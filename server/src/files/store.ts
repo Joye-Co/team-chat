@@ -30,8 +30,8 @@ export function checkDeclaredLength(request: Request, size: number): void {
 
 /**
  * Streams `body` into R2 at `key` without buffering it. The body must be exactly `size` bytes
- * with SHA-256 `sha256` (lowercase hex). On any mismatch the object is deleted and `invalid`
- * is thrown; other storage failures throw `internal`.
+ * with SHA-256 `sha256` (lowercase hex). On any mismatch `invalid` is thrown and this attempt
+ * leaves no object behind; other storage failures throw `internal`.
  */
 export async function putVerified(
   bucket: R2Bucket,
@@ -67,11 +67,11 @@ export async function putVerified(
   );
   const fixed = new FixedLengthStream(size);
   const piping = counted.pipeTo(fixed.writable).catch(() => {});
-  let stored = true;
+  let stored: R2Object | null = null;
   try {
-    await bucket.put(key, fixed.readable, { sha256, httpMetadata });
+    stored = await bucket.put(key, fixed.readable, { sha256, httpMetadata });
   } catch {
-    stored = false;
+    stored = null;
   }
   await piping;
   let hex: string | null = null;
@@ -81,7 +81,13 @@ export async function putVerified(
     writer.abort().catch(() => {});
   }
   if (stored && hex === sha256) return;
-  await bucket.delete(key).catch(() => {});
+  // Remove only our own object: a failed attempt must never delete the good object of another
+  // upload of the same key (a client retry that finished first). R2 refused a put whose bytes
+  // do not match `sha256`, so usually there is nothing of ours to remove.
+  if (stored) {
+    const current = await bucket.head(key).catch(() => null);
+    if (current?.version === stored.version) await bucket.delete(key).catch(() => {});
+  }
   if (tooLong || count !== size) throw new ApiError("invalid", "body length does not match size");
   if (hex !== sha256) throw new ApiError("invalid", "sha256 does not match the body");
   throw new ApiError("internal", "storage write failed");
@@ -200,18 +206,18 @@ export async function serveObject(
 }
 
 /**
- * Fixed-window counter in D1. Returns false when `key` already had `max` hits in the current
- * window. Old windows are removed now and then.
+ * Fixed-window counter in D1. Adds `amount` and returns false when the window's total is over
+ * `max`. Old windows are removed now and then.
  */
-export async function rateHit(db: D1Database, key: string, windowMs: number, max: number): Promise<boolean> {
+export async function rateHit(db: D1Database, key: string, windowMs: number, max: number, amount = 1): Promise<boolean> {
   const now = Date.now();
   const window = Math.floor(now / windowMs) * windowMs;
   const row = await db
     .prepare(
-      `INSERT INTO files_rate_hits (key, window, count) VALUES (?, ?, 1)
-       ON CONFLICT (key, window) DO UPDATE SET count = count + 1 RETURNING count`,
+      `INSERT INTO files_rate_hits (key, window, count) VALUES (?, ?, ?)
+       ON CONFLICT (key, window) DO UPDATE SET count = count + excluded.count RETURNING count`,
     )
-    .bind(key, window)
+    .bind(key, window, amount)
     .first<{ count: number }>();
   if (Math.random() < 0.02) {
     await db
@@ -220,5 +226,5 @@ export async function rateHit(db: D1Database, key: string, windowMs: number, max
       .run()
       .catch(() => {});
   }
-  return (row?.count ?? 1) <= max;
+  return (row?.count ?? amount) <= max;
 }

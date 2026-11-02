@@ -5,9 +5,12 @@ import type { Artifact, ArtifactFile, ArtifactKind, ArtifactVersion, FileRef } f
 import { ApiError } from "../core/errors";
 import {
   type Actor,
+  type ArchivedEvent,
   type RoomContext,
+  registerAfterCommit,
   registerEditExtension,
   registerEventImporter,
+  registerEventWriter,
   registerMessageExtension,
   registerRoomMigration,
   registerRoomRpc,
@@ -51,6 +54,12 @@ registerRoomMigration({
       PRIMARY KEY (artifact_id, version)
     );
   `,
+});
+
+// Files that only deleted messages used, waiting for D1 and R2 to forget them (see below).
+registerRoomMigration({
+  name: "files-2",
+  up: `CREATE TABLE file_deletions (file_id TEXT PRIMARY KEY, at INTEGER NOT NULL);`,
 });
 
 type FileRecordRow = {
@@ -431,4 +440,80 @@ registerRoomRpc("files.importRecords", (room, actor, args) => {
     );
   }
   return { rows: files.length };
+});
+
+// ---------------------------------------------------------------------------
+// Message delete: attachments and 产出 references go too
+// ---------------------------------------------------------------------------
+
+function attachmentIds(ext: string | null): string[] {
+  if (!ext) return [];
+  const list = (JSON.parse(ext) as { attachments?: { fileId?: unknown }[] }).attachments;
+  return Array.isArray(list) ? list.map((a) => a?.fileId).filter((x): x is string => typeof x === "string") : [];
+}
+
+/** True when a message other than `messageId` that is not deleted, or a 产出 version, uses the file. */
+function fileStillUsed(sql: SqlStorage, fileId: string, messageId: string): boolean {
+  const inMessage = sql
+    .exec(
+      `SELECT 1 FROM messages m, json_each(m.ext, '$.attachments') j
+       WHERE m.ext IS NOT NULL AND m.deleted_at IS NULL AND m.id != ? AND json_extract(j.value, '$.fileId') = ? LIMIT 1`,
+      messageId,
+      fileId,
+    )
+    .toArray().length > 0;
+  if (inMessage) return true;
+  return (
+    sql
+      .exec("SELECT 1 FROM artifact_versions v, json_each(v.files) j WHERE json_extract(j.value, '$.fileId') = ? LIMIT 1", fileId)
+      .toArray().length > 0
+  );
+}
+
+/**
+ * Removes the attachments and 产出 references of a deleted message from its row and stored
+ * events, and marks files that no other message or 产出 uses for deletion. Live and imports.
+ */
+function forgetDeletedRefs(event: ArchivedEvent, sql: SqlStorage): void {
+  if (event.type !== "message.deleted") return;
+  const messageId = (event.data as { messageId?: string }).messageId ?? event.messageId;
+  if (!messageId) return;
+  const row = sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", messageId).toArray()[0];
+  if (!row) return;
+  const fileIds = attachmentIds(row.ext);
+  sql.exec("UPDATE messages SET ext = json_remove(ext, '$.attachments', '$.artifactRefs') WHERE id = ?", messageId);
+  sql.exec(
+    `UPDATE events SET data = json_remove(data, '$.message.attachments', '$.message.artifactRefs')
+     WHERE message_id = ? AND type = 'message.created'`,
+    messageId,
+  );
+  sql.exec(
+    "UPDATE events SET data = json_remove(data, '$.attachments', '$.artifactRefs') WHERE message_id = ? AND type = 'message.updated'",
+    messageId,
+  );
+  for (const id of new Set(fileIds)) {
+    if (fileStillUsed(sql, id, messageId)) continue;
+    sql.exec("DELETE FROM file_records WHERE id = ?", id);
+    sql.exec("INSERT OR IGNORE INTO file_deletions (file_id, at) VALUES (?, ?)", id, event.at);
+  }
+}
+registerEventWriter(forgetDeletedRefs);
+
+// After a delete commits: D1 stops serving the files, then R2 drops their bytes.
+registerAfterCommit(async (event, h) => {
+  if (event.type !== "message.deleted") return;
+  const rows = h.sql.exec<{ file_id: string }>("SELECT file_id FROM file_deletions LIMIT 100").toArray();
+  if (rows.length === 0) return;
+  const now = Date.now();
+  await h.env.DB.batch(
+    rows.map((r) =>
+      h.env.DB.prepare("UPDATE files SET deleted_at = ? WHERE id = ? AND group_id = ? AND deleted_at IS NULL").bind(
+        now,
+        r.file_id,
+        h.groupId,
+      ),
+    ),
+  );
+  await h.env.FILES.delete(rows.map((r) => `files/${h.groupId}/${r.file_id}`));
+  for (const r of rows) h.sql.exec("DELETE FROM file_deletions WHERE file_id = ?", r.file_id);
 });

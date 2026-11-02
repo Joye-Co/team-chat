@@ -27,10 +27,16 @@ import {
   contentDisposition,
   INLINE_MIMES,
   putVerified,
+  rateHit,
   readBytes,
   SAFE_HEADERS,
   serveObject,
 } from "./store";
+
+/** Files a member may create per hour, and their declared bytes. */
+export const FILE_RATE = { windowMs: 3600_000, files: 500, bytes: 5 * 1024 ** 3 };
+/** Bytes of a member's files that are not deleted, at most. */
+export const MEMBER_FILE_QUOTA = 100 * 1024 ** 3;
 
 /** A `pending` file older than this is deleted. */
 export const PENDING_TTL_MS = 24 * 3600_000;
@@ -51,6 +57,8 @@ export type FileRow = {
   status: "pending" | "ready";
   created_by: string;
   created_at: number;
+  /** Set when every message that used the file was deleted. */
+  deleted_at?: number | null;
 };
 
 export function toFileMeta(r: FileRow): FileMeta {
@@ -78,7 +86,7 @@ async function requireGroupMember(env: Env, groupId: string, auth: AuthContext):
 
 async function loadFile(env: Env, id: string, auth: AuthContext): Promise<FileRow> {
   const row = await env.DB.prepare("SELECT * FROM files WHERE id = ?").bind(id).first<FileRow>();
-  if (!row) throw new ApiError("not_found", "file not found");
+  if (!row || row.deleted_at) throw new ApiError("not_found", "file not found");
   await requireGroupMember(env, row.group_id, auth);
   return row;
 }
@@ -168,6 +176,17 @@ export function registerFileRoutes(): void {
       if ((req.width !== undefined || req.height !== undefined) && !req.mime.startsWith("image/")) {
         throw new ApiError("invalid", "width and height are for images only");
       }
+      // Per member and hour: a leaked token or a loop cannot fill R2 without limit.
+      if (!(await rateHit(env.DB, `files:n:${a.memberId}`, FILE_RATE.windowMs, FILE_RATE.files))) {
+        throw new ApiError("rate_limited", "too many files this hour");
+      }
+      if (!(await rateHit(env.DB, `files:b:${a.memberId}`, FILE_RATE.windowMs, FILE_RATE.bytes, req.size))) {
+        throw new ApiError("rate_limited", "too many bytes uploaded this hour");
+      }
+      const used = await env.DB.prepare("SELECT coalesce(sum(size), 0) AS n FROM files WHERE created_by = ? AND deleted_at IS NULL")
+        .bind(a.memberId)
+        .first<{ n: number }>();
+      if ((used?.n ?? 0) + req.size > MEMBER_FILE_QUOTA) throw new ApiError("too_large", "file storage quota reached");
       const now = Date.now();
       const id = ulid(now);
       await env.DB.batch([

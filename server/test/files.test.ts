@@ -536,3 +536,105 @@ describe("releases and updates", () => {
     expect(audit?.n).toBe(2);
   });
 });
+
+describe("files: review fixes", () => {
+  it("keep the good object when an older upload attempt fails after a retry finished", async () => {
+    const { owner, groupId } = await setup();
+    const bytes = enc.encode("0123456789abcdef");
+    const c = await createFile(owner, groupId, bytes);
+    const id = c.body.file.id;
+    // Attempt A: the network stalls after a few bytes.
+    let ctl!: ReadableStreamDefaultController<Uint8Array>;
+    const slow = new ReadableStream<Uint8Array>({ start: (x) => void (ctl = x) });
+    ctl.enqueue(enc.encode("0123"));
+    const a = raw(`/v1/files/${id}/content`, { method: "PUT", token: owner.token, body: slow, headers: { "content-length": String(bytes.length) } });
+    await new Promise((r) => setTimeout(r, 100));
+    // Attempt B (the client's retry) finishes with the right bytes.
+    const b = await raw(`/v1/files/${id}/content`, { method: "PUT", token: owner.token, body: bytes });
+    expect(b.status).toBe(200);
+    await b.arrayBuffer();
+    // Then A ends with wrong bytes.
+    ctl.enqueue(enc.encode("XXXXXXXXXXXX"));
+    ctl.close();
+    const ra = await a;
+    expect(ra.status).toBe(400);
+    await ra.arrayBuffer();
+    expect((await api(`/v1/files/${id}`, { token: owner.token })).body.status).toBe("ready");
+    const got = await raw(`/v1/files/${id}/content`, { token: owner.token });
+    expect(got.status).toBe(200);
+    expect(await got.text()).toBe("0123456789abcdef");
+  });
+
+  it("drop the attachments of a deleted message and stop serving files only it used", async () => {
+    const { owner, member, groupId } = await setup();
+    const { c } = await Client.connect(member.token);
+    const { c: co } = await Client.connect(owner.token);
+    const secret = await upload(member, groupId, enc.encode("API_KEY=secret"), { name: ".env", mime: "text/plain" });
+    const shared = await upload(member, groupId, enc.encode("shared"), { name: "s.txt", mime: "text/plain" });
+    const sent = await c.ok({
+      t: "send",
+      groupId,
+      clientMsgId: clientMsgId(),
+      body: "oops",
+      attachments: [ref(secret), ref(shared)],
+    });
+    const topicId = sent.message.topicId;
+    // Another message keeps using `shared`.
+    await c.ok({ t: "send", groupId, topicId, clientMsgId: clientMsgId(), body: "again", attachments: [ref(shared)] });
+    await c.ok({ t: "delete", groupId, messageId: sent.message.id });
+
+    const h = await co.request({ t: "history", groupId, topicId });
+    const gone = h.messages.find((m: any) => m.id === sent.message.id);
+    expect(gone.deletedAt).toBeTypeOf("number");
+    expect(gone.attachments).toBeUndefined();
+    const page = await co.request({ t: "fetch", groupId, afterSeq: 0 });
+    const created = page.events.find((e: any) => e.type === "message.created" && e.data.message.id === sent.message.id);
+    expect(created.data.message.attachments).toBeUndefined();
+    expect(created.data.message.body).toBe("");
+
+    await waitFor(async () => (await raw(`/v1/files/${secret.id}/content`, { token: owner.token })).status === 404);
+    expect((await api(`/v1/files/${secret.id}`, { token: owner.token })).status).toBe(404);
+    expect(await env.FILES.head(`files/${groupId}/${secret.id}`)).toBeNull();
+    const still = await raw(`/v1/files/${shared.id}/content`, { token: owner.token });
+    expect(still.status).toBe(200);
+    expect(await still.text()).toBe("shared");
+    // A deleted file cannot be attached again.
+    const re = await c.request({ t: "send", groupId, clientMsgId: clientMsgId(), body: "x", attachments: [ref(secret)] });
+    expect(re).toMatchObject({ ok: false, error: { code: "invalid" } });
+    c.close();
+    co.close();
+  });
+
+  it("limit the bytes a member stores", async () => {
+    const { owner, groupId } = await setup();
+    await env.DB.prepare(
+      `INSERT INTO files (id, group_id, name, size, mime, sha256, status, created_by, created_at)
+       VALUES (?, ?, 'big', ?, 'a/b', ?, 'ready', ?, ?)`,
+    )
+      .bind(`big-${owner.id}`, groupId, 100 * 1024 ** 3, "0".repeat(64), owner.id, Date.now())
+      .run();
+    const r = await createFile(owner, groupId, enc.encode("x"));
+    expect(r.status).toBe(413);
+    expect(r.body.error.code).toBe("too_large");
+  });
+
+  it("rate limit file creation per member", async () => {
+    const { owner, groupId } = await setup();
+    const window = Math.floor(Date.now() / 3600_000) * 3600_000;
+    await env.DB.prepare("INSERT INTO files_rate_hits (key, window, count) VALUES (?, ?, 500)").bind(`files:n:${owner.id}`, window).run();
+    const r = await createFile(owner, groupId, enc.encode("x"));
+    expect(r.status).toBe(429);
+  });
+});
+
+function ref(f: FileMeta) {
+  return { fileId: f.id, name: f.name, size: f.size, mime: f.mime, sha256: f.sha256 };
+}
+
+async function waitFor(fn: () => Promise<boolean>, ms = 5000): Promise<void> {
+  const start = Date.now();
+  while (!(await fn())) {
+    if (Date.now() - start > ms) throw new Error("timed out");
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
