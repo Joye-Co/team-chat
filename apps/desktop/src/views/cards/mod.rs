@@ -24,10 +24,9 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, FontWeight, Global, Hsla, IntoElement, ParentElement, Styled, Window, div,
-    px,
+    AnyElement, App, Global, IntoElement, ParentElement, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::ActiveTheme as _;
 
 use crate::{
     data::{
@@ -35,12 +34,13 @@ use crate::{
         card::{Card, CardBlock, CardTone},
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui,
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
-/// Widest a card grows in the timeline.
-pub const CARD_MAX_WIDTH: f32 = 460.;
+/// Widest a card grows in the timeline: the one measure of text, cards,
+/// files and images (§4.4, §7.10).
+pub const CARD_MAX_WIDTH: f32 = 620.;
 
 /// The timeline extra that draws card messages.
 pub struct CardExtra;
@@ -85,21 +85,10 @@ pub(crate) fn toggle_expanded(key: String, window: &mut Window, cx: &mut App) {
     window.refresh();
 }
 
-/// The accent color of a card tone, from the theme.
-pub(crate) fn tone_color(tone: CardTone, cx: &App) -> Option<Hsla> {
-    let t = cx.theme();
-    match tone {
-        CardTone::Neutral => None,
-        CardTone::Info => Some(t.blue),
-        CardTone::Success => Some(t.green),
-        CardTone::Warning => Some(t.yellow),
-        CardTone::Danger => Some(t.red),
-    }
-}
-
-/// The chip of a card status: three weights only (§2.5). A warning is
-/// something that waits on the viewer.
-fn status_chip(tone: CardTone, label: impl Into<String>) -> ui::StatusChip {
+/// The quiet label of a card status (§7.8): a glyph and the words, no fill.
+/// A card that waits for the viewer shows no label: its 3 pt `you-bar`
+/// already says it, so amber appears once per card (§7.10).
+fn status_label(tone: CardTone, label: impl Into<String>) -> ui::StatusChip {
     use crate::{data::TopicStatus as S, theme::ChipKind as K};
     let (status, kind) = match tone {
         CardTone::Neutral => (S::Open, K::Quiet),
@@ -108,7 +97,25 @@ fn status_chip(tone: CardTone, label: impl Into<String>) -> ui::StatusChip {
         CardTone::Warning => (S::WaitingAnswer, K::You),
         CardTone::Danger => (S::Blocked, K::Blocked),
     };
-    ui::StatusChip::labeled(label, status, kind)
+    ui::StatusChip::labeled(label, status, kind).style(ui::ChipStyle::Label)
+}
+
+/// A card that waits for the viewer: the `warning` tone (§2.5 `you-bar`).
+pub(crate) fn waits_for_viewer(card: &Card) -> bool {
+    card.tone == Some(CardTone::Warning)
+}
+
+/// An ask card (§7.10, GrokBot): it waits for the viewer and its buttons are
+/// plain answers (two or more, none primary, danger or confirmed). They draw
+/// as lettered option rows instead of buttons.
+pub(crate) fn is_ask(card: &Card) -> bool {
+    let actions = card.actions.as_deref().unwrap_or(&[]);
+    waits_for_viewer(card)
+        && (2..=6).contains(&actions.len())
+        && actions.iter().all(|a| {
+            a.style.unwrap_or_default() == crate::data::card::ActionStyle::Default
+                && a.confirm.is_none()
+        })
 }
 
 /// A stable element id inside a card: message id plus a part name.
@@ -116,7 +123,10 @@ pub(crate) fn part_id(message: &Message, part: impl std::fmt::Display) -> String
     format!("card-{}-{part}", message.id)
 }
 
-/// Draws one card: tone stripe, title and status, blocks, buttons, presses.
+/// Draws one card (§7.10): one 1 pt border, radius 12, padding 14 16 16; the
+/// title at 15/22 600 with the status label at the right; blocks under it; the
+/// actions 14 pt below. A card that waits for the viewer gets the 3 pt
+/// `you-bar` on its left edge, inset 12 pt from the top and bottom.
 pub fn render_card(
     card: &Arc<Card>,
     message: &Message,
@@ -124,66 +134,84 @@ pub fn render_card(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    let colors = theme::colors(cx);
-    let tone = card.tone.unwrap_or_default();
-    let stripe = tone_color(tone, cx);
-    let radius = cx.theme().radius_lg;
-
-    // §13.9: a status glyph, the title (one line) and the chip at the end.
     let k = theme::colors(cx);
-    let glyph = match tone {
-        CardTone::Danger => Some((Lucide::CircleAlert, k.danger)),
-        CardTone::Success => Some((Lucide::CircleCheck, k.success)),
-        CardTone::Warning => Some((Lucide::CircleQuestionMark, k.glyph_wait)),
-        CardTone::Info => Some((Lucide::CircleDot, k.glyph_progress)),
-        CardTone::Neutral => None,
-    };
+    let tone = card.tone.unwrap_or_default();
+    let waits = waits_for_viewer(card);
+
     let header = div()
         .flex()
-        .items_center()
-        .gap(space::S8)
-        .children(glyph.map(|(g, c)| ui::icon(g, theme::icon::TOOLBAR, c)))
+        .items_start()
+        .gap(space::S12)
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
-                .t_ui()
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(colors.text_1)
-                .one_line()
+                .t_card_title()
+                .text_color(k.text_1)
                 .child(card.title.clone()),
         )
-        .children(card.status.as_ref().map(|s| status_chip(tone, s.label.clone())));
+        .when_some(card.status.as_ref().filter(|_| !waits), |el, s| {
+            el.child(
+                div()
+                    .flex_none()
+                    .h(theme::type_scale::CARD_TITLE.1)
+                    .flex()
+                    .items_center()
+                    .child(status_label(tone, s.label.clone())),
+            )
+        });
 
-    let blocks: Vec<AnyElement> = card
+    let shown: Vec<(usize, &CardBlock)> = card
         .blocks
         .iter()
         .enumerate()
         .filter(|(_, b)| !matches!(b, CardBlock::Unknown))
-        .map(|(ix, block)| blocks::render(block, ix, message, ctx, window, cx))
         .collect();
+    let mut body = div().flex().flex_col();
+    for (n, (ix, block)) in shown.iter().enumerate() {
+        // The first sentence sits 4 pt under the title in `text-2`; later
+        // blocks are 12 pt apart.
+        let lead = n == 0 && matches!(block, CardBlock::Text { .. });
+        let el = blocks::render(block, *ix, message, ctx, window, cx);
+        body = body.child(
+            div()
+                .mt(if n == 0 {
+                    if lead { space::S4 } else { space::S12 }
+                } else {
+                    space::S12
+                })
+                .when(lead, |el| el.text_color(k.text_2))
+                .child(el),
+        );
+    }
     record_render(message, card);
 
     let actions = actions::render(card, message, ctx, window, cx);
 
-    let _ = (stripe, radius);
     ui::card(cx)
-        .mt(space::S4)
+        .relative()
+        .mt(space::S6)
         .w_full()
         .max_w(px(CARD_MAX_WIDTH))
-        .flex()
-        .overflow_hidden()
+        .when(waits, |el| {
+            el.child(
+                div()
+                    .absolute()
+                    .left_0()
+                    .top(space::S12)
+                    .bottom(space::S12)
+                    .w(px(3.))
+                    .rounded_r(px(2.))
+                    .bg(k.you_bar),
+            )
+        })
         .child(
-            div()
-                .flex_1()
+            ui::card_padding(div())
                 .min_w(px(0.))
-                .px(space::S14)
-                .py(space::S12)
                 .flex()
                 .flex_col()
-                .gap(space::S10)
                 .child(header)
-                .children(blocks)
+                .child(body)
                 .children(actions),
         )
         .into_any_element()

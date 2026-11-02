@@ -3,15 +3,13 @@
 //! and a button to show the rest, so a 200-row card stays cheap to draw.
 
 use gpui::{
-    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement, ObjectFit,
+    AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
     prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
+    Disableable as _, IconName,
     button::{Button, ButtonVariants as _},
-    progress::Progress,
-    separator::Separator,
 };
 
 use super::{is_expanded, part_id, toggle_expanded};
@@ -21,7 +19,9 @@ use crate::{
         Message,
         card::{CardBlock, CardField, CardListItem, CardListStatus, LinkTarget},
     },
-    markdown, theme,
+    markdown,
+    theme::{self, Type as _, space},
+    ui::{self, ButtonSpec as _, Lucide},
     views::timeline::extras::ExtrasContext,
 };
 
@@ -78,36 +78,51 @@ pub fn render(
         CardBlock::Image { file_id, alt } => {
             render_image(message, ctx, file_id, alt.as_deref(), cx)
         }
-        CardBlock::Divider => Separator::horizontal().into_any_element(),
+        CardBlock::Divider => ui::hairline(cx).into_any_element(),
         CardBlock::Link { label, target } => render_link(&key, message, label, target),
         CardBlock::Unknown => div().into_any_element(),
     }
 }
 
+/// Fields as key-value rows (§7.10 draft card, Feishu): `ui` 14/20, the key
+/// column in `text-3` (48 pt, wider for long keys), a 0.5 pt `sep` under each
+/// row, padding 10 0. No outer border: the card has the only one.
 fn render_fields(fields: &[CardField], cx: &App) -> AnyElement {
-    let colors = theme::colors(cx);
+    let k = theme::colors(cx);
+    let longest = fields
+        .iter()
+        .map(|f| {
+            f.label
+                .chars()
+                .map(|ch| if ch.is_ascii() { 7.5 } else { 14.0 })
+                .sum::<f32>()
+        })
+        .fold(0.0_f32, f32::max);
+    let key_w = px(longest.clamp(48.0, 120.0).ceil());
     div()
         .flex()
-        .flex_wrap()
-        .gap_y(px(8.))
+        .flex_col()
         .children(fields.iter().map(|f| {
             div()
-                .w(relative(0.5))
-                .min_w(px(160.))
-                .pr(px(12.))
+                .py(space::S10)
                 .flex()
-                .flex_col()
-                .gap(px(2.))
+                .items_start()
+                .gap(space::S12)
+                .t_ui()
+                .border_b(theme::HAIRLINE)
+                .border_color(k.sep)
                 .child(
                     div()
-                        .text_xs()
-                        .text_color(colors.muted_foreground)
+                        .w(key_w)
+                        .flex_none()
+                        .text_color(k.text_3)
                         .child(f.label.clone()),
                 )
                 .child(
                     div()
-                        .text_sm()
-                        .text_color(colors.foreground)
+                        .flex_1()
+                        .min_w(px(0.))
+                        .text_color(k.text_1)
                         .child(f.value.clone()),
                 )
         }))
@@ -138,9 +153,9 @@ fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
     };
     let toggle_key = key.to_string();
     Button::new(ElementId::Name(format!("{key}-more").into()))
-        .xsmall()
         .ghost()
         .label(label)
+        .spec(ui::ButtonSize::Sm)
         .on_click(move |_, window, cx| toggle_expanded(toggle_key.clone(), window, cx))
 }
 
@@ -161,16 +176,14 @@ fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -
         div()
             .w(px(width))
             .flex_none()
-            .px(px(8.))
-            .py(px(4.))
+            .px(space::S10)
+            .py(space::S6)
             .child(text)
     };
     let header = div()
         .flex()
-        .bg(colors.code_background)
-        .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(colors.foreground)
+        .t_meta_medium()
+        .text_color(colors.text_3)
         .children(
             columns
                 .iter()
@@ -180,10 +193,11 @@ fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -
     let body = rows[..shown].iter().map(|row| {
         div()
             .flex()
-            .border_t_1()
-            .border_color(colors.border)
-            .text_xs()
-            .text_color(colors.foreground)
+            .border_t(theme::HAIRLINE)
+            .border_color(colors.sep)
+            .t_small()
+            .tnum()
+            .text_color(colors.text_1)
             .children(
                 widths
                     .iter()
@@ -200,9 +214,6 @@ fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -
                 .id(ElementId::Name(format!("{key}-scroll").into()))
                 .w_full()
                 .overflow_x_scroll()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(colors.border)
                 .child(div().flex().flex_col().child(header).children(body)),
         )
         .when(hidden > 0, |el| {
@@ -211,32 +222,25 @@ fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -
         .into_any_element()
 }
 
+/// The 16 pt glyph of a plan step (§8.1 progress): done in `success`, the
+/// current step in `text-1`, later steps `circle-dashed` in `text-3`.
 fn list_icon(status: Option<CardListStatus>, cx: &App) -> AnyElement {
-    let t = cx.theme();
-    let (icon, color) = match status {
+    let k = theme::colors(cx);
+    let (glyph, color) = match status {
         None => {
             return div()
-                .size(px(6.))
-                .mx(px(4.))
+                .size(px(5.))
                 .rounded_full()
-                .bg(t.muted_foreground)
+                .bg(k.text_3)
                 .into_any_element();
         }
-        Some(CardListStatus::Todo) => {
-            return div()
-                .size(px(12.))
-                .mx(px(1.))
-                .rounded_full()
-                .border_1()
-                .border_color(t.muted_foreground)
-                .into_any_element();
-        }
-        Some(CardListStatus::InProgress) => (IconName::LoaderCircle, t.blue),
-        Some(CardListStatus::Done) => (IconName::CircleCheck, t.green),
-        Some(CardListStatus::Failed) => (IconName::CircleX, t.red),
-        Some(CardListStatus::Skipped) => (IconName::Minus, t.muted_foreground),
+        Some(CardListStatus::Todo) => (Lucide::CircleDashed, k.text_3),
+        Some(CardListStatus::InProgress) => (Lucide::CircleDot, k.text_1),
+        Some(CardListStatus::Done) => (Lucide::CircleCheck, k.success),
+        Some(CardListStatus::Failed) => (Lucide::CircleX, k.danger),
+        Some(CardListStatus::Skipped) => (Lucide::Minus, k.text_3),
     };
-    Icon::new(icon).small().text_color(color).into_any_element()
+    ui::icon(glyph, theme::icon::ROW, color).into_any_element()
 }
 
 fn list_status_text(status: CardListStatus) -> &'static str {
@@ -249,8 +253,11 @@ fn list_status_text(status: CardListStatus) -> &'static str {
     }
 }
 
+/// A plan list (Slack Block Kit, §8.1): 28 pt rows, a 16 pt glyph, `small`
+/// 13/20 text; the current step `text-1` 500, the rest `text-2`; the state
+/// word at the right in `text-3` for failed and skipped steps.
 fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
-    let colors = theme::colors(cx);
+    let k = theme::colors(cx);
     let expanded = is_expanded(key, cx);
     let shown = if expanded {
         items.len()
@@ -261,18 +268,20 @@ fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
     div()
         .flex()
         .flex_col()
-        .gap(px(4.))
         .children(items[..shown].iter().map(|item| {
             let skipped = item.status == Some(CardListStatus::Skipped);
+            let now = item.status == Some(CardListStatus::InProgress);
             div()
+                .min_h(px(28.))
+                .py(space::S4)
                 .flex()
                 .items_start()
-                .gap(px(6.))
-                .text_sm()
+                .gap(space::S10)
+                .t_small()
                 .child(
                     div()
                         .h(px(20.))
-                        .w(px(14.))
+                        .w(px(16.))
                         .flex_none()
                         .flex()
                         .items_center()
@@ -283,21 +292,29 @@ fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
                     div()
                         .flex_1()
                         .min_w(px(0.))
-                        .text_color(if skipped {
-                            colors.muted_foreground
-                        } else {
-                            colors.foreground
-                        })
+                        .text_color(if now { k.text_1 } else { k.text_2 })
+                        .when(now, |el| el.medium())
                         .when(skipped, |el| el.line_through())
                         .child(item.text.clone()),
                 )
-                .children(item.status.map(|s| {
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.muted_foreground)
-                        .child(list_status_text(s))
-                }))
+                .children(
+                    item.status
+                        .filter(|s| matches!(s, CardListStatus::Failed | CardListStatus::Skipped))
+                        .map(|s| {
+                            div()
+                                .flex_none()
+                                .t_meta()
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .text_color(if s == CardListStatus::Failed {
+                                    k.danger_text
+                                } else {
+                                    k.text_3
+                                })
+                                .child(list_status_text(s))
+                        }),
+                )
         }))
         .when(hidden > 0, |el| {
             el.child(div().flex().child(more_button(key, hidden, expanded)))
@@ -305,27 +322,47 @@ fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn render_progress(key: &str, value: f64, label: Option<&str>, cx: &App) -> AnyElement {
-    let colors = theme::colors(cx);
+/// A progress block: the label `small` `text-2` with the percent at the
+/// right (12 `text-3`, tabular), then a 4 pt `accent` bar on a `field` track.
+fn render_progress(_key: &str, value: f64, label: Option<&str>, cx: &App) -> AnyElement {
+    let k = theme::colors(cx);
     let percent = (value * 100.0).round();
     div()
         .flex()
         .flex_col()
-        .gap(px(4.))
+        .gap(space::S6)
         .child(
             div()
                 .flex()
-                .text_xs()
-                .text_color(colors.muted_foreground)
+                .items_center()
+                .gap(space::S8)
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.))
+                        .t_small()
+                        .text_color(k.text_2)
+                        .one_line()
                         .children(label.map(str::to_string)),
                 )
-                .child(div().flex_none().child(format!("{percent}%"))),
+                .child(
+                    div()
+                        .flex_none()
+                        .t_meta()
+                        .tnum()
+                        .text_color(k.text_3)
+                        .child(format!("{percent}%")),
+                ),
         )
-        .child(Progress::new(ElementId::Name(format!("{key}-bar").into())).value(percent as f32))
+        .child(
+            div().h(px(4.)).w_full().rounded(px(2.)).bg(k.field).child(
+                div()
+                    .h_full()
+                    .w(relative(value.clamp(0.0, 1.0) as f32))
+                    .rounded(px(2.))
+                    .bg(k.accent),
+            ),
+        )
         .into_any_element()
 }
 
@@ -365,10 +402,10 @@ fn render_image(
         .w(px(IMAGE_WIDTH))
         .max_w_full()
         .h(px(IMAGE_HEIGHT))
-        .rounded(cx.theme().radius)
+        .rounded(theme::radius::MD)
         .border_1()
         .border_color(colors.border)
-        .bg(colors.code_background)
+        .bg(colors.field)
         .overflow_hidden()
         .flex()
         .items_center()
@@ -378,11 +415,15 @@ fn render_image(
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(6.))
-            .px(px(12.))
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(Icon::new(IconName::Frame).text_color(colors.muted_foreground))
+            .gap(space::S6)
+            .px(space::S12)
+            .t_meta()
+            .text_color(colors.text_3)
+            .child(ui::icon(
+                Lucide::FileImage,
+                theme::icon::EMPTY,
+                colors.text_3,
+            ))
             .child(text)
     };
     match ctx
@@ -397,7 +438,7 @@ fn render_image(
                         .size_full()
                         .object_fit(ObjectFit::Contain)
                         .with_fallback(move || {
-                            div().text_xs().child(fallback.clone()).into_any_element()
+                            div().t_meta().child(fallback.clone()).into_any_element()
                         }),
                 )
                 .into_any_element()
@@ -420,7 +461,11 @@ fn render_link(key: &str, message: &Message, label: &str, target: &LinkTarget) -
 
 fn link_button(key: &str, message: &Message, label: &str, target: &LinkTarget) -> AnyElement {
     let id = ElementId::Name(format!("{key}-link").into());
-    let button = Button::new(id).small().link().label(label.to_string());
+    let button = Button::new(id)
+        .ghost()
+        .label(label.to_string())
+        .spec(ui::ButtonSize::Sm)
+        .ml(px(-10.));
     match target {
         LinkTarget::Url { url } => match markdown::safe_link(url) {
             Some(safe) if safe.starts_with("http") || safe.starts_with("HTTP") => {

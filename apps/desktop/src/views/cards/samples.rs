@@ -175,6 +175,51 @@ pub fn samples() -> Vec<Sample> {
             presses: vec![],
             state: None,
         },
+        Sample {
+            author: "m-taro",
+            minutes_ago: 3,
+            card: card(json!({
+                "v": 1,
+                "title": "发布预览",
+                "tone": "warning",
+                "status": { "label": "等你审" },
+                "blocks": [
+                    { "type": "fields", "fields": [
+                        { "label": "平台", "value": "小红书" },
+                        { "label": "时间", "value": "周四 20:00" },
+                        { "label": "标题", "value": "夹夹 3.0：粉丝群的照片，一键分享回群里" }
+                    ]},
+                    { "type": "text", "text": "以前在群里找一张合照要翻半天。3.0 把群里的照片按活动自动整理好，点一下就能分享回群。" }
+                ],
+                "actions": [
+                    { "id": "publish", "label": "发布", "style": "primary" },
+                    { "id": "edit", "label": "修改" },
+                    { "id": "drop", "label": "放弃" }
+                ]
+            })),
+            presses: vec![],
+            state: None,
+        },
+        Sample {
+            author: "m-sentry",
+            minutes_ago: 1,
+            card: card(json!({
+                "v": 1,
+                "title": "要在 staging 先打开合并规则吗？",
+                "tone": "warning",
+                "status": { "label": "等你回答" },
+                "blocks": [
+                    { "type": "text", "text": "你选之前我不会改任何环境。生产要等 Scout 验收后再单独确认。" }
+                ],
+                "actions": [
+                    { "id": "staging-now", "label": "现在在 staging 打开" },
+                    { "id": "after-scout", "label": "等 Scout 验收完再开" },
+                    { "id": "not-now", "label": "先不改，回到讨论" }
+                ]
+            })),
+            presses: vec![],
+            state: None,
+        },
     ]
 }
 
