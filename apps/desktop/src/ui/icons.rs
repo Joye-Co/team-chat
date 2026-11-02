@@ -64,6 +64,16 @@ pub const APP_ICON_88: &str = "brand/app-icon-88.png";
 const APP_ICON_88_BYTES: &[u8] =
     include_bytes!("../../../../assets/brand/login/app-icon-88@2x.png");
 
+/// The bare app icon at the login and 关于 sizes (72 pt, from the 2x PNG):
+/// cropped to its squircle, with no baked shadow (DESIGN.md §8.3).
+pub const APP_ICON_72: &str = "brand/app-icon-72.png";
+const APP_ICON_72_BYTES: &[u8] =
+    include_bytes!("../../../../assets/brand/login/app-icon-72@2x.png");
+/// The dark-mode variant of [`APP_ICON_72`].
+pub const APP_ICON_DARK_72: &str = "brand/app-icon-dark-72.png";
+const APP_ICON_DARK_72_BYTES: &[u8] =
+    include_bytes!("../../../../assets/brand/login/app-icon-dark-72@2x.png");
+
 /// The asset source of the app: brand images, the extra icons, then
 /// gpui-kit's defaults.
 #[derive(Clone, Copy, Debug, Default)]
@@ -73,6 +83,12 @@ impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
         if path == APP_ICON_88 {
             return Ok(Some(Cow::Borrowed(APP_ICON_88_BYTES)));
+        }
+        if path == APP_ICON_72 {
+            return Ok(Some(Cow::Borrowed(APP_ICON_72_BYTES)));
+        }
+        if path == APP_ICON_DARK_72 {
+            return Ok(Some(Cow::Borrowed(APP_ICON_DARK_72_BYTES)));
         }
         if let Some(bytes) = crate::characters::tile::load(path) {
             return Ok(Some(Cow::Owned(bytes)));
