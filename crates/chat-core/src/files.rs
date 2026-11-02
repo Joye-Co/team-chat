@@ -467,10 +467,11 @@ impl FileCache {
         let dir = self.dir.join(sha256);
         tokio::fs::create_dir_all(&dir).await?;
         let part = dir.join(format!(".part-{}", crate::new_id()));
-        if let Err(e) = stream_to_file(resp, &part, size, Some(sha256), progress).await {
-            let _ = tokio::fs::remove_file(&part).await;
-            return Err(e);
-        }
+        // Removes the partial file when the download fails or is cancelled
+        // (the task aborted, so this future is dropped mid-stream).
+        let guard = PartFile(Some(part.clone()));
+        stream_to_file(resp, &part, size, Some(sha256), progress).await?;
+        guard.keep();
         self.finish(part, sha256, size, name).await
     }
 
@@ -515,6 +516,23 @@ impl FileCache {
     }
 }
 
+/// A partial download that is removed on drop unless kept.
+struct PartFile(Option<PathBuf>);
+
+impl PartFile {
+    fn keep(mut self) {
+        self.0 = None;
+    }
+}
+
+impl Drop for PartFile {
+    fn drop(&mut self) {
+        if let Some(p) = self.0.take() {
+            let _ = std::fs::remove_file(p);
+        }
+    }
+}
+
 async fn first_complete_file(dir: &Path) -> Option<PathBuf> {
     let mut rd = tokio::fs::read_dir(dir).await.ok()?;
     while let Ok(Some(e)) = rd.next_entry().await {
@@ -525,4 +543,21 @@ async fn first_complete_file(dir: &Path) -> Option<PathBuf> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PartFile;
+
+    #[test]
+    fn a_dropped_partial_download_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let (gone, kept) = (dir.path().join(".part-a"), dir.path().join(".part-b"));
+        std::fs::write(&gone, b"half").unwrap();
+        std::fs::write(&kept, b"all").unwrap();
+        drop(PartFile(Some(gone.clone())));
+        PartFile(Some(kept.clone())).keep();
+        assert!(!gone.exists());
+        assert!(kept.exists());
+    }
 }
