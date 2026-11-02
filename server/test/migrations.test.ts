@@ -1,6 +1,6 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { GATEWAY_CORE_MIGRATIONS } from "../src/core/gateway";
+import { GATEWAY_CORE_MIGRATIONS, gatewayMigrationSteps } from "../src/core/gateway";
 import { appliedMigrations, runMigrations } from "../src/core/migrations";
 import { GroupRoom, roomMigrationSteps } from "../src/core/room";
 
@@ -38,8 +38,10 @@ describe("Durable Object migrations", () => {
   it("migrate a MemberGateway from an empty object", async () => {
     const stub = env.MEMBER_GATEWAY.get(env.MEMBER_GATEWAY.idFromName(`empty-${crypto.randomUUID()}`));
     await runInDurableObject(stub, async (_gw, state) => {
-      expect(appliedMigrations(state.storage)).toEqual(GATEWAY_CORE_MIGRATIONS.map((s) => s.name));
-      expect(runMigrations(state.storage, GATEWAY_CORE_MIGRATIONS)).toEqual([]);
+      const registered = gatewayMigrationSteps().map((s) => s.name);
+      expect(registered.slice(0, GATEWAY_CORE_MIGRATIONS.length)).toEqual(GATEWAY_CORE_MIGRATIONS.map((s) => s.name));
+      expect(appliedMigrations(state.storage)).toEqual(registered);
+      expect(runMigrations(state.storage, gatewayMigrationSteps())).toEqual([]);
     });
   });
 });
