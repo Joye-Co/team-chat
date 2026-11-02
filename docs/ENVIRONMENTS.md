@@ -66,8 +66,8 @@ State on 2026-11-03 (from `wrangler deployments list` and `wrangler d1 migration
 
 | Env | Deployed (UTC) | D1 migrations applied | Pending |
 | --- | --- | --- | --- |
-| e2e | 2026-11-02 21:08, version `88dfb003` | through `0005_auth_rate` | `0006_ops` |
-| staging | 2026-11-02 16:04, version `12b33346` | through `0004_characters` | `0005_auth_rate`, `0006_ops` |
+| e2e | 2026-11-02 23:03, version `0566745e` (main `6ec0691`) | through `0006_ops` | none |
+| staging | 2026-11-02 23:03, version `7b88d141` (main `6ec0691`) | through `0006_ops` | none |
 
 Deploys carry no commit message, so the deployed commit is not recorded here. No new Worker
 secret since the first setup. Update this table after each deploy:
@@ -103,7 +103,7 @@ cargo run -p e2e -- --base-url https://chat-api-e2e.huangdeshiou.workers.dev --s
 All scenarios except `soak` run by default (`--minutes <n>` adds soak). `pipeline` sends 50
 writes on one socket without waiting for acks; it is the check for the subrequest depth limit
 (see Logs), so run it on a deployed env after any change to how Durable Objects call each other.
-Last run on e2e (`e2wgg0`): all 8 pass; load delivery p50 71 ms, p95 153 ms.
+Last run on e2e (`sz8xgx`, 2026-11-03): all 10 pass; load delivery p50 63 ms, p95 157 ms. Last soak (`p24gpf`, 30 minutes): pass.
 
 Use the e2e env for routine runs. Each run leaves its groups and members in place (only their
 tokens are revoked), so run against staging only when a release needs it.

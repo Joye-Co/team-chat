@@ -1,14 +1,15 @@
 # V1 checklist
 
 The V1 bar of [PRODUCT.md](PRODUCT.md#v1-production-use-by-5-people-and-5-bots), checked on
-2026-11-03 by the final-check track against `main` at `4760b84` (server deployed to e2e and
-staging from that code). Each line is **pass**, **fail** or **not checked**, with its evidence.
+2026-11-03 by the final-check track against `main` at `6ec0691` (server deployed to e2e and
+staging from that commit). Each line is **pass**, **fail** or **not checked**, with its evidence.
 
 Evidence folders (not in git):
 
 - `R` = `~/.cache/team-chat/reports/final/` (JSON reports of this check, no secrets)
 - `S` = `~/.cache/team-chat/screens/final/` (screenshot self-test captures, contact sheets, boards)
-- e2e run ids: `kthm42` (all scenarios), `p24gpf` (30-minute soak), both against
+- e2e run ids: `kthm42` and `sz8xgx` (all scenarios, before and after the last deploy), `p24gpf`
+  (30-minute soak), all against
   `https://chat-api-e2e.huangdeshiou.workers.dev`
 
 ## 1. Chat
