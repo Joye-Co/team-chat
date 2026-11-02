@@ -619,3 +619,47 @@ describe("revocations", () => {
     expect((await api("/v1/admin/revocations", { headers: ADMIN, body: saved.body })).body.applied).toBe(0);
   });
 });
+
+describe("member gateway state", () => {
+  it("archives read cursors and the hook topic map once a day and merges them back", async () => {
+    const [a, b] = await Promise.all([createMember(), createMember()]);
+    const gw = (id: string) => env.MEMBER_GATEWAY.get(env.MEMBER_GATEWAY.idFromName(id));
+    await runInDurableObject(gw(a.id), (_o, state) => {
+      state.storage.sql.exec("INSERT INTO cursors (group_id, seq, updated_at) VALUES ('g1', 42, 1), ('g2', 7, 1)");
+      state.storage.sql.exec(
+        "INSERT INTO hook_keys (key, topic_id, message_id, own_topic, updated_at) VALUES ('pr:o/r#1', 't1', 'm1', 1, 1)",
+      );
+      state.storage.sql.exec("INSERT INTO hook_deliveries (id, at) VALUES ('d1', 1)");
+    });
+    const day = Date.UTC(2030, 0, 1, 3);
+    const run = await runArchive(env, { skipD1: true, now: day });
+    const { memberStateKey } = await import("../src/ops/archive");
+    const key = memberStateKey(a.id, "2030-01-01");
+    expect(run.files).toContain(key);
+    // Once a day: a second run that day writes no member state.
+    expect((await runArchive(env, { skipD1: true, now: day })).files.some((k) => k.startsWith("archive/members/"))).toBe(false);
+
+    // Restore into b's gateway, which already has a newer cursor for g2.
+    await runInDurableObject(gw(b.id), (_o, state) => {
+      state.storage.sql.exec("INSERT INTO cursors (group_id, seq, updated_at) VALUES ('g2', 9, 2)");
+    });
+    const bytes = new Uint8Array(await (await env.FILES.get(key))!.arrayBuffer());
+    const r = await api(`/v1/admin/import/members/${b.id}/state`, { method: "POST", headers: ADMIN, raw: bytes as unknown as string });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    const restored = await runInDurableObject(gw(b.id), (_o, state) => ({
+      cursors: state.storage.sql.exec("SELECT group_id, seq FROM cursors ORDER BY group_id").toArray(),
+      keys: state.storage.sql.exec("SELECT key, topic_id FROM hook_keys").toArray(),
+      deliveries: state.storage.sql.exec("SELECT id FROM hook_deliveries").toArray(),
+    }));
+    expect(restored).toEqual({
+      cursors: [
+        { group_id: "g1", seq: 42 },
+        { group_id: "g2", seq: 9 },
+      ],
+      keys: [{ key: "pr:o/r#1", topic_id: "t1" }],
+      deliveries: [{ id: "d1" }],
+    });
+    expect((await api(`/v1/admin/import/members/${ulid()}/state`, { method: "POST", headers: ADMIN, raw: bytes as unknown as string })).status).toBe(404);
+    expect((await api(`/v1/admin/import/members/${b.id}/state`, { method: "POST", raw: bytes as unknown as string })).status).toBe(401);
+  });
+});

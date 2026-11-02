@@ -1,6 +1,8 @@
 // Daily archive to R2 (the env's FILES bucket):
 //   archive/groups/<groupId>/<from>-<to>.ndjson.gz   stored events with from <= seq <= to
 //   archive/groups/<groupId>/state/<YYYY-MM-DD>.json.gz   per-member room state (reads, follows, prefs)
+//   archive/members/<memberId>/state/<YYYY-MM-DD>.json.gz  member gateway state (group read
+//                                                    cursors, GitHub hook topic map), once a day
 //   archive/d1/<YYYY-MM-DD>.json.gz                 every D1 table (hashes only, no secrets)
 // Resumable and idempotent: D1 table ops_archive keeps the last archived seq per group and is
 // moved forward after each file is written. A run stops at its budget and the next run goes on
@@ -10,7 +12,7 @@
 // archives its delete event.
 // A crash between the R2 write and the state update makes the next file overlap the last one;
 // restore skips seqs it already has, so overlap is harmless.
-import { type Env, roomStub } from "../core/env";
+import { type Env, gatewayStub, roomStub } from "../core/env";
 import { unwrap } from "../core/errors";
 import type { Logger } from "../core/logger";
 import type { ArchivedEvent } from "../core/registry";
@@ -40,6 +42,13 @@ export function groupFileKey(groupId: string, from: number, to: number): string 
 export function parseGroupFileKey(key: string): { groupId: string; from: number; to: number } | null {
   const m = /^archive\/groups\/([^/]+)\/(\d+)-(\d+)\.ndjson\.gz$/.exec(key);
   return m ? { groupId: m[1], from: Number(m[2]), to: Number(m[3]) } : null;
+}
+
+export const MEMBER_PREFIX = "archive/members/";
+
+/** One member gateway's state (group read cursors, hook topic map) on one day. */
+export function memberStateKey(memberId: string, date: string): string {
+  return `${MEMBER_PREFIX}${memberId}/state/${date}.json.gz`;
 }
 
 export function groupStateKey(groupId: string, date: string): string {
@@ -91,6 +100,7 @@ export interface ArchiveStatus {
 const META_CURSOR = "archive.cursor";
 const META_COMPLETE = "archive.lastCompleteAt";
 const META_RUN = "archive.lastRun";
+const META_GATEWAYS = "archive.gatewaysDate";
 
 async function getMeta<T>(env: Env, key: string): Promise<T | null> {
   const r = await env.DB.prepare("SELECT value FROM ops_meta WHERE key = ?").bind(key).first<{ value: string }>();
@@ -233,6 +243,25 @@ export async function runArchive(env: Env, opts: ArchiveOptions = {}): Promise<A
       opts.log?.error("group archive failed", { groupId: g.id, err: err instanceof Error ? err.message : String(err) });
     }
     pass.after = g.id;
+  }
+  // Member gateways once a day, after a pass reached the last group: a few RPCs per member.
+  if (!stopped && (await getMeta<string>(env, META_GATEWAYS)) !== date) {
+    let ok = true;
+    const members = await env.DB.prepare("SELECT id FROM members ORDER BY id").all<{ id: string }>();
+    for (const m of members.results) {
+      try {
+        const state = await gatewayStub(env, m.id).rpc("ops.exportGateway", null);
+        const key = memberStateKey(m.id, date);
+        await env.FILES.put(key, await gzip(JSON.stringify(state)), { httpMetadata: { contentType: "application/gzip" } });
+        report.files.push(key);
+      } catch (err) {
+        ok = false;
+        report.failed.push(`member:${m.id}`);
+        pass.failed++;
+        opts.log?.error("member archive failed", { memberId: m.id, err: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (ok) await setMeta(env, META_GATEWAYS, date);
   }
   report.complete = !stopped;
   if (stopped) {

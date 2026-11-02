@@ -158,6 +158,7 @@ The cron `0 3 * * *` on `chat-api-*` writes to the env's own bucket:
 | --- | --- |
 | `archive/groups/<groupId>/<from>-<to>.ndjson.gz` | stored events `from..to` of the group log, one JSON per line (seq, type, at, actorId, topicId, messageId, data); at most 5,000 per file |
 | `archive/groups/<groupId>/state/<YYYY-MM-DD>.json.gz` | per-member room state: per-topic read positions, follow flags, mute and notify preferences |
+| `archive/members/<memberId>/state/<YYYY-MM-DD>.json.gz` | each member gateway's group read cursors and GitHub hook topic map (`hook_keys`, `hook_shas`, `hook_deliveries`), once a day after a pass reached every group |
 | `archive/d1/<YYYY-MM-DD>.json.gz` | every D1 table in creation order (`d1_migrations` and the `ops_*` tables left out); tokens and invites only as SHA-256 hashes; columns named like a plain secret are written as `[redacted]` (`hooks.secret_enc` is kept: it is encrypted with the env's `HOOK_SECRET_KEY`) |
 
 - The last archived seq per group is in D1 `ops_archive`; each file is written before that seq
@@ -191,11 +192,10 @@ The cron `0 3 * * *` on `chat-api-*` writes to the env's own bucket:
     bucket, which is durable. A restore into **another** env's bucket does not copy them: copy
     those prefixes with the R2 dashboard or an S3 client, or attachments and 产出 files answer
     404 there.
-  - each member's gateway: group read cursors, so after a restore into a new env (or a lost
-    gateway) every group shows all its history as unread, except topics with a per-topic read
-    position; and the GitHub hook topic map (`hook_keys`, `hook_deliveries`), so the next event
-    for an open pull request opens a second topic and redeliveries are not deduplicated.
   - in-memory presence and typing.
+- Member gateway state is a daily snapshot: read positions and hook topics made after it are
+  lost in an env restore. A lost cursor makes that group show its newer history as unread; a
+  lost hook topic makes the next event of that pull request open a second topic.
 
 ## Restore from the R2 archive
 
@@ -224,7 +224,7 @@ server version, with its D1 migrations applied.
    them): `bun server/scripts/admin.ts revocations-save --env production --url https://chat-api-prod.huangdeshiou.workers.dev`.
 5. `bun ops/restore/restore.ts env --from production --from-url https://chat-api-prod.huangdeshiou.workers.dev --to staging --revocations <that file>`
    (D1 first and the revocations right after it, then each group's events, its state and its
-   ready-file records). `--date YYYY-MM-DD` picks an older D1 dump and state snapshot.
+   ready-file records, then each member gateway's state). `--date YYYY-MM-DD` picks an older D1 dump and state snapshot.
    `--resume` goes on with a D1 restore that stopped. Without a revocations file, revoke again
    by hand every token and member revoked after the dump (audit log of the source).
 6. Into another env's bucket: copy the file bytes (see "Not archived" above).

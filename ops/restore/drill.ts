@@ -3,7 +3,7 @@
 // API, runs the archive, copies the archive to a folder and stops A. Then starts a stack B with
 // empty D1 and Durable Objects (A's R2 bucket, which holds the file bytes, stays),
 // restores the whole env from that folder, and compares what members see in B with what they
-// saw in A (messages, topics, 产出 and their files). A message deleted after the first archive
+// saw in A (messages, topics, read cursors, 产出 and their files). A message deleted after the first archive
 // run must be gone from every archive file and from B. Exits 0 when all match.
 // Report: ops/restore/.drill/report.json (no secrets).
 //
@@ -120,6 +120,10 @@ class Ws {
     this.ws.send(JSON.stringify({ ...frame, rid }));
     return this.wait(pred ?? ((f) => f.rid === rid));
   }
+  /** A frame with no ack (e.g. read). */
+  push(frame: Record<string, unknown>): void {
+    this.ws.send(JSON.stringify(frame));
+  }
   async ok(frame: Record<string, unknown>): Promise<any> {
     for (let attempt = 0; ; attempt++) {
       const r = await this.call(frame);
@@ -214,6 +218,9 @@ async function seed(): Promise<Seeded> {
     body: { entry: "index.html", files: [{ path: "index.html", fileId: page2.fileId }], note: "第二版" },
   });
   const late = await m.ok({ t: "send", groupId: gid, topicId, clientMsgId: id(), body: LATE_DELETE });
+  // A group read cursor (member gateway state): after the restore the group is not all unread.
+  m.push({ t: "read", groupId: gid, seq: 10 });
+  await m.wait((f) => f.t === "reads" && f.groupId === gid && f.readSeq === 10);
   await o.ok({ t: "send", groupId: dm.group.id, clientMsgId: id(), body: "私聊" });
   await m.ok({ t: "send", groupId: dm.group.id, clientMsgId: id(), body: "收到" });
   for (const ws of [o, m, b]) ws.close();
@@ -262,12 +269,8 @@ async function view(token: string): Promise<any> {
       artifacts[gid].push({ ...full, entries });
     }
   }
-  // Group read cursors live in each member's gateway and are not archived; compare the rest.
-  const strip = (g: any) => {
-    const { readSeq, unread, mentions, ...rest } = g;
-    return rest;
-  };
-  return { members, groups: groups.map(strip), events, history, artifacts };
+  // Group read cursors (readSeq, unread, mentions) come from each member's gateway snapshot.
+  return { members, groups, events, history, artifacts };
 }
 
 function diff(a: unknown, b: unknown, path = "$", out: string[] = []): string[] {
@@ -328,6 +331,7 @@ async function main() {
       d1Inserted: restored.d1.inserted,
       skippedTables: restored.d1.skippedTables,
       groups: restored.groups,
+      members: restored.members,
       version: health.version,
     };
     const after = { owner: await view(seeded.ownerToken), member: await view(seeded.memberToken) };

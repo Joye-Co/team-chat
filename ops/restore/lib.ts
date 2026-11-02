@@ -164,6 +164,11 @@ export function parseStateKey(key: string): { groupId: string; date: string } | 
   return m ? { groupId: m[1], date: m[2] } : null;
 }
 
+export function parseMemberStateKey(key: string): { memberId: string; date: string } | null {
+  const m = /^archive\/members\/([^/]+)\/state\/(\d{4}-\d{2}-\d{2})\.json\.gz$/.exec(key);
+  return m ? { memberId: m[1], date: m[2] } : null;
+}
+
 export function parseD1Key(key: string): string | null {
   return /^archive\/d1\/(\d{4}-\d{2}-\d{2})\.json\.gz$/.exec(key)?.[1] ?? null;
 }

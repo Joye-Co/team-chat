@@ -2,7 +2,7 @@
 // mute and notify preferences). The archive snapshots it daily next to the group's events and
 // restore writes it back after the events. Room RPCs, called with actor null (internal only).
 import { ApiError } from "../core/errors";
-import { registerRoomRpc } from "../core/registry";
+import { registerGatewayRpc, registerRoomRpc } from "../core/registry";
 
 /** Room tables copied whole. Each must have a primary key so a re-import replaces rows. */
 export const ROOM_STATE_TABLES = ["topic_states", "member_prefs"] as const;
@@ -83,4 +83,56 @@ registerRoomRpc("ops.seqAt", (room, actor, args) => {
   if (actor) throw new ApiError("forbidden", "internal only");
   const { at } = args as { at: number };
   return { seq: room.sql.exec<{ s: number | null }>("SELECT max(seq) AS s FROM events WHERE at <= ?", at).one().s ?? 0 };
+});
+
+// ---------------------------------------------------------------------------
+// Member gateway state: group read cursors and the GitHub hook topic map
+// ---------------------------------------------------------------------------
+
+/** Gateway tables copied whole (those that exist). Each has a primary key. */
+export const GATEWAY_STATE_TABLES = ["cursors", "hook_keys", "hook_shas", "hook_deliveries"] as const;
+
+export interface GatewayStateSnapshot {
+  version: 1;
+  tables: Record<string, { columns: string[]; rows: unknown[][] }>;
+}
+
+registerGatewayRpc("ops.exportGateway", (gw) => {
+  const out: GatewayStateSnapshot = { version: 1, tables: {} };
+  for (const t of GATEWAY_STATE_TABLES) {
+    if (!hasTable(gw.sql, t)) continue;
+    const columns = columnsOf(gw.sql, t);
+    const rows = [...gw.sql.exec(`SELECT ${columns.map((c) => `"${c}"`).join(", ")} FROM ${t}`).raw()] as unknown[][];
+    out.tables[t] = { columns, rows };
+  }
+  return out;
+});
+
+/**
+ * Restore: merges a snapshot into the gateway. Rows it already has win (the member may have
+ * used the app since the restore began), except that a read cursor only moves forward.
+ */
+registerGatewayRpc("ops.importGateway", (gw, args) => {
+  const snap = args as GatewayStateSnapshot;
+  let rows = 0;
+  for (const t of GATEWAY_STATE_TABLES) {
+    const table = snap.tables?.[t];
+    if (!table || !hasTable(gw.sql, t)) continue;
+    const known = new Set(columnsOf(gw.sql, t));
+    const idx = table.columns.map((c, i) => (known.has(c) ? i : -1)).filter((i) => i >= 0);
+    if (idx.length === 0) continue;
+    const names = idx.map((i) => table.columns[i]);
+    const cols = names.map((c) => `"${c}"`).join(", ");
+    const values = idx.map(() => "?").join(", ");
+    const stmt =
+      t === "cursors" && names.includes("group_id") && names.includes("seq")
+        ? `INSERT INTO cursors (${cols}) VALUES (${values})
+           ON CONFLICT (group_id) DO UPDATE SET seq = max(cursors.seq, excluded.seq)`
+        : `INSERT OR IGNORE INTO ${t} (${cols}) VALUES (${values})`;
+    for (const r of table.rows) {
+      gw.sql.exec(stmt, ...idx.map((i) => r[i] as SqlStorageValue));
+      rows++;
+    }
+  }
+  return { rows };
 });

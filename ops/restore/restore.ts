@@ -17,7 +17,8 @@
 //   bun ops/restore/restore.ts fetch <source> --out <folder>      copy the archive to a folder
 //
 // Order for a whole environment: D1 first (members, tokens, groups), then every group's events,
-// then its room state, then its ready-file records (from the restored D1 files table). The target must have its D1 migrations applied and no members (or pass
+// then its room state, then its ready-file records (from the restored D1 files table), then
+// each member gateway's state (group read cursors, GitHub hook topic map). The target must have its D1 migrations applied and no members (or pass
 // --resume to go on with a restore that stopped).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -33,6 +34,7 @@ import {
   parseArgs,
   parseD1Key,
   parseGroupFileKey,
+  parseMemberStateKey,
   parseStateKey,
   readSecretFile,
 } from "./lib";
@@ -165,7 +167,33 @@ export async function restoreEnv(
   const groupIds = groupsTable && idCol >= 0 ? groupsTable.rows.map((r) => r[idCol] as string) : [];
   const groups = [];
   for (const id of groupIds) groups.push(await restoreGroup(source, target, id, opts));
-  return { d1: { key: d1.key, rows: d1.rows, inserted: d1.inserted, skippedTables: d1.skippedTables, reapplied: d1.reapplied }, groups };
+  const members = await restoreMembers(source, target, opts);
+  return { d1: { key: d1.key, rows: d1.rows, inserted: d1.inserted, skippedTables: d1.skippedTables, reapplied: d1.reapplied }, groups, members };
+}
+
+/** Each member gateway's newest state snapshot (on or before `date`): read cursors, hook map. */
+export async function restoreMembers(
+  source: ArchiveSource,
+  target: AdminApi,
+  opts: { date?: string } = {},
+): Promise<{ members: number; rows: number }> {
+  const latest = new Map<string, { key: string; date: string }>();
+  for (const k of await source.list("archive/members/")) {
+    const p = parseMemberStateKey(k);
+    if (!p || (opts.date && p.date > opts.date)) continue;
+    const prev = latest.get(p.memberId);
+    if (!prev || prev.date < p.date) latest.set(p.memberId, { key: k, date: p.date });
+  }
+  let rows = 0;
+  for (const [memberId, { key }] of latest) {
+    const r = await target.json<{ rows: number }>(`/v1/admin/import/members/${memberId}/state`, {
+      method: "POST",
+      headers: { "content-type": "application/gzip" },
+      body: await source.get(key),
+    });
+    rows += r.rows;
+  }
+  return { members: latest.size, rows };
 }
 
 export async function fetchArchive(source: ArchiveSource, out: string): Promise<number> {
