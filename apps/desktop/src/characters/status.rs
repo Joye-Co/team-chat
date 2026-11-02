@@ -8,7 +8,9 @@
 //! (needs input > error > working > idle):
 //! 1. offline: the bot is not present (not online, or deactivated);
 //! 2. needs-input: a topic it owns waits on a person (`waiting_answer`,
-//!    `waiting_review`), or one of its runs waits (`waiting`);
+//!    `waiting_review`), one of its runs waits (`waiting`), or it posted an
+//!    ask or draft card (`warning` tone with buttons) that nobody answered
+//!    yet, in a topic that is not done;
 //! 3. error: a topic it owns is `blocked`, one of its runs is `blocked`, or
 //!    its newest run in a topic that is not done failed;
 //! 4. working: one of its runs is active, or it is writing a streaming
@@ -42,6 +44,8 @@ pub const SUCCESS_FOR: Duration = Duration::from_secs(8);
 const RECENT_MS: Millis = 60 * 60 * 1000;
 /// Messages read at the end of a topic to find streaming replies.
 const TAIL: usize = 4;
+/// Messages read at the end of a topic to find unanswered ask and draft cards.
+const ASK_TAIL: usize = 30;
 
 /// What is known about one member, the inputs of [`status_of`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -119,6 +123,8 @@ pub struct StatusTracker {
     streaming: HashMap<(GroupId, TopicId), HashSet<MemberId>>,
     /// The status of each bot's newest run, per topic.
     runs: HashMap<(GroupId, TopicId), HashMap<MemberId, RunStatus>>,
+    /// Bots with an unanswered ask or draft card, per topic.
+    asks: HashMap<(GroupId, TopicId), HashSet<MemberId>>,
     success_until: HashMap<MemberId, Instant>,
     _changes: Subscription,
 }
@@ -141,6 +147,7 @@ impl StatusTracker {
                 owned: HashMap::new(),
                 streaming: HashMap::new(),
                 runs: HashMap::new(),
+                asks: HashMap::new(),
                 success_until: HashMap::new(),
                 _changes: changes,
             };
@@ -160,6 +167,7 @@ impl StatusTracker {
                 }
                 if t.status != TopicStatus::Done {
                     self.read_runs(&group.id, &t.id);
+                    self.read_asks(&group.id, &t.id);
                 }
             }
             self.owned.insert(group.id.clone(), owned_of(&topics));
@@ -183,6 +191,43 @@ impl StatusTracker {
         before.unwrap_or_default()
     }
 
+    /// The bots whose ask or draft card in a topic waits for an answer: the
+    /// `warning` tone with buttons, and no press by anyone but its author.
+    fn read_asks(&mut self, group_id: &str, topic_id: &str) {
+        let key = (group_id.to_string(), topic_id.to_string());
+        if self
+            .provider
+            .topic(group_id, topic_id)
+            .is_some_and(|t| t.status == TopicStatus::Done)
+        {
+            self.asks.remove(&key);
+            return;
+        }
+        let window = self.provider.messages(group_id, topic_id, ASK_TAIL);
+        let waiting: HashSet<MemberId> = window
+            .messages
+            .iter()
+            .filter(|m| m.deleted_at.is_none())
+            .filter(|m| {
+                self.provider.card(group_id, &m.id).is_some_and(|card| {
+                    crate::views::cards::waits_for_viewer(&card)
+                        && card.actions.as_ref().is_some_and(|a| !a.is_empty())
+                        && !self
+                            .provider
+                            .card_presses(group_id, &m.id)
+                            .iter()
+                            .any(|p| p.actor_id != m.author_id)
+                })
+            })
+            .map(|m| m.author_id.clone())
+            .collect();
+        if waiting.is_empty() {
+            self.asks.remove(&key);
+        } else {
+            self.asks.insert(key, waiting);
+        }
+    }
+
     /// The status of each bot's newest run in a topic (runs come newest
     /// first).
     fn read_runs(&mut self, group_id: &str, topic_id: &str) {
@@ -203,6 +248,7 @@ impl StatusTracker {
         for change in &changes.0 {
             match change {
                 Change::Messages { group_id, topic_id } => {
+                    self.read_asks(group_id, topic_id);
                     let before = self.read_streaming(group_id, topic_id);
                     let key = (group_id.clone(), topic_id.clone());
                     let after = self.streaming.get(&key).cloned().unwrap_or_default();
@@ -286,6 +332,16 @@ impl StatusTracker {
                 }
             }
         }
+        for ((group_id, topic_id), bots) in &self.asks {
+            if done.contains(&(group_id.as_str(), topic_id.as_str())) {
+                continue;
+            }
+            for id in bots {
+                if let Some(s) = out.get_mut(id) {
+                    s.waits_on_person = true;
+                }
+            }
+        }
         for topic in self.owned.values().flatten() {
             if let Some(s) = out.get_mut(&topic.owner) {
                 match topic.status {
@@ -363,12 +419,34 @@ mod tests {
         cx.run_until_parked();
         let status =
             |cx: &mut TestAppContext, id: &str| cx.read(|cx| cx.global::<StatusBoard>().get(id));
-        // Pocket streams the release notes; Forge runs in t-login; Jojo and
-        // Watch own blocked topics; Ledger is offline.
+        // Pocket streams the release notes; Forge runs in t-login; Jojo owns
+        // a blocked topic; Ledger is offline. Watch owns a blocked topic too,
+        // but its ask card in the card samples waits for an answer, and
+        // Taro's draft card waits for a review: needs input wins.
         assert_eq!(status(cx, "m-docs"), Some(Working));
         assert_eq!(status(cx, "m-coder"), Some(Working));
         assert_eq!(status(cx, "m-deploy"), Some(Error));
         assert_eq!(status(cx, "m-ledger"), Some(Offline));
+        assert_eq!(status(cx, "m-sentry"), Some(NeedsInput));
+        assert_eq!(status(cx, "m-taro"), Some(NeedsInput));
+
+        // Joye answers the ask: Watch shows its blocked topic again.
+        let ask = cx.read(|_| {
+            use crate::views::cards::samples as cs;
+            provider
+                .messages(cs::GROUP, cs::TOPIC, 50)
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.author_id == "m-sentry")
+                .map(|m| m.id.clone())
+                .unwrap()
+        });
+        {
+            use crate::views::cards::samples as cs;
+            provider.press_card_action(cs::GROUP, cs::TOPIC, &ask, "after-scout");
+        }
+        cx.run_until_parked();
         assert_eq!(status(cx, "m-sentry"), Some(Error));
         assert_eq!(status(cx, "m-tata"), Some(Idle));
         assert_eq!(status(cx, "m-reviewer"), Some(Idle));

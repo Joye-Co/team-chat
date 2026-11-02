@@ -643,6 +643,36 @@ pub struct BotRunSummary {
     pub ended_at: Option<Millis>,
     pub updated_at: Millis,
     pub summary: Option<String>,
+    /// The bot's plan for this run, in order: what it did, does now, waits
+    /// for and does later. Empty when the run has none.
+    pub plan: Vec<PlanItem>,
+}
+
+/// The state of one plan item (docs/protocol.md, "Run plans").
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanState {
+    Done,
+    /// The bot works on it now.
+    Current,
+    /// Waits for a member (an answer, a review).
+    Waiting,
+    Pending,
+}
+
+/// One item of a run plan.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PlanItem {
+    pub text: String,
+    pub state: PlanState,
+}
+
+impl PlanItem {
+    pub fn new(text: impl Into<String>, state: PlanState) -> Self {
+        Self {
+            text: text.into(),
+            state,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

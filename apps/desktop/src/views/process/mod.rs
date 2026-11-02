@@ -655,6 +655,7 @@ mod tests {
             ended_at: None,
             updated_at: 2_000,
             summary: None,
+            plan: Vec::new(),
         };
         assert_eq!(run_duration(&run, 11_000), Some(10_000));
         run.status = RunStatus::Failed;

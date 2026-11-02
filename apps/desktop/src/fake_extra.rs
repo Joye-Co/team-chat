@@ -101,6 +101,7 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
             ended_at: None,
             updated_at: now - 10 * MIN,
             summary: None,
+            plan: Vec::new(),
         },
         BotRunSummary {
             id: "run-blocked-1".into(),
@@ -116,6 +117,7 @@ pub fn sample_runs(now: Millis) -> Vec<BotRunSummary> {
             ended_at: Some(now - 2 * 24 * 60 * MIN + 7 * MIN),
             updated_at: now - 2 * 24 * 60 * MIN + 7 * MIN,
             summary: Some("打包失败：找不到签名证书。".into()),
+            plan: Vec::new(),
         },
     ]
 }

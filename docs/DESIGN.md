@@ -540,7 +540,10 @@ Counts above 99 render as `99+` everywhere: badges, neutral badges, tabs and the
   `needs-input` (`you-glyph`) and `error` (`danger`). Above 64 pt the full art is drawn.
 - A bot's avatar signal (art and pip) is one status across all its runs, by priority:
   **needs input > error > working > idle**. A bot that works in one topic and waits for an
-  answer in another shows needs input.
+  answer in another shows needs input. Needs input means: a topic it is responsible for waits on
+  a person, one of its runs waits, or it posted an ask or draft card (`warning` tone with
+  buttons) that nobody answered yet in a topic that is not done; this wins over a blocked topic
+  elsewhere (settings then says 等人回答, not 出错了).
 - Role tag after a bot's name (messages, side panel, settings): 20 pt, radius 6, `field`, padding
   0 6, `bot` glyph 12 + 岗位 12/16 500 `text-2`. Confirmed by Joye on 2026-11-03: the character is
   the mark, plus this tag. People show 岗位 as plain `small` text where a list needs it.
@@ -640,7 +643,7 @@ remembered per topic). Never shown with no topic open (U07).
 | --- | --- |
 | Header | 92 pt with a 0.5 pt `sep` bottom rule level with the other two: row 1 (52) `话题详情` `title` 16/24 + close `x` 32; row 2 (40) one context line `small` 13/20 `text-2` that the timeline does not show (`Taro 负责 · 周四 20:00 截止`). Sub-pages (a 产出's versions, the process view, a member) replace the content with a `chevron-left` back button and the sub-page title |
 | Sections | 16 pt side padding, 16 pt between sections (16 for the first, under the rule). Label 12/16 600 `text-3` with the count inline (`产出 · 2`), 8 pt below |
-| Progress | When a bot is responsible: flat like the other sections (no card): 36 pt bot tile, name `ui` 14/600, state `small` `text-2` (`等你审发布预览`); plan list: 28 pt rows, 16 glyph (`circle-check` `success`, current step glyph `text-1`, `circle-dashed` `text-3` for later), `small` 13/20 text, current step `text-1` 500. `查看过程` text button opens the process view |
+| Progress | When a bot is responsible: flat like the other sections (no card): 36 pt bot tile, name `ui` 14/600, state `small` `text-2` (`等你审发布预览`); plan list, first match wins: the bot's run plan (protocol "Run plans"), else a plan-style card list, else the run's latest steps. 28 pt rows, 16 glyph (`circle-check` `success` for done, `circle-dot` `text-1` for current, `eye` `text-1` for waiting on a member, `circle-dashed` `text-3` for later), `small` 13/20 text, current and waiting items `text-1` 500; at most 6 rows, a window from two items before the first open one. `查看过程` text button opens the process view |
 | 产出 | 48 pt rows (§7.11). One quiet line when empty: `还没有产出` 12 `text-3` |
 | 成员 | 40 pt rows: 24 avatar, name `ui` 14, trailing 岗位 13/20 `text-3` for everyone, with a 12 pt `bot` glyph and 4 pt gap before it for bots (no tag fill); then a 40 pt `添加成员` row in the same columns: a 24 pt slot with `user-plus` 16 `accent-text`, 10 pt gap, label `ui` 14/20 500 `accent-text`; hover `hover` fill, radius 8 |
 

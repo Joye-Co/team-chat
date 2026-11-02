@@ -33,6 +33,7 @@ const SHORT_DRAFT: &str = "art-v21-note";
 const SHORT_IMAGES: &str = "art-v21-images";
 const RUN_DONE: &str = "run-v21-forge";
 const RUN_LIVE: &str = "run-v21-scout";
+const RUN_SHORT: &str = "run-v21-taro";
 const BIG_FILE_SHA: &str = "v21worstcasetrace";
 
 const MIN: i64 = 60_000;
@@ -135,24 +136,6 @@ fn ask_card() -> card::Card {
             { "id": "a", "label": "现在在 staging 打开" },
             { "id": "b", "label": "等 Scout 验收完再开" },
             { "id": "c", "label": "先不改，回到讨论" }
-        ]
-    }))
-    .expect("sample card parses")
-}
-
-/// Taro's plan on its first reply, updated in place as it works: the side
-/// panel reads it as Taro's progress (short-topic-*).
-fn plan_card() -> card::Card {
-    serde_json::from_value(serde_json::json!({
-        "v": 1,
-        "title": "小红书发布计划",
-        "blocks": [
-            { "type": "list", "items": [
-                { "text": "写标题和正文", "status": "done" },
-                { "text": "生成 3 张配图", "status": "done" },
-                { "text": "等 Joye 确认", "status": "in_progress" },
-                { "text": "周四 20:00 发出", "status": "todo" }
-            ]}
         ]
     }))
     .expect("sample card parses")
@@ -289,7 +272,6 @@ impl TopicSamples {
         ];
         // 李雪 is cc'd on the brief: the third member of the topic.
         short[0].mentions = vec!["m-taro".into(), "m-lixue".into()];
-        cards.insert(short[1].id.clone(), Arc::new(plan_card()));
         cards.insert(short[2].id.clone(), Arc::new(draft_card()));
         let mut short_topic = topic(
             SHORT,
@@ -375,6 +357,7 @@ impl TopicSamples {
                 ended_at: Some(main[4].created_at),
                 updated_at: main[4].created_at,
                 summary: None,
+                plan: Vec::new(),
             },
             BotRunSummary {
                 id: RUN_LIVE.into(),
@@ -390,6 +373,31 @@ impl TopicSamples {
                 ended_at: None,
                 updated_at: now - 2_000,
                 summary: None,
+                plan: Vec::new(),
+            },
+            // Taro's run in short-topic-*: its plan is the side panel's
+            // `Taro 的进度` (the mockup's four steps). It waits for Joye's
+            // review, so the timeline shows no bot-at-work row.
+            BotRunSummary {
+                id: RUN_SHORT.into(),
+                bot_id: "m-taro".into(),
+                group_id: GROUP.into(),
+                topic_id: SHORT.into(),
+                machine_id: None,
+                machine_name: None,
+                status: RunStatus::Waiting,
+                requested_by: Some(crate::fake::ME.into()),
+                created_at: short[1].created_at,
+                started_at: Some(short[1].created_at),
+                ended_at: None,
+                updated_at: short[2].created_at,
+                summary: None,
+                plan: vec![
+                    PlanItem::new("写标题和正文", PlanState::Done),
+                    PlanItem::new("生成 3 张配图", PlanState::Done),
+                    PlanItem::new("等 Joye 确认", PlanState::Waiting),
+                    PlanItem::new("周四 20:00 发出", PlanState::Pending),
+                ],
             },
         ];
 

@@ -322,6 +322,12 @@ impl CoreProvider {
                 ended_at: r.ended_at.map(|t| t as i64),
                 updated_at: r.updated_at as i64,
                 summary: r.summary,
+                plan: r
+                    .plan
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(plan_item)
+                    .collect(),
             })
             .collect()
     }
@@ -509,4 +515,17 @@ mod tests {
         let e = ClientError::Api(ApiError::Unexpected { status: 403 });
         assert_eq!(load_error(&e), RunLoadError::Forbidden);
     }
+}
+
+/// A run plan item of the protocol, as the views read it.
+fn plan_item(i: chat_core::proto::RunPlanItem) -> crate::data::PlanItem {
+    use crate::data::PlanState;
+    use chat_core::proto::RunPlanState as S;
+    let state = match i.state {
+        S::Done => PlanState::Done,
+        S::Current => PlanState::Current,
+        S::Waiting => PlanState::Waiting,
+        S::Pending => PlanState::Pending,
+    };
+    crate::data::PlanItem::new(i.text, state)
 }

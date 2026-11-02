@@ -22,8 +22,8 @@ use crate::{
     app::{Changes, MentionInComposer, Services},
     copy::{dev, fill, panel as p, process as pc},
     data::{
-        BotRunSummary, Change, ChatProvider, GroupId, Member, Message, Millis, ProcessStep,
-        RunStatus, Topic, TopicId, TransferState,
+        BotRunSummary, Change, ChatProvider, GroupId, Member, Message, Millis, PlanState,
+        ProcessStep, RunStatus, Topic, TopicId, TransferState,
         card::{CardBlock, CardListItem, CardListStatus},
         create_key,
     },
@@ -325,6 +325,13 @@ impl SidePanel {
         {
             return Some(bot);
         }
+        // The bot whose newest run has a plan.
+        if let Some(bot) = self.runs.iter().find_map(|r| {
+            let bot = self.member(&r.bot_id).filter(|m| m.is_bot())?;
+            (self.newest_run(&bot.id)?.id == r.id && !r.plan.is_empty()).then_some(bot)
+        }) {
+            return Some(bot);
+        }
         // The bot that posted the newest plan list.
         self.messages.iter().rev().find_map(|m| {
             let bot = self.member(&m.author_id).filter(|b| b.is_bot())?;
@@ -399,10 +406,12 @@ impl SidePanel {
         }
     }
 
-    /// The progress list: a plan list from a card in the topic when one
-    /// exists (statuses on its items), else the run's latest steps.
-    /// `waits`: the bot waits for me, so its current step shows `eye` (the
-    /// step is my review, as in the mockup's `等 Joye 确认`).
+    /// The progress list, first match wins: the plan of the bot's newest run
+    /// (its own to-do list), a plan list from a card in the topic (statuses
+    /// on its items), else the run's latest steps. `waits`: the bot waits for
+    /// me, so a card plan's current step shows `eye` (the step is my review,
+    /// as in the mockup's `等 Joye 确认`); a run plan says so itself with a
+    /// `waiting` item.
     fn plan_rows(
         &self,
         topic: &Topic,
@@ -412,6 +421,33 @@ impl SidePanel {
     ) -> Vec<PlanRow> {
         let k = theme::colors(cx);
         let provider = &self.services.provider;
+        if let Some(run) = self.newest_run(&bot.id)
+            && !run.plan.is_empty()
+        {
+            let items = &run.plan;
+            let start = plan_window(
+                items.iter().position(|i| i.state != PlanState::Done),
+                items.len(),
+            );
+            return items[start..]
+                .iter()
+                .take(PLAN_ITEMS)
+                .map(|item| {
+                    let (glyph, color, current) = match item.state {
+                        PlanState::Done => (Lucide::CircleCheck, k.success, false),
+                        PlanState::Current => (Lucide::CircleDot, k.text_1, true),
+                        PlanState::Waiting => (Lucide::Eye, k.text_1, true),
+                        PlanState::Pending => (Lucide::CircleDashed, k.text_3, false),
+                    };
+                    PlanRow {
+                        glyph,
+                        color,
+                        text: item.text.clone(),
+                        current,
+                    }
+                })
+                .collect();
+        }
         let plan = self.messages.iter().rev().find_map(|m| {
             let card = provider.card(&topic.group_id, &m.id)?;
             card.blocks.iter().find_map(|b| match b {
@@ -430,9 +466,7 @@ impl SidePanel {
                     )
                 })
                 .unwrap_or(items.len());
-            let start = current
-                .saturating_sub(2)
-                .min(items.len().saturating_sub(PLAN_ITEMS));
+            let start = plan_window(Some(current), items.len());
             return items[start..]
                 .iter()
                 .take(PLAN_ITEMS)
@@ -806,6 +840,15 @@ impl SidePanel {
     }
 }
 
+/// Where a long plan's window of [`PLAN_ITEMS`] starts: two items before the
+/// first one that is not done, so the current item and what follows show.
+fn plan_window(current: Option<usize>, len: usize) -> usize {
+    current
+        .unwrap_or(len)
+        .saturating_sub(2)
+        .min(len.saturating_sub(PLAN_ITEMS))
+}
+
 /// A plan list (§8.1): a card list whose items carry statuses.
 fn is_plan(items: &[CardListItem]) -> bool {
     items.len() >= 2 && items.iter().all(|i| i.status.is_some())
@@ -903,5 +946,22 @@ impl Render for SidePanel {
                     )
                 }),
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_plan_shows_a_window_around_its_first_open_item() {
+        // Short plans show whole.
+        assert_eq!(plan_window(Some(3), 4), 0);
+        assert_eq!(plan_window(None, 4), 0);
+        // Two done items stay above the current one, when the rest fits.
+        assert_eq!(plan_window(Some(5), 12), 3);
+        // Near the end the window keeps PLAN_ITEMS rows.
+        assert_eq!(plan_window(Some(11), 12), 12 - PLAN_ITEMS);
+        assert_eq!(plan_window(None, 12), 12 - PLAN_ITEMS);
     }
 }

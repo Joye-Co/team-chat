@@ -188,7 +188,7 @@ impl Render for TopicOutputs {
                     _ => format!(
                         "{kind} · {} · {}",
                         fill(ca::VERSION_SHORT, &[("n", &a.version.to_string())]),
-                        time_text(a.updated_at)
+                        day_time_text(a.updated_at)
                     ),
                 };
                 let author = self
@@ -351,5 +351,20 @@ impl Render for TopicOutputs {
                         .children(files),
                 )
             })
+    }
+}
+
+/// A 产出's time (§8.1 `网页 · v3 · 今天 14:31`): today spells `今天` and the
+/// time, so it reads the same as the message that posted it; other days as
+/// in lists.
+fn day_time_text(at: crate::data::Millis) -> String {
+    use chrono::{Local, TimeZone as _};
+    let Some(then) = Local.timestamp_millis_opt(at).single() else {
+        return String::new();
+    };
+    if then.date_naive() == Local::now().date_naive() {
+        format!("{} {}", crate::copy::timeline::TODAY, then.format("%H:%M"))
+    } else {
+        time_text(at)
     }
 }

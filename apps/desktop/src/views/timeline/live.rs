@@ -21,7 +21,7 @@ use super::TimelineView;
 use crate::{
     characters::CharacterStatus,
     copy::{fill, timeline as t},
-    data::{BotRunSummary, Message, Millis, ProcessStep},
+    data::{BotRunSummary, Message, Millis, ProcessStep, RunStatus},
     theme::{self, Type as _, space},
     ui::{self, Lucide},
 };
@@ -277,12 +277,13 @@ impl TimelineView {
         )
     }
 
-    /// Bots that work in this topic and have not started their reply.
+    /// Bots that work in this topic and have not started their reply. A run
+    /// that waits for a member (an answer, a review) is not at work.
     fn working_runs(&self) -> Vec<&BotRunSummary> {
         let mut seen = Vec::new();
         self.runs
             .iter()
-            .filter(|r| r.status.is_active())
+            .filter(|r| r.status.is_active() && r.status != RunStatus::Waiting)
             .filter(|r| {
                 !self
                     .messages
