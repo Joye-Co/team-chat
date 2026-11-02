@@ -13,7 +13,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
     uniform_list,
 };
-use gpui_component::menu::ContextMenuExt as _;
+use gpui_component::{menu::ContextMenuExt as _, tooltip::Tooltip};
 
 use crate::{
     app::{Changes, Place, Services},
