@@ -593,6 +593,9 @@ pub mod motion {
     pub const CARET_BLINK: Duration = Duration::from_millis(530);
     /// Pending dots loop (three 4 pt dots, 150 ms apart).
     pub const TYPING_PULSE: Duration = Duration::from_millis(1200);
+    /// Frame cap of decorative loops (pending dots): each frame re-renders
+    /// the view that holds the loop.
+    pub const DECORATIVE_FPS: f32 = 24.0;
     pub const SHIMMER: Duration = Duration::from_millis(1600);
     pub const SPINNER_TURN: Duration = Duration::from_millis(800);
     /// Travel of menus and popovers from their trigger.

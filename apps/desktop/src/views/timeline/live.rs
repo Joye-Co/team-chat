@@ -12,9 +12,8 @@ use std::time::Duration;
 
 use chrono::Utc;
 use gpui::{
-    AnimationExt as _, AnyElement, Context, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement as _, Styled, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, Context, ElementId, InteractiveElement as _, IntoElement, ParentElement,
+    SharedString, StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
 };
 
 use super::TimelineView;
@@ -49,7 +48,11 @@ fn pulse_dots(color: gpui::Hsla, reduce_motion: bool) -> impl IntoElement {
             }
             dot.with_animation(
                 gpui::ElementId::NamedInteger("pending-dot".into(), i as u64),
-                Animation::new(theme::motion::TYPING_PULSE).repeat(),
+                // A capped frame rate: every frame of this loop re-renders the
+                // whole timeline, and 24 fps steps are not visible on a 1.2 s wave.
+                Animation::new(theme::motion::TYPING_PULSE)
+                    .repeat()
+                    .with_max_fps(theme::motion::DECORATIVE_FPS),
                 move |el, t| {
                     let phase = (t - i as f32 * 0.125).rem_euclid(1.0);
                     let wave = (phase * std::f32::consts::TAU).cos() * 0.5 + 0.5;
@@ -317,7 +320,7 @@ impl TimelineView {
             let name = bot.map(|m| m.name.clone()).unwrap_or_default();
             let process = self.services.provider.run_process(&run.id);
             let label = live_label(&process.steps).unwrap_or_else(|| t::BOT_WORKING.to_string());
-            div()
+            let row = div()
                 .h(px(28.))
                 .flex()
                 .items_center()
@@ -379,22 +382,16 @@ impl TimelineView {
                             .ml(-space::S6)
                             .on_click(cx.listener(|this, _, _, cx| this.open_process(cx))),
                         ),
-                )
-                .with_animation(
-                    ElementId::Name(format!("live-enter-{}", run.id).into()),
-                    // Enter: 200 ms opacity + a 6 pt rise; opacity only
-                    // with reduce motion (§12).
-                    gpui::Animation::new(theme::motion::SLOW).with_easing(theme::motion::out_fn()),
-                    move |el, t| {
-                        let el = el.opacity(t);
-                        if reduce {
-                            el
-                        } else {
-                            el.relative().top(theme::motion::RISE * (1. - t))
-                        }
-                    },
-                )
-                .into_any_element()
+                );
+            // Enter: 200 ms opacity + a 6 pt rise; opacity only with reduce
+            // motion (§12).
+            ui::motion::enter(
+                ElementId::Name(format!("live-enter-{}", run.id).into()),
+                theme::motion::SLOW,
+                row,
+                |el, t| el.relative().top(theme::motion::RISE * (1. - t)),
+                cx,
+            )
         });
         let more = runs.len().saturating_sub(MAX_LIVE);
         Some(

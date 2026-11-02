@@ -513,4 +513,5 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
+    crate::ui::motion::watch_reduce_motion(cx);
 }
