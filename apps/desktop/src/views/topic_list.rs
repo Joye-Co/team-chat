@@ -182,6 +182,10 @@ pub struct TopicListView {
     previews: HashMap<TopicId, (u64, String)>,
     scroll: gpui::UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
+    /// Re-renders when the window becomes key or stops being key.
+    activation: Option<Subscription>,
+    /// The selection uses the accent tint (the window is key).
+    emphasized: bool,
 }
 
 impl TopicListView {
@@ -235,6 +239,8 @@ impl TopicListView {
             previews: HashMap::new(),
             scroll: gpui::UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
+            activation: None,
+            emphasized: true,
         };
         this.refresh(cx);
         this
@@ -506,6 +512,7 @@ impl TopicListView {
                     selected,
                     cx,
                 )
+                .when(selected && !self.emphasized, |el| el.bg(k.pressed))
                 .relative()
                 .size_full()
                 .items_start()
@@ -629,6 +636,10 @@ fn table_row(line: &str) -> Option<String> {
 
 impl Render for TopicListView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.activation.is_none() {
+            self.activation = Some(cx.observe_window_activation(window, |_, _, cx| cx.notify()));
+        }
+        self.emphasized = ui::rows::selection_emphasized(window);
         let k = theme::colors(cx);
         let base = self.scroll.0.borrow().base_handle.clone();
         let edges = scroll_edges(&base);

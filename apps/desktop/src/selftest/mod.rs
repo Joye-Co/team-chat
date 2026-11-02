@@ -73,6 +73,7 @@ pub fn main_if_requested() -> Option<i32> {
     if !args.iter().any(|a| a == "--screenshot") {
         return None;
     }
+    crate::ui::rows::draw_as_key_window();
     match parse(&args) {
         Ok(options) => Some(run(options)),
         Err(error) => {

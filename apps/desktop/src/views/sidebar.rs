@@ -73,13 +73,27 @@ pub fn scroll_edges(handle: &ScrollHandle) -> (bool, bool) {
 /// (§7.7 scroll edges), so a row cut by the edge never shows as a hard
 /// sliver. Place it in a relative parent over the scroll area.
 pub fn edge_fade(top: bool, color: Hsla) -> Div {
-    let el = div().absolute().left_0().right_0().h(space::S24);
-    let el = if top { el.top_0() } else { el.bottom_0() };
-    el.bg(gpui::linear_gradient(
-        if top { 180. } else { 0. },
-        gpui::linear_color_stop(color, 0.),
-        gpui::linear_color_stop(color.opacity(0.), 1.),
-    ))
+    // A 24 pt fade (§7.7): 8 pt of solid `color` at the edge, so a row cut
+    // by the edge never peeks out (badges included), then an eased 16 pt
+    // ramp 1.0, 0.85, 0.5, 0.15, 0 in 4 pt linear steps (a gradient has two
+    // stops).
+    const STOPS: [f32; 5] = [1.0, 0.85, 0.5, 0.15, 0.0];
+    let el = div()
+        .absolute()
+        .left_0()
+        .right_0()
+        .h(space::S24)
+        .flex()
+        .when(top, |el| el.top_0().flex_col())
+        .when(!top, |el| el.bottom_0().flex_col_reverse())
+        .child(div().flex_none().h(space::S8).bg(color));
+    el.children(STOPS.windows(2).map(|w| {
+        div().flex_none().h(space::S4).bg(gpui::linear_gradient(
+            if top { 180. } else { 0. },
+            gpui::linear_color_stop(color.opacity(w[0]), 0.),
+            gpui::linear_color_stop(color.opacity(w[1]), 1.),
+        ))
+    }))
 }
 
 /// Re-renders `view` on the next frame when the scroll edges in `seen` are
