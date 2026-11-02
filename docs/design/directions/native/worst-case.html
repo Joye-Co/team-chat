@@ -1,0 +1,527 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>worst-case</title>
+<style>
+
+:root[data-theme="light"] {
+  --desk-a: #d9e1ea;
+  --desk-b: #ebe5df;
+  --sidebar-tint: rgba(234, 234, 239, 0.74);
+  --content: #ffffff;
+  --panel: #f7f7f8;
+  --window-bg: #ececee;
+  --group: #ffffff;
+  --elevated: #ffffff;
+  --toolbar-capsule: rgba(255, 255, 255, 0.86);
+  --scrim: rgba(0, 0, 0, 0.18);
+  --text-1: rgba(0, 0, 0, 0.85);
+  --text-2: rgba(0, 0, 0, 0.55);
+  --text-3: rgba(0, 0, 0, 0.32);
+  --placeholder: rgba(0, 0, 0, 0.30);
+  --sep: rgba(0, 0, 0, 0.09);
+  --sep-strong: rgba(0, 0, 0, 0.14);
+  --fill-hover: rgba(0, 0, 0, 0.035);
+  --fill-selected: rgba(0, 0, 0, 0.065);
+  --fill-pressed: rgba(0, 0, 0, 0.10);
+  --fill-field: rgba(0, 0, 0, 0.045);
+  --sidebar-selected: rgba(0, 0, 0, 0.075);
+  --control: #ffffff;
+  --control-border: rgba(0, 0, 0, 0.13);
+  --accent: #007aff;
+  --accent-hover: #0a6fe6;
+  --accent-pressed: #0062cc;
+  --accent-text: #0066d6;
+  --accent-soft: rgba(0, 122, 255, 0.11);
+  --on-accent: #ffffff;
+  --focus-ring: rgba(0, 122, 255, 0.42);
+  --selection: rgba(0, 122, 255, 0.20);
+  --mention-bg: rgba(0, 122, 255, 0.10);
+  --mention-me-bg: rgba(255, 149, 0, 0.18);
+  --mention-me-text: #a35400;
+  --st-progress-bg: rgba(0, 122, 255, 0.10);
+  --st-progress: #0062cc;
+  --st-you-bg: rgba(255, 149, 0, 0.17);
+  --st-you: #9c5100;
+  --st-other-bg: rgba(0, 0, 0, 0.05);
+  --st-other: rgba(0, 0, 0, 0.58);
+  --st-wait-dot: #ff9500;
+  --st-blocked-bg: rgba(255, 59, 48, 0.11);
+  --st-blocked: #c4001a;
+  --st-done-bg: rgba(52, 199, 89, 0.14);
+  --st-done: #1c7a35;
+  --badge-bg: rgba(0, 0, 0, 0.065);
+  --badge-text: rgba(0, 0, 0, 0.55);
+  --badge-mention-bg: #007aff;
+  --online: #34c759;
+  --bot-mark: #7c7c82;
+  --code-bg: #f5f5f7;
+  --code-text: rgba(0, 0, 0, 0.85);
+  --code-keyword: #9b2393;
+  --code-string: #c41a16;
+  --code-type: #0b4f79;
+  --code-fn: #326d74;
+  --code-comment: #5d6c79;
+  --code-number: #1c00cf;
+  --quote-bar: rgba(0, 0, 0, 0.16);
+  --card-border: rgba(0, 0, 0, 0.10);
+  --image-border: rgba(0, 0, 0, 0.07);
+  --danger: #ff3b30;
+  --danger-text: #d70015;
+  --success: #34c759;
+  --warning: #ff9500;
+  --new-divider: #ff3b30;
+  --shadow-popover: 0 0 0 0.5px rgba(0,0,0,0.12), 0 4px 12px rgba(0,0,0,0.08), 0 14px 36px rgba(0,0,0,0.12);
+  --shadow-dialog: 0 0 0 0.5px rgba(0,0,0,0.14), 0 6px 16px rgba(0,0,0,0.10), 0 24px 64px rgba(0,0,0,0.20);
+  --shadow-window: 0 0 0 0.5px rgba(0,0,0,0.20), 0 10px 30px rgba(0,0,0,0.18), 0 32px 80px rgba(0,0,0,0.22);
+  --shadow-capsule: 0 0 0 0.5px rgba(0,0,0,0.08), 0 1px 3px rgba(0,0,0,0.06);
+  --shadow-control: 0 0 0 0.5px rgba(0,0,0,0.12), 0 1px 1.5px rgba(0,0,0,0.06);
+  color-scheme: light;
+}
+:root[data-theme="dark"] {
+  --desk-a: #1b2129;
+  --desk-b: #2a2420;
+  --sidebar-tint: rgba(36, 36, 40, 0.76);
+  --content: #1e1e20;
+  --panel: #232326;
+  --window-bg: #1e1e20;
+  --group: #2a2a2d;
+  --elevated: #2c2c2f;
+  --toolbar-capsule: rgba(58, 58, 62, 0.86);
+  --scrim: rgba(0, 0, 0, 0.38);
+  --text-1: rgba(255, 255, 255, 0.86);
+  --text-2: rgba(235, 235, 245, 0.58);
+  --text-3: rgba(235, 235, 245, 0.32);
+  --placeholder: rgba(235, 235, 245, 0.30);
+  --sep: rgba(255, 255, 255, 0.085);
+  --sep-strong: rgba(255, 255, 255, 0.13);
+  --fill-hover: rgba(255, 255, 255, 0.045);
+  --fill-selected: rgba(255, 255, 255, 0.085);
+  --fill-pressed: rgba(255, 255, 255, 0.13);
+  --fill-field: rgba(255, 255, 255, 0.07);
+  --sidebar-selected: rgba(255, 255, 255, 0.10);
+  --control: rgba(255, 255, 255, 0.10);
+  --control-border: rgba(255, 255, 255, 0.10);
+  --accent: #0a84ff;
+  --accent-hover: #2b93ff;
+  --accent-pressed: #0070e0;
+  --accent-text: #4da3ff;
+  --accent-soft: rgba(10, 132, 255, 0.22);
+  --on-accent: #ffffff;
+  --focus-ring: rgba(10, 132, 255, 0.55);
+  --selection: rgba(10, 132, 255, 0.36);
+  --mention-bg: rgba(10, 132, 255, 0.20);
+  --mention-me-bg: rgba(255, 159, 10, 0.24);
+  --mention-me-text: #ffbd5c;
+  --st-progress-bg: rgba(10, 132, 255, 0.20);
+  --st-progress: #6cb4ff;
+  --st-you-bg: rgba(255, 159, 10, 0.22);
+  --st-you: #ffb547;
+  --st-other-bg: rgba(255, 255, 255, 0.07);
+  --st-other: rgba(235, 235, 245, 0.62);
+  --st-wait-dot: #ff9f0a;
+  --st-blocked-bg: rgba(255, 69, 58, 0.20);
+  --st-blocked: #ff7a70;
+  --st-done-bg: rgba(48, 209, 88, 0.17);
+  --st-done: #5fd37a;
+  --badge-bg: rgba(255, 255, 255, 0.10);
+  --badge-text: rgba(235, 235, 245, 0.62);
+  --badge-mention-bg: #0a84ff;
+  --online: #30d158;
+  --bot-mark: #8e8e94;
+  --code-bg: #28282b;
+  --code-text: rgba(255, 255, 255, 0.86);
+  --code-keyword: #ff7ab2;
+  --code-string: #ff8170;
+  --code-type: #6bdfff;
+  --code-fn: #67b7a4;
+  --code-comment: #7f8c98;
+  --code-number: #d9c97c;
+  --quote-bar: rgba(255, 255, 255, 0.20);
+  --card-border: rgba(255, 255, 255, 0.10);
+  --image-border: rgba(255, 255, 255, 0.08);
+  --danger: #ff453a;
+  --danger-text: #ff6961;
+  --success: #30d158;
+  --warning: #ff9f0a;
+  --new-divider: #ff453a;
+  --shadow-popover: 0 0 0 0.5px rgba(255,255,255,0.10), 0 4px 12px rgba(0,0,0,0.30), 0 14px 36px rgba(0,0,0,0.45);
+  --shadow-dialog: 0 0 0 0.5px rgba(255,255,255,0.12), 0 6px 16px rgba(0,0,0,0.35), 0 24px 64px rgba(0,0,0,0.55);
+  --shadow-window: 0 0 0 0.5px rgba(255,255,255,0.12), 0 0 0 1px rgba(0,0,0,0.6), 0 10px 30px rgba(0,0,0,0.4), 0 32px 80px rgba(0,0,0,0.5);
+  --shadow-capsule: 0 0 0 0.5px rgba(255,255,255,0.08), 0 1px 3px rgba(0,0,0,0.30);
+  --shadow-control: 0 0 0 0.5px rgba(255,255,255,0.08), 0 1px 1.5px rgba(0,0,0,0.25);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { overflow: hidden; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  font-size: 13px; line-height: 18px; color: var(--text-1);
+  background: var(--content);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "kern";
+  font-kerning: normal;
+}
+.num, time, .badge, .count, .kbd { font-variant-numeric: tabular-nums; }
+.mono, code, pre { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.i { flex-shrink: 0; display: block; }
+.row { display: flex; align-items: center; }
+.col { display: flex; flex-direction: column; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.ell { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.t2 { color: var(--text-2); }
+.t3 { color: var(--text-3); }
+
+/* Desktop backdrop (stands in for the wallpaper the window blurs) */
+.desk {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(1200px 700px at 15% 10%, var(--desk-a), transparent 70%),
+    radial-gradient(1000px 800px at 85% 90%, var(--desk-b), transparent 70%),
+    linear-gradient(160deg, var(--desk-a), var(--desk-b));
+}
+
+/* Avatars */
+.avatar {
+  position: relative; flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 500; letter-spacing: 0; line-height: 1; user-select: none;
+}
+.botmark {
+  position: absolute; right: calc(var(--s) * -0.22); bottom: calc(var(--s) * -0.22);
+  width: var(--s); height: var(--s); border-radius: 50%;
+  background: var(--bot-mark); color: #fff; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 1.5px var(--ring);
+}
+.presence {
+  position: absolute; right: -1px; bottom: -1px; width: var(--s); height: var(--s); border-radius: 50%;
+  background: var(--online); box-shadow: 0 0 0 1.5px var(--ring);
+}
+.gtile {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; border-radius: 5.5px;
+  font-weight: 600; line-height: 1;
+}
+
+/* Chips and badges */
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 18px; padding: 0 6px; border-radius: 5px;
+  font-size: 11px; line-height: 14px; font-weight: 500; white-space: nowrap; flex-shrink: 0; max-width: 168px;
+}
+.chip .chip-t { display: inline-flex; min-width: 0; overflow: hidden; }
+.chip .chip-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; max-width: 104px; }
+.chip.st-progress { background: var(--st-progress-bg); color: var(--st-progress); }
+.chip.st-you { background: var(--st-you-bg); color: var(--st-you); font-weight: 600; }
+.chip.st-other { background: var(--st-other-bg); color: var(--st-other); }
+.chip.st-blocked { background: var(--st-blocked-bg); color: var(--st-blocked); }
+.chip.st-done { background: var(--st-done-bg); color: var(--st-done); }
+.wdot { width: 6px; height: 6px; border-radius: 50%; background: var(--st-wait-dot); flex-shrink: 0; }
+.badge {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 6px;
+  border-radius: 9px; background: var(--badge-bg); color: var(--badge-text); font-size: 11px; font-weight: 500; flex-shrink: 0;
+}
+.badge.mention { background: var(--badge-mention-bg); color: var(--on-accent); font-weight: 600; }
+.udot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex-shrink: 0; }
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 4px;
+  border-radius: 4px; font-size: 11px; color: var(--text-2); background: var(--fill-field);
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+/* Window chrome */
+.traffic { display: flex; gap: 8px; }
+.tl { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12); }
+.tl.r { background: #ff5f57; } .tl.y { background: #febc2e; } .tl.g { background: #28c840; }
+:root[data-theme="dark"] .tl { box-shadow: inset 0 0 0 0.5px rgba(255,255,255,0.10); }
+.window-inactive .tl { background: var(--fill-pressed); }
+
+/* Buttons (gpui-component Button, restyled) */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px;
+  border-radius: 7px; font-size: 13px; font-weight: 500; white-space: nowrap; border: 0; cursor: default;
+  font-family: inherit; color: var(--text-1); background: var(--control); box-shadow: var(--shadow-control);
+}
+.btn.primary { background: var(--accent); color: var(--on-accent); box-shadow: 0 0 0 0.5px rgba(0,0,0,0.08), 0 1px 1.5px rgba(0,0,0,0.10); }
+.btn.ghost { background: transparent; box-shadow: none; color: var(--text-2); padding: 0 6px; }
+.btn.sm { height: 24px; padding: 0 10px; font-size: 12px; border-radius: 6px; }
+.btn.lg { height: 34px; padding: 0 16px; font-size: 14px; border-radius: 9px; }
+.iconbtn {
+  width: 28px; height: 28px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-2); flex-shrink: 0;
+}
+.capsule {
+  display: inline-flex; align-items: center; height: 32px; padding: 0 2px; border-radius: 16px;
+  background: var(--toolbar-capsule); box-shadow: var(--shadow-capsule);
+}
+.capsule .iconbtn { width: 32px; height: 28px; border-radius: 14px; }
+
+/* Fields */
+.field {
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border-radius: 7px;
+  background: var(--fill-field); color: var(--text-3); font-size: 13px;
+}
+.input {
+  display: flex; align-items: center; height: 32px; padding: 0 10px; border-radius: 8px; background: var(--control);
+  box-shadow: var(--shadow-control); font-size: 13px; color: var(--text-1);
+}
+.input.focus { box-shadow: 0 0 0 0.5px var(--accent), 0 0 0 3.5px var(--focus-ring); }
+.caret { display: inline-block; width: 1.5px; height: 17px; background: var(--accent); vertical-align: -3px; margin-left: 1px; }
+
+/* Popovers and menus */
+.popover {
+  position: absolute; background: var(--elevated); border-radius: 10px; box-shadow: var(--shadow-popover);
+  padding: 5px;
+}
+.menu-head { font-size: 11px; font-weight: 600; color: var(--text-3); padding: 6px 8px 4px; }
+.menu-item { display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 8px; border-radius: 6px; }
+.menu-item.active { background: var(--accent); color: var(--on-accent); }
+.menu-item.active .t2, .menu-item.active .t3 { color: rgba(255,255,255,0.78); }
+.menu-item.active .kbd { background: rgba(255,255,255,0.2); color: #fff; }
+
+/* Segmented control (gpui-component TabBar segmented) */
+.seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--fill-field); gap: 0; }
+.seg > span { height: 22px; padding: 0 10px; display: inline-flex; align-items: center; gap: 4px; border-radius: 6px; font-size: 12px; color: var(--text-2); font-weight: 500; }
+.seg > span.on { background: var(--control); color: var(--text-1); box-shadow: var(--shadow-control); }
+:root[data-theme="dark"] .seg > span.on { background: rgba(255,255,255,0.16); }
+
+
+.win { position: absolute; inset: 0; display: flex; overflow: hidden; }
+
+/* Sidebar: window-level vibrancy (NSVisualEffectView behind the whole window) + a tint */
+.sidebar { width: 236px; flex-shrink: 0; position: relative; display: flex; flex-direction: column; background: var(--sidebar-tint); }
+.sb-top { height: 52px; display: flex; align-items: center; padding: 0 12px 0 20px; flex-shrink: 0; }
+.sb-top .iconbtn { margin-left: auto; }
+.sb-search { margin: 0 10px 10px; }
+.sb-search .kbd { margin-left: auto; background: transparent; color: var(--text-3); padding: 0; }
+.sb-scroll { flex: 1; overflow: hidden; padding: 0 10px; }
+.sb-row { display: flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 7px; color: var(--text-1); }
+.sb-row .label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sb-row.unread .label { font-weight: 600; }
+.sb-row.sel { background: var(--sidebar-selected); }
+.sb-row.muted .label { color: var(--text-2); }
+.sb-row .sicon { width: 20px; display: flex; justify-content: center; color: var(--accent); }
+.sb-head { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--text-3); padding: 16px 8px 6px; display: flex; align-items: center; }
+.sb-head .iconbtn { width: 20px; height: 20px; margin-left: auto; color: var(--text-3); }
+.sb-foot { height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 18px; flex-shrink: 0; }
+.sb-foot .who { line-height: 16px; }
+.sb-foot .who b { font-weight: 500; display: block; }
+.sb-foot .who span { font-size: 11px; color: var(--text-2); }
+.conn { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); }
+
+/* Columns */
+.list { width: 300px; flex-shrink: 0; background: var(--content); display: flex; flex-direction: column; box-shadow: inset 0.5px 0 0 var(--sep); }
+.view { flex: 1; min-width: 0; background: var(--content); display: flex; flex-direction: column; box-shadow: inset 0.5px 0 0 var(--sep); position: relative; }
+.panel { width: 280px; flex-shrink: 0; background: var(--panel); display: flex; flex-direction: column; box-shadow: inset 0.5px 0 0 var(--sep); }
+.toolbar { height: 52px; flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 0 12px 0 16px; position: relative; z-index: 2; }
+.toolbar .title { font-size: 15px; line-height: 20px; font-weight: 600; }
+.toolbar .sub { font-size: 11px; line-height: 14px; color: var(--text-2); }
+.edge { position: absolute; left: 0; right: 0; top: 52px; height: 14px; background: linear-gradient(var(--content), transparent); z-index: 1; pointer-events: none; }
+
+/* Topic list */
+.list-filter { padding: 0 12px 8px; display: flex; align-items: center; gap: 8px; }
+.list-filter .seg { flex: 1; } .list-filter .seg > span { flex: 1; justify-content: center; }
+.topics { flex: 1; overflow: hidden; padding: 0 8px; }
+.topic { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 9px 10px 10px 20px; border-radius: 8px; }
+.topic + .topic::before { content: ""; position: absolute; left: 20px; right: 10px; top: 0; height: 0.5px; background: var(--sep); }
+.topic.sel::before, .topic.sel + .topic::before { display: none; }
+.topic.sel { background: var(--fill-selected); }
+.topic .l1 { display: flex; align-items: baseline; gap: 8px; }
+.topic .ttl { flex: 1; min-width: 0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topic.unread .ttl { font-weight: 600; }
+.topic time { font-size: 12px; color: var(--text-2); flex-shrink: 0; }
+.topic .l2 { display: flex; align-items: center; gap: 6px; font-size: 12px; line-height: 16px; color: var(--text-2); }
+.topic .l2 .pv { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.topic .udot { position: absolute; left: 6px; top: 14px; }
+
+/* Topic view */
+.view .head { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.view .head .row { gap: 8px; min-width: 0; }
+.stack { display: flex; }
+.stack .avatar { box-shadow: 0 0 0 1.5px var(--content); }
+.stack .avatar + .avatar { margin-left: -6px; }
+.timeline { flex: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 4px; }
+.timeline.up { justify-content: flex-start; padding-top: 8px; }
+.tstart { display: flex; gap: 12px; align-items: center; padding: 10px 24px 14px 20px; margin-bottom: 4px; }
+.tstart .tsi { width: 32px; height: 32px; border-radius: 50%; background: var(--fill-field); color: var(--text-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.tstart b { font-size: 15px; line-height: 20px; font-weight: 600; }
+.tstart .t2 { font-size: 12px; }
+.jump { position: absolute; left: 50%; transform: translateX(-50%); bottom: 150px; height: 30px; padding: 0 12px; border-radius: 15px; background: var(--elevated); box-shadow: var(--shadow-popover); display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; z-index: 3; }
+.day { align-self: center; font-size: 11px; font-weight: 500; color: var(--text-3); margin: 8px 0 4px; }
+.msg { display: flex; gap: 12px; padding: 4px 24px 4px 20px; position: relative; }
+.msg + .msg:not(.cont) { margin-top: 12px; }
+.msg.cont { padding-top: 2px; }
+.msg .gut { width: 32px; flex-shrink: 0; }
+.msg .meta { display: flex; align-items: baseline; gap: 6px; margin-bottom: 2px; min-width: 0; }
+.msg .meta b { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 1; }
+.msg .meta .role { font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; flex-shrink: 2; }
+.msg .meta time { font-size: 11px; color: var(--text-3); flex-shrink: 0; }
+.body { font-size: 14px; line-height: 22px; max-width: 620px; overflow-wrap: anywhere; }
+.body p + p, .body p + ol, .body ol + p { margin-top: 6px; }
+.body ol { padding-left: 20px; }
+.body .blk { margin-top: 8px; }
+.mention { color: var(--accent-text); background: var(--mention-bg); border-radius: 4px; padding: 0 2px; font-weight: 500; }
+.mention.me { color: var(--mention-me-text); background: var(--mention-me-bg); }
+.msg.hover { background: var(--fill-hover); }
+.actions { position: absolute; right: 24px; top: -14px; height: 30px; padding: 0 2px; border-radius: 8px; background: var(--elevated); box-shadow: var(--shadow-popover); display: flex; align-items: center; }
+.actions .iconbtn { width: 28px; height: 26px; border-radius: 6px; }
+.ack { display: flex; align-items: center; gap: 12px; padding: 2px 24px 2px 20px; margin-top: 6px; font-size: 12.5px; color: var(--text-2); }
+.ack .gut { display: flex; justify-content: center; }
+.ack b { font-weight: 500; color: var(--text-1); }
+.ack time { font-size: 11px; color: var(--text-3); margin-left: 2px; }
+.quote { border-left: 2px solid var(--quote-bar); padding: 0 0 0 10px; margin: 2px 0 6px; font-size: 13px; line-height: 19px; color: var(--text-2); }
+.quote b { font-weight: 600; font-size: 12px; }
+.code { border-radius: 8px; background: var(--code-bg); overflow: hidden; max-width: 560px; }
+.code .ch { display: flex; align-items: center; height: 28px; padding: 0 6px 0 12px; font-size: 11px; color: var(--text-3); }
+.code .ch .iconbtn { margin-left: auto; width: 24px; height: 22px; color: var(--text-3); }
+.code { position: relative; }
+.code.wide::after { content: ""; position: absolute; right: 0; top: 28px; bottom: 0; width: 40px; background: linear-gradient(90deg, transparent, var(--code-bg)); }
+.composer.idle { box-shadow: 0 0 0 0.5px var(--control-border), 0 1px 2px rgba(0,0,0,0.04); }
+.code pre { font-size: 12.5px; line-height: 19px; padding: 0 12px 10px; color: var(--code-text); white-space: pre; overflow: hidden; }
+.k { color: var(--code-keyword); } .s { color: var(--code-string); } .ty { color: var(--code-type); } .fn { color: var(--code-fn); } .cm { color: var(--code-comment); } .n { color: var(--code-number); }
+.img { border-radius: 8px; overflow: hidden; box-shadow: 0 0 0 0.5px var(--image-border); display: block; }
+.card { border-radius: 10px; box-shadow: 0 0 0 0.5px var(--card-border); background: var(--content); max-width: 460px; }
+.art { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.art .tile { width: 40px; height: 40px; border-radius: 8px; background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.art b { font-weight: 600; display: block; }
+.art .m { font-size: 12px; line-height: 16px; color: var(--text-2); }
+.sc { padding: 12px 14px 12px; }
+.sc .sh { display: flex; align-items: center; gap: 8px; }
+.sc .sh b { font-weight: 600; flex: 1; min-width: 0; }
+.sc dl { display: grid; grid-template-columns: 64px 1fr 64px 1fr; gap: 6px 10px; margin: 10px 0 12px; font-size: 13px; }
+.sc dt { color: var(--text-2); }
+.sc dd { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sc .acts { display: flex; gap: 8px; }
+.ok { color: var(--success); display: inline-flex; vertical-align: -2px; margin-right: 3px; }
+.divider { display: flex; align-items: center; gap: 8px; margin: 14px 24px 2px 20px; color: var(--new-divider); font-size: 11px; font-weight: 600; }
+.divider::before { content: ""; flex: 1; height: 0.5px; background: var(--new-divider); opacity: 0.7; }
+.stream-caret { display: inline-block; width: 2px; height: 16px; background: var(--accent); vertical-align: -3px; margin-left: 2px; border-radius: 1px; }
+.streaming { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: 12px; color: var(--text-3); }
+.shimmer { background: linear-gradient(90deg, var(--text-3) 0%, var(--text-3) 35%, var(--text-1) 50%, var(--text-3) 65%, var(--text-3) 100%); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.typing { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 20px 0 24px; font-size: 12px; color: var(--text-2); flex-shrink: 0; }
+.dots { display: inline-flex; gap: 3px; } .dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); }
+.dots i:nth-child(2) { opacity: .7; } .dots i:nth-child(3) { opacity: .4; }
+.composer-wrap { padding: 0 20px 16px; flex-shrink: 0; position: relative; }
+.composer { border-radius: 12px; background: var(--content); box-shadow: 0 0 0 1px var(--focus-ring), 0 1px 2px rgba(0,0,0,0.04); padding: 10px 12px 8px; }
+:root[data-theme="dark"] .composer { background: rgba(255,255,255,0.04); }
+.composer .txt { font-size: 14px; line-height: 22px; min-height: 22px; }
+.composer .ph { color: var(--placeholder); }
+.composer .bar { display: flex; align-items: center; gap: 2px; margin-top: 6px; }
+.composer .bar .iconbtn { width: 28px; height: 28px; color: var(--text-2); }
+.composer .hint { margin-left: auto; margin-right: 8px; font-size: 11px; color: var(--text-3); }
+.send { width: 28px; height: 28px; border-radius: 50%; background: var(--accent); color: var(--on-accent); display: flex; align-items: center; justify-content: center; }
+.send.off { background: var(--fill-pressed); color: var(--text-3); }
+.mention-pop { width: 280px; bottom: 112px; } .mention-pop .menu-item { height: 32px; } .hlm { text-decoration: none; font-weight: 700; }
+.offline-bar { margin: 0 20px 8px; height: 30px; border-radius: 8px; background: var(--fill-field); display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 12px; color: var(--text-2); }
+
+/* Side panel */
+.panel .toolbar { justify-content: center; padding: 0 12px; }
+.panel .seg { width: 100%; } .panel .seg > span { flex: 1; justify-content: center; }
+.psec { padding: 4px 12px 0; }
+.psec h4 { font-size: 11px; line-height: 14px; font-weight: 600; color: var(--text-3); padding: 12px 6px 6px; }
+.pitem { display: flex; align-items: center; gap: 10px; padding: 7px 6px; border-radius: 7px; }
+.pitem .tile { width: 32px; height: 32px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; background: var(--fill-field); color: var(--text-2); }
+.pitem .tile.html { background: var(--accent-soft); color: var(--accent); }
+.pitem b { font-weight: 500; display: block; }
+.pitem .m { font-size: 11px; line-height: 14px; color: var(--text-2); }
+.decision { margin: 0 6px; padding: 10px 12px; border-radius: 8px; background: var(--content); box-shadow: 0 0 0 0.5px var(--card-border); font-size: 13px; line-height: 19px; }
+.decision .m { font-size: 11px; color: var(--text-2); margin-top: 4px; }
+.kv { display: grid; grid-template-columns: 56px 1fr; gap: 8px 8px; padding: 0 6px; font-size: 13px; align-items: center; }
+.kv dt { color: var(--text-2); font-size: 12px; }
+.kv dd { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.steps { padding: 0 6px; }
+.step { display: flex; gap: 10px; position: relative; padding-bottom: 14px; }
+.step .ic { width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px; color: var(--success); position: relative; z-index: 1; background: var(--panel); }
+.step.run .ic { color: var(--accent); } .step.wait .ic { color: var(--text-3); }
+.step:not(:last-child)::after { content: ""; position: absolute; left: 7.5px; top: 20px; bottom: 2px; width: 1px; background: var(--sep-strong); }
+.step b { font-weight: 500; display: block; font-size: 13px; }
+.step .m { font-size: 11px; line-height: 14px; color: var(--text-2); }
+.bar-track { height: 4px; border-radius: 2px; background: var(--fill-pressed); margin-top: 6px; overflow: hidden; width: 180px; }
+.bar-fill { height: 100%; border-radius: 2px; background: var(--accent); }
+.runbox { margin: 4px 6px 0; padding: 10px 12px; border-radius: 8px; background: var(--fill-field); font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 8px; }
+
+</style>
+</head>
+<body style="width:1440px;height:900px">
+<div class="desk"></div>
+<div class="win">
+<aside class="sidebar">
+  <div class="sb-top"><div class="traffic"><span class="tl r"></span><span class="tl y"></span><span class="tl g"></span></div><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M9 3v18" /></svg></span></div>
+  <div class="field sb-search"><svg class="i " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21 21-4.34-4.34" /> <circle cx="11" cy="11" r="8" /></svg><span>搜索</span><span class="kbd">⌘K</span></div>
+  <div class="sb-scroll">
+    <div class="sb-row unread"><span class="sicon"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12" /> <path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z" /></svg></span><span class="label">待办</span><span class="badge mention">99+</span></div>
+    <div class="sb-head">群<span class="iconbtn"><svg class="i " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14" /> <path d="M12 5v14" /></svg></span></div>
+    <div class="sb-row sel"><span class="gtile" style="width:20px;height:20px;background:#dce9f6;color:#2e5c87;font-size:11px">2</span><span class="label">2026 Q4 移动端与桌面端统一登录及账号体系重构专项小组</span></div><div class="sb-row unread"><span class="avatar" style="width:20px;height:20px;border-radius:10px;background:#f3e2e4;color:#874450;font-size:8px">AW<span class="presence" style="--s:8px;--ring:#e7e7ec"></span></span><span class="label">Aleksandra Wiśniewska-Kowalczyk</span><span class="badge">999+</span></div><div class="sb-row unread"><span class="avatar" style="width:20px;height:20px;border-radius:10px;background:#f0e7d8;color:#76572a;font-size:8px">J<span class="presence" style="--s:8px;--ring:#e7e7ec"></span></span><span class="label">J</span><span class="badge mention">@99+</span></div><div class="sb-row unread"><span class="avatar" style="width:20px;height:20px;border-radius:10px;background:#efe1d9;color:#864d36;font-size:9px">王</span><span class="label">王</span><span class="badge">1</span></div><div class="sb-row unread"><span class="avatar" style="width:20px;height:20px;border-radius:6px;background:#e0ece2;color:#3b6646;font-size:9px">超<span class="botmark" style="--s:11px;--ring:#e7e7ec"><svg class="i " width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" /></svg></span><span class="presence" style="--s:8px;--ring:#e7e7ec"></span></span><span class="label">超长名字的自动部署与回滚监控值守助手</span><span class="badge">99</span></div><div class="sb-row"><span class="avatar" style="width:20px;height:20px;border-radius:10px;background:#daeded;color:#2c6868;font-size:8px">F</span><span class="label">🦊 Fox 狐狸</span></div><div class="sb-row unread"><span class="gtile" style="width:20px;height:20px;background:#e3e8ef;color:#46566c;font-size:11px">B</span><span class="label">Benachrichtigungseinstellungen</span><span class="badge mention">@7</span></div><div class="sb-row unread"><span class="gtile" style="width:20px;height:20px;background:#e3e8ef;color:#46566c;font-size:11px">全</span><span class="label">全员</span><span class="badge">999+</span></div><div class="sb-row muted"><span class="gtile" style="width:20px;height:20px;background:#daeded;color:#2c6868;font-size:11px">运</span><span class="label">运维</span><span class="t3"><svg class="i " width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.268 21a2 2 0 0 0 3.464 0" /> <path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742" /> <path d="m2 2 20 20" /> <path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05" /></svg></span></div><div class="sb-row"><span class="avatar" style="width:20px;height:20px;border-radius:10px;background:#dce9f6;color:#2e5c87;font-size:8px">نا</span><span class="label">نور الهدى عبد الرحمن</span></div>
+  </div>
+  <div class="sb-foot"><div class="conn grow"><svg class="i " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h.01" /> <path d="M8.5 16.429a5 5 0 0 1 7 0" /> <path d="M5 12.859a10 10 0 0 1 5.17-2.69" /> <path d="M19 12.859a10 10 0 0 0-2.007-1.523" /> <path d="M2 8.82a15 15 0 0 1 4.177-2.643" /> <path d="M22 8.82a15 15 0 0 0-11.288-3.764" /> <path d="m2 2 20 20" /></svg><span class="ell">离线，正在重新连接…</span></div><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" /> <circle cx="12" cy="12" r="3" /></svg></span></div>
+</aside>
+<section class="list">
+  <div class="toolbar"><div class="col grow" style="min-width:0"><span class="title ell">2026 Q4 移动端与桌面端统一登录及账号体系重构专项小组</span><span class="sub ell">1,284 位成员 · 10,000 个话题</span></div><span class="iconbtn" title="新话题"><svg class="i " width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /> <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" /></svg></span></div>
+  <div class="list-filter"><div class="seg"><span class="on">全部</span><span>未读</span><span>待办</span></div></div>
+  <div class="topics"><div class="topic sel">
+  
+  <div class="l1"><span class="ttl">fix/ios-push-cert-renewal-and-apns-p8-key-rotation-for-production-environment</span><time>14:32</time></div>
+  <div class="l2"><span class="chip st-other" title="等Aleksandra Wiśniewska-Kowalczyk审"><span class="wdot"></span><span class="chip-t">等<span class="chip-name">Aleksandra Wiśniewska-Kowalczyk</span>审</span></span><span class="pv">Aleksandra Wiśniewska-Kowalczyk：https://example.com/workspaces/acme/projects/q3-launch/docs/9f8e7d6c5b4a?tab=comments</span><span class="badge">999+</span></div>
+</div><div class="topic unread">
+  <span class="udot"></span>
+  <div class="l1"><span class="ttl">J</span><time>14:31</time></div>
+  <div class="l2"><span class="chip st-you" title="等你回答"><span class="chip-t">等你回答</span></span><span class="pv">J：?</span><span class="badge mention">@99+</span></div>
+</div><div class="topic unread">
+  <span class="udot"></span>
+  <div class="l1"><span class="ttl">（无标题）</span><time>14:30</time></div>
+  <div class="l2"><span class="chip st-progress" title="进行中"><span class="chip-t">进行中</span></span><span class="pv">超长名字的自动部署与回滚监控值守助手：已接手</span><span class="badge">99</span></div>
+</div><div class="topic">
+  
+  <div class="l1"><span class="ttl">把 2,000 字的需求说明贴进来之后标题会怎样显示，标题默认取第一行消息的全部内容</span><time>11月2日</time></div>
+  <div class="l2"><span class="chip st-blocked" title="卡住了"><span class="chip-t">卡住了</span></span><span class="pv">王：👍👍👍</span><span class="badge">1</span></div>
+</div><div class="topic">
+  
+  <div class="l1"><span class="ttl">Paramètres de confidentialité et de sécurité 隐私与安全设置翻译</span><time>2025年12月31日</time></div>
+  <div class="l2"><span class="chip st-done" title="完成"><span class="chip-t">完成</span></span><span class="pv">🦊 Fox 狐狸：&lt;script>alert(1)&lt;/script> 原样显示了</span></div>
+</div><div class="topic">
+  
+  <div class="l1"><span class="ttl">等回答</span><time>10月3日</time></div>
+  <div class="l2"><span class="chip st-other" title="等回答"><span class="wdot"></span><span class="chip-t">等回答</span></span><span class="pv">（这个话题还没有消息）</span></div>
+</div></div>
+</section>
+<main class="view">
+  <div class="toolbar">
+    <div class="head"><div class="row"><span class="title ell">fix/ios-push-cert-renewal-and-apns-p8-key-rotation-for-production-environment</span><span class="chip st-other" title="等Aleksandra Wiśniewska-Kowalczyk审"><span class="wdot"></span><span class="chip-t">等<span class="chip-name">Aleksandra Wiśniewska-Kowalczyk</span>审</span></span></div><span class="sub ell">Aleksandra Wiśniewska-Kowalczyk 发起 · 超长名字的自动部署与回滚监控值守助手 负责 · 1,284 位成员</span></div>
+    <div class="stack"><span class="avatar" style="width:22px;height:22px;border-radius:11px;background:#f3e2e4;color:#874450;font-size:8px">AW</span><span class="avatar" style="width:22px;height:22px;border-radius:11px;background:#f0e7d8;color:#76572a;font-size:8px">J</span><span class="avatar" style="width:22px;height:22px;border-radius:6px;background:#e0ece2;color:#3b6646;font-size:10px">超<span class="botmark" style="--s:11px;--ring:var(--content)"><svg class="i " width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" /></svg></span></span></div>
+    <span class="capsule"><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.268 21a2 2 0 0 0 3.464 0" /> <path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326" /></svg></span><span class="iconbtn" style="color:var(--accent)"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" /> <path d="M15 3v18" /></svg></span><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="1" /> <circle cx="19" cy="12" r="1" /> <circle cx="5" cy="12" r="1" /></svg></span></span>
+  </div>
+  <div class="edge"></div>
+  <div class="timeline"><div class="msg"><span class="gut"><span class="avatar" style="width:32px;height:32px;border-radius:16px;background:#e6e6e9;color:#55555c;font-size:12px">CI</span></span><div class="grow"><div class="meta"><b>Christopher Alexander Montgomery III</b><span class="role">高级产品设计工程师（平台基础设施与开发者体验）</span><time>14:20</time></div><div class="body"><p><span class="mention ">@Aleksandra Wiśniewska-Kowalczyk</span> 证书在这里：https://example.com/workspaces/acme/projects/q3-launch/docs/9f8e7d6c5b4a?tab=comments&amp;filter=unresolved 还有 bartholomew.fitzgerald@northwind-industries-holdings.example.com</p></div></div></div>
+<div class="ack"><span class="gut"><span class="avatar" style="width:20px;height:20px;border-radius:6px;background:#e0ece2;color:#3b6646;font-size:9px">超<span class="botmark" style="--s:11px;--ring:var(--content)"><svg class="i " width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" /></svg></span></span></span><span class="ell"><b>超长名字的自动部署与回滚监控值守助手</b> 已接手。这一行很长，在窄窗口里只显示一行并以省略号结束，完整内容在悬停提示里。</span><time>14:21</time></div>
+<div class="msg"><span class="gut"><span class="avatar" style="width:32px;height:32px;border-radius:16px;background:#f0e7d8;color:#76572a;font-size:12px">J<span class="presence" style="--s:10px;--ring:var(--content)"></span></span></span><div class="grow"><div class="meta"><b>J</b><span class="role"></span><time>14:22</time></div><div class="body"><p>?</p></div></div></div>
+<div class="msg"><span class="gut"><span class="avatar" style="width:32px;height:32px;border-radius:16px;background:#efe1d9;color:#864d36;font-size:14px">王</span></span><div class="grow"><div class="meta"><b>王</b><span class="role">iOS</span><time>14:23</time></div><div class="body"><p>👍👍👍</p></div></div></div>
+<div class="msg"><span class="gut"><span class="avatar" style="width:32px;height:32px;border-radius:16px;background:#f3e2e4;color:#874450;font-size:12px">AW<span class="presence" style="--s:10px;--ring:var(--content)"></span></span></span><div class="grow"><div class="meta"><b>Aleksandra Wiśniewska-Kowalczyk</b><span class="role">Senior Product Design Engineer, Platform Infrastructure</span><time>14:25</time></div><div class="body"><div class="code wide"><div class="ch">Shell<span class="iconbtn"><svg class="i " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" /> <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></svg></span></div><pre>openssl pkcs12 -in AuthKey_9F8E7D6C5B.p12 -out apns-production-2026-11-03-renewed.pem -nodes -clcerts -legacy</pre></div>
+<div class="blk card art"><span class="tile"><svg class="i " width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /></svg></span><div class="grow" style="min-width:0"><b class="ell" title="Q3 Board Deck — FINAL (revised) v12 [approved by legal].pdf">Q3 Board Deck — FINAL (revised) v…legal].pdf</b><div class="m ell">文件 · 98.6 MB · 第 12 版</div></div><span class="btn sm">打开</span></div></div></div></div>
+<div class="divider">新消息</div>
+<div class="msg"><span class="gut"><span class="avatar" style="width:32px;height:32px;border-radius:9px;background:#e0ece2;color:#3b6646;font-size:11px">超长<span class="botmark" style="--s:13px;--ring:var(--content)"><svg class="i " width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" /></svg></span></span></span><div class="grow"><div class="meta"><b>超长名字的自动部署与回滚监控值守助手</b><span class="role">构建与发布</span><time>14:31</time></div><div class="body"><div class="card sc"><div class="sh"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" /> <path d="M12 9v4" /> <path d="M12 17h.01" /></svg><b class="ell">生产环境证书将在 0 天后过期，自动续期失败，需要账号持有人在 Apple 后台确认</b><span class="chip st-blocked">卡住了</span></div>
+<dl><dt>证书</dt><dd class="mono" style="font-size:12px" title="9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f">9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f</dd><dt>失败</dt><dd><span class="num">1,284</span> 次</dd><dt>负责</dt><dd>Aleksandra Wiśniewska-Kowalczyk</dd><dt>耗时</dt><dd><span class="num">1,284</span> 小时</dd></dl>
+<div class="acts"><span class="btn primary sm">我来处理</span><span class="btn sm">稍后提醒</span><span class="btn sm">查看日志</span></div></div></div></div></div></div>
+  
+  <div class="offline-bar"><svg class="i " width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h.01" /> <path d="M8.5 16.429a5 5 0 0 1 7 0" /> <path d="M5 12.859a10 10 0 0 1 5.17-2.69" /> <path d="M19 12.859a10 10 0 0 0-2.007-1.523" /> <path d="M2 8.82a15 15 0 0 1 4.177-2.643" /> <path d="M22 8.82a15 15 0 0 0-11.288-3.764" /> <path d="m2 2 20 20" /></svg><span>网络已断开。新消息会在连上后发出。</span></div>
+  <div class="typing"><span class="dots"><i></i><i></i><i></i></span><span class="ell">Aleksandra Wiśniewska-Kowalczyk、J 和另外 1,282 位正在输入…</span></div>
+  <div class="composer-wrap">
+    
+    <div class="composer">
+      <div class="txt"><span style="display:block;max-height:154px;overflow:hidden">粘贴了一段很长的需求说明。输入框最多长到 7 行，再多就在框内滚动，发送按钮和工具栏始终可见。第二段：说明包含很多内容，用来测试换行与行高，以及中英文混排 mixed English text 和数字 1,284 的对齐。第二段：说明包含很多内容，用来测试换行与行高，以及中英文混排 mixed English text 和数字 1,284 的对齐。第二段：说明包含很多内容，用来测试换行与行高，以及中英文混排 mixed English text 和数字 1,284 的对齐。第二段：说明包含很多内容，用来测试换行与行高，以及中英文混排 mixed English text 和数字 1,284 的对齐。</span></div>
+      <div class="bar"><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551" /></svg></span><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /> <circle cx="9" cy="9" r="2" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg></span><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /> <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></svg></span><span class="iconbtn"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 5H3" /> <path d="M21 12H8" /> <path d="M21 19H8" /> <path d="M3 12v7" /></svg></span><span class="hint">↵ 发送　⇧↵ 换行</span><span class="send"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7" /> <path d="M12 19V5" /></svg></span></div>
+    </div>
+  </div>
+</main>
+<aside class="panel">
+  <div class="toolbar"><div class="seg"><span class="on">产出 <span class="num t3">3</span></span><span>过程</span></div></div>
+  <div class="psec"><h4>结论</h4><div class="decision">邀请码输入框移到窗口中部并自动聚焦；粘贴时自动规整格式。<div class="m">林晓 定下 · 今天 14:10</div></div></div>
+  <div class="psec"><h4>产出</h4><div class="pitem"><span class="tile undefined"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /></svg></span><div class="grow" style="min-width:0"><b class="ell">Q3 Board Deck — FINAL (revised) v12 [approved by legal].pdf</b><div class="m ell">文件 · 98.6 MB · 第 12 版 · 2025年12月31日</div></div></div><div class="pitem"><span class="tile undefined"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" /> <circle cx="9" cy="9" r="2" /> <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></svg></span><div class="grow" style="min-width:0"><b class="ell">IMG_20250914_183022_HDR_portrait_edited_edited.HEIC</b><div class="m ell">图片 · 0 B · 上传失败</div></div></div><div class="pitem"><span class="tile html"><svg class="i " width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /> <path d="M14 2v5a1 1 0 0 0 1 1h5" /> <path d="M10 12.5 8 15l2 2.5" /> <path d="m14 12.5 2 2.5-2 2.5" /></svg></span><div class="grow" style="min-width:0"><b class="ell">J</b><div class="m ell">HTML 页面 · 第 1 版</div></div></div></div>
+  <div class="psec"><h4>谁在做什么</h4><dl class="kv">
+    <dt>负责</dt><dd><span class="avatar" style="width:20px;height:20px;border-radius:6px;background:#daeded;color:#2c6868;font-size:9px">设<span class="botmark" style="--s:11px;--ring:var(--panel)"><svg class="i " width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 8V4H8" /> <rect width="16" height="12" x="4" y="8" rx="2" /> <path d="M2 14h2" /> <path d="M20 14h2" /> <path d="M15 13v2" /> <path d="M9 13v2" /></svg></span></span><span class="ell">设计助手</span></dd>
+    <dt>等待</dt><dd><span class="avatar" style="width:20px;height:20px;border-radius:10px;background:#e6e6e9;color:#55555c;font-size:8px">J</span><span class="ell">你审方案 v3</span></dd>
+    <dt>关注</dt><dd><span class="t2 ell">林晓、陈思远 和另外 2 位</span></dd>
+  </dl></div>
+</aside>
+</div>
+
+</body>
+</html>
