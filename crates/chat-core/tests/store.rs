@@ -79,7 +79,7 @@ fn member_characters_are_stored_changed_and_cleared() {
         character: Some(Some(CharacterId::O03)),
         ..member("B1", "Tata")
     };
-    s.apply_directory(Some(&[bot.clone()]), None, None).unwrap();
+    s.apply_directory(Some(std::slice::from_ref(&bot)), None, None).unwrap();
     assert_eq!(
         s.member("B1").unwrap().unwrap().character(),
         Some(CharacterId::O03)

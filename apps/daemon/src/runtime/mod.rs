@@ -257,7 +257,7 @@ pub struct RpcIds {
 }
 
 impl RpcIds {
-    pub fn next(&mut self) -> u64 {
+    pub fn next_id(&mut self) -> u64 {
         self.next += 1;
         self.next
     }

@@ -65,6 +65,7 @@ async fn mock() -> Mock {
             tokio::spawn(async move {
                 let auth = Arc::new(Mutex::new(None));
                 let a2 = auth.clone();
+                #[allow(clippy::result_large_err)] // the callback type is tungstenite's
                 let cb = move |req: &Request, resp: Response| {
                     *a2.lock().unwrap() = req
                         .headers()

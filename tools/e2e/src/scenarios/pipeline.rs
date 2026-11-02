@@ -37,7 +37,10 @@ async fn run(c: &mut Ctx) -> Result<()> {
         .request(json!({ "t": "send", "groupId": g, "clientMsgId": chat_core::new_id(), "body": "pipeline" }))
         .await?;
     check!(root["ok"] == true, "root send refused: {root}");
-    let topic = root["result"]["topic"]["id"].as_str().unwrap_or_default().to_string();
+    let topic = root["result"]["topic"]["id"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
 
     let ids: Vec<String> = (0..N).map(|_| chat_core::new_id()).collect();
     let mut todo: Vec<usize> = (0..N).collect();
@@ -49,7 +52,11 @@ async fn run(c: &mut Ctx) -> Result<()> {
     let mut accepted: HashMap<String, (usize, usize)> = HashMap::new();
     while !todo.is_empty() {
         rounds += 1;
-        check!(rounds <= 10, "{} sends still refused after 10 rounds", todo.len());
+        check!(
+            rounds <= 10,
+            "{} sends still refused after 10 rounds",
+            todo.len()
+        );
         let mut rids = HashMap::new();
         for &i in &todo {
             let rid = ra.rid();
@@ -73,7 +80,10 @@ async fn run(c: &mut Ctx) -> Result<()> {
                 continue;
             }
             let code = ack["error"]["code"].as_str().unwrap_or_default();
-            check!(code == "rate_limited", "pipelined send {i} refused with {code}: {ack}");
+            check!(
+                code == "rate_limited",
+                "pipelined send {i} refused with {code}: {ack}"
+            );
             rate_limited += 1;
             refused.push(i);
         }
@@ -98,7 +108,10 @@ async fn run(c: &mut Ctx) -> Result<()> {
                         .is_some_and(|m| want.contains(m))
             })
             .await?;
-        let m = f["event"]["data"]["message"]["clientMsgId"].as_str().unwrap_or_default().to_string();
+        let m = f["event"]["data"]["message"]["clientMsgId"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
         check!(seen.insert(m.clone()), "B got {m} twice live");
     }
     let (events, _) = rb.fetch_all(&g).await?;
@@ -108,7 +121,10 @@ async fn run(c: &mut Ctx) -> Result<()> {
         .filter(|m| want.contains(m))
         .collect();
     check!(stored.len() == N, "{} of {N} stored", stored.len());
-    let order: Vec<(usize, usize)> = stored.iter().filter_map(|m| accepted.get(*m).copied()).collect();
+    let order: Vec<(usize, usize)> = stored
+        .iter()
+        .filter_map(|m| accepted.get(*m).copied())
+        .collect();
     check!(
         order.windows(2).all(|w| w[0] < w[1]),
         "stored order differs from the send order: {order:?}"

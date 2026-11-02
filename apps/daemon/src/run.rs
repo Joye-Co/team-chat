@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 
 /// What a run sends to the daemon loop. Frames get their `seq` there.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)] // one message per frame on a channel; boxing gains nothing
 pub enum RunMsg {
     Frame(Up),
     Finished,

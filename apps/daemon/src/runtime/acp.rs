@@ -210,7 +210,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut last_stop: String;
     let mut control_open = true;
 
-    let id = ids.next();
+    let id = ids.next_id();
     pending.insert(id, Pending::Initialize);
     let _ = p
         .write_json(&json!({ "jsonrpc": "2.0", "id": id, "method": "initialize", "params": {
@@ -244,7 +244,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         let r = result.cloned().unwrap_or(Value::Null);
                         match kind {
                             Pending::Initialize => {
-                                let id = ids.next();
+                                let id = ids.next_id();
                                 pending.insert(id, Pending::NewSession);
                                 let _ = p.write_json(&json!({ "jsonrpc": "2.0", "id": id, "method": "session/new",
                                     "params": { "cwd": spec.cwd.to_string_lossy(), "mcpServers": [] } })).await;
@@ -362,7 +362,7 @@ async fn send_prompt(
     for ev in norm.start_turn() {
         let _ = emit.send(ev);
     }
-    let id = ids.next();
+    let id = ids.next_id();
     pending.insert(id, Pending::Prompt);
     let _ = p
         .write_json(

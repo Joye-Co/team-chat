@@ -288,7 +288,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut approval_n = 0u32;
     let mut control_open = true;
 
-    let id = ids.next();
+    let id = ids.next_id();
     pending.insert(id, Pending::Initialize);
     let init = json!({ "id": id, "method": "initialize", "params": {
         "clientInfo": { "name": "machine-daemon", "title": null, "version": env!("CARGO_PKG_VERSION") },
@@ -335,7 +335,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         match kind {
                             Pending::Initialize => {
                                 let _ = p.write_json(&json!({ "method": "initialized" })).await;
-                                let id = ids.next();
+                                let id = ids.next_id();
                                 pending.insert(id, Pending::ThreadStart);
                                 let mut params = json!({
                                     "cwd": spec.cwd.to_string_lossy(),
@@ -356,7 +356,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                     model: r["model"].as_str().map(str::to_string),
                                 });
                                 thread_id = Some(tid.clone());
-                                let id = ids.next();
+                                let id = ids.next_id();
                                 pending.insert(id, Pending::TurnStart);
                                 turn_running = true;
                                 let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": {
@@ -404,7 +404,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                             take_late_input(&mut control, &mut queued, &emit);
                             if !queued.is_empty() {
                                 let text = queued.drain(..).collect::<Vec<_>>().join("\n\n");
-                                let id = ids.next();
+                                let id = ids.next_id();
                                 pending.insert(id, Pending::TurnStart);
                                 turn_running = true;
                                 let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": {
@@ -426,7 +426,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         let _ = emit.send(RunEvent::InputAccepted { input_id });
                         match (&thread_id, &active_turn, turn_running) {
                             (Some(tid), Some(turn), true) => {
-                                let id = ids.next();
+                                let id = ids.next_id();
                                 pending.insert(id, Pending::Steer { text: text.clone() });
                                 let _ = p.write_json(&json!({ "id": id, "method": "turn/steer", "params": {
                                     "threadId": tid, "input": text_input(&text), "expectedTurnId": turn } })).await;
@@ -443,7 +443,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                     }
                     Control::Cancel => {
                         if let (Some(tid), Some(turn)) = (&thread_id, &active_turn) {
-                            let id = ids.next();
+                            let id = ids.next_id();
                             pending.insert(id, Pending::Interrupt);
                             let _ = p.write_json(&json!({ "id": id, "method": "turn/interrupt", "params": {
                                 "threadId": tid, "turnId": turn } })).await;

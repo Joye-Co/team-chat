@@ -339,6 +339,7 @@ pub enum Up {
 }
 
 /// Server to daemon.
+#[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t")]
 pub enum Down {
