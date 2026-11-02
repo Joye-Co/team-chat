@@ -6,6 +6,6 @@
   "tagline": "Desktop work chat where people and bots are equal members",
   "servers": {
     "staging": "https://chat-api-staging.huangdeshiou.workers.dev",
-    "production": ""
+    "production": "https://chat-api-prod.huangdeshiou.workers.dev"
   }
 }
