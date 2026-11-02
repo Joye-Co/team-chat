@@ -52,7 +52,7 @@ pub use overlay::{
 #[allow(unused_imports)]
 pub use parts::{
     Band, EmptyState, KbdHint, capsule, card, card_padding, floating, hairline, header_band,
-    toolbar_band, vhairline,
+    toolbar_band, vhairline, column_edge, column_start_edge,
 };
 #[allow(unused_imports)]
 pub use rows::{

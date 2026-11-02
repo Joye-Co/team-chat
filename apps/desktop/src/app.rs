@@ -392,7 +392,7 @@ impl Render for RootView {
                     .flex_none()
                     .child(self.sidebar.clone())
                     .into_any_element(),
-                ui::vhairline(cx).into_any_element(),
+                ui::column_edge(cx).into_any_element(),
                 div()
                     .flex_1()
                     .h_full()
@@ -415,14 +415,14 @@ impl Render for RootView {
                     .flex_none()
                     .child(self.sidebar.clone())
                     .into_any_element(),
-                ui::vhairline(cx).into_any_element(),
+                ui::column_edge(cx).into_any_element(),
                 div()
                     .w(theme::TOPIC_LIST_WIDTH)
                     .h_full()
                     .flex_none()
                     .child(self.topic_list.clone())
                     .into_any_element(),
-                ui::vhairline(cx).into_any_element(),
+                ui::column_edge(cx).into_any_element(),
                 div()
                     .flex_1()
                     .min_w(theme::TOPIC_VIEW_MIN_WIDTH)
@@ -434,13 +434,15 @@ impl Render for RootView {
                     .into_any_element(),
             ])
             .when_some(panel_open.then(|| self.side_panel.clone()), |el, panel| {
-                el.child(ui::vhairline(cx)).child(
+                el.child(
                     div()
+                        .relative()
                         .w(theme::SIDE_PANEL_WIDTH)
                         .h_full()
                         .flex_none()
                         .bg(colors.panel)
-                        .child(panel),
+                        .child(panel)
+                        .child(ui::column_start_edge(cx)),
                 )
             })
     }

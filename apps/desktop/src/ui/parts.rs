@@ -280,6 +280,33 @@ pub fn hairline(cx: &App) -> gpui::Div {
         .bg(theme::colors(cx).sep)
 }
 
+/// The 0.5 pt `sep` edge at the end of a column (§4.4), drawn inside that
+/// column as the mockups' `border-right` is: the element takes no width, so
+/// the next column starts exactly at the column's width.
+pub fn column_edge(cx: &App) -> gpui::Div {
+    div().relative().flex_none().w(px(0.)).h_full().child(
+        div()
+            .absolute()
+            .top_0()
+            .bottom_0()
+            .left(-theme::HAIRLINE)
+            .w(theme::HAIRLINE)
+            .bg(theme::colors(cx).sep),
+    )
+}
+
+/// The 0.5 pt `sep` edge at the start of a column (the side panel's
+/// `border-left`): add it as the last child of a `relative` column.
+pub fn column_start_edge(cx: &App) -> gpui::Div {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .left_0()
+        .w(theme::HAIRLINE)
+        .bg(theme::colors(cx).sep)
+}
+
 /// A vertical hairline in `sep` for column edges.
 pub fn vhairline(cx: &App) -> gpui::Div {
     div()

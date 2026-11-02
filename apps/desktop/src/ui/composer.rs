@@ -196,11 +196,15 @@ impl RenderOnce for ComposerShell {
                     .child(
                         div()
                             .w_full()
-                            .pt(space::S12)
+                            // 12 pt from the box's outer edge (the mockup's
+                            // border is an inset ring, this one takes 1 pt).
+                            .pt(space::S12 - theme::BORDER)
                             // 14 pt to the text: the editor keeps a 4 pt inset of its own.
                             .px(space::S14 - EDITOR_INSET)
-                            .min_h(size::COMPOSER_TEXT_MIN + space::S12)
-                            .when_some(self.max_text_height, |el, h| el.max_h(h + space::S12))
+                            .min_h(size::COMPOSER_TEXT_MIN + space::S12 - theme::BORDER)
+                            .when_some(self.max_text_height, |el, h| {
+                                el.max_h(h + space::S12 - theme::BORDER)
+                            })
                             .t_body()
                             .text_color(k.text_1)
                             .child(self.editor),
@@ -209,11 +213,11 @@ impl RenderOnce for ComposerShell {
                         el.child(
                             div()
                                 .flex_none()
-                                .h(size::COMPOSER_TOOLBAR)
+                                .h(size::COMPOSER_TOOLBAR - theme::BORDER)
                                 // 8 pt from the box's outer edge (the
                                 // mockup's border is an inset ring).
                                 .px(space::S8 - theme::BORDER)
-                                .pb(space::S8)
+                                .pb(space::S8 - theme::BORDER)
                                 .flex()
                                 .items_end()
                                 .gap(space::S2)
