@@ -147,13 +147,13 @@ fn link_line(line: &str, targets: &[&MentionTarget], out: &mut String) {
             continue;
         }
         // A Markdown link or image: keep it as written.
-        if c == '[' || (c == '!' && rest[1..].starts_with('[')) {
-            if let Some(end) = link_end(rest) {
-                out.push_str(&rest[..end]);
-                prev = rest[..end].chars().next_back();
-                rest = &rest[end..];
-                continue;
-            }
+        if (c == '[' || (c == '!' && rest[1..].starts_with('[')))
+            && let Some(end) = link_end(rest)
+        {
+            out.push_str(&rest[..end]);
+            prev = rest[..end].chars().next_back();
+            rest = &rest[end..];
+            continue;
         }
         if c == '@' && !prev.is_some_and(|p| p.is_ascii_alphanumeric() || p == '_') {
             let after = &rest[1..];
