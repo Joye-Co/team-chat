@@ -31,6 +31,39 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 const TYPING_MIN_GAP: Duration = Duration::from_secs(3);
 const TICK: Duration = Duration::from_millis(250);
+/// Outbox writes in flight at once. The server handles the frames of one socket in order.
+const MAX_INFLIGHT_WRITES: usize = 32;
+/// Client-side write pace, below the server's per-member write limit (20 per second, burst 20),
+/// so a reconnect backlog is not refused with `rate_limited` and reordered by the retries.
+const WRITE_RATE_PER_SEC: f64 = 16.0;
+const WRITE_BURST: f64 = 16.0;
+
+/// Token bucket for outbox writes.
+struct WritePace {
+    tokens: f64,
+    at: Instant,
+}
+
+impl WritePace {
+    fn new(now: Instant) -> WritePace {
+        WritePace {
+            tokens: WRITE_BURST,
+            at: now,
+        }
+    }
+
+    fn take(&mut self, now: Instant) -> bool {
+        let dt = now.duration_since(self.at).as_secs_f64();
+        self.at = now;
+        self.tokens = (self.tokens + dt * WRITE_RATE_PER_SEC).min(WRITE_BURST);
+        if self.tokens >= 1.0 {
+            self.tokens -= 1.0;
+            true
+        } else {
+            false
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) enum Command {
@@ -261,6 +294,7 @@ struct Session {
     next_rid: u64,
     pending: HashMap<String, (Pending, Instant)>,
     inflight_outbox: HashSet<String>,
+    write_pace: WritePace,
     retry_at: HashMap<String, Instant>,
     groups: HashMap<String, GroupSync>,
     history_inflight: HashSet<String>,
@@ -294,6 +328,7 @@ impl Session {
             next_rid: 1,
             pending: HashMap::new(),
             inflight_outbox: HashSet::new(),
+            write_pace: WritePace::new(now),
             retry_at: HashMap::new(),
             groups: HashMap::new(),
             history_inflight: HashSet::new(),
@@ -533,13 +568,11 @@ impl Session {
             .insert(rid, (p, Instant::now() + self.request_timeout));
     }
 
-    /// Sends the oldest due outbox row, one write in flight at a time. Writes reach the server
-    /// strictly in outbox order: a row that waits for its retry holds back the rows after it.
-    /// One at a time also keeps a reconnect backlog under the server's write rate limit, and a
-    /// deployed gateway refuses a long pipelined burst ("Subrequest depth limit exceeded": every
-    /// write it handles before the next frame arrives nests one level deeper).
+    /// Sends due outbox rows oldest first, pipelined: up to `MAX_INFLIGHT_WRITES` in flight, paced
+    /// below the server's write limit. Writes reach the server in outbox order: a row that waits
+    /// for its retry holds back the rows after it.
     fn flush_outbox(&mut self) {
-        if !self.welcomed || !self.inflight_outbox.is_empty() {
+        if !self.welcomed || self.inflight_outbox.len() >= MAX_INFLIGHT_WRITES {
             return;
         }
         let items = match self.shared.store.outbox_all() {
@@ -551,10 +584,13 @@ impl Session {
         };
         let now = Instant::now();
         for item in items {
-            if item.state != OutboxState::Pending {
+            if item.state != OutboxState::Pending || self.inflight_outbox.contains(&item.id) {
                 continue;
             }
             if self.retry_at.get(&item.id).is_some_and(|t| *t > now) {
+                return;
+            }
+            if self.inflight_outbox.len() >= MAX_INFLIGHT_WRITES || !self.write_pace.take(now) {
                 return;
             }
             let rid = self.rid();
@@ -658,7 +694,6 @@ impl Session {
             self.inflight_outbox.insert(item.id.clone());
             self.out.push(frame);
             self.track(rid, Pending::Outbox { id: item.id });
-            return;
         }
     }
 
