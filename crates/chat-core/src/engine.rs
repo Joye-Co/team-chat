@@ -533,9 +533,13 @@ impl Session {
             .insert(rid, (p, Instant::now() + self.request_timeout));
     }
 
-    /// Sends every due outbox row that is not in flight, oldest first.
+    /// Sends the oldest due outbox row, one write in flight at a time. Writes reach the server
+    /// strictly in outbox order: a row that waits for its retry holds back the rows after it.
+    /// One at a time also keeps a reconnect backlog under the server's write rate limit, and a
+    /// deployed gateway refuses a long pipelined burst ("Subrequest depth limit exceeded": every
+    /// write it handles before the next frame arrives nests one level deeper).
     fn flush_outbox(&mut self) {
-        if !self.welcomed {
+        if !self.welcomed || !self.inflight_outbox.is_empty() {
             return;
         }
         let items = match self.shared.store.outbox_all() {
@@ -547,11 +551,11 @@ impl Session {
         };
         let now = Instant::now();
         for item in items {
-            if item.state != OutboxState::Pending || self.inflight_outbox.contains(&item.id) {
+            if item.state != OutboxState::Pending {
                 continue;
             }
             if self.retry_at.get(&item.id).is_some_and(|t| *t > now) {
-                continue;
+                return;
             }
             let rid = self.rid();
             let frame = match item.op.clone() {
@@ -654,6 +658,7 @@ impl Session {
             self.inflight_outbox.insert(item.id.clone());
             self.out.push(frame);
             self.track(rid, Pending::Outbox { id: item.id });
+            return;
         }
     }
 
@@ -775,7 +780,13 @@ impl Session {
                     AckOutcome::Err { error } => (false, None, Some(error)),
                 };
                 match p {
-                    Pending::Outbox { id } => return self.on_outbox_ack(id, ok, result, error),
+                    Pending::Outbox { id } => {
+                        let end = self.on_outbox_ack(id, ok, result, error);
+                        if end.is_none() {
+                            self.flush_outbox();
+                        }
+                        return end;
+                    }
                     Pending::Fetch { group_id } => {
                         // A fetch answered with an error ack instead of a page.
                         warn!(group = %group_id, code = ?error.as_ref().map(|e| e.code), "fetch refused");
