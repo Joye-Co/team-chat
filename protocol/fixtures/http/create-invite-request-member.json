@@ -1,0 +1,11 @@
+{
+  "kind": "CreateInviteRequest",
+  "valid": true,
+  "description": "sign-in code for an existing member",
+  "value": {
+    "name": "小王",
+    "kind": "human",
+    "level": "member",
+    "memberId": "01HZX5Q0Y7R0V9C8B7N6M5K4J3"
+  }
+}

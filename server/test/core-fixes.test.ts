@@ -115,8 +115,10 @@ describe("core review fixes", () => {
     // Hold b's directory load until a's message is committed and delivered.
     let release!: () => void;
     const held = new Promise<void>((r) => (release = r));
-    const gw = env.MEMBER_GATEWAY.get(env.MEMBER_GATEWAY.idFromName(b.id));
-    await runInDurableObject(gw, (inst: any) => {
+    const ns = (env as unknown as { MEMBER_GATEWAY: DurableObjectNamespace }).MEMBER_GATEWAY;
+    const gw = ns.get(ns.idFromName(b.id));
+    const inDo = runInDurableObject as unknown as (stub: unknown, fn: (inst: any) => void) => Promise<void>;
+    await inDo(gw, (inst: any) => {
       const load = inst.loadDirectory.bind(inst);
       inst.loadDirectory = async (...args: unknown[]) => {
         const dir = await load(...args);
@@ -171,5 +173,38 @@ describe("core review fixes", () => {
     const h = await room.history(gid, actor(m.id), topicId, undefined, 500);
     expect(h.ok && h.value.hasMore).toBe(true);
     expect(h.ok && h.value.messages.length).toBeLessThan(200);
+  });
+
+  it("sign an existing member in again with a code for that member", async () => {
+    const owner = await createMember({ level: "owner" });
+    const x = await createMember({ name: "小王" });
+    const gid = await createGroup(owner, [x.id]);
+    const inv = await api("/v1/invites", {
+      token: owner.token,
+      body: { name: "ignored", kind: "bot", level: "owner", memberId: x.id },
+    });
+    expect(inv.status, JSON.stringify(inv.body)).toBe(200);
+    const red = await api("/v1/auth/redeem", { body: { inviteCode: inv.body.code, deviceName: "new mac" } });
+    expect(red.status, JSON.stringify(red.body)).toBe(200);
+    // Same member, its own name and level, not the ones in the request.
+    expect(red.body.member).toMatchObject({ id: x.id, name: "小王", kind: "human", level: "member" });
+    const { c, welcome } = await Client.connect(red.body.token);
+    expect(welcome.me.id).toBe(x.id);
+    expect(welcome.groups.map((g: any) => g.group.id)).toContain(gid);
+    c.close();
+    // The old token still works (another device), the code is single use.
+    expect((await api("/v1/me", { token: x.token })).status).toBe(200);
+    expect((await api("/v1/auth/redeem", { body: { inviteCode: inv.body.code, deviceName: "again" } })).status).toBe(401);
+    const n = await env.DB.prepare("SELECT count(*) AS n FROM members WHERE name = '小王'").first<{ n: number }>();
+    expect(n?.n).toBe(1);
+
+    // Not for a deactivated member: neither making the code nor redeeming it.
+    const inv2 = await api("/v1/invites", { token: owner.token, body: { name: "x", kind: "human", level: "member", memberId: x.id } });
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(x.id).run();
+    expect((await api("/v1/auth/redeem", { body: { inviteCode: inv2.body.code, deviceName: "d" } })).status).toBe(401);
+    const inv3 = await api("/v1/invites", { token: owner.token, body: { name: "x", kind: "human", level: "member", memberId: x.id } });
+    expect(inv3.status).toBe(400);
+    const member = await createMember();
+    expect((await api("/v1/invites", { token: member.token, body: { name: "x", kind: "human", level: "member", memberId: x.id } })).status).toBe(403);
   });
 });

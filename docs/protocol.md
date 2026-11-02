@@ -170,7 +170,16 @@ ErrorCode = "unauthorized" | "forbidden" | "not_found" | "invalid" | "conflict"
   as pending and resend them with the same `clientMsgId` after a reconnect.
 - Streaming: a bot sends `send` with `streaming: true`, then `delta` frames, then `edit` with the
   full final body and `streaming: false`. The room coalesces deltas (every 100 ms or 8 KiB)
-  before it broadcasts `message.delta`; only the final `message.updated` is stored.
+  before it broadcasts `message.delta`; only the final `message.updated` is stored as an event.
+  The room also keeps the text so far (up to 32,768 characters) in the message, so `history`
+  and `fetch` return the current body of a streaming message to members who load it later.
+- `hello` is accepted once per socket; a second one gets `invalid`. Events committed while the
+  server builds `welcome` are sent right after it (some may be at or below welcome's
+  `lastSeq`; clients drop seqs they already have).
+- `fetch` and `history` pages also stop at about 4 MiB of JSON (with `hasMore: true`); a page
+  always has at least one row.
+- A member added to a group starts with everything before it read: its group read position is
+  at least the seq of its `group.memberAdded` event.
 - Keepalive: the client sends `ping` every 30 s; the server answers `pong` without waking up the
   object. The client reconnects with exponential backoff (0.5 s to 30 s, with jitter).
 
@@ -185,7 +194,7 @@ JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
 | `POST /v1/auth/redeem` | anyone with an invite code | `{ inviteCode, deviceName }` | `{ token, member }` |
 | `GET /v1/me` | member | | `Member` |
 | `GET /v1/members` | member | | `Member[]` |
-| `POST /v1/invites` | owner | `{ name, kind, level, role? }` | `{ code, expiresAt }` |
+| `POST /v1/invites` | owner | `{ name, kind, level, role?, memberId? }` | `{ code, expiresAt }`; with `memberId`, a sign-in code for that member |
 | `POST /v1/bots` | owner | `{ name, role?, character? }` | `{ member, token }` |
 | `POST /v1/tokens/revoke` | owner, or the token's member | `{ memberId?, all? }` | `{ revoked }` |
 | `GET /v1/groups` | member | | `GroupSummary[]` |
@@ -209,6 +218,11 @@ log records `group.memberAdded` / `group.memberRemoved`.
   format have 12 characters (`XXXX-XXXX-XXXX`) and still redeem. `POST /v1/auth/redeem` allows 10
   attempts per minute per client IP; a right code does not use one up. Over the limit it answers
   429 with the `rate_limited` error.
+- Sign-in code for an existing member (`POST /v1/invites` with `memberId`): the same code
+  format and rules, but `redeem` gives that member one more token instead of making a new
+  member (a new Mac, signing in again after 退出登录, or after reactivation). The member's own
+  name, kind and level are used; the request's are ignored. It is refused for a deactivated
+  member (`invalid` when made, `unauthorized` when redeemed).
 - Bootstrap: the first owner is made with `POST /v1/admin/bootstrap`, protected by the
   `ADMIN_SECRET` Worker secret. It also makes a group called "General".
 
@@ -330,6 +344,12 @@ Rules:
 - `artifactRefs`: each must name an existing 产出 of the same group and an existing version.
 - `edit` with `card` is allowed only on a card message and only for its author. `edit` cannot
   change `kind` or `replyTo`.
+- `delete` removes the message's content everywhere the server keeps it: `body`, `card`,
+  `replyTo`, `reactions`, `attachments` and `artifactRefs` of the message and of its stored
+  events, and the `excerpt` of every `replyTo` that quotes it (set to `""`, the link stays). A
+  file that no other message and no 产出 uses is then deleted: `GET /v1/files/:id` and its
+  content answer `not_found`, and its bytes are removed from R2. Clients hide the attachments of
+  a deleted message.
 
 ## Cards
 
@@ -377,7 +397,8 @@ Rules:
 - Readers render an unknown block type as nothing (Rust: `CardBlock::Unknown`) so new block
   types can be added; the server rejects unknown block types on write.
 - Text is Markdown only in `text` blocks; every other string is plain text.
-- `card.action`: any group member may press. The message must be a card message that is not
+- `card.action`: any group member may press (a runner bot's approval card acts only on a press by
+  the run's requester or an owner, see "Bot runs"). The message must be a card message that is not
   deleted, and `actionId` must exist in its current card (`not_found` otherwise). `value` in the
   frame is ignored in V1: the event carries the action's own `value`. At most one press per
   member per message per second (`rate_limited`).
@@ -435,7 +456,10 @@ Rules:
 - `uploadUrl` is the absolute URL of `PUT /v1/files/:id/content`; send it with the same bearer
   token. Only the file's creator may upload, once (`conflict` when already `ready`). The server
   checks that the body length equals `size` and its SHA-256 equals `sha256` (`invalid`
-  otherwise, and the file stays `pending`). A `pending` file is deleted after 24 hours.
+  otherwise, and the file stays `pending`). A failed attempt never removes the object of another
+  attempt that finished. A `pending` file is deleted after 24 hours.
+- Limits per member: 500 files and 5 GiB (declared sizes) per hour (`rate_limited`), and at most
+  100 GiB of files that are not deleted (`too_large`).
 - Downloads send `Content-Type` from `mime`, `X-Content-Type-Options: nosniff`, and
   `Content-Disposition: attachment` except for `image/png`, `image/jpeg`, `image/gif` and
   `image/webp`. Files are never served as `text/html` inline from the API origin.
@@ -556,7 +580,9 @@ Module: `updates.ts` / `updates.rs`.
 | `GET /v1/updates/:version/download` | member | | the DMG (`Range` supported) |
 | `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
 | `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }`; a withdrawn release is not `latest` and not downloadable |
-| `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG |
+| `GET /download` | anyone | | a small page that reads the code from the fragment (`/download#code=<invite code>`) and posts it |
+| `POST /download` | anyone with a valid invite code | form `code=<invite code>` | the latest DMG |
+| `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG (links made before the fragment form) |
 
 ```ts
 UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl }
@@ -567,8 +593,10 @@ Rules: latest = the highest version by numeric comparison. A `PUT` of an existin
 `conflict`. The server checks the body's SHA-256 against `X-Sha256` (`invalid` otherwise) and
 the body is at most 100 MB. `GET /download` accepts an invite code that is not expired (used or
 not), is rate limited per IP, answers 404 with a plain-text body for a bad code, and sends
-`Content-Disposition: attachment; filename="<slug>-<version>.dmg"`. Logs must redact the `code`
-query parameter. Every publish is audited.
+`Content-Disposition: attachment; filename="<slug>-<version>.dmg"`. Invite links put the code in
+the URL fragment, which browsers never send, so no request log (the app's or the Workers
+invocation log) records it. Logs must redact the `code` query parameter of old links. Every
+publish is audited.
 
 ## Diagnostics
 
@@ -680,28 +708,31 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/bots/:id/runner` | owner | | `BotRunner`; 404 when the bot is not runner-backed |
 | `DELETE /v1/bots/:id/runner` | owner | | `{ ok: true }` |
 | `POST /v1/machines` | owner | `CreateMachineRequest` | `CreateMachineResponse` |
-| `GET /v1/machines` | owner | | `Machine[]` |
+| `GET /v1/machines` | member | | `Machine[]`; members other than owners get only `id`, `name`, `createdBy`, `createdAt`, `revoked`, `connected` and `healthy` (`labels` and `runningRuns` empty) |
 | `DELETE /v1/machines/:id` | owner | | `{ ok: true }`; revokes the token, closes the link |
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
 | `GET /v1/runs/:id/events?afterSeq=&limit=` | member of the run's group | | `RunEventsResponse`; `limit` 1..500, default 200 |
 | `GET /v1/runs/:id/session` | owner | | the raw CLI session, gzip (`application/gzip`); 404 until uploaded |
 | `POST /v1/runs` | a bot that is not runner-backed, member of the group | `StartRunRequest` | `BotRun`: a new `running` run, or the bot's active run in the topic |
 | `PUT /v1/runs/:id/plan` | the run's bot | `SetRunPlanRequest` | `BotRun`; `conflict` when the run ended |
+| `POST /v1/runs/:id/cancel` | a person in the run's group | | `BotRun` with `status: "cancelled"`; `conflict` when the run ended; audited |
 | `POST /v1/runs/:id/end` | the run's bot, runs from `POST /v1/runs` only | `EndRunRequest` | `BotRun`; `conflict` when the run ended |
 | `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
 | `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
 
 Rules:
 
-- Labels are 1..64 of `[A-Za-z0-9_.:-]`, at most 20. A machine's labels are its owner labels plus
-  the labels its daemon reports. A machine qualifies for a bot when it has all of the bot's
+- Labels are 1..64 of `[A-Za-z0-9_.:-]`, at most 20. A machine shows its owner labels plus the
+  labels its daemon reports, but only owner labels route runs. A machine qualifies for a bot when it has all of the bot's
   labels, reports the bot's `runtime` as available, is connected with a heartbeat in the last
   90 s, has fewer active runs than `maxParallelRuns` and at least 5 GiB free disk (`healthy`).
   Among those the server picks the one with the fewest active runs, then the lowest load.
 - Trigger: a `message.created` by a human that mentions a runner-backed bot starts a run in
   that topic, unless the topic already has a responsible bot. The first bot that starts a run
   in a topic becomes its only responsible bot. Messages written by bots never start runs or
-  reach a run (no loops).
+  reach a run (no loops). In a DM with a runner-backed bot every human message counts as a
+  mention of it. A deactivated bot, or one whose runner is disabled, gets no more messages; on
+  deactivation its active runs are cancelled and its topics released.
 - While a run of the topic's bot is active (`created`, `running`, `waiting`, `blocked`), every
   later human message in the topic goes to that run as input. A message that reaches the run
   after its last turn ended starts a new run. When no run is active, only a new mention of the
@@ -709,9 +740,19 @@ Rules:
 - The bot answers once with a short acknowledgement, streams progress into one streaming
   message, and posts the result when the run ends. It sets the topic's `status`:
   `in_progress` while it works, `waiting_answer` with `waitingOn` = the requester while the run
-  asks a question (reply 同意 or 拒绝 to an approval), `done` on success, `blocked` with one
+  asks a question (reply 同意 or 拒绝 to an approval, or press the card's buttons; only the
+  requester or an owner can answer, every answer is audited as `run.approval`; when the question
+  cannot be posted the answer is no), `done` on success, `blocked` with one
   short note when the run fails, its machine stays away past the lease, or no event comes for
-  10 minutes. A blocked run that sends events again goes back to `running`.
+  10 minutes (the daemon's own `status: stalled` report marks it blocked at once and does not
+  count as progress). A blocked run that sends events again goes back to `running`. A run that
+  never reaches a machine ends as `failed` after 2 minutes.
+- Input left over when a run ends starts a follow-up run, at most 5 in a row; then the bot
+  posts one note. A person in the run's group stops a run with `POST /v1/runs/:id/cancel`: the
+  machine gets `run.cancel`, the run ends as `cancelled` at once, the bot posts one note and the
+  topic goes back to `open`.
+- When the run's result is also the last text of the progress message, the progress message
+  leaves it out (the result is posted once).
 - `run.updated` is stored in the group log when a run is created and on every status change, so
   clients show runs from events. The process view reads the run log with
   `GET /v1/runs/:id/events`, paged by `seq` (gaps are normal: the daemon may drop deltas).

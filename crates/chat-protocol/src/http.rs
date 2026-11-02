@@ -58,6 +58,13 @@ pub struct CreateInviteRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub role: Option<String>,
+    /// Sign-in code for this existing member: redeeming it adds a token, not a member.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub member_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -167,7 +174,10 @@ impl RedeemRequest {
 
 impl CreateInviteRequest {
     pub fn validate(&self) -> Validation {
-        check_name("name", &self.name)
+        check_name("name", &self.name)?;
+        self.member_id
+            .as_deref()
+            .map_or(Ok(()), |id| check_id("memberId", id))
     }
 }
 

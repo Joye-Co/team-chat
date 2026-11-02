@@ -227,13 +227,38 @@ export function registerCoreRoutes(): void {
       const { inviteCode, deviceName } = await body(RedeemRequest);
       const codeHash = await sha256Hex(normalizeInviteCode(inviteCode));
       const now = Date.now();
-      const memberId = ulid(now);
       const tokenId = ulid(now);
       const token = newToken();
       const tokenHash = await sha256Hex(token);
+      const forMember = await env.DB.prepare("SELECT member_id FROM invites WHERE code_hash = ?")
+        .bind(codeHash)
+        .first<{ member_id: string | null }>();
+      if (forMember?.member_id) {
+        // A sign-in code for an existing member: one more token (device), same member.
+        const existing = forMember.member_id;
+        const r = await env.DB.batch([
+          env.DB.prepare(
+            `UPDATE invites SET used_at = ?, used_by = member_id WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?
+               AND EXISTS (SELECT 1 FROM members m WHERE m.id = invites.member_id AND m.deactivated = 0)`,
+          ).bind(now, codeHash, now),
+          env.DB.prepare(
+            "INSERT INTO tokens (id, token_hash, member_id, label, created_at) SELECT ?, ?, ?, ?, ? WHERE changes() = 1",
+          ).bind(tokenId, tokenHash, existing, deviceName, now),
+          env.DB.prepare(
+            `INSERT INTO audit (actor_id, credential_id, action, target, details, at)
+             SELECT ?, ?, 'invite.redeem', id, '{"existingMember":true}', ? FROM invites
+             WHERE code_hash = ? AND used_at = ? AND EXISTS (SELECT 1 FROM tokens WHERE id = ?)`,
+          ).bind(existing, tokenId, now, codeHash, now, tokenId),
+        ]);
+        if (!r[0].meta.changes) throw new ApiError("unauthorized", "invite code is invalid, used or expired");
+        await refundAttempt(env.DB, attempt);
+        const row = (await getMember(env.DB, existing)) as MemberRow;
+        return { token, member: toMember(row) };
+      }
+      const memberId = ulid(now);
       const results = await env.DB.batch([
         env.DB.prepare(
-          "UPDATE invites SET used_at = ?, used_by = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ?",
+          "UPDATE invites SET used_at = ?, used_by = ? WHERE code_hash = ? AND used_at IS NULL AND expires_at > ? AND member_id IS NULL",
         ).bind(now, memberId, codeHash, now),
         env.DB.prepare(
           `INSERT INTO members (id, kind, name, role, level, created_at, created_by)
@@ -280,19 +305,37 @@ export function registerCoreRoutes(): void {
     async handler({ env, auth, body }) {
       const req = await body(CreateInviteRequest);
       const a = auth as AuthContext;
+      if (req.memberId) {
+        // The code signs in as this member: its own name, kind and level, not the request's.
+        const m = await getMember(env.DB, req.memberId);
+        if (!m) throw new ApiError("not_found", "member not found");
+        if (m.deactivated) throw new ApiError("invalid", "reactivate the member first");
+        Object.assign(req, { name: m.name, kind: m.kind, level: m.level, role: m.role ?? undefined });
+      }
       const code = newInviteCode();
       const now = Date.now();
       const expiresAt = now + INVITE_TTL_MS;
       const id = ulid(now);
       await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO invites (id, code_hash, name, kind, level, role, created_by, created_at, expires_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        ).bind(id, await sha256Hex(normalizeInviteCode(code)), req.name, req.kind, req.level, req.role ?? null, a.memberId, now, expiresAt),
+          `INSERT INTO invites (id, code_hash, name, kind, level, role, created_by, created_at, expires_at, member_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).bind(
+          id,
+          await sha256Hex(normalizeInviteCode(code)),
+          req.name,
+          req.kind,
+          req.level,
+          req.role ?? null,
+          a.memberId,
+          now,
+          expiresAt,
+          req.memberId ?? null,
+        ),
         auditStatement(env.DB, a, {
           action: "invite.create",
           target: id,
-          details: { name: req.name, kind: req.kind, level: req.level, role: req.role ?? null },
+          details: { name: req.name, kind: req.kind, level: req.level, role: req.role ?? null, ...(req.memberId ? { memberId: req.memberId } : {}) },
         }, now),
       ]);
       return { code, expiresAt };

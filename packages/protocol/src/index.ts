@@ -511,6 +511,8 @@ export const CreateInviteRequest = z.object({
   kind: MemberKind,
   level: MemberLevel,
   role: z.string().optional(),
+  /** Sign-in code for this existing member: redeeming it adds a token, not a member. */
+  memberId: Id.optional(),
 });
 export type CreateInviteRequest = z.infer<typeof CreateInviteRequest>;
 export const CreateInviteResponse = z.object({ code: z.string(), expiresAt: Millis });

@@ -279,6 +279,7 @@ impl HttpClient {
             kind,
             level,
             role: role.map(str::to_string),
+            member_id: None,
         };
         self.call(Method::POST, "/v1/invites", Some(&body), true)
             .await
