@@ -17,17 +17,24 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gpui::{
-    App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
-    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
+    Animation, AnimationExt as _, App, AppContext, Bounds, Context, ElementId, Entity,
+    EventEmitter, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
+    MouseMoveEvent, MouseUpEvent, ParentElement, Render, Styled, Subscription, TitlebarOptions,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
 };
 
 use crate::{
     data::{Change, ChatProvider, GroupId, SessionState, TopicId},
     theme, ui,
     views::{
-        composer::ComposerView, connection_banner::ConnectionBanner, login::LoginView,
-        side_panel::SidePanel, sidebar::Sidebar, timeline::TimelineView, topic_list::TopicListView,
+        columns::{Column, Columns},
+        composer::ComposerView,
+        connection_banner::ConnectionBanner,
+        login::LoginView,
+        side_panel::SidePanel,
+        sidebar::Sidebar,
+        timeline::TimelineView,
+        topic_list::TopicListView,
     },
 };
 
@@ -37,6 +44,7 @@ gpui::actions!(
         Quit,
         OpenSettings,
         ToggleSidePanel,
+        ToggleSidebar,
         NewTopic,
         MentionInComposer,
         FocusNext,
@@ -120,6 +128,14 @@ pub struct Navigation {
     pub side_panel_tab: usize,
     /// A message to scroll to and highlight (from search).
     pub focus: Option<FocusRequest>,
+    /// When the side panel last opened by itself: its content fades in
+    /// (§12). `None` after a manual open.
+    pub side_panel_auto_at: Option<std::time::Instant>,
+    /// The pointer is over the topic header: the side panel does not open by
+    /// itself then, so the header buttons never move under the pointer.
+    pub header_hovered: bool,
+    /// ⌘⇧S hid the sidebar (§4.4).
+    pub sidebar_hidden: bool,
 }
 
 /// Scroll the open topic to this message and highlight it. `serial` grows
@@ -144,6 +160,9 @@ impl Navigation {
             developer_view: false,
             side_panel_tab: 0,
             focus: None,
+            side_panel_auto_at: None,
+            header_hovered: false,
+            sidebar_hidden: false,
         }
     }
 
@@ -215,6 +234,7 @@ impl Navigation {
         if !open && let Some(topic) = self.topic.clone() {
             self.side_panel_settled.insert(topic);
         }
+        self.side_panel_auto_at = None;
         if self.side_panel_open != open {
             self.side_panel_open = open;
             cx.notify();
@@ -227,10 +247,28 @@ impl Navigation {
         let Some(topic) = self.topic.clone() else {
             return;
         };
-        if self.side_panel_settled.insert(topic) && !self.side_panel_open {
+        // Wait while the pointer is on the topic header: opening would move
+        // its buttons under the pointer. The next change tries again.
+        if self.header_hovered || self.side_panel_settled.contains(&topic) {
+            return;
+        }
+        self.side_panel_settled.insert(topic);
+        if !self.side_panel_open {
             self.side_panel_open = true;
+            self.side_panel_auto_at = Some(std::time::Instant::now());
             cx.notify();
         }
+    }
+
+    /// The pointer entered or left the topic header.
+    pub fn set_header_hovered(&mut self, hovered: bool) {
+        self.header_hovered = hovered;
+    }
+
+    /// ⌘⇧S: hides or shows the sidebar.
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_hidden = !self.sidebar_hidden;
+        cx.notify();
     }
 
     pub fn set_side_panel_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
@@ -299,6 +337,8 @@ pub struct RootView {
     banner: Entity<ConnectionBanner>,
     update_banner: Entity<crate::updater::banner::UpdateBanner>,
     first_frame: Option<FirstFrameHook>,
+    /// Widths of the sidebar and the topic list (`views/columns.rs`).
+    columns: Columns,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -335,12 +375,50 @@ impl RootView {
             update_banner,
             services,
             first_frame,
+            columns: Columns::default(),
             _subscriptions: subscriptions,
         }
     }
 
     pub fn services(&self) -> &Services {
         &self.services
+    }
+
+    /// The divider between a column and the next: the 0.5 pt hairline and a
+    /// 6 pt hit strip with the resize cursor (§4.4).
+    fn divider(&self, column: Column, cx: &mut Context<Self>) -> gpui::AnyElement {
+        div()
+            .relative()
+            .flex_none()
+            .w(px(0.))
+            .h_full()
+            .child(ui::column_edge(cx))
+            .child(
+                div()
+                    .id(match column {
+                        Column::Sidebar => "sidebar-divider",
+                        Column::TopicList => "topic-list-divider",
+                    })
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left(px(-3.))
+                    .w(px(6.))
+                    .cursor_col_resize()
+                    .on_mouse_down(
+                        MouseButton::Left,
+                        cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                            if e.click_count >= 2 {
+                                this.columns.reset(column);
+                            } else {
+                                this.columns.start_drag(column, e.position.x);
+                            }
+                            cx.stop_propagation();
+                            cx.notify();
+                        }),
+                    ),
+            )
+            .into_any_element()
     }
 
     pub fn login(&self) -> &Entity<LoginView> {
@@ -374,6 +452,11 @@ impl Render for RootView {
             }))
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &FocusPrev, window, cx| window.focus_prev(cx))
+            .on_action(cx.listener(|this, _: &ToggleSidebar, _, cx| {
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.toggle_sidebar(cx));
+            }))
             .on_action(cx.listener(|this, _: &NewTopic, _, cx| {
                 this.services.nav.update(cx, |nav, cx| nav.new_topic(cx));
             }))
@@ -391,7 +474,7 @@ impl Render for RootView {
         if self.services.provider.groups().is_empty() {
             return root.flex().flex_row().children([
                 div()
-                    .w(theme::SIDEBAR_WIDTH)
+                    .w(self.columns.width(Column::Sidebar))
                     .h_full()
                     .flex_none()
                     .child(self.sidebar.clone())
@@ -408,43 +491,55 @@ impl Render for RootView {
         // window the columns shrink for it, then it floats (§4.4).
         let nav = self.services.nav.read(cx);
         let panel_open = nav.side_panel_open && nav.topic.is_some();
-        let cols = theme::columns(window.viewport_size().width, panel_open);
-        let panel = panel_open.then(|| {
-            let panel = div()
-                .w(theme::SIDE_PANEL_WIDTH)
-                .h_full()
-                .flex_none()
-                .bg(colors.panel)
-                .child(self.side_panel.clone());
-            if cols.panel_floats {
-                panel
-                    .absolute()
-                    .top_0()
-                    .right_0()
-                    .shadow(colors.shadow(theme::Elevation::Overlay))
-                    .occlude()
-            } else {
-                panel.relative().child(ui::column_start_edge(cx))
-            }
-        });
-        root.flex()
-            .flex_row()
-            .relative()
-            .children([
+        let sidebar_shown = !nav.sidebar_hidden;
+        let auto_at = nav.side_panel_auto_at;
+        let window_w = window.viewport_size().width;
+        let (sidebar_w, list_w, panel_floats) =
+            self.columns.layout(window_w, sidebar_shown, panel_open);
+        if self.columns.settling() {
+            window.request_animation_frame();
+        }
+        let sidebar = sidebar_shown.then(|| {
+            [
                 div()
-                    .w(cols.sidebar)
+                    .w(sidebar_w)
                     .h_full()
                     .flex_none()
                     .child(self.sidebar.clone())
                     .into_any_element(),
-                ui::column_edge(cx).into_any_element(),
+                self.divider(Column::Sidebar, cx),
+            ]
+        });
+        root.flex()
+            .flex_row()
+            .relative()
+            .when(self.columns.drag.is_some(), |el| el.cursor_col_resize())
+            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                if this.columns.drag.is_some() {
+                    if e.pressed_button != Some(MouseButton::Left) {
+                        this.columns.end_drag(cx.reduce_motion());
+                    } else if this.columns.drag_to(e.position.x) {
+                        cx.notify();
+                    }
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _: &MouseUpEvent, _, cx| {
+                    if this.columns.end_drag(cx.reduce_motion()) {
+                        cx.notify();
+                    }
+                }),
+            )
+            .children(sidebar.into_iter().flatten())
+            .children([
                 div()
-                    .w(cols.topic_list)
+                    .w(list_w)
                     .h_full()
                     .flex_none()
                     .child(self.topic_list.clone())
                     .into_any_element(),
-                ui::column_edge(cx).into_any_element(),
+                self.divider(Column::TopicList, cx),
                 div()
                     .flex_1()
                     .min_w(theme::TOPIC_VIEW_MIN_WIDTH)
@@ -455,7 +550,43 @@ impl Render for RootView {
                     .child(self.composer.clone())
                     .into_any_element(),
             ])
-            .children(panel)
+            .children(panel_open.then(|| {
+                // Width snaps; when the panel opened by itself its content
+                // fades in over 120 ms, so the reflow of the topic is not a
+                // pop (§12). ⌘⌥I and the button stay instant, and so does
+                // reduce motion.
+                let fade =
+                    auto_at.filter(|at| at.elapsed() < theme::motion::FAST && !cx.reduce_motion());
+                let content = match fade {
+                    Some(at) => div()
+                        .size_full()
+                        .child(self.side_panel.clone())
+                        .with_animation(
+                            ElementId::Name(format!("side-panel-auto-{at:?}").into()),
+                            Animation::new(theme::motion::FAST)
+                                .with_easing(theme::motion::out_fn()),
+                            |el, t| el.opacity(t),
+                        )
+                        .into_any_element(),
+                    None => self.side_panel.clone().into_any_element(),
+                };
+                let panel = div()
+                    .w(theme::SIDE_PANEL_WIDTH)
+                    .h_full()
+                    .flex_none()
+                    .bg(colors.panel)
+                    .child(content);
+                if panel_floats {
+                    panel
+                        .absolute()
+                        .top_0()
+                        .right_0()
+                        .shadow(colors.shadow(theme::Elevation::Overlay))
+                        .occlude()
+                } else {
+                    panel.relative().child(ui::column_start_edge(cx))
+                }
+            }))
     }
 }
 
@@ -492,7 +623,15 @@ pub fn open_main_window(
 ) -> Result<Entity<RootView>, String> {
     let options = main_window_options(focus, cx);
     let (_, view) = gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| RootView::new(services, first_frame, window, cx))
+        cx.new(|cx| {
+            let mut root = RootView::new(services, first_frame, window, cx);
+            // The app keeps the widths the user dragged; self-tests (no
+            // focus) always draw the defaults.
+            if focus {
+                root.columns = Columns::load();
+            }
+            root
+        })
     })
     .map_err(|e| e.to_string())?;
     Ok(view)
@@ -509,6 +648,7 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
+        KeyBinding::new("cmd-shift-s", ToggleSidebar, None),
         KeyBinding::new("cmd-n", NewTopic, None),
         // Tab moves keyboard focus through the window's tab stops (§11);
         // inputs keep their own Tab binding.

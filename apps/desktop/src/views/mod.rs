@@ -4,6 +4,7 @@
 pub mod artifacts;
 pub mod banners;
 pub mod cards;
+pub mod columns;
 pub mod composer;
 pub mod connection_banner;
 pub mod files;

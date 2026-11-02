@@ -180,9 +180,16 @@ impl TimelineView {
             .text_color(colors.text_2)
             .children(items);
 
+        let nav = self.services.nav.clone();
         ui::header_band(cx)
+            .id("topic-header")
             .pl(theme::CONTENT_GUTTER)
             .pr(space::S12)
+            // While the pointer is here the side panel waits to open by
+            // itself, so these buttons never move under it.
+            .on_hover(move |hovered, _, cx| {
+                nav.update(cx, |nav, _| nav.set_header_hovered(*hovered))
+            })
             .child(row1)
             .child(row2)
     }

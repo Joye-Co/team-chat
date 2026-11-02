@@ -738,8 +738,14 @@ impl Render for TopicListView {
         };
         // Title row (§8.1): 52 pt, padding 0 10 0 16, the 群 name `title`
         // 16/24, then the 32 pt 新话题 icon button.
+        // With the sidebar hidden (⌘⇧S) the traffic lights sit in this band.
+        let sidebar_hidden = self.services.nav.read(cx).sidebar_hidden;
         let header = ui::toolbar_band("topic-list-toolbar")
-            .pl(space::S16)
+            .pl(if sidebar_hidden {
+                theme::TRAFFIC_LIGHTS_INSET
+            } else {
+                space::S16
+            })
             .pr(space::S10)
             .gap(space::S8)
             .child(
