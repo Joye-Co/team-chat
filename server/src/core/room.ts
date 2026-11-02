@@ -664,11 +664,29 @@ export class GroupRoom extends DurableObject<Env> {
     });
   }
 
-  async groupUpdated(groupId: string, actorId: string, name: string): Promise<Result<{ seq: number }>> {
+  /**
+   * Renames the group in its log. `before` is the name in D1, used while the room has no name
+   * of its own yet (no rename since it was made). The same name again appends nothing, so a
+   * retry after a failed D1 write is safe. Returns the new event's seq (null = no change).
+   */
+  async groupUpdated(
+    groupId: string,
+    actorId: string,
+    name: string,
+    before: string,
+  ): Promise<Result<{ seq: number | null; lastSeq: number }>> {
     return run(async () => {
       await this.ready(groupId);
-      const event = this.commit((tx) => tx.append({ type: "group.updated", actorId, data: { name } }));
-      return { seq: event.seq };
+      const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'group_name'").toArray()[0];
+      if ((row?.value ?? before) === name) return { seq: null, lastSeq: this.lastSeq };
+      const event = this.commit((tx) => {
+        this.sql.exec(
+          "INSERT OR REPLACE INTO meta (key, value) VALUES ('group_name', ?)",
+          name,
+        );
+        return tx.append({ type: "group.updated", actorId, data: { name } });
+      });
+      return { seq: event.seq, lastSeq: this.lastSeq };
     });
   }
 

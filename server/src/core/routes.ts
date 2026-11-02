@@ -9,12 +9,22 @@ import {
   type GroupSummary,
   RedeemRequest,
   RevokeTokensRequest,
+  UpdateGroupRequest,
 } from "@chat/protocol";
 import { auditStatement } from "./audit";
 import type { AuthContext } from "./auth";
 import { newInviteCode, newToken, normalizeInviteCode, sha256Hex, timingSafeEqualString } from "./crypto";
 import { REDEEM_RATE, refundAttempt, takeAttempt } from "./ratelimit";
-import { type MemberRow, getGroup, getMember, groupMemberIds, isGroupMember, listMembers, toMember } from "./db";
+import {
+  type MemberRow,
+  getGroup,
+  getMember,
+  groupMemberIds,
+  isGroupMember,
+  listMembers,
+  toMember,
+  viewGroup,
+} from "./db";
 import { type Env, gatewayStub, roomStub } from "./env";
 import { ApiError, unwrap } from "./errors";
 import { ulid } from "./ids";
@@ -22,7 +32,20 @@ import { logger } from "./logger";
 import { memberDeactivatedHooks, registerRoute } from "./registry";
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-export const DEFAULT_GROUP_NAME = "General";
+export const DEFAULT_GROUP_NAME = "全员";
+export const MAX_GROUP_NAME_CHARS = 64;
+
+/**
+ * A group name as it is stored: trimmed, every run of whitespace (also full-width spaces and
+ * line breaks) one space, 1..64 code points. Group create and rename use the same rule.
+ */
+export function normalizeGroupName(raw: string): string {
+  const name = raw.trim().replace(/\s+/gu, " ");
+  const chars = [...name].length;
+  if (chars === 0) throw new ApiError("invalid", "name is empty");
+  if (chars > MAX_GROUP_NAME_CHARS) throw new ApiError("invalid", `name is longer than ${MAX_GROUP_NAME_CHARS} characters`);
+  return name;
+}
 
 type Wait = (p: Promise<unknown>) => void;
 
@@ -406,6 +429,7 @@ export function registerCoreRoutes(): void {
     auth: "member",
     async handler({ env, auth, body, ctx }) {
       const req = await body(CreateGroupRequest);
+      const name = normalizeGroupName(req.name);
       const a = auth as AuthContext;
       const memberIds = [...new Set([a.memberId, ...req.memberIds])];
       if (memberIds.length > 99) throw new ApiError("invalid", "too many members");
@@ -415,7 +439,7 @@ export function registerCoreRoutes(): void {
       await env.DB.batch([
         env.DB.prepare("INSERT INTO groups (id, kind, name, created_by, created_at) VALUES (?, 'group', ?, ?, ?)").bind(
           groupId,
-          req.name,
+          name,
           a.memberId,
           now,
         ),
@@ -434,6 +458,43 @@ export function registerCoreRoutes(): void {
       const summary = await summaryFor(env, a.memberId, groupId);
       ctx.waitUntil(gatewayStub(env, a.memberId).groupChanged(a.memberId, groupId).catch(() => {}));
       return summary;
+    },
+  });
+
+  registerRoute({
+    method: "PATCH",
+    path: "/v1/groups/:id",
+    auth: "member",
+    async handler({ env, auth, body, params }) {
+      const req = await body(UpdateGroupRequest);
+      const a = auth as AuthContext;
+      const group = await getGroup(env.DB, params.id);
+      if (!group) throw new ApiError("not_found", "group not found");
+      const member = await isGroupMember(env.DB, group.id, a.memberId);
+      if (!member && a.member.level !== "owner") throw new ApiError("forbidden", "not a member of this group");
+      if (group.kind === "dm") throw new ApiError("forbidden", "a DM cannot be renamed");
+      const name = normalizeGroupName(req.name);
+      // The room first: it decides whether the name changed and appends `group.updated`, which
+      // updates every client's cache. Then D1, the source of truth for GroupSummary. A retry
+      // after a failed D1 write appends nothing and writes D1 again.
+      const r = unwrap(await roomStub(env, group.id).groupUpdated(group.id, a.memberId, name, group.name));
+      if (group.name !== name) {
+        await env.DB.batch([
+          env.DB.prepare("UPDATE groups SET name = ? WHERE id = ?").bind(name, group.id),
+          auditStatement(env.DB, a, { action: "group.rename", target: group.id, details: { from: group.name, to: name } }),
+        ]);
+      }
+      if (member) return summaryFor(env, a.memberId, group.id);
+      // An owner outside the group: no read position of its own.
+      const memberIds = await groupMemberIds(env.DB, group.id);
+      const names = new Map((await listMembers(env.DB)).map((m) => [m.id, m.name]));
+      return {
+        group: viewGroup({ ...group, name }, memberIds, a.memberId, names),
+        lastSeq: r.lastSeq,
+        readSeq: 0,
+        unread: 0,
+        mentions: 0,
+      } satisfies GroupSummary;
     },
   });
 

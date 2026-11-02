@@ -31,7 +31,7 @@ describe("bootstrap", () => {
     });
     expect(ok.status).toBe(200);
     expect(ok.body.member).toMatchObject({ name: "Joye", level: "owner", kind: "human" });
-    expect(ok.body.group).toMatchObject({ name: "General", kind: "group", memberIds: [ok.body.member.id] });
+    expect(ok.body.group).toMatchObject({ name: "全员", kind: "group", memberIds: [ok.body.member.id] });
 
     const again = await api("/v1/admin/bootstrap", {
       body: { ownerName: "Eve" },
@@ -44,7 +44,7 @@ describe("bootstrap", () => {
     expect(stored.results).toHaveLength(1);
     expect(stored.results[0].token_hash).not.toContain("tc_");
 
-    // A redeemed member joins General and the owner sees it live.
+    // A redeemed member joins 全员 and the owner sees it live.
     const { c } = await Client.connect(ok.body.token);
     const inv = await api("/v1/invites", { token: ok.body.token, body: { name: "Ann", kind: "human", level: "member" } });
     const red = await api("/v1/auth/redeem", { body: { inviteCode: inv.body.code, deviceName: "mac" } });
@@ -52,7 +52,7 @@ describe("bootstrap", () => {
     expect(ev).toMatchObject({ groupId: ok.body.group.id, seq: 1, data: { memberId: red.body.member.id } });
     await c.next((f) => f.t === "directory" && f.members?.some((m: any) => m.id === red.body.member.id));
     const groups = await api("/v1/groups", { token: red.body.token });
-    expect(groups.body.map((s: any) => s.group.name)).toEqual(["General"]);
+    expect(groups.body.map((s: any) => s.group.name)).toEqual(["全员"]);
     c.close();
   });
 });
