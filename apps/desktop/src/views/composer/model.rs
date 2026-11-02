@@ -97,10 +97,16 @@ pub fn match_members(
         .collect()
 }
 
-/// The member ids a body mentions: at each `@`, the member with the longest
-/// name that follows it. When two members share that name, a picked one wins.
-/// Each id appears once, in order of first mention.
-pub fn resolve_mentions(body: &str, picked: &[MemberId], members: &[Member]) -> Vec<MemberId> {
+/// The member ids a body mentions: at each `@`, the member of the 群 (`group_members`)
+/// with the longest name that follows it. When two members share that name, a picked one
+/// wins. Each id appears once, in order of first mention. A typed `@name` of a member who is
+/// not in the 群 stays plain text: the server refuses a mention outside the 群.
+pub fn resolve_mentions(
+    body: &str,
+    picked: &[MemberId],
+    members: &[Member],
+    group_members: &[MemberId],
+) -> Vec<MemberId> {
     let mut out: Vec<MemberId> = Vec::new();
     for (i, c) in body.char_indices() {
         if !is_at(c) {
@@ -109,7 +115,12 @@ pub fn resolve_mentions(body: &str, picked: &[MemberId], members: &[Member]) -> 
         let rest = &body[i + c.len_utf8()..];
         let best = members
             .iter()
-            .filter(|m| !m.deactivated && !m.name.is_empty() && rest.starts_with(&m.name))
+            .filter(|m| {
+                !m.deactivated
+                    && !m.name.is_empty()
+                    && group_members.contains(&m.id)
+                    && rest.starts_with(&m.name)
+            })
             .max_by_key(|m| (m.name.len(), picked.contains(&m.id)));
         if let Some(m) = best
             && !out.contains(&m.id)
@@ -312,20 +323,34 @@ mod tests {
     #[test]
     fn resolves_mention_ids() {
         let members = sample();
+        let all: Vec<MemberId> = members.iter().map(|m| m.id.clone()).collect();
         assert_eq!(
-            resolve_mentions("@小王五 和 @小王，还有 @Lisa 和 @Li。@小王", &[], &members),
+            resolve_mentions(
+                "@小王五 和 @小王，还有 @Lisa 和 @Li。@小王",
+                &[],
+                &members,
+                &all
+            ),
             vec!["m-wangwu", "m-wang", "m-lisa", "m-li"]
         );
         // A removed name is no longer mentioned, even if it was picked.
-        assert!(resolve_mentions("没有提及", &["m-wang".into()], &members).is_empty());
+        assert!(resolve_mentions("没有提及", &["m-wang".into()], &members, &all).is_empty());
         // Deactivated members are not mentioned.
-        assert!(resolve_mentions("@小李", &[], &members).is_empty());
+        assert!(resolve_mentions("@小李", &[], &members, &all).is_empty());
         // Same name twice: the picked one wins.
         let mut twins = sample();
         twins.push(member("m-wang2", "小王", "运营", MemberKind::Human));
+        let mut both = all.clone();
+        both.push("m-wang2".into());
         assert_eq!(
-            resolve_mentions("@小王 你好", &["m-wang2".into()], &twins),
+            resolve_mentions("@小王 你好", &["m-wang2".into()], &twins, &both),
             vec!["m-wang2"]
+        );
+        // A typed name of a member outside the 群 is not a mention (the server refuses those).
+        let only_li = vec!["m-li".to_string()];
+        assert_eq!(
+            resolve_mentions("@Lisa 和 @Li 看看", &[], &members, &only_li),
+            vec!["m-li"]
         );
     }
 

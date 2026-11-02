@@ -357,14 +357,9 @@ impl ComposerView {
         cx.notify();
     }
 
-    fn update_mention(&mut self, text: &str, cx: &mut Context<Self>) {
-        let cursor = self.input.read(cx).cursor();
-        let Some(query) = model::mention_query(text, cursor) else {
-            self.mention = None;
-            return;
-        };
-        let group_members = self
-            .key
+    /// The member ids of the 群 this composer writes into.
+    fn group_member_ids(&self) -> Vec<MemberId> {
+        self.key
             .as_ref()
             .and_then(|k| {
                 self.services
@@ -374,7 +369,16 @@ impl ComposerView {
                     .find(|g| g.id == k.group_id)
             })
             .map(|g| g.member_ids)
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
+
+    fn update_mention(&mut self, text: &str, cx: &mut Context<Self>) {
+        let cursor = self.input.read(cx).cursor();
+        let Some(query) = model::mention_query(text, cursor) else {
+            self.mention = None;
+            return;
+        };
+        let group_members = self.group_member_ids();
         let me = self.services.me();
         let results = model::match_members(
             &self.services.provider.members(),
@@ -664,7 +668,8 @@ impl ComposerView {
             return;
         }
         let members = provider.members();
-        let mentions = model::resolve_mentions(&body, &self.picked, &members);
+        let mentions =
+            model::resolve_mentions(&body, &self.picked, &members, &self.group_member_ids());
         let files: Vec<_> = self.files.iter().map(|f| f.id.clone()).collect();
         let title =
             model::topic_title(&body).or_else(|| self.files.first().map(|f| f.name.clone()));
