@@ -123,6 +123,8 @@ impl State {
         };
         s.fill_sample();
         s.fill_cards();
+        // One muted 群, as in the mockups (the sidebar's bell-off row).
+        s.muted.insert("g-all".into());
         if signed_in {
             s.sign_in("https://chat.example.invalid".into());
         }
@@ -392,7 +394,7 @@ impl State {
                 (CODER, "进展：表单和校验已完成，正在接 Keychain。\n\n```rust\nlet entry = keyring::Entry::new(service, account)?;\nentry.set_password(&token)?;\n```", 2 * HOUR),
                 (XIAOWANG, "错误提示要区分「邀请码无效」和「连不上服务器」吗？", 90 * MIN),
                 (ME, "要区分，文案用目录里的。", 80 * MIN),
-                (CODER, "好的，已经区分。", 10 * MIN),
+                (CODER, "@Joye 好的，已经区分，你看一下。", 10 * MIN),
             ],
             1,
         );
