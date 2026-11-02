@@ -465,8 +465,14 @@ pub fn open_add_machine(
 ) -> Entity<MachineForm> {
     let form = cx.new(|cx| MachineForm::new(services, window, cx));
     let shown = form.clone();
-    window.open_dialog(cx, move |dialog, _, _| {
+    // The first field takes the focus once, as in the new-群 dialog.
+    let first = std::cell::Cell::new(true);
+    window.open_dialog(cx, move |dialog, window, cx| {
         let dialog = crate::ui::SheetExt::sheet(dialog);
+        if first.replace(false) {
+            let handle = gpui::Focusable::focus_handle(shown.read(cx).name.read(cx), cx);
+            handle.focus(window, cx);
+        }
         dialog
             .w(theme::size::DIALOG_WIDTH)
             .title(SharedString::from(s::MACHINE_ADD))
