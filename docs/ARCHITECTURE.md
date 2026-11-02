@@ -67,6 +67,9 @@ scope, so do not run `wrangler r2` commands, but Worker R2 bindings work). Secre
 
 - GPUI plus gpui-component, built with GPUI's `runtime_shaders` feature, so a full Xcode is not
   needed to build.
+- `third_party/gpui-pre` is gpui-pre 0.3.10 with two text fixes, used through `[patch.crates-io]`:
+  CJK line breaking (no line starts with closing or ends with opening punctuation) and an
+  ellipsis that fits the shaped width and trims punctuation and short word cuts before `…`.
 - chat-core runs networking on a background tokio runtime. The UI renders from the local SQLite
   cache and never waits for the network.
 

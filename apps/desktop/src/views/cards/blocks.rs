@@ -58,11 +58,13 @@ pub fn render(
 ) -> AnyElement {
     let key = part_id(message, ix);
     match block {
-        CardBlock::Text { text } => {
-            markdown::message_body(ElementId::Name(key.into()), text.clone())
-                .w_full()
-                .into_any_element()
-        }
+        CardBlock::Text { text } => markdown::message_body(
+            ElementId::Name(key.into()),
+            text.clone(),
+            &markdown::mention_targets(ctx.members, ctx.me),
+        )
+        .w_full()
+        .into_any_element(),
         CardBlock::Fields { fields } => render_fields(fields, cx),
         CardBlock::Table { columns, rows } => render_table(&key, columns, rows, cx),
         CardBlock::List { items } => render_list(&key, items, cx),
@@ -72,6 +74,7 @@ pub fn render(
         CardBlock::Code { lang, text } => markdown::message_body(
             ElementId::Name(key.into()),
             code_fence(lang.as_deref(), text),
+            &[],
         )
         .w_full()
         .into_any_element(),

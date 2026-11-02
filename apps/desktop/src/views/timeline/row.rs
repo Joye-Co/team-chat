@@ -167,6 +167,7 @@ impl TimelineView {
                 markdown::message_body(
                     ElementId::Name(format!("body-{key}").into()),
                     message.body.clone(),
+                    &markdown::mention_targets(&self.members, self.me.as_deref()),
                 )
                 .w_full()
                 .text_color(colors.text_1)
