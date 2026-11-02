@@ -290,7 +290,11 @@ impl MembersPage {
         } else {
             div().into_any_element()
         };
-        let role = m.role.clone().filter(|r| !r.trim().is_empty());
+        let role = m
+            .role
+            .as_deref()
+            .map(|r| r.split_whitespace().collect::<Vec<_>>().join(" "))
+            .filter(|r| !r.is_empty());
         widgets::table_row()
             .h(theme::size::SETTINGS_ROW)
             .py_0()
@@ -320,14 +324,9 @@ impl MembersPage {
                                     .items_baseline()
                                     .gap(space::S4)
                                     .min_w_0()
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .t_ui()
-                                            .medium()
-                                            .one_line()
-                                            .child(m.name.trim().to_string()),
-                                    )
+                                    .child(div().min_w_0().t_ui().medium().one_line().child(
+                                        m.name.split_whitespace().collect::<Vec<_>>().join(" "),
+                                    ))
                                     .when(is_me, |el| {
                                         el.child(
                                             div()
@@ -338,7 +337,9 @@ impl MembersPage {
                                         )
                                     }),
                             )
-                            .when(role.is_some() || m.is_bot(), |el| {
+                            // The 岗位 line; a bot's tile already marks it, so a
+                            // bot with no 岗位 shows no lone glyph.
+                            .when(role.is_some(), |el| {
                                 el.child(
                                     div()
                                         .flex()
@@ -536,6 +537,7 @@ impl Render for InviteForm {
             return div()
                 .flex()
                 .flex_col()
+                .pt(space::S8)
                 .gap(space::S16)
                 .child(widgets::hint(s::SHOWN_ONCE, cx))
                 .child(widgets::secret_block(
@@ -574,6 +576,7 @@ impl Render for InviteForm {
         div()
             .flex()
             .flex_col()
+            .pt(space::S8)
             .gap(space::S16)
             .child(widgets::form_input("member-name", s::NAME, &self.name, cx))
             .child(widgets::form_input("member-role", s::ROLE, &self.role, cx))
@@ -650,6 +653,7 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
             .w(theme::size::DIALOG_WIDTH)
             .title(SharedString::from(s::INVITE))
             .overlay_closable(false)
+            .close_button(false)
             .child(shown.clone())
     });
     form
@@ -800,6 +804,7 @@ impl Render for BotForm {
             return div()
                 .flex()
                 .flex_col()
+                .pt(space::S8)
                 .gap(space::S16)
                 .child(
                     div()
@@ -852,6 +857,7 @@ impl Render for BotForm {
         div()
             .flex()
             .flex_col()
+            .pt(space::S8)
             .gap(space::S16)
             .child(widgets::form_input("member-name", s::NAME, &self.name, cx))
             .child(widgets::form_input("member-role", s::ROLE, &self.role, cx))
@@ -949,6 +955,7 @@ pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> En
             .w(theme::size::DIALOG_WIDTH)
             .title(SharedString::from(s::ADD_BOT_MEMBER))
             .overlay_closable(false)
+            .close_button(false)
             .child(shown.clone())
     });
     form

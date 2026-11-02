@@ -653,6 +653,68 @@ pub fn open_profile_error(
     Ok(handle)
 }
 
+/// A settings page with one of its dialogs open, for a scene.
+fn open_with_dialog(
+    services: Services,
+    page: Page,
+    open: fn(Services, &mut gpui::Window, &mut App),
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, _) = super::open_window(services.clone(), page, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| open(services, window, cx))
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+/// 成员 with the invite dialog open.
+pub fn open_invite_dialog(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            super::members::open_invite(s, w, cx);
+        },
+        cx,
+    )
+}
+
+/// 成员 with the add-bot dialog open.
+pub fn open_bot_dialog(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            super::members::open_add_bot(s, w, cx);
+        },
+        cx,
+    )
+}
+
+/// 机器 with the add-machine dialog open.
+pub fn open_machine_dialog(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Machines,
+        |s, w, cx| {
+            super::machines::open_add_machine(s, w, cx);
+        },
+        cx,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -389,6 +389,7 @@ impl Render for MachineForm {
             return div()
                 .flex()
                 .flex_col()
+                .pt(space::S8)
                 .gap(space::S16)
                 .child(
                     div()
@@ -421,6 +422,7 @@ impl Render for MachineForm {
         div()
             .flex()
             .flex_col()
+            .pt(space::S8)
             .gap(space::S16)
             .child(widgets::form_input(
                 "machine-name",
@@ -469,6 +471,7 @@ pub fn open_add_machine(
             .w(theme::size::DIALOG_WIDTH)
             .title(SharedString::from(s::MACHINE_ADD))
             .overlay_closable(false)
+            .close_button(false)
             .child(shown.clone())
     });
     form

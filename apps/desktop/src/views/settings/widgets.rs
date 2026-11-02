@@ -533,7 +533,8 @@ pub fn choice(
     let k = theme::colors(cx);
     let id: ElementId = id.into();
     let on_pick = std::rc::Rc::new(on_pick);
-    div()
+    // The wrapper keeps the track at its own width in a stretching column.
+    let track = div()
         .flex_none()
         .h(theme::size::BUTTON_MD)
         .p(space::S2)
@@ -577,7 +578,8 @@ pub fn choice(
             .when(!disabled && !on, |b| {
                 b.on_click(move |_, window, cx| pick(ix, window, cx))
             })
-        }))
+        }));
+    div().flex().child(track)
 }
 
 /// A dialog footer (§7.12): right-aligned `md` buttons, secondary then

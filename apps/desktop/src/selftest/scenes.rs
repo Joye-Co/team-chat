@@ -139,6 +139,27 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_profile,
     },
     Scene {
+        name: "settings-invite",
+        about: "Settings: the invite dialog over 成员",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_invite_dialog,
+    },
+    Scene {
+        name: "settings-add-bot",
+        about: "Settings: the add-bot dialog over 成员",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_bot_dialog,
+    },
+    Scene {
+        name: "settings-add-machine",
+        about: "Settings: the add-machine dialog over 机器",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_machine_dialog,
+    },
+    Scene {
         name: "settings",
         about: "The settings window",
         start: Start::SignedIn,
