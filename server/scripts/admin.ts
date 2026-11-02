@@ -12,6 +12,12 @@
 //   revoke --member <id>               revoke every token of a member
 //   revoke --self                      revoke the saved owner token
 //   members                            list members (no secrets)
+//   machine --name <n> [--labels a,b]  add a machine for the daemon, save its token (mode 600)
+//   machines                           list machines and their health (no secrets)
+//   machine-revoke --machine <id>      revoke a machine token and close its link
+//   runner --bot <id> --runtime <r> [--labels a,b] [--repo-url <u> | --repo-path <p>]
+//          [--base-branch <b>] [--model <m>] [--env-allow A,B] [--disable]
+//                                      make a bot runner-backed (runs on a matching machine)
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -117,7 +123,7 @@ async function call(
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
   if (!command || command === "help" || flags.help) {
-    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 15).join("\n"));
+    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 21).join("\n"));
     return;
   }
   const envName = (str(flags, "env") ?? "local") as EnvName;
@@ -193,6 +199,49 @@ async function main() {
       for (const m of r) {
         console.log([m.id, m.kind, m.level, m.deactivated ? "deactivated" : "active", m.name, m.role ?? ""].join("\t"));
       }
+      return;
+    }
+    case "machine": {
+      const name = str(flags, "name", true) as string;
+      const labels = (str(flags, "labels") ?? "").split(",").map((l) => l.trim()).filter(Boolean);
+      const r = await call(base, "POST", "/v1/machines", { token: ownerToken(), body: { name, labels } });
+      const path = join(dir, `machine-${slug(name)}-${r.machine.id}.token`);
+      writeSecret(path, r.token);
+      console.log(`machine ${r.machine.id} (${r.machine.name})`);
+      console.log(`machine token: ${path}`);
+      return;
+    }
+    case "machines": {
+      const r = (await call(base, "GET", "/v1/machines", { token: ownerToken() })) as any[];
+      for (const m of r) {
+        const free = m.health ? `${Math.round(m.health.diskFreeBytes / 1e9)}GB free` : "";
+        const state = m.revoked ? "revoked" : m.healthy ? "healthy" : m.connected ? "connected" : "offline";
+        console.log([m.id, state, m.name, m.labels.join(","), m.daemonVersion ?? "", free, `${m.runningRuns.length} runs`].join("\t"));
+      }
+      return;
+    }
+    case "machine-revoke": {
+      const id = str(flags, "machine", true) as string;
+      await call(base, "DELETE", `/v1/machines/${id}`, { token: ownerToken() });
+      console.log(`revoked machine ${id}`);
+      return;
+    }
+    case "runner": {
+      const bot = str(flags, "bot", true) as string;
+      const list = (k: string) => (str(flags, k) ?? "").split(",").map((l) => l.trim()).filter(Boolean);
+      const repoUrl = str(flags, "repo-url");
+      const repoPath = str(flags, "repo-path");
+      const body = {
+        runtime: str(flags, "runtime", true),
+        labels: list("labels"),
+        repo: repoUrl ? { url: repoUrl } : repoPath ? { path: repoPath } : undefined,
+        baseBranch: str(flags, "base-branch"),
+        model: str(flags, "model"),
+        envAllowlist: list("env-allow"),
+        enabled: !flags.disable,
+      };
+      const r = await call(base, "PUT", `/v1/bots/${bot}/runner`, { token: ownerToken(), body });
+      console.log(`bot ${r.botId}: runtime ${r.runtime}, labels [${r.labels.join(",")}], ${r.enabled ? "enabled" : "disabled"}`);
       return;
     }
     default:

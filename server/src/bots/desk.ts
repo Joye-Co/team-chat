@@ -358,7 +358,7 @@ export class BotDesk extends DurableObject<BotsEnv> {
       const prompt = buildPrompt({
         botName: names.get(botId) ?? "bot",
         title: claim.title,
-        messages: claim.messages.filter((x) => x.body !== ""),
+        messages: claim.messages.filter((x) => x.body !== "" && x.id !== m.messageId),
         names,
         request: { authorId: m.authorId, body: m.body },
         followUps,

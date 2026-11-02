@@ -154,6 +154,7 @@ export function firstLine(text: string, max = 280): string {
 }
 
 export interface ContextMessage {
+  id?: string;
   authorId: string;
   body: string;
 }

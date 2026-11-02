@@ -48,15 +48,15 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     Date.now(),
   );
   const messages = room.sql
-    .exec<{ author_id: string; body: string }>(
-      `SELECT author_id, body FROM messages WHERE topic_id = ? AND deleted_at IS NULL
+    .exec<{ id: string; author_id: string; body: string }>(
+      `SELECT id, author_id, body FROM messages WHERE topic_id = ? AND deleted_at IS NULL
        ORDER BY created_seq DESC LIMIT ?`,
       topicId,
       CONTEXT_MESSAGES,
     )
     .toArray()
     .reverse()
-    .map((m) => ({ authorId: m.author_id, body: m.body }));
+    .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
   return { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
 });
 

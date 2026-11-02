@@ -7,21 +7,26 @@ bot members, runs a coding CLI for each run in its own folder, and streams norma
 back. **BotDesk** (one per bot member) decides what to run and turns run events into topic
 messages; it talks to MachineLink, never to the daemon.
 
-`apps/daemon/src/proto.rs` (serde) is the executable source of truth on the daemon side.
-`apps/daemon/tests/fixtures/machine/{up,down}.jsonl` hold one golden frame per line; the
-daemon test parses each one and serializes it back to an equal value. A server
-implementation must accept the same files. Conventions are those of [protocol.md](protocol.md):
+The shared types are `packages/protocol/src/machine.ts` (Zod, used by the server) and
+`crates/chat-protocol/src/machine.rs` (serde, used by the daemon through
+`apps/daemon/src/proto.rs`). `apps/daemon/tests/fixtures/machine/{up,down}.jsonl` hold one
+golden frame per line; the daemon test parses each one and serializes it back to an equal
+value, and `bun run gen:fixtures` copies them into `protocol/fixtures/machine/`, which both
+the Zod and the Rust fixture tests check. Change the doc, both type modules and the golden
+files together. Conventions are those of [protocol.md](protocol.md):
 JSON, UTF-8, camelCase, unknown fields ignored, times in ms since the epoch, IDs are ULIDs
 made by the server (except the ids below that the daemon or the CLI makes), one frame at most
 1 MiB.
 
 ## Machine token
 
-- The owner adds a machine in settings (机器). The server makes a machine member row in D1
-  (`machines`: id, name, owner, labels, token hash, created, last seen) and a token
-  `tm_` + 43 characters of base64url (32 random bytes). The server stores only the SHA-256 hex
-  digest, like member tokens. The token can be revoked; a revoked token closes the link with
-  `error.code = "unauthorized"`.
+- The owner adds a machine in settings (机器) or with `bun scripts/admin.ts machine --name
+  <n> [--labels a,b]` (the token goes to a mode-600 file, never to the terminal):
+  `POST /v1/machines`. The server makes a row in D1 (`machines`: id, name, labels, token hash,
+  created by and at, revoked at, last seen) and a token `tm_` + 43 characters of base64url
+  (32 random bytes), shown once. The server stores only the SHA-256 hex digest, like member
+  tokens. `DELETE /v1/machines/:id` revokes it: the link closes with
+  `error.code = "unauthorized"` and new upgrades get 401.
 - The daemon reads the token from `token_file` (mode 600; the daemon refuses group- or
   world-readable files) and never logs or prints it.
 
@@ -29,8 +34,9 @@ made by the server (except the ids below that the daemon or the CLI makes), one 
 
 `GET {base}/v1/machine/ws` with header `Authorization: Bearer <machine token>`. The Worker
 rejects a missing or bad token with HTTP 401 before the upgrade and routes the upgrade to the
-MachineLink of that machine. One machine has at most one live link: a new link replaces the
-old one (MachineLink closes the old socket).
+MachineLink of that machine (`idFromName(machineId)`, location hint `oc`). One machine has at
+most one live link: a new link replaces the old one (MachineLink closes the old socket with
+code 4002).
 
 Every frame has a `t` field. The first daemon frame is `hello`; the server answers `welcome`.
 Before `welcome` the daemon sends nothing else, and the server sends nothing but `welcome` or
@@ -143,13 +149,36 @@ RunEvent =
   again. When the server gets neither `run.accept` nor `run.reject` within 30 s, or the link
   drops first, it sends the same `run.assign` again on the next link.
 
+## Server side (MachineLink and BotDesk)
+
+- MachineLink stores, per run: the assign frame, its state (`assigned`, `accepted`, `done`
+  waiting for `run.session`, `closed`, `lost`), the highest stored seq and the lease. Frames
+  of one link are handled in order. Run frames go to the bot's BotDesk in batches of at most
+  100; the `ack` is sent only after BotDesk stored them, so an ack always means "stored".
+  When BotDesk cannot store a batch after 3 tries, MachineLink closes the link (code 1011) and
+  the daemon replays after the next `welcome`.
+- `run.input`, `run.approval` and `run.cancel` for a run are queued in MachineLink while the
+  link is down and sent after the next `welcome`, after the resent `run.assign` frames.
+- An alarm every 30 s (while anything is open) closes an idle link (90 s), expires leases,
+  resends unanswered `run.assign` frames after 30 s, and closes `done` runs whose
+  `run.session` did not come within an hour.
+- Run events are read leniently: a `run.event` whose `event.type` this server does not know is
+  stored as is, never rejected (a rejected frame would be resent forever).
+- BotDesk (one per bot member) picks the machine (docs/protocol.md, "Bot runs": labels,
+  runtime, health, free disk, load) and stores the run log by `(runId, seq)` idempotently.
+  `run.reject` makes it try the next qualifying machine; with none left the run fails with a
+  note in the topic.
+
 ## Leases
 
 - `run.assign.leaseMs` is the time the server waits without hearing about a run before it
   declares the run lost. Every `heartbeat` lists the daemon's runs and renews each listed
   run's lease to `now + leaseMs`; any `run.*` frame for a run also renews it.
-- When a lease expires, the server marks the run lost (BotDesk tells the topic) and leaves it
-  out of later `welcome.runs`, so the daemon stops it on reconnect.
+- When a lease expires, the server marks the run lost and leaves it out of later
+  `welcome.runs`, so the daemon stops it on reconnect. BotDesk sets the run and the topic to
+  `blocked` with one short note. A lost run is never assigned again: a new run needs a new
+  mention. Late frames of a lost or closed run are acked and dropped.
+- The server's lease is 10 minutes (`leaseMs = 600000`) and `maxDurationMs` is 2 hours.
 - The server closes the link when it hears nothing for 90 s. The daemon drops the link when
   it receives nothing for 3 heartbeat intervals and reconnects with exponential backoff
   (0.5 s to 30 s, with jitter).
@@ -186,9 +215,11 @@ later audits have the complete record:
   `X-Session-Sha256` (hex SHA-256 of the uncompressed file), `X-Session-Bytes`, plus
   `sessionUpload.headers`. The daemon adds `Authorization: Bearer <machine token>` only when
   the URL has the same origin as the configured server URL; it never sends the token
-  elsewhere. Suggested URL: `{base}/v1/machine/runs/{runId}/session` (the server checks that
-  the run belongs to this machine and stores the body in R2 under
-  `sessions/{botMemberId}/{runId}.jsonl.gz`).
+  elsewhere. The server sends `{base}/v1/machine/runs/{runId}/session` (base = the origin of
+  the daemon's WebSocket upgrade). It needs `Content-Length`, checks that the run was given to
+  this machine and stores the body in R2 under `sessions/<runId>.jsonl.gz` (metadata: bot,
+  machine, `X-Session-Sha256`, `X-Session-Bytes`). Owners download it with
+  `GET /v1/runs/:id/session`.
 - At most 100 MiB of gzip. 3 attempts (8 s, then 32 s between them) on network errors and 5xx; a 4xx
   is final. The result is the `run.session` frame (`ok: false` with `error` on failure).
 
@@ -242,3 +273,15 @@ found on PATH.
   KeepAlive, the current PATH, logs in `~/Library/Logs/<slug>-daemon/`) and loads it with
   `launchctl bootstrap gui/<uid>`; `--no-load` only writes the file.
   `daemon uninstall-service` unloads and removes it.
+
+## Tests
+
+- `cargo test -p daemon`: runtimes against fake CLIs, the golden frames, and the daemon against
+  a mock server.
+- `bun run test` in `server/`: MachineLink and BotDesk against a fake daemon (dispatch, labels,
+  health gating, leases, follow-ups, no bot loops, stall detection).
+- `bun apps/daemon/e2e/local-e2e.ts [--port 8793]`: `wrangler dev` with fresh local state plus
+  the real daemon and the fake Claude Code CLI. A member mentions the bot; the run must show
+  the acknowledgement, streamed progress, the result, the topic status `done`, the run log and
+  the uploaded session. It writes `report.json` in a temp folder and stops both processes by
+  the PIDs it started.

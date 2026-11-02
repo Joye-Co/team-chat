@@ -1,0 +1,237 @@
+#!/usr/bin/env bun
+// Local end-to-end run of a runner-backed bot: `wrangler dev` (fresh local state) plus the real
+// machine daemon with the fake Claude Code CLI. A member mentions the bot in a topic; the run
+// must show the acknowledgement, streamed progress, the result and the topic status `done`,
+// the run log and the uploaded raw session.
+//
+// Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
+// Needs: `bun install`, and the daemon binary (built here with cargo when missing).
+// Tokens stay in memory or in files of mode 600 inside the temp folder; nothing is printed.
+import { spawn, spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+
+const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../..");
+const args = process.argv.slice(2);
+const PORT = Number(args[args.indexOf("--port") + 1] || 0) || 8793;
+const KEEP = args.includes("--keep");
+const BASE = `http://127.0.0.1:${PORT}`;
+const TMP = mkdtempSync(join(tmpdir(), "bots-e2e-"));
+const LABEL = "e2e";
+const report: Record<string, unknown> = { base: BASE, tmp: TMP, steps: [] as string[] };
+const children: { name: string; pid: number; kill: () => void }[] = [];
+
+function step(s: string): void {
+  (report.steps as string[]).push(s);
+  console.log(`- ${s}`);
+}
+
+function secretFile(name: string, value: string): string {
+  const p = join(TMP, name);
+  writeFileSync(p, value, { mode: 0o600 });
+  chmodSync(p, 0o600);
+  return p;
+}
+
+function start(name: string, cmd: string, argv: string[], opts: { cwd: string; env?: Record<string, string> }) {
+  const log = join(TMP, `${name}.log`);
+  const fd = openSync(log, "a");
+  const child = spawn(cmd, argv, { cwd: opts.cwd, env: { ...process.env, ...opts.env }, stdio: ["ignore", fd, fd], detached: true });
+  if (!child.pid) throw new Error(`${name} did not start`);
+  const pid = child.pid;
+  // Stop by the PID we started (its process group: wrangler runs workerd as a child).
+  children.push({ name, pid, kill: () => { try { process.kill(-pid, "SIGTERM"); } catch { /* gone */ } } });
+  step(`${name} started (pid ${pid}, log ${log})`);
+}
+
+function stopAll(): void {
+  for (const c of children.reverse()) c.kill();
+}
+
+async function sleep(ms: number) {
+  await new Promise((r) => setTimeout(r, ms));
+}
+
+async function until<T>(what: string, fn: () => Promise<T | undefined | false> | T | undefined | false, ms = 30_000): Promise<T> {
+  const t0 = Date.now();
+  for (;;) {
+    try {
+      const v = await fn();
+      if (v) return v;
+    } catch {
+      // retry
+    }
+    if (Date.now() - t0 > ms) throw new Error(`timed out: ${what}`);
+    await sleep(200);
+  }
+}
+
+async function call(method: string, path: string, opts: { token?: string; body?: unknown; headers?: Record<string, string> } = {}) {
+  const headers: Record<string, string> = { ...(opts.headers ?? {}) };
+  if (opts.token) headers.authorization = `Bearer ${opts.token}`;
+  if (opts.body !== undefined) headers["content-type"] = "application/json";
+  const res = await fetch(`${BASE}${path}`, { method, headers, body: opts.body === undefined ? undefined : JSON.stringify(opts.body) });
+  const text = await res.text();
+  let data: any = null;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = text;
+  }
+  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status} ${data?.error?.code ?? ""}`);
+  return data;
+}
+
+async function main() {
+  const server = join(ROOT, "server");
+  const state = join(TMP, "wrangler-state");
+  const adminSecret = crypto.randomUUID();
+  // A throwaway admin secret for this fresh local state only.
+  const mig = spawnSync("bunx", ["wrangler", "d1", "migrations", "apply", "DB", "--local", "--persist-to", state], {
+    cwd: server,
+    encoding: "utf8",
+    env: { ...process.env, CI: "1" },
+  });
+  if (mig.status !== 0) throw new Error(`d1 migrations failed: ${mig.stderr?.slice(-400)}`);
+  step("local D1 migrated");
+  start(
+    "wrangler",
+    "bunx",
+    ["wrangler", "dev", "--port", String(PORT), "--inspector-port", String(PORT + 1000), "--ip", "127.0.0.1", "--persist-to", state, "--var", `ADMIN_SECRET:${adminSecret}`],
+    { cwd: server },
+  );
+  await until("server health", async () => (await fetch(`${BASE}/v1/health`)).ok, 90_000);
+  step("server is up");
+
+  // Members: owner (bootstrap), a human (invite), a runner-backed bot.
+  const boot = await call("POST", "/v1/admin/bootstrap", { headers: { "x-admin-secret": adminSecret }, body: { ownerName: "Joye" } });
+  const owner = boot.token as string;
+  const groupId = boot.group.id as string;
+  const invite = await call("POST", "/v1/invites", { token: owner, body: { name: "Alice", kind: "human", level: "member" } });
+  const alice = await call("POST", "/v1/auth/redeem", { body: { inviteCode: invite.code, deviceName: "e2e" } });
+  const bot = await call("POST", "/v1/bots", { token: owner, body: { name: "dev", role: "开发" } });
+  await call("PUT", `/v1/bots/${bot.member.id}/runner`, { token: owner, body: { runtime: "claude", labels: [LABEL] } });
+  const machine = await call("POST", "/v1/machines", { token: owner, body: { name: "e2e-mac", labels: [LABEL] } });
+  const tokenFile = secretFile("machine-token", machine.token);
+  step("owner, member, bot runner and machine made");
+
+  // The daemon with the fake Claude Code CLI.
+  const daemonBin = join(process.env.CARGO_TARGET_DIR ?? join(ROOT, "target"), "debug", "daemon");
+  if (!existsSync(daemonBin)) {
+    const b = spawnSync("cargo", ["build", "-p", "daemon"], { cwd: ROOT, stdio: "inherit" });
+    if (b.status !== 0) throw new Error("cargo build -p daemon failed");
+  }
+  const fake = join(ROOT, "apps/daemon/tests/fake/fake_claude.py");
+  chmodSync(fake, 0o755);
+  const work = join(TMP, "work");
+  const claudeHome = join(TMP, "claude-home");
+  mkdirSync(claudeHome, { recursive: true });
+  const config = join(TMP, "daemon.toml");
+  writeFileSync(
+    config,
+    [
+      `server_url = "${BASE}"`,
+      `token_file = "${tokenFile}"`,
+      `name = "e2e-mac"`,
+      `labels = ["${LABEL}"]`,
+      `work_root = "${work}"`,
+      "max_parallel_runs = 2",
+      "min_free_gb = 1",
+      "",
+      "[runtimes.claude]",
+      'kind = "claude"',
+      `command = "${fake}"`,
+      `env = { CLAUDE_CONFIG_DIR = "${claudeHome}" }`,
+      "",
+    ].join("\n"),
+  );
+  start("daemon", daemonBin, ["run", "--config", config], { cwd: TMP });
+  const healthy = await until("machine healthy", async () => {
+    const list = (await call("GET", "/v1/machines", { token: owner })) as any[];
+    return list.find((m) => m.id === machine.machine.id && m.healthy);
+  });
+  report.machine = { connected: healthy.connected, healthy: healthy.healthy, labels: healthy.labels, daemonVersion: healthy.daemonVersion };
+  step("daemon connected and healthy");
+
+  // Alice mentions the bot in a new topic of General.
+  const events: any[] = [];
+  const transients: any[] = [];
+  const ws = new WebSocket(`${BASE.replace("http", "ws")}/v1/ws`, { headers: { authorization: `Bearer ${alice.token}` } } as any);
+  ws.addEventListener("message", (e) => {
+    const f = JSON.parse(String(e.data));
+    if (f.t === "event") events.push(f.event);
+    if (f.t === "transient") transients.push(f.event);
+    if (f.t === "ack" || f.t === "welcome") events.push({ frame: f });
+  });
+  await until("socket open", () => ws.readyState === WebSocket.OPEN, 10_000);
+  ws.send(JSON.stringify({ t: "hello", protocol: 1, client: { name: "e2e", version: "0" } }));
+  await until("welcome", () => events.find((e) => e.frame?.t === "welcome"));
+  ws.send(
+    JSON.stringify({ t: "send", rid: "r1", groupId, clientMsgId: crypto.randomUUID(), body: "@dev 请总结一下 slow", mentions: [bot.member.id] }),
+  );
+  const ack = await until("send ack", () => events.find((e) => e.frame?.rid === "r1"));
+  if (!ack.frame.ok) throw new Error("send failed");
+  const topicId = ack.frame.result.message.topicId as string;
+  step(`mentioned the bot in topic ${topicId}`);
+
+  const botMsgs = () => events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id).map((e) => e.data.message);
+  const statuses = () => events.filter((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status).map((e) => e.data.status);
+  const ackMsg = await until("acknowledgement", () => botMsgs().find((m) => m.body === "收到，我来处理。"));
+  await until("topic in progress", () => statuses().includes("in_progress"));
+  step("bot acknowledged; topic in progress");
+  const progress = await until("streaming progress message", () => botMsgs().find((m) => m.streaming));
+  const done = await until("topic done", () => statuses().at(-1) === "done", 60_000);
+  const result = botMsgs().find((m) => !m.streaming && m.id !== progress.id && m.body.startsWith("reply 1:"));
+  if (!result) throw new Error("no result message");
+  const final = events.find((e) => e.type === "message.updated" && e.data.messageId === progress.id && e.data.streaming === false);
+  const deltas = transients.filter((t) => t.type === "message.delta" && t.messageId === progress.id);
+  const runs = events.filter((e) => e.type === "run.updated").map((e) => e.data.run);
+  const runId = runs[0]?.id as string;
+  step("progress streamed, result posted, topic done");
+
+  const log = await call("GET", `/v1/runs/${runId}/events`, { token: alice.token });
+  const session = await until("raw session uploaded", async () => {
+    const res = await fetch(`${BASE}/v1/runs/${runId}/session`, { headers: { authorization: `Bearer ${owner}` } });
+    return res.ok ? new Uint8Array(await res.arrayBuffer()) : undefined;
+  });
+  ws.close();
+  Object.assign(report, {
+    ok: true,
+    topicId,
+    runId,
+    acknowledgement: ackMsg.body,
+    progressDeltas: deltas.length,
+    progressFinal: final?.data.body ?? null,
+    result: result.body,
+    topicStatuses: statuses(),
+    runStatuses: runs.map((r: any) => r.status),
+    runLogEntries: log.entries.length,
+    runLogTypes: log.entries.map((e: any) => (e.t === "run.event" ? e.event.type : e.t)),
+    sessionGzipBytes: session.byteLength,
+    sessionIsGzip: session[0] === 0x1f && session[1] === 0x8b,
+    done: Boolean(done),
+  });
+  if (!report.sessionIsGzip) throw new Error("session is not gzip");
+  step("run log and raw session checked");
+}
+
+let code = 0;
+try {
+  await main();
+} catch (err) {
+  code = 1;
+  report.ok = false;
+  report.error = String(err);
+  console.error(`FAILED: ${String(err)}`);
+} finally {
+  stopAll();
+  const out = join(TMP, "report.json");
+  writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(`report: ${out}`);
+  if (!KEEP && code === 0) {
+    await sleep(500);
+    rmSync(join(TMP, "work"), { recursive: true, force: true });
+  }
+}
+process.exit(code);
