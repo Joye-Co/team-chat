@@ -760,3 +760,192 @@ async fn unknown_events_notify_flags_and_search() {
         (rid, 1, "你好")
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_page_too_large_to_read_is_fetched_again_in_smaller_pages() {
+    let server = server_with_group().await;
+    server.with(|s| {
+        let tid = s
+            .post(G1, ALICE, None, None, "a0", "root", false)
+            .1
+            .unwrap()
+            .id;
+        let long = "长".repeat(1500); // about 4.5 KB of UTF-8
+        for i in 1..=40 {
+            s.post(G1, ALICE, Some(&tid), None, &format!("a{i}"), &long, false);
+        }
+    });
+    // 100 events of 4.5 KB do not fit in 64 KiB; the engine asks for smaller pages.
+    let mut h = harness_with(server, |c| c.max_frame_bytes = 64 << 10);
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    assert_eq!(h.client.store().last_applied(G1).unwrap(), 42);
+    let limits: Vec<u64> = h
+        .server
+        .with(|s| s.frames_of("fetch"))
+        .iter()
+        .map(|f| f["limit"].as_u64().unwrap())
+        .collect();
+    println!("fetch limits: {limits:?}");
+    assert_eq!(limits.first(), Some(&100));
+    assert!(limits.iter().any(|l| *l < 25), "{limits:?}");
+    assert!(h.server.with(|s| s.accepted) <= 4, "no reconnect loop");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_write_that_keeps_failing_internally_fails_without_blocking_other_groups() {
+    const G2: &str = "01G2000000000000000000000A";
+    let server = server_with_group().await;
+    server.add_group(group(G2, &[ME, ALICE]));
+    let (t1, t2) = server.with(|s| {
+        s.fail_send_body = Some(("boom".into(), ErrorCode::Internal));
+        let t1 = s
+            .post(G1, ALICE, None, None, "a0", "r1", false)
+            .1
+            .unwrap()
+            .id;
+        let t2 = s
+            .post(G2, ALICE, None, None, "a1", "r2", false)
+            .1
+            .unwrap()
+            .id;
+        (t1, t2)
+    });
+    let mut h = harness_with(server, |c| c.write_retry_base = Duration::from_millis(20));
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    let boom = h.client.send_message(G1, &t1, "boom", vec![]).unwrap();
+    let ok = h.client.send_message(G2, &t2, "fine", vec![]).unwrap();
+    let u = next_update(&mut h.updates, "send failed", |u| {
+        matches!(u, ClientUpdate::SendFailed(_))
+    })
+    .await;
+    let ClientUpdate::SendFailed(f) = u else {
+        unreachable!()
+    };
+    assert_eq!(
+        (f.id.as_str(), f.code),
+        (boom.as_str(), ErrorCode::Internal)
+    );
+    let row = h.client.store().outbox_get(&boom).unwrap().unwrap();
+    assert_eq!(row.state, OutboxState::Failed);
+    assert_eq!(
+        h.server.with(|s| s
+            .frames_of("send")
+            .iter()
+            .filter(|f| f["body"] == "boom")
+            .count()),
+        5
+    );
+    // The other group's write went out while the failing one waited for its retries.
+    until("other group sent", || {
+        h.client.store().outbox_get(&ok).unwrap().is_none()
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_read_is_synced_only_after_the_server_confirms_it() {
+    let server = server_with_group().await;
+    let tid = server.with(|s| {
+        let tid = s
+            .post(G1, ALICE, None, None, "a0", "root", false)
+            .1
+            .unwrap()
+            .id;
+        s.post(G1, ALICE, Some(&tid), None, "a1", "m1", false);
+        tid
+    });
+    let mut h = harness_with(server, |c| c.pong_timeout = Duration::from_millis(400));
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    // A half-open socket: the read frame is written but nothing is confirmed.
+    h.server.with(|s| s.ignore_pings = true);
+    h.client.mark_topic_read(G1, &tid, 3).unwrap();
+    until("read sent", || {
+        !h.server.with(|s| s.frames_of("read")).is_empty()
+    })
+    .await;
+    until("ping sent", || {
+        !h.server.with(|s| s.frames_of("ping")).is_empty()
+    })
+    .await;
+    assert_eq!(h.client.store().unsynced_reads().unwrap().len(), 1);
+    // After the pong timeout the client reconnects and sends the read again.
+    h.server.with(|s| s.ignore_pings = false);
+    until("read synced", || {
+        h.client.store().unsynced_reads().unwrap().is_empty()
+    })
+    .await;
+    assert!(h.server.with(|s| s.accepted) >= 2);
+    assert!(h.server.with(|s| s.frames_of("read").len()) >= 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_error_frame_for_a_typing_frame_keeps_the_connection() {
+    let server = server_with_group().await;
+    let tid = server.with(|s| {
+        s.typing_error = Some(ErrorCode::Forbidden);
+        s.post(G1, ALICE, None, None, "a0", "root", false)
+            .1
+            .unwrap()
+            .id
+    });
+    let mut h = harness_with(server, |_| {});
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    h.client.typing_in(G1, &tid);
+    until("typing sent", || {
+        !h.server.with(|s| s.frames_of("typing")).is_empty()
+    })
+    .await;
+    h.client
+        .send_message(G1, &tid, "still here", vec![])
+        .unwrap();
+    next_update(&mut h.updates, "sent", |u| {
+        matches!(u, ClientUpdate::Sent { .. })
+    })
+    .await;
+    assert_eq!(h.server.with(|s| s.accepted), 1, "no reconnect");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_card_press_whose_ack_was_lost_is_not_sent_again() {
+    let server = server_with_group().await;
+    let (tid, mid) = server.with(|s| {
+        let (m, t) = s.post(G1, ALICE, None, None, "a0", "card", false);
+        (t.unwrap().id, m.id)
+    });
+    let mut h = harness_with(server, |_| {});
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    // The server applies the press, then the socket dies before the ack and the event.
+    h.server.with(|s| {
+        s.drop_acks = 1;
+        s.hide_live.insert(3);
+    });
+    let id = h.client.card_action(&mid, "approve").unwrap();
+    until("reconnected", || h.server.with(|s| s.accepted >= 2)).await;
+    until("press row gone", || {
+        h.client.store().outbox_get(&id).unwrap().is_none()
+    })
+    .await;
+    next_update(&mut h.updates, "caught up again", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(h.server.with(|s| s.frames_of("card.action").len()), 1);
+    assert_eq!(h.client.card_actions(&mid).unwrap().len(), 1);
+    let _ = tid;
+}

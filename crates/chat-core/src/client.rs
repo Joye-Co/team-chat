@@ -39,6 +39,13 @@ pub struct ClientConfig {
     pub fetch_limit: u32,
     /// `limit` of `history` requests.
     pub history_limit: u32,
+    /// Largest WebSocket message the client reads. A page of 500 events of the longest
+    /// bodies is about 50 MB, so the default is 64 MiB. A larger frame ends the session; the
+    /// engine then asks for smaller pages.
+    pub max_frame_bytes: usize,
+    /// First retry delay of a write refused with `rate_limited` or `internal`; it doubles per
+    /// attempt up to 60 s.
+    pub write_retry_base: Duration,
     /// Size limit of the downloaded-file cache (`data_dir/files`); least recently used
     /// files are removed past it. Default 2 GiB.
     pub file_cache_max_bytes: u64,
@@ -70,6 +77,8 @@ impl ClientConfig {
             backoff_max: Duration::from_secs(30),
             fetch_limit: 500,
             history_limit: 100,
+            max_frame_bytes: 64 << 20,
+            write_retry_base: Duration::from_secs(1),
             file_cache_max_bytes: 2 * 1024 * 1024 * 1024,
             drop_live_event: None,
         }

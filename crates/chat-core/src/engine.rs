@@ -37,6 +37,10 @@ const MAX_INFLIGHT_WRITES: usize = 32;
 /// so a reconnect backlog is not refused with `rate_limited` and reordered by the retries.
 const WRITE_RATE_PER_SEC: f64 = 16.0;
 const WRITE_BURST: f64 = 16.0;
+/// `internal` answers to one write before it is marked failed.
+const MAX_INTERNAL_FAILURES: u32 = 5;
+/// `internal` error frames on one connection before it reconnects.
+const MAX_INTERNAL_ERROR_FRAMES: u32 = 5;
 
 /// Token bucket for outbox writes.
 struct WritePace {
@@ -114,6 +118,10 @@ pub(crate) async fn run(
 ) {
     let mut backoff = Backoff::new(config.backoff_min, config.backoff_max);
     let mut skip_wait = true;
+    // Page sizes for the next session. A page that is too large to read is asked for
+    // again in smaller pages, so a reconnect does not repeat the same failing fetch.
+    let mut fetch_limit = config.fetch_limit.clamp(1, crate::proto::MAX_PAGE_LIMIT);
+    let mut history_limit = config.history_limit.clamp(1, crate::proto::MAX_PAGE_LIMIT);
     loop {
         if !skip_wait {
             let delay = backoff.next_delay();
@@ -136,34 +144,41 @@ pub(crate) async fn run(
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone();
-        let ws =
-            match tokio::time::timeout(config.connect_timeout, connect(&config.base_url, &token))
-                .await
-            {
-                Ok(Ok(ws)) => ws,
-                Ok(Err(ConnectError::Unauthorized)) => {
-                    warn!("token refused");
-                    shared.set_state(ConnectionState::Unauthorized);
-                    match wait(&shared, &mut cmds, None).await {
-                        WaitEnd::Stop => break,
-                        _ => {
-                            skip_wait = true;
-                            backoff.reset();
-                            continue;
-                        }
+        let ws = match tokio::time::timeout(
+            config.connect_timeout,
+            connect(&config.base_url, &token, config.max_frame_bytes),
+        )
+        .await
+        {
+            Ok(Ok(ws)) => ws,
+            Ok(Err(ConnectError::Unauthorized)) => {
+                warn!("token refused");
+                shared.set_state(ConnectionState::Unauthorized);
+                match wait(&shared, &mut cmds, None).await {
+                    WaitEnd::Stop => break,
+                    _ => {
+                        skip_wait = true;
+                        backoff.reset();
+                        continue;
                     }
                 }
-                Ok(Err(ConnectError::Other(e))) => {
-                    info!(error = %e, "connect failed");
-                    continue;
-                }
-                Err(_) => {
-                    info!("connect timed out");
-                    continue;
-                }
-            };
-        let mut session = Session::new(shared.clone(), &config);
+            }
+            Ok(Err(ConnectError::Other(e))) => {
+                info!(error = %e, "connect failed");
+                continue;
+            }
+            Err(_) => {
+                info!("connect timed out");
+                continue;
+            }
+        };
+        let mut session = Session::new(shared.clone(), &config, fetch_limit, history_limit);
         let end = session.run(ws, &mut cmds, &mut backoff).await;
+        if session.too_large {
+            fetch_limit = (fetch_limit / 4).max(1);
+            history_limit = (history_limit / 4).max(1);
+            warn!(fetch_limit, history_limit, "frame too large: smaller pages");
+        }
         shared.transient().clear_presence();
         shared.transient().clear_streams();
         match end {
@@ -243,7 +258,7 @@ pub(crate) fn ws_url(base: &str) -> String {
     format!("{rest}/v1/ws")
 }
 
-async fn connect(base: &str, token: &str) -> Result<Ws, ConnectError> {
+async fn connect(base: &str, token: &str, max_frame_bytes: usize) -> Result<Ws, ConnectError> {
     let mut req = ws_url(base)
         .into_client_request()
         .map_err(|e| ConnectError::Other(e.to_string()))?;
@@ -252,8 +267,8 @@ async fn connect(base: &str, token: &str) -> Result<Ws, ConnectError> {
     auth.set_sensitive(true);
     req.headers_mut().insert("Authorization", auth);
     let mut cfg = WebSocketConfig::default();
-    cfg.max_message_size = Some(2 << 20);
-    cfg.max_frame_size = Some(2 << 20);
+    cfg.max_message_size = Some(max_frame_bytes);
+    cfg.max_frame_size = Some(max_frame_bytes);
     match tokio_tungstenite::connect_async_with_config(req, Some(cfg), true).await {
         Ok((ws, _)) => Ok(ws),
         Err(tungstenite::Error::Http(resp))
@@ -289,6 +304,7 @@ struct Session {
     request_timeout: Duration,
     fetch_limit: u32,
     history_limit: u32,
+    write_retry_base: Duration,
     me: String,
     welcomed: bool,
     next_rid: u64,
@@ -296,6 +312,10 @@ struct Session {
     inflight_outbox: HashSet<String>,
     write_pace: WritePace,
     retry_at: HashMap<String, Instant>,
+    /// `internal` answers per outbox row on this session.
+    internal_failures: HashMap<String, u32>,
+    /// `internal` error frames on this connection.
+    internal_errors: u32,
     groups: HashMap<String, GroupSync>,
     history_inflight: HashSet<String>,
     typing_sent: HashMap<(String, String), Instant>,
@@ -303,13 +323,23 @@ struct Session {
     catching_up: BTreeSet<String>,
     next_ping: Instant,
     pong_deadline: Option<Instant>,
+    /// Pings sent and pongs received on this connection; pongs answer pings in order.
+    pings_sent: u64,
+    pongs: u64,
+    /// Reads sent but not confirmed, with the number of the pong that confirms each.
+    unconfirmed_reads: Vec<(u64, PendingRead)>,
     welcome_deadline: Instant,
     out: Vec<ClientFrame>,
     drop_live_event: Option<crate::client::DropLiveEvent>,
+    /// The session ended on a frame larger than `max_frame_bytes`.
+    too_large: bool,
+    /// The session made sync progress (caught up), so the next reconnect may start at the
+    /// shortest delay. A session that ends before that keeps the backoff growing.
+    progressed: bool,
 }
 
 impl Session {
-    fn new(shared: Arc<Shared>, c: &ClientConfig) -> Session {
+    fn new(shared: Arc<Shared>, c: &ClientConfig, fetch_limit: u32, history_limit: u32) -> Session {
         let now = Instant::now();
         Session {
             shared,
@@ -320,8 +350,9 @@ impl Session {
             ping_interval: c.ping_interval,
             pong_timeout: c.pong_timeout,
             request_timeout: c.request_timeout,
-            fetch_limit: c.fetch_limit.clamp(1, crate::proto::MAX_PAGE_LIMIT),
-            history_limit: c.history_limit.clamp(1, crate::proto::MAX_PAGE_LIMIT),
+            fetch_limit,
+            history_limit,
+            write_retry_base: c.write_retry_base,
             drop_live_event: c.drop_live_event.clone(),
             me: String::new(),
             welcomed: false,
@@ -330,14 +361,21 @@ impl Session {
             inflight_outbox: HashSet::new(),
             write_pace: WritePace::new(now),
             retry_at: HashMap::new(),
+            internal_failures: HashMap::new(),
+            internal_errors: 0,
             groups: HashMap::new(),
             history_inflight: HashSet::new(),
             typing_sent: HashMap::new(),
             catching_up: BTreeSet::new(),
             next_ping: now + c.ping_interval,
             pong_deadline: None,
+            pings_sent: 0,
+            pongs: 0,
+            unconfirmed_reads: Vec::new(),
             welcome_deadline: now + c.request_timeout,
             out: Vec::new(),
+            too_large: false,
+            progressed: false,
         }
     }
 
@@ -401,7 +439,10 @@ impl Session {
                 msg = stream.next() => {
                     let msg = match msg {
                         None => break SessionEnd::Reconnect { reason: "closed by server".into(), immediate: false },
-                        Some(Err(e)) => break SessionEnd::Reconnect { reason: format!("read: {e}"), immediate: false },
+                        Some(Err(e)) => {
+                            self.too_large = matches!(e, tungstenite::Error::Capacity(_));
+                            break SessionEnd::Reconnect { reason: format!("read: {e}"), immediate: false };
+                        }
                         Some(Ok(m)) => m,
                     };
                     let text = match msg {
@@ -416,7 +457,11 @@ impl Session {
                             continue;
                         }
                     };
-                    if let Some(end) = self.on_frame(frame, backoff) {
+                    let end = self.on_frame(frame);
+                    if std::mem::take(&mut self.progressed) {
+                        backoff.reset();
+                    }
+                    if let Some(end) = end {
                         break end;
                     }
                 }
@@ -459,6 +504,7 @@ impl Session {
         }
         if now >= self.next_ping {
             self.out.push(ClientFrame::Ping);
+            self.pings_sent += 1;
             self.next_ping = now + self.ping_interval;
             if self.pong_deadline.is_none() {
                 self.pong_deadline = Some(now + self.pong_timeout);
@@ -552,14 +598,32 @@ impl Session {
         }
     }
 
+    /// Sends a read cursor. A `read` has no ack, so the cursor is marked synced only when the
+    /// pong of a ping sent after it arrives: the server then has the frame. A cursor that a dead
+    /// socket lost stays unsynced and is sent again after the next `welcome`.
     fn send_read(&mut self, read: PendingRead) {
         self.out.push(ClientFrame::Read(ReadFrame {
             group_id: read.group_id.clone(),
             seq: read.seq,
             topic_id: read.topic_id.clone(),
         }));
-        if let Err(e) = self.shared.store.mark_read_synced(&read) {
-            warn!(error = %e, "mark read synced");
+        self.unconfirmed_reads.push((self.pings_sent + 1, read));
+        // Ping on the next tick, so the read is confirmed soon.
+        self.next_ping = self.next_ping.min(Instant::now());
+    }
+
+    fn on_pong(&mut self) {
+        self.pong_deadline = None;
+        self.pongs += 1;
+        let pongs = self.pongs;
+        let (done, wait): (Vec<_>, Vec<_>) = std::mem::take(&mut self.unconfirmed_reads)
+            .into_iter()
+            .partition(|(ping, _)| *ping <= pongs);
+        self.unconfirmed_reads = wait;
+        for (_, read) in done {
+            if let Err(e) = self.shared.store.mark_read_synced(&read) {
+                warn!(error = %e, "mark read synced");
+            }
         }
     }
 
@@ -569,8 +633,8 @@ impl Session {
     }
 
     /// Sends due outbox rows oldest first, pipelined: up to `MAX_INFLIGHT_WRITES` in flight, paced
-    /// below the server's write limit. Writes reach the server in outbox order: a row that waits
-    /// for its retry holds back the rows after it.
+    /// below the server's write limit. Writes of one group reach the server in outbox order: a row
+    /// that waits for its retry holds back the later rows of its group, not of other groups.
     fn flush_outbox(&mut self) {
         if !self.welcomed || self.inflight_outbox.len() >= MAX_INFLIGHT_WRITES {
             return;
@@ -586,6 +650,7 @@ impl Session {
         // One reaction change per message and emoji on the wire at a time, so
         // a quick add then remove reaches the server in that order.
         let mut reacting: std::collections::HashSet<(String, String)> = Default::default();
+        let mut held: HashSet<String> = HashSet::new();
         for item in items {
             if let OutboxOp::React {
                 message_id, emoji, ..
@@ -597,8 +662,20 @@ impl Session {
             if item.state != OutboxState::Pending || self.inflight_outbox.contains(&item.id) {
                 continue;
             }
+            // A card press that was sent before waits until its group caught up: if the server
+            // applied it, its `card.actioned` event removes the row instead of a second press.
+            if item.attempts > 0
+                && matches!(item.op, OutboxOp::CardAction { .. })
+                && self.catching_up.contains(item.op.group_id())
+            {
+                continue;
+            }
+            if held.contains(item.op.group_id()) {
+                continue;
+            }
             if self.retry_at.get(&item.id).is_some_and(|t| *t > now) {
-                return;
+                held.insert(item.op.group_id().to_string());
+                continue;
             }
             if self.inflight_outbox.len() >= MAX_INFLIGHT_WRITES || !self.write_pace.take(now) {
                 return;
@@ -720,7 +797,7 @@ impl Session {
         }
     }
 
-    fn on_frame(&mut self, frame: Incoming, backoff: &mut Backoff) -> Option<SessionEnd> {
+    fn on_frame(&mut self, frame: Incoming) -> Option<SessionEnd> {
         let frame = match frame {
             Incoming::Unsupported => return Some(SessionEnd::Unsupported),
             Incoming::Event(entry, notify) => {
@@ -778,7 +855,6 @@ impl Session {
                 info!(groups = groups.len(), members = members.len(), "welcome");
                 self.me = me.id.clone();
                 self.welcomed = true;
-                backoff.reset();
                 self.shared.set_state(ConnectionState::Connected);
                 self.shared.emit(ClientUpdate::DirectoryChanged);
                 for g in &out.groups_changed {
@@ -794,7 +870,7 @@ impl Session {
                     }
                 }
                 if self.catching_up.is_empty() {
-                    self.shared.emit(ClientUpdate::CaughtUp);
+                    self.caught_up();
                 }
                 if let Ok(reads) = self.shared.store.unsynced_reads() {
                     for r in reads {
@@ -852,7 +928,7 @@ impl Session {
                             g.fetch_rid = None;
                         }
                         if self.catching_up.remove(&group_id) && self.catching_up.is_empty() {
-                            self.shared.emit(ClientUpdate::CaughtUp);
+                            self.caught_up();
                         }
                     }
                     Pending::History { group_id, topic_id } => {
@@ -887,7 +963,7 @@ impl Session {
                     }
                 };
                 for g in &out.groups_removed {
-                    self.groups.remove(g);
+                    self.forget_group(g);
                 }
                 self.shared.emit(ClientUpdate::DirectoryChanged);
                 for g in &out.groups_changed {
@@ -903,16 +979,25 @@ impl Session {
                 }
             }
             ServerFrame::Error(e) => {
+                // The gateway also answers a refused frame without `rid` (read, typing, delta)
+                // with an error frame. Only an auth or protocol error, or a run of internal
+                // errors, ends the connection; the others are about one frame.
                 let code = e.error.code;
-                warn!(?code, "connection error frame");
-                return Some(match code {
-                    ErrorCode::Unauthorized => SessionEnd::Unauthorized,
-                    ErrorCode::UnsupportedProtocol => SessionEnd::Unsupported,
-                    _ => SessionEnd::Reconnect {
-                        reason: format!("error frame {code:?}"),
-                        immediate: false,
-                    },
-                });
+                warn!(?code, "error frame");
+                match code {
+                    ErrorCode::Unauthorized => return Some(SessionEnd::Unauthorized),
+                    ErrorCode::UnsupportedProtocol => return Some(SessionEnd::Unsupported),
+                    ErrorCode::Internal => {
+                        self.internal_errors += 1;
+                        if self.internal_errors >= MAX_INTERNAL_ERROR_FRAMES {
+                            return Some(SessionEnd::Reconnect {
+                                reason: "repeated internal error frames".into(),
+                                immediate: false,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
             }
             ServerFrame::Reads(f) => {
                 let received = self.received_seq(&f.group_id);
@@ -934,9 +1019,39 @@ impl Session {
                     });
                 }
             }
-            ServerFrame::Pong => self.pong_deadline = None,
+            ServerFrame::Pong => self.on_pong(),
         }
         None
+    }
+
+    /// Drops the sync state of a group I left: its pending fetches and history requests are
+    /// forgotten, so a page that arrives later does not bring back rows of the removed group.
+    fn forget_group(&mut self, group_id: &str) {
+        self.groups.remove(group_id);
+        let mut topics = Vec::new();
+        self.pending.retain(|_, (p, _)| match p {
+            Pending::Fetch { group_id: g } => g != group_id,
+            Pending::History {
+                group_id: g,
+                topic_id,
+            } if g == group_id => {
+                topics.push(topic_id.clone());
+                false
+            }
+            _ => true,
+        });
+        for t in topics {
+            self.history_inflight.remove(&t);
+        }
+        if self.catching_up.remove(group_id) && self.catching_up.is_empty() {
+            self.caught_up();
+        }
+    }
+
+    /// Catch-up after `welcome` is done: the connection is healthy, so the backoff resets.
+    fn caught_up(&mut self) {
+        self.progressed = true;
+        self.shared.emit(ClientUpdate::CaughtUp);
     }
 
     /// Newest seq of a group received on this connection, applied or buffered.
@@ -983,7 +1098,7 @@ impl Session {
                 warn!(group = %group_id, last, last_seq, "fetch ended behind the server");
             }
             if self.catching_up.remove(&group_id) && self.catching_up.is_empty() {
-                self.shared.emit(ClientUpdate::CaughtUp);
+                self.caught_up();
             }
         }
     }
@@ -1069,10 +1184,24 @@ impl Session {
             code: ErrorCode::Internal,
             message: String::new(),
         });
+        let internal_failures = if err.code == ErrorCode::Internal {
+            let n = self.internal_failures.entry(id.clone()).or_default();
+            *n += 1;
+            *n
+        } else {
+            0
+        };
         match err.code {
-            ErrorCode::RateLimited | ErrorCode::Internal => {
+            // A write that keeps failing with `internal` becomes failed below, so it does not
+            // hold back its group forever and the member can retry or discard it.
+            ErrorCode::RateLimited | ErrorCode::Internal
+                if internal_failures < MAX_INTERNAL_FAILURES =>
+            {
                 let attempts = item.attempts.clamp(0, 6) as u32;
-                let delay = Duration::from_secs(1u64 << attempts).min(Duration::from_secs(60));
+                let delay = self
+                    .write_retry_base
+                    .saturating_mul(1u32 << attempts)
+                    .min(Duration::from_secs(60));
                 self.retry_at.insert(id.clone(), Instant::now() + delay);
                 let _ = self.shared.store.outbox_set_state(
                     &id,
@@ -1102,6 +1231,8 @@ impl Session {
             }
             code => {
                 warn!(id = %id, kind = item.op.kind(), ?code, "write refused");
+                self.internal_failures.remove(&id);
+                self.retry_at.remove(&id);
                 let _ = self.shared.store.outbox_set_state(
                     &id,
                     OutboxState::Failed,
@@ -1408,8 +1539,9 @@ fn fail_search(shared: &Shared, rid: String) {
     });
 }
 
-/// Builds the notification for a server-marked event, or `None` for my own event or
-/// a muted group (the server should not mark those; this guards stale decisions).
+/// Builds the notification for a server-marked event, or `None` for my own event or a
+/// non-mention in a muted group (the server should not mark those; this guards stale
+/// decisions). A muted group still notifies mentions (docs/protocol.md, Notifications).
 fn notify_update(shared: &Shared, reason: NotifyReason, entry: &LogEntry) -> Option<ClientUpdate> {
     use crate::proto::EventData;
     let LogEntry::Known(e) = entry else {
@@ -1421,7 +1553,7 @@ fn notify_update(shared: &Shared, reason: NotifyReason, entry: &LogEntry) -> Opt
         return None;
     }
     let group = store.group(&e.group_id).ok().flatten();
-    if group.as_ref().is_some_and(|g| g.muted) {
+    if reason != NotifyReason::Mention && group.as_ref().is_some_and(|g| g.muted) {
         return None;
     }
     let (topic_id, message_id, body) = match &e.data {

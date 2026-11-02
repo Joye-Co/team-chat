@@ -271,17 +271,19 @@ async fn notifications_skip_mine_and_muted_and_artifact_events_update_the_panel(
     })
     .await;
 
-    let marked = |s: &mut mock::State, author: &str, cmid: &str| {
+    let marked_as = |s: &mut mock::State, author: &str, cmid: &str, reason: &str| {
         let seq = s.groups[G1].log.len() as u64 + 1;
         s.hide_live.insert(seq);
         let (m, _) = s.post(G1, author, Some(&tid), None, cmid, "hello", false);
         let event = s.groups[G1].log.last().unwrap().clone();
         s.broadcast(
-            &json!({"t": "event", "event": event, "notify": "message"}),
+            &json!({"t": "event", "event": event, "notify": reason}),
             None,
         );
         m.id
     };
+    let marked =
+        |s: &mut mock::State, author: &str, cmid: &str| marked_as(s, author, cmid, "message");
     let muted = |s: &mut mock::State, muted: bool| {
         let mut g = summary(group(G1, &[ME, ALICE]), s.groups[G1].log.len() as u64, 0, 0);
         g.muted = Some(muted);
@@ -295,10 +297,20 @@ async fn notifications_skip_mine_and_muted_and_artifact_events_update_the_panel(
         matches!(u, ClientUpdate::GroupChanged { .. })
     })
     .await;
-    server.with(|s| {
+    // A muted group notifies only mentions (docs/protocol.md, Notifications).
+    let mention = server.with(|s| {
         marked(s, ALICE, "a1"); // muted group: no notification
-        muted(s, false);
+        marked_as(s, ALICE, "a1m", "mention")
     });
+    let u = next_update(&mut rx, "mention", |u| matches!(u, ClientUpdate::Notify(_))).await;
+    let ClientUpdate::Notify(n) = u else {
+        unreachable!()
+    };
+    assert_eq!(
+        (n.message_id.as_deref(), n.reason),
+        (Some(mention.as_str()), NotifyReason::Mention)
+    );
+    server.with(|s| muted(s, false));
     next_update(&mut rx, "unmuted", |u| {
         matches!(u, ClientUpdate::GroupChanged { .. })
     })
@@ -1151,7 +1163,14 @@ async fn run_plans_sync_with_the_run_and_stay_in_the_cache() {
     };
     {
         let store = store_with_group(dir.path());
-        let ran = |seq: u64, run: BotRun| ev(seq, G1, ALICE, EventData::RunUpdated(RunUpdatedData { run }));
+        let ran = |seq: u64, run: BotRun| {
+            ev(
+                seq,
+                G1,
+                ALICE,
+                EventData::RunUpdated(RunUpdatedData { run }),
+            )
+        };
         let out = store
             .apply_events(
                 G1,
@@ -1170,7 +1189,10 @@ async fn run_plans_sync_with_the_run_and_stay_in_the_cache() {
         assert_eq!(store.runs("T1").unwrap()[0].plan.as_ref(), Some(&plan2));
         // An older copy (a replayed event) never brings the old plan back.
         store.store_run(&with_plan(5, Some(plan1.clone()))).unwrap();
-        assert_eq!(store.run("R1").unwrap().unwrap().plan.as_ref(), Some(&plan2));
+        assert_eq!(
+            store.run("R1").unwrap().unwrap().plan.as_ref(),
+            Some(&plan2)
+        );
     }
     // The cache keeps the plan across a restart.
     let store = Store::open(&dir.path().join("cache.sqlite3")).unwrap();
@@ -1186,7 +1208,12 @@ async fn run_plans_sync_with_the_run_and_stay_in_the_cache() {
     let client = http_client(&http, dir.path(), |_| {});
     let run = client
         .http()
-        .set_run_plan("R1", &SetRunPlanRequest { plan: plan2.clone() })
+        .set_run_plan(
+            "R1",
+            &SetRunPlanRequest {
+                plan: plan2.clone(),
+            },
+        )
         .await
         .unwrap();
     assert_eq!(run.plan.as_ref(), Some(&plan2));

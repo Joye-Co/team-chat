@@ -410,7 +410,8 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             None => err(StatusCode::NOT_FOUND, "not_found"),
         },
         (&Method::PUT, ["v1", "runs", id, "plan"]) => {
-            let r: chat_core::proto::SetRunPlanRequest = serde_json::from_value(json_body()).unwrap();
+            let r: chat_core::proto::SetRunPlanRequest =
+                serde_json::from_value(json_body()).unwrap();
             match s.runs.get_mut(*id) {
                 Some((run, _)) => {
                     run.plan = (!r.plan.is_empty()).then_some(r.plan);

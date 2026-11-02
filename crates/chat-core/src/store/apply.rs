@@ -623,6 +623,27 @@ fn apply_one(
         }
         EventData::CardActioned(d) => {
             super::ext::insert_card_action(tx, ev, d)?;
+            if ev.actor_id == me {
+                // My press reached the server: drop the sent outbox row for it, so a lost ack
+                // does not send the press again after a reconnect.
+                let row: Option<(String, Option<String>)> = tx
+                    .query_row(
+                        "SELECT id, topic_id FROM outbox
+                         WHERE kind = 'card_action' AND group_id = ?1 AND attempts > 0
+                           AND json_extract(payload, '$.message_id') = ?2
+                           AND json_extract(payload, '$.action_id') = ?3
+                         ORDER BY ord LIMIT 1",
+                        params![gid, d.message_id, d.action_id],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                if let Some((id, topic_id)) = row {
+                    tx.execute("DELETE FROM outbox WHERE id = ?1", [&id])?;
+                    if let Some(t) = topic_id {
+                        out.message_topics.insert(t);
+                    }
+                }
+            }
             out.other_events.push(ev.clone());
         }
         EventData::RunUpdated(d) => {

@@ -54,6 +54,10 @@ pub struct State {
     pub topic_update_error: Option<ErrorCode>,
     /// Ack every `search` with this error.
     pub search_error: Option<ErrorCode>,
+    /// Ack every `send` with this body with this error, without storing it.
+    pub fail_send_body: Option<(String, ErrorCode)>,
+    /// Answer every `typing` with a connection-level error frame (a frame without rid).
+    pub typing_error: Option<ErrorCode>,
     // Observations.
     pub client_frames: Vec<Value>,
     pub accepted: usize,
@@ -351,6 +355,17 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 send(tx, json!({"t": "pong"}));
             }
         }
+        "send"
+            if s.fail_send_body
+                .as_ref()
+                .is_some_and(|(b, _)| v["body"].as_str() == Some(b.as_str())) =>
+        {
+            let code = s.fail_send_body.as_ref().unwrap().1;
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": false, "error": {"code": code, "message": "boom"}}),
+            );
+        }
         "send" => {
             let cmid = v["clientMsgId"].as_str().unwrap().to_string();
             let key = (me.clone(), cmid.clone());
@@ -489,6 +504,25 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
         "search" => {
             let hits = json!([{"groupId": G, "topicId": "T", "messageId": "M", "authorId": me, "snippet": v["query"], "createdAt": 1, "seq": 1}]);
             send(tx, json!({"t": "searchResults", "rid": rid, "hits": hits}));
+        }
+        "typing" if s.typing_error.is_some() => {
+            let code = s.typing_error.unwrap();
+            send(
+                tx,
+                json!({"t": "error", "error": {"code": code, "message": "no"}}),
+            );
+        }
+        "card.action" => {
+            let data: CardActionedData = serde_json::from_value(json!({
+                "messageId": v["messageId"], "actionId": v["actionId"]
+            }))
+            .unwrap();
+            s.append(&gid, &me, EventData::CardActioned(data));
+            if s.drop_acks > 0 {
+                s.drop_acks -= 1;
+                return false;
+            }
+            send(tx, json!({"t": "ack", "rid": rid, "ok": true}));
         }
         "typing" => {
             let ev = json!({"t": "transient", "event": {"type": "typing", "groupId": gid, "topicId": v["topicId"], "memberId": me, "at": 1}});
