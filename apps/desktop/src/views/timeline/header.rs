@@ -45,7 +45,7 @@ impl TimelineView {
         .iter()
         .filter(|id| self.members.iter().any(|m| &m.id == *id))
         .count();
-        let title = crate::views::sidebar::topic_line(&topic.title);
+        let (title, untitled) = crate::views::sidebar::topic_display_title(&topic.title);
 
         let row1 = ui::toolbar_band("topic-toolbar")
             .gap(space::S8)
@@ -53,7 +53,11 @@ impl TimelineView {
                 ui::truncating("topic-title", title)
                     .flex_1()
                     .t_heading()
-                    .text_color(colors.text_1),
+                    .text_color(if untitled {
+                        colors.text_2
+                    } else {
+                        colors.text_1
+                    }),
             )
             .child(
                 div()

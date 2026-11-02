@@ -426,13 +426,7 @@ impl Sidebar {
         let context = format!("{} · {}", item.group_name, todo_reason(item, &self.members));
         let (g, t) = (item.group_id.clone(), item.topic.id.clone());
         let selected = self.services.nav.read(cx).topic.as_ref() == Some(&(g.clone(), t.clone()));
-        let title = topic_line(&item.topic.title);
-        let untitled = title.is_empty();
-        let title = if untitled {
-            nav::UNTITLED.to_string()
-        } else {
-            title
-        };
+        let (title, untitled) = topic_display_title(&item.topic.title);
         // Title and context are both cut to one line; the tooltip has both.
         let tip_title = SharedString::from(title.clone());
         let tip_detail = SharedString::from(context.clone());
@@ -520,6 +514,18 @@ fn todo_reason(item: &TodoItem, members: &[Member]) -> String {
 /// The first line of a title; newlines become spaces.
 pub fn topic_line(title: &str) -> String {
     title.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The title as every surface shows it (§15): its first line, or
+/// `（无标题）` when that is empty. The flag is `true` for the fallback,
+/// which renders in `text-2`.
+pub fn topic_display_title(title: &str) -> (String, bool) {
+    let line = topic_line(title);
+    if line.is_empty() {
+        (nav::UNTITLED.to_string(), true)
+    } else {
+        (line, false)
+    }
 }
 
 impl Render for Sidebar {

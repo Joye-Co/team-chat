@@ -650,7 +650,7 @@ impl TimelineView {
         };
         let lead_id = topic.owner_id.as_deref().unwrap_or(&topic.created_by);
         let lead = self.members.iter().find(|m| m.id == lead_id);
-        let title = crate::views::sidebar::topic_line(&topic.title);
+        let (title, untitled) = crate::views::sidebar::topic_display_title(&topic.title);
         // How far the top of row 0 is scrolled out of view: each part of
         // the block fades as it reaches the top edge, so no half-cut title
         // or meta line shows under the header (§4.4).
@@ -675,7 +675,7 @@ impl TimelineView {
                 div()
                     .relative()
                     .t_display()
-                    .text_color(colors.text_1)
+                    .text_color(if untitled { colors.text_2 } else { colors.text_1 })
                     .line_clamp(2)
                     .opacity(fade.title)
                     .child(title)
