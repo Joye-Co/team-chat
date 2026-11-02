@@ -15,6 +15,8 @@
 //! | [`overlay`] | §5, §7.12, §8.6 | popovers, menus, popup rows, toasts, banners |
 //! | [`sheet`] | §7.12 | dialogs, alerts, the switcher |
 //! | [`parts`] | §4.4, §8.5 | bands, cards, hairlines, empty states |
+//! | [`truncate`] | §15 | one cut line with the full text in a tooltip |
+//! | [`motion`] | §12 | durations, reduce motion, the busy spinner |
 //! | [`gallery`] | §16 | every component in its states (self-test scene) |
 
 pub mod avatar;
@@ -29,6 +31,7 @@ pub mod overlay;
 pub mod parts;
 pub mod rows;
 pub mod sheet;
+pub mod truncate;
 
 // The screens build from these; some are not used by every screen yet.
 #[allow(unused_imports)]
@@ -44,6 +47,7 @@ pub use controls::{
     select_trigger, text_button,
 };
 pub use icons::{AppAssets, Lucide, button_glyph, icon};
+pub use motion::spinner;
 #[allow(unused_imports)]
 pub use overlay::{
     Banner, Toast, Tone, float_surface, mention_surface, menu_row, menu_separator, menu_surface,
@@ -60,3 +64,4 @@ pub use rows::{
     unread_dot,
 };
 pub use sheet::SheetExt;
+pub use truncate::{row_tip, truncating};

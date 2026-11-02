@@ -121,18 +121,18 @@ impl NotificationsPage {
             .py_0()
             .child(div().flex_none().child(leading))
             .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .t_ui()
-                    .medium()
-                    .text_color(if prefs.muted {
-                        colors.text_2
-                    } else {
-                        colors.text_1
-                    })
-                    .one_line()
-                    .child(g.name.clone()),
+                ui::truncating(
+                    gpui::ElementId::Name(format!("notify-name-{}", g.id).into()),
+                    g.name.clone(),
+                )
+                .flex_1()
+                .t_ui()
+                .medium()
+                .text_color(if prefs.muted {
+                    colors.text_2
+                } else {
+                    colors.text_1
+                }),
             )
             .child(div().w(SEGMENTS).flex_none().child(widgets::choice(
                 SharedString::from(format!("notify-{}", g.id)),

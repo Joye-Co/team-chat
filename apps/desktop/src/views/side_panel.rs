@@ -770,14 +770,14 @@ impl SidePanel {
                 // The name identifies the member, so it keeps its width (up
                 // to 65 % of the row) and the 岗位 gives way first.
                 .child(
-                    div()
-                        .flex_shrink_0()
-                        .min_w(px(0.))
-                        .max_w(relative(0.65))
-                        .t_ui()
-                        .text_color(k.text_1)
-                        .one_line()
-                        .child(m.name.clone()),
+                    ui::truncating(
+                        gpui::ElementId::Name(format!("panel-member-{}", m.id).into()),
+                        m.name.clone(),
+                    )
+                    .flex_shrink_0()
+                    .max_w(relative(0.65))
+                    .t_ui()
+                    .text_color(k.text_1),
                 )
                 .when_some(m.role.clone().filter(|r| !r.is_empty()), |el, role| {
                     el.child(
@@ -794,7 +794,10 @@ impl SidePanel {
                             .when(m.is_bot(), |el| {
                                 el.child(ui::icon(Lucide::Bot, theme::icon::TAG, k.text_3))
                             })
-                            .child(div().min_w(px(0.)).one_line().child(role)),
+                            .child(ui::truncating(
+                                gpui::ElementId::Name(format!("panel-role-{}", m.id).into()),
+                                role,
+                            )),
                     )
                 })
         });

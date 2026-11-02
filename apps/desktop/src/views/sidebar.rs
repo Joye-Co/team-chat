@@ -417,7 +417,9 @@ impl Sidebar {
         } else {
             title
         };
-        let tip = title.clone();
+        // Title and context are both cut to one line; the tooltip has both.
+        let tip_title = SharedString::from(title.clone());
+        let tip_detail = SharedString::from(context.clone());
         ui::list_row(
             ElementId::NamedInteger("todo-row".into(), ix as u64),
             RowSurface::Sidebar,
@@ -463,7 +465,9 @@ impl Sidebar {
                         .child(context),
                 ),
         )
-        .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+        .tooltip(move |window, cx| {
+            ui::row_tip(tip_title.clone(), tip_detail.clone()).build(window, cx)
+        })
         .on_click(cx.listener(move |this, _, _, cx| {
             let (g, t) = (g.clone(), t.clone());
             this.services

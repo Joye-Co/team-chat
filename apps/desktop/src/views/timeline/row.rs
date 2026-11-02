@@ -232,15 +232,12 @@ impl TimelineView {
                 .items_center()
                 .gap(space::S8)
                 .child(
-                    div()
+                    ui::truncating("sender-name", name)
                         .flex_shrink(1.)
-                        .min_w(px(0.))
                         .max_w(px(160.))
                         .t_body()
                         .semibold()
-                        .text_color(colors.text_1)
-                        .one_line()
-                        .child(name),
+                        .text_color(colors.text_1),
                 )
                 .when_some(
                     author

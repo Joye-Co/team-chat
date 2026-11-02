@@ -13,7 +13,7 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
     uniform_list,
 };
-use gpui_component::{menu::ContextMenuExt as _, tooltip::Tooltip};
+use gpui_component::menu::ContextMenuExt as _;
 
 use crate::{
     app::{Changes, Place, Services},
@@ -482,7 +482,7 @@ impl TopicListView {
         } else {
             (title, false)
         };
-        let tip = SharedString::from(title.clone());
+        let tip_title = SharedString::from(title.clone());
         let preview = match self.typing_text(&topic.id) {
             Some(t) => t,
             None => {
@@ -497,6 +497,8 @@ impl TopicListView {
                 }
             }
         };
+        // Title and preview are both cut to one line; the tooltip has both.
+        let tip_detail = SharedString::from(preview.to_string());
         let (g, t) = (row.group_id.clone(), topic.id.clone());
         let menu_services = self.services.clone();
         let menu_topic = topic.clone();
@@ -589,7 +591,9 @@ impl TopicListView {
                                 .children(trailing),
                         ),
                 )
-                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .tooltip(move |window, cx| {
+                    ui::row_tip(tip_title.clone(), tip_detail.clone()).build(window, cx)
+                })
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let (g, t) = (g.clone(), t.clone());
                     this.services
@@ -663,12 +667,9 @@ impl Render for TopicListView {
             .pr(space::S10)
             .gap(space::S8)
             .child(
-                div()
+                ui::truncating("topic-list-title", self.title.clone())
                     .flex_1()
-                    .min_w(px(0.))
-                    .t_title()
-                    .one_line()
-                    .child(self.title.clone()),
+                    .t_title(),
             )
             .when(is_group, |el| {
                 el.child(

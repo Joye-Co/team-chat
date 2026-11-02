@@ -49,13 +49,10 @@ impl TimelineView {
         let row1 = ui::toolbar_band("topic-toolbar")
             .gap(space::S8)
             .child(
-                div()
+                ui::truncating("topic-title", title)
                     .flex_1()
-                    .min_w(px(0.))
                     .t_heading()
-                    .text_color(colors.text_1)
-                    .one_line()
-                    .child(title),
+                    .text_color(colors.text_1),
             )
             .child(
                 div()
@@ -127,7 +124,7 @@ impl TimelineView {
                 .items_center()
                 .gap(space::S4)
                 .child(ui::icon(Lucide::Hash, theme::icon::CHIP, colors.text_3))
-                .child(div().min_w(px(0.)).one_line().child(group_name))
+                .child(ui::truncating("topic-group-name", group_name))
                 .into_any_element(),
         ];
         if let Some(status) = self.header_status(topic, cx) {
