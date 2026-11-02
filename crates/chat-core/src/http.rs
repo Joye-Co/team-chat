@@ -2,9 +2,10 @@
 //! on a tokio runtime such as [`crate::background`] or [`crate::Client::spawn`].
 
 use crate::proto::{
-    CreateBotRequest, CreateBotResponse, CreateGroupRequest, CreateInviteRequest, CreateInviteResponse,
-    AddGroupMemberRequest, CreateDmRequest, ErrorCode, ErrorResponse, GroupSummary, HealthResponse, Member, MemberKind,
-    MemberLevel, RedeemRequest, RedeemResponse, RevokeTokensRequest, RevokeTokensResponse,
+    AddGroupMemberRequest, CreateBotRequest, CreateBotResponse, CreateDmRequest,
+    CreateGroupRequest, CreateInviteRequest, CreateInviteResponse, ErrorCode, ErrorResponse,
+    GroupSummary, HealthResponse, Member, MemberKind, MemberLevel, RedeemRequest, RedeemResponse,
+    RevokeTokensRequest, RevokeTokensResponse,
 };
 use reqwest::{Method, StatusCode};
 use serde::{Serialize, de::DeserializeOwned};
@@ -17,7 +18,11 @@ pub enum ApiError {
     Network(String),
     /// The server answered with an error body.
     #[error("server error {status} {code:?}: {message}")]
-    Server { status: u16, code: ErrorCode, message: String },
+    Server {
+        status: u16,
+        code: ErrorCode,
+        message: String,
+    },
     /// The server answered with a status and a body that is not an error body.
     #[error("unexpected response status {status}")]
     Unexpected { status: u16 },
@@ -39,8 +44,10 @@ impl ApiError {
         }
     }
     pub fn is_unauthorized(&self) -> bool {
-        matches!(self, ApiError::Server { status: 401, .. } | ApiError::Unexpected { status: 401 })
-            || self.code() == Some(ErrorCode::Unauthorized)
+        matches!(
+            self,
+            ApiError::Server { status: 401, .. } | ApiError::Unexpected { status: 401 }
+        ) || self.code() == Some(ErrorCode::Unauthorized)
     }
 }
 
@@ -83,7 +90,11 @@ impl HttpClient {
     }
 
     pub fn with_token(&self, token: Option<String>) -> HttpClient {
-        HttpClient { base: self.base.clone(), token, http: self.http.clone() }
+        HttpClient {
+            base: self.base.clone(),
+            token,
+            http: self.http.clone(),
+        }
     }
 
     pub fn base(&self) -> &str {
@@ -112,24 +123,35 @@ impl HttpClient {
             return serde_json::from_slice(&bytes).map_err(|e| ApiError::Decode(e.to_string()));
         }
         match serde_json::from_slice::<ErrorResponse>(&bytes) {
-            Ok(er) => Err(ApiError::Server { status: status.as_u16(), code: er.error.code, message: er.error.message }),
+            Ok(er) => Err(ApiError::Server {
+                status: status.as_u16(),
+                code: er.error.code,
+                message: er.error.message,
+            }),
             Err(_) if status == StatusCode::UNAUTHORIZED => Err(ApiError::Server {
                 status: 401,
                 code: ErrorCode::Unauthorized,
                 message: String::new(),
             }),
-            Err(_) => Err(ApiError::Unexpected { status: status.as_u16() }),
+            Err(_) => Err(ApiError::Unexpected {
+                status: status.as_u16(),
+            }),
         }
     }
 
     pub async fn health(&self) -> ApiResult<HealthResponse> {
-        self.call::<(), _>(Method::GET, "/v1/health", None, false).await
+        self.call::<(), _>(Method::GET, "/v1/health", None, false)
+            .await
     }
 
     /// Exchanges an invite code for a token. The caller stores the token in a [`crate::TokenStore`].
     pub async fn redeem(&self, invite_code: &str, device_name: &str) -> ApiResult<RedeemResponse> {
-        let body = RedeemRequest { invite_code: invite_code.to_string(), device_name: device_name.to_string() };
-        self.call(Method::POST, "/v1/auth/redeem", Some(&body), false).await
+        let body = RedeemRequest {
+            invite_code: invite_code.to_string(),
+            device_name: device_name.to_string(),
+        };
+        self.call(Method::POST, "/v1/auth/redeem", Some(&body), false)
+            .await
     }
 
     pub async fn me(&self) -> ApiResult<Member> {
@@ -137,21 +159,39 @@ impl HttpClient {
     }
 
     pub async fn members(&self) -> ApiResult<Vec<Member>> {
-        self.call::<(), _>(Method::GET, "/v1/members", None, true).await
+        self.call::<(), _>(Method::GET, "/v1/members", None, true)
+            .await
     }
 
     pub async fn groups(&self) -> ApiResult<Vec<GroupSummary>> {
-        self.call::<(), _>(Method::GET, "/v1/groups", None, true).await
+        self.call::<(), _>(Method::GET, "/v1/groups", None, true)
+            .await
     }
 
     pub async fn create_group(&self, name: &str, member_ids: &[String]) -> ApiResult<GroupSummary> {
-        let body = CreateGroupRequest { name: name.to_string(), member_ids: member_ids.to_vec() };
-        self.call(Method::POST, "/v1/groups", Some(&body), true).await
+        let body = CreateGroupRequest {
+            name: name.to_string(),
+            member_ids: member_ids.to_vec(),
+        };
+        self.call(Method::POST, "/v1/groups", Some(&body), true)
+            .await
     }
 
-    pub async fn add_group_member(&self, group_id: &str, member_id: &str) -> ApiResult<GroupSummary> {
-        let body = AddGroupMemberRequest { member_id: member_id.to_string() };
-        self.call(Method::POST, &format!("/v1/groups/{}/members", enc(group_id)), Some(&body), true).await
+    pub async fn add_group_member(
+        &self,
+        group_id: &str,
+        member_id: &str,
+    ) -> ApiResult<GroupSummary> {
+        let body = AddGroupMemberRequest {
+            member_id: member_id.to_string(),
+        };
+        self.call(
+            Method::POST,
+            &format!("/v1/groups/{}/members", enc(group_id)),
+            Some(&body),
+            true,
+        )
+        .await
     }
 
     pub async fn remove_group_member(&self, group_id: &str, member_id: &str) -> ApiResult<()> {
@@ -168,7 +208,9 @@ impl HttpClient {
 
     /// Finds or creates the DM with a member.
     pub async fn dm(&self, member_id: &str) -> ApiResult<GroupSummary> {
-        let body = CreateDmRequest { member_id: member_id.to_string() };
+        let body = CreateDmRequest {
+            member_id: member_id.to_string(),
+        };
         self.call(Method::POST, "/v1/dms", Some(&body), true).await
     }
 
@@ -180,20 +222,37 @@ impl HttpClient {
         level: MemberLevel,
         role: Option<&str>,
     ) -> ApiResult<CreateInviteResponse> {
-        let body = CreateInviteRequest { name: name.to_string(), kind, level, role: role.map(str::to_string) };
-        self.call(Method::POST, "/v1/invites", Some(&body), true).await
+        let body = CreateInviteRequest {
+            name: name.to_string(),
+            kind,
+            level,
+            role: role.map(str::to_string),
+        };
+        self.call(Method::POST, "/v1/invites", Some(&body), true)
+            .await
     }
 
     /// Owner only. The returned token is a secret: never log it.
     pub async fn create_bot(&self, name: &str, role: Option<&str>) -> ApiResult<CreateBotResponse> {
-        let body = CreateBotRequest { name: name.to_string(), role: role.map(str::to_string) };
+        let body = CreateBotRequest {
+            name: name.to_string(),
+            role: role.map(str::to_string),
+        };
         self.call(Method::POST, "/v1/bots", Some(&body), true).await
     }
 
     /// Revokes tokens: with no arguments, the token of this client.
-    pub async fn revoke(&self, member_id: Option<&str>, all: bool) -> ApiResult<RevokeTokensResponse> {
-        let body = RevokeTokensRequest { member_id: member_id.map(str::to_string), all: all.then_some(true) };
-        self.call(Method::POST, "/v1/tokens/revoke", Some(&body), true).await
+    pub async fn revoke(
+        &self,
+        member_id: Option<&str>,
+        all: bool,
+    ) -> ApiResult<RevokeTokensResponse> {
+        let body = RevokeTokensRequest {
+            member_id: member_id.map(str::to_string),
+            all: all.then_some(true),
+        };
+        self.call(Method::POST, "/v1/tokens/revoke", Some(&body), true)
+            .await
     }
 }
 

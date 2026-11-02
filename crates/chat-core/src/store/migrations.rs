@@ -37,7 +37,9 @@ CREATE TABLE groups (
   unread INTEGER NOT NULL DEFAULT 0,
   mentions INTEGER NOT NULL DEFAULT 0,
   summary_seq INTEGER NOT NULL DEFAULT 0,
-  last_activity_at INTEGER NOT NULL DEFAULT 0
+  last_activity_at INTEGER NOT NULL DEFAULT 0,
+  muted INTEGER NOT NULL DEFAULT 0,
+  notify TEXT
 );
 CREATE INDEX groups_by_activity ON groups(last_activity_at DESC);
 CREATE TABLE sync_state (
@@ -55,7 +57,11 @@ CREATE TABLE topics (
   last_seq INTEGER NOT NULL,
   message_count INTEGER NOT NULL,
   last_activity_at INTEGER NOT NULL,
-  history_complete INTEGER NOT NULL DEFAULT 0
+  history_complete INTEGER NOT NULL DEFAULT 0,
+  owner_id TEXT,
+  waiting_on TEXT NOT NULL DEFAULT '[]',
+  last_message_at INTEGER,
+  raw TEXT NOT NULL
 );
 CREATE INDEX topics_by_activity ON topics(group_id, last_seq DESC);
 CREATE TABLE messages (
@@ -70,7 +76,9 @@ CREATE TABLE messages (
   created_at INTEGER NOT NULL,
   edited_at INTEGER,
   deleted_at INTEGER,
-  streaming INTEGER NOT NULL DEFAULT 0
+  streaming INTEGER NOT NULL DEFAULT 0,
+  kind TEXT NOT NULL DEFAULT 'text',
+  raw TEXT NOT NULL
 );
 CREATE INDEX messages_by_topic ON messages(topic_id, created_seq);
 CREATE INDEX messages_by_group ON messages(group_id, created_seq);
@@ -79,6 +87,7 @@ CREATE TABLE read_cursors (
   topic_id TEXT NOT NULL DEFAULT '',
   seq INTEGER NOT NULL,
   synced INTEGER NOT NULL DEFAULT 0,
+  following INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (group_id, topic_id)
 );
 CREATE TABLE outbox (

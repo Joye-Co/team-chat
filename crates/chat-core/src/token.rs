@@ -89,7 +89,10 @@ pub struct KeychainTokenStore {
 #[cfg(target_os = "macos")]
 impl KeychainTokenStore {
     pub fn new(service: impl Into<String>, account: impl Into<String>) -> Self {
-        KeychainTokenStore { service: service.into(), account: account.into() }
+        KeychainTokenStore {
+            service: service.into(),
+            account: account.into(),
+        }
     }
 }
 
@@ -101,17 +104,23 @@ impl TokenStore for KeychainTokenStore {
     fn load(&self) -> Result<Option<String>, TokenStoreError> {
         use security_framework::passwords::get_generic_password;
         match get_generic_password(&self.service, &self.account) {
-            Ok(bytes) => Ok(Some(
-                String::from_utf8(bytes).map_err(|_| TokenStoreError::Keychain("token is not UTF-8".into()))?,
-            )),
+            Ok(bytes) => {
+                Ok(Some(String::from_utf8(bytes).map_err(|_| {
+                    TokenStoreError::Keychain("token is not UTF-8".into())
+                })?))
+            }
             Err(e) if e.code() == ERR_SEC_ITEM_NOT_FOUND => Ok(None),
             Err(e) => Err(TokenStoreError::Keychain(e.to_string())),
         }
     }
 
     fn save(&self, token: &str) -> Result<(), TokenStoreError> {
-        security_framework::passwords::set_generic_password(&self.service, &self.account, token.as_bytes())
-            .map_err(|e| TokenStoreError::Keychain(e.to_string()))
+        security_framework::passwords::set_generic_password(
+            &self.service,
+            &self.account,
+            token.as_bytes(),
+        )
+        .map_err(|e| TokenStoreError::Keychain(e.to_string()))
     }
 
     fn clear(&self) -> Result<(), TokenStoreError> {

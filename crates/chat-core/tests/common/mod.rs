@@ -12,10 +12,8 @@ pub fn member(id: &str, name: &str) -> Member {
         id: id.into(),
         kind: MemberKind::Human,
         name: name.into(),
-        role: None,
         level: MemberLevel::Member,
-        avatar_url: None,
-        deactivated: None,
+        ..Default::default()
     }
 }
 
@@ -31,7 +29,14 @@ pub fn group(id: &str, members: &[&str]) -> Group {
 }
 
 pub fn summary(g: Group, last_seq: u64, read_seq: u64, unread: u64) -> GroupSummary {
-    GroupSummary { group: g, last_seq, read_seq, unread, mentions: 0 }
+    GroupSummary {
+        group: g,
+        last_seq,
+        read_seq,
+        unread,
+        mentions: 0,
+        ..Default::default()
+    }
 }
 
 pub fn topic(id: &str, group_id: &str, root: &str, seq: u64) -> Topic {
@@ -45,10 +50,18 @@ pub fn topic(id: &str, group_id: &str, root: &str, seq: u64) -> Topic {
         root_message_id: root.into(),
         last_seq: seq,
         message_count: 1,
+        ..Default::default()
     }
 }
 
-pub fn message(id: &str, group_id: &str, topic_id: &str, author: &str, seq: u64, body: &str) -> Message {
+pub fn message(
+    id: &str,
+    group_id: &str,
+    topic_id: &str,
+    author: &str,
+    seq: u64,
+    body: &str,
+) -> Message {
     Message {
         id: id.into(),
         client_msg_id: format!("c-{id}"),
@@ -59,22 +72,36 @@ pub fn message(id: &str, group_id: &str, topic_id: &str, author: &str, seq: u64,
         mentions: vec![],
         created_seq: seq,
         created_at: 1_000 + seq,
-        edited_at: None,
-        deleted_at: None,
-        streaming: None,
+        ..Default::default()
     }
 }
 
 pub fn ev(seq: u64, group_id: &str, actor: &str, data: EventData) -> Event {
-    Event { seq, group_id: group_id.into(), at: 1_000 + seq, actor_id: actor.into(), data }
+    Event {
+        seq,
+        group_id: group_id.into(),
+        at: 1_000 + seq,
+        actor_id: actor.into(),
+        data,
+    }
 }
 
 pub fn topic_created(seq: u64, group_id: &str, t: Topic) -> Event {
-    ev(seq, group_id, ME, EventData::TopicCreated(TopicCreatedData { topic: t }))
+    ev(
+        seq,
+        group_id,
+        ME,
+        EventData::TopicCreated(TopicCreatedData { topic: t }),
+    )
 }
 
 pub fn msg_created(seq: u64, m: Message) -> Event {
     let g = m.group_id.clone();
     let a = m.author_id.clone();
-    ev(seq, &g, &a, EventData::MessageCreated(MessageCreatedData { message: m }))
+    ev(
+        seq,
+        &g,
+        &a,
+        EventData::MessageCreated(MessageCreatedData { message: m }),
+    )
 }

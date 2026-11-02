@@ -17,7 +17,11 @@ impl Default for Backoff {
 
 impl Backoff {
     pub fn new(min: Duration, max: Duration) -> Self {
-        Backoff { attempt: 0, min, max }
+        Backoff {
+            attempt: 0,
+            min,
+            max,
+        }
     }
 
     /// The delay before the next attempt. Each call doubles the base delay up to `max`;
@@ -55,8 +59,16 @@ mod tests {
         for _ in 0..12 {
             let base = b.base();
             let d = b.next_delay();
-            assert!(d >= Duration::from_millis(500) && d <= Duration::from_secs(30), "{d:?}");
-            assert!(d >= base.mul_f64(0.5).max(Duration::from_millis(500)).min(Duration::from_secs(30)));
+            assert!(
+                d >= Duration::from_millis(500) && d <= Duration::from_secs(30),
+                "{d:?}"
+            );
+            assert!(
+                d >= base
+                    .mul_f64(0.5)
+                    .max(Duration::from_millis(500))
+                    .min(Duration::from_secs(30))
+            );
             assert!(d <= base.mul_f64(1.5).min(Duration::from_secs(30)));
             bases.push(base.as_millis());
         }

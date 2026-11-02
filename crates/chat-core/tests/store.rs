@@ -44,7 +44,9 @@ fn migrations_are_named_and_run_once() {
         })
         .unwrap();
     assert_eq!(names, vec!["core-1"]);
-    let mode: String = s.with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0))).unwrap();
+    let mode: String = s
+        .with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
+        .unwrap();
     assert_eq!(mode, "wal");
 }
 
@@ -81,7 +83,12 @@ fn events_apply_in_seq_order_and_stop_at_gaps() {
     assert_eq!(out.applied, 3);
     assert_eq!(out.gap_at, None);
     assert_eq!(s.last_applied(G1).unwrap(), 5);
-    let bodies: Vec<String> = s.messages_before("T1", None, 10).unwrap().into_iter().map(|m| m.body).collect();
+    let bodies: Vec<String> = s
+        .messages_before("T1", None, 10)
+        .unwrap()
+        .into_iter()
+        .map(|m| m.body)
+        .collect();
     assert_eq!(bodies, vec!["root", "three", "four", "five"]);
     assert_eq!(s.cursors().unwrap().get(G1), Some(&5));
 }
@@ -116,15 +123,54 @@ fn edits_and_deletes_keep_rows() {
         G1,
         &[
             msg_created(3, message("M3", G1, "T1", ALICE, 3, "draft")),
-            ev(4, G1, ALICE, EventData::MessageUpdated(MessageUpdatedData { message_id: "M3".into(), body: "final".into(), edited_at: 9, streaming: false })),
-            ev(5, G1, ALICE, EventData::MessageDeleted(MessageDeletedData { message_id: "M1".into(), deleted_at: 10 })),
-            ev(6, G1, ME, EventData::TopicUpdated(TopicUpdatedData {
-                topic_id: "T1".into(),
-                title: Some("new".into()),
-                status: Some(TopicStatus::WaitingReview),
-            })),
-            ev(7, G1, ME, EventData::GroupUpdated(GroupUpdatedData { name: "renamed".into() })),
-            ev(8, G1, ME, EventData::GroupMemberRemoved(GroupMemberChangeData { member_id: ALICE.into() })),
+            ev(
+                4,
+                G1,
+                ALICE,
+                EventData::MessageUpdated(MessageUpdatedData {
+                    message_id: "M3".into(),
+                    body: "final".into(),
+                    edited_at: 9,
+                    streaming: false,
+                    ..Default::default()
+                }),
+            ),
+            ev(
+                5,
+                G1,
+                ALICE,
+                EventData::MessageDeleted(MessageDeletedData {
+                    message_id: "M1".into(),
+                    deleted_at: 10,
+                }),
+            ),
+            ev(
+                6,
+                G1,
+                ME,
+                EventData::TopicUpdated(TopicUpdatedData {
+                    topic_id: "T1".into(),
+                    title: Some("new".into()),
+                    status: Some(TopicStatus::WaitingReview),
+                    ..Default::default()
+                }),
+            ),
+            ev(
+                7,
+                G1,
+                ME,
+                EventData::GroupUpdated(GroupUpdatedData {
+                    name: "renamed".into(),
+                }),
+            ),
+            ev(
+                8,
+                G1,
+                ME,
+                EventData::GroupMemberRemoved(GroupMemberChangeData {
+                    member_id: ALICE.into(),
+                }),
+            ),
         ],
     )
     .unwrap();
@@ -135,12 +181,26 @@ fn edits_and_deletes_keep_rows() {
     // A late edit does not bring a deleted body back.
     s.apply_events(
         G1,
-        &[ev(9, G1, ME, EventData::MessageUpdated(MessageUpdatedData { message_id: "M1".into(), body: "x".into(), edited_at: 11, streaming: false }))],
+        &[ev(
+            9,
+            G1,
+            ME,
+            EventData::MessageUpdated(MessageUpdatedData {
+                message_id: "M1".into(),
+                body: "x".into(),
+                edited_at: 11,
+                streaming: false,
+                ..Default::default()
+            }),
+        )],
     )
     .unwrap();
     assert_eq!(s.message("M1").unwrap().unwrap().body, "");
     let t = s.topic("T1").unwrap().unwrap().topic;
-    assert_eq!((t.title.as_str(), t.status), ("new", TopicStatus::WaitingReview));
+    assert_eq!(
+        (t.title.as_str(), t.status),
+        ("new", TopicStatus::WaitingReview)
+    );
     let g = s.group(G1).unwrap().unwrap();
     assert_eq!(g.group.name, "renamed");
     assert_eq!(g.group.member_ids, vec![ME.to_string()]);
@@ -151,7 +211,12 @@ fn unread_counts_follow_summary_events_and_cursors() {
     let dir = tempfile::tempdir().unwrap();
     let s = Store::open(&dir.path().join("c.sqlite3")).unwrap();
     // The server says 1 unread up to seq 2; seq 1..2 are not cached yet.
-    s.apply_welcome(&member(ME, "me"), &[], &[summary(group(G1, &[ME, ALICE]), 2, 1, 1)]).unwrap();
+    s.apply_welcome(
+        &member(ME, "me"),
+        &[],
+        &[summary(group(G1, &[ME, ALICE]), 2, 1, 1)],
+    )
+    .unwrap();
     s.apply_events(
         G1,
         &[
@@ -164,21 +229,187 @@ fn unread_counts_follow_summary_events_and_cursors() {
     assert_eq!(s.group(G1).unwrap().unwrap().unread, 1);
     let mut m = message("M3", G1, "T1", ALICE, 3, "hi @me");
     m.mentions = vec![ME.into()];
-    s.apply_events(G1, &[msg_created(3, m), msg_created(4, message("M4", G1, "T1", ME, 4, "mine"))]).unwrap();
+    s.apply_events(
+        G1,
+        &[
+            msg_created(3, m),
+            msg_created(4, message("M4", G1, "T1", ME, 4, "mine")),
+        ],
+    )
+    .unwrap();
     let g = s.group(G1).unwrap().unwrap();
     assert_eq!((g.unread, g.mentions), (2, 1));
     assert_eq!(s.topics(G1, 10).unwrap()[0].unread, 2);
-    // Reading the topic to seq 3 clears it and moves the group cursor to the newest seq.
-    let sent = s.mark_read(G1, Some("T1"), 3).unwrap();
-    assert_eq!(sent, Some(4));
+    // Reading the topic to seq 3 clears it; the group cursor stays.
+    let sent = s.mark_read(G1, Some("T1"), 3).unwrap().unwrap();
+    assert_eq!((sent.topic_id.as_deref(), sent.seq), (Some("T1"), 3));
     let g = s.group(G1).unwrap().unwrap();
-    assert_eq!((g.unread, g.mentions, g.read_seq), (0, 0, 4));
-    assert_eq!(s.unsynced_group_reads().unwrap(), vec![(G1.to_string(), 4)]);
-    s.mark_read_synced(G1, 4).unwrap();
-    assert!(s.unsynced_group_reads().unwrap().is_empty());
-    // A cursor never moves back.
-    assert_eq!(s.mark_read(G1, None, 2).unwrap(), None);
+    assert_eq!((g.unread, g.mentions, g.read_seq), (0, 0, 1));
+    assert_eq!(s.unsynced_reads().unwrap(), vec![sent.clone()]);
+    s.mark_read_synced(&sent).unwrap();
+    assert!(s.unsynced_reads().unwrap().is_empty());
+    // A cursor never moves back, and never past the newest seq.
+    assert_eq!(s.mark_read(G1, Some("T1"), 2).unwrap(), None);
+    let g_read = s.mark_read(G1, None, 99).unwrap().unwrap();
+    assert_eq!(g_read.seq, 4);
     assert_eq!(s.group(G1).unwrap().unwrap().read_seq, 4);
+}
+
+#[test]
+fn deleted_and_system_messages_are_not_unread_and_lose_content() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    let mut sys = message("MS", G1, "T1", ALICE, 3, "alice joined");
+    sys.kind = Some(MessageKind::System);
+    s.apply_events(
+        G1,
+        &[
+            msg_created(3, sys),
+            msg_created(4, message("M4", G1, "T1", ALICE, 4, "secret")),
+            ev(
+                5,
+                G1,
+                ALICE,
+                EventData::MessageDeleted(MessageDeletedData {
+                    message_id: "M4".into(),
+                    deleted_at: 10,
+                }),
+            ),
+        ],
+    )
+    .unwrap();
+    let t = s.topic("T1").unwrap().unwrap();
+    assert_eq!(t.unread, 0);
+    let m4 = s.message("M4").unwrap().unwrap();
+    assert!(m4.body.is_empty() && m4.card.is_none() && m4.is_deleted());
+    let raw: String = s
+        .with_reader(|c| c.query_row("SELECT raw FROM messages WHERE id = 'M4'", [], |r| r.get(0)))
+        .unwrap();
+    assert!(!raw.contains("secret"));
+}
+
+#[test]
+fn welcome_topic_states_and_reads_frames_set_per_topic_positions() {
+    let (_d, s) = open();
+    s.apply_events(
+        G1,
+        &[
+            topic_created(1, G1, topic("TA", G1, "MA", 1)),
+            msg_created(2, message("MA", G1, "TA", ALICE, 2, "a")),
+            topic_created(3, G1, topic("TB", G1, "MB", 3)),
+            msg_created(4, message("MB", G1, "TB", ALICE, 4, "b")),
+        ],
+    )
+    .unwrap();
+    // The server lists only TB (unread, followed): TA is read up to lastSeq.
+    let mut sum = summary(group(G1, &[ME, ALICE]), 4, 0, 1);
+    sum.topics = Some(vec![TopicState {
+        topic_id: "TB".into(),
+        read_seq: 0,
+        unread: 1,
+        mentions: 0,
+        following: Some(true),
+    }]);
+    s.apply_welcome(&member(ME, "me"), &[], &[sum]).unwrap();
+    let rows = s.topics(G1, 10).unwrap();
+    let get = |id: &str| rows.iter().find(|t| t.topic.id == id).unwrap().clone();
+    assert_eq!((get("TA").unread, get("TA").following), (0, false));
+    assert_eq!((get("TB").unread, get("TB").following), (1, true));
+    // A reads frame from another device reads TB.
+    s.apply_reads(
+        &ReadsFrame {
+            group_id: G1.into(),
+            read_seq: 0,
+            unread: 0,
+            mentions: 0,
+            topics: vec![TopicState {
+                topic_id: "TB".into(),
+                read_seq: 4,
+                unread: 0,
+                mentions: 0,
+                following: Some(true),
+            }],
+        },
+        4,
+    )
+    .unwrap();
+    assert_eq!(s.topic("TB").unwrap().unwrap().unread, 0);
+    assert_eq!(s.group(G1).unwrap().unwrap().unread, 0);
+    // A later message counts once.
+    s.apply_events(
+        G1,
+        &[msg_created(5, message("M5", G1, "TA", ALICE, 5, "new"))],
+    )
+    .unwrap();
+    assert_eq!(s.group(G1).unwrap().unwrap().unread, 1);
+    assert_eq!(s.topic("TA").unwrap().unwrap().unread, 1);
+}
+
+#[test]
+fn unknown_log_entries_keep_seq_order() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    let out = s
+        .apply_log(
+            G1,
+            &[
+                chat_core::LogEntry::Known(msg_created(
+                    4,
+                    message("M4", G1, "T1", ALICE, 4, "after"),
+                )),
+                chat_core::LogEntry::Unknown {
+                    seq: 3,
+                    group_id: G1.into(),
+                    event_type: "future.thing".into(),
+                },
+            ],
+        )
+        .unwrap();
+    assert_eq!((out.applied, out.last_applied), (2, 4));
+    assert!(s.message("M4").unwrap().is_some());
+}
+
+#[test]
+fn topic_updates_keep_v1_fields() {
+    let (_d, s) = open();
+    seed_topic(&s);
+    s.apply_events(
+        G1,
+        &[ev(
+            3,
+            G1,
+            ME,
+            EventData::TopicUpdated(TopicUpdatedData {
+                topic_id: "T1".into(),
+                status: Some(TopicStatus::WaitingAnswer),
+                waiting_on: Some(vec![ALICE.into()]),
+                owner_id: Some(Some(ME.into())),
+                ..Default::default()
+            }),
+        )],
+    )
+    .unwrap();
+    let t = s.topic("T1").unwrap().unwrap().topic;
+    assert_eq!(t.waiting_on, Some(vec![ALICE.to_string()]));
+    assert_eq!(t.owner_id, Some(Some(ME.to_string())));
+    assert_eq!(t.last_message_at, Some(1_002));
+    s.apply_events(
+        G1,
+        &[ev(
+            4,
+            G1,
+            ME,
+            EventData::TopicUpdated(TopicUpdatedData {
+                topic_id: "T1".into(),
+                owner_id: Some(None),
+                ..Default::default()
+            }),
+        )],
+    )
+    .unwrap();
+    let t = s.topic("T1").unwrap().unwrap().topic;
+    assert_eq!(t.owner_id, Some(None));
+    assert_eq!(t.waiting_on, Some(vec![ALICE.to_string()]));
 }
 
 #[test]
@@ -195,9 +426,15 @@ fn per_topic_reads_do_not_clear_other_topics() {
     )
     .unwrap();
     assert_eq!(s.group(G1).unwrap().unwrap().unread, 2);
-    assert_eq!(s.mark_read(G1, Some("TB"), 4).unwrap(), None);
+    assert!(s.mark_read(G1, Some("TB"), 4).unwrap().is_some());
     let topics = s.topics(G1, 10).unwrap();
-    assert_eq!(topics.iter().map(|t| (t.topic.id.as_str(), t.unread)).collect::<Vec<_>>(), vec![("TB", 0), ("TA", 1)]);
+    assert_eq!(
+        topics
+            .iter()
+            .map(|t| (t.topic.id.as_str(), t.unread))
+            .collect::<Vec<_>>(),
+        vec![("TB", 0), ("TA", 1)]
+    );
     assert_eq!(s.group(G1).unwrap().unwrap().unread, 1);
 }
 
@@ -216,7 +453,19 @@ fn perf_insert_10k_and_query_window_of_200() {
     let (_d, s) = open();
     seed_topic(&s);
     let events: Vec<Event> = (3..10_003)
-        .map(|seq| msg_created(seq, message(&format!("M{seq:06}"), G1, "T1", ALICE, seq, &format!("message number {seq} 你好"))))
+        .map(|seq| {
+            msg_created(
+                seq,
+                message(
+                    &format!("M{seq:06}"),
+                    G1,
+                    "T1",
+                    ALICE,
+                    seq,
+                    &format!("message number {seq} 你好"),
+                ),
+            )
+        })
         .collect();
     let t0 = Instant::now();
     for chunk in events.chunks(500) {

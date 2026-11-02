@@ -1,0 +1,619 @@
+//! Writes of server state: directory, read states and the group event log.
+
+use super::rows::{self, clear_deleted, enum_str};
+use super::{ApplyOutcome, DirectoryOutcome, LogEntry, Store, StoreResult};
+use crate::proto::{
+    Event, EventData, GroupMemberChangeData, GroupSummary, Member, Message, MessageDeletedData,
+    MessageKind, MessageUpdatedData, ReadsFrame, SendResult, Topic, TopicState, TopicUpdatedData,
+};
+use rusqlite::{OptionalExtension, Transaction, params};
+use std::collections::BTreeSet;
+
+impl Store {
+    /// Applies a `welcome`: me, all members, and the full list of my groups.
+    /// Groups that are not in the list are removed from the cache.
+    pub fn apply_welcome(
+        &self,
+        me: &Member,
+        members: &[Member],
+        groups: &[GroupSummary],
+    ) -> StoreResult<DirectoryOutcome> {
+        self.with_writer(|tx| {
+            tx.execute(
+                "INSERT INTO meta (key, value) VALUES ('me', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [serde_json::to_string(me)?],
+            )?;
+            let mut out = DirectoryOutcome { members_changed: true, ..Default::default() };
+            upsert_member(tx, me)?;
+            for m in members {
+                upsert_member(tx, m)?;
+            }
+            let keep: BTreeSet<&str> = groups.iter().map(|g| g.group.id.as_str()).collect();
+            let existing: Vec<String> = {
+                let mut st = tx.prepare("SELECT id FROM groups")?;
+                st.query_map([], |r| r.get(0))?.collect::<Result<_, _>>()?
+            };
+            for id in existing {
+                if !keep.contains(id.as_str()) {
+                    remove_group(tx, &id)?;
+                    out.groups_removed.push(id);
+                }
+            }
+            for g in groups {
+                upsert_group_summary(tx, &me.id, g)?;
+                out.groups_changed.insert(g.group.id.clone());
+            }
+            Ok(out)
+        })
+    }
+
+    /// Applies a `directory` frame.
+    pub fn apply_directory(
+        &self,
+        members: Option<&[Member]>,
+        groups: Option<&[GroupSummary]>,
+        removed: Option<&[String]>,
+    ) -> StoreResult<DirectoryOutcome> {
+        let me = self.me_id()?.unwrap_or_default();
+        self.with_writer(|tx| {
+            let mut out = DirectoryOutcome::default();
+            if let Some(ms) = members {
+                for m in ms {
+                    upsert_member(tx, m)?;
+                    if m.id == me {
+                        tx.execute(
+                            "UPDATE meta SET value = ?1 WHERE key = 'me'",
+                            [serde_json::to_string(m)?],
+                        )?;
+                    }
+                }
+                out.members_changed = !ms.is_empty();
+            }
+            for g in groups.unwrap_or_default() {
+                upsert_group_summary(tx, &me, g)?;
+                out.groups_changed.insert(g.group.id.clone());
+            }
+            for id in removed.unwrap_or_default() {
+                remove_group(tx, id)?;
+                out.groups_removed.push(id.clone());
+            }
+            Ok(out)
+        })
+    }
+
+    /// Applies a `reads` frame. `received_seq` is the newest seq of the group this
+    /// connection received before the frame (applied or buffered): the totals include
+    /// those events, so only newer events count locally.
+    pub fn apply_reads(&self, f: &ReadsFrame, received_seq: u64) -> StoreResult<()> {
+        self.with_writer(|tx| {
+            tx.execute(
+                "UPDATE groups SET read_seq = MAX(read_seq, ?2), unread = ?3, mentions = ?4,
+                   summary_seq = MAX(summary_seq, ?5) WHERE id = ?1",
+                params![f.group_id, f.read_seq, f.unread, f.mentions, received_seq],
+            )?;
+            for t in &f.topics {
+                upsert_topic_state(tx, &f.group_id, t)?;
+            }
+            Ok(())
+        })
+    }
+
+    /// Stores my state of one topic (the ack of `topic.follow`).
+    pub fn apply_topic_state(&self, group_id: &str, t: &TopicState) -> StoreResult<()> {
+        self.with_writer(|tx| upsert_topic_state(tx, group_id, t))
+    }
+
+    /// Applies events of one group strictly in seq order: events at or below
+    /// `lastApplied` are skipped, and application stops at the first gap.
+    /// `events` may be in any order and contain duplicates.
+    pub fn apply_events(&self, group_id: &str, events: &[Event]) -> StoreResult<ApplyOutcome> {
+        let entries: Vec<LogEntry> = events.iter().cloned().map(LogEntry::Known).collect();
+        self.apply_log(group_id, &entries)
+    }
+
+    /// Like `apply_events`, for log entries that may include events this client cannot
+    /// read: those only advance `lastApplied`.
+    pub fn apply_log(&self, group_id: &str, entries: &[LogEntry]) -> StoreResult<ApplyOutcome> {
+        let me = self.me_id()?.unwrap_or_default();
+        let mut sorted: Vec<&LogEntry> = entries
+            .iter()
+            .filter(|e| e.group_id() == group_id)
+            .collect();
+        sorted.sort_by_key(|e| e.seq());
+        self.with_writer(|tx| {
+            let mut last: u64 = tx
+                .query_row(
+                    "SELECT last_applied FROM sync_state WHERE group_id = ?1",
+                    [group_id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .unwrap_or(0);
+            let mut out = ApplyOutcome::default();
+            for entry in sorted {
+                let seq = entry.seq();
+                if seq <= last {
+                    continue;
+                }
+                if seq != last + 1 {
+                    out.gap_at = Some(seq);
+                    break;
+                }
+                if let LogEntry::Known(ev) = entry {
+                    apply_one(tx, &me, ev, &mut out)?;
+                }
+                last = seq;
+                out.applied += 1;
+            }
+            if out.applied > 0 {
+                tx.execute(
+                    "INSERT INTO sync_state (group_id, last_applied) VALUES (?1, ?2)
+                     ON CONFLICT(group_id) DO UPDATE SET last_applied = excluded.last_applied",
+                    params![group_id, last],
+                )?;
+                tx.execute(
+                    "UPDATE groups SET last_seq = MAX(last_seq, ?2) WHERE id = ?1",
+                    params![group_id, last],
+                )?;
+            }
+            out.last_applied = last;
+            Ok(out)
+        })
+    }
+
+    /// Stores messages from a `history` answer. Rows already in the cache stay as they
+    /// are (events keep them current). Marks the topic complete when `has_more` is false.
+    pub fn insert_history(
+        &self,
+        topic_id: &str,
+        messages: &[Message],
+        has_more: bool,
+    ) -> StoreResult<usize> {
+        self.with_writer(|tx| {
+            let mut n = 0;
+            for m in messages {
+                n += insert_message_if_absent(tx, m)?;
+            }
+            if !has_more {
+                tx.execute(
+                    "UPDATE topics SET history_complete = 1 WHERE id = ?1",
+                    [topic_id],
+                )?;
+            }
+            Ok(n)
+        })
+    }
+
+    /// Records a successful `send` ack: stores the message and topic when they are not
+    /// cached yet, and removes the outbox row. Counters change only through events.
+    pub fn ack_send(&self, client_msg_id: &str, result: &SendResult) -> StoreResult<()> {
+        self.with_writer(|tx| {
+            insert_message_if_absent(tx, &result.message)?;
+            if let Some(t) = &result.topic {
+                insert_topic(tx, t, result.message.created_at, false)?;
+            }
+            tx.execute("DELETE FROM outbox WHERE id = ?1", [client_msg_id])?;
+            Ok(())
+        })
+    }
+}
+
+fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
+    tx.execute(
+        "INSERT INTO members (id, kind, name, role, level, avatar_url, deactivated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+         ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, role = excluded.role,
+           level = excluded.level, avatar_url = excluded.avatar_url, deactivated = excluded.deactivated",
+        params![
+            m.id,
+            enum_str(&m.kind)?,
+            m.name,
+            m.role(),
+            enum_str(&m.level)?,
+            m.avatar_url(),
+            m.is_deactivated()
+        ],
+    )?;
+    Ok(())
+}
+
+fn upsert_topic_state(tx: &Transaction<'_>, group_id: &str, t: &TopicState) -> StoreResult<()> {
+    tx.execute(
+        "INSERT INTO read_cursors (group_id, topic_id, seq, synced, following) VALUES (?1, ?2, ?3, 1, ?4)
+         ON CONFLICT(group_id, topic_id) DO UPDATE SET following = excluded.following,
+           synced = CASE WHEN excluded.seq >= read_cursors.seq THEN 1 ELSE read_cursors.synced END,
+           seq = MAX(read_cursors.seq, excluded.seq)",
+        params![group_id, t.topic_id, t.read_seq, t.is_following()],
+    )?;
+    Ok(())
+}
+
+fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> StoreResult<()> {
+    let g = &s.group;
+    // A local read cursor may be ahead of the server (a read not yet sent).
+    let local_read: u64 = tx
+        .query_row(
+            "SELECT seq FROM read_cursors WHERE group_id = ?1 AND topic_id = ''",
+            [&g.id],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(0);
+    tx.execute(
+        "INSERT INTO groups (id, kind, name, member_ids, created_by, created_at, last_seq, read_seq, unread, mentions,
+                             summary_seq, muted, notify)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?7, ?11, ?12)
+         ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, member_ids = excluded.member_ids,
+           created_by = excluded.created_by, created_at = excluded.created_at,
+           last_seq = MAX(groups.last_seq, excluded.last_seq), read_seq = excluded.read_seq,
+           unread = excluded.unread, mentions = excluded.mentions, summary_seq = excluded.summary_seq,
+           muted = excluded.muted, notify = excluded.notify",
+        params![
+            g.id,
+            enum_str(&g.kind)?,
+            g.name,
+            serde_json::to_string(&g.member_ids)?,
+            g.created_by,
+            g.created_at,
+            s.last_seq,
+            s.read_seq.max(local_read),
+            s.unread,
+            s.mentions,
+            s.muted.unwrap_or(false),
+            match &s.notify {
+                Some(n) => Some(enum_str(n)?),
+                None => None,
+            }
+        ],
+    )?;
+    if let Some(states) = &s.topics {
+        // Listed topics carry their state; a topic that is not listed has nothing
+        // unread up to lastSeq and is not followed.
+        let listed: BTreeSet<&str> = states.iter().map(|t| t.topic_id.as_str()).collect();
+        let cached: Vec<String> = {
+            let mut st = tx.prepare("SELECT id FROM topics WHERE group_id = ?1")?;
+            st.query_map([&g.id], |r| r.get(0))?
+                .collect::<Result<_, _>>()?
+        };
+        for t in states {
+            upsert_topic_state(tx, &g.id, t)?;
+        }
+        for tid in cached.iter().filter(|t| !listed.contains(t.as_str())) {
+            upsert_topic_state(
+                tx,
+                &g.id,
+                &TopicState {
+                    topic_id: tid.clone(),
+                    read_seq: s.last_seq,
+                    unread: 0,
+                    mentions: 0,
+                    following: None,
+                },
+            )?;
+        }
+    }
+    let unsynced: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM read_cursors WHERE group_id = ?1 AND synced = 0)",
+        [&g.id],
+        |r| r.get(0),
+    )?;
+    if local_read > s.read_seq || unsynced {
+        recount_unread(tx, me, &g.id)?;
+    }
+    Ok(())
+}
+
+fn remove_group(tx: &Transaction<'_>, id: &str) -> StoreResult<()> {
+    for sql in [
+        "DELETE FROM messages WHERE group_id = ?1",
+        "DELETE FROM topics WHERE group_id = ?1",
+        "DELETE FROM sync_state WHERE group_id = ?1",
+        "DELETE FROM read_cursors WHERE group_id = ?1",
+        "DELETE FROM outbox WHERE group_id = ?1",
+        "DELETE FROM groups WHERE id = ?1",
+    ] {
+        tx.execute(sql, [id])?;
+    }
+    Ok(())
+}
+
+/// Recomputes the unread and mention totals of a group from the cache and the cursors,
+/// with the rule of docs/protocol.md (not mine, not deleted, not system).
+pub(super) fn recount_unread(tx: &Transaction<'_>, me: &str, group_id: &str) -> StoreResult<()> {
+    let sql = format!(
+        "UPDATE groups SET
+           unread = (SELECT COUNT(*) FROM messages m
+                     LEFT JOIN read_cursors rc ON rc.group_id = m.group_id AND rc.topic_id = m.topic_id
+                     WHERE m.group_id = ?1 AND {cond}
+                       AND m.created_seq > groups.read_seq AND m.created_seq > COALESCE(rc.seq, 0)),
+           mentions = (SELECT COUNT(*) FROM messages m
+                     LEFT JOIN read_cursors rc ON rc.group_id = m.group_id AND rc.topic_id = m.topic_id
+                     WHERE m.group_id = ?1 AND {cond} AND m.mentions LIKE ?3
+                       AND m.created_seq > groups.read_seq AND m.created_seq > COALESCE(rc.seq, 0)),
+           summary_seq = last_seq
+         WHERE id = ?1",
+        cond = rows::UNREAD_COND
+    );
+    tx.execute(&sql, params![group_id, me, format!("%\"{me}\"%")])?;
+    Ok(())
+}
+
+fn insert_message_if_absent(tx: &Transaction<'_>, m: &Message) -> StoreResult<usize> {
+    Ok(tx.execute(
+        &format!(
+            "INSERT OR IGNORE INTO messages ({}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+            rows::MESSAGE_COLS
+        ),
+        rusqlite::params_from_iter(rows::message_values(m)?),
+    )?)
+}
+
+/// Inserts a topic snapshot; with `replace`, a cached row takes the snapshot's fields.
+fn insert_topic(tx: &Transaction<'_>, t: &Topic, activity: u64, replace: bool) -> StoreResult<()> {
+    let conflict = if replace {
+        "ON CONFLICT(id) DO UPDATE SET title = excluded.title, status = excluded.status,
+           last_seq = MAX(topics.last_seq, excluded.last_seq),
+           message_count = MAX(topics.message_count, excluded.message_count),
+           last_activity_at = MAX(topics.last_activity_at, excluded.last_activity_at),
+           owner_id = excluded.owner_id, waiting_on = excluded.waiting_on,
+           last_message_at = COALESCE(MAX(topics.last_message_at, excluded.last_message_at), excluded.last_message_at),
+           raw = excluded.raw"
+    } else {
+        "ON CONFLICT(id) DO NOTHING"
+    };
+    tx.execute(
+        &format!(
+            "INSERT INTO topics (id, group_id, title, status, created_by, created_at, root_message_id, last_seq,
+                                 message_count, last_activity_at, owner_id, waiting_on, last_message_at, raw)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14) {conflict}"
+        ),
+        params![
+            t.id,
+            t.group_id,
+            t.title,
+            enum_str(&t.status)?,
+            t.created_by,
+            t.created_at,
+            t.root_message_id,
+            t.last_seq,
+            t.message_count,
+            activity.max(t.created_at),
+            t.owner_id.clone().flatten(),
+            serde_json::to_string(t.waiting_on.as_deref().unwrap_or_default())?,
+            t.last_message_at,
+            serde_json::to_string(t)?
+        ],
+    )?;
+    Ok(())
+}
+
+fn update_message_raw(
+    tx: &Transaction<'_>,
+    id: &str,
+    f: impl FnOnce(&mut Message),
+) -> StoreResult<()> {
+    let raw: Option<String> = tx
+        .query_row("SELECT raw FROM messages WHERE id = ?1", [id], |r| r.get(0))
+        .optional()?;
+    if let Some(raw) = raw {
+        let mut m: Message = serde_json::from_str(&raw)?;
+        f(&mut m);
+        tx.execute(
+            "UPDATE messages SET raw = ?2 WHERE id = ?1",
+            params![id, serde_json::to_string(&m)?],
+        )?;
+    }
+    Ok(())
+}
+
+fn apply_one(
+    tx: &Transaction<'_>,
+    me: &str,
+    ev: &Event,
+    out: &mut ApplyOutcome,
+) -> StoreResult<()> {
+    let gid = &ev.group_id;
+    match &ev.data {
+        EventData::TopicCreated(d) => {
+            let mut t = d.topic.clone();
+            t.last_seq = t.last_seq.max(ev.seq);
+            insert_topic(tx, &t, ev.at, true)?;
+            touch_group(tx, gid, ev.at)?;
+            out.topic_list_changed = true;
+        }
+        EventData::TopicUpdated(TopicUpdatedData {
+            topic_id,
+            title,
+            status,
+            waiting_on,
+            owner_id,
+            last_message_at,
+        }) => {
+            let status = match status {
+                Some(s) => Some(enum_str(s)?),
+                None => None,
+            };
+            let waiting = match waiting_on {
+                Some(w) => Some(serde_json::to_string(w)?),
+                None => None,
+            };
+            tx.execute(
+                "UPDATE topics SET title = COALESCE(?2, title), status = COALESCE(?3, status),
+                   waiting_on = COALESCE(?4, waiting_on),
+                   owner_id = CASE WHEN ?5 THEN ?6 ELSE owner_id END,
+                   last_message_at = CASE WHEN ?7 THEN ?8 ELSE last_message_at END,
+                   last_seq = MAX(last_seq, ?9)
+                 WHERE id = ?1",
+                params![
+                    topic_id,
+                    title,
+                    status,
+                    waiting,
+                    owner_id.is_some(),
+                    owner_id.clone().flatten(),
+                    last_message_at.is_some(),
+                    last_message_at,
+                    ev.seq
+                ],
+            )?;
+            out.topic_list_changed = true;
+        }
+        EventData::MessageCreated(d) => {
+            let m = &d.message;
+            tx.execute(
+                &format!(
+                    "INSERT INTO messages ({}) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
+                     ON CONFLICT(id) DO UPDATE SET body = excluded.body, mentions = excluded.mentions,
+                       created_seq = excluded.created_seq, edited_at = excluded.edited_at,
+                       deleted_at = excluded.deleted_at, streaming = excluded.streaming,
+                       kind = excluded.kind, raw = excluded.raw",
+                    rows::MESSAGE_COLS
+                ),
+                rusqlite::params_from_iter(rows::message_values(m)?),
+            )?;
+            // The topic snapshot in topic.created already counts its root message.
+            let root: bool = tx
+                .query_row(
+                    "SELECT root_message_id = ?2 FROM topics WHERE id = ?1",
+                    params![m.topic_id, m.id],
+                    |r| r.get(0),
+                )
+                .optional()?
+                .unwrap_or(false);
+            tx.execute(
+                "UPDATE topics SET message_count = CASE WHEN ?4 THEN MAX(message_count, 1) ELSE message_count + 1 END,
+                   last_seq = MAX(last_seq, ?2), last_activity_at = MAX(last_activity_at, ?3),
+                   last_message_at = MAX(COALESCE(last_message_at, 0), ?3)
+                 WHERE id = ?1",
+                params![m.topic_id, ev.seq, m.created_at, root],
+            )?;
+            let system = m.kind == Some(MessageKind::System);
+            if m.author_id != me && !system && !m.is_deleted() {
+                // Unread totals: only events newer than the server summary count.
+                let mention = m.mentions.iter().any(|x| x == me) as u64;
+                let topic_read: u64 = tx
+                    .query_row(
+                        "SELECT seq FROM read_cursors WHERE group_id = ?1 AND topic_id = ?2",
+                        params![gid, m.topic_id],
+                        |r| r.get(0),
+                    )
+                    .optional()?
+                    .unwrap_or(0);
+                tx.execute(
+                    "UPDATE groups SET unread = unread + 1, mentions = mentions + ?3
+                     WHERE id = ?1 AND ?2 > summary_seq AND ?2 > read_seq AND ?2 > ?4",
+                    params![gid, m.created_seq, mention, topic_read],
+                )?;
+            }
+            if m.author_id == me {
+                out.my_client_msg_ids.push(m.client_msg_id.clone());
+                tx.execute(
+                    "DELETE FROM outbox WHERE id = ?1 AND kind = 'send'",
+                    [&m.client_msg_id],
+                )?;
+            }
+            touch_group(tx, gid, m.created_at)?;
+            out.created.push((m.topic_id.clone(), m.author_id.clone()));
+            out.message_topics.insert(m.topic_id.clone());
+            out.topic_list_changed = true;
+            out.group_changed = true;
+        }
+        EventData::MessageUpdated(MessageUpdatedData {
+            message_id,
+            body,
+            edited_at,
+            streaming,
+            attachments,
+            artifact_refs,
+            card,
+        }) => {
+            out.replaced_bodies.push(message_id.clone());
+            let topic: Option<String> = tx
+                .query_row(
+                    "UPDATE messages SET body = ?2, edited_at = ?3, streaming = ?4 WHERE id = ?1 AND deleted_at IS NULL
+                     RETURNING topic_id",
+                    params![message_id, body, edited_at, streaming],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(t) = topic {
+                if attachments.is_some() || artifact_refs.is_some() || card.is_some() {
+                    update_message_raw(tx, message_id, |m| {
+                        if let Some(a) = attachments {
+                            m.attachments = Some(a.clone());
+                        }
+                        if let Some(a) = artifact_refs {
+                            m.artifact_refs = Some(a.clone());
+                        }
+                        if let Some(c) = card {
+                            m.card = Some(c.clone());
+                        }
+                    })?;
+                }
+                tx.execute(
+                    "UPDATE topics SET last_seq = MAX(last_seq, ?2) WHERE id = ?1",
+                    params![t, ev.seq],
+                )?;
+                out.message_topics.insert(t);
+            }
+        }
+        EventData::MessageDeleted(MessageDeletedData {
+            message_id,
+            deleted_at,
+        }) => {
+            out.replaced_bodies.push(message_id.clone());
+            let topic: Option<String> = tx
+                .query_row(
+                    "UPDATE messages SET body = '', deleted_at = ?2, streaming = 0 WHERE id = ?1 RETURNING topic_id",
+                    params![message_id, deleted_at],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(t) = topic {
+                update_message_raw(tx, message_id, clear_deleted)?;
+                out.message_topics.insert(t);
+            }
+        }
+        EventData::GroupUpdated(d) => {
+            tx.execute(
+                "UPDATE groups SET name = ?2 WHERE id = ?1",
+                params![gid, d.name],
+            )?;
+            out.group_changed = true;
+        }
+        EventData::GroupMemberAdded(GroupMemberChangeData { member_id })
+        | EventData::GroupMemberRemoved(GroupMemberChangeData { member_id }) => {
+            let add = matches!(ev.data, EventData::GroupMemberAdded(_));
+            let ids: Option<String> = tx
+                .query_row("SELECT member_ids FROM groups WHERE id = ?1", [gid], |r| {
+                    r.get(0)
+                })
+                .optional()?;
+            if let Some(ids) = ids {
+                let mut v: Vec<String> = serde_json::from_str(&ids)?;
+                v.retain(|x| x != member_id);
+                if add {
+                    v.push(member_id.clone());
+                }
+                tx.execute(
+                    "UPDATE groups SET member_ids = ?2 WHERE id = ?1",
+                    params![gid, serde_json::to_string(&v)?],
+                )?;
+            }
+            out.group_changed = true;
+        }
+        EventData::CardActioned(_)
+        | EventData::ArtifactCreated(_)
+        | EventData::ArtifactVersionAdded(_) => {
+            out.other_events.push(ev.clone());
+        }
+    }
+    Ok(())
+}
+
+fn touch_group(tx: &Transaction<'_>, gid: &str, at: u64) -> rusqlite::Result<()> {
+    tx.execute(
+        "UPDATE groups SET last_activity_at = MAX(last_activity_at, ?2) WHERE id = ?1",
+        params![gid, at],
+    )?;
+    Ok(())
+}

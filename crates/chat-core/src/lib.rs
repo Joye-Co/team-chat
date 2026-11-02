@@ -14,12 +14,17 @@ pub mod store;
 pub mod token;
 pub mod transient;
 
-pub use client::{background, Client, ClientConfig, ClientError, ClientUpdate, ConnectionState, SendFailure};
+pub use client::{
+    Client, ClientConfig, ClientError, ClientUpdate, ConnectionState, EditRequest, SearchRequest,
+    SendFailure, SendRequest, TopicPatch, background,
+};
 pub use http::{ApiError, HttpClient};
-pub use store::{GroupRow, OutboxItem, OutboxOp, OutboxState, Store, TopicRow};
-pub use token::{FileTokenStore, TokenStore, TokenStoreError};
+pub use store::{
+    GroupRow, LogEntry, Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Store, TopicRow,
+};
 #[cfg(target_os = "macos")]
 pub use token::KeychainTokenStore;
+pub use token::{FileTokenStore, TokenStore, TokenStoreError};
 
 /// Milliseconds since the Unix epoch.
 pub fn now_ms() -> u64 {

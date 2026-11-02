@@ -3,7 +3,10 @@
 
 use crate::engine::{self, Command};
 use crate::http::{ApiError, HttpClient};
-use crate::proto::{ErrorCode, Member, Message, TopicStatus};
+use crate::proto::{
+    ArtifactRef, Card, ErrorCode, Event, FileRef, Member, Message, NotifyReason, SearchHit,
+    TopicStatus,
+};
 use crate::store::{GroupRow, OutboxItem, OutboxOp, OutboxState, Store, StoreError, TopicRow};
 use crate::transient::TransientState;
 use std::path::PathBuf;
@@ -39,7 +42,11 @@ pub struct ClientConfig {
 }
 
 impl ClientConfig {
-    pub fn new(base_url: impl Into<String>, token: impl Into<String>, data_dir: impl Into<PathBuf>) -> Self {
+    pub fn new(
+        base_url: impl Into<String>,
+        token: impl Into<String>,
+        data_dir: impl Into<PathBuf>,
+    ) -> Self {
         ClientConfig {
             base_url: base_url.into(),
             token: token.into(),
@@ -81,7 +88,9 @@ pub enum ConnectionState {
     /// `welcome` arrived; catch-up may still run.
     Connected,
     /// Waiting before the next attempt.
-    Disconnected { retry_in: Duration },
+    Disconnected {
+        retry_in: Duration,
+    },
     /// The server refused the token. The engine waits for `reconnect_now` or `set_token`.
     Unauthorized,
     /// The server does not support this protocol version. Needs an app update.
@@ -107,21 +116,110 @@ pub enum ClientUpdate {
     /// Members or the set of groups changed (welcome, directory frame).
     DirectoryChanged,
     /// A group's name, members, unread or mention counts changed.
-    GroupChanged { group_id: String },
+    GroupChanged {
+        group_id: String,
+    },
     /// The topic list of a group changed (new topic, title, status, activity, pending new topics).
-    TopicsChanged { group_id: String },
+    TopicsChanged {
+        group_id: String,
+    },
     /// Messages of a topic changed (new, edited, deleted, streaming text, pending sends).
-    MessagesChanged { group_id: String, topic_id: String },
+    MessagesChanged {
+        group_id: String,
+        topic_id: String,
+    },
     /// A `load_older` answer arrived.
-    HistoryLoaded { group_id: String, topic_id: String, has_more: bool },
-    Typing { group_id: String, topic_id: String },
-    Presence { member_id: String, online: bool },
+    HistoryLoaded {
+        group_id: String,
+        topic_id: String,
+        has_more: bool,
+    },
+    Typing {
+        group_id: String,
+        topic_id: String,
+    },
+    Presence {
+        member_id: String,
+        online: bool,
+    },
     /// A send was acked.
-    Sent { client_msg_id: String, message_id: String, topic_id: String, duplicate: bool },
+    Sent {
+        client_msg_id: String,
+        message_id: String,
+        topic_id: String,
+        duplicate: bool,
+    },
     /// The server refused a write; the outbox row is now `Failed`.
     SendFailed(SendFailure),
     /// Every group that was behind after the last `welcome` is caught up.
     CaughtUp,
+    /// The server marked a live event for a notification.
+    Notify {
+        reason: NotifyReason,
+        group_id: String,
+        topic_id: Option<String>,
+        message_id: Option<String>,
+    },
+    /// An applied event that the core cache does not model (`card.actioned`,
+    /// `artifact.created`, `artifact.versionAdded`).
+    GroupEvent(Box<Event>),
+    SearchResults {
+        rid: String,
+        hits: Vec<SearchHit>,
+    },
+    /// `code = None`: not connected or no answer.
+    SearchFailed {
+        rid: String,
+        code: Option<ErrorCode>,
+        message: String,
+    },
+}
+
+/// A message to queue. `topic_id = None` starts a new topic (`title` optional).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SendRequest {
+    pub group_id: String,
+    pub topic_id: Option<String>,
+    pub title: Option<String>,
+    pub body: String,
+    pub mentions: Vec<String>,
+    /// A bot reply to finish with `send_delta` and an edit with `streaming: false`.
+    pub streaming: bool,
+    /// Id of the quoted message.
+    pub reply_to: Option<String>,
+    pub attachments: Option<Vec<FileRef>>,
+    pub artifact_refs: Option<Vec<ArtifactRef>>,
+    pub card: Option<Card>,
+}
+
+/// An edit of my message. `None` fields keep their value.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct EditRequest {
+    pub message_id: String,
+    pub body: String,
+    pub streaming: bool,
+    pub attachments: Option<Vec<FileRef>>,
+    pub artifact_refs: Option<Vec<ArtifactRef>>,
+    pub card: Option<Card>,
+}
+
+/// Topic changes; `None` keeps a field. `owner_id: Some(None)` clears the owner.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TopicPatch {
+    pub title: Option<String>,
+    pub status: Option<TopicStatus>,
+    pub waiting_on: Option<Vec<String>>,
+    pub owner_id: Option<Option<String>>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct SearchRequest {
+    pub query: String,
+    pub group_id: Option<String>,
+    /// Needs `group_id`.
+    pub topic_id: Option<String>,
+    /// 1..=50; default 20.
+    pub limit: Option<u32>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -225,7 +323,11 @@ impl Client {
     /// polling with `try_recv`.
     pub fn subscribe(&self) -> UnboundedReceiver<ClientUpdate> {
         let (tx, rx) = unbounded_channel();
-        self.shared.subscribers.lock().unwrap_or_else(|e| e.into_inner()).push(tx);
+        self.shared
+            .subscribers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(tx);
         rx
     }
 
@@ -253,7 +355,11 @@ impl Client {
     }
 
     pub fn connection_state(&self) -> ConnectionState {
-        self.shared.state.lock().unwrap_or_else(|e| e.into_inner()).clone()
+        self.shared
+            .state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Reconnects at once, without waiting for the backoff (wake from sleep, network change).
@@ -295,15 +401,31 @@ impl Client {
 
     /// A window of messages of a topic, oldest first: up to `limit` messages created
     /// before `before_seq` (the newest when `None`). Streaming text is merged in.
-    pub fn messages(&self, topic_id: &str, before_seq: Option<u64>, limit: usize) -> Result<Vec<Message>, ClientError> {
-        let mut v = self.shared.store.messages_before(topic_id, before_seq, limit)?;
+    pub fn messages(
+        &self,
+        topic_id: &str,
+        before_seq: Option<u64>,
+        limit: usize,
+    ) -> Result<Vec<Message>, ClientError> {
+        let mut v = self
+            .shared
+            .store
+            .messages_before(topic_id, before_seq, limit)?;
         self.merge_streams(&mut v);
         Ok(v)
     }
 
     /// Up to `limit` messages created after `after_seq`, oldest first.
-    pub fn messages_after(&self, topic_id: &str, after_seq: u64, limit: usize) -> Result<Vec<Message>, ClientError> {
-        let mut v = self.shared.store.messages_after(topic_id, after_seq, limit)?;
+    pub fn messages_after(
+        &self,
+        topic_id: &str,
+        after_seq: u64,
+        limit: usize,
+    ) -> Result<Vec<Message>, ClientError> {
+        let mut v = self
+            .shared
+            .store
+            .messages_after(topic_id, after_seq, limit)?;
         self.merge_streams(&mut v);
         Ok(v)
     }
@@ -329,7 +451,9 @@ impl Client {
 
     /// Members typing in a topic now (not me).
     pub fn typing(&self, group_id: &str, topic_id: &str) -> Vec<String> {
-        self.shared.transient().typing_in(group_id, topic_id, Instant::now())
+        self.shared
+            .transient()
+            .typing_in(group_id, topic_id, Instant::now())
     }
 
     pub fn is_online(&self, member_id: &str) -> bool {
@@ -356,7 +480,10 @@ impl Client {
             created_at: crate::now_ms(),
         })?;
         match topic_id {
-            Some(t) => self.shared.emit(ClientUpdate::MessagesChanged { group_id, topic_id: t }),
+            Some(t) => self.shared.emit(ClientUpdate::MessagesChanged {
+                group_id,
+                topic_id: t,
+            }),
             None => self.shared.emit(ClientUpdate::TopicsChanged { group_id }),
         }
         let _ = self.cmd_tx.send(Command::Flush);
@@ -370,109 +497,191 @@ impl Client {
         Ok(())
     }
 
-    /// Sends a message into a topic. Returns its `clientMsgId`.
-    pub fn send_message(&self, group_id: &str, topic_id: &str, body: &str, mentions: Vec<String>) -> Result<String, ClientError> {
-        self.send_message_ext(group_id, topic_id, body, mentions, false)
+    fn check_title(title: Option<&str>) -> Result<(), ClientError> {
+        if let Some(t) = title {
+            let n = t.chars().count();
+            if n == 0 || n > MAX_TITLE_CHARS {
+                return Err(ClientError::Invalid("bad title"));
+            }
+        }
+        Ok(())
     }
 
-    /// Like `send_message`; `streaming = true` starts a bot reply to finish with
-    /// `send_delta` and `edit_message_ext(.., streaming = false)`.
-    pub fn send_message_ext(
+    /// Queues a message. Without `topic_id` it starts a new topic whose root is this
+    /// message; the topic appears when the send is acked. Returns the `clientMsgId`.
+    pub fn send(&self, req: SendRequest) -> Result<String, ClientError> {
+        Self::check_body(&req.body)?;
+        Self::check_title(req.title.as_deref())?;
+        if req.body.trim().is_empty()
+            && !req.streaming
+            && req.card.is_none()
+            && req.attachments.is_none()
+        {
+            return Err(ClientError::Invalid("empty message"));
+        }
+        if req.topic_id.is_some() && req.title.is_some() {
+            return Err(ClientError::Invalid("title is only for a new topic"));
+        }
+        self.enqueue(
+            crate::new_id(),
+            OutboxOp::Send {
+                group_id: req.group_id,
+                topic_id: req.topic_id,
+                title: req.title,
+                body: req.body,
+                mentions: req.mentions,
+                streaming: req.streaming,
+                reply_to: req.reply_to,
+                attachments: req.attachments,
+                artifact_refs: req.artifact_refs,
+                card: req.card,
+            },
+        )
+    }
+
+    /// Sends a text message into a topic. Returns its `clientMsgId`.
+    pub fn send_message(
         &self,
         group_id: &str,
         topic_id: &str,
         body: &str,
         mentions: Vec<String>,
-        streaming: bool,
     ) -> Result<String, ClientError> {
-        Self::check_body(body)?;
-        if body.trim().is_empty() && !streaming {
-            return Err(ClientError::Invalid("empty body"));
-        }
-        self.enqueue(
-            crate::new_id(),
-            OutboxOp::Send {
-                group_id: group_id.into(),
-                topic_id: Some(topic_id.into()),
-                title: None,
-                body: body.into(),
-                mentions,
-                streaming,
-            },
-        )
+        self.send(SendRequest {
+            group_id: group_id.into(),
+            topic_id: Some(topic_id.into()),
+            body: body.into(),
+            mentions,
+            ..Default::default()
+        })
     }
 
-    /// Starts a new topic whose root is this message. Returns its `clientMsgId`; the
-    /// topic appears when the send is acked. `title = None` uses the first line.
-    pub fn start_topic(&self, group_id: &str, title: Option<&str>, body: &str, mentions: Vec<String>) -> Result<String, ClientError> {
-        Self::check_body(body)?;
-        if body.trim().is_empty() {
-            return Err(ClientError::Invalid("empty body"));
-        }
-        if let Some(t) = title {
-            let n = t.chars().count();
-            if n == 0 || n > MAX_TITLE_CHARS {
-                return Err(ClientError::Invalid("bad title"));
-            }
-        }
-        self.enqueue(
-            crate::new_id(),
-            OutboxOp::Send {
-                group_id: group_id.into(),
-                topic_id: None,
-                title: title.map(str::to_string),
-                body: body.into(),
-                mentions,
-                streaming: false,
-            },
-        )
+    /// Starts a new topic with a text message. `title = None` uses the first line.
+    pub fn start_topic(
+        &self,
+        group_id: &str,
+        title: Option<&str>,
+        body: &str,
+        mentions: Vec<String>,
+    ) -> Result<String, ClientError> {
+        self.send(SendRequest {
+            group_id: group_id.into(),
+            title: title.map(str::to_string),
+            body: body.into(),
+            mentions,
+            ..Default::default()
+        })
     }
 
-    pub fn edit_message(&self, message_id: &str, body: &str) -> Result<String, ClientError> {
-        self.edit_message_ext(message_id, body, false)
-    }
-
-    pub fn edit_message_ext(&self, message_id: &str, body: &str, streaming: bool) -> Result<String, ClientError> {
-        Self::check_body(body)?;
-        let m = self.shared.store.message(message_id)?.ok_or(ClientError::NotFound)?;
+    /// Queues an edit of my message. Returns the outbox id.
+    pub fn edit(&self, req: EditRequest) -> Result<String, ClientError> {
+        Self::check_body(&req.body)?;
+        let m = self
+            .shared
+            .store
+            .message(&req.message_id)?
+            .ok_or(ClientError::NotFound)?;
         self.enqueue(
             crate::new_id(),
             OutboxOp::Edit {
                 group_id: m.group_id,
                 topic_id: Some(m.topic_id),
-                message_id: message_id.into(),
-                body: body.into(),
-                streaming,
+                message_id: req.message_id,
+                body: req.body,
+                streaming: req.streaming,
+                attachments: req.attachments,
+                artifact_refs: req.artifact_refs,
+                card: req.card,
             },
         )
     }
 
+    pub fn edit_message(&self, message_id: &str, body: &str) -> Result<String, ClientError> {
+        self.edit(EditRequest {
+            message_id: message_id.into(),
+            body: body.into(),
+            ..Default::default()
+        })
+    }
+
     pub fn delete_message(&self, message_id: &str) -> Result<String, ClientError> {
-        let m = self.shared.store.message(message_id)?.ok_or(ClientError::NotFound)?;
+        let m = self
+            .shared
+            .store
+            .message(message_id)?
+            .ok_or(ClientError::NotFound)?;
         self.enqueue(
             crate::new_id(),
-            OutboxOp::Delete { group_id: m.group_id, topic_id: Some(m.topic_id), message_id: message_id.into() },
+            OutboxOp::Delete {
+                group_id: m.group_id,
+                topic_id: Some(m.topic_id),
+                message_id: message_id.into(),
+            },
         )
     }
 
-    pub fn update_topic(&self, topic_id: &str, title: Option<&str>, status: Option<TopicStatus>) -> Result<String, ClientError> {
-        if let Some(t) = title {
-            let n = t.chars().count();
-            if n == 0 || n > MAX_TITLE_CHARS {
-                return Err(ClientError::Invalid("bad title"));
-            }
-        }
-        if title.is_none() && status.is_none() {
+    /// Changes a topic's title, status, `waitingOn` or owner.
+    pub fn update_topic(&self, topic_id: &str, patch: TopicPatch) -> Result<String, ClientError> {
+        Self::check_title(patch.title.as_deref())?;
+        if patch == TopicPatch::default() {
             return Err(ClientError::Invalid("nothing to change"));
         }
-        let group_id = self.shared.store.topic_group(topic_id)?.ok_or(ClientError::NotFound)?;
+        if patch
+            .waiting_on
+            .as_ref()
+            .is_some_and(|w| w.len() > crate::proto::MAX_WAITING_ON)
+        {
+            return Err(ClientError::Invalid("too many waitingOn members"));
+        }
+        let group_id = self
+            .shared
+            .store
+            .topic_group(topic_id)?
+            .ok_or(ClientError::NotFound)?;
         self.enqueue(
             crate::new_id(),
             OutboxOp::TopicUpdate {
                 group_id,
                 topic_id: topic_id.into(),
-                title: title.map(str::to_string),
-                status,
+                title: patch.title,
+                status: patch.status,
+                waiting_on: patch.waiting_on,
+                owner_id: patch.owner_id,
+            },
+        )
+    }
+
+    /// Follows or unfollows a topic.
+    pub fn follow_topic(&self, topic_id: &str, follow: bool) -> Result<String, ClientError> {
+        let group_id = self
+            .shared
+            .store
+            .topic_group(topic_id)?
+            .ok_or(ClientError::NotFound)?;
+        self.enqueue(
+            crate::new_id(),
+            OutboxOp::TopicFollow {
+                group_id,
+                topic_id: topic_id.into(),
+                follow,
+            },
+        )
+    }
+
+    /// Presses a card button. The card's author gets a `card.actioned` event.
+    pub fn card_action(&self, message_id: &str, action_id: &str) -> Result<String, ClientError> {
+        let m = self
+            .shared
+            .store
+            .message(message_id)?
+            .ok_or(ClientError::NotFound)?;
+        self.enqueue(
+            crate::new_id(),
+            OutboxOp::CardAction {
+                group_id: m.group_id,
+                topic_id: Some(m.topic_id),
+                message_id: message_id.into(),
+                action_id: action_id.into(),
             },
         )
     }
@@ -486,43 +695,90 @@ impl Client {
         });
     }
 
-    /// Marks a topic read up to `seq` (a message `createdSeq`). When no topic of the
-    /// group is unread any more, the group cursor moves and is sent to the server.
-    pub fn mark_topic_read(&self, group_id: &str, topic_id: &str, seq: u64) -> Result<(), ClientError> {
+    /// Searches on the server. Returns a request id; `SearchResults` or `SearchFailed`
+    /// with that id follows (at once when offline).
+    pub fn search(&self, req: SearchRequest) -> Result<String, ClientError> {
+        let n = req.query.chars().count();
+        if n == 0 || n > crate::proto::MAX_QUERY_CHARS {
+            return Err(ClientError::Invalid("bad query"));
+        }
+        if req.topic_id.is_some() && req.group_id.is_none() {
+            return Err(ClientError::Invalid("topic search needs a group"));
+        }
+        let rid = format!("s{}", crate::new_id());
+        let _ = self.cmd_tx.send(Command::Search {
+            rid: rid.clone(),
+            req,
+        });
+        Ok(rid)
+    }
+
+    /// Marks a topic read up to `seq` (a message `createdSeq`). Other topics of the
+    /// group stay unread.
+    pub fn mark_topic_read(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        seq: u64,
+    ) -> Result<(), ClientError> {
         self.mark_read_inner(group_id, Some(topic_id), seq)
     }
 
-    /// Moves the group read cursor to `seq` and sends it to the server.
+    /// Moves the group read cursor to `seq`: every topic is read up to it.
     pub fn mark_group_read(&self, group_id: &str, seq: u64) -> Result<(), ClientError> {
         self.mark_read_inner(group_id, None, seq)
     }
 
-    fn mark_read_inner(&self, group_id: &str, topic_id: Option<&str>, seq: u64) -> Result<(), ClientError> {
-        let sent = self.shared.store.mark_read(group_id, topic_id, seq)?;
-        self.shared.emit(ClientUpdate::GroupChanged { group_id: group_id.into() });
-        self.shared.emit(ClientUpdate::TopicsChanged { group_id: group_id.into() });
-        if let Some(seq) = sent {
-            let _ = self.cmd_tx.send(Command::Read { group_id: group_id.into(), seq });
+    fn mark_read_inner(
+        &self,
+        group_id: &str,
+        topic_id: Option<&str>,
+        seq: u64,
+    ) -> Result<(), ClientError> {
+        if let Some(read) = self.shared.store.mark_read(group_id, topic_id, seq)? {
+            self.shared.emit(ClientUpdate::GroupChanged {
+                group_id: group_id.into(),
+            });
+            self.shared.emit(ClientUpdate::TopicsChanged {
+                group_id: group_id.into(),
+            });
+            let _ = self.cmd_tx.send(Command::Read(read));
         }
         Ok(())
     }
 
     /// Asks the server for older messages of a topic. `HistoryLoaded` follows.
     pub fn load_older(&self, topic_id: &str) -> Result<(), ClientError> {
-        let group_id = self.shared.store.topic_group(topic_id)?.ok_or(ClientError::NotFound)?;
-        let _ = self.cmd_tx.send(Command::LoadOlder { group_id, topic_id: topic_id.into() });
+        let group_id = self
+            .shared
+            .store
+            .topic_group(topic_id)?
+            .ok_or(ClientError::NotFound)?;
+        let _ = self.cmd_tx.send(Command::LoadOlder {
+            group_id,
+            topic_id: topic_id.into(),
+        });
         Ok(())
     }
 
     /// Tells the others that I type in a topic (the engine sends at most one per 3 s).
     pub fn typing_in(&self, group_id: &str, topic_id: &str) {
-        let _ = self.cmd_tx.send(Command::Typing { group_id: group_id.into(), topic_id: topic_id.into() });
+        let _ = self.cmd_tx.send(Command::Typing {
+            group_id: group_id.into(),
+            topic_id: topic_id.into(),
+        });
     }
 
     /// Puts a failed outbox row back in the queue.
     pub fn retry_failed(&self, id: &str) -> Result<(), ClientError> {
-        let item = self.shared.store.outbox_get(id)?.ok_or(ClientError::NotFound)?;
-        self.shared.store.outbox_set_state(id, OutboxState::Pending, None)?;
+        let item = self
+            .shared
+            .store
+            .outbox_get(id)?
+            .ok_or(ClientError::NotFound)?;
+        self.shared
+            .store
+            .outbox_set_state(id, OutboxState::Pending, None)?;
         self.emit_outbox_scope(&item);
         let _ = self.cmd_tx.send(Command::Flush);
         Ok(())
@@ -531,7 +787,11 @@ impl Client {
     /// Removes a failed (or pending) outbox row. A pending send that is in flight may
     /// still arrive.
     pub fn discard(&self, id: &str) -> Result<(), ClientError> {
-        let item = self.shared.store.outbox_get(id)?.ok_or(ClientError::NotFound)?;
+        let item = self
+            .shared
+            .store
+            .outbox_get(id)?
+            .ok_or(ClientError::NotFound)?;
         self.shared.store.outbox_remove(id)?;
         self.emit_outbox_scope(&item);
         Ok(())
@@ -540,7 +800,10 @@ impl Client {
     fn emit_outbox_scope(&self, item: &OutboxItem) {
         let group_id = item.op.group_id().to_string();
         match item.op.topic_id() {
-            Some(t) => self.shared.emit(ClientUpdate::MessagesChanged { group_id, topic_id: t.into() }),
+            Some(t) => self.shared.emit(ClientUpdate::MessagesChanged {
+                group_id,
+                topic_id: t.into(),
+            }),
             None => self.shared.emit(ClientUpdate::TopicsChanged { group_id }),
         }
     }
@@ -549,7 +812,12 @@ impl Client {
 impl Drop for Client {
     fn drop(&mut self) {
         let _ = self.cmd_tx.send(Command::Stop);
-        if let Some(rt) = self.runtime.lock().unwrap_or_else(|e| e.into_inner()).take() {
+        if let Some(rt) = self
+            .runtime
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
             rt.shutdown_background();
         }
     }

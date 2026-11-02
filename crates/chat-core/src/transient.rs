@@ -25,7 +25,10 @@ impl TransientState {
     /// Stops showing a member as typing (for example when its message arrives).
     pub fn clear_typing(&mut self, group_id: &str, topic_id: &str, member_id: &str) -> bool {
         let key = (group_id.to_string(), topic_id.to_string());
-        let removed = self.typing.get_mut(&key).is_some_and(|m| m.remove(member_id).is_some());
+        let removed = self
+            .typing
+            .get_mut(&key)
+            .is_some_and(|m| m.remove(member_id).is_some());
         if self.typing.get(&key).is_some_and(|m| m.is_empty()) {
             self.typing.remove(&key);
         }
@@ -51,7 +54,12 @@ impl TransientState {
         let mut v: Vec<String> = self
             .typing
             .get(&(group_id.to_string(), topic_id.to_string()))
-            .map(|m| m.iter().filter(|(_, u)| **u > now).map(|(id, _)| id.clone()).collect())
+            .map(|m| {
+                m.iter()
+                    .filter(|(_, u)| **u > now)
+                    .map(|(id, _)| id.clone())
+                    .collect()
+            })
             .unwrap_or_default();
         v.sort();
         v
@@ -67,7 +75,12 @@ impl TransientState {
     }
 
     pub fn online_members(&self) -> Vec<String> {
-        let mut v: Vec<String> = self.presence.iter().filter(|(_, o)| **o).map(|(k, _)| k.clone()).collect();
+        let mut v: Vec<String> = self
+            .presence
+            .iter()
+            .filter(|(_, o)| **o)
+            .map(|(k, _)| k.clone())
+            .collect();
         v.sort();
         v
     }
@@ -78,7 +91,10 @@ impl TransientState {
     }
 
     pub fn append_delta(&mut self, message_id: &str, append: &str) {
-        self.streams.entry(message_id.to_string()).or_default().push_str(append);
+        self.streams
+            .entry(message_id.to_string())
+            .or_default()
+            .push_str(append);
     }
 
     /// Drops the delta buffer once a stored body replaces it.
@@ -106,13 +122,22 @@ mod tests {
         let t0 = Instant::now();
         t.on_typing("g", "t", "a", t0);
         t.on_typing("g", "t", "b", t0 + Duration::from_secs(3));
-        assert_eq!(t.typing_in("g", "t", t0 + Duration::from_secs(1)), vec!["a", "b"]);
-        assert_eq!(t.typing_in("g", "t", t0 + Duration::from_millis(5500)), vec!["b"]);
+        assert_eq!(
+            t.typing_in("g", "t", t0 + Duration::from_secs(1)),
+            vec!["a", "b"]
+        );
+        assert_eq!(
+            t.typing_in("g", "t", t0 + Duration::from_millis(5500)),
+            vec!["b"]
+        );
         let changed = t.expire_typing(t0 + Duration::from_millis(5500));
         assert_eq!(changed.len(), 1);
         assert!(t.expire_typing(t0 + Duration::from_millis(6000)).is_empty());
         assert_eq!(t.expire_typing(t0 + Duration::from_secs(9)).len(), 1);
-        assert!(t.typing_in("g", "t", t0 + Duration::from_secs(9)).is_empty());
+        assert!(
+            t.typing_in("g", "t", t0 + Duration::from_secs(9))
+                .is_empty()
+        );
     }
 
     #[test]

@@ -3,14 +3,17 @@
 //! with the same `clientMsgId`, keepalive, and reconnect with backoff.
 
 use crate::backoff::Backoff;
-use crate::client::{ClientConfig, ClientUpdate, ConnectionState, SendFailure, Shared};
-use crate::proto::{
-    AckFrame, AckOutcome, ClientFrame, ClientInfo, DeleteFrame, DeltaFrame, DirectoryFrame, EditFrame, ErrorBody,
-    ErrorCode, Event, FetchFrame, HelloFrame, HistoryFrame, HistoryRequestFrame, Message, MessageDeltaEvent,
-    PROTOCOL_VERSION, PresenceEvent, ReadFrame, SendFrame, SendResult, ServerFrame, TopicUpdateFrame,
-    TransientEvent, TypingEvent, TypingFrame, WelcomeFrame,
+use crate::client::{
+    ClientConfig, ClientUpdate, ConnectionState, SearchRequest, SendFailure, Shared,
 };
-use crate::store::{ApplyOutcome, LogEntry, OutboxOp, OutboxState};
+use crate::proto::{
+    AckFrame, AckOutcome, CardActionFrame, ClientFrame, ClientInfo, DeleteFrame, DeltaFrame,
+    DirectoryFrame, EditFrame, ErrorBody, ErrorCode, Event, FetchFrame, HelloFrame, HistoryFrame,
+    HistoryRequestFrame, Message, MessageDeltaEvent, NotifyReason, PROTOCOL_VERSION, PresenceEvent,
+    ReadFrame, SearchFrame, SendFrame, SendResult, ServerFrame, TopicFollowFrame, TopicState,
+    TopicUpdateFrame, TransientEvent, TypingEvent, TypingFrame, WelcomeFrame,
+};
+use crate::store::{ApplyOutcome, LogEntry, OutboxOp, OutboxState, PendingRead};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -33,10 +36,24 @@ const TICK: Duration = Duration::from_millis(250);
 pub(crate) enum Command {
     /// The outbox has new or retried rows.
     Flush,
-    Typing { group_id: String, topic_id: String },
-    Read { group_id: String, seq: u64 },
-    LoadOlder { group_id: String, topic_id: String },
-    Delta { group_id: String, message_id: String, append: String },
+    Typing {
+        group_id: String,
+        topic_id: String,
+    },
+    Read(PendingRead),
+    Search {
+        rid: String,
+        req: SearchRequest,
+    },
+    LoadOlder {
+        group_id: String,
+        topic_id: String,
+    },
+    Delta {
+        group_id: String,
+        message_id: String,
+        append: String,
+    },
     ReconnectNow,
     Stop,
 }
@@ -49,20 +66,31 @@ enum ConnectError {
 enum SessionEnd {
     Stop,
     /// Reconnect; `immediate` skips the backoff wait.
-    Reconnect { reason: String, immediate: bool },
+    Reconnect {
+        reason: String,
+        immediate: bool,
+    },
     Unauthorized,
     Unsupported,
 }
 
-pub(crate) async fn run(shared: Arc<Shared>, config: ClientConfig, mut cmds: UnboundedReceiver<Command>) {
+pub(crate) async fn run(
+    shared: Arc<Shared>,
+    config: ClientConfig,
+    mut cmds: UnboundedReceiver<Command>,
+) {
     let mut backoff = Backoff::new(config.backoff_min, config.backoff_max);
     let mut skip_wait = true;
     loop {
         if !skip_wait {
             let delay = backoff.next_delay();
             shared.set_state(ConnectionState::Disconnected { retry_in: delay });
-            info!(delay_ms = delay.as_millis() as u64, attempt = backoff.attempt(), "reconnect wait");
-            match wait(&mut cmds, Some(delay)).await {
+            info!(
+                delay_ms = delay.as_millis() as u64,
+                attempt = backoff.attempt(),
+                "reconnect wait"
+            );
+            match wait(&shared, &mut cmds, Some(delay)).await {
                 WaitEnd::Stop => break,
                 WaitEnd::Now => backoff.reset(),
                 WaitEnd::Elapsed => {}
@@ -70,30 +98,37 @@ pub(crate) async fn run(shared: Arc<Shared>, config: ClientConfig, mut cmds: Unb
         }
         skip_wait = false;
         shared.set_state(ConnectionState::Connecting);
-        let token = shared.token.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        let ws = match tokio::time::timeout(config.connect_timeout, connect(&config.base_url, &token)).await {
-            Ok(Ok(ws)) => ws,
-            Ok(Err(ConnectError::Unauthorized)) => {
-                warn!("token refused");
-                shared.set_state(ConnectionState::Unauthorized);
-                match wait(&mut cmds, None).await {
-                    WaitEnd::Stop => break,
-                    _ => {
-                        skip_wait = true;
-                        backoff.reset();
-                        continue;
+        let token = shared
+            .token
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone();
+        let ws =
+            match tokio::time::timeout(config.connect_timeout, connect(&config.base_url, &token))
+                .await
+            {
+                Ok(Ok(ws)) => ws,
+                Ok(Err(ConnectError::Unauthorized)) => {
+                    warn!("token refused");
+                    shared.set_state(ConnectionState::Unauthorized);
+                    match wait(&shared, &mut cmds, None).await {
+                        WaitEnd::Stop => break,
+                        _ => {
+                            skip_wait = true;
+                            backoff.reset();
+                            continue;
+                        }
                     }
                 }
-            }
-            Ok(Err(ConnectError::Other(e))) => {
-                info!(error = %e, "connect failed");
-                continue;
-            }
-            Err(_) => {
-                info!("connect timed out");
-                continue;
-            }
-        };
+                Ok(Err(ConnectError::Other(e))) => {
+                    info!(error = %e, "connect failed");
+                    continue;
+                }
+                Err(_) => {
+                    info!("connect timed out");
+                    continue;
+                }
+            };
         let mut session = Session::new(shared.clone(), &config);
         let end = session.run(ws, &mut cmds, &mut backoff).await;
         shared.transient().clear_presence();
@@ -109,7 +144,7 @@ pub(crate) async fn run(shared: Arc<Shared>, config: ClientConfig, mut cmds: Unb
             }
             SessionEnd::Unauthorized => {
                 shared.set_state(ConnectionState::Unauthorized);
-                match wait(&mut cmds, None).await {
+                match wait(&shared, &mut cmds, None).await {
                     WaitEnd::Stop => break,
                     _ => {
                         skip_wait = true;
@@ -119,7 +154,7 @@ pub(crate) async fn run(shared: Arc<Shared>, config: ClientConfig, mut cmds: Unb
             }
             SessionEnd::Unsupported => {
                 shared.set_state(ConnectionState::Unsupported);
-                if let WaitEnd::Stop = wait(&mut cmds, None).await {
+                if let WaitEnd::Stop = wait(&shared, &mut cmds, None).await {
                     break;
                 }
                 skip_wait = true;
@@ -138,7 +173,11 @@ enum WaitEnd {
 
 /// Waits for the delay (or forever), ending early on `ReconnectNow` or `Stop`. Other
 /// commands are dropped: their state is in the store and is sent after the reconnect.
-async fn wait(cmds: &mut UnboundedReceiver<Command>, delay: Option<Duration>) -> WaitEnd {
+async fn wait(
+    shared: &Shared,
+    cmds: &mut UnboundedReceiver<Command>,
+    delay: Option<Duration>,
+) -> WaitEnd {
     let sleep = async {
         match delay {
             Some(d) => tokio::time::sleep(d).await,
@@ -152,6 +191,7 @@ async fn wait(cmds: &mut UnboundedReceiver<Command>, delay: Option<Duration>) ->
             c = cmds.recv() => match c {
                 None | Some(Command::Stop) => return WaitEnd::Stop,
                 Some(Command::ReconnectNow) => return WaitEnd::Now,
+                Some(Command::Search { rid, .. }) => fail_search(shared, rid),
                 Some(_) => {}
             }
         }
@@ -174,7 +214,8 @@ async fn connect(base: &str, token: &str) -> Result<Ws, ConnectError> {
     let mut req = ws_url(base)
         .into_client_request()
         .map_err(|e| ConnectError::Other(e.to_string()))?;
-    let mut auth = HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_| ConnectError::Unauthorized)?;
+    let mut auth = HeaderValue::from_str(&format!("Bearer {token}"))
+        .map_err(|_| ConnectError::Unauthorized)?;
     auth.set_sensitive(true);
     req.headers_mut().insert("Authorization", auth);
     let mut cfg = WebSocketConfig::default();
@@ -182,10 +223,14 @@ async fn connect(base: &str, token: &str) -> Result<Ws, ConnectError> {
     cfg.max_frame_size = Some(2 << 20);
     match tokio_tungstenite::connect_async_with_config(req, Some(cfg), true).await {
         Ok((ws, _)) => Ok(ws),
-        Err(tungstenite::Error::Http(resp)) if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 => {
+        Err(tungstenite::Error::Http(resp))
+            if resp.status().as_u16() == 401 || resp.status().as_u16() == 403 =>
+        {
             Err(ConnectError::Unauthorized)
         }
-        Err(tungstenite::Error::Http(resp)) => Err(ConnectError::Other(format!("http {}", resp.status()))),
+        Err(tungstenite::Error::Http(resp)) => {
+            Err(ConnectError::Other(format!("http {}", resp.status())))
+        }
         Err(e) => Err(ConnectError::Other(e.to_string())),
     }
 }
@@ -194,6 +239,7 @@ enum Pending {
     Outbox { id: String },
     Fetch { group_id: String },
     History { group_id: String, topic_id: String },
+    Search { rid: String },
 }
 
 #[derive(Default)]
@@ -232,7 +278,10 @@ impl Session {
         let now = Instant::now();
         Session {
             shared,
-            client: ClientInfo { name: c.client_name.clone(), version: c.client_version.clone() },
+            client: ClientInfo {
+                name: c.client_name.clone(),
+                version: c.client_version.clone(),
+            },
             ping_interval: c.ping_interval,
             pong_timeout: c.pong_timeout,
             request_timeout: c.request_timeout,
@@ -261,7 +310,12 @@ impl Session {
         r
     }
 
-    async fn run(&mut self, ws: Ws, cmds: &mut UnboundedReceiver<Command>, backoff: &mut Backoff) -> SessionEnd {
+    async fn run(
+        &mut self,
+        ws: Ws,
+        cmds: &mut UnboundedReceiver<Command>,
+        backoff: &mut Backoff,
+    ) -> SessionEnd {
         let (mut sink, mut stream) = ws.split();
         let cursors = match self.shared.store.cursors() {
             Ok(c) => c,
@@ -295,11 +349,15 @@ impl Session {
                 }
             }
             if write_err.is_none()
-                && let Err(e) = sink.flush().await {
-                    write_err = Some(e.to_string());
-                }
+                && let Err(e) = sink.flush().await
+            {
+                write_err = Some(e.to_string());
+            }
             if let Some(e) = write_err {
-                break SessionEnd::Reconnect { reason: format!("write: {e}"), immediate: false };
+                break SessionEnd::Reconnect {
+                    reason: format!("write: {e}"),
+                    immediate: false,
+                };
             }
 
             tokio::select! {
@@ -347,14 +405,21 @@ impl Session {
         let now = Instant::now();
         if !self.welcomed {
             if now >= self.welcome_deadline {
-                return Some(SessionEnd::Reconnect { reason: "no welcome".into(), immediate: false });
+                return Some(SessionEnd::Reconnect {
+                    reason: "no welcome".into(),
+                    immediate: false,
+                });
             }
             return None;
         }
         if let Some(d) = self.pong_deadline
-            && now >= d {
-                return Some(SessionEnd::Reconnect { reason: "pong timeout".into(), immediate: false });
-            }
+            && now >= d
+        {
+            return Some(SessionEnd::Reconnect {
+                reason: "pong timeout".into(),
+                immediate: false,
+            });
+        }
         if now >= self.next_ping {
             self.out.push(ClientFrame::Ping);
             self.next_ping = now + self.ping_interval;
@@ -363,13 +428,18 @@ impl Session {
             }
         }
         if self.pending.values().any(|(_, deadline)| now >= *deadline) {
-            return Some(SessionEnd::Reconnect { reason: "request timeout".into(), immediate: false });
+            return Some(SessionEnd::Reconnect {
+                reason: "request timeout".into(),
+                immediate: false,
+            });
         }
         let changed = self.shared.transient().expire_typing(now);
         for (group_id, topic_id) in changed {
-            self.shared.emit(ClientUpdate::Typing { group_id, topic_id });
+            self.shared
+                .emit(ClientUpdate::Typing { group_id, topic_id });
         }
-        self.typing_sent.retain(|_, t| now.duration_since(*t) < TYPING_MIN_GAP);
+        self.typing_sent
+            .retain(|_, t| now.duration_since(*t) < TYPING_MIN_GAP);
         self.flush_outbox();
         None
     }
@@ -377,6 +447,9 @@ impl Session {
     fn on_command(&mut self, c: Command) {
         if !self.welcomed {
             // Outbox rows and read cursors are in the store and go out after welcome.
+            if let Command::Search { rid, .. } = c {
+                fail_search(&self.shared, rid);
+            }
             return;
         }
         match c {
@@ -384,18 +457,38 @@ impl Session {
             Command::Typing { group_id, topic_id } => {
                 let key = (group_id.clone(), topic_id.clone());
                 let now = Instant::now();
-                if self.typing_sent.get(&key).is_some_and(|t| now.duration_since(*t) < TYPING_MIN_GAP) {
+                if self
+                    .typing_sent
+                    .get(&key)
+                    .is_some_and(|t| now.duration_since(*t) < TYPING_MIN_GAP)
+                {
                     return;
                 }
                 self.typing_sent.insert(key, now);
-                self.out.push(ClientFrame::Typing(TypingFrame { group_id, topic_id }));
+                self.out
+                    .push(ClientFrame::Typing(TypingFrame { group_id, topic_id }));
             }
-            Command::Read { group_id, seq } => self.send_read(group_id, seq),
+            Command::Read(read) => self.send_read(read),
+            Command::Search { rid, req } => {
+                self.out.push(ClientFrame::Search(SearchFrame {
+                    rid: rid.clone(),
+                    query: req.query,
+                    group_id: req.group_id,
+                    topic_id: req.topic_id,
+                    limit: req.limit,
+                }));
+                self.track(rid.clone(), Pending::Search { rid });
+            }
             Command::LoadOlder { group_id, topic_id } => {
                 if self.history_inflight.contains(&topic_id) {
                     return;
                 }
-                let before = self.shared.store.oldest_cached_seq(&topic_id).ok().flatten();
+                let before = self
+                    .shared
+                    .store
+                    .oldest_cached_seq(&topic_id)
+                    .ok()
+                    .flatten();
                 let rid = self.rid();
                 self.history_inflight.insert(topic_id.clone());
                 self.out.push(ClientFrame::History(HistoryRequestFrame {
@@ -407,22 +500,35 @@ impl Session {
                 }));
                 self.track(rid, Pending::History { group_id, topic_id });
             }
-            Command::Delta { group_id, message_id, append } => {
-                self.out.push(ClientFrame::Delta(DeltaFrame { group_id, message_id, append }));
+            Command::Delta {
+                group_id,
+                message_id,
+                append,
+            } => {
+                self.out.push(ClientFrame::Delta(DeltaFrame {
+                    group_id,
+                    message_id,
+                    append,
+                }));
             }
             Command::ReconnectNow | Command::Stop => {}
         }
     }
 
-    fn send_read(&mut self, group_id: String, seq: u64) {
-        self.out.push(ClientFrame::Read(ReadFrame { group_id: group_id.clone(), seq }));
-        if let Err(e) = self.shared.store.mark_read_synced(&group_id, seq) {
+    fn send_read(&mut self, read: PendingRead) {
+        self.out.push(ClientFrame::Read(ReadFrame {
+            group_id: read.group_id.clone(),
+            seq: read.seq,
+            topic_id: read.topic_id.clone(),
+        }));
+        if let Err(e) = self.shared.store.mark_read_synced(&read) {
             warn!(error = %e, "mark read synced");
         }
     }
 
     fn track(&mut self, rid: String, p: Pending) {
-        self.pending.insert(rid, (p, Instant::now() + self.request_timeout));
+        self.pending
+            .insert(rid, (p, Instant::now() + self.request_timeout));
     }
 
     /// Sends every due outbox row that is not in flight, oldest first.
@@ -447,7 +553,18 @@ impl Session {
             }
             let rid = self.rid();
             let frame = match item.op.clone() {
-                OutboxOp::Send { group_id, topic_id, title, body, mentions, streaming } => ClientFrame::Send(SendFrame {
+                OutboxOp::Send {
+                    group_id,
+                    topic_id,
+                    title,
+                    body,
+                    mentions,
+                    streaming,
+                    reply_to,
+                    attachments,
+                    artifact_refs,
+                    card,
+                } => ClientFrame::Send(SendFrame {
                     rid: rid.clone(),
                     group_id,
                     topic_id,
@@ -456,20 +573,77 @@ impl Session {
                     body,
                     mentions: (!mentions.is_empty()).then_some(mentions),
                     streaming: streaming.then_some(true),
+                    reply_to: OutboxOp::reply_to_ref(&reply_to),
+                    attachments,
+                    artifact_refs,
+                    card,
                 }),
-                OutboxOp::Edit { group_id, message_id, body, streaming, .. } => ClientFrame::Edit(EditFrame {
+                OutboxOp::Edit {
+                    group_id,
+                    message_id,
+                    body,
+                    streaming,
+                    attachments,
+                    artifact_refs,
+                    card,
+                    ..
+                } => ClientFrame::Edit(EditFrame {
                     rid: rid.clone(),
                     group_id,
                     message_id,
                     body,
                     streaming: Some(streaming),
+                    attachments,
+                    artifact_refs,
+                    card,
                 }),
-                OutboxOp::Delete { group_id, message_id, .. } => {
-                    ClientFrame::Delete(DeleteFrame { rid: rid.clone(), group_id, message_id })
-                }
-                OutboxOp::TopicUpdate { group_id, topic_id, title, status } => {
-                    ClientFrame::TopicUpdate(TopicUpdateFrame { rid: rid.clone(), group_id, topic_id, title, status })
-                }
+                OutboxOp::Delete {
+                    group_id,
+                    message_id,
+                    ..
+                } => ClientFrame::Delete(DeleteFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    message_id,
+                }),
+                OutboxOp::TopicUpdate {
+                    group_id,
+                    topic_id,
+                    title,
+                    status,
+                    waiting_on,
+                    owner_id,
+                } => ClientFrame::TopicUpdate(TopicUpdateFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    topic_id,
+                    title,
+                    status,
+                    waiting_on,
+                    owner_id,
+                }),
+                OutboxOp::TopicFollow {
+                    group_id,
+                    topic_id,
+                    follow,
+                } => ClientFrame::TopicFollow(TopicFollowFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    topic_id,
+                    follow,
+                }),
+                OutboxOp::CardAction {
+                    group_id,
+                    message_id,
+                    action_id,
+                    ..
+                } => ClientFrame::CardAction(CardActionFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    message_id,
+                    action_id,
+                    value: None,
+                }),
             };
             if let Err(e) = self.shared.store.outbox_attempt(&item.id) {
                 warn!(error = %e, "outbox attempt");
@@ -484,27 +658,49 @@ impl Session {
     fn on_frame(&mut self, frame: Incoming, backoff: &mut Backoff) -> Option<SessionEnd> {
         let frame = match frame {
             Incoming::Unsupported => return Some(SessionEnd::Unsupported),
-            Incoming::Event(entry) => {
+            Incoming::Event(entry, notify) => {
                 if self.welcomed {
                     let gid = entry.group_id().to_string();
-                    self.groups.entry(gid.clone()).or_default().buffer.insert(entry.seq(), entry);
+                    let note = notify.map(|reason| notify_update(reason, &entry));
+                    self.groups
+                        .entry(gid.clone())
+                        .or_default()
+                        .buffer
+                        .insert(entry.seq(), entry);
                     self.drain(&gid);
+                    if let Some(n) = note {
+                        self.shared.emit(n);
+                    }
                 }
                 return None;
             }
-            Incoming::Page { rid, group_id, entries, has_more, last_seq } => {
+            Incoming::Page {
+                rid,
+                group_id,
+                entries,
+                has_more,
+                last_seq,
+            } => {
                 self.on_page(rid, group_id, entries, has_more, last_seq);
                 return None;
             }
             Incoming::Frame(f) => f,
         };
         match frame {
-            ServerFrame::Welcome(WelcomeFrame { me, members, groups, .. }) => {
+            ServerFrame::Welcome(WelcomeFrame {
+                me,
+                members,
+                groups,
+                ..
+            }) => {
                 let out = match self.shared.store.apply_welcome(&me, &members, &groups) {
                     Ok(o) => o,
                     Err(e) => {
                         warn!(error = %e, "apply welcome");
-                        return Some(SessionEnd::Reconnect { reason: "store".into(), immediate: false });
+                        return Some(SessionEnd::Reconnect {
+                            reason: "store".into(),
+                            immediate: false,
+                        });
                     }
                 };
                 info!(groups = groups.len(), members = members.len(), "welcome");
@@ -514,7 +710,9 @@ impl Session {
                 self.shared.set_state(ConnectionState::Connected);
                 self.shared.emit(ClientUpdate::DirectoryChanged);
                 for g in &out.groups_changed {
-                    self.shared.emit(ClientUpdate::GroupChanged { group_id: g.clone() });
+                    self.shared.emit(ClientUpdate::GroupChanged {
+                        group_id: g.clone(),
+                    });
                 }
                 for g in &groups {
                     let last = self.shared.store.last_applied(&g.group.id).unwrap_or(0);
@@ -526,24 +724,40 @@ impl Session {
                 if self.catching_up.is_empty() {
                     self.shared.emit(ClientUpdate::CaughtUp);
                 }
-                if let Ok(reads) = self.shared.store.unsynced_group_reads() {
-                    for (g, seq) in reads {
-                        self.send_read(g, seq);
+                if let Ok(reads) = self.shared.store.unsynced_reads() {
+                    for r in reads {
+                        self.send_read(r);
                     }
                 }
                 self.flush_outbox();
             }
             // Parsed by `parse_incoming` into `Incoming::Event` and `Incoming::Page`.
             ServerFrame::Event(_) | ServerFrame::Page(_) => {}
-            ServerFrame::History(HistoryFrame { rid, group_id, topic_id, messages, has_more }) => {
+            ServerFrame::History(HistoryFrame {
+                rid,
+                group_id,
+                topic_id,
+                messages,
+                has_more,
+            }) => {
                 self.pending.remove(&rid)?;
                 self.history_inflight.remove(&topic_id);
-                let msgs: Vec<Message> = messages.into_iter().filter(|m| m.topic_id == topic_id).collect();
+                let msgs: Vec<Message> = messages
+                    .into_iter()
+                    .filter(|m| m.topic_id == topic_id)
+                    .collect();
                 if let Err(e) = self.shared.store.insert_history(&topic_id, &msgs, has_more) {
                     warn!(error = %e, "store history");
                 }
-                self.shared.emit(ClientUpdate::MessagesChanged { group_id: group_id.clone(), topic_id: topic_id.clone() });
-                self.shared.emit(ClientUpdate::HistoryLoaded { group_id, topic_id, has_more });
+                self.shared.emit(ClientUpdate::MessagesChanged {
+                    group_id: group_id.clone(),
+                    topic_id: topic_id.clone(),
+                });
+                self.shared.emit(ClientUpdate::HistoryLoaded {
+                    group_id,
+                    topic_id,
+                    has_more,
+                });
             }
             ServerFrame::Ack(AckFrame { rid, outcome }) => {
                 let (p, _) = self.pending.remove(&rid)?;
@@ -567,10 +781,22 @@ impl Session {
                         self.history_inflight.remove(&topic_id);
                         warn!(group = %group_id, code = ?error.as_ref().map(|e| e.code), "history refused");
                     }
+                    Pending::Search { rid } => {
+                        let (code, message) = match error {
+                            Some(e) => (Some(e.code), e.message),
+                            None => (None, String::new()),
+                        };
+                        self.shared
+                            .emit(ClientUpdate::SearchFailed { rid, code, message });
+                    }
                 }
             }
             ServerFrame::Transient(t) => self.on_transient(t.event),
-            ServerFrame::Directory(DirectoryFrame { members, groups, removed_group_ids }) => {
+            ServerFrame::Directory(DirectoryFrame {
+                members,
+                groups,
+                removed_group_ids,
+            }) => {
                 let out = match self.shared.store.apply_directory(
                     members.as_deref(),
                     groups.as_deref(),
@@ -587,7 +813,9 @@ impl Session {
                 }
                 self.shared.emit(ClientUpdate::DirectoryChanged);
                 for g in &out.groups_changed {
-                    self.shared.emit(ClientUpdate::GroupChanged { group_id: g.clone() });
+                    self.shared.emit(ClientUpdate::GroupChanged {
+                        group_id: g.clone(),
+                    });
                 }
                 for g in groups.unwrap_or_default() {
                     let last = self.shared.store.last_applied(&g.group.id).unwrap_or(0);
@@ -602,15 +830,56 @@ impl Session {
                 return Some(match code {
                     ErrorCode::Unauthorized => SessionEnd::Unauthorized,
                     ErrorCode::UnsupportedProtocol => SessionEnd::Unsupported,
-                    _ => SessionEnd::Reconnect { reason: format!("error frame {code:?}"), immediate: false },
+                    _ => SessionEnd::Reconnect {
+                        reason: format!("error frame {code:?}"),
+                        immediate: false,
+                    },
                 });
+            }
+            ServerFrame::Reads(f) => {
+                let received = self.received_seq(&f.group_id);
+                if let Err(e) = self.shared.store.apply_reads(&f, received) {
+                    warn!(error = %e, "apply reads");
+                }
+                self.shared.emit(ClientUpdate::GroupChanged {
+                    group_id: f.group_id.clone(),
+                });
+                self.shared.emit(ClientUpdate::TopicsChanged {
+                    group_id: f.group_id,
+                });
+            }
+            ServerFrame::SearchResults(f) => {
+                if self.pending.remove(&f.rid).is_some() {
+                    self.shared.emit(ClientUpdate::SearchResults {
+                        rid: f.rid,
+                        hits: f.hits,
+                    });
+                }
             }
             ServerFrame::Pong => self.pong_deadline = None,
         }
         None
     }
 
-    fn on_page(&mut self, rid: String, group_id: String, entries: Vec<LogEntry>, has_more: bool, last_seq: u64) {
+    /// Newest seq of a group received on this connection, applied or buffered.
+    fn received_seq(&self, group_id: &str) -> u64 {
+        let applied = self.shared.store.last_applied(group_id).unwrap_or(0);
+        let buffered = self
+            .groups
+            .get(group_id)
+            .and_then(|g| g.buffer.keys().next_back().copied())
+            .unwrap_or(0);
+        applied.max(buffered)
+    }
+
+    fn on_page(
+        &mut self,
+        rid: String,
+        group_id: String,
+        entries: Vec<LogEntry>,
+        has_more: bool,
+        last_seq: u64,
+    ) {
         let Some((Pending::Fetch { .. }, _)) = self.pending.remove(&rid) else {
             return;
         };
@@ -625,7 +894,10 @@ impl Session {
             }
         }
         let last = self.drain(&group_id);
-        let gap = self.groups.get(&group_id).is_some_and(|g| !g.buffer.is_empty());
+        let gap = self
+            .groups
+            .get(&group_id)
+            .is_some_and(|g| !g.buffer.is_empty());
         if (has_more || gap || last < last_seq) && !empty {
             self.start_fetch(&group_id);
         } else {
@@ -651,11 +923,13 @@ impl Session {
             // Already removed: its event arrived first, or the UI discarded it.
             _ => {
                 if ok
-                    && let Some(r) = result.and_then(|v| serde_json::from_value::<SendResult>(v).ok())
-                        && r.message.client_msg_id == id {
-                            let _ = self.shared.store.ack_send(&id, &r);
-                            self.emit_sent(id, r);
-                        }
+                    && let Some(r) =
+                        result.and_then(|v| serde_json::from_value::<SendResult>(v).ok())
+                    && r.message.client_msg_id == id
+                {
+                    let _ = self.shared.store.ack_send(&id, &r);
+                    self.emit_sent(id, r);
+                }
                 return None;
             }
         };
@@ -678,19 +952,38 @@ impl Session {
                         }
                     }
                 }
+                OutboxOp::TopicFollow { group_id, .. } => {
+                    if let Some(state) =
+                        result.and_then(|v| serde_json::from_value::<TopicState>(v).ok())
+                        && let Err(e) = self.shared.store.apply_topic_state(group_id, &state)
+                    {
+                        warn!(error = %e, "store topic state");
+                    }
+                    let _ = self.shared.store.outbox_remove(&id);
+                    self.shared.emit(ClientUpdate::TopicsChanged {
+                        group_id: group_id.clone(),
+                    });
+                }
                 _ => {
                     let _ = self.shared.store.outbox_remove(&id);
                 }
             }
             return None;
         }
-        let err = error.unwrap_or(ErrorBody { code: ErrorCode::Internal, message: String::new() });
+        let err = error.unwrap_or(ErrorBody {
+            code: ErrorCode::Internal,
+            message: String::new(),
+        });
         match err.code {
             ErrorCode::RateLimited | ErrorCode::Internal => {
                 let attempts = item.attempts.clamp(0, 6) as u32;
                 let delay = Duration::from_secs(1u64 << attempts).min(Duration::from_secs(60));
                 self.retry_at.insert(id.clone(), Instant::now() + delay);
-                let _ = self.shared.store.outbox_set_state(&id, OutboxState::Pending, Some(code_str(err.code)));
+                let _ = self.shared.store.outbox_set_state(
+                    &id,
+                    OutboxState::Pending,
+                    Some(code_str(err.code)),
+                );
                 None
             }
             ErrorCode::Unauthorized => Some(SessionEnd::Unauthorized),
@@ -701,11 +994,20 @@ impl Session {
             }
             code => {
                 warn!(id = %id, kind = item.op.kind(), ?code, "write refused");
-                let _ = self.shared.store.outbox_set_state(&id, OutboxState::Failed, Some(code_str(code)));
+                let _ = self.shared.store.outbox_set_state(
+                    &id,
+                    OutboxState::Failed,
+                    Some(code_str(code)),
+                );
                 let topic_id = item.op.topic_id().map(str::to_string);
                 match &topic_id {
-                    Some(t) => self.shared.emit(ClientUpdate::MessagesChanged { group_id: group_id.clone(), topic_id: t.clone() }),
-                    None => self.shared.emit(ClientUpdate::TopicsChanged { group_id: group_id.clone() }),
+                    Some(t) => self.shared.emit(ClientUpdate::MessagesChanged {
+                        group_id: group_id.clone(),
+                        topic_id: t.clone(),
+                    }),
+                    None => self.shared.emit(ClientUpdate::TopicsChanged {
+                        group_id: group_id.clone(),
+                    }),
                 }
                 self.shared.emit(ClientUpdate::SendFailed(SendFailure {
                     id,
@@ -723,8 +1025,13 @@ impl Session {
     fn emit_sent(&self, client_msg_id: String, r: SendResult) {
         let group_id = r.message.group_id.clone();
         let topic_id = r.message.topic_id.clone();
-        self.shared.emit(ClientUpdate::TopicsChanged { group_id: group_id.clone() });
-        self.shared.emit(ClientUpdate::MessagesChanged { group_id, topic_id: topic_id.clone() });
+        self.shared.emit(ClientUpdate::TopicsChanged {
+            group_id: group_id.clone(),
+        });
+        self.shared.emit(ClientUpdate::MessagesChanged {
+            group_id,
+            topic_id: topic_id.clone(),
+        });
         self.shared.emit(ClientUpdate::Sent {
             client_msg_id,
             message_id: r.message.id,
@@ -735,21 +1042,38 @@ impl Session {
 
     fn on_transient(&mut self, ev: TransientEvent) {
         match ev {
-            TransientEvent::Typing(TypingEvent { group_id, topic_id, member_id, .. }) => {
+            TransientEvent::Typing(TypingEvent {
+                group_id,
+                topic_id,
+                member_id,
+                ..
+            }) => {
                 if member_id == self.me {
                     return;
                 }
-                self.shared.transient().on_typing(&group_id, &topic_id, &member_id, Instant::now());
-                self.shared.emit(ClientUpdate::Typing { group_id, topic_id });
+                self.shared
+                    .transient()
+                    .on_typing(&group_id, &topic_id, &member_id, Instant::now());
+                self.shared
+                    .emit(ClientUpdate::Typing { group_id, topic_id });
             }
-            TransientEvent::Presence(PresenceEvent { member_id, online, .. }) => {
+            TransientEvent::Presence(PresenceEvent {
+                member_id, online, ..
+            }) => {
                 if self.shared.transient().set_presence(&member_id, online) {
-                    self.shared.emit(ClientUpdate::Presence { member_id, online });
+                    self.shared
+                        .emit(ClientUpdate::Presence { member_id, online });
                 }
             }
-            TransientEvent::MessageDelta(MessageDeltaEvent { group_id, topic_id, message_id, append }) => {
+            TransientEvent::MessageDelta(MessageDeltaEvent {
+                group_id,
+                topic_id,
+                message_id,
+                append,
+            }) => {
                 self.shared.transient().append_delta(&message_id, &append);
-                self.shared.emit(ClientUpdate::MessagesChanged { group_id, topic_id });
+                self.shared
+                    .emit(ClientUpdate::MessagesChanged { group_id, topic_id });
             }
         }
     }
@@ -769,7 +1093,12 @@ impl Session {
             after_seq: after,
             limit: Some(self.fetch_limit),
         }));
-        self.track(rid, Pending::Fetch { group_id: group_id.to_string() });
+        self.track(
+            rid,
+            Pending::Fetch {
+                group_id: group_id.to_string(),
+            },
+        );
     }
 
     /// Applies the contiguous buffered events of a group; fetches when a gap remains.
@@ -810,29 +1139,53 @@ impl Session {
             }
         }
         for (topic_id, author) in &out.created {
-            if self.shared.transient().clear_typing(group_id, topic_id, author) {
-                self.shared.emit(ClientUpdate::Typing { group_id: group_id.into(), topic_id: topic_id.clone() });
+            if self
+                .shared
+                .transient()
+                .clear_typing(group_id, topic_id, author)
+            {
+                self.shared.emit(ClientUpdate::Typing {
+                    group_id: group_id.into(),
+                    topic_id: topic_id.clone(),
+                });
             }
         }
         for id in &out.my_client_msg_ids {
             self.retry_at.remove(id);
         }
+        for ev in &out.other_events {
+            self.shared
+                .emit(ClientUpdate::GroupEvent(Box::new(ev.clone())));
+        }
         if out.group_changed {
-            self.shared.emit(ClientUpdate::GroupChanged { group_id: group_id.into() });
+            self.shared.emit(ClientUpdate::GroupChanged {
+                group_id: group_id.into(),
+            });
         }
         if out.topic_list_changed {
-            self.shared.emit(ClientUpdate::TopicsChanged { group_id: group_id.into() });
+            self.shared.emit(ClientUpdate::TopicsChanged {
+                group_id: group_id.into(),
+            });
         }
         for t in &out.message_topics {
-            self.shared.emit(ClientUpdate::MessagesChanged { group_id: group_id.into(), topic_id: t.clone() });
+            self.shared.emit(ClientUpdate::MessagesChanged {
+                group_id: group_id.into(),
+                topic_id: t.clone(),
+            });
         }
     }
 }
 
 pub(crate) enum Incoming {
     Frame(ServerFrame),
-    Event(LogEntry),
-    Page { rid: String, group_id: String, entries: Vec<LogEntry>, has_more: bool, last_seq: u64 },
+    Event(LogEntry, Option<NotifyReason>),
+    Page {
+        rid: String,
+        group_id: String,
+        entries: Vec<LogEntry>,
+        has_more: bool,
+        last_seq: u64,
+    },
     /// A `welcome` for another protocol version.
     Unsupported,
 }
@@ -842,39 +1195,120 @@ pub(crate) enum Incoming {
 pub(crate) fn parse_incoming(text: &str) -> Result<Incoming, String> {
     let mut v: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
     match v.get("t").and_then(|t| t.as_str()) {
-        Some("event") => Ok(Incoming::Event(log_entry(v.get_mut("event").map(serde_json::Value::take).ok_or("event frame without event")?)?)),
+        Some("event") => {
+            // An unknown reason reads as `message` (docs/protocol.md, Notifications).
+            let notify = v.get("notify").and_then(|n| n.as_str()).map(|n| {
+                serde_json::from_value(serde_json::Value::String(n.into()))
+                    .unwrap_or(NotifyReason::Message)
+            });
+            let ev = v
+                .get_mut("event")
+                .map(serde_json::Value::take)
+                .ok_or("event frame without event")?;
+            Ok(Incoming::Event(log_entry(ev)?, notify))
+        }
         Some("page") => {
-            let rid = v.get("rid").and_then(|x| x.as_str()).ok_or("page without rid")?.to_string();
-            let group_id = v.get("groupId").and_then(|x| x.as_str()).ok_or("page without groupId")?.to_string();
-            let has_more = v.get("hasMore").and_then(|x| x.as_bool()).ok_or("page without hasMore")?;
-            let last_seq = v.get("lastSeq").and_then(|x| x.as_u64()).ok_or("page without lastSeq")?;
+            let rid = v
+                .get("rid")
+                .and_then(|x| x.as_str())
+                .ok_or("page without rid")?
+                .to_string();
+            let group_id = v
+                .get("groupId")
+                .and_then(|x| x.as_str())
+                .ok_or("page without groupId")?
+                .to_string();
+            let has_more = v
+                .get("hasMore")
+                .and_then(|x| x.as_bool())
+                .ok_or("page without hasMore")?;
+            let last_seq = v
+                .get("lastSeq")
+                .and_then(|x| x.as_u64())
+                .ok_or("page without lastSeq")?;
             let events = match v.get_mut("events").map(serde_json::Value::take) {
                 Some(serde_json::Value::Array(a)) => a,
                 _ => return Err("page without events".into()),
             };
-            let entries = events.into_iter().map(log_entry).collect::<Result<Vec<_>, _>>()?;
-            Ok(Incoming::Page { rid, group_id, entries, has_more, last_seq })
+            let entries = events
+                .into_iter()
+                .map(log_entry)
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Incoming::Page {
+                rid,
+                group_id,
+                entries,
+                has_more,
+                last_seq,
+            })
         }
-        Some("welcome") if v.get("protocol").and_then(|p| p.as_u64()) != Some(PROTOCOL_VERSION as u64) => {
+        Some("welcome")
+            if v.get("protocol").and_then(|p| p.as_u64()) != Some(PROTOCOL_VERSION as u64) =>
+        {
             Ok(Incoming::Unsupported)
         }
-        _ => crate::proto::parse_server_frame(text).map(Incoming::Frame).map_err(|e| e.to_string()),
+        _ => crate::proto::parse_server_frame(text)
+            .map(Incoming::Frame)
+            .map_err(|e| e.to_string()),
     }
 }
 
 fn log_entry(v: serde_json::Value) -> Result<LogEntry, String> {
     let seq = v.get("seq").and_then(|x| x.as_u64());
-    let group_id = v.get("groupId").and_then(|x| x.as_str()).map(str::to_string);
-    let event_type = v.get("type").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    let group_id = v
+        .get("groupId")
+        .and_then(|x| x.as_str())
+        .map(str::to_string);
+    let event_type = v
+        .get("type")
+        .and_then(|x| x.as_str())
+        .unwrap_or("")
+        .to_string();
     match serde_json::from_value::<Event>(v) {
         Ok(e) => Ok(LogEntry::Known(e)),
         Err(err) => match (seq, group_id) {
             (Some(seq), Some(group_id)) if seq > 0 => {
                 warn!(seq, event_type = %event_type, error = %err, "skipping event this client cannot read");
-                Ok(LogEntry::Unknown { seq, group_id, event_type })
+                Ok(LogEntry::Unknown {
+                    seq,
+                    group_id,
+                    event_type,
+                })
             }
             _ => Err(err.to_string()),
         },
+    }
+}
+
+fn fail_search(shared: &Shared, rid: String) {
+    shared.emit(ClientUpdate::SearchFailed {
+        rid,
+        code: None,
+        message: "not connected".into(),
+    });
+}
+
+fn notify_update(reason: NotifyReason, entry: &LogEntry) -> ClientUpdate {
+    use crate::proto::EventData;
+    let (topic_id, message_id) = match entry {
+        LogEntry::Known(e) => match &e.data {
+            EventData::MessageCreated(d) => {
+                (Some(d.message.topic_id.clone()), Some(d.message.id.clone()))
+            }
+            EventData::TopicUpdated(d) => (Some(d.topic_id.clone()), None),
+            EventData::TopicCreated(d) => (Some(d.topic.id.clone()), None),
+            EventData::ArtifactCreated(d) | EventData::ArtifactVersionAdded(d) => {
+                (Some(d.artifact.topic_id.clone()), None)
+            }
+            _ => (None, None),
+        },
+        LogEntry::Unknown { .. } => (None, None),
+    };
+    ClientUpdate::Notify {
+        reason,
+        group_id: entry.group_id().to_string(),
+        topic_id,
+        message_id,
     }
 }
 
@@ -897,6 +1331,9 @@ mod tests {
     #[test]
     fn ws_url_from_base() {
         assert_eq!(super::ws_url("https://a.example/"), "wss://a.example/v1/ws");
-        assert_eq!(super::ws_url("http://127.0.0.1:8787"), "ws://127.0.0.1:8787/v1/ws");
+        assert_eq!(
+            super::ws_url("http://127.0.0.1:8787"),
+            "ws://127.0.0.1:8787/v1/ws"
+        );
     }
 }

@@ -24,7 +24,10 @@ pub struct GroupState {
     pub topics: HashMap<String, Topic>,
     pub messages: BTreeMap<String, Message>,
     pub dedupe: HashMap<(String, String), String>,
+    pub topic_reads: HashMap<String, u64>,
 }
+
+const G: &str = "G";
 
 enum Ctrl {
     Frame(String),
@@ -72,7 +75,9 @@ impl State {
             .log
             .iter()
             .filter(|e| e.seq > g.read_seq)
-            .filter(|e| matches!(&e.data, EventData::MessageCreated(d) if d.message.author_id != me))
+            .filter(
+                |e| matches!(&e.data, EventData::MessageCreated(d) if d.message.author_id != me),
+            )
             .count() as u64;
         GroupSummary {
             group: g.group.clone().unwrap(),
@@ -80,6 +85,7 @@ impl State {
             read_seq: g.read_seq,
             unread,
             mentions: 0,
+            ..Default::default()
         }
     }
 
@@ -87,7 +93,13 @@ impl State {
     pub fn append(&mut self, gid: &str, actor: &str, data: EventData) -> u64 {
         let g = self.groups.get_mut(gid).unwrap();
         let seq = g.log.len() as u64 + 1;
-        let ev = Event { seq, group_id: gid.into(), at: 1_000 + seq, actor_id: actor.into(), data };
+        let ev = Event {
+            seq,
+            group_id: gid.into(),
+            at: 1_000 + seq,
+            actor_id: actor.into(),
+            data,
+        };
         g.log.push(ev.clone());
         if !self.hide_live.contains(&seq) {
             self.broadcast(&json!({"t": "event", "event": ev}), None);
@@ -95,9 +107,10 @@ impl State {
         seq
     }
 
-    fn broadcast(&mut self, v: &Value, except: Option<usize>) {
+    pub fn broadcast(&mut self, v: &Value, except: Option<usize>) {
         let text = v.to_string();
-        self.conns.retain(|(id, tx)| Some(*id) == except || tx.send(Ctrl::Frame(text.clone())).is_ok());
+        self.conns
+            .retain(|(id, tx)| Some(*id) == except || tx.send(Ctrl::Frame(text.clone())).is_ok());
     }
 
     /// Creates a message (and a topic when `topic_id` is None). Returns (message, new topic).
@@ -121,16 +134,30 @@ impl State {
                 let topic = Topic {
                     id: tid.clone(),
                     group_id: gid.into(),
-                    title: title.map(str::to_string).unwrap_or_else(|| default_title(body)),
+                    title: title
+                        .map(str::to_string)
+                        .unwrap_or_else(|| default_title(body)),
                     status: TopicStatus::Open,
                     created_by: author.into(),
                     created_at: 1_000 + seq,
                     root_message_id: msg_id.clone(),
                     last_seq: seq,
                     message_count: 1,
+                    owner_id: Some(Some(author.into())),
+                    ..Default::default()
                 };
-                self.groups.get_mut(gid).unwrap().topics.insert(tid.clone(), topic.clone());
-                self.append(gid, author, EventData::TopicCreated(TopicCreatedData { topic: topic.clone() }));
+                self.groups
+                    .get_mut(gid)
+                    .unwrap()
+                    .topics
+                    .insert(tid.clone(), topic.clone());
+                self.append(
+                    gid,
+                    author,
+                    EventData::TopicCreated(TopicCreatedData {
+                        topic: topic.clone(),
+                    }),
+                );
                 new_topic = Some(topic);
                 tid
             }
@@ -146,14 +173,18 @@ impl State {
             mentions: vec![],
             created_seq: seq,
             created_at: 1_000 + seq,
-            edited_at: None,
-            deleted_at: None,
             streaming: streaming.then_some(true),
+            ..Default::default()
         };
         let g = self.groups.get_mut(gid).unwrap();
         g.messages.insert(msg_id.clone(), m.clone());
-        g.dedupe.insert((author.into(), client_msg_id.into()), msg_id);
-        self.append(gid, author, EventData::MessageCreated(MessageCreatedData { message: m.clone() }));
+        g.dedupe
+            .insert((author.into(), client_msg_id.into()), msg_id);
+        self.append(
+            gid,
+            author,
+            EventData::MessageCreated(MessageCreatedData { message: m.clone() }),
+        );
         (m, new_topic)
     }
 
@@ -168,7 +199,11 @@ impl State {
     }
 
     pub fn frames_of(&self, t: &str) -> Vec<Value> {
-        self.client_frames.iter().filter(|f| f["t"] == t).cloned().collect()
+        self.client_frames
+            .iter()
+            .filter(|f| f["t"] == t)
+            .cloned()
+            .collect()
     }
 
     pub fn message_count(&self, gid: &str) -> usize {
@@ -185,11 +220,17 @@ impl MockServer {
     pub async fn start(me: Member, members: Vec<Member>) -> MockServer {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let state = Arc::new(Mutex::new(State { me: Some(me), members, ..Default::default() }));
+        let state = Arc::new(Mutex::new(State {
+            me: Some(me),
+            members,
+            ..Default::default()
+        }));
         let st = state.clone();
         tokio::spawn(async move {
             loop {
-                let Ok((tcp, _)) = listener.accept().await else { break };
+                let Ok((tcp, _)) = listener.accept().await else {
+                    break;
+                };
                 let st = st.clone();
                 tokio::spawn(async move { serve(tcp, st).await });
             }
@@ -207,7 +248,13 @@ impl MockServer {
 
     pub fn add_group(&self, g: Group) {
         self.with(|s| {
-            s.groups.insert(g.id.clone(), GroupState { group: Some(g), ..Default::default() });
+            s.groups.insert(
+                g.id.clone(),
+                GroupState {
+                    group: Some(g),
+                    ..Default::default()
+                },
+            );
         });
     }
 }
@@ -232,7 +279,9 @@ async fn serve(tcp: tokio::net::TcpStream, st: Arc<Mutex<State>>) {
         }
         Ok(resp)
     };
-    let Ok(ws) = tokio_tungstenite::accept_hdr_async(tcp, check).await else { return };
+    let Ok(ws) = tokio_tungstenite::accept_hdr_async(tcp, check).await else {
+        return;
+    };
     let (mut sink, mut stream) = ws.split();
     let (tx, mut rx) = unbounded_channel::<Ctrl>();
     let conn_id = {
@@ -281,8 +330,18 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
     match v["t"].as_str().unwrap() {
         "hello" => {
             s.hellos.push(v.clone());
-            let groups: Vec<GroupSummary> = s.groups.keys().cloned().collect::<Vec<_>>().iter().map(|g| s.summary(g)).collect();
-            send(tx, json!({"t": "welcome", "protocol": 1, "me": s.me, "members": s.members, "groups": groups, "serverTime": 1}));
+            let groups: Vec<GroupSummary> = s
+                .groups
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .iter()
+                .map(|g| s.summary(g))
+                .collect();
+            send(
+                tx,
+                json!({"t": "welcome", "protocol": 1, "me": s.me, "members": s.members, "groups": groups, "serverTime": 1}),
+            );
             s.conns.push((conn, tx.clone()));
         }
         "ping" => {
@@ -295,7 +354,10 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
             let key = (me.clone(), cmid.clone());
             if let Some(mid) = s.groups[&gid].dedupe.get(&key).cloned() {
                 let m = s.groups[&gid].messages[&mid].clone();
-                send(tx, json!({"t": "ack", "rid": rid, "ok": true, "result": {"message": m, "duplicate": true}}));
+                send(
+                    tx,
+                    json!({"t": "ack", "rid": rid, "ok": true, "result": {"message": m, "duplicate": true}}),
+                );
                 return true;
             }
             let (m, topic) = s.post(
@@ -315,7 +377,10 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
             if let Some(t) = topic {
                 result["topic"] = json!(t);
             }
-            send(tx, json!({"t": "ack", "rid": rid, "ok": true, "result": result}));
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": true, "result": result}),
+            );
         }
         "edit" => {
             let mid = v["messageId"].as_str().unwrap().to_string();
@@ -326,7 +391,17 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 m.edited_at = Some(Some(5));
                 m.streaming = streaming.then_some(true);
             }
-            s.append(&gid, &me, EventData::MessageUpdated(MessageUpdatedData { message_id: mid, body, edited_at: 5, streaming }));
+            s.append(
+                &gid,
+                &me,
+                EventData::MessageUpdated(MessageUpdatedData {
+                    message_id: mid,
+                    body,
+                    edited_at: 5,
+                    streaming,
+                    ..Default::default()
+                }),
+            );
             send(tx, json!({"t": "ack", "rid": rid, "ok": true}));
         }
         "delete" => {
@@ -335,18 +410,30 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 m.body.clear();
                 m.deleted_at = Some(Some(6));
             }
-            s.append(&gid, &me, EventData::MessageDeleted(MessageDeletedData { message_id: mid, deleted_at: 6 }));
+            s.append(
+                &gid,
+                &me,
+                EventData::MessageDeleted(MessageDeletedData {
+                    message_id: mid,
+                    deleted_at: 6,
+                }),
+            );
             send(tx, json!({"t": "ack", "rid": rid, "ok": true}));
         }
         "topic.update" => {
             if let Some(code) = s.topic_update_error {
-                send(tx, json!({"t": "ack", "rid": rid, "ok": false, "error": {"code": code, "message": "no"}}));
+                send(
+                    tx,
+                    json!({"t": "ack", "rid": rid, "ok": false, "error": {"code": code, "message": "no"}}),
+                );
                 return true;
             }
             let data = TopicUpdatedData {
                 topic_id: v["topicId"].as_str().unwrap().into(),
                 title: v["title"].as_str().map(str::to_string),
                 status: serde_json::from_value(v["status"].clone()).ok(),
+                waiting_on: serde_json::from_value(v["waitingOn"].clone()).ok(),
+                ..Default::default()
             };
             s.append(&gid, &me, EventData::TopicUpdated(data));
             send(tx, json!({"t": "ack", "rid": rid, "ok": true}));
@@ -357,23 +444,42 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
             let g = &s.groups[&gid];
             let events: Vec<&Event> = g.log.iter().filter(|e| e.seq > after).take(limit).collect();
             let has_more = events.last().is_some_and(|e| e.seq < g.log.len() as u64);
-            send(tx, json!({"t": "page", "rid": rid, "groupId": gid, "events": events, "hasMore": has_more, "lastSeq": g.log.len()}));
+            send(
+                tx,
+                json!({"t": "page", "rid": rid, "groupId": gid, "events": events, "hasMore": has_more, "lastSeq": g.log.len()}),
+            );
         }
         "history" => {
             let tid = v["topicId"].as_str().unwrap();
             let before = v["beforeSeq"].as_u64().unwrap_or(u64::MAX);
             let limit = v["limit"].as_u64().unwrap_or(100) as usize;
-            let mut msgs: Vec<&Message> =
-                s.groups[&gid].messages.values().filter(|m| m.topic_id == tid && m.created_seq < before).collect();
+            let mut msgs: Vec<&Message> = s.groups[&gid]
+                .messages
+                .values()
+                .filter(|m| m.topic_id == tid && m.created_seq < before)
+                .collect();
             msgs.sort_by_key(|m| std::cmp::Reverse(m.created_seq));
             let has_more = msgs.len() > limit;
             msgs.truncate(limit);
-            send(tx, json!({"t": "history", "rid": rid, "groupId": gid, "topicId": tid, "messages": msgs, "hasMore": has_more}));
+            send(
+                tx,
+                json!({"t": "history", "rid": rid, "groupId": gid, "topicId": tid, "messages": msgs, "hasMore": has_more}),
+            );
         }
         "read" => {
             let seq = v["seq"].as_u64().unwrap();
             let g = s.groups.get_mut(&gid).unwrap();
-            g.read_seq = g.read_seq.max(seq);
+            match v["topicId"].as_str() {
+                Some(t) => {
+                    let e = g.topic_reads.entry(t.to_string()).or_default();
+                    *e = (*e).max(seq);
+                }
+                None => g.read_seq = g.read_seq.max(seq),
+            }
+        }
+        "search" => {
+            let hits = json!([{"groupId": G, "topicId": "T", "messageId": "M", "authorId": me, "snippet": v["query"], "createdAt": 1, "seq": 1}]);
+            send(tx, json!({"t": "searchResults", "rid": rid, "hits": hits}));
         }
         "typing" => {
             let ev = json!({"t": "transient", "event": {"type": "typing", "groupId": gid, "topicId": v["topicId"], "memberId": me, "at": 1}});
