@@ -8,7 +8,10 @@
 //! literal in a view: add a token here so light and dark both work.
 
 use std::{
-    sync::{Arc, OnceLock},
+    sync::{
+        Arc, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -31,6 +34,7 @@ pub const SIDEBAR_MAX_WIDTH: Pixels = px(320.);
 /// Topic list column width (280 to 400).
 pub const TOPIC_LIST_WIDTH: Pixels = px(320.);
 pub const TOPIC_LIST_MIN_WIDTH: Pixels = px(280.);
+pub const TOPIC_LIST_MAX_WIDTH: Pixels = px(400.);
 /// Side panel width (260 to 380), closed by default.
 pub const SIDE_PANEL_WIDTH: Pixels = px(300.);
 /// The topic view never gets narrower than this.
@@ -96,6 +100,8 @@ pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
 pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
 /// Traffic light origin: their center lands on y 26, the title row center.
 pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(20.), px(20.));
+/// Leading inset of a toolbar band that holds the traffic lights.
+pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
 /// Timeline and topic row avatar size.
 pub const AVATAR_SIZE: Pixels = px(36.);
 /// Sidebar 群 and 私聊 row height.
@@ -272,9 +278,18 @@ pub fn follow_system(window: &mut Window, cx: &mut App) -> Subscription {
 /// again after every change (DESIGN.md §18). The self-test uses this too.
 pub fn set_mode(mode: ThemeMode, cx: &mut App) {
     Theme::change(mode, None, cx);
-    crate::ui::motion::sync_reduce_motion(cx);
+    crate::ui::motion::sync_accessibility(cx);
     let dark = mode.is_dark();
     Theme::update(cx, |theme| apply(theme, dark));
+}
+
+/// Applies a change of the accessibility display options (Increase
+/// contrast, Reduce motion) while the app runs: the colors are loaded again
+/// and every window repaints.
+pub fn refresh_accessibility(cx: &mut App) {
+    let dark = is_dark(cx);
+    Theme::update(cx, |theme| apply(theme, dark));
+    cx.refresh_windows();
 }
 
 pub fn is_dark(cx: &App) -> bool {
@@ -1045,14 +1060,44 @@ fn build(dark: bool) -> Colors {
     }
 }
 
+/// System Settings › Accessibility › Display › Increase contrast (§11).
+static INCREASE_CONTRAST: AtomicBool = AtomicBool::new(false);
+
+/// Sets the Increase contrast flag; `true` when it changed.
+pub fn set_increase_contrast(on: bool) -> bool {
+    INCREASE_CONTRAST.swap(on, Ordering::Relaxed) != on
+}
+
+/// With Increase contrast (§11): hairlines and borders use `border-strong`,
+/// `text-3` becomes `text-2` (and the placeholder takes the old `text-3`).
+/// Scrim and overlay are opaque already, so Reduce transparency needs no
+/// change.
+fn high_contrast(mut k: Colors) -> Colors {
+    k.border = k.border_strong;
+    k.sep = k.border_strong;
+    k.placeholder = k.text_3;
+    k.text_3 = k.text_2;
+    k
+}
+
 fn light_colors() -> &'static Colors {
     static L: OnceLock<Colors> = OnceLock::new();
-    L.get_or_init(|| build(false))
+    static H: OnceLock<Colors> = OnceLock::new();
+    if INCREASE_CONTRAST.load(Ordering::Relaxed) {
+        H.get_or_init(|| high_contrast(build(false)))
+    } else {
+        L.get_or_init(|| build(false))
+    }
 }
 
 fn dark_colors() -> &'static Colors {
     static D: OnceLock<Colors> = OnceLock::new();
-    D.get_or_init(|| build(true))
+    static H: OnceLock<Colors> = OnceLock::new();
+    if INCREASE_CONTRAST.load(Ordering::Relaxed) {
+        H.get_or_init(|| high_contrast(build(true)))
+    } else {
+        D.get_or_init(|| build(true))
+    }
 }
 
 /// The app's colors for the current mode.
@@ -1157,6 +1202,28 @@ mod tests {
         // Below 1260 the panel floats over the topic view.
         assert!(c(1259., true).panel_floats);
         assert!(c(WINDOW_MIN_WIDTH.into(), true).panel_floats);
+    }
+
+    #[test]
+    fn increase_contrast_strengthens_lines_and_quiet_text() {
+        for dark in [false, true] {
+            let k = build(dark);
+            let h = high_contrast(k);
+            assert_eq!(h.border, k.border_strong);
+            assert_eq!(h.sep, k.border_strong);
+            assert_eq!(h.text_3, k.text_2);
+            assert_eq!(h.placeholder, k.text_3);
+            assert_eq!(h.text_1, k.text_1);
+        }
+    }
+
+    #[test]
+    fn disabled_fill_sits_above_every_surface_in_dark() {
+        // Translucent white: it lightens content and overlay alike, so the
+        // disabled primary never reads as a hole in a dialog (§2.3).
+        let k = build(true);
+        assert!(k.disabled_bg.a < 0.2);
+        assert!(k.disabled_bg.l > 0.9);
     }
 
     fn rel_luminance(h: Hsla, over: Hsla) -> f32 {

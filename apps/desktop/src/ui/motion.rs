@@ -10,25 +10,34 @@ use gpui::{
 
 use crate::theme::motion;
 
-/// Reads "Reduce motion" from the system and passes it to GPUI, which then
-/// stops decorative animations (`cx.reduce_motion()`). Called at start, on
-/// every appearance change and when the accessibility display options change.
-pub fn sync_reduce_motion(cx: &mut App) {
-    cx.set_reduce_motion(system_reduce_motion());
+/// Reads "Reduce motion" and "Increase contrast" from the system: GPUI then
+/// stops decorative animations (`cx.reduce_motion()`) and the theme uses its
+/// high-contrast colors. `true` when either changed. Called at start, on
+/// every appearance change and when the accessibility display options change
+/// ([`watch_reduce_motion`]).
+pub fn sync_accessibility(cx: &mut App) -> bool {
+    let (reduce, contrast) = system_accessibility();
+    let changed = cx.reduce_motion() != reduce;
+    cx.set_reduce_motion(reduce);
+    crate::theme::set_increase_contrast(contrast) || changed
 }
 
 #[cfg(target_os = "macos")]
-fn system_reduce_motion() -> bool {
-    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+fn system_accessibility() -> (bool, bool) {
+    let ws = objc2_app_kit::NSWorkspace::sharedWorkspace();
+    (
+        ws.accessibilityDisplayShouldReduceMotion(),
+        ws.accessibilityDisplayShouldIncreaseContrast(),
+    )
 }
 
 #[cfg(not(target_os = "macos"))]
-fn system_reduce_motion() -> bool {
-    false
+fn system_accessibility() -> (bool, bool) {
+    (false, false)
 }
 
-/// Follows a change of "Reduce motion" in System Settings while the app
-/// runs. Call once on the main thread.
+/// Follows a change of "Reduce motion" or "Increase contrast" in System
+/// Settings while the app runs (§11). Call once on the main thread.
 #[cfg(target_os = "macos")]
 pub fn watch_reduce_motion(cx: &mut App) {
     use std::ptr::NonNull;
@@ -59,8 +68,9 @@ pub fn watch_reduce_motion(cx: &mut App) {
     cx.spawn(async move |cx| {
         while rx.next().await.is_some() {
             cx.update(|cx| {
-                sync_reduce_motion(cx);
-                cx.refresh_windows();
+                if sync_accessibility(cx) {
+                    crate::theme::refresh_accessibility(cx);
+                }
             });
         }
     })
