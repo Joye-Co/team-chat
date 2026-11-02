@@ -8,9 +8,9 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p scripts",
     "admin": "bun scripts/admin.ts",
     "db:migrate:local": "wrangler d1 migrations apply DB --local",
-    "deploy:e2e": "wrangler d1 migrations apply DB --env e2e --remote && wrangler deploy --env e2e",
-    "deploy:staging": "wrangler d1 migrations apply DB --env staging --remote && wrangler deploy --env staging",
-    "deploy:production": "wrangler d1 migrations apply DB --env production --remote && wrangler deploy --env production"
+    "deploy:e2e": "bash ../scripts/deploy-server.sh e2e",
+    "deploy:staging": "bash ../scripts/deploy-server.sh staging",
+    "deploy:production": "bash ../scripts/deploy-server.sh production"
   },
   "dependencies": {
     "@chat/protocol": "workspace:*",
