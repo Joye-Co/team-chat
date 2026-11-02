@@ -136,6 +136,45 @@ pub fn undo_clamp(
     Ok(())
 }
 
+/// Draws the window as the key window without making it key: the app stays
+/// inactive and the focus stays with the app the person uses. Fields hide
+/// their caret and selection in an inactive window (gpui-component checks
+/// `isKeyWindow` through GPUI), so a capture of a focused field would lose
+/// both. In the screenshot process only, GPUI's window class answers
+/// `isKeyWindow` with YES, and its delegate hears `windowDidBecomeKey:`.
+/// The window server's key window does not change.
+#[cfg(target_os = "macos")]
+pub fn draw_as_key(window: &Window) -> Result<(), String> {
+    use objc2::runtime::{AnyClass, AnyObject, Bool, Imp, Sel};
+
+    extern "C-unwind" fn yes(_: *mut AnyObject, _: Sel) -> Bool {
+        Bool::YES
+    }
+
+    let ns_window = ns_window(window)?;
+    // SAFETY: a live NSWindow on the main thread. `class_addMethod` only adds
+    // the method to GPUI's own window subclass (it fails, harmlessly, when it
+    // is already there) with the signature of `-[NSWindow isKeyWindow]`;
+    // `delegate` is a getter and GPUI's delegate implements
+    // `windowDidBecomeKey:`, which takes a notification it does not read.
+    unsafe {
+        let class: *const AnyClass = objc2::msg_send![ns_window, class];
+        let imp: Imp = std::mem::transmute::<extern "C-unwind" fn(*mut AnyObject, Sel) -> Bool, Imp>(yes);
+        objc2::ffi::class_addMethod(class.cast_mut(), objc2::sel!(isKeyWindow), imp, c"B@:".as_ptr());
+        let delegate: *mut AnyObject = objc2::msg_send![ns_window, delegate];
+        if !delegate.is_null() {
+            let none: *mut AnyObject = std::ptr::null_mut();
+            let _: () = objc2::msg_send![delegate, windowDidBecomeKey: none];
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn draw_as_key(_window: &Window) -> Result<(), String> {
+    Ok(())
+}
+
 /// The window's frame size in points.
 #[cfg(target_os = "macos")]
 pub fn frame_size(window: &Window) -> Result<(f64, f64), String> {

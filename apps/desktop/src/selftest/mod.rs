@@ -306,6 +306,7 @@ async fn shoot(
                 window.bounds_changed(cx);
                 window.refresh();
                 capture::order_front(window)?;
+                capture::draw_as_key(window)?;
                 Ok::<_, String>(())
             })
         })
