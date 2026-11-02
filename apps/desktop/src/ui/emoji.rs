@@ -98,7 +98,7 @@ pub fn reaction_pill(
                 .flex()
                 .items_center()
                 .gap(space::S4)
-                .child(div().type_role(type_scale::REACTION_EMOJI).child(emoji))
+                .child(reaction_emoji(emoji))
                 .child(div().t_meta().tnum().one_line().child(label)),
         );
     if mine {
@@ -106,6 +106,31 @@ pub fn reaction_pill(
     } else {
         button
     }
+}
+
+/// Apple Color Emoji draws in GPUI about 12 % larger than in the browser
+/// at the same size, with about 3 pt of side bearing on each side. The
+/// mockups' 16 pt emoji is 16 pt of ink in a 16 pt box: so the glyph is set
+/// smaller and centered in a 16 x 16 box, which keeps the pill as wide as
+/// in the mockup.
+const REACTION_EMOJI_DRAWN: f32 = 14.2;
+
+/// The 16 x 16 emoji of a reaction pill (§7.5).
+fn reaction_emoji(emoji: SharedString) -> gpui::Div {
+    let (size, line) = type_scale::REACTION_EMOJI;
+    div()
+        .flex_none()
+        .size(size)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(REACTION_EMOJI_DRAWN))
+                .line_height(line)
+                .child(emoji),
+        )
 }
 
 /// The pill after the reactions that opens the picker: 26 pt, radius 13,
