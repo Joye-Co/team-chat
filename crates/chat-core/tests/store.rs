@@ -573,3 +573,57 @@ fn perf_insert_10k_and_query_window_of_200() {
     assert_eq!(topics.len(), 1);
     assert!(worst.as_millis() < 10, "window query took {worst:?}");
 }
+
+#[test]
+fn a_topic_read_in_a_long_group_takes_only_that_topic_off_the_totals() {
+    let (_d, s) = open();
+    s.apply_events(
+        G1,
+        &[
+            topic_created(1, G1, topic("TA", G1, "MA", 1)),
+            msg_created(2, message("MA", G1, "TA", ALICE, 2, "a")),
+        ],
+    )
+    .unwrap();
+    // 20,000 unread messages in topic TA, then a topic TB with two, one a mention of me.
+    let events: Vec<Event> = (3..20_003)
+        .map(|seq| {
+            msg_created(
+                seq,
+                message(&format!("M{seq:06}"), G1, "TA", ALICE, seq, "x"),
+            )
+        })
+        .collect();
+    for chunk in events.chunks(500) {
+        s.apply_events(G1, chunk).unwrap();
+    }
+    let mut mention = message("MB2", G1, "TB", ALICE, 20_005, "@me");
+    mention.mentions = vec![ME.into()];
+    s.apply_events(
+        G1,
+        &[
+            topic_created(20_003, G1, topic("TB", G1, "MB1", 20_003)),
+            msg_created(20_004, message("MB1", G1, "TB", ALICE, 20_004, "b")),
+            msg_created(20_005, mention),
+        ],
+    )
+    .unwrap();
+    let g = s.group(G1).unwrap().unwrap();
+    assert_eq!((g.unread, g.mentions), (20_003, 1));
+    let t = Instant::now();
+    assert!(s.mark_read(G1, Some("TB"), 20_004).unwrap().is_some());
+    let first = t.elapsed();
+    let g = s.group(G1).unwrap().unwrap();
+    assert_eq!((g.unread, g.mentions), (20_002, 1));
+    let t = Instant::now();
+    assert!(s.mark_read(G1, Some("TB"), 20_005).unwrap().is_some());
+    let second = t.elapsed();
+    let g = s.group(G1).unwrap().unwrap();
+    assert_eq!((g.unread, g.mentions), (20_001, 0));
+    println!(
+        "perf: topic read in a 20k group {:.3} ms, {:.3} ms",
+        first.as_secs_f64() * 1e3,
+        second.as_secs_f64() * 1e3
+    );
+    assert!(second.as_millis() < 10, "topic read took {second:?}");
+}

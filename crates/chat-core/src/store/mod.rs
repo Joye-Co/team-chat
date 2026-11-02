@@ -224,13 +224,20 @@ impl Store {
                  ON CONFLICT(group_id, topic_id) DO UPDATE SET seq = excluded.seq, synced = 0",
                 params![group_id, key, seq],
             )?;
-            if topic_id.is_none() {
-                tx.execute(
-                    "UPDATE groups SET read_seq = MAX(read_seq, ?2) WHERE id = ?1",
-                    params![group_id, seq],
-                )?;
+            match topic_id {
+                None => {
+                    tx.execute(
+                        "UPDATE groups SET read_seq = MAX(read_seq, ?2) WHERE id = ?1",
+                        params![group_id, seq],
+                    )?;
+                    apply::recount_unread(tx, &me, group_id)?;
+                }
+                // Only this topic moved: take its newly read messages off the group totals
+                // instead of recounting the whole group (this runs on every scroll).
+                Some(t) => {
+                    apply::subtract_topic_read(tx, &me, group_id, t, before.max(group_before), seq)?
+                }
             }
-            apply::recount_unread(tx, &me, group_id)?;
             Ok(Some(PendingRead {
                 group_id: group_id.into(),
                 topic_id: topic_id.map(str::to_string),

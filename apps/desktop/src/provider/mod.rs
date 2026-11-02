@@ -16,15 +16,15 @@ pub mod app_glue;
 mod cards;
 pub mod convert;
 pub mod files;
+#[cfg(test)]
+mod files_live;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod persist;
+mod process;
 mod realtime;
 #[cfg(test)]
 mod realtime_live;
-#[cfg(test)]
-mod files_live;
-mod process;
 #[cfg(test)]
 mod search_live;
 pub mod selftest_live;
@@ -41,6 +41,10 @@ use std::{
 use chat_core::{Client, ClientConfig, ClientUpdate, TopicPatch};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
+use crate::data::{
+    AdminReply, BotCreated, GroupPrefs, InviteCreated, InviteRequest, MachineCreated, MachineInfo,
+    MemberLevel, NotifyLevel, RunnerSetup,
+};
 use crate::{
     data::{
         ArtifactDetail, ArtifactFolder, ArtifactSummary, Change, ChatProvider, ClientMsgId,
@@ -51,10 +55,6 @@ use crate::{
         TransferState,
     },
     drafts::DraftStore,
-};
-use crate::data::{
-    BotCreated, GroupPrefs, InviteCreated, InviteRequest, MachineCreated, MachineInfo,
-    MemberLevel, NotifyLevel, AdminReply, RunnerSetup,
 };
 
 use convert::{pending_cid, pending_topic_id};
@@ -671,12 +671,11 @@ impl CoreProvider {
                     if is_root {
                         s.aliases.insert(pending.clone(), topic_id.clone());
                     }
-                    let (ready, rest): (Vec<_>, Vec<_>) =
-                        std::mem::take(&mut s.deferred)
-                            .into_iter()
-                            .partition(|(p, _, _)| {
-                                *p == pending || resolve_alias(&s.aliases, p) == topic_id
-                            });
+                    let (ready, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.deferred)
+                        .into_iter()
+                        .partition(|(p, _, _)| {
+                            *p == pending || resolve_alias(&s.aliases, p) == topic_id
+                        });
                     s.deferred = rest;
                     ready
                 };
@@ -751,8 +750,7 @@ impl CoreProvider {
                     }
                 }
             }
-            ClientUpdate::SearchResults { .. }
-            | ClientUpdate::SearchFailed { .. } => {}
+            ClientUpdate::SearchResults { .. } | ClientUpdate::SearchFailed { .. } => {}
         }
     }
 
@@ -1207,10 +1205,16 @@ impl ChatProvider for CoreProvider {
         if seq == 0 || pending_cid(&real).is_some() {
             return;
         }
-        if let Some(a) = self.account()
-            && let Err(e) = a.client.mark_topic_read(group_id, &real, seq)
-        {
-            tracing::warn!(error = %e, "mark read failed");
+        // Off the UI thread: the store write waits for the writer lock, which a catch-up page
+        // can hold for tens of milliseconds. The change arrives as GroupChanged/TopicsChanged.
+        if let Some(a) = self.account() {
+            let client = a.client.clone();
+            let group_id = group_id.to_string();
+            chat_core::background().spawn_blocking(move || {
+                if let Err(e) = client.mark_topic_read(&group_id, &real, seq) {
+                    tracing::warn!(error = %e, "mark read failed");
+                }
+            });
         }
     }
 
@@ -1347,7 +1351,11 @@ impl ChatProvider for CoreProvider {
         self.request_artifact_inner(group_id, topic_id, artifact_id);
     }
 
-    fn open_artifact_version(&self, artifact_id: &str, version: Option<u32>) -> Reply<ArtifactFolder> {
+    fn open_artifact_version(
+        &self,
+        artifact_id: &str,
+        version: Option<u32>,
+    ) -> Reply<ArtifactFolder> {
         self.open_artifact_version_inner(artifact_id, version)
     }
 

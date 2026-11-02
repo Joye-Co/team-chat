@@ -340,6 +340,40 @@ pub(super) fn recount_unread(tx: &Transaction<'_>, me: &str, group_id: &str) -> 
     Ok(())
 }
 
+/// Takes the messages of one topic with `after < createdSeq <= upto` (newly read) off the
+/// group's unread and mention totals. Uses the `messages_by_topic` index.
+pub(super) fn subtract_topic_read(
+    tx: &Transaction<'_>,
+    me: &str,
+    group_id: &str,
+    topic_id: &str,
+    after: u64,
+    upto: u64,
+) -> StoreResult<()> {
+    if upto <= after {
+        return Ok(());
+    }
+    let sql = format!(
+        "SELECT COUNT(*), COALESCE(SUM(m.mentions LIKE ?5), 0) FROM messages m
+         WHERE m.topic_id = ?1 AND m.group_id = ?6 AND {cond}
+           AND m.created_seq > ?3 AND m.created_seq <= ?4",
+        cond = rows::UNREAD_COND
+    );
+    let (read, mentioned): (u64, u64) = tx.query_row(
+        &sql,
+        params![topic_id, me, after, upto, format!("%\"{me}\"%"), group_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    if read > 0 {
+        tx.execute(
+            "UPDATE groups SET unread = MAX(unread - ?2, 0), mentions = MAX(mentions - ?3, 0)
+             WHERE id = ?1",
+            params![group_id, read, mentioned],
+        )?;
+    }
+    Ok(())
+}
+
 fn insert_message_if_absent(tx: &Transaction<'_>, m: &Message) -> StoreResult<usize> {
     Ok(tx.execute(
         &format!(
