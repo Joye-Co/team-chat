@@ -404,24 +404,42 @@ impl Render for RootView {
                     .into_any_element(),
             ]);
         }
-        // The side panel needs a window of at least 1100 pt (§5.1).
-        // It never shows with no topic open (U07).
+        // The side panel never shows with no topic open (U07). In a narrow
+        // window the columns shrink for it, then it floats (§4.4).
         let nav = self.services.nav.read(cx);
-        let panel_open = nav.side_panel_open
-            && nav.topic.is_some()
-            && window.viewport_size().width >= theme::SIDE_PANEL_MIN_WINDOW;
+        let panel_open = nav.side_panel_open && nav.topic.is_some();
+        let cols = theme::columns(window.viewport_size().width, panel_open);
+        let panel = panel_open.then(|| {
+            let panel = div()
+                .w(theme::SIDE_PANEL_WIDTH)
+                .h_full()
+                .flex_none()
+                .bg(colors.panel)
+                .child(self.side_panel.clone());
+            if cols.panel_floats {
+                panel
+                    .absolute()
+                    .top_0()
+                    .right_0()
+                    .shadow(colors.shadow(theme::Elevation::Overlay))
+                    .occlude()
+            } else {
+                panel.relative().child(ui::column_start_edge(cx))
+            }
+        });
         root.flex()
             .flex_row()
+            .relative()
             .children([
                 div()
-                    .w(theme::SIDEBAR_WIDTH)
+                    .w(cols.sidebar)
                     .h_full()
                     .flex_none()
                     .child(self.sidebar.clone())
                     .into_any_element(),
                 ui::column_edge(cx).into_any_element(),
                 div()
-                    .w(theme::TOPIC_LIST_WIDTH)
+                    .w(cols.topic_list)
                     .h_full()
                     .flex_none()
                     .child(self.topic_list.clone())
@@ -437,18 +455,7 @@ impl Render for RootView {
                     .child(self.composer.clone())
                     .into_any_element(),
             ])
-            .when_some(panel_open.then(|| self.side_panel.clone()), |el, panel| {
-                el.child(
-                    div()
-                        .relative()
-                        .w(theme::SIDE_PANEL_WIDTH)
-                        .h_full()
-                        .flex_none()
-                        .bg(colors.panel)
-                        .child(panel)
-                        .child(ui::column_start_edge(cx)),
-                )
-            })
+            .children(panel)
     }
 }
 

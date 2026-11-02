@@ -42,9 +42,55 @@ pub const HEADER_SECOND_ROW: Pixels = px(40.);
 /// Header band of the topic list, topic view and side panel: 52 + 40. The
 /// three 0.5 pt bottom rules sit on one y.
 pub const HEADER_BAND: Pixels = px(92.);
-/// Below this window width the side panel closes: 248 + 320 + 480 + 300.
+/// From this window width every column has its default width with the side
+/// panel open: 248 + 320 + 480 + 300.
 pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1348.);
 pub const WINDOW_MIN_WIDTH: Pixels = px(1100.);
+/// Below this window width an open side panel floats over the topic view:
+/// 200 + 280 + 480 + 300.
+pub const SIDE_PANEL_INLINE_MIN_WINDOW: Pixels = px(1260.);
+
+/// The column widths of the main window (§4.4 "Narrow window").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Columns {
+    pub sidebar: Pixels,
+    pub topic_list: Pixels,
+    /// The open side panel floats over the topic view (level 2) instead of
+    /// taking its own column.
+    pub panel_floats: bool,
+}
+
+/// With the side panel open, the topic list shrinks to 280 and then the
+/// sidebar to 200, so the topic view keeps 480; below
+/// [`SIDE_PANEL_INLINE_MIN_WINDOW`] the panel floats over the topic view.
+pub fn columns(window_width: Pixels, panel_open: bool) -> Columns {
+    let full = Columns {
+        sidebar: SIDEBAR_WIDTH,
+        topic_list: TOPIC_LIST_WIDTH,
+        panel_floats: false,
+    };
+    if !panel_open || window_width >= SIDE_PANEL_MIN_WINDOW {
+        return full;
+    }
+    if window_width < SIDE_PANEL_INLINE_MIN_WINDOW {
+        return Columns {
+            panel_floats: true,
+            ..full
+        };
+    }
+    let room = window_width - TOPIC_VIEW_MIN_WIDTH - SIDE_PANEL_WIDTH;
+    let topic_list = (room - SIDEBAR_WIDTH)
+        .max(TOPIC_LIST_MIN_WIDTH)
+        .min(TOPIC_LIST_WIDTH);
+    let sidebar = (room - topic_list)
+        .max(SIDEBAR_MIN_WIDTH)
+        .min(SIDEBAR_WIDTH);
+    Columns {
+        sidebar,
+        topic_list,
+        panel_floats: false,
+    }
+}
 pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
 pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
 pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
@@ -1091,6 +1137,27 @@ pub fn status_chip_colors(status: TopicStatus, cx: &App) -> (Hsla, Hsla) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_side_panel_fits_every_window_width() {
+        let c = |w: f32, open| columns(px(w), open);
+        assert_eq!(c(1100., false).sidebar, SIDEBAR_WIDTH);
+        assert_eq!(c(1440., true), c(1440., false));
+        // 1308: only the topic list shrinks.
+        let narrow = c(1308., true);
+        assert_eq!(
+            (narrow.sidebar, narrow.topic_list),
+            (SIDEBAR_WIDTH, px(280.))
+        );
+        assert!(!narrow.panel_floats);
+        // 1280: the sidebar shrinks too, and the topic view keeps 480.
+        let narrower = c(1280., true);
+        assert_eq!(narrower.topic_list, px(280.));
+        assert_eq!(narrower.sidebar, px(220.));
+        // Below 1260 the panel floats over the topic view.
+        assert!(c(1259., true).panel_floats);
+        assert!(c(WINDOW_MIN_WIDTH.into(), true).panel_floats);
+    }
 
     fn rel_luminance(h: Hsla, over: Hsla) -> f32 {
         let a = h.to_rgb();
