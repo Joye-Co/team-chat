@@ -14,11 +14,7 @@ use gpui::{
     App, Context, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    ActiveTheme as _, Disableable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
-    list::ListItem,
-};
+use gpui_component::{ActiveTheme as _, Disableable as _};
 
 use crate::{
     app::{Changes, Services},
@@ -27,8 +23,9 @@ use crate::{
         BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess, RunStatus,
         TopicId,
     },
-    theme,
-    views::{avatar, time_text},
+    theme::{self, Type as _, space},
+    ui,
+    views::time_text,
 };
 
 /// How often an active run's log is fetched while the view shows it.
@@ -311,40 +308,48 @@ impl ProcessView {
         self.members.iter().find(|m| m.id == id)
     }
 
+    /// One run: a 40 pt row (§8.1 rows), the 24 pt bot, its name `ui` 14,
+    /// the status label and the start time 12 `text-3`.
     fn render_run_row(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
+        let k = theme::colors(cx);
         let bot = self.member(&run.bot_id).cloned();
         let selected = self.selected.as_deref() == Some(run.id.as_str());
         let id = run.id.clone();
         let when = time_text(run.started_at.unwrap_or(run.created_at));
-        ListItem::new(gpui::ElementId::Name(format!("run-{}", run.id).into()))
-            .selected(selected)
-            .on_click(cx.listener(move |this, _, _, cx| this.select(Some(id.clone()), cx)))
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(avatar(bot.as_ref(), px(18.), cx))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(0.))
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(bot.map(|b| b.name).unwrap_or_default()),
-                    )
-                    .child(status_badge(run.status, cx))
-                    .child(
-                        div()
-                            .flex_none()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(when),
-                    ),
-            )
+        ui::list_row(
+            gpui::ElementId::Name(format!("run-{}", run.id).into()),
+            ui::RowSurface::Content,
+            selected,
+            cx,
+        )
+        .h(theme::size::PANEL_ROW)
+        .px(space::S8)
+        .gap(space::S10)
+        .on_click(cx.listener(move |this, _, _, cx| this.select(Some(id.clone()), cx)))
+        .child(
+            ui::MemberAvatar::new(bot.as_ref(), theme::size::AVATAR_ROW)
+                .selected(selected)
+                .on(if selected { k.selected } else { k.content }),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .t_ui()
+                .text_color(k.text_1)
+                .when(selected, |el| el.semibold())
+                .one_line()
+                .child(bot.map(|b| b.name).unwrap_or_default()),
+        )
+        .child(status_badge(run.status, cx))
+        .child(
+            div()
+                .flex_none()
+                .t_meta()
+                .tnum()
+                .text_color(k.text_3)
+                .child(when),
+        )
     }
 
     fn render_run_details(
@@ -372,33 +377,44 @@ impl ProcessView {
             facts.push(fill(p::DURATION, &[("d", &duration_text(ms))]));
         }
         let live = run.status.is_active() && self.visible;
+        // One `small` line of facts split by `·`, the summary in `body`.
         div()
+            .pt(space::S8)
             .flex()
             .flex_col()
-            .gap(px(2.))
-            .py(px(6.))
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .children(facts.into_iter().map(|f| div().child(f)))
+            .gap(space::S6)
+            .child(
+                div()
+                    .t_small()
+                    .tnum()
+                    .text_color(colors.text_2)
+                    .child(facts.join(" · ")),
+            )
             .when(live, |el| {
-                el.child(div().text_color(colors.accent).child(p::LIVE))
-            })
-            .when_some(run.summary.clone(), |el, summary| {
                 el.child(
                     div()
-                        .pt(px(4.))
-                        .text_sm()
-                        .text_color(colors.foreground)
-                        .child(summary),
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .t_meta()
+                        .text_color(colors.accent_text)
+                        .child(div().size(px(6.)).rounded_full().bg(colors.accent))
+                        .child(p::LIVE),
                 )
+            })
+            .when_some(run.summary.clone(), |el, summary| {
+                el.child(div().t_body().text_color(colors.text_1).child(summary))
             })
             .when(developer, |el| {
                 let opt =
                     |t: Option<Millis>| t.map(|t| t.to_string()).unwrap_or_else(|| "-".into());
                 el.child(
                     div()
-                        .pt(px(6.))
-                        .font_family(cx.theme().mono_font_family.clone())
+                        .p(space::S8)
+                        .rounded(theme::radius::MD)
+                        .bg(colors.code_bg)
+                        .t_code()
+                        .text_color(colors.text_2)
                         .child(div().child(fill(dev::RUN_ID, &[("id", &run.id)])))
                         .child(div().child(fill(dev::RUN_BOT, &[("id", &run.bot_id)])))
                         .child(div().child(fill(
@@ -462,93 +478,81 @@ impl ProcessView {
                     text.push('…');
                 }
                 div()
-                    .py(px(2.))
-                    .border_b_1()
-                    .border_color(colors.border)
+                    .py(space::S2)
+                    .border_b(theme::HAIRLINE)
+                    .border_color(colors.sep)
                     .child(format!("#{} {}", e.seq, text))
             })
             .collect();
         div()
-            .pt(px(12.))
+            .pt(space::S12)
             .flex()
             .flex_col()
-            .gap(px(4.))
-            .text_xs()
+            .gap(space::S6)
+            .t_meta()
             .child(
-                Button::new("download-session")
-                    .small()
-                    .outline()
-                    .label(dev::RUN_DOWNLOAD_SESSION)
-                    .disabled(matches!(self.download, Download::Running))
-                    .on_click(cx.listener(|this, _, _, cx| this.download_session(cx))),
+                ui::button(
+                    "download-session",
+                    dev::RUN_DOWNLOAD_SESSION,
+                    ui::ButtonKind::Secondary,
+                    ui::ButtonSize::Sm,
+                    cx,
+                )
+                .disabled(matches!(self.download, Download::Running))
+                .on_click(cx.listener(|this, _, _, cx| this.download_session(cx))),
             )
             .when_some(download_line, |el, line| {
-                el.child(div().text_color(colors.muted_foreground).child(line))
+                el.child(div().text_color(colors.text_2).child(line))
             })
+            .child(div().pt(space::S6).text_color(colors.text_3).child(fill(
+                dev::RUN_RAW,
+                &[("n", &self.process.raw.len().to_string())],
+            )))
             .child(
                 div()
-                    .pt(px(6.))
-                    .text_color(colors.muted_foreground)
-                    .child(fill(
-                        dev::RUN_RAW,
-                        &[("n", &self.process.raw.len().to_string())],
-                    )),
+                    .font_family(mono)
+                    .text_color(colors.text_2)
+                    .children(raw),
             )
-            .child(div().font_family(mono).children(raw))
     }
 }
 
-/// The colored status label of a run.
-pub fn status_badge(status: RunStatus, cx: &App) -> impl IntoElement {
-    let t = cx.theme();
-    let (bg, fg) = match status {
-        RunStatus::Created => (t.muted, t.muted_foreground),
-        RunStatus::Running => (t.blue_light, t.blue),
-        RunStatus::Waiting => (t.yellow_light, t.yellow),
-        RunStatus::Blocked | RunStatus::Failed => (t.red_light, t.red),
-        RunStatus::Done => (t.green_light, t.green),
-        RunStatus::Cancelled => (t.muted, t.muted_foreground),
+/// The status label of a run (§7.8): a glyph and the word, no fill.
+pub fn status_badge(status: RunStatus, _cx: &App) -> impl IntoElement {
+    use crate::{data::TopicStatus as S, theme::ChipKind as K};
+    let (topic_status, kind) = match status {
+        RunStatus::Created | RunStatus::Cancelled => (S::Open, K::Quiet),
+        RunStatus::Running => (S::InProgress, K::Quiet),
+        RunStatus::Waiting => (S::WaitingAnswer, K::Quiet),
+        RunStatus::Blocked | RunStatus::Failed => (S::Blocked, K::Blocked),
+        RunStatus::Done => (S::Done, K::Quiet),
     };
-    let (bg, fg) = if theme::is_dark(cx) {
-        (fg.opacity(0.2), fg)
-    } else {
-        (bg, fg)
-    };
-    div()
-        .flex_none()
-        .px(px(6.))
-        .py(px(1.))
-        .rounded(px(4.))
-        .bg(bg)
-        .text_color(fg)
-        .text_xs()
-        .child(status_text(status))
+    ui::StatusChip::labeled(status_text(status), topic_status, kind).style(ui::ChipStyle::Label)
 }
 
 impl Render for ProcessView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let developer = self.services.nav.read(cx).developer_view;
-        let section = |title: &'static str| {
+        let section = |title: &'static str, cx: &App| {
             div()
-                .pt(px(12.))
-                .pb(px(4.))
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child(title)
+                .pt(space::S16)
+                .pb(space::S8)
+                .child(ui::panel_label(title, None, cx))
         };
         let body = div()
             .id("process-view")
             .size_full()
             .overflow_y_scroll()
-            .px(px(12.))
-            .pb(px(16.));
+            .px(space::S16)
+            .pb(space::S24);
         if self.runs.is_empty() {
             return body
                 .child(
                     div()
-                        .pt(px(12.))
-                        .text_color(colors.muted_foreground)
+                        .pt(space::S16)
+                        .t_meta()
+                        .text_color(colors.text_3)
                         .child(p::EMPTY),
                 )
                 .into_any_element();
@@ -575,32 +579,42 @@ impl Render for ProcessView {
             (None, true, true) => Some((p::NO_STEPS, false)),
             _ => None,
         };
-        body.child(section(p::RUNS))
-            .children(rows)
+        body.child(section(p::RUNS, cx))
+            .child(div().mx(-space::S8).flex().flex_col().children(rows))
             .when_some(run, |el, run| {
                 el.child(self.render_run_details(&run, developer, cx))
-                    .child(section(p::STEPS))
+                    .child(section(p::STEPS, cx))
                     .children(steps)
                     .when_some(state_line, |el, (text, retry)| {
                         el.child(
                             div()
-                                .py(px(6.))
+                                .py(space::S6)
                                 .flex()
                                 .items_center()
-                                .gap(px(8.))
-                                .text_color(colors.muted_foreground)
+                                .gap(space::S8)
+                                .t_small()
+                                .text_color(if retry {
+                                    colors.danger_text
+                                } else {
+                                    colors.text_3
+                                })
+                                .when(retry, |el| {
+                                    el.child(ui::icon(
+                                        ui::Lucide::CircleAlert,
+                                        theme::icon::CHIP,
+                                        colors.danger,
+                                    ))
+                                })
                                 .child(text)
                                 .when(retry, |el| {
                                     let id = run.id.clone();
                                     el.child(
-                                        Button::new("process-retry")
-                                            .small()
-                                            .ghost()
-                                            .label(p::RETRY)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
+                                        ui::text_button("process-retry", p::RETRY, cx).on_click(
+                                            cx.listener(move |this, _, _, cx| {
                                                 this.services.provider.follow_run(&id);
                                                 cx.notify();
-                                            })),
+                                            }),
+                                        ),
                                     )
                                 }),
                         )
