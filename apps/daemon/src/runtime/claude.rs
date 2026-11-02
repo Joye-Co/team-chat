@@ -147,23 +147,26 @@ impl ClaudeNormalizer {
                         output: Some(truncate(&value_text(&b["content"]), OUTPUT_LIMIT)),
                         exit_code: None,
                     });
-                    if let (true, Some((name, input))) = (ok, self.tools.get(&id)) {
-                        if matches!(name.as_str(), "Edit" | "MultiEdit" | "Write" | "NotebookEdit") {
-                            let path = input["file_path"]
-                                .as_str()
-                                .or(input["notebook_path"].as_str())
-                                .unwrap_or_default()
-                                .to_string();
-                            out.push(RunEvent::FileChange {
-                                item_id: format!("{id}:file"),
-                                turn_id: self.turn(),
-                                changes: vec![FileChange {
-                                    path,
-                                    kind: "modify".into(),
-                                    diff: None,
-                                }],
-                            });
-                        }
+                    if let (true, Some((name, input))) = (ok, self.tools.get(&id))
+                        && matches!(
+                            name.as_str(),
+                            "Edit" | "MultiEdit" | "Write" | "NotebookEdit"
+                        )
+                    {
+                        let path = input["file_path"]
+                            .as_str()
+                            .or(input["notebook_path"].as_str())
+                            .unwrap_or_default()
+                            .to_string();
+                        out.push(RunEvent::FileChange {
+                            item_id: format!("{id}:file"),
+                            turn_id: self.turn(),
+                            changes: vec![FileChange {
+                                path,
+                                kind: "modify".into(),
+                                diff: None,
+                            }],
+                        });
                     }
                 }
                 out
@@ -209,9 +212,16 @@ impl ClaudeNormalizer {
 }
 
 fn tool_title(name: &str, input: &Value) -> String {
-    let pick = ["command", "file_path", "pattern", "url", "description", "path"]
-        .iter()
-        .find_map(|k| input[*k].as_str());
+    let pick = [
+        "command",
+        "file_path",
+        "pattern",
+        "url",
+        "description",
+        "path",
+    ]
+    .iter()
+    .find_map(|k| input[*k].as_str());
     match pick {
         Some(p) => format!("{name}: {}", truncate(p, 200)),
         None => name.to_string(),
@@ -256,11 +266,7 @@ impl Runtime for ClaudeRuntime {
     }
 }
 
-async fn run(
-    spec: RunSpec,
-    emit: Emit,
-    mut control: mpsc::UnboundedReceiver<Control>,
-) -> Outcome {
+async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let session_id = uuid_v4();
     let mut args: Vec<String> = [
         "-p",
@@ -366,7 +372,10 @@ async fn run(
         },
         exit_code: code,
         error: if exited_early {
-            Some(format!("claude exited before the turn ended: {}", p.stderr_tail()))
+            Some(format!(
+                "claude exited before the turn ended: {}",
+                p.stderr_tail()
+            ))
         } else if failed {
             norm.last_result.clone()
         } else {

@@ -67,7 +67,10 @@ impl CodexNormalizer {
                 vec![]
             }
             "error" => {
-                let msg = p["error"]["message"].as_str().unwrap_or("error").to_string();
+                let msg = p["error"]["message"]
+                    .as_str()
+                    .unwrap_or("error")
+                    .to_string();
                 if p["willRetry"].as_bool() == Some(true) {
                     vec![RunEvent::Status {
                         state: "retrying".into(),
@@ -264,11 +267,7 @@ fn text_input(text: &str) -> Value {
     json!([{ "type": "text", "text": text, "text_elements": [] }])
 }
 
-async fn run(
-    spec: RunSpec,
-    emit: Emit,
-    mut control: mpsc::UnboundedReceiver<Control>,
-) -> Outcome {
+async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let program = spec.cfg.command();
     let mut args = vec!["app-server".to_string()];
     args.extend(spec.cfg.args.iter().cloned());

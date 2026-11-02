@@ -45,10 +45,10 @@ pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String
         }
     }
     for k in &a.env_allowlist {
-        if cfg.env_passthrough.contains(k) {
-            if let Ok(v) = std::env::var(k) {
-                put(k, v);
-            }
+        if cfg.env_passthrough.contains(k)
+            && let Ok(v) = std::env::var(k)
+        {
+            put(k, v);
         }
     }
     for (k, v) in &rt.env {
@@ -163,7 +163,10 @@ pub async fn supervise(ctx: RunCtx) {
         status: status.into(),
         exit_code: outcome.exit_code,
         summary: outcome.result_text.as_deref().map(summary),
-        result_text: outcome.result_text.as_deref().map(|t| truncate(t, 64 * 1024)),
+        result_text: outcome
+            .result_text
+            .as_deref()
+            .map(|t| truncate(t, 64 * 1024)),
         error: outcome.error.as_deref().map(|e| truncate(e, 4096)),
         session_id: outcome.session_id.clone(),
         usage: outcome.usage.clone(),
@@ -226,7 +229,10 @@ async fn run_runtime(
     event: &impl Fn(RunEvent),
 ) -> (Outcome, bool) {
     let Some(rt) = runtime::for_kind(&spec.cfg.kind) else {
-        return (Outcome::failed(format!("unknown runtime kind {}", spec.cfg.kind)), false);
+        return (
+            Outcome::failed(format!("unknown runtime kind {}", spec.cfg.kind)),
+            false,
+        );
     };
     let (emit_tx, mut emit_rx) = mpsc::unbounded_channel();
     let fut = rt.start(spec, emit_tx, control_rx);
@@ -253,12 +259,11 @@ async fn run_runtime(
                     event(RunEvent::Status { state: "stalled".into(),
                         message: Some(format!("no output for {} minutes", stall.as_secs() / 60)) });
                 }
-                if let Some(d) = deadline {
-                    if !timed_out && tokio::time::Instant::now() >= d {
+                if let Some(d) = deadline
+                    && !timed_out && tokio::time::Instant::now() >= d {
                         timed_out = true;
                         let _ = control_tx.send(Control::Cancel);
                     }
-                }
             }
         }
     };

@@ -28,8 +28,9 @@ fn main() {
             }
             let rt = tokio::runtime::Runtime::new().unwrap_or_else(|e| exit_with(&e.to_string()));
             let res = rt.block_on(daemon::daemon::run(cfg, async {
-                let mut term = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-                    .expect("signal handler");
+                let mut term =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .expect("signal handler");
                 tokio::select! {
                     _ = tokio::signal::ctrl_c() => {}
                     _ = term.recv() => {}
@@ -48,15 +49,22 @@ fn main() {
         }
         "install-service" => {
             let _ = load_cfg();
-            match daemon::service::install(&daemon::service::agents_dir(), &config_path, &daemon::service::log_dir(), load) {
+            match daemon::service::install(
+                &daemon::service::agents_dir(),
+                &config_path,
+                &daemon::service::log_dir(),
+                load,
+            ) {
                 Ok(p) => println!("installed {}", p.display()),
                 Err(e) => exit_with(&e),
             }
         }
-        "uninstall-service" => match daemon::service::uninstall(&daemon::service::agents_dir(), load) {
-            Ok(p) => println!("removed {}", p.display()),
-            Err(e) => exit_with(&e),
-        },
+        "uninstall-service" => {
+            match daemon::service::uninstall(&daemon::service::agents_dir(), load) {
+                Ok(p) => println!("removed {}", p.display()),
+                Err(e) => exit_with(&e),
+            }
+        }
         "example-config" => print!("{}", config::EXAMPLE),
         _ => exit_with(USAGE),
     }

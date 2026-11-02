@@ -90,11 +90,7 @@ fn open_pty() -> std::io::Result<(OwnedFd, OwnedFd)> {
 
 const KEEP: usize = 256 * 1024;
 
-async fn run(
-    spec: RunSpec,
-    emit: Emit,
-    mut control: mpsc::UnboundedReceiver<Control>,
-) -> Outcome {
+async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let program = spec.cfg.command();
     let has_placeholder = spec.cfg.args.iter().any(|a| a.contains("{prompt}"));
     let args: Vec<String> = spec

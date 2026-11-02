@@ -12,7 +12,11 @@ pub async fn report(cfg: &Config) -> (String, bool) {
     let _ = writeln!(s, "work root:    {}", cfg.work_root.display());
     let _ = writeln!(s, "max parallel: {}", cfg.max_parallel_runs);
     let git = crate::health::which("git");
-    let _ = writeln!(s, "git:          {}", if git.is_some() { "found" } else { "MISSING" });
+    let _ = writeln!(
+        s,
+        "git:          {}",
+        if git.is_some() { "found" } else { "MISSING" }
+    );
     let h = crate::health::health(cfg, 0);
     let _ = writeln!(
         s,
@@ -20,7 +24,11 @@ pub async fn report(cfg: &Config) -> (String, bool) {
         h.disk_free_bytes as f64 / (1u64 << 30) as f64,
         h.disk_total_bytes as f64 / (1u64 << 30) as f64
     );
-    let _ = writeln!(s, "load:         {} {} {} ({} cpus)", h.load1, h.load5, h.load15, h.cpu_count);
+    let _ = writeln!(
+        s,
+        "load:         {} {} {} ({} cpus)",
+        h.load1, h.load5, h.load15, h.cpu_count
+    );
     let _ = writeln!(s, "runtimes:");
     let clis = crate::health::discover_clis(cfg).await;
     let mut ok = problems.is_empty() && git.is_some();
@@ -31,12 +39,20 @@ pub async fn report(cfg: &Config) -> (String, bool) {
             c.runtime,
             c.kind,
             c.command,
-            if c.available { c.version.clone().unwrap_or_else(|| "found".into()) } else { "NOT FOUND".into() }
+            if c.available {
+                c.version.clone().unwrap_or_else(|| "found".into())
+            } else {
+                "NOT FOUND".into()
+            }
         );
         ok &= c.available;
     }
     if h.disk_free_bytes < cfg.min_free_gb * (1 << 30) {
-        let _ = writeln!(s, "warning: free disk is below min_free_gb ({})", cfg.min_free_gb);
+        let _ = writeln!(
+            s,
+            "warning: free disk is below min_free_gb ({})",
+            cfg.min_free_gb
+        );
     }
     for p in &problems {
         let _ = writeln!(s, "problem: {p}");

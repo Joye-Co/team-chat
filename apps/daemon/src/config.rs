@@ -73,11 +73,13 @@ pub struct RuntimeConfig {
 
 impl RuntimeConfig {
     pub fn command(&self) -> String {
-        self.command.clone().unwrap_or_else(|| match self.kind.as_str() {
-            "codex" => "codex".into(),
-            "claude" => "claude".into(),
-            _ => String::new(),
-        })
+        self.command
+            .clone()
+            .unwrap_or_else(|| match self.kind.as_str() {
+                "codex" => "codex".into(),
+                "claude" => "claude".into(),
+                _ => String::new(),
+            })
     }
 }
 

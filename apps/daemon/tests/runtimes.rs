@@ -72,29 +72,62 @@ async fn drive(
 #[tokio::test]
 async fn codex_steer_and_approval() {
     let dir = tempfile::tempdir().unwrap();
-    let s = spec(dir.path(), "codex", &fake("fake_codex.py"), &[], "approve then fix");
+    let s = spec(
+        dir.path(),
+        "codex",
+        &fake("fake_codex.py"),
+        &[],
+        "approve then fix",
+    );
     let mut steered = false;
     let (o, evs) = drive(s, |e| match e {
-        RunEvent::ApprovalRequest { approval_id, title, .. } => {
+        RunEvent::ApprovalRequest {
+            approval_id, title, ..
+        } => {
             assert!(title.contains("rm -rf build"));
-            Some(Control::Approval { approval_id: approval_id.clone(), approve: true })
+            Some(Control::Approval {
+                approval_id: approval_id.clone(),
+                approve: true,
+            })
         }
         RunEvent::MessageDelta { .. } if !steered => {
             steered = true;
-            Some(Control::Input { input_id: "in1".into(), text: "also docs".into() })
+            Some(Control::Input {
+                input_id: "in1".into(),
+                text: "also docs".into(),
+            })
         }
         _ => None,
     })
     .await;
     assert_eq!(o.status, Status::Succeeded, "{o:?}");
-    assert_eq!(o.result_text.as_deref(), Some("codex: approve then fix + also docs"));
+    assert_eq!(
+        o.result_text.as_deref(),
+        Some("codex: approve then fix + also docs")
+    );
     assert_eq!(o.session_id.as_deref(), Some("th-1"));
     assert!(o.session_file.as_ref().unwrap().is_file());
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::Session { model: Some(m), .. } if m == "fake-codex")));
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::ApprovalResolved { decision, .. } if decision == "approve")));
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::ToolResult { ok: true, .. })));
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in1")));
-    assert_eq!(evs.iter().filter(|e| matches!(e, RunEvent::TurnCompleted { .. })).count(), 1);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::Session { model: Some(m), .. } if m == "fake-codex"))
+    );
+    assert!(evs.iter().any(
+        |e| matches!(e, RunEvent::ApprovalResolved { decision, .. } if decision == "approve")
+    ));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::ToolResult { ok: true, .. }))
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in1"))
+    );
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+            .count(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -102,17 +135,24 @@ async fn acp_permission_flow() {
     let dir = tempfile::tempdir().unwrap();
     let s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "approve this");
     let (o, evs) = drive(s, |e| match e {
-        RunEvent::ApprovalRequest { approval_id, .. } => {
-            Some(Control::Approval { approval_id: approval_id.clone(), approve: false })
-        }
+        RunEvent::ApprovalRequest { approval_id, .. } => Some(Control::Approval {
+            approval_id: approval_id.clone(),
+            approve: false,
+        }),
         _ => None,
     })
     .await;
     assert_eq!(o.status, Status::Succeeded, "{o:?}");
     // A tool call ends the message item; the text after it is the final message.
     assert_eq!(o.result_text.as_deref(), Some("permission no"));
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::ToolResult { ok: false, .. })));
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::Session { session_id, .. } if session_id == "s1")));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::ToolResult { ok: false, .. }))
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::Session { session_id, .. } if session_id == "s1"))
+    );
 }
 
 #[tokio::test]
@@ -121,30 +161,48 @@ async fn acp_follow_up_is_next_prompt() {
     let s = spec(dir.path(), "acp", &fake("fake_acp.py"), &[], "approve");
     let mut sent = false;
     let (o, evs) = drive(s, |e| match e {
-        RunEvent::ApprovalRequest { approval_id, .. } => {
-            Some(Control::Approval { approval_id: approval_id.clone(), approve: true })
-        }
+        RunEvent::ApprovalRequest { approval_id, .. } => Some(Control::Approval {
+            approval_id: approval_id.clone(),
+            approve: true,
+        }),
         RunEvent::MessageDelta { .. } if !sent => {
             sent = true;
-            Some(Control::Input { input_id: "i".into(), text: "more".into() })
+            Some(Control::Input {
+                input_id: "i".into(),
+                text: "more".into(),
+            })
         }
         _ => None,
     })
     .await;
     assert_eq!(o.status, Status::Succeeded);
     assert_eq!(o.result_text.as_deref(), Some("acp: more"));
-    assert_eq!(evs.iter().filter(|e| matches!(e, RunEvent::TurnCompleted { .. })).count(), 2);
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+            .count(),
+        2
+    );
 }
 
 #[tokio::test]
 async fn pty_prompt_input_and_exit_code() {
     let dir = tempfile::tempdir().unwrap();
-    let s = spec(dir.path(), "pty", "/bin/sh", &["-c", "echo start:{prompt}; read x; echo got:$x; exit 3"], "hi");
+    let s = spec(
+        dir.path(),
+        "pty",
+        "/bin/sh",
+        &["-c", "echo start:{prompt}; read x; echo got:$x; exit 3"],
+        "hi",
+    );
     let mut sent = false;
     let (o, _evs) = drive(s, |e| match e {
         RunEvent::MessageDelta { text, .. } if text.contains("start:hi") && !sent => {
             sent = true;
-            Some(Control::Input { input_id: "i".into(), text: "abc".into() })
+            Some(Control::Input {
+                input_id: "i".into(),
+                text: "abc".into(),
+            })
         }
         _ => None,
     })
@@ -158,20 +216,35 @@ async fn pty_prompt_input_and_exit_code() {
 #[tokio::test]
 async fn pty_cancel_kills_group() {
     let dir = tempfile::tempdir().unwrap();
-    let s = spec(dir.path(), "pty", "/bin/sh", &["-c", "echo $$ > pid; sleep 600 & wait"], "x");
+    let s = spec(
+        dir.path(),
+        "pty",
+        "/bin/sh",
+        &["-c", "echo $$ > pid; sleep 600 & wait"],
+        "x",
+    );
     let pidfile = dir.path().join("work/pid");
     let rt = runtime::for_kind("pty").unwrap();
     let (etx, _erx) = mpsc::unbounded_channel();
     let (ctx, crx) = mpsc::unbounded_channel();
     let h = tokio::spawn(rt.start(s, etx, crx));
     for _ in 0..100 {
-        if pidfile.exists() { break; }
+        if pidfile.exists() {
+            break;
+        }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     ctx.send(Control::Cancel).unwrap();
-    let o = tokio::time::timeout(Duration::from_secs(10), h).await.unwrap().unwrap();
+    let o = tokio::time::timeout(Duration::from_secs(10), h)
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(o.status, Status::Cancelled);
-    let pid: i32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
     // SAFETY: probing a pid with signal 0.
     assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "shell still alive");
 }

@@ -80,7 +80,12 @@ async fn mock() -> Mock {
             });
         }
     });
-    Mock { conns: rx, puts, url, refuse }
+    Mock {
+        conns: rx,
+        puts,
+        url,
+        refuse,
+    }
 }
 
 async fn handle_put(mut s: TcpStream, puts: Arc<Mutex<Vec<Put>>>) {
@@ -147,7 +152,9 @@ async fn collect(ws: &mut Ws, run: &str, ack: bool, stop: impl Fn(&Up) -> bool) 
     loop {
         let f = next(ws).await;
         let mine = match &f {
-            Up::RunEvent { run_id, .. } | Up::RunAccept { run_id } | Up::RunReject { run_id, .. } => run_id == run,
+            Up::RunEvent { run_id, .. }
+            | Up::RunAccept { run_id }
+            | Up::RunReject { run_id, .. } => run_id == run,
             Up::RunDone(d) => d.run_id == run,
             Up::RunSession(s) => s.run_id == run,
             _ => false,
@@ -155,10 +162,15 @@ async fn collect(ws: &mut Ws, run: &str, ack: bool, stop: impl Fn(&Up) -> bool) 
         if !mine {
             continue;
         }
-        if ack {
-            if let Some(seq) = f.seq() {
-                send(ws, &Down::Ack { run_id: run.into(), seq }).await;
-            }
+        if ack && let Some(seq) = f.seq() {
+            send(
+                ws,
+                &Down::Ack {
+                    run_id: run.into(),
+                    seq,
+                },
+            )
+            .await;
         }
         let end = stop(&f);
         out.push(f);
@@ -249,18 +261,20 @@ env = {{ CLAUDE_CONFIG_DIR = "{claude}" }}
 
 fn gunzip(b: &[u8]) -> Vec<u8> {
     let mut out = vec![];
-    flate2::read::GzDecoder::new(b).read_to_end(&mut out).unwrap();
+    flate2::read::GzDecoder::new(b)
+        .read_to_end(&mut out)
+        .unwrap();
     out
 }
 
 fn find_session(dir: &Path) -> PathBuf {
     let projects = dir.join("claude/projects");
-    for d in std::fs::read_dir(projects).unwrap().flatten() {
-        for f in std::fs::read_dir(d.path()).unwrap().flatten() {
-            return f.path();
-        }
-    }
-    panic!("no session file")
+    std::fs::read_dir(projects)
+        .unwrap()
+        .flatten()
+        .find_map(|d| std::fs::read_dir(d.path()).unwrap().flatten().next())
+        .expect("no session file")
+        .path()
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -280,12 +294,21 @@ async fn daemon_end_to_end() {
         .unwrap();
     assert_eq!(auth.as_deref(), Some(&*format!("Bearer {TOKEN}")));
     match next(&mut ws).await {
-        Up::Hello { protocol, machine, clis, health, runs } => {
+        Up::Hello {
+            protocol,
+            machine,
+            clis,
+            health,
+            runs,
+        } => {
             assert_eq!(protocol, 1);
             assert_eq!(machine.name, "test-mac");
             assert_eq!(machine.max_parallel_runs, 3);
             assert_eq!(clis.len(), 1);
-            assert_eq!((clis[0].runtime.as_str(), clis[0].kind.as_str()), ("fake", "claude"));
+            assert_eq!(
+                (clis[0].runtime.as_str(), clis[0].kind.as_str()),
+                ("fake", "claude")
+            );
             assert!(clis[0].available);
             assert!(health.disk_total_bytes > 0 && health.cpu_count > 0);
             assert!(runs.is_empty());
@@ -302,16 +325,34 @@ async fn daemon_end_to_end() {
     loop {
         let f = next(&mut ws).await;
         if let Some(seq) = f.seq() {
-            send(&mut ws, &Down::Ack { run_id: "r1".into(), seq }).await;
+            send(
+                &mut ws,
+                &Down::Ack {
+                    run_id: "r1".into(),
+                    seq,
+                },
+            )
+            .await;
         }
-        if !sent_input && matches!(f, Up::RunEvent { event: RunEvent::MessageDelta { .. }, .. }) {
+        if !sent_input
+            && matches!(
+                f,
+                Up::RunEvent {
+                    event: RunEvent::MessageDelta { .. },
+                    ..
+                }
+            )
+        {
             sent_input = true;
-            send(&mut ws, &Down::RunInput {
-                run_id: "r1".into(),
-                input_id: "in1".into(),
-                text: "follow up".into(),
-                author_id: Some("u1".into()),
-            })
+            send(
+                &mut ws,
+                &Down::RunInput {
+                    run_id: "r1".into(),
+                    input_id: "in1".into(),
+                    text: "follow up".into(),
+                    author_id: Some("u1".into()),
+                },
+            )
             .await;
         }
         let end = matches!(f, Up::RunSession(_));
@@ -322,12 +363,30 @@ async fn daemon_end_to_end() {
     }
     assert!(matches!(frames[0], Up::RunAccept { .. }));
     let seqs: Vec<u64> = frames.iter().filter_map(Up::seq).collect();
-    assert_eq!(seqs, (1..=seqs.len() as u64).collect::<Vec<_>>(), "seq is 1, 2, 3, ...");
+    assert_eq!(
+        seqs,
+        (1..=seqs.len() as u64).collect::<Vec<_>>(),
+        "seq is 1, 2, 3, ..."
+    );
     let evs = events(&frames);
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::Session { model: Some(m), .. } if m == "fake-model")));
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in1")));
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::ToolCall { tool, .. } if tool == "Bash")));
-    assert_eq!(evs.iter().filter(|e| matches!(e, RunEvent::TurnCompleted { .. })).count(), 2);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::Session { model: Some(m), .. } if m == "fake-model"))
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in1"))
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::ToolCall { tool, .. } if tool == "Bash"))
+    );
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+            .count(),
+        2
+    );
     let d = done(&frames);
     assert_eq!(d.status, "succeeded", "{d:?}");
     assert_eq!(d.result_text.as_deref(), Some("reply 2: follow up"));
@@ -341,12 +400,18 @@ async fn daemon_end_to_end() {
     assert_eq!(session.source.as_deref(), Some("cli"));
     let put = m.puts.lock().unwrap().last().cloned().expect("upload");
     assert_eq!(put.path, "/v1/machine/runs/r1/session");
-    assert_eq!(put.headers.get("authorization").map(String::as_str), Some(&*format!("Bearer {TOKEN}")));
+    assert_eq!(
+        put.headers.get("authorization").map(String::as_str),
+        Some(&*format!("Bearer {TOKEN}"))
+    );
     assert_eq!(put.headers["content-type"], "application/gzip");
     let raw = std::fs::read(find_session(tmp.path())).unwrap();
     assert_eq!(gunzip(&put.body), raw);
     assert_eq!(session.bytes, Some(raw.len() as u64));
-    assert_eq!(put.headers["x-session-sha256"], session.sha256.clone().unwrap());
+    assert_eq!(
+        put.headers["x-session-sha256"],
+        session.sha256.clone().unwrap()
+    );
     // The run folder keeps the normalized log and the copied session.
     let run_dir = tmp.path().join("work/runs/r1");
     assert!(run_dir.join("events.jsonl").is_file());
@@ -368,14 +433,25 @@ async fn daemon_end_to_end() {
     }
     send(&mut ws, &assign("r1", "fake", "again", None)).await;
     match next(&mut ws).await {
-        Up::RunReject { run_id, reason, .. } => assert_eq!((run_id.as_str(), reason.as_str()), ("r1", "invalid")),
+        Up::RunReject { run_id, reason, .. } => {
+            assert_eq!((run_id.as_str(), reason.as_str()), ("r1", "invalid"))
+        }
         f => panic!("{f:?}"),
     }
 
     // 3. Cancel kills the CLI's process group.
     send(&mut ws, &assign("r3", "fake", "hang", None)).await;
     let pidfile = tmp.path().join("work/runs/r3/work/fake.pid");
-    let start = collect(&mut ws, "r3", true, |f| matches!(f, Up::RunEvent { event: RunEvent::TurnStarted { .. }, .. })).await;
+    let start = collect(&mut ws, "r3", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
     assert!(matches!(start[0], Up::RunAccept { .. }));
     for _ in 0..200 {
         if pidfile.exists() {
@@ -383,8 +459,19 @@ async fn daemon_end_to_end() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let pid: i32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
-    send(&mut ws, &Down::RunCancel { run_id: "r3".into(), reason: None }).await;
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "r3".into(),
+            reason: None,
+        },
+    )
+    .await;
     let fr = collect(&mut ws, "r3", true, |f| matches!(f, Up::RunDone(_))).await;
     assert_eq!(done(&fr).status, "cancelled");
     // SAFETY: probing a pid with signal 0.
@@ -411,7 +498,14 @@ async fn daemon_end_to_end() {
         }
         f => panic!("{f:?}"),
     };
-    send(&mut ws, &welcome(vec![KnownRun { run_id: "r4".into(), acked_seq: 1 }])).await;
+    send(
+        &mut ws,
+        &welcome(vec![KnownRun {
+            run_id: "r4".into(),
+            acked_seq: 1,
+        }]),
+    )
+    .await;
     let after = collect(&mut ws, "r4", true, |f| matches!(f, Up::RunDone(_))).await;
     let seqs: Vec<u64> = after.iter().filter_map(Up::seq).collect();
     assert_eq!(seqs.first(), Some(&2), "replay starts after ackedSeq");
@@ -422,15 +516,22 @@ async fn daemon_end_to_end() {
 
     // 5. Heartbeat carries health and run cursors.
     let hb = loop {
-        let m = tokio::time::timeout(Duration::from_secs(10), ws.next()).await.unwrap().unwrap().unwrap();
-        if let Message::Text(t) = m {
-            if let Ok(Up::Heartbeat { health, runs, .. }) = serde_json::from_str(&t) {
-                break (health, runs);
-            }
+        let m = tokio::time::timeout(Duration::from_secs(10), ws.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        if let Message::Text(t) = m
+            && let Ok(Up::Heartbeat { health, runs, .. }) = serde_json::from_str(&t)
+        {
+            break (health, runs);
         }
     };
     assert!(hb.0.cpu_count > 0);
-    assert!(hb.1.iter().all(|c| c.run_id != "r1"), "acked finished runs are forgotten");
+    assert!(
+        hb.1.iter().all(|c| c.run_id != "r1"),
+        "acked finished runs are forgotten"
+    );
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)
@@ -453,7 +554,16 @@ async fn unknown_run_after_reconnect_is_cancelled() {
     assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
     send(&mut ws, &welcome(vec![])).await;
     send(&mut ws, &assign("r9", "fake", "hang", None)).await;
-    collect(&mut ws, "r9", true, |f| matches!(f, Up::RunEvent { event: RunEvent::TurnStarted { .. }, .. })).await;
+    collect(&mut ws, "r9", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
     let pidfile = tmp.path().join("work/runs/r9/work/fake.pid");
     for _ in 0..200 {
         if pidfile.exists() {
@@ -461,9 +571,16 @@ async fn unknown_run_after_reconnect_is_cancelled() {
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-    let pid: i32 = std::fs::read_to_string(&pidfile).unwrap().trim().parse().unwrap();
+    let pid: i32 = std::fs::read_to_string(&pidfile)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
     drop(ws);
-    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(40), m.conns.recv()).await.unwrap().unwrap();
+    let (mut ws, _) = tokio::time::timeout(Duration::from_secs(40), m.conns.recv())
+        .await
+        .unwrap()
+        .unwrap();
     match next(&mut ws).await {
         Up::Hello { runs, .. } => assert!(runs.iter().any(|c| c.run_id == "r9" && !c.done)),
         f => panic!("{f:?}"),
@@ -481,5 +598,9 @@ async fn unknown_run_after_reconnect_is_cancelled() {
     }
     assert!(gone, "orphaned run was not killed");
     stop_tx.send(()).unwrap();
-    tokio::time::timeout(Duration::from_secs(20), daemon).await.unwrap().unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
 }

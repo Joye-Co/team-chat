@@ -209,7 +209,10 @@ pub enum RunEvent {
         detail: Option<String>,
     },
     #[serde(rename = "approval.resolved", rename_all = "camelCase")]
-    ApprovalResolved { approval_id: String, decision: String },
+    ApprovalResolved {
+        approval_id: String,
+        decision: String,
+    },
     #[serde(rename = "input.accepted", rename_all = "camelCase")]
     InputAccepted { input_id: String },
     /// state: "preparing" | "running" | "retrying" | "stalled" | "warning" | "error"

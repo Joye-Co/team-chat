@@ -27,7 +27,12 @@ fn codex(name: &str) -> (Vec<RunEvent>, CodexNormalizer) {
 
 fn types(evs: &[RunEvent]) -> Vec<String> {
     evs.iter()
-        .map(|e| serde_json::to_value(e).unwrap()["type"].as_str().unwrap().to_string())
+        .map(|e| {
+            serde_json::to_value(e).unwrap()["type"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
         .collect()
 }
 
@@ -61,7 +66,12 @@ fn codex_success_sample() {
         }
     );
     match &evs[4] {
-        RunEvent::ToolResult { ok, exit_code, output, .. } => {
+        RunEvent::ToolResult {
+            ok,
+            exit_code,
+            output,
+            ..
+        } => {
             assert!(*ok);
             assert_eq!(*exit_code, Some(0));
             assert_eq!(output.as_deref(), Some("test ok\n"));
@@ -71,7 +81,10 @@ fn codex_success_sample() {
     match &evs[5] {
         RunEvent::FileChange { changes, .. } => {
             assert_eq!(changes.len(), 2);
-            assert_eq!((changes[0].path.as_str(), changes[0].kind.as_str()), ("src/lib.rs", "modify"));
+            assert_eq!(
+                (changes[0].path.as_str(), changes[0].kind.as_str()),
+                ("src/lib.rs", "modify")
+            );
             assert_eq!(changes[1].kind, "add");
         }
         e => panic!("{e:?}"),
@@ -85,10 +98,17 @@ fn codex_success_sample() {
     }
     assert_eq!(
         evs[11],
-        RunEvent::TurnCompleted { turn_id: "tu1".into(), status: "completed".into(), error: None }
+        RunEvent::TurnCompleted {
+            turn_id: "tu1".into(),
+            status: "completed".into(),
+            error: None
+        }
     );
     assert_eq!(n.last_message.as_deref(), Some("Fixed the test."));
-    assert_eq!(n.usage.as_ref().map(|u| (u.input_tokens, u.output_tokens)), Some((120, 30)));
+    assert_eq!(
+        n.usage.as_ref().map(|u| (u.input_tokens, u.output_tokens)),
+        Some((120, 30))
+    );
 }
 
 #[test]
@@ -97,7 +117,10 @@ fn codex_real_auth_failure_sample() {
     let t = types(&evs);
     assert_eq!(t.first().map(String::as_str), Some("turn.started"));
     assert!(t.iter().filter(|x| *x == "status").count() >= 5, "{t:?}");
-    assert!(evs.iter().any(|e| matches!(e, RunEvent::Status { state, .. } if state == "retrying")));
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::Status { state, .. } if state == "retrying"))
+    );
     match evs.last().unwrap() {
         RunEvent::TurnCompleted { status, error, .. } => {
             assert_eq!(status, "failed");
@@ -136,11 +159,20 @@ fn claude_success_sample() {
     );
     assert_eq!(
         evs[1],
-        RunEvent::Session { session_id: "s-1".into(), runtime: "claude".into(), model: Some("claude-test".into()) }
+        RunEvent::Session {
+            session_id: "s-1".into(),
+            runtime: "claude".into(),
+            model: Some("claude-test".into())
+        }
     );
     // Tool use ids from the stream; block indices continue across assistant events.
     match &evs[3] {
-        RunEvent::ToolCall { item_id, tool, title, .. } => {
+        RunEvent::ToolCall {
+            item_id,
+            tool,
+            title,
+            ..
+        } => {
             assert_eq!((item_id.as_str(), tool.as_str()), ("toolu_1", "Bash"));
             assert_eq!(title, "Bash: ls");
         }
@@ -153,7 +185,9 @@ fn claude_success_sample() {
     assert!(matches!(&evs[8], RunEvent::ToolResult { ok: false, .. }));
     // Deltas and the final message share one item id.
     let delta_id = match &evs[9] {
-        RunEvent::MessageDelta { item_id, turn_id, .. } => {
+        RunEvent::MessageDelta {
+            item_id, turn_id, ..
+        } => {
             assert_eq!(turn_id.as_deref(), Some("t1"));
             item_id.clone()
         }
@@ -168,7 +202,11 @@ fn claude_success_sample() {
     }
     assert_eq!(
         evs[13],
-        RunEvent::TurnCompleted { turn_id: "t1".into(), status: "completed".into(), error: None }
+        RunEvent::TurnCompleted {
+            turn_id: "t1".into(),
+            status: "completed".into(),
+            error: None
+        }
     );
     assert_eq!(n.last_result.as_deref(), Some("Done."));
     let u = n.usage.clone().unwrap();
@@ -184,7 +222,15 @@ fn claude_follow_up_turns() {
     let result = serde_json::json!({ "type": "result", "subtype": "success", "is_error": false, "result": "a", "session_id": "s" });
     evs.extend(n.on_line(&result));
     evs.extend(n.on_line(&result));
-    assert_eq!(types(&evs), ["turn.started", "turn.completed", "turn.started", "turn.completed"]);
+    assert_eq!(
+        types(&evs),
+        [
+            "turn.started",
+            "turn.completed",
+            "turn.started",
+            "turn.completed"
+        ]
+    );
     assert_eq!(n.open_turns(), 0);
 }
 
@@ -195,7 +241,10 @@ fn claude_real_auth_failure_sample() {
     for v in lines("claude-real-auth-failure.jsonl") {
         evs.extend(n.on_line(&v));
     }
-    assert_eq!(types(&evs), ["turn.started", "session", "message", "turn.completed"]);
+    assert_eq!(
+        types(&evs),
+        ["turn.started", "session", "message", "turn.completed"]
+    );
     match evs.last().unwrap() {
         RunEvent::TurnCompleted { status, error, .. } => {
             assert_eq!(status, "failed");
@@ -276,5 +325,8 @@ fn acp_real_empty_turn() {
 #[test]
 fn ansi_is_stripped() {
     use daemon::runtime::pty::strip_ansi;
-    assert_eq!(strip_ansi("\x1b[1;32mok\x1b[0m\r\n\x1b]0;title\x07x"), "ok\nx");
+    assert_eq!(
+        strip_ansi("\x1b[1;32mok\x1b[0m\r\n\x1b]0;title\x07x"),
+        "ok\nx"
+    );
 }

@@ -21,7 +21,6 @@ macro_rules! log {
     }};
 }
 
-
 /// Frames buffered per run before message deltas are dropped (finals are always kept).
 const BUFFER_SOFT_CAP: usize = 20_000;
 
@@ -279,10 +278,10 @@ impl Daemon {
                 if protocol != MACHINE_PROTOCOL {
                     log!("server speaks machine protocol {protocol}");
                 }
-                if let Some(id) = &self.cfg.machine_id {
-                    if id != &machine_id {
-                        log!("server machine id differs from config machine_id");
-                    }
+                if let Some(id) = &self.cfg.machine_id
+                    && id != &machine_id
+                {
+                    log!("server machine id differs from config machine_id");
                 }
                 self.welcomed = true;
                 self.backoff_ms = 500;
@@ -379,10 +378,18 @@ impl Daemon {
             return self.reject(&id, "invalid", "run already finished on this machine");
         }
         let Some(rt) = self.cfg.runtimes.get(&a.runtime).cloned() else {
-            return self.reject(&id, "runtime_unavailable", format!("no runtime {}", a.runtime));
+            return self.reject(
+                &id,
+                "runtime_unavailable",
+                format!("no runtime {}", a.runtime),
+            );
         };
         if health::which(&rt.command()).is_none() {
-            return self.reject(&id, "runtime_unavailable", format!("{} is not installed", rt.command()));
+            return self.reject(
+                &id,
+                "runtime_unavailable",
+                format!("{} is not installed", rt.command()),
+            );
         }
         if self.active_count() >= self.cfg.max_parallel_runs {
             return self.reject(&id, "busy", "max_parallel_runs reached");
@@ -391,10 +398,10 @@ impl Daemon {
         if free < self.cfg.min_free_gb * (1 << 30) / 2 {
             return self.reject(&id, "disk_low", "free disk below half of min_free_gb");
         }
-        if let Some(repo) = &a.repo {
-            if let Err(e) = crate::workspace::validate_repo(&self.cfg, repo) {
-                return self.reject(&id, "invalid", e);
-            }
+        if let Some(repo) = &a.repo
+            && let Err(e) = crate::workspace::validate_repo(&self.cfg, repo)
+        {
+            return self.reject(&id, "invalid", e);
         }
         if a.prompt.is_empty() {
             return self.reject(&id, "invalid", "empty prompt");
@@ -427,7 +434,9 @@ impl Daemon {
 
     fn on_run(&mut self, id: String, msg: RunMsg) {
         let cfg = self.cfg.clone();
-        let Some(r) = self.runs.get_mut(&id) else { return };
+        let Some(r) = self.runs.get_mut(&id) else {
+            return;
+        };
         match msg {
             RunMsg::Finished => {
                 r.finished = true;
@@ -453,7 +462,9 @@ impl Daemon {
                     Up::RunSession(s) => s.seq = seq,
                     _ => {}
                 }
-                let Ok(text) = serde_json::to_string(&up) else { return };
+                let Ok(text) = serde_json::to_string(&up) else {
+                    return;
+                };
                 if r.log.is_none() {
                     r.log = std::fs::OpenOptions::new()
                         .create(true)
@@ -467,10 +478,10 @@ impl Daemon {
                 if r.orphan {
                     return;
                 }
-                if self.welcomed {
-                    if let Some(l) = &self.link {
-                        let _ = l.send(text.clone());
-                    }
+                if self.welcomed
+                    && let Some(l) = &self.link
+                {
+                    let _ = l.send(text.clone());
                 }
                 r.buffer.push_back((seq, is_delta, text));
                 if r.buffer.len() > BUFFER_SOFT_CAP {
@@ -488,10 +499,10 @@ impl Daemon {
             self.runs.remove(id);
             self.recent.push_back(id.to_string());
             self.recent_set.insert(id.to_string());
-            if self.recent.len() > 1000 {
-                if let Some(old) = self.recent.pop_front() {
-                    self.recent_set.remove(&old);
-                }
+            if self.recent.len() > 1000
+                && let Some(old) = self.recent.pop_front()
+            {
+                self.recent_set.remove(&old);
             }
         }
     }

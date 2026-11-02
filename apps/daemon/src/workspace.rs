@@ -44,8 +44,7 @@ fn safe_ref(s: &str) -> bool {
     !s.is_empty()
         && !s.starts_with('-')
         && !s.contains("..")
-        && s
-            .bytes()
+        && s.bytes()
             .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/'))
 }
 
@@ -56,16 +55,14 @@ fn safe_url(u: &str) -> bool {
 
 /// Checks an assignment's repo against the config before the run is accepted.
 pub fn validate_repo(cfg: &Config, repo: &RepoSpec) -> Result<(), String> {
-    if let Some(b) = &repo.base_branch {
-        if !safe_ref(b) {
-            return Err("invalid baseBranch".into());
-        }
+    if let Some(b) = &repo.base_branch
+        && !safe_ref(b)
+    {
+        return Err("invalid baseBranch".into());
     }
     match (&repo.url, &repo.path) {
         (Some(_), Some(_)) => Err("repo has both url and path".into()),
-        (Some(u), None) if !safe_url(u) => {
-            Err("repo url must be https://, ssh:// or git@".into())
-        }
+        (Some(u), None) if !safe_url(u) => Err("repo url must be https://, ssh:// or git@".into()),
         (None, Some(p)) => {
             let p = std::fs::canonicalize(p).map_err(|_| "repo path does not exist".to_string())?;
             if !cfg.repo_roots.is_empty()
@@ -111,7 +108,11 @@ async fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
 static GIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Makes `<run>/work`: a git worktree on a new branch `bot/<runId>`, or an empty folder.
-pub async fn prepare(cfg: &Config, run_id: &str, repo: Option<&RepoSpec>) -> Result<(PathBuf, RunMeta), String> {
+pub async fn prepare(
+    cfg: &Config,
+    run_id: &str,
+    repo: Option<&RepoSpec>,
+) -> Result<(PathBuf, RunMeta), String> {
     let dir = run_dir(cfg, run_id);
     std::fs::create_dir_all(&dir).map_err(|e| format!("cannot create run folder: {e}"))?;
     let work = dir.join("work");
@@ -130,12 +131,30 @@ pub async fn prepare(cfg: &Config, run_id: &str, repo: Option<&RepoSpec>) -> Res
         let h = hex(&Sha256::digest(url.as_bytes()))[..16].to_string();
         let mirror = cfg.work_root.join("repos").join(format!("{h}.git"));
         if mirror.join("HEAD").exists() {
-            git(Some(&mirror), &["fetch", "--quiet", "--prune", "origin", "+refs/heads/*:refs/heads/*"]).await?;
+            git(
+                Some(&mirror),
+                &[
+                    "fetch",
+                    "--quiet",
+                    "--prune",
+                    "origin",
+                    "+refs/heads/*:refs/heads/*",
+                ],
+            )
+            .await?;
         } else {
             std::fs::create_dir_all(cfg.work_root.join("repos")).map_err(|e| e.to_string())?;
             let m = mirror.to_string_lossy().to_string();
             git(None, &["clone", "--bare", "--quiet", "--", url, &m]).await?;
-            git(Some(&mirror), &["config", "remote.origin.fetch", "+refs/heads/*:refs/heads/*"]).await?;
+            git(
+                Some(&mirror),
+                &[
+                    "config",
+                    "remote.origin.fetch",
+                    "+refs/heads/*:refs/heads/*",
+                ],
+            )
+            .await?;
         }
         mirror
     } else {
@@ -147,7 +166,13 @@ pub async fn prepare(cfg: &Config, run_id: &str, repo: Option<&RepoSpec>) -> Res
     let start = match &repo.base_branch {
         Some(b) => {
             let remote = format!("refs/remotes/origin/{b}");
-            if git(Some(&git_dir), &["rev-parse", "--verify", "--quiet", &remote]).await.is_ok() {
+            if git(
+                Some(&git_dir),
+                &["rev-parse", "--verify", "--quiet", &remote],
+            )
+            .await
+            .is_ok()
+            {
                 format!("origin/{b}")
             } else {
                 b.clone()
@@ -157,7 +182,11 @@ pub async fn prepare(cfg: &Config, run_id: &str, repo: Option<&RepoSpec>) -> Res
     };
     let branch = format!("bot/{run_id}");
     let w = work.to_string_lossy().to_string();
-    git(Some(&git_dir), &["worktree", "add", "--quiet", "-b", &branch, &w, &start]).await?;
+    git(
+        Some(&git_dir),
+        &["worktree", "add", "--quiet", "-b", &branch, &w, &start],
+    )
+    .await?;
     meta.git_dir = Some(git_dir);
     meta.branch = Some(branch);
     write_meta(&dir, &meta);
@@ -166,16 +195,16 @@ pub async fn prepare(cfg: &Config, run_id: &str, repo: Option<&RepoSpec>) -> Res
 
 /// Removes a finished run folder and its worktree registration.
 pub async fn remove_run(dir: &Path) {
-    if let Some(meta) = read_meta(dir) {
-        if let Some(gd) = &meta.git_dir {
-            let _guard = GIT_LOCK.lock().await;
-            let w = dir.join("work").to_string_lossy().to_string();
-            let _ = git(Some(gd), &["worktree", "remove", "--force", &w]).await;
-            if let Some(b) = &meta.branch {
-                let _ = git(Some(gd), &["branch", "-D", b]).await;
-            }
-            let _ = git(Some(gd), &["worktree", "prune"]).await;
+    if let Some(meta) = read_meta(dir)
+        && let Some(gd) = &meta.git_dir
+    {
+        let _guard = GIT_LOCK.lock().await;
+        let w = dir.join("work").to_string_lossy().to_string();
+        let _ = git(Some(gd), &["worktree", "remove", "--force", &w]).await;
+        if let Some(b) = &meta.branch {
+            let _ = git(Some(gd), &["branch", "-D", b]).await;
         }
+        let _ = git(Some(gd), &["worktree", "prune"]).await;
     }
     let _ = tokio::fs::remove_dir_all(dir).await;
 }

@@ -211,7 +211,11 @@ impl Proc {
             }
             _ => {
                 self.signal_group(libc::SIGKILL);
-                self.child.wait().await.ok().and_then(|s| s.code().map(i64::from))
+                self.child
+                    .wait()
+                    .await
+                    .ok()
+                    .and_then(|s| s.code().map(i64::from))
             }
         }
     }

@@ -35,7 +35,10 @@ pub async fn cli_version(cmd: &str) -> Option<String> {
         .ok()?
         .ok()?;
     let s = String::from_utf8_lossy(&out.stdout);
-    s.lines().next().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())
+    s.lines()
+        .next()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
 }
 
 pub async fn discover_clis(cfg: &Config) -> Vec<CliInfo> {

@@ -71,7 +71,10 @@ impl AcpNormalizer {
     pub fn on_update(&mut self, u: &Value) -> Vec<RunEvent> {
         match u["sessionUpdate"].as_str().unwrap_or_default() {
             "agent_message_chunk" => {
-                let text = u["content"]["text"].as_str().unwrap_or_default().to_string();
+                let text = u["content"]["text"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_string();
                 if text.is_empty() {
                     return vec![];
                 }
@@ -137,17 +140,22 @@ impl AcpNormalizer {
             match c["type"].as_str() {
                 Some("diff") => changes.push(FileChange {
                     path: c["path"].as_str().unwrap_or_default().to_string(),
-                    kind: if c["oldText"].is_null() { "add" } else { "modify" }.into(),
+                    kind: if c["oldText"].is_null() {
+                        "add"
+                    } else {
+                        "modify"
+                    }
+                    .into(),
                     diff: None,
                 }),
                 Some("content") => text.push(value_text(&json!([c["content"]]))),
                 _ => {}
             }
         }
-        if text.is_empty() {
-            if let Some(raw) = u.get("rawOutput") {
-                text.push(value_text(raw));
-            }
+        if text.is_empty()
+            && let Some(raw) = u.get("rawOutput")
+        {
+            text.push(value_text(raw));
         }
         out.push(RunEvent::ToolResult {
             item_id: id.to_string(),
@@ -185,11 +193,7 @@ enum Pending {
     Prompt,
 }
 
-async fn run(
-    spec: RunSpec,
-    emit: Emit,
-    mut control: mpsc::UnboundedReceiver<Control>,
-) -> Outcome {
+async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let program = spec.cfg.command();
     let mut p = match Proc::spawn(&spec, &program, &spec.cfg.args) {
         Ok(p) => p,
@@ -332,7 +336,11 @@ async fn run(
         "end_turn" | "max_tokens" | "max_turn_requests"
     );
     Outcome {
-        status: if ok { Status::Succeeded } else { Status::Failed },
+        status: if ok {
+            Status::Succeeded
+        } else {
+            Status::Failed
+        },
         exit_code: code,
         error: (!ok).then(|| format!("stop reason: {last_stop}")),
         result_text: norm.last_message,
@@ -357,7 +365,9 @@ async fn send_prompt(
     let id = ids.next();
     pending.insert(id, Pending::Prompt);
     let _ = p
-        .write_json(&json!({ "jsonrpc": "2.0", "id": id, "method": "session/prompt",
-            "params": { "sessionId": session, "prompt": [{ "type": "text", "text": text }] } }))
+        .write_json(
+            &json!({ "jsonrpc": "2.0", "id": id, "method": "session/prompt",
+            "params": { "sessionId": session, "prompt": [{ "type": "text", "text": text }] } }),
+        )
         .await;
 }

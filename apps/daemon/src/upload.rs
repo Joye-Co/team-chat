@@ -21,7 +21,11 @@ pub struct Uploaded {
 fn origin(url: &str) -> Option<String> {
     let (scheme, rest) = url.split_once("://")?;
     let host = rest.split(['/', '?', '#']).next()?;
-    Some(format!("{}://{}", scheme.to_ascii_lowercase(), host.to_ascii_lowercase()))
+    Some(format!(
+        "{}://{}",
+        scheme.to_ascii_lowercase(),
+        host.to_ascii_lowercase()
+    ))
 }
 
 /// The machine token is sent only to the configured server's own origin.
@@ -99,7 +103,10 @@ mod tests {
     #[test]
     fn token_only_to_same_origin() {
         assert!(same_origin("https://a.example/v1/x", "https://A.example"));
-        assert!(!same_origin("https://a.example.evil/v1", "https://a.example"));
+        assert!(!same_origin(
+            "https://a.example.evil/v1",
+            "https://a.example"
+        ));
         assert!(!same_origin("http://a.example/v1", "https://a.example"));
         assert!(same_origin("http://127.0.0.1:9/x", "http://127.0.0.1:9"));
         assert!(!same_origin("http://127.0.0.1:8/x", "http://127.0.0.1:9"));
