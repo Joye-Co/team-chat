@@ -112,7 +112,14 @@ async fn run() -> Result<bool> {
     };
     let minutes = args.minutes.unwrap_or(1.0);
 
-    let data_root = std::env::temp_dir().join(format!("team-chat-e2e-{}", std::process::id()));
+    // Client caches go under the worktree's .tmp/ (git ignores it); cleanup removes them.
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .ancestors()
+        .nth(2)
+        .unwrap_or(std::path::Path::new("."));
+    let data_root = repo
+        .join(".tmp")
+        .join(format!("e2e-{}", std::process::id()));
     let h = Arc::new(Harness::setup(&args.base_url, &args.secrets_dir, data_root).await?);
     println!("run {} against {}", h.run_id, h.base);
 

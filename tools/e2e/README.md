@@ -13,14 +13,21 @@ every scenario passes and 1 when a scenario fails.
 mkdir -p -m 700 ~/.config/team-chat/local-e2e
 (umask 077; openssl rand -base64 32 | tr '+/' '-_' | tr -d '=\n' > ~/.config/team-chat/local-e2e/admin-secret)
 (umask 077; printf 'ADMIN_SECRET=%s\n' "$(cat ~/.config/team-chat/local-e2e/admin-secret)" > server/.dev.vars)
+mkdir -p .tmp
 (cd server && bunx wrangler d1 migrations apply DB --local)
-(cd server && bunx wrangler dev --port 8790 --inspector-port 9790 --ip 127.0.0.1 > /tmp/wrangler-e2e.log 2>&1 &)
+(cd server && ./node_modules/.bin/wrangler dev --port 8790 --inspector-port 9790 --ip 127.0.0.1 \
+  > ../.tmp/wrangler.log 2>&1 & echo $! > ../.tmp/wrangler.pid)
 
 cargo run -p e2e -- --base-url http://127.0.0.1:8790 --secrets-dir ~/.config/team-chat/local-e2e
 cargo run -p e2e -- --scenario chat,gap
 cargo run -p e2e -- --minutes 10             # all scenarios plus a 10-minute soak
 cargo run -p e2e -- --list
+
+# stop wrangler: check that `ps -p "$(cat .tmp/wrangler.pid)" -o command=` shows this worktree
+kill "$(cat .tmp/wrangler.pid)"
 ```
+
+Client caches go to `.tmp/e2e-<pid>/` and are removed at the end of the run.
 
 On the first run against an empty server the runner bootstraps an owner with `admin-secret` and
 saves the token to `<secrets-dir>/owner-token` (mode 600). Later runs use `owner-token`. Against a
