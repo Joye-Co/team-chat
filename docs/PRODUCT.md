@@ -82,6 +82,26 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 - Distribution: an unsigned DMG. GitHub Releases keeps every build; the server also serves the
   latest DMG to holders of an invite code and to members, and the app updates itself from it.
 
+## Bot members (first roster)
+
+Every bot's look is a character from Joye's jojo-friends family (his private personal IP,
+`/Users/joye/Documents/code/jojo-friends`; use it only inside this private product, never publish
+the source or the art elsewhere). A bot's avatar shows its live state with the character's
+status signal: idle, working, needs-input, success, error, offline. The main bot is Jojo. The
+other bots and their duties are copied from the team's Notion roster (团队名册) for now; Joye
+will adjust them. The roster lives in `docs/BOTS.md` and `assets/bots/roster.json`.
+
+| Bot | Character | 岗位 | Level | Reports to | Duties (from Notion) |
+| --- | --- | --- | --- | --- | --- |
+| Jojo | `jojo` Jojo | 主助手 | owner | Joye | The team's main bot: the default entry point, routes work to the right member, does general work; runs on the Mac mini |
+| Tata | `o03` 塔塔 | 产品负责人 | member | Joye | qqbot lead and product; jiajia.fun and share.jiajia.fun; the growth group (data flywheel); R2 buckets |
+| Pocket | `o05` 兜兜 | 幕僚长 | member | Joye | Joye's single entry point (mail, calendar, todos, reminders, morning brief), routes to the right bot; keeps the roster; decision and merge cards; blog, GitHub and personal brand |
+| Forge | `o08` 薇薇 | 开发 | member | Tata | qqbot development: issues, coding runs, PR review, test debt, CI failures |
+| Watch | `o11` 蒂奇 | 运维 | member | Tata | qqbot operations: alerts, staging checks, incident reviews, cloud moves, secret and permission checks; asks Joye before production |
+| Scout | `o07` 点点 | 测试验收 | member | Tata | qqbot QA: a daily read-only patrol of staging; checks each batch on staging before production |
+| Ledger | `h02` 便当 | 数据 | member | Tata | qqbot data: reports, tracking, the knowledge base and review queue, evals, cost |
+| Taro | `h03` 芋圆 | 社媒发布 | member | Pocket | Social posts: rewrites Joye's blog, projects and views and schedules them on X, the blog, Bilibili, Xiaohongshu and Douyin; Joye confirms each post first |
+
 ## V1: production use by 5 people and 5 bots
 
 V1 is not an MVP. The team works in it every day, stably. Done when all of these hold:
