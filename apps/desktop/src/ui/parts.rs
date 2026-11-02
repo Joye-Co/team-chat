@@ -3,8 +3,8 @@
 //! headers, empty states, bands, cards and hairlines.
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, Keystroke,
-    MouseButton, ParentElement, Pixels, RenderOnce, SharedString, Styled, Window, div,
+    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, Keystroke, MouseButton,
+    ParentElement, Pixels, RenderOnce, SharedString, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
@@ -71,7 +71,10 @@ impl KbdHint {
     /// `keys` are GPUI keystroke strings: `"cmd-k"`, `"enter"`, `"up"`.
     pub fn new(keys: &[&'static str]) -> Self {
         Self {
-            keys: keys.iter().filter_map(|k| Keystroke::parse(k).ok()).collect(),
+            keys: keys
+                .iter()
+                .filter_map(|k| Keystroke::parse(k).ok())
+                .collect(),
             label: None,
         }
     }
@@ -304,9 +307,7 @@ pub fn card(cx: &App) -> gpui::Div {
 /// A popover-level surface (`elevated`, level 2).
 pub fn floating(cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
-    div()
-        .bg(k.elevated)
-        .shadow(k.shadow(Elevation::Popover))
+    div().bg(k.elevated).shadow(k.shadow(Elevation::Popover))
 }
 
 /// A horizontal hairline in `sep`.

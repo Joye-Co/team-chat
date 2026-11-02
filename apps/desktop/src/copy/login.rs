@@ -3,6 +3,8 @@
 crate::copy! {
     TITLE = "登录",
     WELCOME = "欢迎使用 {product}",
+    LEAD = "工作在话题里推进，成员一起完成。",
+    FOOTER = "版本 {version} · 登录后凭证保存在钥匙串里",
     SERVER_LABEL = "服务器地址",
     SERVER_PLACEHOLDER = "https://",
     CODE_LABEL = "邀请码或登录凭证",

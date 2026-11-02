@@ -53,12 +53,21 @@ gpui_kit::assets::icon_assets!(
     ]
 );
 
-/// The asset source of the app: the extra icons, then gpui-kit's defaults.
+/// The app icon at the login size (88 pt, drawn from the 2x PNG).
+pub const APP_ICON_88: &str = "brand/app-icon-88.png";
+const APP_ICON_88_BYTES: &[u8] =
+    include_bytes!("../../../../assets/brand/login/app-icon-88@2x.png");
+
+/// The asset source of the app: brand images, the extra icons, then
+/// gpui-kit's defaults.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct AppAssets;
 
 impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+        if path == APP_ICON_88 {
+            return Ok(Some(Cow::Borrowed(APP_ICON_88_BYTES)));
+        }
         if let Some(bytes) = ExtraIcons.load(path)? {
             return Ok(Some(bytes));
         }

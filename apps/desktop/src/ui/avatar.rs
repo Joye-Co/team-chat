@@ -209,10 +209,17 @@ pub fn monogram(name: &str, bot: bool, size: Pixels) -> String {
             (true, false) => chars[chars.len() - 2..].iter().collect(),
         };
     }
-    let latin_word = |w: &&str| w.chars().all(|c| c.is_alphabetic() && !is_han(c) || c == '-' || c == '\'' || c == '.');
+    let latin_word = |w: &&str| {
+        w.chars()
+            .all(|c| c.is_alphabetic() && !is_han(c) || c == '-' || c == '\'' || c == '.')
+    };
     let words: Vec<&str> = name.split_whitespace().collect();
     if words.iter().all(latin_word) && first.is_alphabetic() {
-        let initial = |w: &str| w.chars().next().map(|c| c.to_uppercase().collect::<String>());
+        let initial = |w: &str| {
+            w.chars()
+                .next()
+                .map(|c| c.to_uppercase().collect::<String>())
+        };
         return match words.as_slice() {
             [one] => initial(one).unwrap_or_default(),
             [a, .., b] => format!(

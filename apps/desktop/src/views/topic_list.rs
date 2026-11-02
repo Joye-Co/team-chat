@@ -435,10 +435,10 @@ impl Render for TopicListView {
                         .map(|(ix, row)| {
                             let is_selected = is_sel(ix);
                             // The hairline under a row hides next to the selected row.
-                            let separator = !is_selected
-                                && !is_sel(ix + 1)
-                                && ix + 1 < this.rows.len();
-                            let chip = StatusChip::for_topic(&row.topic, me.as_deref(), &this.members);
+                            let separator =
+                                !is_selected && !is_sel(ix + 1) && ix + 1 < this.rows.len();
+                            let chip =
+                                StatusChip::for_topic(&row.topic, me.as_deref(), &this.members);
                             let (g, t) = (row.group_id.clone(), row.topic.id.clone());
                             let unread = row.topic.unread > 0;
                             let badge = if row.topic.mentions > 0 {
@@ -530,20 +530,18 @@ impl Render for TopicListView {
                                                 .t_callout()
                                                 .text_color(colors.text_2)
                                                 .children(chip)
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w(px(0.))
-                                                        .one_line()
-                                                        .map(|el| match typing {
+                                                .child(div().flex_1().min_w(px(0.)).one_line().map(
+                                                    |el| {
+                                                        match typing {
                                                             Some(text) => el
                                                                 .text_color(colors.accent_text)
                                                                 .child(text),
-                                                            None => el.children(
-                                                                row.group_name.clone(),
-                                                            ),
-                                                        }),
-                                                )
+                                                            None => {
+                                                                el.children(row.group_name.clone())
+                                                            }
+                                                        }
+                                                    },
+                                                ))
                                                 .children(badge),
                                         )
                                         .when(separator, |el| {

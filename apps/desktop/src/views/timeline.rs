@@ -33,8 +33,9 @@ use std::{
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FollowMode, InteractiveElement, IntoElement,
-    ListAlignment, ListOffset, ListState, ParentElement, Pixels, Render, Styled, Subscription,
-    Window, div, list, prelude::FluentBuilder as _, px, StatefulInteractiveElement as _,
+    ListAlignment, ListOffset, ListState, ParentElement, Pixels, Render,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div, list,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{input::TextareaState, menu::DropdownMenu as _};
 
@@ -53,23 +54,27 @@ use crate::{
 /// motion (§10).
 fn typing_dots(color: gpui::Hsla, reduce_motion: bool) -> impl IntoElement {
     use gpui::{Animation, AnimationExt as _};
-    div().flex_none().flex().gap(px(3.)).children((0..3).map(move |i| {
-        let dot = div().size(px(4.)).rounded_full().bg(color);
-        if reduce_motion {
-            return dot.into_any_element();
-        }
-        dot.with_animation(
-            gpui::ElementId::NamedInteger("typing-dot".into(), i as u64),
-            Animation::new(theme::motion::TYPING_PULSE).repeat(),
-            move |el, t| {
-                // Each dot peaks 150 ms after the one before it.
-                let phase = (t - i as f32 * 0.125).rem_euclid(1.0);
-                let wave = (phase * std::f32::consts::TAU).cos() * 0.5 + 0.5;
-                el.opacity(0.35 + 0.65 * wave)
-            },
-        )
-        .into_any_element()
-    }))
+    div()
+        .flex_none()
+        .flex()
+        .gap(px(3.))
+        .children((0..3).map(move |i| {
+            let dot = div().size(px(4.)).rounded_full().bg(color);
+            if reduce_motion {
+                return dot.into_any_element();
+            }
+            dot.with_animation(
+                gpui::ElementId::NamedInteger("typing-dot".into(), i as u64),
+                Animation::new(theme::motion::TYPING_PULSE).repeat(),
+                move |el, t| {
+                    // Each dot peaks 150 ms after the one before it.
+                    let phase = (t - i as f32 * 0.125).rem_euclid(1.0);
+                    let wave = (phase * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+                    el.opacity(0.35 + 0.65 * wave)
+                },
+            )
+            .into_any_element()
+        }))
 }
 
 use model::ListOp;
@@ -571,12 +576,7 @@ impl TimelineView {
                             .items_center()
                             .gap(space::S8)
                             .child(div().min_w(px(0.)).t_topic_title().one_line().child(title))
-                            .children(status_chip(
-                                topic,
-                                self.me.as_deref(),
-                                &self.members,
-                                cx,
-                            )),
+                            .children(status_chip(topic, self.me.as_deref(), &self.members, cx)),
                     )
                     .child(
                         div()
@@ -623,18 +623,18 @@ impl TimelineView {
                             })
                     })
                     .child(
-                    ui::icon_button("toggle-panel", Lucide::PanelRight)
-                        .w(px(32.))
-                        .h(px(28.))
-                        .rounded_full()
-                        .when(panel_open, |b| b.bg(colors.fill_selected))
-                        .tooltip(t::TOGGLE_PANEL)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.services
-                                .nav
-                                .update(cx, |nav, cx| nav.toggle_side_panel(cx))
-                        })),
-                ),
+                        ui::icon_button("toggle-panel", Lucide::PanelRight)
+                            .w(px(32.))
+                            .h(px(28.))
+                            .rounded_full()
+                            .when(panel_open, |b| b.bg(colors.fill_selected))
+                            .tooltip(t::TOGGLE_PANEL)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.services
+                                    .nav
+                                    .update(cx, |nav, cx| nav.toggle_side_panel(cx))
+                            })),
+                    ),
             )
     }
 
@@ -727,7 +727,11 @@ impl Render for TimelineView {
                             el.child(div().size(px(6.)).rounded_full().bg(colors.accent))
                         })
                         .child(label)
-                        .child(ui::icon(Lucide::ArrowDown, theme::icon::SMALL, colors.text_2))
+                        .child(ui::icon(
+                            Lucide::ArrowDown,
+                            theme::icon::SMALL,
+                            colors.text_2,
+                        ))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.jump_to_latest();
                             cx.notify();

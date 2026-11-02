@@ -333,15 +333,18 @@ pub trait Type: Styled + Sized {
     }
     /// 22 / 28, 600: the login welcome.
     fn t_display(self) -> Self {
-        self.type_role(type_scale::DISPLAY).font_weight(FontWeight::SEMIBOLD)
+        self.type_role(type_scale::DISPLAY)
+            .font_weight(FontWeight::SEMIBOLD)
     }
     /// 17 / 22, 600: the topic view toolbar.
     fn t_topic_title(self) -> Self {
-        self.type_role(type_scale::TOPIC_TITLE).font_weight(FontWeight::SEMIBOLD)
+        self.type_role(type_scale::TOPIC_TITLE)
+            .font_weight(FontWeight::SEMIBOLD)
     }
     /// 15 / 20, 600: column, pane and sheet titles.
     fn t_title(self) -> Self {
-        self.type_role(type_scale::TITLE).font_weight(FontWeight::SEMIBOLD)
+        self.type_role(type_scale::TITLE)
+            .font_weight(FontWeight::SEMIBOLD)
     }
     /// 14 / 24: message body and composer text.
     fn t_message(self) -> Self {
@@ -357,15 +360,18 @@ pub trait Type: Styled + Sized {
     }
     /// 11 / 14, 500: chips, badges, timestamps, kbd.
     fn t_caption(self) -> Self {
-        self.type_role(type_scale::CAPTION).font_weight(FontWeight::MEDIUM)
+        self.type_role(type_scale::CAPTION)
+            .font_weight(FontWeight::MEDIUM)
     }
     /// 11 / 14, 600: section headers.
     fn t_section(self) -> Self {
-        self.type_role(type_scale::CAPTION).font_weight(FontWeight::SEMIBOLD)
+        self.type_role(type_scale::CAPTION)
+            .font_weight(FontWeight::SEMIBOLD)
     }
     /// 12.5 / 19 Menlo.
     fn t_code(self) -> Self {
-        self.type_role(type_scale::CODE).font_family(MONO_FONT_FAMILY)
+        self.type_role(type_scale::CODE)
+            .font_family(MONO_FONT_FAMILY)
     }
     fn medium(self) -> Self {
         self.font_weight(FontWeight::MEDIUM)

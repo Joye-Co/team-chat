@@ -138,7 +138,13 @@ impl RenderOnce for StatusChip {
                 .items_center()
                 .child(div().flex_none().whitespace_nowrap().child(before))
                 .when(!name.is_empty(), |el| {
-                    el.child(div().min_w(px(0.)).max_w(CHIP_NAME_MAX).one_line().child(name))
+                    el.child(
+                        div()
+                            .min_w(px(0.))
+                            .max_w(CHIP_NAME_MAX)
+                            .one_line()
+                            .child(name),
+                    )
                 })
                 .when(!after.is_empty(), |el| {
                     el.child(div().flex_none().whitespace_nowrap().child(after))

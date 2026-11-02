@@ -19,8 +19,8 @@ mod tests;
 use std::time::Instant;
 
 use gpui::{
-    AppContext, ClipboardEntry, Context, Focusable as _, ElementId, Entity, EntityInputHandler, ExternalPaths,
-    InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    AppContext, ClipboardEntry, Context, ElementId, Entity, EntityInputHandler, ExternalPaths,
+    Focusable as _, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
     relative,
 };
@@ -870,7 +870,12 @@ impl Render for ComposerView {
                     })
                     .when(has_chips, |el| el.child(chips))
                     .when(self.too_long, |el| {
-                        el.child(div().t_callout().text_color(colors.danger_text).child(c::TOO_LONG))
+                        el.child(
+                            div()
+                                .t_callout()
+                                .text_color(colors.danger_text)
+                                .child(c::TOO_LONG),
+                        )
                     })
                     .children(self.rejected.iter().map(|line| {
                         div()

@@ -102,15 +102,16 @@ impl TimelineView {
                     .gap(space::S6)
                     .t_callout()
                     .text_color(colors.danger_text)
-                    .child(ui::icon(Lucide::CircleAlert, theme::icon::SMALL, colors.danger_text))
+                    .child(ui::icon(
+                        Lucide::CircleAlert,
+                        theme::icon::SMALL,
+                        colors.danger_text,
+                    ))
                     .child(t::FAILED)
-                    .child(
-                        ui::text_button("retry", t::RETRY)
-                            .on_click(cx.listener({
-                                let message = message.clone();
-                                move |this, _, _, _| this.retry(&message)
-                            })),
-                    )
+                    .child(ui::text_button("retry", t::RETRY).on_click(cx.listener({
+                        let message = message.clone();
+                        move |this, _, _, _| this.retry(&message)
+                    })))
                     .into_any_element(),
             ),
         };
@@ -174,22 +175,9 @@ impl TimelineView {
         let gutter = if grouped {
             div().w(theme::AVATAR_SIZE).flex_none().into_any_element()
         } else {
-            // Presence dot at the bottom left (the bot mark is at the right).
-            let online = author.as_ref().map(|m| m.online);
-            div()
-                .relative()
-                .flex_none()
-                .size(theme::AVATAR_SIZE)
-                .child(member_avatar(author.as_ref(), theme::AVATAR_SIZE, cx))
-                .when_some(online, |el, online| {
-                    el.child(
-                        div()
-                            .absolute()
-                            .bottom(px(-1.))
-                            .left(px(-1.))
-                            .child(crate::views::presence_dot(online, cx)),
-                    )
-                })
+            // People show an online dot; bots carry the bot mark (§14).
+            crate::ui::MemberAvatar::new(author.as_ref(), theme::AVATAR_SIZE)
+                .presence(author.as_ref())
                 .into_any_element()
         };
 

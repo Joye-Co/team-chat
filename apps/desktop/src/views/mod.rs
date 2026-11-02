@@ -29,9 +29,7 @@ use crate::{
 /// The member's avatar (`ui::MemberAvatar`: people are circles, bots are
 /// rounded squares with the bot mark).
 pub fn avatar(member: Option<&Member>, size: Pixels, _cx: &App) -> Div {
-    div()
-        .flex_none()
-        .child(ui::MemberAvatar::new(member, size))
+    div().flex_none().child(ui::MemberAvatar::new(member, size))
 }
 
 /// Presence dot (online green, else `text-3`).

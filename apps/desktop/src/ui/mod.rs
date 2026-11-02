@@ -15,6 +15,6 @@ pub use avatar::{GroupTile, MemberAvatar};
 pub use chip::{BadgeKind, CountBadge, StatusChip};
 pub use icons::{AppAssets, Lucide, icon};
 pub use parts::{
-    Band, EmptyState, KbdHint, SectionHeader, capsule, card, floating, hairline, icon_button,
+    Band, EmptyState, KbdHint, SectionHeader, capsule, floating, hairline, icon_button,
     text_button, toolbar_band, vhairline,
 };

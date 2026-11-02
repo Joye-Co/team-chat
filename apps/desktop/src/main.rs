@@ -44,9 +44,9 @@ mod provider;
 mod selftest;
 #[allow(dead_code)]
 mod theme;
-mod updater;
 #[allow(dead_code)]
 mod ui;
+mod updater;
 #[allow(dead_code)]
 mod views;
 

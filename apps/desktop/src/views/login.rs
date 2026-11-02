@@ -3,10 +3,10 @@
 
 use gpui::{
     AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window,
-    div, prelude::FluentBuilder as _, px,
+    div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _,
+    Disableable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
 };
@@ -15,7 +15,8 @@ use crate::{
     app::{Changes, Services},
     copy::{fill, login as l},
     data::{Change, Credential, LoginError, LoginRequest, SessionState},
-    theme,
+    theme::{self, Type as _, space},
+    ui,
 };
 
 pub fn default_server_url() -> &'static str {
@@ -107,46 +108,100 @@ impl Render for LoginView {
         });
         let label = |text: &'static str| {
             div()
-                .text_sm()
-                .text_color(colors.muted_foreground)
+                .pt(space::S12)
+                .pb(space::S6)
+                .t_callout()
+                .medium()
+                .text_color(colors.text_2)
                 .child(text)
         };
+        let footer = fill(l::FOOTER, &[("version", crate::updater::version::CURRENT)]);
         div()
             .size_full()
             .flex()
-            .items_center()
-            .justify_center()
+            .flex_col()
+            .bg(colors.content)
+            .child(ui::toolbar_band("login-toolbar"))
             .child(
                 div()
-                    .w(px(360.))
+                    .flex_1()
+                    .min_h(px(0.))
                     .flex()
                     .flex_col()
-                    .gap(px(10.))
+                    .items_center()
                     .child(
                         div()
-                            .text_xl()
-                            .child(fill(l::WELCOME, &[("product", env!("PRODUCT_NAME"))])),
-                    )
-                    .child(label(l::SERVER_LABEL))
-                    .child(Input::new(&self.server))
-                    .child(label(l::CODE_LABEL))
-                    .child(Input::new(&self.code))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(l::CODE_HINT),
-                    )
-                    .when_some(error, |el, e| {
-                        el.child(div().text_sm().text_color(colors.danger).child(e))
-                    })
-                    .child(
-                        Button::new("login")
-                            .primary()
-                            .label(if signing_in { l::SIGNING_IN } else { l::SUBMIT })
-                            .disabled(signing_in)
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                            .w(px(344.))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .pt(space::S28)
+                                    .flex()
+                                    .justify_center()
+                                    .child(img(ui::icons::APP_ICON_88).size(px(88.))),
+                            )
+                            .child(
+                                div()
+                                    .pt(space::S20)
+                                    .text_center()
+                                    .t_display()
+                                    .child(fill(l::WELCOME, &[("product", env!("PRODUCT_NAME"))])),
+                            )
+                            .child(
+                                div()
+                                    .pt(space::S6)
+                                    .pb(space::S16)
+                                    .text_center()
+                                    .t_ui()
+                                    .text_color(colors.text_2)
+                                    .child(l::LEAD),
+                            )
+                            .child(label(l::SERVER_LABEL))
+                            .child(Input::new(&self.server))
+                            .child(label(l::CODE_LABEL))
+                            .child(Input::new(&self.code))
+                            .child(
+                                div()
+                                    .pt(space::S8)
+                                    .t_callout()
+                                    .text_color(colors.text_2)
+                                    .child(l::CODE_HINT),
+                            )
+                            .when_some(error, |el, e| {
+                                el.child(
+                                    div()
+                                        .pt(space::S8)
+                                        .t_callout()
+                                        .text_color(colors.danger_text)
+                                        .child(e),
+                                )
+                            })
+                            .child(
+                                div().pt(space::S20).child(
+                                    Button::new("login")
+                                        .primary()
+                                        .large()
+                                        .w_full()
+                                        .label(if signing_in { l::SIGNING_IN } else { l::SUBMIT })
+                                        .disabled(signing_in)
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.submit(window, cx)
+                                        })),
+                                ),
+                            ),
                     ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .pb(space::S16)
+                    .text_center()
+                    .t_caption()
+                    .font_weight(gpui::FontWeight::NORMAL)
+                    .tnum()
+                    .text_color(colors.text_3)
+                    .child(footer),
             )
     }
 }

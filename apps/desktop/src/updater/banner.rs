@@ -15,7 +15,7 @@ use gpui_component::{
 use super::{Failure, Phase, Updater, version};
 use crate::{
     copy::{fill, update as u},
-    theme,
+    theme::{self, Type as _},
 };
 
 /// The line of text for a phase, or `None` when the phase has no banner text.
@@ -64,11 +64,7 @@ fn actions(phase: &Phase) -> &'static [Action] {
     }
 }
 
-fn action_button(
-    action: Action,
-    id: &'static str,
-    updater: &Entity<Updater>,
-) -> Button {
+fn action_button(action: Action, id: &'static str, updater: &Entity<Updater>) -> Button {
     let updater = updater.clone();
     let (label, primary) = match action {
         Action::Update => (u::UPDATE, true),
@@ -86,7 +82,11 @@ fn action_button(
                 Action::Dismiss => up.dismiss(cx),
             })
         });
-    if primary { button.primary() } else { button.ghost() }
+    if primary {
+        button.primary()
+    } else {
+        button.ghost()
+    }
 }
 
 /// Shown above the topic view while an update is available or running.
@@ -130,32 +130,41 @@ impl Render for UpdateBanner {
             _ => None,
         };
         let busy = matches!(phase, Phase::Installing(_) | Phase::WaitingForSends(_));
+        // A neutral band above the composer (DESIGN.md §13.14).
         div()
             .flex_none()
             .w_full()
-            .px(px(16.))
-            .py(px(6.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .bg(colors.panel)
-            .border_b_1()
-            .border_color(colors.border)
-            .text_sm()
-            .when(busy, |el| el.child(Spinner::new().small()))
-            .child(div().flex_1().min_w(px(0.)).child(text))
-            .when_some(progress, |el, pct| {
-                el.child(
-                    Progress::new("update-progress")
-                        .w(px(120.))
-                        .value(pct)
-                        .color(colors.accent),
-                )
-            })
-            .children(
-                actions(&phase)
-                    .iter()
-                    .map(|a| action_button(*a, "update-banner", &updater)),
+            .px(theme::space::S20)
+            .pb(theme::space::S8)
+            .child(
+                div()
+                    .w_full()
+                    .min_h(px(36.))
+                    .pl(theme::space::S12)
+                    .pr(theme::space::S6)
+                    .py(theme::space::S4)
+                    .rounded(theme::radius::ROW)
+                    .bg(colors.fill_field)
+                    .flex()
+                    .items_center()
+                    .gap(theme::space::S8)
+                    .t_callout()
+                    .text_color(colors.text_2)
+                    .when(busy, |el| el.child(Spinner::new().small()))
+                    .child(div().flex_1().min_w(px(0.)).one_line().child(text))
+                    .when_some(progress, |el, pct| {
+                        el.child(
+                            Progress::new("update-progress")
+                                .w(px(120.))
+                                .value(pct)
+                                .color(colors.accent),
+                        )
+                    })
+                    .children(
+                        actions(&phase)
+                            .iter()
+                            .map(|a| action_button(*a, "update-banner", &updater)),
+                    ),
             )
             .into_any_element()
     }
