@@ -1569,9 +1569,18 @@ impl ChatProvider for CoreProvider {
         &self,
         name: String,
         role: Option<String>,
+        character: Option<crate::data::CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
-        self.create_bot_member_inner(name, role, runner)
+        self.create_bot_member_inner(name, role, character, runner)
+    }
+
+    fn set_member_character(
+        &self,
+        member_id: &str,
+        character: Option<crate::data::CharacterId>,
+    ) -> AdminReply<Member> {
+        self.set_member_character_inner(member_id, character)
     }
 
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {

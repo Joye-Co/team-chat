@@ -286,11 +286,16 @@ impl HttpClient {
     }
 
     /// Owner only. The returned token is a secret: never log it.
-    pub async fn create_bot(&self, name: &str, role: Option<&str>) -> ApiResult<CreateBotResponse> {
+    pub async fn create_bot(
+        &self,
+        name: &str,
+        role: Option<&str>,
+        character: Option<crate::proto::CharacterId>,
+    ) -> ApiResult<CreateBotResponse> {
         let body = CreateBotRequest {
             name: name.to_string(),
             role: role.map(str::to_string),
-            character: None,
+            character,
         };
         self.call(Method::POST, "/v1/bots", Some(&body), true).await
     }

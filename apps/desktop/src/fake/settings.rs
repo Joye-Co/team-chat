@@ -212,10 +212,25 @@ impl FakeProvider {
         }))
     }
 
+    pub(super) fn set_member_character_fake(
+        &self,
+        id: &str,
+        character: Option<CharacterId>,
+    ) -> AdminReply<Member> {
+        if !self.is_owner() {
+            return reply_now(Err(AdminError::Forbidden));
+        }
+        reply_now(self.change_member(id, |m, _| {
+            m.character = character;
+            Ok(())
+        }))
+    }
+
     pub(super) fn create_bot_member_fake(
         &self,
         name: String,
         role: Option<String>,
+        character: Option<CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
         if !self.is_owner() {
@@ -235,7 +250,7 @@ impl FakeProvider {
             avatar_url: None,
             deactivated: false,
             online: false,
-            character: None,
+            character,
         };
         self.with(|s| s.members.push(member.clone()));
         self.emit(vec![Change::Members]);
@@ -454,14 +469,14 @@ mod tests {
     #[test]
     fn bot_member_credentials() {
         let p = FakeProvider::new();
-        let plain = answer(p.create_bot_member("助手".into(), None, None)).unwrap();
+        let plain = answer(p.create_bot_member("助手".into(), None, None, None)).unwrap();
         assert!(plain.credential.is_some());
         assert!(!format!("{plain:?}").contains("tc_fake"));
         let runner = RunnerSetup {
             runtime: "main".into(),
             ..Default::default()
         };
-        let backed = answer(p.create_bot_member("跑腿".into(), None, Some(runner))).unwrap();
+        let backed = answer(p.create_bot_member("跑腿".into(), None, None, Some(runner))).unwrap();
         assert!(backed.credential.is_none());
         assert!(p.members().iter().any(|m| m.id == backed.member.id));
     }

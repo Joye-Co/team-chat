@@ -7,8 +7,8 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Icon, WindowExt as _,
-    button::ButtonVariant,
+    Disableable as _, Icon, Selectable as _, WindowExt as _,
+    button::{Button, ButtonVariant, ButtonVariants as _},
     input::{InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
     tooltip::Tooltip,
@@ -21,7 +21,7 @@ use super::{
 use crate::ui::NamedButton as _;
 use crate::{
     app::{Changes, Services},
-    characters::{CharacterStatus, status::StatusBoard},
+    characters::{self, CharacterId, CharacterStatus, status::StatusBoard},
     copy::{common, fill, settings as s},
     data::{
         BotCreated, Change, InviteCreated, InviteRequest, Member, MemberKind, MemberLevel,
@@ -285,6 +285,21 @@ impl MembersPage {
                         let _ = page.update(cx, |this, cx| this.set_deactivated(target, false, cx));
                     }))
                 } else {
+                    let menu = if member.is_bot() {
+                        let (page, member) = (page.clone(), member.clone());
+                        menu.item(PopupMenuItem::new(s::CHANGE_CHARACTER).on_click(
+                            move |_, window, cx| {
+                                let services = page
+                                    .read_with(cx, |this, _| this.services.clone())
+                                    .ok();
+                                if let Some(services) = services {
+                                    open_character(services, &member, window, cx);
+                                }
+                            },
+                        ))
+                    } else {
+                        menu
+                    };
                     let member = member.clone();
                     menu.item(PopupMenuItem::new(s::DEACTIVATE_MENU).on_click(
                         move |_, window, cx| {
@@ -699,6 +714,32 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
 
 // --- bot member ---
 
+/// The 26 characters as a grid of 40 pt ghost buttons with the idle look at 32 pt; the chosen
+/// one is selected. `pick` gets the clicked character.
+pub fn character_picker(
+    id: &'static str,
+    selected: Option<CharacterId>,
+    disabled: bool,
+    pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
+) -> gpui::Div {
+    div()
+        .flex()
+        .flex_wrap()
+        .gap(space::S4)
+        .children(CharacterId::ALL.iter().enumerate().map(|(ix, c)| {
+            let c = *c;
+            let pick = pick.clone();
+            Button::new(ElementId::NamedInteger(id.into(), ix as u64))
+                .ghost()
+                .size(px(40.))
+                .p_0()
+                .selected(selected == Some(c))
+                .disabled(disabled)
+                .child(characters::image(c, CharacterStatus::Idle, px(32.)))
+                .on_click(move |_, window, cx| pick(c, window, cx))
+        }))
+}
+
 /// The add-bot-member dialog: name and 岗位, then either an outside
 /// credential (shown once) or a runner setup.
 pub struct BotForm {
@@ -712,8 +753,11 @@ pub struct BotForm {
     branch: Entity<InputState>,
     /// Runtime names that machines report.
     known_runtimes: Vec<String>,
+    /// The character picked by hand; until then the roster's one for the name.
+    character: Option<CharacterId>,
     status: Status,
     created: Option<BotCreated>,
+    _subscriptions: Vec<Subscription>,
 }
 
 impl BotForm {
@@ -734,8 +778,15 @@ impl BotForm {
         let input = |placeholder: &'static str, window: &mut Window, cx: &mut Context<Self>| {
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
         };
+        let name = input(s::BOT_NAME_PLACEHOLDER, window, cx);
+        // The roster's character follows the name as it is typed.
+        let subscriptions = vec![cx.subscribe(&name, |_, _, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change) {
+                cx.notify();
+            }
+        })];
         Self {
-            name: input(s::BOT_NAME_PLACEHOLDER, window, cx),
+            name,
             role: input(s::ROLE_PLACEHOLDER, window, cx),
             labels: input(s::RUNNER_LABELS_PLACEHOLDER, window, cx),
             runtime: input(s::RUNNER_RUNTIME_PLACEHOLDER, window, cx),
@@ -744,9 +795,17 @@ impl BotForm {
             services,
             runner: false,
             known_runtimes: Vec::new(),
+            character: None,
             status: Status::Idle,
             created: None,
+            _subscriptions: subscriptions,
         }
+    }
+
+    /// The character the new bot gets: picked by hand, or the roster's one for the name.
+    fn chosen_character(&self, cx: &App) -> Option<CharacterId> {
+        self.character
+            .or_else(|| characters::roster_character(&self.value(&self.name, cx)))
     }
 
     pub fn created(&self) -> Option<&BotCreated> {
@@ -811,9 +870,11 @@ impl BotForm {
         } else {
             None
         };
+        let character = self.chosen_character(cx);
         let reply = self.services.provider.create_bot_member(
             name,
             (!role.is_empty()).then_some(role),
+            character,
             runner,
         );
         self.status = Status::Busy(s::SAVING.into());
@@ -900,6 +961,19 @@ impl Render for BotForm {
             .child(widgets::form_input("member-name", s::NAME, &self.name, cx))
             .child(widgets::form_input("member-role", s::ROLE, &self.role, cx))
             .child(widgets::field(
+                s::BOT_CHARACTER,
+                character_picker("bot-character", self.chosen_character(cx), busy, {
+                    let page = cx.entity().downgrade();
+                    move |c, _, cx| {
+                        let _ = page.update(cx, |this, cx| {
+                            this.character = Some(c);
+                            cx.notify();
+                        });
+                    }
+                }),
+                cx,
+            ))
+            .child(widgets::field(
                 s::BOT_MODE,
                 widgets::choice(
                     "bot-mode",
@@ -982,6 +1056,83 @@ impl Render for BotForm {
             )
             .into_any_element()
     }
+}
+
+/// The dialog that changes a bot's character: click a look, it saves at once.
+struct CharacterForm {
+    services: Services,
+    member_id: String,
+    selected: Option<CharacterId>,
+    status: Status,
+}
+
+impl CharacterForm {
+    fn pick(&mut self, c: CharacterId, window: &mut Window, cx: &mut Context<Self>) {
+        if self.status.busy() {
+            return;
+        }
+        let reply = self
+            .services
+            .provider
+            .set_member_character(&self.member_id, Some(c));
+        self.selected = Some(c);
+        self.status = Status::Busy(s::SAVING.into());
+        cx.notify();
+        cx.spawn_in(window, async move |this, cx| {
+            let result = answer(reply).await;
+            let _ = this.update_in(cx, |this, window, cx| match result {
+                Ok(_) => window.close_dialog(cx),
+                Err(e) => {
+                    this.status = Status::from_error(e);
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
+    }
+}
+
+impl Render for CharacterForm {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let page = cx.entity().downgrade();
+        div()
+            .flex()
+            .flex_col()
+            .pt(space::S8)
+            .gap(space::S16)
+            .child(widgets::hint(s::BOT_CHARACTER_HINT, cx))
+            .child(character_picker(
+                "member-character",
+                self.selected,
+                self.status.busy(),
+                move |c, window, cx| {
+                    let _ = page.update(cx, |this, cx| this.pick(c, window, cx));
+                },
+            ))
+            .children(widgets::status_line("member-character-status", &self.status, cx))
+            .child(
+                div().flex().justify_end().child(
+                    ui::secondary_button("member-character-cancel", common::CANCEL, cx)
+                        .on_click(|_, window, cx| window.close_dialog(cx)),
+                ),
+            )
+    }
+}
+
+fn open_character(services: Services, member: &Member, window: &mut Window, cx: &mut App) {
+    let form = cx.new(|_| CharacterForm {
+        services,
+        member_id: member.id.clone(),
+        selected: member.character,
+        status: Status::Idle,
+    });
+    let title = SharedString::from(fill(s::CHANGE_CHARACTER_TITLE, &[("name", &member.name)]));
+    window.open_dialog(cx, move |dialog, _, cx| {
+        crate::ui::SheetExt::sheet(dialog, cx)
+            .w(theme::size::DIALOG_WIDTH)
+            .title(title.clone())
+            .child(form.clone())
+    });
 }
 
 pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> Entity<BotForm> {

@@ -93,11 +93,44 @@ pub fn image(character: CharacterId, status: CharacterStatus, size: Pixels) -> I
         .flex_none()
 }
 
+/// The character the bot roster (`assets/bots/roster.json`) gives a bot of this name, compared
+/// without case: the default look of a new bot member.
+pub fn roster_character(name: &str) -> Option<CharacterId> {
+    static ROSTER: std::sync::OnceLock<Vec<(String, CharacterId)>> = std::sync::OnceLock::new();
+    let roster = ROSTER.get_or_init(|| {
+        let v: serde_json::Value =
+            serde_json::from_str(include_str!("../../../../assets/bots/roster.json"))
+                .unwrap_or_default();
+        v["bots"]
+            .as_array()
+            .map(|bots| {
+                bots.iter()
+                    .filter_map(|b| {
+                        let name = b["name"].as_str()?.to_lowercase();
+                        let c = CharacterId::parse(b["character"].as_str()?)?;
+                        Some((name, c))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    });
+    let name = name.trim().to_lowercase();
+    roster.iter().find(|(n, _)| *n == name).map(|(_, c)| *c)
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::px;
 
     use super::*;
+
+    #[test]
+    fn the_roster_gives_new_bots_their_character() {
+        assert_eq!(roster_character("Jojo"), Some(CharacterId::Jojo));
+        assert_eq!(roster_character(" ledger "), Some(CharacterId::H02));
+        assert_eq!(roster_character("Tata"), Some(CharacterId::O03));
+        assert_eq!(roster_character("新机器人"), None);
+    }
 
     #[test]
     fn picks_the_bundled_size_at_or_above() {

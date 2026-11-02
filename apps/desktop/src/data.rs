@@ -10,6 +10,7 @@
 //! crates, so the UI builds without them. A real provider (chat-core) maps the
 //! wire types to these.
 
+pub use crate::characters::CharacterId;
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -1427,12 +1428,22 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
     /// Owner: adds a bot member. With `runner`, it is runner-backed (the server
     /// runs it on a machine) and no credential is returned.
+    /// `character` is its jojo-friends look (avatar and status art).
     fn create_bot_member(
         &self,
         _name: String,
         _role: Option<String>,
+        _character: Option<CharacterId>,
         _runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: changes a bot's character (`PATCH /v1/members/:id`, `character`).
+    fn set_member_character(
+        &self,
+        _member_id: &str,
+        _character: Option<CharacterId>,
+    ) -> AdminReply<Member> {
         reply_now(Err(AdminError::Unsupported))
     }
     /// The machines and their health, fresh from the server.

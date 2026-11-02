@@ -15,7 +15,7 @@ use chat_core::{
 
 use super::{CoreProvider, convert};
 use crate::data::{
-    AdminError, AdminReply, BotCreated, GroupKind, GroupPrefs, InviteCreated, InviteRequest,
+    AdminError, AdminReply, BotCreated, CharacterId, GroupKind, GroupPrefs, InviteCreated, InviteRequest,
     MachineCreated, MachineInfo, Member, MemberKind, MemberLevel, NotifyLevel, RunnerSetup,
     SecretText, reply_now,
 };
@@ -298,10 +298,23 @@ impl CoreProvider {
         self.patch_member(id.to_string(), req)
     }
 
+    pub(super) fn set_member_character_inner(
+        &self,
+        id: &str,
+        character: Option<CharacterId>,
+    ) -> AdminReply<Member> {
+        let req = UpdateMemberRequest {
+            character: Some(character),
+            ..Default::default()
+        };
+        self.patch_member(id.to_string(), req)
+    }
+
     pub(super) fn create_bot_member_inner(
         &self,
         name: String,
         role: Option<String>,
+        character: Option<CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
         let name = name.trim().to_string();
@@ -315,7 +328,7 @@ impl CoreProvider {
             let http = client.http();
             let role = non_empty(role);
             let created = http
-                .create_bot(&name, role.as_deref())
+                .create_bot(&name, role.as_deref(), character)
                 .await
                 .map_err(|e| api_error(&e))?;
             let member = convert::member(&created.member, false);

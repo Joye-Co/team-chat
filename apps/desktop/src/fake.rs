@@ -1553,9 +1553,18 @@ impl ChatProvider for FakeProvider {
         &self,
         name: String,
         role: Option<String>,
+        character: Option<CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
-        self.create_bot_member_fake(name, role, runner)
+        self.create_bot_member_fake(name, role, character, runner)
+    }
+
+    fn set_member_character(
+        &self,
+        member_id: &str,
+        character: Option<CharacterId>,
+    ) -> AdminReply<Member> {
+        self.set_member_character_fake(member_id, character)
     }
 
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
