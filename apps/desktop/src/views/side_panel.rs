@@ -401,7 +401,15 @@ impl SidePanel {
 
     /// The progress list: a plan list from a card in the topic when one
     /// exists (statuses on its items), else the run's latest steps.
-    fn plan_rows(&self, topic: &Topic, bot: &Member, cx: &Context<Self>) -> Vec<PlanRow> {
+    /// `waits`: the bot waits for me, so its current step shows `eye` (the
+    /// step is my review, as in the mockup's `等 Joye 确认`).
+    fn plan_rows(
+        &self,
+        topic: &Topic,
+        bot: &Member,
+        waits: bool,
+        cx: &Context<Self>,
+    ) -> Vec<PlanRow> {
         let k = theme::colors(cx);
         let provider = &self.services.provider;
         let plan = self.messages.iter().rev().find_map(|m| {
@@ -431,7 +439,15 @@ impl SidePanel {
                 .map(|item| {
                     let (glyph, color, current) = match item.status {
                         Some(CardListStatus::Done) => (Lucide::CircleCheck, k.success, false),
-                        Some(CardListStatus::InProgress) => (Lucide::CircleDot, k.text_1, true),
+                        Some(CardListStatus::InProgress) => (
+                            if waits {
+                                Lucide::Eye
+                            } else {
+                                Lucide::CircleDot
+                            },
+                            k.text_1,
+                            true,
+                        ),
                         Some(CardListStatus::Failed) => (Lucide::CircleX, k.danger, false),
                         Some(CardListStatus::Skipped) => (Lucide::Minus, k.text_3, false),
                         Some(CardListStatus::Todo) | None => {
@@ -568,6 +584,7 @@ impl SidePanel {
         let k = theme::colors(cx);
         let now = chrono::Utc::now().timestamp_millis();
         let state = self.bot_state(topic, bot);
+        let waits = matches!(state, BotState::Waits { .. });
         let mut error = None;
         let mut state_color = k.text_2;
         let mut trailing = None;
@@ -592,7 +609,7 @@ impl SidePanel {
             BotState::Last(at) => fill(p::STATE_LAST, &[("time", &time_text(at))]),
             BotState::Idle => p::PROGRESS_IDLE.to_string(),
         };
-        let rows = self.plan_rows(topic, bot, cx);
+        let rows = self.plan_rows(topic, bot, waits, cx);
         let has_run = self.newest_run(&bot.id).is_some();
         div()
             .flex()
