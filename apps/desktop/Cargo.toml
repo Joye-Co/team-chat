@@ -21,7 +21,10 @@ gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] 
 [build-dependencies]
 serde_json.workspace = true
 
-# The screenshot self-test reads the NSWindow number (src/selftest/capture.rs).
+# The screenshot self-test reads the NSWindow number (src/selftest/capture.rs);
+# navigation uses AppKit for the about panel and the menu bar item.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
+objc2-foundation = "0.3"
+objc2-app-kit = "0.3"
 raw-window-handle = "0.6"

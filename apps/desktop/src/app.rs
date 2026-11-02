@@ -18,8 +18,8 @@ use std::sync::Arc;
 use futures::StreamExt;
 use gpui::{
     App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    KeyBinding, Menu, MenuItem, ParentElement, Render, Styled, Subscription, TitlebarOptions,
-    Window, WindowBounds, WindowOptions, div, px, size,
+    KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window, WindowBounds,
+    WindowOptions, div, px, size,
 };
 
 use crate::{
@@ -213,6 +213,7 @@ impl RootView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        crate::views::nav::attach_window(window, cx);
         let subscriptions = vec![
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
@@ -377,9 +378,5 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
-    cx.set_menus([Menu::new(env!("PRODUCT_NAME")).items([
-        MenuItem::action(copy::settings::MENU_SETTINGS, OpenSettings),
-        MenuItem::separator(),
-        MenuItem::action(copy::settings::MENU_QUIT, Quit),
-    ])]);
+    crate::views::nav::menus::install(cx);
 }

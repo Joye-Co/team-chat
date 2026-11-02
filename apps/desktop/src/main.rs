@@ -10,6 +10,8 @@
 //!       open n ms after the first frame (for a screenshot with `screencapture`).
 //!   desktop --screenshot <dir> [--theme light|dark|both] [--scenes ...] [--worst-case]
 //!       capture every scene's window in each theme; see `selftest/mod.rs`.
+//!   desktop --selftest-nav --report <path>
+//!       drive the navigation actions and dialogs (views/nav/selftest.rs).
 
 // The skeleton defines API that the timeline, composer, navigation and
 // chat-core tracks use; unused parts are not warnings yet.
@@ -47,6 +49,7 @@ static EXIT_CODE: AtomicI32 = AtomicI32::new(0);
 #[derive(Debug, Default)]
 struct Args {
     selftest_smoke: bool,
+    selftest_nav: bool,
     report: Option<PathBuf>,
     signed_out: bool,
     hold_ms: u64,
@@ -58,6 +61,7 @@ fn parse_args() -> Result<Args, String> {
     while let Some(arg) = it.next() {
         match arg.as_str() {
             "--selftest-smoke" => args.selftest_smoke = true,
+            "--selftest-nav" => args.selftest_nav = true,
             "--report" => args.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--signed-out" => args.signed_out = true,
             "--hold-ms" => {
@@ -70,8 +74,8 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown argument: {other}")),
         }
     }
-    if args.selftest_smoke && args.report.is_none() {
-        return Err("--selftest-smoke needs --report <path>".into());
+    if (args.selftest_smoke || args.selftest_nav) && args.report.is_none() {
+        return Err("a self-test needs --report <path>".into());
     }
     Ok(args)
 }
@@ -89,44 +93,46 @@ fn main() {
                 eprintln!("{error}");
             }
             eprintln!(
-                "usage: desktop [--signed-out] [--selftest-smoke --report <path> [--hold-ms <n>]]"
+                "usage: desktop [--signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]]"
             );
             std::process::exit(2);
         }
     };
 
-    gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
-        .run(move |cx: &mut App| {
-            gpui_kit::init(cx);
-            let provider: Arc<dyn ChatProvider> = if args.signed_out {
-                fake::FakeProvider::signed_out()
-            } else {
-                fake::FakeProvider::new()
-            };
-            let services = Services::new(provider, cx);
-            app::install_menus_and_actions(services.clone(), cx);
+    let application = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
+    // A click on the Dock icon with no window open shows the main window again.
+    application.on_reopen(views::nav::show_main_window);
+    application.run(move |cx: &mut App| {
+        gpui_kit::init(cx);
+        let provider: Arc<dyn ChatProvider> = if args.signed_out {
+            fake::FakeProvider::signed_out()
+        } else {
+            fake::FakeProvider::new()
+        };
+        let services = Services::new(provider, cx);
+        app::install_menus_and_actions(services.clone(), cx);
+        // The smoke test leaves the menu bar alone; the nav test checks the item.
+        views::nav::install(services.clone(), !args.selftest_smoke, cx);
 
-            if args.selftest_smoke {
-                run_smoke(
-                    services,
-                    args.report.clone().unwrap(),
-                    started,
-                    args.hold_ms,
-                    cx,
-                );
-            } else {
-                if let Some(group) = services.provider.groups().first() {
-                    let id = group.id.clone();
-                    services.nav.update(cx, |nav, cx| nav.open_group(id, cx));
-                }
-                if let Err(error) = app::open_main_window(services, true, None, cx) {
-                    eprintln!("failed to open the window: {error}");
-                    cx.quit();
-                }
-                cx.activate(true);
+        if args.selftest_nav {
+            views::nav::selftest::run(services, args.report.clone().unwrap(), finish, cx);
+        } else if args.selftest_smoke {
+            run_smoke(
+                services,
+                args.report.clone().unwrap(),
+                started,
+                args.hold_ms,
+                cx,
+            );
+        } else {
+            views::nav::restore(&services, cx);
+            if let Err(error) = app::open_main_window(services, true, None, cx) {
+                eprintln!("failed to open the window: {error}");
+                cx.quit();
             }
-        });
+            cx.activate(true);
+        }
+    });
     std::process::exit(EXIT_CODE.load(Ordering::SeqCst));
 }
 
@@ -214,4 +220,6 @@ fn finish(path: &PathBuf, json: serde_json::Value, ok: bool, cx: &mut App) {
         EXIT_CODE.store(1, Ordering::SeqCst);
     }
     cx.quit();
+    // On macOS `run` does not return after `quit`, so exit with the code here.
+    std::process::exit(EXIT_CODE.load(Ordering::SeqCst));
 }

@@ -94,14 +94,22 @@ fn group(mut g: GroupSummary, i: usize) -> GroupSummary {
         g.name = pick(GROUP_NAMES, i).to_string();
     }
     g.unread = pick(COUNTS, i + 3);
-    g.mentions = if i.is_multiple_of(3) { pick(COUNTS, i + 4) } else { 0 };
+    g.mentions = if i.is_multiple_of(3) {
+        pick(COUNTS, i + 4)
+    } else {
+        0
+    };
     g
 }
 
 fn topic(mut t: Topic, i: usize, now: Millis) -> Topic {
     t.title = pick(TITLES, i).to_string();
     t.unread = pick(COUNTS, i + 2);
-    t.mentions = if i.is_multiple_of(2) { pick(COUNTS, i + 1) } else { 0 };
+    t.mentions = if i.is_multiple_of(2) {
+        pick(COUNTS, i + 1)
+    } else {
+        0
+    };
     t.message_count = pick(COUNTS, i + 5);
     const DAY: i64 = 24 * 3_600_000;
     t.last_activity_at = match i % 5 {

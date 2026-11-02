@@ -6,7 +6,7 @@
 //! bot reply, pending and failed sends, 产出, and one topic with 10,000 messages.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -42,6 +42,8 @@ struct State {
     artifacts: Vec<ArtifactSummary>,
     next_id: u64,
     now: Millis,
+    muted: HashSet<GroupId>,
+    saved_navigation: Option<SavedNavigation>,
 }
 
 fn now_ms() -> Millis {
@@ -99,6 +101,8 @@ impl State {
             artifacts: Vec::new(),
             next_id: 1,
             now,
+            muted: HashSet::new(),
+            saved_navigation: None,
         };
         s.fill_sample();
         if signed_in {
@@ -1201,6 +1205,112 @@ impl ChatProvider for FakeProvider {
         if self.drafts.clear(key) {
             self.emit(vec![Change::Draft { key: key.clone() }]);
         }
+    }
+
+    fn create_group(&self, request: CreateGroupRequest) {
+        let name = request.name.trim().to_string();
+        if name.is_empty() {
+            return;
+        }
+        self.with(|s| {
+            let id = s.id("g");
+            let mut member_ids = vec![ME.to_string()];
+            for m in request.member_ids {
+                if !member_ids.contains(&m) && s.members.iter().any(|x| x.id == m) {
+                    member_ids.push(m);
+                }
+            }
+            s.groups.push(GroupSummary {
+                id,
+                kind: GroupKind::Group,
+                name,
+                member_ids,
+                dm_peer: None,
+                last_seq: 0,
+                read_seq: 0,
+                unread: 0,
+                mentions: 0,
+                last_activity_at: now_ms(),
+            });
+        });
+        self.emit(vec![Change::Groups]);
+    }
+
+    fn open_dm(&self, member_id: &str) {
+        self.with(|s| {
+            if member_id == ME
+                || s.groups
+                    .iter()
+                    .any(|g| g.kind == GroupKind::Dm && g.dm_peer.as_deref() == Some(member_id))
+            {
+                return;
+            }
+            let Some(peer) = s.members.iter().find(|m| m.id == member_id).cloned() else {
+                return;
+            };
+            let id = s.id("dm");
+            s.groups.push(GroupSummary {
+                id,
+                kind: GroupKind::Dm,
+                name: peer.name,
+                member_ids: vec![ME.to_string(), peer.id.clone()],
+                dm_peer: Some(peer.id),
+                last_seq: 0,
+                read_seq: 0,
+                unread: 0,
+                mentions: 0,
+                last_activity_at: now_ms(),
+            });
+        });
+        // The real provider answers with the group whether it is new or not.
+        self.emit(vec![Change::Groups]);
+    }
+
+    fn leave_group(&self, group_id: &str) {
+        let left = self.with(|s| {
+            let before = s.groups.len();
+            s.groups.retain(|g| g.id != group_id);
+            s.topics.retain(|t| t.group_id != group_id);
+            s.muted.remove(group_id);
+            s.groups.len() != before
+        });
+        if left {
+            self.emit(vec![
+                Change::Groups,
+                Change::Todo,
+                Change::Topics {
+                    group_id: group_id.to_string(),
+                },
+            ]);
+        }
+    }
+
+    fn group_muted(&self, group_id: &str) -> bool {
+        self.with(|s| s.muted.contains(group_id))
+    }
+
+    fn set_group_muted(&self, group_id: &str, muted: bool) {
+        let changed = self.with(|s| {
+            if !s.groups.iter().any(|g| g.id == group_id) {
+                return false;
+            }
+            if muted {
+                s.muted.insert(group_id.to_string())
+            } else {
+                s.muted.remove(group_id)
+            }
+        });
+        if changed {
+            self.emit(vec![Change::Groups]);
+        }
+    }
+
+    fn saved_navigation(&self) -> Option<SavedNavigation> {
+        self.with(|s| s.saved_navigation.clone())
+    }
+
+    fn save_navigation(&self, navigation: SavedNavigation) {
+        self.with(|s| s.saved_navigation = Some(navigation));
     }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {

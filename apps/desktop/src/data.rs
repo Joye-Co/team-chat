@@ -315,6 +315,24 @@ pub struct StartTopicRequest {
     pub mentions: Vec<MemberId>,
 }
 
+/// A new 群 from the new-group dialog. I am added as a member by the server.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreateGroupRequest {
+    pub name: String,
+    /// The other members; my own id is not needed.
+    pub member_ids: Vec<MemberId>,
+}
+
+/// Where the main window was, so the next start opens the same place.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SavedNavigation {
+    /// The 待办 list was open (the topic, if any, is still in `group_id`).
+    pub todo: bool,
+    /// The selected group, or the group of the open topic.
+    pub group_id: Option<GroupId>,
+    pub topic_id: Option<TopicId>,
+}
+
 /// What changed. Views re-read only the snapshots that a change names.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Change {
@@ -550,6 +568,27 @@ pub trait ChatProvider: Send + Sync + 'static {
     ) -> ClientMsgId {
         self.start_topic(request)
     }
+
+    // --- groups and navigation (all have defaults, so providers can add them later) ---
+
+    /// Creates a 群 (`POST /v1/groups`). The new group arrives as `Change::Groups`.
+    fn create_group(&self, _request: CreateGroupRequest) {}
+    /// Finds or creates the DM with a member (`POST /v1/dms`). Emits `Change::Groups`.
+    fn open_dm(&self, _member_id: &str) {}
+    /// Leaves a group (`DELETE /v1/groups/:id/members/<me>`). Emits `Change::Groups`.
+    fn leave_group(&self, _group_id: &str) {}
+    /// My mute preference of a group (`GroupSummary.muted`).
+    fn group_muted(&self, _group_id: &str) -> bool {
+        false
+    }
+    /// Sets my mute preference (`PATCH /v1/groups/:id/prefs`). Emits `Change::Groups`.
+    fn set_group_muted(&self, _group_id: &str, _muted: bool) {}
+    /// The place the main window showed last time, from local storage.
+    fn saved_navigation(&self) -> Option<SavedNavigation> {
+        None
+    }
+    /// Stores the place of the main window locally (not on the server).
+    fn save_navigation(&self, _navigation: SavedNavigation) {}
 
     // --- changes ---
 

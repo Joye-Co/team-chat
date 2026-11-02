@@ -3,6 +3,7 @@
 
 pub mod composer;
 pub mod login;
+pub mod nav;
 pub mod settings;
 pub mod side_panel;
 pub mod sidebar;
