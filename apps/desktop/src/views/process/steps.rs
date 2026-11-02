@@ -1,7 +1,8 @@
 //! One element per process step, in product words.
 
 use gpui::{
-    AnyElement, App, Hsla, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
+    StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -45,7 +46,8 @@ pub fn render_steps(
     let start = process.steps.len().saturating_sub(MAX_STEPS);
     process.steps[start..]
         .iter()
-        .filter_map(|step| render_step(step, bot_name, developer, cx))
+        .enumerate()
+        .filter_map(|(i, step)| render_step(start + i, step, bot_name, developer, cx))
         .collect()
 }
 
@@ -68,17 +70,32 @@ fn block(_cx: &App) -> gpui::Div {
 }
 
 /// Command lines and output: `code` 13/20 Menlo on `code-bg`, radius 8.
-fn mono_box(text: String, cx: &App) -> impl IntoElement {
+/// Lines never wrap: a long path or command scrolls sideways (§15), so a
+/// log reads line by line. `id` is unique within the step list.
+fn mono_box(id: ElementId, text: String, cx: &App) -> impl IntoElement {
     let k = theme::colors(cx);
     div()
+        .id(id)
         .mt(space::S2)
-        .px(space::S10)
-        .py(space::S8)
+        .w_full()
+        .min_w(px(0.))
+        .overflow_x_scroll()
         .rounded(theme::radius::MD)
         .bg(k.code_bg)
-        .t_code()
-        .text_color(k.text_1)
-        .child(text)
+        .child(
+            div()
+                .px(space::S10)
+                .py(space::S8)
+                .t_code()
+                .text_color(k.text_1)
+                .whitespace_nowrap()
+                .child(text),
+        )
+}
+
+/// The id of the `slot`th box of step `ix`.
+fn mono_id(ix: usize, slot: usize) -> ElementId {
+    ElementId::NamedInteger("process-mono".into(), (ix * 4 + slot) as u64)
 }
 
 /// The 16 pt glyph of a step (§17 U31: steps with icons).
@@ -162,6 +179,7 @@ pub fn error_line(steps: &[ProcessStep]) -> Option<String> {
 }
 
 fn render_step(
+    ix: usize,
     step: &ProcessStep,
     bot_name: &str,
     developer: bool,
@@ -246,7 +264,7 @@ fn render_step(
             });
             block(cx)
                 .child(header)
-                .child(mono_box(clip(title, 400), cx))
+                .child(mono_box(mono_id(ix, 0), clip(title, 400), cx))
                 .when_some(input.clone().filter(|_| developer), |el, json| {
                     el.child(label(
                         fill(dev::RUN_TOOL_INPUT, &[("json", &clip(&json, 600))]),
@@ -254,9 +272,10 @@ fn render_step(
                     ))
                 })
                 .when_some(out, |el, (head, more)| {
-                    el.child(mono_box(head, cx)).when(more > 0, |el| {
-                        el.child(label(fill(p::MORE_LINES, &[("n", &more.to_string())]), cx))
-                    })
+                    el.child(mono_box(mono_id(ix, 1), head, cx))
+                        .when(more > 0, |el| {
+                            el.child(label(fill(p::MORE_LINES, &[("n", &more.to_string())]), cx))
+                        })
                 })
         }
         ProcessStep::Files { changes } => {
@@ -315,7 +334,7 @@ fn render_step(
                         .child(clip(title, 400)),
                 )
                 .when_some(detail.clone(), |el, d| {
-                    el.child(mono_box(clip(&d, 1200), cx))
+                    el.child(mono_box(mono_id(ix, 2), clip(&d, 1200), cx))
                 })
                 .child(
                     div()
