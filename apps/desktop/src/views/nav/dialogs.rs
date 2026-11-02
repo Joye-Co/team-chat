@@ -312,8 +312,11 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
 pub fn open_new_group(services: Services, window: &mut Window, cx: &mut App) {
     let form = cx.new(|cx| NewGroupForm::new(services, window, cx));
     let first = Cell::new(true);
+    // ⌘⇧N opens it at once; a click on `+` fades it in (§12).
+    let keyed = window.last_input_was_keyboard();
     window.open_dialog(cx, move |dialog, window, cx| {
         let dialog = crate::ui::SheetExt::sheet(dialog, cx);
+        let dialog = crate::ui::SheetExt::keyed(dialog, keyed);
         if first.replace(false) {
             let handle = form.read(cx).name.read(cx).focus_handle(cx);
             handle.focus(window, cx);

@@ -22,28 +22,53 @@ pub const SWITCHER_WIDTH: gpui::Pixels = size::SWITCHER_WIDTH;
 /// The switcher sits this far below the window top.
 pub const SWITCHER_TOP: gpui::Pixels = size::PALETTE_TOP;
 
+/// How a sheet enters (§12): it fades in place, on the theme's out curve
+/// and its `normal` duration, enter and exit alike; gpui-component's dialog
+/// has no scale and no separate exit time, and a fade without travel is the
+/// closest it draws to `opacity + scale 0.98 → 1`. A sheet opened from a key
+/// binding appears at once: a keyboard action never animates.
+fn entrance(keyed: bool) -> DialogEntrance {
+    if keyed {
+        DialogEntrance::None
+    } else {
+        DialogEntrance::Fade
+    }
+}
+
 pub trait SheetExt: Sized {
-    /// A centered dialog: 440 wide, padding 20, fade with a short settle
-    /// (200 ms, out curve) over the scrim, on the `overlay` surface.
+    /// A centered dialog: 440 wide, padding 20, fading in over the scrim,
+    /// on the `overlay` surface.
     fn sheet(self, cx: &App) -> Self;
+
+    /// The sheet was opened from the keyboard (the last input when the
+    /// opening action ran): no entrance and no exit animation.
+    fn keyed(self, keyed: bool) -> Self;
 }
 
 impl SheetExt for Dialog {
     fn sheet(self, cx: &App) -> Self {
         overlay_fill(self, cx)
-            .entrance(DialogEntrance::FadeSlide)
+            .entrance(entrance(false))
             .centered()
             .width(size::DIALOG_WIDTH)
             .rounded(theme::radius::LG)
+    }
+
+    fn keyed(self, keyed: bool) -> Self {
+        self.entrance(entrance(keyed))
     }
 }
 
 impl SheetExt for AlertDialog {
     fn sheet(self, cx: &App) -> Self {
         overlay_fill(self, cx)
-            .entrance(DialogEntrance::FadeSlide)
+            .entrance(entrance(false))
             .centered()
             .width(ALERT_WIDTH)
+    }
+
+    fn keyed(self, keyed: bool) -> Self {
+        self.entrance(entrance(keyed))
     }
 }
 
@@ -55,4 +80,15 @@ pub fn switcher(dialog: Dialog, cx: &App) -> Dialog {
         .w(SWITCHER_WIDTH)
         .margin_top(SWITCHER_TOP)
         .rounded(theme::radius::LG)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sheets_fade_in_place_and_keyboard_sheets_do_not_animate() {
+        assert_eq!(entrance(false), DialogEntrance::Fade);
+        assert_eq!(entrance(true), DialogEntrance::None);
+    }
 }
