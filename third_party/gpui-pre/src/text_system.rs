@@ -32,7 +32,7 @@ use std::{
     ops::{Deref, DerefMut, Range},
     sync::{
         Arc,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
 };
 
@@ -238,6 +238,8 @@ pub struct TextSystem {
     font_generation: Arc<AtomicUsize>,
     missing_glyph_reporter: Arc<MissingGlyphReporter>,
     missing_glyph_receiver: Mutex<Option<MissingGlyphReceiver>>,
+    // Patch (team-chat): app-level switch for font-smoothing glyph dilation.
+    font_smoothing: AtomicBool,
 }
 
 #[derive(Clone)]
@@ -273,6 +275,7 @@ impl TextSystem {
                 font("Arial"), // macOS, Windows
             ],
             font_generation: Arc::default(),
+            font_smoothing: AtomicBool::new(true),
             missing_glyph_reporter: Arc::new(MissingGlyphReporter {
                 generation: missing_glyph_generation.clone(),
                 sender,
@@ -553,7 +556,17 @@ impl TextSystem {
 
     /// Returns the dilation level to use for a glyph painted in the given color.
     pub(crate) fn glyph_dilation_for_color(&self, color: Hsla) -> u8 {
+        if !self.font_smoothing.load(Ordering::Relaxed) {
+            return 0;
+        }
         self.platform_text_system.glyph_dilation_for_color(color)
+    }
+
+    /// Turns the platform's font-smoothing glyph dilation on or off for every window.
+    /// Off draws glyphs with plain grayscale antialiasing, like CSS
+    /// `-webkit-font-smoothing: antialiased`. On (the default) keeps the platform behavior.
+    pub fn set_font_smoothing(&self, enabled: bool) {
+        self.font_smoothing.store(enabled, Ordering::Relaxed);
     }
 
     /// Returns the text rendering mode recommended by the platform for the given font and size.
