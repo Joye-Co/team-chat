@@ -3,8 +3,9 @@
 //! when the text was actually cut.
 
 use gpui::{
-    ElementId, InteractiveText, ParentElement as _, Pixels, SharedString, Styled as _, StyledText,
-    TextLayout, div, prelude::FluentBuilder as _, px,
+    AppContext as _, ElementId, InteractiveElement as _, ParentElement as _, Pixels, SharedString,
+    StatefulInteractiveElement as _, Styled as _, StyledText, TextLayout, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::tooltip::Tooltip;
 
@@ -37,18 +38,29 @@ pub fn row_tip(title: SharedString, detail: SharedString) -> Tooltip {
 /// One line of `text`, cut with `…` at the end; hovering a cut line shows
 /// the full text in a tooltip. Style the returned box (type, color, width):
 /// the text inherits it.
-pub fn truncating(id: impl Into<ElementId>, text: impl Into<SharedString>) -> gpui::Div {
+pub fn truncating(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+) -> gpui::Stateful<gpui::Div> {
     let text: SharedString = text.into();
     let styled = StyledText::new(text.clone());
     let layout = styled.layout().clone();
+    // The tooltip sits on the box, not on an `InteractiveText`: that element
+    // measures its line differently inside a flex row and cuts it early.
     div()
+        .id(id)
         .min_w_0()
         .one_line()
-        .child(
-            InteractiveText::new(id, styled).tooltip(move |_, window, cx| {
-                was_cut(&layout, &text).then(|| text_tip(text.clone()).build(window, cx))
-            }),
-        )
+        .child(styled)
+        .tooltip(move |window, cx| {
+            if was_cut(&layout, &text) {
+                text_tip(text.clone()).build(window, cx)
+            } else {
+                // A line shown whole needs no tooltip: an empty view draws
+                // nothing.
+                cx.new(|_| gpui::Empty).into()
+            }
+        })
 }
 
 /// True when the laid-out line is not the whole text. The tooltip asks only
@@ -78,12 +90,9 @@ mod tests {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
             let styled = StyledText::new(NAME);
             self.layout = Some(styled.layout().clone());
-            div().w(px(self.width)).child(
-                div()
-                    .min_w_0()
-                    .one_line()
-                    .child(InteractiveText::new("t", styled)),
-            )
+            div()
+                .w(px(self.width))
+                .child(div().min_w_0().one_line().child(styled))
         }
     }
 
