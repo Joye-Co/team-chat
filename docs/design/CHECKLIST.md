@@ -1,5 +1,7 @@
 # Design checklist (GPUI)
 
+> Design v2: the UI basics checklist in [DESIGN.md §15](../DESIGN.md#15-ui-basics-checklist) wins where this file differs. Values here that cite v1 tokens are out of date.
+
 Check every UI change against this list before merging. It distills the vendored skills in
 [skills/emilkowalski](skills/emilkowalski/) (written for the web) into checks for this native
 macOS app. Each item says **what** to check in this app, **how** in GPUI / gpui-component, and the
