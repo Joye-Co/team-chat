@@ -1,0 +1,9 @@
+[package]
+name = "daemon"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+chat-protocol.workspace = true

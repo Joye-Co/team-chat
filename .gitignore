@@ -1,0 +1,11 @@
+target/
+node_modules/
+.wrangler/
+dist/
+build/
+*.dmg
+*.log
+.DS_Store
+.dev.vars
+.env
+.env.*

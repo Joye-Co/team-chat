@@ -1,0 +1,5 @@
+{
+  "name": "team-chat",
+  "private": true,
+  "workspaces": ["packages/*", "server"]
+}

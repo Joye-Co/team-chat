@@ -1,0 +1,11 @@
+{
+  "name": "TeamChat",
+  "slug": "team-chat",
+  "bundleId": "co.joye.teamchat",
+  "urlScheme": "teamchat",
+  "tagline": "Desktop work chat where people and bots are equal members",
+  "servers": {
+    "staging": "",
+    "production": ""
+  }
+}
