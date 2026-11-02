@@ -7,4 +7,6 @@ crate::copy! {
     OFFLINE = "未连接",
     QUEUED_HINT = "新消息会在连上后发出",
     RECONNECT = "立即重连",
+    BANNER_DISCONNECTED = "连接已断开",
+    BANNER_RETRY_IN = "{s} 秒后重连",
 }

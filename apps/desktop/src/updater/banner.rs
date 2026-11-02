@@ -2,21 +2,17 @@
 //! Both render [`Updater`] state and call its commands; nothing here touches the network.
 
 use gpui::{
-    Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div, img,
+    App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div, img,
     prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonVariants as _},
-    progress::Progress,
-    spinner::Spinner,
-};
+use gpui_component::{Sizable as _, button::Button, spinner::Spinner, tooltip::Tooltip};
 
 use super::{Failure, Phase, Updater, version};
 use crate::{
     copy::{fill, update as u},
-    theme::{self, Type as _},
-    ui::{Lucide, icon},
+    theme::{self, Type as _, space},
+    ui::{self, ButtonKind, ButtonSize, Lucide, icon},
 };
 
 /// The line of text for a phase, or `None` when the phase has no banner text.
@@ -65,32 +61,38 @@ fn actions(phase: &Phase) -> &'static [Action] {
     }
 }
 
-fn action_button(action: Action, id: &'static str, updater: &Entity<Updater>) -> Button {
+fn action_button(action: Action, id: &'static str, updater: &Entity<Updater>, cx: &App) -> Button {
     let updater = updater.clone();
-    let (label, primary) = match action {
-        Action::Update => (u::UPDATE, true),
-        Action::Retry => (u::RETRY, true),
-        Action::Later => (u::LATER, false),
-        Action::Dismiss => (u::DISMISS, false),
+    let button = match action {
+        Action::Update => ui::button(
+            (id, 0usize),
+            u::UPDATE,
+            ButtonKind::Primary,
+            ButtonSize::Sm,
+            cx,
+        ),
+        Action::Retry => ui::button(
+            (id, 1usize),
+            u::RETRY,
+            ButtonKind::Primary,
+            ButtonSize::Sm,
+            cx,
+        ),
+        // The narrow card closes with an `x`; its tooltip names the action.
+        Action::Later => ui::icon_button_sm((id, 2usize), Lucide::X).tooltip(u::LATER),
+        Action::Dismiss => ui::icon_button_sm((id, 3usize), Lucide::X).tooltip(u::DISMISS),
     };
-    let button = Button::new((id, action as usize))
-        .xsmall()
-        .label(label)
-        .on_click(move |_, _, cx| {
-            updater.update(cx, |up, cx| match action {
-                Action::Update | Action::Retry => up.start_update(cx),
-                Action::Later => up.postpone(cx),
-                Action::Dismiss => up.dismiss(cx),
-            })
-        });
-    if primary {
-        button.primary()
-    } else {
-        button.ghost()
-    }
+    button.on_click(move |_, _, cx| {
+        updater.update(cx, |up, cx| match action {
+            Action::Update | Action::Retry => up.start_update(cx),
+            Action::Later => up.postpone(cx),
+            Action::Dismiss => up.dismiss(cx),
+        })
+    })
 }
 
-/// Shown above the topic view while an update is available or running.
+/// The app-level update banner (DESIGN.md §8.6): a 48 pt card above the
+/// sidebar footer, never in the topic column.
 pub struct UpdateBanner {
     updater: Option<Entity<Updater>>,
     _subscriptions: Vec<Subscription>,
@@ -107,6 +109,28 @@ impl UpdateBanner {
             updater,
             _subscriptions: subscriptions,
         }
+    }
+}
+
+/// The banner's two lines for a phase: a short title and a detail. The
+/// sidebar is narrow, so the long sentences go to the detail and its tooltip.
+fn banner_lines(phase: &Phase, text: String) -> (String, Option<String>) {
+    match phase {
+        Phase::Available(i) => (
+            u::BANNER_AVAILABLE.to_string(),
+            Some(fill(u::BANNER_VERSION, &[("version", &i.version)])),
+        ),
+        Phase::Downloading { info, done, total } => {
+            let total = if *total == 0 { info.size } else { *total };
+            let pct = version::percent(*done, total).to_string();
+            (
+                fill(u::BANNER_DOWNLOADING, &[("version", &info.version)]),
+                Some(fill(u::BANNER_PERCENT, &[("percent", &pct)])),
+            )
+        }
+        Phase::Manual(_) => (u::BANNER_MANUAL.to_string(), Some(text)),
+        Phase::Failed { .. } => (text, None),
+        _ => (text, None),
     }
 }
 
@@ -132,68 +156,106 @@ impl Render for UpdateBanner {
         };
         let busy = matches!(phase, Phase::Installing(_) | Phase::WaitingForSends(_));
         let failed = matches!(phase, Phase::Failed { .. });
-        // A neutral band (DESIGN.md §11, §13.14): 30 pt, radius 8, `fill-field`,
-        // a 13 pt glyph and 12 pt `text-2`. Never red: a failure shows only
-        // its glyph in the danger color.
-        let glyph = if failed {
-            Lucide::CircleAlert
+        let manual = matches!(phase, Phase::Manual(_));
+        let (glyph, glyph_color) = if failed {
+            (Lucide::CircleAlert, colors.danger)
         } else {
-            Lucide::Download
+            (Lucide::Download, colors.accent_text)
         };
-        div()
+        let (title, detail) = banner_lines(&phase, text.clone());
+        let actions: Vec<Button> = actions(&phase)
+            .iter()
+            .map(|a| action_button(*a, "update-banner", &updater, cx))
+            .collect();
+        // One row: glyph, the two lines, the actions. The download bar is an
+        // inset track along the bottom edge, inside the card's radius.
+        let card = div()
+            .id("update-banner")
+            .relative()
             .flex_none()
             .w_full()
-            .px(theme::space::S20)
-            .pt(theme::space::S8)
-            .pb(theme::space::S8)
+            .min_h(theme::size::BANNER)
+            .pl(space::S12)
+            .pr(space::S6)
+            .py(space::S6)
+            .rounded(theme::radius::MD)
+            .bg(colors.raised)
+            .border_1()
+            .border_color(colors.border)
+            .flex()
+            .items_center()
+            .gap(space::S10)
+            .when(manual, |el| {
+                el.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
+            })
+            .map(|el| {
+                if busy {
+                    el.child(
+                        Spinner::new()
+                            .with_size(theme::icon::ROW)
+                            .color(colors.text_2),
+                    )
+                } else {
+                    el.child(icon(glyph, theme::icon::ROW, glyph_color))
+                }
+            })
             .child(
                 div()
-                    .w_full()
-                    .min_h(px(30.))
-                    .pl(theme::space::S10)
-                    .pr(theme::space::S4)
-                    .py(theme::space::S2)
-                    .rounded(theme::radius::ROW)
-                    .bg(colors.fill_field)
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .t_small()
+                            .medium()
+                            .tnum()
+                            .text_color(colors.text_1)
+                            .one_line()
+                            .child(title),
+                    )
+                    .children(detail.map(|d| {
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .t_meta()
+                            .tnum()
+                            .text_color(colors.text_3)
+                            .child(div().min_w(px(0.)).one_line().child(d))
+                            // The download bar follows the percent on the
+                            // detail line: a 3 pt inset track.
+                            .when_some(progress, |el, pct| {
+                                el.child(
+                                    div()
+                                        .flex_1()
+                                        .h(px(3.))
+                                        .rounded(px(1.5))
+                                        .bg(colors.field)
+                                        .child(
+                                            div()
+                                                .h_full()
+                                                .rounded(px(1.5))
+                                                .bg(colors.accent)
+                                                .w(gpui::relative((pct / 100.).clamp(0., 1.))),
+                                        ),
+                                )
+                            })
+                    })),
+            )
+            .child(
+                div()
+                    .flex_none()
                     .flex()
                     .items_center()
-                    .gap(theme::space::S8)
-                    .t_callout()
-                    .tnum()
-                    .text_color(colors.text_2)
-                    .map(|el| {
-                        if busy {
-                            el.child(Spinner::new().xsmall().color(colors.text_2))
-                        } else {
-                            el.child(icon(
-                                glyph,
-                                theme::icon::SMALL,
-                                if failed { colors.danger } else { colors.text_2 },
-                            ))
-                        }
-                    })
-                    // Wraps: the manual-install text is an instruction and must stay whole.
-                    .child(div().flex_1().min_w(px(0.)).py(theme::space::S4).child(text))
-                    .when_some(progress, |el, pct| {
-                        el.child(
-                            Progress::new("update-progress")
-                                .w(px(120.))
-                                .h(px(4.))
-                                .value(pct)
-                                .color(colors.accent),
-                        )
-                    })
-                    .children(
-                        actions(&phase)
-                            .iter()
-                            .map(|a| action_button(*a, "update-banner", &updater)),
-                    ),
-            )
-            .into_any_element()
+                    .gap(space::S2)
+                    .children(actions),
+            );
+        crate::views::banners::place(card).into_any_element()
     }
 }
 
-/// The 关于 section of settings: version, update state and 检查更新.
+/// The 关于 row of settings: version, update state and 检查更新.
 pub struct AboutUpdate {
     updater: Option<Entity<Updater>>,
     _subscriptions: Vec<Subscription>,
@@ -240,43 +302,51 @@ impl Render for AboutUpdate {
                 Phase::Available(i) | Phase::Failed { info: Some(i), .. } => {
                     let up = updater.clone();
                     buttons.push(
-                        Button::new("about-update")
-                            .small()
-                            .primary()
-                            .label(fill(u::UPDATE_TO, &[("version", &i.version)]))
-                            .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
+                        ui::primary_button(
+                            "about-update",
+                            fill(u::UPDATE_TO, &[("version", &i.version)]),
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
                     );
                 }
                 Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. } => {
                     let up = updater.clone();
                     buttons.push(
-                        Button::new("about-check")
-                            .small()
-                            .label(u::CHECK)
+                        ui::secondary_button("about-check", u::CHECK, cx)
                             .on_click(move |_, _, cx| up.update(cx, |u, cx| u.check_now(cx))),
                     );
                 }
                 _ => {}
             }
         }
-        // One row of the 关于 group (DESIGN.md §5.5): the app icon, the
-        // product and version, the update state and its button.
+        let dark = theme::is_dark(cx);
+        // The first row of the 关于 table: the app icon, the product and
+        // version, the update state and its button.
         div()
             .w_full()
-            .min_h(px(52.))
-            .px(theme::space::S12)
-            .py(theme::space::S10)
+            .min_h(px(72.))
+            .pl(space::S16)
+            .pr(space::S12)
+            .py(space::S12)
             .flex()
             .items_center()
-            .gap(theme::space::S12)
-            .child(img(crate::ui::icons::APP_ICON_88).flex_none().size(px(40.)))
+            .gap(space::S12)
+            .child(
+                img(if dark {
+                    crate::ui::icons::APP_ICON_DARK_72
+                } else {
+                    crate::ui::icons::APP_ICON_72
+                })
+                .flex_none()
+                .size(px(44.)),
+            )
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .gap(theme::space::S2)
                     .child(
                         div()
                             .t_ui()
@@ -287,7 +357,7 @@ impl Render for AboutUpdate {
                     )
                     .child(
                         div()
-                            .t_callout()
+                            .t_small()
                             .tnum()
                             .text_color(colors.text_2)
                             .one_line()
@@ -298,16 +368,20 @@ impl Render for AboutUpdate {
                             div()
                                 .flex()
                                 .items_center()
-                                .gap(theme::space::S6)
-                                .t_callout()
+                                .gap(space::S6)
+                                .t_meta()
                                 .tnum()
                                 .text_color(if failed {
                                     colors.danger_text
                                 } else {
-                                    colors.text_2
+                                    colors.text_3
                                 })
                                 .when(busy, |el| {
-                                    el.child(Spinner::new().xsmall().color(colors.text_3))
+                                    el.child(
+                                        Spinner::new()
+                                            .with_size(theme::icon::CHIP)
+                                            .color(colors.text_3),
+                                    )
                                 })
                                 .child(div().min_w(px(0.)).child(s)),
                         )

@@ -1,21 +1,16 @@
-//! A thin banner above the topic view while the connection is not up:
+//! The app-level connection banner above the sidebar footer while the connection is not up:
 //! connecting, reconnecting (with the next retry) or offline. Hidden when
 //! online or signed out.
 
-use gpui::{
-    Context, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonVariants as _},
-};
+use gpui::{Context, IntoElement, Render, Subscription, Window, div, prelude::FluentBuilder as _};
+use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
 
 use crate::{
     app::{Changes, Services},
     copy::{connection as c, fill},
     data::{Change, ConnectionState, SessionState},
     theme,
+    ui::{self, Lucide},
 };
 
 pub struct ConnectionBanner {
@@ -51,48 +46,60 @@ pub fn banner_text(state: ConnectionState) -> Option<String> {
     }
 }
 
+/// The banner's title and detail: the sidebar is narrow, so the title is the
+/// short state and the detail says what happens next.
+pub fn banner_lines(state: ConnectionState) -> Option<(&'static str, String)> {
+    Some(match state {
+        ConnectionState::Online => return None,
+        ConnectionState::Connecting => (c::CONNECTING, c::QUEUED_HINT.to_string()),
+        ConnectionState::Reconnecting { retry_in_ms, .. } if retry_in_ms >= 1000 => (
+            c::BANNER_DISCONNECTED,
+            fill(
+                c::BANNER_RETRY_IN,
+                &[("s", &retry_in_ms.div_ceil(1000).to_string())],
+            ),
+        ),
+        ConnectionState::Reconnecting { .. } => {
+            (c::BANNER_DISCONNECTED, c::RECONNECTING_NOW.to_string())
+        }
+        ConnectionState::Offline => (c::OFFLINE, c::QUEUED_HINT.to_string()),
+    })
+}
+
 impl Render for ConnectionBanner {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let provider = &self.services.provider;
         let signed_in = matches!(provider.session(), SessionState::SignedIn { .. });
         let state = provider.connection();
-        let Some(text) = banner_text(state).filter(|_| signed_in) else {
+        let Some((title, detail)) = banner_lines(state).filter(|_| signed_in) else {
             return div().into_any_element();
         };
-        let colors = theme::colors(cx);
+        // An app-level banner (DESIGN.md §8.6): a neutral 48 pt card above
+        // the sidebar footer. Never red: being offline is not an error the
+        // user made, and messages still queue.
         let can_retry = !matches!(state, ConnectionState::Connecting);
-        div()
-            .flex_none()
-            .w_full()
-            .px(px(16.))
-            .py(px(6.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .bg(colors.panel)
-            .border_b_1()
-            .border_color(colors.border)
-            .text_sm()
-            .child(div().text_color(colors.danger).child(text))
-            .child(
-                div()
-                    .flex_1()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(c::QUEUED_HINT),
-            )
-            .when(can_retry, |el| {
-                el.child(
-                    Button::new("reconnect-now")
-                        .small()
-                        .ghost()
-                        .label(c::RECONNECT)
-                        .on_click(cx.listener(|this, _, _, _| {
-                            this.services.provider.reconnect_now()
-                        })),
+        crate::views::banners::place(ui::Banner::new(Lucide::WifiOff, title).detail(detail).when(
+            can_retry,
+            |b| {
+                b.action(
+                    ui::button(
+                        "reconnect-now",
+                        c::RECONNECT,
+                        ui::ButtonKind::Ghost,
+                        ui::ButtonSize::Sm,
+                        cx,
+                    )
+                    .custom(
+                        ButtonCustomVariant::new(cx)
+                            .foreground(theme::colors(cx).accent_text)
+                            .hover(theme::colors(cx).hover)
+                            .active(theme::colors(cx).pressed),
+                    )
+                    .on_click(cx.listener(|this, _, _, _| this.services.provider.reconnect_now())),
                 )
-            })
-            .into_any_element()
+            },
+        ))
+        .into_any_element()
     }
 }
 

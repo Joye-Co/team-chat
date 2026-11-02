@@ -19,15 +19,9 @@ use gpui_component::{
 use crate::{
     app::{Changes, Place, Services},
     copy::{common, fill, nav},
-    data::{
-        Change, ConnectionState, GroupId, GroupKind, GroupSummary, Member, TodoItem, TodoReason,
-        TopicStatus,
-    },
+    data::{Change, GroupId, GroupKind, GroupSummary, Member, TodoItem, TodoReason, TopicStatus},
     theme::{self, Type as _, size, space},
-    ui::{
-        self, BadgeKind, ButtonKind, ButtonSize, CountBadge, GroupGlyph, Kbd, Lucide, MemberAvatar,
-        RowSurface,
-    },
+    ui::{self, BadgeKind, CountBadge, GroupGlyph, Kbd, Lucide, MemberAvatar, RowSurface},
     views::nav::{NewGroup, QuickSwitch, StartDm},
 };
 
@@ -488,12 +482,6 @@ impl Render for Sidebar {
         } else {
             dms.iter().map(|g| row_of(self, g, cx)).collect()
         };
-        let connection = match self.services.provider.connection() {
-            ConnectionState::Online => None,
-            ConnectionState::Connecting => Some(common::CONNECTING),
-            ConnectionState::Reconnecting { .. } => Some(common::RECONNECTING),
-            ConnectionState::Offline => Some(common::CONNECTION_OFFLINE),
-        };
         let todo_count = self.todo.len() as u32;
         let todo_open = !self.collapsed.contains(&Section::Todo);
         let todo_rows: Vec<_> = if todo_open {
@@ -507,7 +495,6 @@ impl Render for Sidebar {
             Vec::new()
         };
         let more_todo = todo_open && self.todo.len() > TODO_ROWS;
-        let empty = self.groups.is_empty();
 
         let todo_header =
             self.section_header(Section::Todo, nav::TODO, Some(todo_count), None, true, cx);
@@ -536,40 +523,6 @@ impl Render for Sidebar {
             ),
             false,
             cx,
-        );
-
-        let empty_state = div().h(px(240.)).child(
-            ui::EmptyState::new(Lucide::UsersRound, nav::NO_GROUPS)
-                .description(nav::NO_GROUPS_HINT)
-                .action(
-                    div()
-                        .flex()
-                        .gap(space::S8)
-                        .child(
-                            ui::button(
-                                "empty-new-group",
-                                nav::NEW_GROUP,
-                                ButtonKind::Primary,
-                                ButtonSize::Md,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(NewGroup), cx)
-                            }),
-                        )
-                        .child(
-                            ui::button(
-                                "empty-start-dm",
-                                nav::START_DM,
-                                ButtonKind::Secondary,
-                                ButtonSize::Md,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(StartDm), cx)
-                            }),
-                        ),
-                ),
         );
 
         let me_id = self.services.me();
@@ -669,14 +622,6 @@ impl Render for Sidebar {
             // The traffic lights sit in this band.
             .child(ui::toolbar_band("sidebar-toolbar"))
             .child(search)
-            .when_some(connection, |el, text| {
-                el.child(
-                    div()
-                        .mx(space::S12)
-                        .mb(space::S8)
-                        .child(ui::Band::new(Lucide::WifiOff, text).compact()),
-                )
-            })
             .child(
                 div()
                     .id("sidebar-groups")
@@ -711,11 +656,12 @@ impl Render for Sidebar {
                         )
                     })
                     .child(groups_header)
-                    .when(empty, |el| el.child(empty_state))
                     .children(group_rows)
                     .when(!dms.is_empty(), |el| el.child(dms_header).children(dm_rows))
                     .child(div().h(space::S8).flex_none()),
             )
+            // App-level banners (update, connection) above the footer (§8.6).
+            .children(crate::views::banners::slot(cx))
             .children(footer)
     }
 }

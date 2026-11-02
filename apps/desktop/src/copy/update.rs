@@ -20,4 +20,9 @@ crate::copy! {
     UP_TO_DATE = "已是最新版本",
     CHECK_FAILED = "检查更新失败，请稍后再试",
     UPDATE_TO = "更新到 {version}",
+    BANNER_AVAILABLE = "有新版本",
+    BANNER_VERSION = "版本 {version}",
+    BANNER_DOWNLOADING = "正在下载 {version}",
+    BANNER_PERCENT = "{percent}%",
+    BANNER_MANUAL = "需要手动安装新版本",
 }

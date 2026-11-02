@@ -2,6 +2,7 @@
 //! Shared small pieces (avatar, badge, status chip, time text) live here.
 
 pub mod artifacts;
+pub mod banners;
 pub mod cards;
 pub mod composer;
 pub mod connection_banner;
@@ -16,6 +17,7 @@ pub mod sidebar;
 pub mod timeline;
 pub mod topic_list;
 pub mod topic_menu;
+pub mod welcome;
 
 use chrono::{Datelike, Local, TimeZone};
 use gpui::{App, Div, IntoElement, ParentElement, Pixels, Styled, div, px};

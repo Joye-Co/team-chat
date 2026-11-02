@@ -18,8 +18,8 @@ use std::sync::Arc;
 use futures::StreamExt;
 use gpui::{
     App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
-    KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window, WindowBounds,
-    WindowBackgroundAppearance, WindowOptions, div, point, px, size,
+    KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
 };
 
 use crate::{
@@ -273,12 +273,17 @@ impl RootView {
         let subscriptions = vec![
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
-                if changes.any(|c| matches!(c, Change::Session)) {
+                // Groups too: the first 群 replaces the welcome (§8.5).
+                if changes.any(|c| matches!(c, Change::Session | Change::Groups)) {
                     cx.notify();
                 }
             }),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
         ];
+        // App-level banners sit above the sidebar footer (DESIGN.md §8.6).
+        let banner = cx.new(|cx| ConnectionBanner::new(services.clone(), cx));
+        let update_banner = cx.new(crate::updater::banner::UpdateBanner::new);
+        crate::views::banners::register(update_banner.clone(), banner.clone(), cx);
         Self {
             sidebar: cx.new(|cx| Sidebar::new(services.clone(), cx)),
             topic_list: cx.new(|cx| TopicListView::new(services.clone(), cx)),
@@ -286,8 +291,8 @@ impl RootView {
             composer: cx.new(|cx| ComposerView::new(services.clone(), window, cx)),
             side_panel: cx.new(|cx| SidePanel::new(services.clone(), cx)),
             login: cx.new(|cx| LoginView::new(services.clone(), window, cx)),
-            banner: cx.new(|cx| ConnectionBanner::new(services.clone(), cx)),
-            update_banner: cx.new(crate::updater::banner::UpdateBanner::new),
+            banner,
+            update_banner,
             services,
             first_frame,
             _subscriptions: subscriptions,
@@ -296,6 +301,10 @@ impl RootView {
 
     pub fn services(&self) -> &Services {
         &self.services
+    }
+
+    pub fn login(&self) -> &Entity<LoginView> {
+        &self.login
     }
 
     pub fn timeline(&self) -> &Entity<TimelineView> {
@@ -328,6 +337,23 @@ impl Render for RootView {
         ) {
             return root.child(self.login.clone());
         }
+        // No 群 yet: one welcome in the content area, nothing else (§8.5, U06).
+        if self.services.provider.groups().is_empty() {
+            return root.flex().flex_row().children([
+                div()
+                    .w(theme::SIDEBAR_WIDTH)
+                    .h_full()
+                    .flex_none()
+                    .child(self.sidebar.clone())
+                    .into_any_element(),
+                ui::vhairline(cx).into_any_element(),
+                div()
+                    .flex_1()
+                    .h_full()
+                    .child(crate::views::welcome::Welcome)
+                    .into_any_element(),
+            ]);
+        }
         // The side panel needs a window of at least 1100 pt (§5.1).
         let panel_open = self.services.nav.read(cx).side_panel_open
             && window.viewport_size().width >= theme::SIDE_PANEL_MIN_WINDOW;
@@ -354,9 +380,7 @@ impl Render for RootView {
                     .h_full()
                     .flex()
                     .flex_col()
-                    .child(self.update_banner.clone())
                     .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))
-                    .child(self.banner.clone())
                     .child(self.composer.clone())
                     .into_any_element(),
             ])
