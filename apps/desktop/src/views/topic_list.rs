@@ -159,6 +159,15 @@ pub fn relative_time(at: Millis, now: DateTime<Local>) -> String {
 }
 
 /// One row: a topic and the group it belongs to (the 待办 list mixes groups).
+/// The topic waits on the viewer (等你答 / 等你审).
+fn waits_on(topic: &Topic, me: Option<&str>) -> bool {
+    me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me))
+        && matches!(
+            topic.status,
+            TopicStatus::WaitingAnswer | TopicStatus::WaitingReview
+        )
+}
+
 #[derive(Clone)]
 struct Row {
     group_id: GroupId,
@@ -514,6 +523,7 @@ impl TopicListView {
         ix: usize,
         row: &Row,
         selected: bool,
+        first_you: bool,
         now: DateTime<Local>,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
@@ -523,14 +533,11 @@ impl TopicListView {
         let unread = topic.unread > 0 || topic.mentions > 0;
         let lead_id = topic.owner_id.as_ref().unwrap_or(&topic.created_by);
         let lead = self.members.iter().find(|m| &m.id == lead_id);
-        let waits_on_me = me
-            .as_deref()
-            .is_some_and(|me| topic.waiting_on.iter().any(|m| m == me))
-            && matches!(
-                topic.status,
-                TopicStatus::WaitingAnswer | TopicStatus::WaitingReview
-            );
-        let chip = StatusChip::for_topic(topic, me.as_deref(), &self.members);
+        let waits_on_me = waits_on(topic, me.as_deref());
+        // One orange fill per screen (§7.8): only the first row on screen
+        // that waits on me gets the filled chip; the 等我 tab has the total.
+        let chip = StatusChip::for_topic(topic, me.as_deref(), &self.members)
+            .map(|c| if first_you { c } else { c.quiet_you() });
         // Exactly one trailing element, by priority (§7.6, §9.1).
         let trailing = if waits_on_me {
             chip.map(|c| c.into_any_element())
@@ -543,12 +550,7 @@ impl TopicListView {
         } else {
             None
         };
-        let title = topic_line(&topic.title);
-        let (title, untitled) = if title.is_empty() {
-            (nav::UNTITLED.to_string(), true)
-        } else {
-            (title, false)
-        };
+        let (title, untitled) = crate::views::sidebar::topic_display_title(&topic.title);
         let tip_title = SharedString::from(title.clone());
         let preview = match self.typing_text(&topic.id) {
             Some(t) => t,
@@ -798,6 +800,12 @@ impl Render for TopicListView {
                                     self.rows.len(),
                                     cx.processor(
                                         move |this, range: std::ops::Range<usize>, _, cx| {
+                                            let me = this.services.me();
+                                            let first_you = range.clone().find(|&ix| {
+                                                this.rows.get(ix).is_some_and(|r| {
+                                                    waits_on(&r.topic, me.as_deref())
+                                                })
+                                            });
                                             range
                                                 .filter_map(|ix| {
                                                     this.rows.get(ix).cloned().map(|row| (ix, row))
@@ -808,7 +816,14 @@ impl Render for TopicListView {
                                                             row.group_id.clone(),
                                                             row.topic.id.clone(),
                                                         ));
-                                                    this.topic_row(ix, &row, sel, now, cx)
+                                                    this.topic_row(
+                                                        ix,
+                                                        &row,
+                                                        sel,
+                                                        first_you == Some(ix),
+                                                        now,
+                                                        cx,
+                                                    )
                                                 })
                                                 .collect::<Vec<_>>()
                                         },

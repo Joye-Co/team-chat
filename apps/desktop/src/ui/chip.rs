@@ -149,6 +149,22 @@ impl StatusChip {
         }
     }
 
+    /// Rule of one orange fill per screen (§7.8): a row that waits on the
+    /// viewer but is not the first such row on screen draws the quiet label
+    /// (`you-glyph` glyph, `text-2` text, no fill) instead of the filled
+    /// compact chip. Other marks stay as they are.
+    pub fn quiet_you(mut self) -> Self {
+        if self.kind == ChipKind::You && self.style == ChipStyle::Compact {
+            self.style = ChipStyle::Label;
+        }
+        self
+    }
+
+    /// The mark draws a fill (a chip, not a label).
+    pub fn is_filled(&self) -> bool {
+        self.style != ChipStyle::Label
+    }
+
     pub fn style(mut self, style: ChipStyle) -> Self {
         self.style = style;
         self
