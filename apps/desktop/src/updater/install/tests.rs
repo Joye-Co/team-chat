@@ -11,6 +11,9 @@ use std::{
 use super::*;
 
 const ID: &str = "co.example.fake-updater-test";
+
+/// The DMG tests run one at a time: each checks that no mount of this process is left.
+static DMG_TESTS: std::sync::Mutex<()> = std::sync::Mutex::new(());
 const NAME: &str = "Fake.app";
 
 /// A fake bundle whose executable writes "<version> <args>" to `$UPDATER_TEST_OUT`.
@@ -187,6 +190,7 @@ fn marker_never_removes_other_paths() {
 
 #[test]
 fn install_from_dmg_and_relaunch() {
+    let _serial = DMG_TESTS.lock().unwrap_or_else(|e| e.into_inner());
     let f = fixture(ID);
     let plan = plan(&f);
     let marker = install(&plan).unwrap();
@@ -225,6 +229,7 @@ fn install_from_dmg_and_relaunch() {
 
 #[test]
 fn install_refuses_bad_input_and_keeps_the_running_bundle() {
+    let _serial = DMG_TESTS.lock().unwrap_or_else(|e| e.into_inner());
     let f = fixture("co.example.someone-else");
     // Wrong checksum.
     let mut p = plan(&f);

@@ -284,10 +284,10 @@ impl Render for MachinesPage {
             .flex()
             .flex_col()
             .when(self.machines.is_some(), |el| {
-                el.children(failed.map(|text| {
+                el.children(failed.and_then(|text| {
                     widgets::status_line(&Status::Failed(text), cx)
                         .map(|l| l.px(space::S12).pb(space::S8))
-                }).flatten())
+                }))
             })
             .child(body)
     }

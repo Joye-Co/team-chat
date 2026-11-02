@@ -101,7 +101,7 @@ pub fn run(
                 (false, json)
             }
         };
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             provider.sign_out_local_for_selftest();
             finish(&report, json, ok, cx);
         });
@@ -157,7 +157,7 @@ async fn drive(
     json["groups"] = provider.groups().len().into();
     json["group_id"] = group.id.clone().into();
     let gid = group.id.clone();
-    let _ = cx.update(|cx| services.nav.update(cx, |nav, cx| nav.open_group(gid, cx)));
+    cx.update(|cx| services.nav.update(cx, |nav, cx| nav.open_group(gid, cx)));
 
     // 2. Start a topic: it shows at once as a pending topic.
     let stamp = chat_core::new_id();
@@ -178,7 +178,7 @@ async fn drive(
         .is_some_and(|t| t.id == pending);
     json["pending_topic_shown"] = shown_pending.into();
     let (g, p) = (group.id.clone(), pending.clone());
-    let _ = cx.update(|cx| services.nav.update(cx, |nav, cx| nav.open_topic(g, p, cx)));
+    cx.update(|cx| services.nav.update(cx, |nav, cx| nav.open_topic(g, p, cx)));
     wait_for(cx, deadline, |_| provider.acked_message(&cid1))
         .await
         .ok_or(("topic ack", json.clone()))?;
@@ -226,7 +226,7 @@ async fn drive(
 
     // 4. The open timeline shows it, and marking read works.
     let (g, t) = (group.id.clone(), topic_id.clone());
-    let _ = cx.update(|cx| services.nav.update(cx, |nav, cx| nav.open_topic(g, t, cx)));
+    cx.update(|cx| services.nav.update(cx, |nav, cx| nav.open_topic(g, t, cx)));
     let shown = wait_for(cx, deadline, |cx| {
         let n = cx.update(|cx| root.read(cx).timeline().read(cx).message_count());
         (n >= 2).then_some(n)

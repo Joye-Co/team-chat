@@ -11,6 +11,7 @@ const CONTEXT: usize = 24;
 
 /// A case-insensitive substring search over message bodies and topic titles,
 /// newest first, like the server's (`docs/protocol.md`, "Search").
+#[allow(clippy::single_range_in_vec_init)] // one highlight per fake hit
 pub fn search(
     topics: &[Topic],
     messages: &[&Message],

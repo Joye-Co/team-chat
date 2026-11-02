@@ -71,10 +71,7 @@ impl TimelineView {
             return;
         }
         self.focus.busy = true;
-        loop {
-            let Some((id, seq)) = self.focus.target.clone() else {
-                break;
-            };
+        while let Some((id, seq)) = self.focus.target.clone() {
             if let Some(ix) = self.messages.iter().position(|m| m.id == id) {
                 self.reveal(ix, cx);
                 break;

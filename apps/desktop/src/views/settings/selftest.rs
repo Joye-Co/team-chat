@@ -622,10 +622,6 @@ macro_rules! scene_opener {
             _content: gpui::Size<gpui::Pixels>,
             cx: &mut App,
         ) -> Result<AnyWindowHandle, String> {
-            if $page == Page::Machines {
-                // Load the list before the capture.
-                let _ = services.provider.machines();
-            }
             super::open_window(services, $page, false, cx).map(|(h, _)| h)
         }
     };

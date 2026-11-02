@@ -67,7 +67,7 @@ impl CoreProvider {
                 })
             })
             .collect();
-        out.sort_by(|x, y| y.topic.last_activity_at.cmp(&x.topic.last_activity_at));
+        out.sort_by_key(|x| std::cmp::Reverse(x.topic.last_activity_at));
         out
     }
 

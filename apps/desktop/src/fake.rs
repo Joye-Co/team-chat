@@ -870,7 +870,7 @@ fn sorted_topics(state: &State, group_id: &str) -> Vec<Topic> {
         .filter(|t| t.group_id == group_id)
         .cloned()
         .collect();
-    topics.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+    topics.sort_by_key(|a| std::cmp::Reverse(a.last_activity_at));
     topics
 }
 
@@ -921,7 +921,7 @@ impl ChatProvider for FakeProvider {
     fn groups(&self) -> Vec<GroupSummary> {
         self.with(|s| {
             let mut groups = s.groups.clone();
-            groups.sort_by(|a, b| b.last_activity_at.cmp(&a.last_activity_at));
+            groups.sort_by_key(|a| std::cmp::Reverse(a.last_activity_at));
             groups
         })
     }
@@ -953,7 +953,7 @@ impl ChatProvider for FakeProvider {
                     })
                 })
                 .collect();
-            items.sort_by(|a, b| b.topic.last_activity_at.cmp(&a.topic.last_activity_at));
+            items.sort_by_key(|a| std::cmp::Reverse(a.topic.last_activity_at));
             items
         })
     }
@@ -1007,7 +1007,7 @@ impl ChatProvider for FakeProvider {
                 .filter(|a| in_group && a.topic_id == topic_id)
                 .cloned()
                 .collect();
-            list.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+            list.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
             list
         })
     }

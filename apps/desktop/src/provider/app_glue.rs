@@ -44,7 +44,7 @@ pub fn install(core: Arc<CoreProvider>, services: Services, cx: &mut App) {
         cx.spawn(async move |cx| {
             while let Some((group_id, topic_id)) = clicks.next().await {
                 let nav = services.nav.clone();
-                let _ = cx.update(|cx| {
+                cx.update(|cx| {
                     nav.update(cx, |nav, cx| {
                         if topic_id.is_empty() {
                             nav.open_group(group_id, cx)

@@ -899,7 +899,7 @@ impl ChatProvider for CoreProvider {
                 g.last_activity_at = g.last_activity_at.max(newest.created_at as i64);
             }
         }
-        out.sort_by(|x, y| y.last_activity_at.cmp(&x.last_activity_at));
+        out.sort_by_key(|x| std::cmp::Reverse(x.last_activity_at));
         out
     }
 

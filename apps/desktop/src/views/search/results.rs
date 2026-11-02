@@ -381,6 +381,7 @@ impl ListDelegate for SearchDelegate {
 }
 
 #[cfg(test)]
+#[allow(clippy::single_range_in_vec_init)] // one highlight range per case
 mod tests {
     use super::*;
 

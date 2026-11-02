@@ -381,6 +381,7 @@ impl CoreProvider {
     /// Starts an upload job for the listed files of the draft. Returns the
     /// job id (used as the message's client id), or `None` when the draft
     /// has none of these files.
+    #[allow(clippy::too_many_arguments)] // the fields of one draft message
     pub(super) fn start_upload_job(
         &self,
         key: &DraftKey,

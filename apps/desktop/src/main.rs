@@ -297,7 +297,7 @@ fn run_smoke(services: Services, report: PathBuf, started: Instant, hold_ms: u64
                 cx.background_executor()
                     .timer(Duration::from_millis(hold_ms))
                     .await;
-                let _ = cx.update(|cx| finish(&path, json, ok, cx));
+                cx.update(|cx| finish(&path, json, ok, cx));
             })
             .detach();
         }
@@ -318,7 +318,7 @@ fn run_smoke(services: Services, report: PathBuf, started: Instant, hold_ms: u64
         cx.background_executor()
             .timer(Duration::from_secs(30) + Duration::from_millis(hold_ms))
             .await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let json = serde_json::json!({ "ok": false, "error": "no frame within 30 s" });
             finish(&timeout_report, json, false, cx);
         });

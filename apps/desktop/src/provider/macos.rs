@@ -44,8 +44,10 @@ use super::Notice;
 /// Separates the parts of a notification id: group, topic, unique suffix.
 const SEP: char = '\u{1f}';
 
-fn click_slot() -> &'static Mutex<Option<UnboundedSender<(String, String)>>> {
-    static SLOT: OnceLock<Mutex<Option<UnboundedSender<(String, String)>>>> = OnceLock::new();
+type ClickSlot = Mutex<Option<UnboundedSender<(String, String)>>>;
+
+fn click_slot() -> &'static ClickSlot {
+    static SLOT: OnceLock<ClickSlot> = OnceLock::new();
     SLOT.get_or_init(|| Mutex::new(None))
 }
 
@@ -312,8 +314,8 @@ mod tests {
         let mut rx = clicks();
         on_click(&format!("g1{SEP}t1{SEP}x"));
         on_click("garbage");
-        assert_eq!(rx.try_next().unwrap(), Some(("g1".into(), "t1".into())));
-        assert!(rx.try_next().is_err());
+        assert_eq!(rx.try_recv().ok(), Some(("g1".into(), "t1".into())));
+        assert!(rx.try_recv().is_err());
     }
 
     #[test]
