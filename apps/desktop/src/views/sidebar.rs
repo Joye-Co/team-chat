@@ -135,7 +135,7 @@ impl Sidebar {
                     MemberAvatar::new(peer, px(20.))
                         .presence(peer)
                         .on(if selected {
-                            colors.sidebar
+                            colors.sidebar_selected
                         } else {
                             colors.sidebar
                         }),

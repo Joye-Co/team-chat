@@ -22,35 +22,49 @@ use gpui_kit::base::Easing;
 use crate::data::TopicStatus;
 
 // ---------------------------------------------------------------------------
-// Layout (§5)
+// Layout (DESIGN.md §4.4)
 
-/// Sidebar column width (§5.1).
-pub const SIDEBAR_WIDTH: Pixels = px(236.);
-pub const TOPIC_LIST_WIDTH: Pixels = px(300.);
-pub const SIDE_PANEL_WIDTH: Pixels = px(280.);
+/// Sidebar column width (200 to 320, resizable).
+pub const SIDEBAR_WIDTH: Pixels = px(248.);
+pub const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
+pub const SIDEBAR_MAX_WIDTH: Pixels = px(320.);
+/// Topic list column width (280 to 400).
+pub const TOPIC_LIST_WIDTH: Pixels = px(320.);
+pub const TOPIC_LIST_MIN_WIDTH: Pixels = px(280.);
+/// Side panel width (260 to 380), closed by default.
+pub const SIDE_PANEL_WIDTH: Pixels = px(300.);
 /// The topic view never gets narrower than this.
 pub const TOPIC_VIEW_MIN_WIDTH: Pixels = px(480.);
-/// Toolbar band at the top of each column; the traffic lights sit in it.
+/// The title row of every header band: 52 pt, centered with the traffic lights.
 pub const TOOLBAR_HEIGHT: Pixels = px(52.);
-/// Below this window width the side panel is hidden: the four columns need
-/// 236 + 300 + 480 + 280 pt (DESIGN.md §5.1 names 1100 pt, where they would clip).
-pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1300.);
+/// The second row of a header band (tabs, topic meta, panel context).
+pub const HEADER_SECOND_ROW: Pixels = px(40.);
+/// Header band of the topic list, topic view and side panel: 52 + 40. The
+/// three 0.5 pt bottom rules sit on one y.
+pub const HEADER_BAND: Pixels = px(92.);
+/// Below this window width the side panel closes: 248 + 320 + 480 + 300.
+pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1348.);
 pub const WINDOW_MIN_WIDTH: Pixels = px(1100.);
 pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
 pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
 pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
-/// Traffic light origin inside the 52 pt toolbar band.
-pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(20.), px(18.));
-/// Timeline avatar size.
-pub const AVATAR_SIZE: Pixels = px(32.);
-/// Sidebar 群 row height.
-pub const ROW_HEIGHT: Pixels = px(28.);
-/// Maximum width of message text (about 40 Han characters).
-pub const MEASURE: Pixels = px(560.);
-/// Hairline width. 0.5 pt is exact on Retina; on 1× it becomes 1 px.
+/// Traffic light origin: their center lands on y 26, the title row center.
+pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(20.), px(20.));
+/// Timeline and topic row avatar size.
+pub const AVATAR_SIZE: Pixels = px(36.);
+/// Sidebar 群 and 私聊 row height.
+pub const ROW_HEIGHT: Pixels = px(32.);
+/// One measure for message text, cards, files and images (Slack).
+pub const MEASURE: Pixels = px(620.);
+/// Equal side gutters of the timeline and composer content box.
+pub const CONTENT_GUTTER: Pixels = px(24.);
+/// Hairline width. 0.5 pt is exact on Retina; on 1x it becomes 1 px.
 pub const HAIRLINE: Pixels = px(0.5);
+/// Border width of controls, cards, fields and the composer.
+pub const BORDER: Pixels = px(1.);
 
-/// Spacing scale (§5): 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32. Nothing else.
+/// Spacing scale (§4.1): 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 44. 10 and 14
+/// are for row and card insets only.
 pub mod space {
     use gpui::{Pixels, px};
     pub const S2: Pixels = px(2.);
@@ -63,38 +77,129 @@ pub mod space {
     pub const S16: Pixels = px(16.);
     pub const S20: Pixels = px(20.);
     pub const S24: Pixels = px(24.);
-    pub const S28: Pixels = px(28.);
     pub const S32: Pixels = px(32.);
+    pub const S44: Pixels = px(44.);
+    /// Not on the v2.1 scale; kept until the views that use it are rebuilt.
+    pub const S28: Pixels = px(28.);
 }
 
-/// Radii (§6). Nested radii: inner = outer − padding.
+/// Radii (§6). Concentric rule: outer = inner + padding.
 pub mod radius {
     use gpui::{Pixels, px};
-    pub const XS: Pixels = px(4.);
-    pub const CHIP: Pixels = px(5.);
-    pub const TILE: Pixels = px(5.5);
+    /// Inline marks in text: mentions, inline code, search marks.
+    pub const MARK: Pixels = px(4.);
+    /// Chips, labels, kbd, role tag, `sm` buttons, popup and menu rows,
+    /// hover-toolbar buttons.
     pub const SM: Pixels = px(6.);
-    pub const MD: Pixels = px(7.);
-    pub const ROW: Pixels = px(8.);
-    pub const LG: Pixels = px(10.);
-    pub const COMPOSER: Pixels = px(12.);
-    pub const XL: Pixels = px(14.);
-    /// Bot avatars: 28 % of their size.
+    /// Buttons, 32 to 36 pt fields, selects, rows, option rows, file tiles.
+    pub const MD: Pixels = px(8.);
+    /// 40 pt fields, `lg` buttons, invite boxes, the @mention popup.
+    pub const FIELD: Pixels = px(10.);
+    /// Cards, the composer, popovers, dialogs, the switcher, settings tables.
+    pub const LG: Pixels = px(12.);
+
+    // Older names, mapped onto the v2.1 steps.
+    pub const XS: Pixels = MARK;
+    pub const CHIP: Pixels = SM;
+    pub const TILE: Pixels = SM;
+    pub const ROW: Pixels = MD;
+    pub const COMPOSER: Pixels = LG;
+    pub const XL: Pixels = LG;
+
+    /// Bot tiles: 0.25 x size (9 at 36, 8 at 32, 6 at 24, 12 at 48).
     pub fn bot(size: Pixels) -> Pixels {
-        size * 0.28
+        size * 0.25
     }
 }
 
-/// Icon sizes (§9).
+/// Icon sizes (§4.3).
 pub mod icon {
     use gpui::{Pixels, px};
-    pub const TOOLBAR: Pixels = px(16.);
-    pub const TODO: Pixels = px(15.);
-    pub const MENU: Pixels = px(14.);
-    pub const BUTTON: Pixels = px(14.);
-    pub const SMALL: Pixels = px(13.);
-    pub const CHIP: Pixels = px(11.);
+    /// Headers, toolbars, the composer, icon buttons.
+    pub const HEADER: Pixels = px(18.);
+    /// Buttons, fields, rows, menus.
+    pub const ROW: Pixels = px(16.);
+    /// Chips and labels.
+    pub const CHIP: Pixels = px(14.);
+    /// The role tag and section chevrons.
+    pub const TAG: Pixels = px(12.);
+    /// Empty states.
     pub const EMPTY: Pixels = px(20.);
+
+    // Older names, mapped onto the v2.1 sizes.
+    pub const TOOLBAR: Pixels = HEADER;
+    pub const TODO: Pixels = ROW;
+    pub const MENU: Pixels = ROW;
+    pub const BUTTON: Pixels = ROW;
+    pub const SMALL: Pixels = CHIP;
+}
+
+/// Control and row heights (§4.2, §7). Views take sizes from here, never a
+/// literal.
+pub mod size {
+    use gpui::{Pixels, px};
+    /// Button `sm`: inline in a message or card row (重试).
+    pub const BUTTON_SM: Pixels = px(28.);
+    /// Button `md`: the default (card actions, dialogs).
+    pub const BUTTON_MD: Pixels = px(32.);
+    /// Button `md` page primary (settings `添加成员 ▾`).
+    pub const BUTTON_PAGE: Pixels = px(36.);
+    /// Button `lg`: login, empty-state primary, full-width submit.
+    pub const BUTTON_LG: Pixels = px(40.);
+    /// Text button inside a message (重试 after a failed send).
+    pub const TEXT_BUTTON: Pixels = px(22.);
+    pub const ICON_BUTTON: Pixels = px(32.);
+    pub const ICON_BUTTON_SM: Pixels = px(28.);
+    /// Search and filter fields.
+    pub const SEARCH_FIELD: Pixels = px(36.);
+    /// Form fields (login, settings, dialogs).
+    pub const FORM_FIELD: Pixels = px(40.);
+    /// Select in a table row: 36 x 120.
+    pub const SELECT: Pixels = px(36.);
+    pub const SELECT_WIDTH: Pixels = px(120.);
+    /// Invite code box: 42 x 48.
+    pub const INVITE_BOX: (Pixels, Pixels) = (px(42.), px(48.));
+    /// Composer: 12 top padding + 44 text (two 22 pt lines) + 40 toolbar.
+    pub const COMPOSER_MIN: Pixels = px(96.);
+    pub const COMPOSER_TEXT_MIN: Pixels = px(44.);
+    pub const COMPOSER_TOOLBAR: Pixels = px(40.);
+    /// The composer grows with its text up to this share of the topic view.
+    pub const COMPOSER_MAX_SHARE: f32 = 0.4;
+    pub const CHIP: Pixels = px(22.);
+    pub const CHIP_COMPACT: Pixels = px(20.);
+    pub const CHIP_MAX: Pixels = px(184.);
+    pub const CHIP_COMPACT_MAX: Pixels = px(72.);
+    pub const BADGE: Pixels = px(20.);
+    pub const KBD: Pixels = px(20.);
+    pub const ROLE_TAG: Pixels = px(20.);
+    pub const REACTION: Pixels = px(26.);
+    pub const SECTION_HEADER: Pixels = px(28.);
+    pub const SIDEBAR_ROW: Pixels = px(32.);
+    pub const SIDEBAR_FOOTER: Pixels = px(56.);
+    pub const TOPIC_ROW: Pixels = px(68.);
+    pub const MENU_ROW: Pixels = px(32.);
+    pub const POPUP_ROW: Pixels = px(40.);
+    pub const SWITCHER_ROW: Pixels = px(44.);
+    pub const SWITCHER_HIT_ROW: Pixels = px(60.);
+    pub const SWITCHER_QUERY: Pixels = px(56.);
+    pub const SETTINGS_ROW: Pixels = px(60.);
+    pub const OPTION_ROW: Pixels = px(40.);
+    pub const PANEL_ROW: Pixels = px(40.);
+    pub const BANNER: Pixels = px(48.);
+    pub const TOAST: Pixels = px(44.);
+    /// Avatars (§4.3).
+    pub const AVATAR_MESSAGE: Pixels = px(36.);
+    pub const AVATAR_FOOTER: Pixels = px(32.);
+    pub const AVATAR_ROW: Pixels = px(24.);
+    pub const AVATAR_START: Pixels = px(48.);
+    /// Widths of overlays (§7.12).
+    pub const SWITCHER_WIDTH: Pixels = px(640.);
+    pub const DIALOG_WIDTH: Pixels = px(440.);
+    pub const DIALOG_WIDE: Pixels = px(560.);
+    pub const ALERT_WIDTH: Pixels = px(320.);
+    pub const MENTION_POPUP_WIDTH: Pixels = px(320.);
+    /// Command-style panels sit this far below the window top.
+    pub const PALETTE_TOP: Pixels = px(96.);
 }
 
 // ---------------------------------------------------------------------------
@@ -128,22 +233,23 @@ fn c(hex: u32) -> Hsla {
     rgba(hex).into()
 }
 
-/// Every gpui-component slot the app can show (DESIGN.md §3).
+/// Every gpui-component slot the app can show (DESIGN.md §2.8).
 fn apply(t: &mut Theme, dark: bool) {
     let k = if dark { dark_colors() } else { light_colors() };
     let p = |l: u32, d: u32| if dark { c(d) } else { c(l) };
+    let clear = c(0x00000000);
 
     t.background = k.content;
     t.foreground = k.text_1;
-    t.muted = k.fill_field;
+    t.muted = k.field;
     t.muted_foreground = k.text_2;
-    t.border = k.sep;
-    t.input = k.control_border;
-    t.ring = k.focus_ring;
-    t.selection = k.selection;
+    t.border = k.border;
+    t.input = k.border;
+    t.ring = k.focus;
+    t.selection = p(0x1F6BFF33, 0x4C8DFF5C);
     t.caret = k.accent;
     t.overlay = k.scrim;
-    t.accent = k.fill_active;
+    t.accent = p(0x1F232914, 0xFFFFFF16);
     t.accent_foreground = k.text_1;
 
     t.primary = k.accent;
@@ -156,14 +262,16 @@ fn apply(t: &mut Theme, dark: bool) {
     t.button_primary_foreground = k.on_accent;
 
     let (sec, sec_h, sec_a) = (
-        p(0xFFFFFFFF, 0xFFFFFF1A),
-        p(0xF7F7F7FF, 0xFFFFFF24),
-        p(0xE6E6E6FF, 0xFFFFFF2E),
+        p(0xFFFFFFFF, 0xFFFFFF14),
+        p(0xF6F7F9FF, 0xFFFFFF1F),
+        p(0xECEDF0FF, 0xFFFFFF29),
     );
     t.secondary = sec;
     t.secondary_hover = sec_h;
     t.secondary_active = sec_a;
-    t.secondary_foreground = k.text_1;
+    // Ghost buttons draw in `secondary_foreground`: `text-2` at rest, and
+    // `accent_foreground` (`text-1`) on hover (§7.1).
+    t.secondary_foreground = k.text_2;
     t.button = sec;
     t.button_hover = sec_h;
     t.button_active = sec_a;
@@ -174,8 +282,8 @@ fn apply(t: &mut Theme, dark: bool) {
     t.button_secondary_foreground = k.text_1;
 
     t.danger = k.danger;
-    t.danger_hover = p(0xF0322AFF, 0xFF5A50FF);
-    t.danger_active = p(0xD92B22FF, 0xE03A30FF);
+    t.danger_hover = p(0xD93F44FF, 0xF66A6EFF);
+    t.danger_active = p(0xC2272DFF, 0xD9474CFF);
     t.danger_foreground = k.on_accent;
     t.button_danger = t.danger;
     t.button_danger_hover = t.danger_hover;
@@ -185,9 +293,9 @@ fn apply(t: &mut Theme, dark: bool) {
     t.success_hover = k.success;
     t.success_active = k.success;
     t.success_foreground = k.on_accent;
-    t.warning = k.warning;
-    t.warning_hover = k.warning;
-    t.warning_active = k.warning;
+    t.warning = k.you_glyph;
+    t.warning_hover = k.you_glyph;
+    t.warning_active = k.you_glyph;
     t.warning_foreground = k.on_accent;
     t.info = k.accent;
     t.info_hover = k.accent_hover;
@@ -195,86 +303,86 @@ fn apply(t: &mut Theme, dark: bool) {
     t.info_foreground = k.on_accent;
 
     t.colors.list = k.content;
-    t.list_hover = c(0x00000000);
-    t.list_active = k.fill_selected;
-    t.list_active_border = c(0x00000000);
+    t.list_hover = k.hover;
+    t.list_active = p(0x1F232914, 0xFFFFFF16);
+    t.list_active_border = clear;
     t.list_even = k.content;
     t.list_head = k.content;
 
-    t.table = k.group;
-    t.table_hover = k.fill_hover;
-    t.table_active = k.fill_selected;
-    t.table_active_border = c(0x00000000);
-    t.table_even = k.group;
+    t.table = k.content;
+    t.table_hover = k.hover;
+    t.table_active = p(0x1F232914, 0xFFFFFF16);
+    t.table_active_border = clear;
+    t.table_even = k.content;
     t.table_row_border = k.sep;
-    t.table_head = k.group;
-    t.table_head_foreground = k.text_2;
-    t.table_foot = k.group;
-    t.table_foot_foreground = k.text_2;
+    t.table_head = k.content;
+    t.table_head_foreground = k.text_3;
+    t.table_foot = k.content;
+    t.table_foot_foreground = k.text_3;
 
-    t.popover = k.elevated;
+    t.popover = k.overlay;
     t.popover_foreground = k.text_1;
-    t.group_box = k.group;
+    t.group_box = k.content;
     t.group_box_foreground = k.text_1;
-    t.description_list_label = c(0x00000000);
+    t.description_list_label = clear;
     t.description_list_label_foreground = k.text_2;
 
     t.sidebar = k.sidebar;
-    t.sidebar_foreground = k.text_1;
-    t.sidebar_accent = k.sidebar_selected;
+    t.sidebar_foreground = k.text_2;
+    t.sidebar_accent = p(0x1F232917, 0xFFFFFF17);
     t.sidebar_accent_foreground = k.text_1;
     t.sidebar_primary = k.accent;
     t.sidebar_primary_foreground = k.on_accent;
     t.sidebar_border = k.sep;
 
-    t.title_bar = c(0x00000000);
-    t.title_bar_border = c(0x00000000);
+    t.title_bar = clear;
+    t.title_bar_border = clear;
     t.status_bar = k.content;
     t.status_bar_border = k.sep;
 
-    t.tab_bar = c(0x00000000);
-    t.tab_bar_segmented = k.fill_field;
-    t.tab = c(0x00000000);
-    t.tab_active = p(0xFFFFFFFF, 0xFFFFFF29);
+    t.tab_bar = clear;
+    t.tab_bar_segmented = k.field;
+    t.tab = clear;
+    t.tab_active = clear;
     t.tab_foreground = k.text_2;
     t.tab_active_foreground = k.text_1;
 
-    t.switch = p(0x00000024, 0xFFFFFF29);
+    t.switch = k.border_strong;
     t.switch_thumb = c(0xFFFFFFFF);
     t.slider_bar = k.accent;
     t.slider_thumb = c(0xFFFFFFFF);
     t.progress_bar = k.accent;
-    t.skeleton = k.fill_field;
+    t.skeleton = k.field;
 
-    t.scrollbar = c(0x00000000);
-    t.scrollbar_thumb = k.scrollbar_thumb;
-    t.scrollbar_thumb_hover = p(0x00000066, 0xFFFFFF66);
+    t.scrollbar = clear;
+    t.scrollbar_thumb = p(0x1F232940, 0xFFFFFF40);
+    t.scrollbar_thumb_hover = p(0x1F232966, 0xFFFFFF66);
 
     t.link = k.accent_text;
-    t.link_hover = p(0x0055B3FF, 0x6BB3FFFF);
-    t.link_active = p(0x004799FF, 0x8CC4FFFF);
+    t.link_hover = p(0x1250BFFF, 0x94BAFFFF);
+    t.link_active = p(0x0E449FFF, 0xAECBFFFF);
 
     t.blue = k.accent;
-    t.blue_light = p(0x007AFF1A, 0x0A84FF33);
-    t.yellow = k.st_you_text;
-    t.yellow_light = k.st_you_bg;
-    t.red = k.st_blocked_text;
-    t.red_light = k.st_blocked_bg;
-    t.green = k.glyph_done;
-    t.green_light = p(0x34C75924, 0x30D1582B);
+    t.blue_light = k.info_bg;
+    t.yellow = k.you_text;
+    t.yellow_light = k.you_bg;
+    t.red = k.danger_text;
+    t.red_light = k.danger_bg;
+    t.green = k.success_text;
+    t.green_light = p(0x1E9E5A1F, 0x3CCB7F29);
     t.magenta = t.blue;
     t.magenta_light = t.blue_light;
     t.cyan = t.blue;
     t.cyan_light = t.blue_light;
 
-    t.chart_1 = p(0x007AFFFF, 0x0A84FFFF);
-    t.chart_2 = p(0x34C759FF, 0x30D158FF);
-    t.chart_3 = p(0xFF9500FF, 0xFF9F0AFF);
-    t.chart_4 = p(0xAF52DEFF, 0xBF5AF2FF);
-    t.chart_5 = p(0x8E8E93FF, 0x98989DFF);
-    t.window_border = p(0x00000024, 0xFFFFFF21);
+    t.chart_1 = k.accent;
+    t.chart_2 = k.success;
+    t.chart_3 = k.you_glyph;
+    t.chart_4 = k.text_2;
+    t.chart_5 = k.text_3;
+    t.window_border = k.border;
     t.drag_border = k.accent;
-    t.drop_target = t.blue_light;
+    t.drop_target = k.info_bg;
 
     t.font_family = FONT_FAMILY.into();
     t.font_size = type_scale::UI.0;
@@ -296,28 +404,53 @@ fn apply(t: &mut Theme, dark: bool) {
 }
 
 // ---------------------------------------------------------------------------
-// Typography (§4)
+// Typography (§3)
 
-/// System font (SF Pro); Core Text falls back to PingFang SC for Han.
+/// System font (SF Pro); Core Text falls back to PingFang SC for Han and to
+/// Apple Color Emoji for emoji.
 pub const FONT_FAMILY: &str = ".SystemUIFont";
 pub const MONO_FONT_FAMILY: &str = "Menlo";
 
-/// Size and line height of each text role.
+/// The closed type scale (§3): size and line height of each style. There is
+/// no 11 pt text and no text a reader reads under 12.
 pub mod type_scale {
     use gpui::{Pixels, px};
-    pub const DISPLAY: (Pixels, Pixels) = (px(22.), px(28.));
-    pub const TOPIC_TITLE: (Pixels, Pixels) = (px(17.), px(22.));
-    pub const TITLE: (Pixels, Pixels) = (px(15.), px(20.));
-    pub const MESSAGE: (Pixels, Pixels) = (px(14.), px(24.));
-    pub const UI: (Pixels, Pixels) = (px(13.), px(18.));
-    pub const QUOTE: (Pixels, Pixels) = (px(13.), px(19.));
-    pub const CALLOUT: (Pixels, Pixels) = (px(12.), px(16.));
-    pub const ACK: (Pixels, Pixels) = (px(12.5), px(18.));
-    pub const CAPTION: (Pixels, Pixels) = (px(11.), px(14.));
-    pub const CODE: (Pixels, Pixels) = (px(12.5), px(19.));
-    pub const INVITE: (Pixels, Pixels) = (px(24.), px(30.));
-    pub const OTP: (Pixels, Pixels) = (px(16.), px(22.));
+    /// 22 / 30: topic start title, page titles, login title, empty-state title.
+    pub const DISPLAY: (Pixels, Pixels) = (px(22.), px(30.));
+    /// 18 / 26: the topic view title, the one primary title of the window.
+    pub const HEADING: (Pixels, Pixels) = (px(18.), px(26.));
+    /// 16 / 24: topic list header, side panel header, dialog title.
+    pub const TITLE: (Pixels, Pixels) = (px(16.), px(24.));
+    /// 15 / 22: card titles.
+    pub const CARD_TITLE: (Pixels, Pixels) = (px(15.), px(22.));
+    /// 14 / 22: message text, composer text, card text, option rows.
+    pub const BODY: (Pixels, Pixels) = (px(14.), px(22.));
+    /// 14 / 20: rows, tabs, buttons, menus, fields.
+    pub const UI: (Pixels, Pixels) = (px(14.), px(20.));
+    /// 13 / 20: previews, live line, inline buttons, footnotes, snippets.
+    pub const SMALL: (Pixels, Pixels) = (px(13.), px(20.));
+    /// 12 / 16: times, chips, badges, kbd, role tag, file meta, help.
+    pub const META: (Pixels, Pixels) = (px(12.), px(16.));
+    /// 13 / 20 Menlo.
+    pub const CODE: (Pixels, Pixels) = (px(13.), px(20.));
+    /// 20 / 28: invite code boxes only.
+    pub const CODE_ENTRY: (Pixels, Pixels) = (px(20.), px(28.));
+    /// 15 / 20: the `lg` button label (buttons only).
+    pub const BUTTON_LG: (Pixels, Pixels) = (px(15.), px(20.));
+    /// 32 / 40: a message of one to three emoji.
     pub const EMOJI: (Pixels, Pixels) = (px(32.), px(40.));
+    /// 16 / 16: emoji in reaction pills.
+    pub const REACTION_EMOJI: (Pixels, Pixels) = (px(16.), px(16.));
+
+    // Older names, mapped onto the closed scale.
+    pub const TOPIC_TITLE: (Pixels, Pixels) = HEADING;
+    pub const MESSAGE: (Pixels, Pixels) = BODY;
+    pub const QUOTE: (Pixels, Pixels) = SMALL;
+    pub const CALLOUT: (Pixels, Pixels) = SMALL;
+    pub const ACK: (Pixels, Pixels) = SMALL;
+    pub const CAPTION: (Pixels, Pixels) = META;
+    pub const INVITE: (Pixels, Pixels) = CODE_ENTRY;
+    pub const OTP: (Pixels, Pixels) = CODE_ENTRY;
 }
 
 /// OpenType tabular figures: every count, time, date, size and version.
@@ -327,52 +460,83 @@ pub fn tabular() -> FontFeatures {
         .clone()
 }
 
-/// Text roles for any styled element. Weights are 400, 500 and 600 only.
+/// Text styles for any styled element (§3). Weights are 400, 500 and 600.
 pub trait Type: Styled + Sized {
     fn type_role(self, role: (Pixels, Pixels)) -> Self {
         self.text_size(role.0).line_height(role.1)
     }
-    /// 22 / 28, 600: the login welcome.
+    /// 22 / 30, 600.
     fn t_display(self) -> Self {
         self.type_role(type_scale::DISPLAY)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 17 / 22, 600: the topic view toolbar.
-    fn t_topic_title(self) -> Self {
-        self.type_role(type_scale::TOPIC_TITLE)
+    /// 18 / 26, 600: the topic view title.
+    fn t_heading(self) -> Self {
+        self.type_role(type_scale::HEADING)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 15 / 20, 600: column, pane and sheet titles.
+    /// 16 / 24, 600: column, pane and dialog titles.
     fn t_title(self) -> Self {
         self.type_role(type_scale::TITLE)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 14 / 24: message body and composer text.
-    fn t_message(self) -> Self {
-        self.type_role(type_scale::MESSAGE)
+    /// 15 / 22, 600: card titles.
+    fn t_card_title(self) -> Self {
+        self.type_role(type_scale::CARD_TITLE)
+            .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 13 / 18: rows, menus, buttons, fields.
+    /// 14 / 22: message, composer and card text.
+    fn t_body(self) -> Self {
+        self.type_role(type_scale::BODY)
+    }
+    /// 14 / 20: rows, menus, buttons, fields.
     fn t_ui(self) -> Self {
         self.type_role(type_scale::UI)
     }
-    /// 12 / 16: previews, 岗位, metadata, hints.
-    fn t_callout(self) -> Self {
-        self.type_role(type_scale::CALLOUT)
+    /// 13 / 20: previews, secondary lines, inline buttons, footnotes.
+    fn t_small(self) -> Self {
+        self.type_role(type_scale::SMALL)
     }
-    /// 11 / 14, 500: chips, badges, timestamps, kbd.
-    fn t_caption(self) -> Self {
-        self.type_role(type_scale::CAPTION)
+    /// 12 / 16: times, help, file meta.
+    fn t_meta(self) -> Self {
+        self.type_role(type_scale::META)
+    }
+    /// 12 / 16, 500: chips, kbd, role tags, field labels of tables.
+    fn t_meta_medium(self) -> Self {
+        self.type_role(type_scale::META)
             .font_weight(FontWeight::MEDIUM)
     }
-    /// 11 / 14, 600: section headers.
+    /// 12 / 16, 600: badges and sidebar section headers.
     fn t_section(self) -> Self {
-        self.type_role(type_scale::CAPTION)
+        self.type_role(type_scale::META)
             .font_weight(FontWeight::SEMIBOLD)
     }
-    /// 12.5 / 19 Menlo.
+    /// 13 / 20 Menlo.
     fn t_code(self) -> Self {
         self.type_role(type_scale::CODE)
             .font_family(MONO_FONT_FAMILY)
+    }
+    /// 20 / 28, 500, tabular figures: invite code boxes.
+    fn t_code_entry(self) -> Self {
+        self.type_role(type_scale::CODE_ENTRY)
+            .font_weight(FontWeight::MEDIUM)
+            .font_features(tabular())
+    }
+    /// Older name of [`Type::t_heading`].
+    fn t_topic_title(self) -> Self {
+        self.t_heading()
+    }
+    /// Older name of [`Type::t_body`].
+    fn t_message(self) -> Self {
+        self.t_body()
+    }
+    /// Older name of [`Type::t_small`].
+    fn t_callout(self) -> Self {
+        self.t_small()
+    }
+    /// Older name of [`Type::t_meta_medium`].
+    fn t_caption(self) -> Self {
+        self.t_meta_medium()
     }
     fn medium(self) -> Self {
         self.font_weight(FontWeight::MEDIUM)
@@ -393,31 +557,40 @@ pub trait Type: Styled + Sized {
 impl<T: Styled> Type for T {}
 
 // ---------------------------------------------------------------------------
-// Motion (§10)
+// Motion (§12)
 
 pub mod motion {
     use super::*;
 
+    pub const INSTANT: Duration = Duration::ZERO;
     pub const FAST: Duration = Duration::from_millis(120);
-    pub const NORMAL: Duration = Duration::from_millis(180);
-    pub const SLOW: Duration = Duration::from_millis(220);
-    /// Exit of menus and popovers.
-    pub const EXIT: Duration = Duration::from_millis(100);
-    /// Crossfades: new messages, chip changes, the jump pill.
-    pub const FADE: Duration = Duration::from_millis(150);
+    pub const NORMAL: Duration = Duration::from_millis(160);
+    pub const SLOW: Duration = Duration::from_millis(200);
+    /// Exit of menus, popovers and dialogs.
+    pub const EXIT: Duration = Duration::from_millis(150);
+    /// Menus, popovers and selects enter.
+    pub const MENU: Duration = Duration::from_millis(150);
+    /// Crossfades: chip changes, character status, side panel content.
+    pub const FADE: Duration = Duration::from_millis(160);
+    /// Busy indicators wait this long before they show, then stay at least
+    /// [`BUSY_MIN`].
+    pub const BUSY_DELAY: Duration = Duration::from_millis(400);
+    pub const BUSY_MIN: Duration = Duration::from_millis(500);
     /// Tooltip delay the first time.
     pub const TOOLTIP_DELAY: Duration = Duration::from_millis(500);
     /// Streaming caret: idle time before it blinks, and the blink half-period.
     pub const CARET_IDLE: Duration = Duration::from_millis(1000);
     pub const CARET_BLINK: Duration = Duration::from_millis(530);
-    /// Typing dots pulse and shimmer loop.
+    /// Pending dots loop (three 4 pt dots, 150 ms apart).
     pub const TYPING_PULSE: Duration = Duration::from_millis(1200);
     pub const SHIMMER: Duration = Duration::from_millis(1600);
     pub const SPINNER_TURN: Duration = Duration::from_millis(800);
-    /// Travel of popovers and the jump pill.
+    /// Travel of menus and popovers from their trigger.
     pub const TRAVEL: gpui::Pixels = gpui::px(4.);
+    /// Rise of new messages and the pending row.
+    pub const RISE: gpui::Pixels = gpui::px(6.);
 
-    /// `cubic-bezier(0.23, 1, 0.32, 1)`: enter and exit.
+    /// `cubic-bezier(0.23, 1, 0.32, 1)`: every enter and exit.
     pub fn out() -> Easing {
         Easing::cubic_bezier(0.23, 1.0, 0.32, 1.0).expect("valid curve")
     }
@@ -437,106 +610,115 @@ pub mod motion {
 // ---------------------------------------------------------------------------
 // Colors (§2)
 
-/// Semantic colors of the app, one value per mode.
+/// Semantic colors of the app, one value per mode (DESIGN.md §2). Field names
+/// follow the token names with `_` for `-`.
 #[derive(Clone, Copy, Debug)]
 pub struct Colors {
-    // Surfaces
+    // Surfaces (§2.1)
     pub sidebar: Hsla,
-    pub sidebar_tint: Hsla,
     pub content: Hsla,
-    pub panel: Hsla,
-    pub window_bg: Hsla,
-    pub group: Hsla,
-    pub elevated: Hsla,
-    pub toolbar_capsule: Hsla,
+    pub raised: Hsla,
+    pub overlay: Hsla,
     pub scrim: Hsla,
-    // Text
+    pub code_bg: Hsla,
+    // Text (§2.2)
     pub text_1: Hsla,
     pub text_2: Hsla,
     pub text_3: Hsla,
     pub placeholder: Hsla,
-    // Lines and fills
+    // Lines and fills (§2.3)
     pub sep: Hsla,
-    pub sep_strong: Hsla,
-    pub fill_hover: Hsla,
-    pub fill_selected: Hsla,
+    pub border: Hsla,
+    pub border_strong: Hsla,
+    pub hover: Hsla,
+    pub selected: Hsla,
+    pub sidebar_hover: Hsla,
     pub sidebar_selected: Hsla,
-    pub fill_pressed: Hsla,
-    pub fill_field: Hsla,
-    pub fill_active: Hsla,
-    pub control: Hsla,
-    pub control_border: Hsla,
-    pub control_border_focus: Hsla,
-    pub chip_ring: Hsla,
-    pub card_border: Hsla,
-    pub image_border: Hsla,
-    pub quote_bar: Hsla,
-    // Accent
+    pub sel_glyph: Hsla,
+    pub pressed: Hsla,
+    pub field: Hsla,
+    pub count_bg: Hsla,
+    pub count_text: Hsla,
+    pub count_solid: Hsla,
+    pub tile_ring: Hsla,
+    pub opt_bg: Hsla,
+    pub opt_hover: Hsla,
+    pub disabled_bg: Hsla,
+    pub disabled_text: Hsla,
+    pub tile: Hsla,
+    pub desk: Hsla,
+    // Accent, focus and mentions (§2.4)
     pub accent: Hsla,
     pub accent_hover: Hsla,
     pub accent_pressed: Hsla,
     pub accent_text: Hsla,
     pub accent_soft: Hsla,
     pub on_accent: Hsla,
-    pub focus_ring: Hsla,
-    pub selection: Hsla,
+    pub focus: Hsla,
+    pub focus_border: Hsla,
+    pub focus_soft: Hsla,
+    pub choice_bg: Hsla,
     pub mention_bg: Hsla,
-    pub mention_me_bg: Hsla,
-    pub mention_me_text: Hsla,
-    // Status chips
-    pub st_quiet_text: Hsla,
-    pub st_you_bg: Hsla,
-    pub st_you_text: Hsla,
-    pub st_blocked_bg: Hsla,
-    pub st_blocked_text: Hsla,
-    pub glyph_progress: Hsla,
-    pub glyph_wait: Hsla,
-    pub glyph_done: Hsla,
-    // Badges, presence, bot mark
-    pub badge_bg: Hsla,
-    pub badge_text: Hsla,
-    pub badge_mention_bg: Hsla,
-    pub online: Hsla,
-    pub bot_mark: Hsla,
-    // Content blocks and system colors
-    pub code_bg: Hsla,
-    pub code_text: Hsla,
+    pub me_bg: Hsla,
+    pub me_text: Hsla,
+    pub hl_bg: Hsla,
+    pub unread_dot: Hsla,
+    // Status tones (§2.5)
+    pub you_bg: Hsla,
+    pub you_text: Hsla,
+    pub you_glyph: Hsla,
+    pub you_bar: Hsla,
+    pub info_bg: Hsla,
+    pub info_text: Hsla,
     pub danger: Hsla,
+    pub danger_bg: Hsla,
     pub danger_text: Hsla,
     pub success: Hsla,
-    pub warning: Hsla,
-    pub new_divider: Hsla,
-    pub scrollbar_thumb: Hsla,
-    /// Shadow colors of each elevation level, in the order of [`Elevation`].
+    pub success_text: Hsla,
+    pub badge: Hsla,
+    pub online: Hsla,
+    // People without a photo (§2.6)
+    pub avatar_bg: Hsla,
+    pub avatar_fg: Hsla,
+    bots: [Hsla; 6],
     shadows: ShadowColors,
     dark: bool,
 
-    // Older names, kept so code written before DESIGN.md still builds. New
-    // code uses the token names above.
+    // Older names, mapped onto the v2.1 tokens so views written before v2.1
+    // still build. New code uses the token names above.
+    pub panel: Hsla,
+    pub window_bg: Hsla,
+    pub group: Hsla,
+    pub elevated: Hsla,
+    pub fill_hover: Hsla,
+    pub fill_selected: Hsla,
+    pub fill_pressed: Hsla,
+    pub fill_field: Hsla,
+    pub fill_active: Hsla,
+    pub control_border: Hsla,
+    pub control_border_focus: Hsla,
+    pub quote_bar: Hsla,
+    pub code_text: Hsla,
+    pub warning: Hsla,
+    pub new_divider: Hsla,
+    pub glyph_progress: Hsla,
+    pub glyph_wait: Hsla,
+    pub glyph_done: Hsla,
     pub background: Hsla,
     pub foreground: Hsla,
     pub muted_foreground: Hsla,
-    pub border: Hsla,
-    pub sidebar_foreground: Hsla,
     pub row_hover: Hsla,
-    pub row_selected: Hsla,
-    pub accent_foreground: Hsla,
-    pub badge: Hsla,
-    pub badge_foreground: Hsla,
-    pub mention: Hsla,
-    pub mention_foreground: Hsla,
     pub offline: Hsla,
     pub code_background: Hsla,
-    /// A message opened from search, and matched words in search results.
     pub search_highlight: Hsla,
 }
 
 #[derive(Clone, Copy, Debug)]
 struct ShadowColors {
-    control: [Hsla; 2],
-    capsule: [Hsla; 2],
-    popover: [Hsla; 3],
-    sheet: [Hsla; 3],
+    /// Level 1 float: ring, drop.
+    float: [Hsla; 2],
+    /// Level 2 overlay: ring, drop, contact (light only).
+    overlay: [Hsla; 3],
 }
 
 impl Colors {
@@ -544,207 +726,256 @@ impl Colors {
         self.dark
     }
 
-    /// Avatar and group-tile palette `(background, foreground)` for an index
-    /// from [`palette_index`] (§2.7).
-    pub fn palette(&self, ix: usize) -> (Hsla, Hsla) {
-        const L: [(u32, u32); 8] = [
-            (0xE3E8EFFF, 0x46566CFF),
-            (0xE0ECE2FF, 0x3B6646FF),
-            (0xF0E7D8FF, 0x76572AFF),
-            (0xF3E2E4FF, 0x874450FF),
-            (0xDCE9F6FF, 0x2E5C87FF),
-            (0xEFE1D9FF, 0x864D36FF),
-            (0xDAEDEDFF, 0x2C6868FF),
-            (0xE6E6E9FF, 0x55555CFF),
-        ];
-        const D: [(u32, u32); 8] = [
-            (0x3A4352FF, 0xC3CFDFFF),
-            (0x33463AFF, 0xB6D6BEFF),
-            (0x4A4031FF, 0xE2CFAEFF),
-            (0x4D3539FF, 0xEBC0C7FF),
-            (0x2F4257FF, 0xB4D2EEFF),
-            (0x4C372EFF, 0xEBC4B2FF),
-            (0x2C4646FF, 0xAEDADAFF),
-            (0x3C3C41FF, 0xCFCFD6FF),
-        ];
-        let (bg, fg) = if self.dark { D } else { L }[ix % 8];
-        (c(bg), c(fg))
+    /// The tint of a bot tile (§2.6): one of six by a stable hash of the
+    /// character id.
+    pub fn bot_tint(&self, key: &str) -> Hsla {
+        self.bots[bot_tint_index(key)]
     }
 
-    /// The shadow list of an elevation level (§7). The first shadow is a
-    /// 0.5 pt ring that serves as the border.
+    /// The avatar pair `(background, foreground)` of a person without a
+    /// photo. One neutral pair for everyone (§2.6); the index is ignored.
+    pub fn palette(&self, _ix: usize) -> (Hsla, Hsla) {
+        (self.avatar_bg, self.avatar_fg)
+    }
+
+    /// The shadow list of an elevation level (§5).
     pub fn shadow(&self, level: Elevation) -> Vec<BoxShadow> {
-        let ring = |color| BoxShadow {
+        let ring = |color, width: Pixels| BoxShadow {
             color,
             offset: point(px(0.), px(0.)),
             blur_radius: px(0.),
-            spread_radius: HAIRLINE,
+            spread_radius: width,
             inset: false,
         };
-        let drop = |color, y: f32, blur: f32| BoxShadow {
+        let drop = |color, y: f32, blur: f32, spread: f32| BoxShadow {
             color,
             offset: point(px(0.), px(y)),
             blur_radius: px(blur),
-            spread_radius: px(0.),
+            spread_radius: px(spread),
             inset: false,
         };
         let s = &self.shadows;
         match level {
-            Elevation::Card => vec![ring(self.card_border)],
-            Elevation::Image => vec![ring(self.image_border)],
-            Elevation::Control => vec![ring(s.control[0]), drop(s.control[1], 1., 1.5)],
-            Elevation::Capsule => vec![ring(s.capsule[0]), drop(s.capsule[1], 1., 3.)],
-            Elevation::Popover => vec![
-                ring(s.popover[0]),
-                drop(s.popover[1], 4., 12.),
-                drop(s.popover[2], 14., 36.),
-            ],
-            Elevation::Sheet => vec![
-                ring(s.sheet[0]),
-                drop(s.sheet[1], 6., 16.),
-                drop(s.sheet[2], 24., 64.),
-            ],
+            Elevation::Flat => vec![],
+            Elevation::Card => vec![ring(self.border, BORDER)],
+            Elevation::Image => vec![ring(self.sep, BORDER)],
+            Elevation::Control => vec![ring(self.border, BORDER)],
+            Elevation::Float | Elevation::Capsule => {
+                vec![ring(s.float[0], HAIRLINE), drop(s.float[1], 2., 8., 0.)]
+            }
+            Elevation::Overlay | Elevation::Popover | Elevation::Sheet => {
+                if self.dark {
+                    vec![
+                        ring(s.overlay[0], BORDER),
+                        drop(s.overlay[1], 16., 40., -8.),
+                    ]
+                } else {
+                    vec![
+                        ring(s.overlay[0], HAIRLINE),
+                        drop(s.overlay[1], 8., 28., -6.),
+                        drop(s.overlay[2], 2., 6., 0.),
+                    ]
+                }
+            }
         }
+    }
+
+    /// The 3 pt outer ring of a focused field or composer (§7.1).
+    pub fn focus_halo(&self) -> Vec<BoxShadow> {
+        vec![BoxShadow {
+            color: self.focus_soft,
+            offset: point(px(0.), px(0.)),
+            blur_radius: px(0.),
+            spread_radius: px(3.),
+            inset: false,
+        }]
+    }
+
+    /// The 3 pt outer ring of a field in the error state (§7.1).
+    pub fn error_halo(&self) -> Vec<BoxShadow> {
+        vec![BoxShadow {
+            color: self.danger_bg,
+            offset: point(px(0.), px(0.)),
+            blur_radius: px(0.),
+            spread_radius: px(3.),
+            inset: false,
+        }]
     }
 }
 
-/// Elevation levels (§7).
+/// Elevation levels (§5). Shadows only on floating layers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Elevation {
-    /// Level 1: cards, grouped sections, the decision box.
+    /// Level 0: no shadow.
+    Flat,
+    /// Level 1 float: hover toolbar, jump pill, selected segment.
+    Float,
+    /// Level 2 overlay: popovers, menus, mention popup, switcher, dialogs,
+    /// toasts.
+    Overlay,
+    /// A 1 pt `border` drawn as a ring (cards keep level 0).
     Card,
-    /// Level 1 for images.
+    /// A 1 pt `sep` ring around images.
     Image,
-    /// Secondary buttons, inputs, OTP boxes, the selected segment.
+    /// Older name: a 1 pt `border` ring.
     Control,
-    /// Toolbar capsules.
+    /// Older name of [`Elevation::Float`].
     Capsule,
-    /// Level 2: popovers, menus, hover toolbar, jump pill, tooltips, toasts.
+    /// Older name of [`Elevation::Overlay`].
     Popover,
-    /// Level 3: sheets, alerts, the switcher.
+    /// Older name of [`Elevation::Overlay`].
     Sheet,
 }
 
-/// A stable palette index for an id: FNV-1a modulo 8 (§2.7).
-pub fn palette_index(id: &str) -> usize {
-    let mut hash: u32 = 0x811c_9dc5;
-    for byte in id.bytes() {
+/// FNV-1a 32-bit with offset basis `2166136261 ^ 91`, mod 6 (§2.6).
+pub fn bot_tint_index(key: &str) -> usize {
+    let mut hash: u32 = 0x811c_9dc5 ^ 91;
+    for byte in key.bytes() {
         hash ^= byte as u32;
         hash = hash.wrapping_mul(0x0100_0193);
     }
-    hash as usize % 8
+    hash as usize % 6
 }
 
-#[allow(clippy::too_many_arguments)]
+/// A stable index for an id. Kept for older callers; people share one neutral
+/// avatar pair, so the index no longer picks a color.
+pub fn palette_index(id: &str) -> usize {
+    bot_tint_index(id)
+}
+
 fn build(dark: bool) -> Colors {
     let p = |l: u32, d: u32| if dark { c(d) } else { c(l) };
-    let content = p(0xFFFFFFFF, 0x1E1E20FF);
-    let text_1 = p(0x000000D9, 0xFFFFFFDB);
-    let text_2 = p(0x0000008C, 0xEBEBF594);
-    let text_3 = p(0x00000075, 0xEBEBF56B);
-    let sep = p(0x00000017, 0xFFFFFF16);
-    let fill_hover = p(0x00000009, 0xFFFFFF0B);
-    let fill_selected = p(0x00000011, 0xFFFFFF16);
-    let accent = p(0x007AFFFF, 0x0A84FFFF);
-    let on_accent = c(0xFFFFFFFF);
-    let badge_bg = p(0x00000011, 0xFFFFFF1A);
-    let badge_text = p(0x00000094, 0xEBEBF59E);
-    let sidebar = p(0xF0F0F2FF, 0x262628FF);
-    let panel = p(0xF7F7F8FF, 0x232326FF);
-    let code_bg = p(0xF5F5F7FF, 0x28282BFF);
-    let danger_text = p(0xD70015FF, 0xFF6961FF);
-    let online = p(0x34C759FF, 0x30D158FF);
+    let sidebar = p(0xF2F3F5FF, 0x18181BFF);
+    let content = p(0xFFFFFFFF, 0x1F1F23FF);
+    let raised = p(0xF6F7F9FF, 0x28282DFF);
+    let overlay = p(0xFFFFFFFF, 0x34343BFF);
+    let code_bg = p(0xF4F5F7FF, 0x26262BFF);
+    let text_1 = p(0x1F2329FF, 0xEDEDF0FF);
+    let text_2 = p(0x5F6670FF, 0xA5A9B1FF);
+    let text_3 = p(0x70767FFF, 0x8A8F98FF);
+    let sep = p(0x1F232917, 0xFFFFFF14);
+    let border = p(0x1F232924, 0xFFFFFF21);
+    let border_strong = p(0x1F23293D, 0xFFFFFF38);
+    let hover = p(0x1F23290A, 0xFFFFFF0A);
+    let selected = p(0xE3ECFEFF, 0x23324FFF);
+    let pressed = p(0x1F23291F, 0xFFFFFF1F);
+    let field = p(0x1F23290E, 0xFFFFFF11);
+    let accent = p(0x1F6BFFFF, 0x2F6FEBFF);
+    let accent_text = p(0x175CD9FF, 0x7AA8FFFF);
+    let focus_border = p(0x1F6BFFFF, 0x4C8DFFFF);
+    let me_bg = p(0xFF8A002E, 0xFF9F0A38);
+    let hl_bg = p(0xFF8A002E, 0xFF9F0A3D);
+    let you_glyph = p(0xE07800FF, 0xFF9F0AFF);
+    let danger = p(0xE5484DFF, 0xF2555AFF);
+    let danger_text = p(0xC2272DFF, 0xFF7B7FFF);
+    let success = p(0x1E9E5AFF, 0x3CCB7FFF);
+    let online = p(0x1FB25AFF, 0x34C76AFF);
+    let bots = if dark {
+        [
+            0x6B7DA6FF, 0x62907BFF, 0xA08562FF, 0x8472A8FF, 0x6293A1FF, 0xA0717FFF,
+        ]
+    } else {
+        [
+            0xDCE6FBFF, 0xDDF1E6FF, 0xFBE9D3FF, 0xEFE3FAFF, 0xDDEFF4FF, 0xF7DDE4FF,
+        ]
+    }
+    .map(c);
     Colors {
         sidebar,
-        sidebar_tint: p(0xEAEAEFBD, 0x242428C2),
         content,
-        panel,
-        window_bg: p(0xECECEEFF, 0x1E1E20FF),
-        group: p(0xFFFFFFFF, 0x2A2A2DFF),
-        elevated: p(0xFFFFFFFF, 0x2C2C2FFF),
-        toolbar_capsule: p(0xFFFFFFDB, 0x3A3A3EDB),
-        scrim: p(0x0000002E, 0x00000061),
+        raised,
+        overlay,
+        scrim: p(0x0F111452, 0x0000008C),
+        code_bg,
         text_1,
         text_2,
         text_3,
-        placeholder: p(0x0000005C, 0xEBEBF55C),
+        placeholder: p(0x9AA0A8FF, 0x6C7079FF),
         sep,
-        sep_strong: p(0x00000024, 0xFFFFFF21),
-        fill_hover,
-        fill_selected,
-        sidebar_selected: p(0x00000013, 0xFFFFFF1A),
-        fill_pressed: p(0x0000001A, 0xFFFFFF21),
-        fill_field: p(0x0000000B, 0xFFFFFF12),
-        fill_active: p(0x007AFF1F, 0x0A84FF42),
-        control: p(0xFFFFFFFF, 0xFFFFFF1A),
-        control_border: p(0x00000021, 0xFFFFFF1A),
-        control_border_focus: p(0x00000042, 0xFFFFFF3D),
-        chip_ring: p(0x00000024, 0xFFFFFF29),
-        card_border: p(0x0000001A, 0xFFFFFF1A),
-        image_border: p(0x00000012, 0xFFFFFF14),
-        quote_bar: p(0x00000029, 0xFFFFFF33),
+        border,
+        border_strong,
+        hover,
+        selected,
+        sidebar_hover: p(0x1F23290D, 0xFFFFFF0B),
+        sidebar_selected: p(0xDCE6FAFF, 0x22304BFF),
+        sel_glyph: accent_text,
+        pressed,
+        field,
+        count_bg: p(0xE6E8ECFF, 0x3A3E46FF),
+        count_text: p(0x4B5058FF, 0xC9CDD4FF),
+        count_solid: p(0x697079FF, 0x5C6370FF),
+        tile_ring: p(0xFFFFFFFF, 0xFFFFFF1A),
+        opt_bg: p(0xF4F5F7FF, 0x2A2D33FF),
+        opt_hover: p(0xECEEF1FF, 0x32353CFF),
+        disabled_bg: p(0xECEEF1FF, 0x2E3138FF),
+        disabled_text: p(0x8A8F98FF, 0x70767FFF),
+        tile: p(0xEBEDF0FF, 0x34343BFF),
+        desk: p(0xE9EBEFFF, 0x0E0F12FF),
         accent,
-        accent_hover: p(0x0A6FE6FF, 0x2B93FFFF),
-        accent_pressed: p(0x0062CCFF, 0x0070E0FF),
-        accent_text: p(0x0066D6FF, 0x4DA3FFFF),
-        accent_soft: p(0x007AFF1C, 0x0A84FF38),
-        on_accent,
-        focus_ring: p(0x007AFF6B, 0x0A84FF8C),
-        selection: p(0x007AFF33, 0x0A84FF5C),
-        mention_bg: p(0x007AFF1A, 0x0A84FF33),
-        mention_me_bg: p(0xFF95002E, 0xFF9F0A3D),
-        mention_me_text: p(0xA35400FF, 0xFFBD5CFF),
-        st_quiet_text: p(0x0000009E, 0xEBEBF5A3),
-        st_you_bg: p(0xFF95002B, 0xFF9F0A38),
-        st_you_text: p(0x9C5100FF, 0xFFB547FF),
-        st_blocked_bg: p(0xFF3B301C, 0xFF453A33),
-        st_blocked_text: p(0xC4001AFF, 0xFF7A70FF),
-        glyph_progress: accent,
-        glyph_wait: p(0xE68600FF, 0xFF9F0AFF),
-        glyph_done: p(0x1F9D45FF, 0x30D158FF),
-        badge_bg,
-        badge_text,
-        badge_mention_bg: accent,
-        online,
-        bot_mark: p(0x7C7C82FF, 0x8E8E94FF),
-        code_bg,
-        code_text: text_1,
-        danger: p(0xFF3B30FF, 0xFF453AFF),
+        accent_hover: p(0x165EEBFF, 0x3D7EFFFF),
+        accent_pressed: p(0x1252CCFF, 0x2A63D4FF),
+        accent_text,
+        accent_soft: p(0x1F6BFF1A, 0x4C8DFF29),
+        on_accent: c(0xFFFFFFFF),
+        focus: p(0x1F6BFF8C, 0x4C8DFFA6),
+        focus_border,
+        focus_soft: p(0x1F6BFF29, 0x4C8DFF3D),
+        choice_bg: p(0x1F6BFF0F, 0x4C8DFF1F),
+        mention_bg: p(0x1F6BFF1A, 0x4C8DFF2E),
+        me_bg,
+        me_text: p(0x9A4A00FF, 0xFFB547FF),
+        hl_bg,
+        unread_dot: p(0x1F6BFFFF, 0x4C8DFFFF),
+        you_bg: p(0xFFE9D1FF, 0x4A3418FF),
+        you_text: p(0x9A4A00FF, 0xFFB547FF),
+        you_glyph,
+        you_bar: c(0xF5A623FF),
+        info_bg: p(0x1F6BFF1A, 0x4C8DFF2E),
+        info_text: accent_text,
+        danger,
+        danger_bg: p(0xE5484D1F, 0xF2555A2E),
         danger_text,
-        success: online,
-        warning: p(0xFF9500FF, 0xFF9F0AFF),
-        new_divider: p(0xFF3B30B3, 0xFF453AB3),
-        scrollbar_thumb: p(0x00000040, 0xFFFFFF40),
+        success,
+        success_text: p(0x137042FF, 0x5BD893FF),
+        badge: c(0xD93A40FF),
+        online,
+        avatar_bg: p(0xE6EAF2FF, 0x364052FF),
+        avatar_fg: p(0x3E4C63FF, 0xD3DCEAFF),
+        bots,
         shadows: ShadowColors {
-            control: [p(0x0000001F, 0xFFFFFF14), p(0x0000000F, 0x00000040)],
-            capsule: [p(0x00000014, 0xFFFFFF14), p(0x0000000F, 0x0000004D)],
-            popover: [
-                p(0x0000001F, 0xFFFFFF1A),
-                p(0x00000014, 0x0000004D),
-                p(0x0000001F, 0x00000073),
-            ],
-            sheet: [
-                p(0x00000024, 0xFFFFFF1F),
-                p(0x0000001A, 0x00000059),
-                p(0x00000033, 0x0000008C),
+            float: [p(0x1F23291F, 0xFFFFFF1F), p(0x0F111414, 0x00000059)],
+            overlay: [
+                p(0x1F232924, 0xFFFFFF29),
+                p(0x0F111438, 0x000000B3),
+                p(0x0F11140F, 0x00000000),
             ],
         },
         dark,
+        panel: content,
+        window_bg: content,
+        group: content,
+        elevated: overlay,
+        fill_hover: hover,
+        fill_selected: selected,
+        fill_pressed: pressed,
+        fill_field: field,
+        fill_active: selected,
+        control_border: border,
+        control_border_focus: focus_border,
+        quote_bar: border_strong,
+        code_text: text_1,
+        warning: you_glyph,
+        new_divider: danger,
+        glyph_progress: accent,
+        glyph_wait: you_glyph,
+        glyph_done: success,
         background: content,
         foreground: text_1,
         muted_foreground: text_2,
-        border: sep,
-        sidebar_foreground: text_1,
-        row_hover: fill_hover,
-        row_selected: fill_selected,
-        accent_foreground: on_accent,
-        badge: badge_bg,
-        badge_foreground: badge_text,
-        mention: accent,
-        mention_foreground: on_accent,
+        row_hover: hover,
         offline: text_3,
         code_background: code_bg,
-        search_highlight: p(0xFF95002E, 0xFF9F0A3D),
+        search_highlight: hl_bg,
     }
 }
 
@@ -767,44 +998,49 @@ pub fn colors(cx: &App) -> Colors {
     }
 }
 
-/// The kind of a status chip (§2.5): three weights only.
+/// The tone of a status mark (§7.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ChipKind {
-    /// Outlined, colored glyph: 进行中, 完成, 等{name}….
+    /// No fill, `text-3` (or `text-2`) text: 完成, 等{name}…, 等审, 等回答.
     Quiet,
-    /// Filled orange, weight 600: 等你….
+    /// `you` tone: 等你回答, 等你审.
     You,
-    /// Red tint: 卡住了.
+    /// `danger-text`: 卡住了.
     Blocked,
+    /// `info` tone: 进行中 in the topic header.
+    Info,
 }
 
-/// Background, text, ring and glyph colors of a chip kind; `glyph` is the
-/// quiet chip's colored glyph for this status.
+/// Background, text and glyph colors of a status mark.
 pub fn chip_colors(kind: ChipKind, status: TopicStatus, cx: &App) -> ChipColors {
     let k = colors(cx);
     let clear = c(0x00000000);
     match kind {
         ChipKind::You => ChipColors {
-            bg: k.st_you_bg,
-            text: k.st_you_text,
+            bg: k.you_bg,
+            text: k.you_text,
             ring: clear,
-            glyph: k.st_you_text,
+            glyph: k.you_glyph,
         },
         ChipKind::Blocked => ChipColors {
-            bg: k.st_blocked_bg,
-            text: k.st_blocked_text,
+            bg: clear,
+            text: k.danger_text,
             ring: clear,
-            glyph: k.st_blocked_text,
+            glyph: k.danger_text,
+        },
+        ChipKind::Info => ChipColors {
+            bg: k.info_bg,
+            text: k.info_text,
+            ring: clear,
+            glyph: k.info_text,
         },
         ChipKind::Quiet => ChipColors {
             bg: clear,
-            text: k.st_quiet_text,
-            ring: k.chip_ring,
+            text: k.text_3,
+            ring: clear,
             glyph: match status {
-                TopicStatus::InProgress => k.glyph_progress,
-                TopicStatus::Done => k.glyph_done,
-                TopicStatus::WaitingAnswer | TopicStatus::WaitingReview => k.glyph_wait,
-                TopicStatus::Open | TopicStatus::Blocked => k.text_2,
+                TopicStatus::WaitingAnswer | TopicStatus::WaitingReview => k.you_glyph,
+                _ => k.text_3,
             },
         },
     }
@@ -818,11 +1054,12 @@ pub struct ChipColors {
     pub glyph: Hsla,
 }
 
-/// Background and text colors of a topic status chip. Kept for older callers;
-/// new code uses `ui::StatusChip`.
+/// Background and text colors of a topic status mark. Kept for older
+/// callers; new code uses `ui::StatusChip`.
 pub fn status_chip_colors(status: TopicStatus, cx: &App) -> (Hsla, Hsla) {
     let kind = match status {
         TopicStatus::Blocked => ChipKind::Blocked,
+        TopicStatus::InProgress => ChipKind::Info,
         _ => ChipKind::Quiet,
     };
     let cc = chip_colors(kind, status, cx);
@@ -854,21 +1091,36 @@ mod tests {
     }
 
     #[test]
-    fn content_text_meets_contrast() {
+    fn text_meets_wcag_aa() {
         for k in [build(false), build(true)] {
             assert!(contrast(k.text_1, k.content) >= 12.0);
             assert!(contrast(k.text_2, k.content) >= 4.5);
             assert!(contrast(k.text_2, k.sidebar) >= 4.5);
-            assert!(contrast(k.text_3, k.content) >= 3.4);
-            assert!(contrast(k.st_quiet_text, k.content) >= 4.5);
+            assert!(contrast(k.text_3, k.content) >= 4.5);
             assert!(contrast(k.danger_text, k.content) >= 4.5);
             assert!(contrast(k.accent_text, k.content) >= 4.5);
+            assert!(contrast(k.you_text, k.you_bg) >= 4.5);
+            assert!(contrast(k.on_accent, k.accent) >= 4.5);
+            assert!(contrast(k.on_accent, k.count_solid) >= 4.5);
+            assert!(contrast(k.avatar_fg, k.avatar_bg) >= 4.5);
         }
     }
 
     #[test]
-    fn palette_index_is_stable() {
-        assert_eq!(palette_index("m-joye"), palette_index("m-joye"));
-        assert!(palette_index("anything") < 8);
+    fn dark_surfaces_step_up() {
+        let d = build(true);
+        let l = |h: Hsla| h.l;
+        assert!(l(d.sidebar) < l(d.content));
+        assert!(l(d.content) < l(d.raised));
+        assert!(l(d.raised) < l(d.overlay));
+    }
+
+    #[test]
+    fn bot_tints_differ_for_the_roster() {
+        // DESIGN.md §2.6: this seed gives the six roster bots six hues.
+        // Pocket, Forge, Watch, Scout, Ledger, Taro.
+        let mut tints = ["o05", "o08", "o11", "o07", "h02", "h03"].map(bot_tint_index);
+        tints.sort();
+        assert_eq!(tints, [0, 1, 2, 3, 4, 5]);
     }
 }
