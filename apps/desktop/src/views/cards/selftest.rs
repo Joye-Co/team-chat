@@ -134,6 +134,22 @@ fn scroll(gallery: &Entity<Gallery>, bottom: bool, cx: &mut gpui::AsyncApp) {
     });
 }
 
+/// Waits up to 10 s for the drawn cards to satisfy `done`, asking for a
+/// redraw meanwhile (frames can be late while the window is covered).
+async fn wait_for(
+    handle: &AnyWindowHandle,
+    cx: &mut gpui::AsyncApp,
+    done: impl Fn(&RenderStats) -> bool,
+) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !done(&stats()) && std::time::Instant::now() < deadline {
+        let _ = handle.update(cx, |_, window, _| window.refresh());
+        cx.background_executor()
+            .timer(Duration::from_millis(100))
+            .await;
+    }
+}
+
 fn stats() -> RenderStats {
     STATS.with(|s| s.borrow().clone().unwrap_or_default())
 }
@@ -217,7 +233,8 @@ pub fn run(
         };
 
         // 1. Light mode: every card and every block type is drawn.
-        cx.background_executor().timer(SETTLE).await;
+        let all_drawn = |s: &RenderStats| ids.iter().all(|id| s.cards.contains_key(id));
+        wait_for(&handle, cx, |s| all_drawn(s)).await;
         let light = stats();
         let expected_types = [
             "text", "fields", "table", "list", "progress", "code", "image", "divider", "link",
@@ -278,6 +295,8 @@ pub fn run(
             Theme::change(ThemeMode::Dark, Some(window), cx);
             window.refresh();
         });
+        let before = light.renders;
+        wait_for(&handle, cx, |s| s.renders > before && all_drawn(s)).await;
         cx.background_executor().timer(SETTLE).await;
         let dark = stats();
         let dark_mode = cx.update(|cx| theme::is_dark(cx));
@@ -306,7 +325,13 @@ pub fn run(
         if let Some(id) = ids.get(4) {
             provider.press_card_action(samples::GROUP, samples::TOPIC, id, "gone-details");
         }
-        cx.background_executor().timer(SETTLE).await;
+        // Wait for the redraw (frames can be late while the window is covered).
+        let (first, fifth) = (ids.first().cloned(), ids.get(4).cloned());
+        let redrawn = |s: &RenderStats| {
+            let get = |id: &Option<String>| id.as_ref().and_then(|id| s.cards.get(id));
+            get(&first).is_some_and(|d| d.buttons == 0) && get(&fifth).is_some_and(|d| d.failed)
+        };
+        wait_for(&handle, cx, redrawn).await;
         let after = stats();
         let edited = drawn(&after, 0);
         check(
