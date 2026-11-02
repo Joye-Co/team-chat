@@ -32,8 +32,9 @@ pub const SIDE_PANEL_WIDTH: Pixels = px(280.);
 pub const TOPIC_VIEW_MIN_WIDTH: Pixels = px(480.);
 /// Toolbar band at the top of each column; the traffic lights sit in it.
 pub const TOOLBAR_HEIGHT: Pixels = px(52.);
-/// Below this window width the side panel is hidden.
-pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1100.);
+/// Below this window width the side panel is hidden: the four columns need
+/// 236 + 300 + 480 + 280 pt (DESIGN.md §5.1 names 1100 pt, where they would clip).
+pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1300.);
 pub const WINDOW_MIN_WIDTH: Pixels = px(1100.);
 pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
 pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
