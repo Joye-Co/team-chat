@@ -122,7 +122,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "login-error",
-        about: "The login view after a wrong invite code: kept, selected, error ring",
+        about: "The login view after a wrong invite code: kept, caret after it, error ring",
         start: Start::SignedOut,
         setup: |_, _| {},
         open: |services, content, cx| open_login(services, content, "!0000-0000", false, cx),
@@ -203,6 +203,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_members_end,
+    },
+    Scene {
+        name: "settings-notifications-end",
+        about: "Settings: 通知 scrolled to the end: the 私聊 table and 关注的话题",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_notifications_end,
     },
     Scene {
         name: "settings-profile-error",

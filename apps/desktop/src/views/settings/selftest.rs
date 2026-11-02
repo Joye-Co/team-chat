@@ -650,6 +650,22 @@ pub fn open_members_end(
     Ok(handle)
 }
 
+/// 通知 scrolled to its end: the 私聊 table and 关注的话题 under it.
+pub fn open_notifications_end(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, Page::Notifications, false, cx)?;
+    handle
+        .update(cx, |_, window, _| {
+            // After the first layout, when the page knows its height.
+            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_end());
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
 /// 我的资料 after saving an empty name: the field error state.
 pub fn open_profile_error(
     services: Services,

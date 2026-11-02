@@ -6,7 +6,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _,
+    Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     clipboard::Clipboard,
     spinner::Spinner,
@@ -534,6 +534,9 @@ pub fn choice(
     let id: ElementId = id.into();
     let on_pick = std::rc::Rc::new(on_pick);
     // The wrapper keeps the track at its own width in a stretching column.
+    // Disabled (a muted 群): no hover or press, the shown value stays
+    // readable on its segment (`text-2`) and the others go `placeholder`;
+    // gpui-component's disabled style would fade the value away.
     let track = div()
         .flex_none()
         .h(theme::size::BUTTON_MD)
@@ -543,24 +546,25 @@ pub fn choice(
         .flex()
         .items_center()
         .gap(space::S2)
-        .when(disabled, |el| el.opacity(0.4))
         .children(options.iter().enumerate().map(|(ix, label)| {
             let on = ix == selected;
             let pick = on_pick.clone();
+            let rest = if on { k.overlay } else { gpui::transparent_black() };
+            let fg = match (on, disabled) {
+                (true, false) => k.text_1,
+                (true, true) | (false, false) => k.text_2,
+                (false, true) => k.placeholder,
+            };
             Button::new(ElementId::NamedInteger(
                 SharedString::from(format!("{id}-opt")),
                 ix as u64,
             ))
             .custom(
                 ButtonCustomVariant::new(cx)
-                    .color(if on {
-                        k.overlay
-                    } else {
-                        gpui::transparent_black()
-                    })
-                    .foreground(if on { k.text_1 } else { k.text_2 })
-                    .hover(if on { k.overlay } else { k.hover })
-                    .active(if on { k.overlay } else { k.pressed }),
+                    .color(rest)
+                    .foreground(fg)
+                    .hover(if on || disabled { rest } else { k.hover })
+                    .active(if on || disabled { rest } else { k.pressed }),
             )
             .label(*label)
             .h(theme::size::BUTTON_SM)
@@ -574,7 +578,7 @@ pub fn choice(
                     .shadow(k.shadow(Elevation::Float))
             })
             .toggled(on)
-            .disabled(disabled)
+            .when(disabled, |b| b.cursor_default())
             .when(!disabled && !on, |b| {
                 b.on_click(move |_, window, cx| pick(ix, window, cx))
             })
