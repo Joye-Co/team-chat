@@ -7,8 +7,9 @@
 //!   people who are online; offline shows no dot.
 //! - Bots are rounded-square tiles (radius 0.25 x size) in the bot's tint,
 //!   with its jojo-friends character at its live status fitted inside
-//!   (`characters::tile`). The status shows as a pip in the presence position,
-//!   only for working, needs-input and error, at 36 pt and below.
+//!   (`characters::tile`). The status shows as a pip with the size and
+//!   offset of a person's presence dot, only for working, needs-input and
+//!   error; callers that already show a status label skip `presence`.
 //!
 //! The shape alone says bot or person.
 
@@ -139,7 +140,7 @@ impl RenderOnce for MemberAvatar {
                 CharacterStatus::Error => Some(k.danger),
                 _ => None,
             }
-            .filter(|_| self.show_status && size <= px(36.));
+            .filter(|_| self.show_status);
             return div()
                 .relative()
                 .flex_none()

@@ -911,7 +911,15 @@ impl ComposerView {
                 active,
                 cx,
             )
-            .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.overlay))
+            .child(
+                ui::MemberAvatar::new(Some(m), px(24.))
+                    .presence(Some(m))
+                    .on(if active {
+                        colors.selected
+                    } else {
+                        colors.overlay
+                    }),
+            )
             .child(div().flex_none().child(m.name.clone()))
             .child(
                 div()
