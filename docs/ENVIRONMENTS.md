@@ -62,8 +62,21 @@ bun run deploy:staging    # the same for staging
 
 Then check `/v1/health` and run `tools/e2e` against the env (below).
 
-State on 2026-11-03: e2e and staging run `origin/main` at `d2edf55` (D1 migrations through
-`0004_characters`). No new Worker secret since the first setup.
+State on 2026-11-03 (from `wrangler deployments list` and `wrangler d1 migrations list`):
+
+| Env | Deployed (UTC) | D1 migrations applied | Pending |
+| --- | --- | --- | --- |
+| e2e | 2026-11-02 21:08, version `88dfb003` | through `0005_auth_rate` | `0006_ops` |
+| staging | 2026-11-02 16:04, version `12b33346` | through `0004_characters` | `0005_auth_rate`, `0006_ops` |
+
+Deploys carry no commit message, so the deployed commit is not recorded here. No new Worker
+secret since the first setup. Update this table after each deploy:
+
+```sh
+cd server
+bunx wrangler deployments list --env <env> | tail -n 4
+bunx wrangler d1 migrations list DB --env <env> --remote
+```
 
 ## admin.ts
 

@@ -194,6 +194,7 @@ JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
 | `DELETE /v1/groups/:id/members/:memberId` | owner, or self | | `{ ok: true }` |
 | `POST /v1/dms` | member | `{ memberId }` | `GroupSummary` (find or create) |
 | `GET /v1/health` | anyone | | `{ ok: true, version }` |
+| `GET /v1/ops/archive` | member | | `{ lastCompleteAt: number \| null, lastRun: { at, complete, failed } \| null }` (daily archive freshness, for the monitor) |
 
 Group changes are also pushed to every affected connection as `directory` frames, and the group
 log records `group.memberAdded` / `group.memberRemoved`.
@@ -554,6 +555,7 @@ Module: `updates.ts` / `updates.rs`.
 | `GET /v1/updates/latest` | member | | `UpdateInfo`; 404 when no release exists |
 | `GET /v1/updates/:version/download` | member | | the DMG (`Range` supported) |
 | `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
+| `POST /v1/admin/releases/:version/withdraw` | header `X-Admin-Secret` | `{ restore? }` | `{ version, withdrawn, latest: UpdateInfo \| null }`; a withdrawn release is not `latest` and not downloadable |
 | `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG |
 
 ```ts
