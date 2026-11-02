@@ -19,6 +19,7 @@ pub mod panel;
 pub mod realtime;
 pub mod settings;
 pub mod timeline;
+pub mod update;
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
 #[macro_export]
@@ -92,6 +93,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "notify",
         entries: notify::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "update",
+        entries: update::ENTRIES,
         developer: false,
     },
     Section {

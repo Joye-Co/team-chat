@@ -18,8 +18,11 @@ serde_json.workspace = true
 chat-core.workspace = true
 tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"
+# Updater: checks the downloaded DMG again before it installs (src/updater/).
+sha2 = "0.10"
 
 [dev-dependencies]
+tempfile = "3"
 gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] }
 
 [build-dependencies]

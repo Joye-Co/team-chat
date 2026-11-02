@@ -203,6 +203,7 @@ pub struct RootView {
     side_panel: Entity<SidePanel>,
     login: Entity<LoginView>,
     banner: Entity<ConnectionBanner>,
+    update_banner: Entity<crate::updater::banner::UpdateBanner>,
     first_frame: Option<FirstFrameHook>,
     _subscriptions: Vec<Subscription>,
 }
@@ -232,6 +233,7 @@ impl RootView {
             side_panel: cx.new(|cx| SidePanel::new(services.clone(), cx)),
             login: cx.new(|cx| LoginView::new(services.clone(), window, cx)),
             banner: cx.new(|cx| ConnectionBanner::new(services.clone(), cx)),
+            update_banner: cx.new(crate::updater::banner::UpdateBanner::new),
             services,
             first_frame,
             _subscriptions: subscriptions,
@@ -297,6 +299,7 @@ impl Render for RootView {
                     .flex()
                     .flex_col()
                     .child(self.banner.clone())
+                    .child(self.update_banner.clone())
                     .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))
                     .child(self.composer.clone())
                     .into_any_element(),

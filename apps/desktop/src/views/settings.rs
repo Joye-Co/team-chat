@@ -20,6 +20,7 @@ use crate::{
 
 pub struct SettingsView {
     services: Services,
+    about: gpui::Entity<crate::updater::banner::AboutUpdate>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -38,6 +39,7 @@ impl SettingsView {
         ];
         Self {
             services,
+            about: gpui::AppContext::new(cx, crate::updater::banner::AboutUpdate::new),
             _subscriptions: subscriptions,
         }
     }
@@ -133,6 +135,7 @@ impl Render for SettingsView {
                     .text_color(colors.muted_foreground)
                     .child(s::COMING_SOON),
             )
+            .child(self.about.clone())
             .child(heading(s::DIAGNOSTICS))
             .child(
                 Switch::new("developer-view")

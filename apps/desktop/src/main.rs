@@ -38,6 +38,7 @@ mod provider;
 mod selftest;
 #[allow(dead_code)]
 mod theme;
+mod updater;
 #[allow(dead_code)]
 mod views;
 
@@ -125,6 +126,9 @@ fn main() {
     if let Some(code) = selftest::main_if_requested() {
         std::process::exit(code);
     }
+    if let Some(code) = updater::selftest::main_if_requested() {
+        std::process::exit(code);
+    }
     let args = match parse_args() {
         Ok(args) => args,
         Err(error) => {
@@ -177,6 +181,12 @@ fn main() {
             cx,
         );
         if let Some(core) = core {
+            let source = core.clone();
+            updater::install(
+                std::sync::Arc::new(move || source.client()),
+                provider::session::default_data_root(),
+                cx,
+            );
             provider::app_glue::install(core, services.clone(), cx);
         }
 

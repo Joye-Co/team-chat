@@ -1,0 +1,23 @@
+//! In-app update: the banner in the main window and the 关于 section of settings.
+
+crate::copy! {
+    AVAILABLE = "新版本 {version} 可以更新了",
+    UPDATE = "更新",
+    LATER = "稍后",
+    DOWNLOADING = "正在下载新版本 {version}… {percent}%",
+    WAITING_SENDS = "还有消息正在发出，发完后自动更新",
+    INSTALLING = "正在安装新版本，马上重新打开…",
+    MANUAL = "无法自动替换当前的应用，安装盘已在访达中打开。请退出 {product}，把安装盘里的 {product} 拖到“应用程序”文件夹，替换旧版本后再打开。",
+    FAILED_DOWNLOAD = "新版本下载失败",
+    FAILED_CHECKSUM = "下载的文件不完整，已删除，请重试",
+    FAILED_INSTALL = "新版本安装失败",
+    RETRY = "重试",
+    DISMISS = "知道了",
+    ABOUT = "关于",
+    VERSION = "当前版本 {version}",
+    CHECK = "检查更新",
+    CHECKING = "正在检查更新…",
+    UP_TO_DATE = "已是最新版本",
+    CHECK_FAILED = "检查更新失败，请稍后再试",
+    UPDATE_TO = "更新到 {version}",
+}

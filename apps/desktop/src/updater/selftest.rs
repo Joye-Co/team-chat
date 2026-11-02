@@ -1,0 +1,230 @@
+//! Live update self-test against a real server (`wrangler dev` or an environment). No
+//! window, no focus, nothing installed: it runs the whole update path on a fake bundle in
+//! a work folder.
+//!
+//!   desktop --selftest-update <url> --token-file <path> --workdir <dir> --report <path>
+//!
+//! The server must have a release whose DMG holds `<product>.app` with this app's bundle
+//! id, the release version as `CFBundleShortVersionString`, and an executable script that
+//! writes "<anything>" to `$UPDATER_TEST_OUT` (see `e2e.sh` next to this file).
+//! Steps: check (as version 0.0.1, and as the release version: no update), download with
+//! progress, verify SHA-256, install over a fake 0.0.1 bundle, relaunch after a stand-in
+//! process exits, and finish the update as the new version.
+
+use std::{
+    ffi::OsString,
+    os::unix::fs::PermissionsExt as _,
+    path::{Path, PathBuf},
+    process::Command,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
+};
+
+use super::{install, version};
+
+struct Args {
+    url: String,
+    token_file: PathBuf,
+    workdir: PathBuf,
+    report: PathBuf,
+}
+
+/// Runs the self-test when `--selftest-update` is on the command line.
+pub fn main_if_requested() -> Option<i32> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.iter().any(|a| a == "--selftest-update") {
+        return None;
+    }
+    let mut url = None;
+    let mut token_file = None;
+    let mut workdir = None;
+    let mut report = None;
+    let mut it = args.into_iter();
+    while let Some(a) = it.next() {
+        match a.as_str() {
+            "--selftest-update" => url = it.next(),
+            "--token-file" => token_file = it.next().map(PathBuf::from),
+            "--workdir" => workdir = it.next().map(PathBuf::from),
+            "--report" => report = it.next().map(PathBuf::from),
+            _ => {}
+        }
+    }
+    let (Some(url), Some(token_file), Some(workdir), Some(report)) =
+        (url, token_file, workdir, report)
+    else {
+        eprintln!(
+            "usage: desktop --selftest-update <url> --token-file <path> --workdir <dir> --report <path>"
+        );
+        return Some(2);
+    };
+    let args = Args {
+        url,
+        token_file,
+        workdir,
+        report,
+    };
+    let started = Instant::now();
+    let mut steps = serde_json::Map::new();
+    let result = run(&args, &mut steps);
+    let ok = result.is_ok();
+    let json = serde_json::json!({
+        "ok": ok,
+        "error": result.err(),
+        "steps": steps,
+        "ms": started.elapsed().as_millis() as u64,
+    });
+    if let Some(p) = args.report.parent() {
+        let _ = std::fs::create_dir_all(p);
+    }
+    let _ = std::fs::write(
+        &args.report,
+        serde_json::to_string_pretty(&json).unwrap_or_default() + "\n",
+    );
+    Some(if ok { 0 } else { 1 })
+}
+
+fn step(steps: &mut serde_json::Map<String, serde_json::Value>, name: &str, v: serde_json::Value) {
+    steps.insert(name.into(), v);
+}
+
+fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    let token = std::fs::read_to_string(&args.token_file)
+        .map_err(|e| format!("token file: {e}"))?
+        .trim()
+        .to_string();
+    // A fresh folder of its own inside the work folder; only this one is removed.
+    let workdir = args
+        .workdir
+        .join(format!("update-selftest-{}", std::process::id()));
+    std::fs::create_dir_all(&workdir).map_err(|e| e.to_string())?;
+    let workdir = std::fs::canonicalize(&workdir).map_err(|e| e.to_string())?;
+    let client = chat_core::Client::new(chat_core::ClientConfig::new(
+        args.url.clone(),
+        token,
+        workdir.join("data"),
+    ))
+    .map_err(|e| format!("client: {e}"))?;
+
+    // 1. Check as an old version, then as the release version.
+    let info = futures::executor::block_on(client.check_update("0.0.1"))
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("check: {e}"))?
+        .ok_or("check: no update offered to 0.0.1")?;
+    step(steps, "check", serde_json::json!({ "version": info.version, "size": info.size }));
+    let same = futures::executor::block_on(client.check_update(&info.version))
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("check same: {e}"))?;
+    if same.is_some() {
+        return Err("check: an update was offered to the release version itself".into());
+    }
+    step(steps, "check_same_version", serde_json::json!("none"));
+
+    // 2. Download with progress, verify.
+    let calls = Arc::new(AtomicU64::new(0));
+    let last = Arc::new(AtomicU64::new(0));
+    let (c, l) = (calls.clone(), last.clone());
+    let progress: chat_core::ProgressFn = Arc::new(move |p: chat_core::Progress| {
+        c.fetch_add(1, Ordering::Relaxed);
+        l.store(p.done, Ordering::Relaxed);
+    });
+    let dmg = workdir.join("updates").join(format!("{}-{}.dmg", env!("PRODUCT_NAME"), info.version));
+    let path = futures::executor::block_on(client.download_update(info.clone(), &dmg, progress))
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("download: {e}"))?;
+    let matches = version::checksum_matches(&path, &info.sha256).map_err(|e| e.to_string())?;
+    if !matches {
+        return Err("download: checksum mismatch".into());
+    }
+    step(
+        steps,
+        "download",
+        serde_json::json!({
+            "bytes": std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0),
+            "progress_calls": calls.load(Ordering::Relaxed),
+            "progress_last": last.load(Ordering::Relaxed),
+            "sha256_ok": true,
+        }),
+    );
+
+    // 3. Install over a fake old bundle.
+    let apps = workdir.join("Applications");
+    let bundle = apps.join(format!("{}.app", env!("PRODUCT_NAME")));
+    fake_old_bundle(&bundle)?;
+    let plan = install::Plan {
+        bundle: bundle.clone(),
+        dmg: path.clone(),
+        version: info.version.clone(),
+        sha256: info.sha256.clone(),
+        bundle_id: env!("PRODUCT_BUNDLE_ID").into(),
+        app_name: Some(format!("{}.app", env!("PRODUCT_NAME"))),
+        marker: workdir.join("data/updates/pending.json"),
+    };
+    let marker = install::install(&plan).map_err(|e| format!("install: {e}"))?;
+    install::check_bundle(&bundle, env!("PRODUCT_BUNDLE_ID"), &info.version)
+        .map_err(|e| format!("installed bundle: {e}"))?;
+    step(steps, "install", serde_json::json!({ "old_kept": marker.old.exists() }));
+
+    // 4. Relaunch after the stand-in app process exits.
+    let out = workdir.join("started.txt");
+    let mut app = Command::new("/bin/sleep")
+        .arg("30")
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let exe = bundle.join("Contents/MacOS").join(env!("PRODUCT_NAME"));
+    let mut env_arg = OsString::from("UPDATER_TEST_OUT=");
+    env_arg.push(&out);
+    install::relaunch(
+        app.id(),
+        &install::Launch::Exec(vec!["/usr/bin/env".into(), env_arg, exe.into()]),
+    )
+    .map_err(|e| format!("relaunch: {e}"))?;
+    std::thread::sleep(Duration::from_millis(300));
+    let early = out.exists();
+    let _ = app.kill();
+    let _ = app.wait();
+    if early {
+        return Err("relaunch: started before the old process exited".into());
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while !out.exists() {
+        if Instant::now() > deadline {
+            return Err("relaunch: the new version did not start".into());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    step(steps, "relaunch", serde_json::json!("started"));
+
+    // 5. The new version cleans up.
+    let finish = install::finish_on_launch(&plan.marker, Some(&bundle), &info.version);
+    if finish != install::Finish::RemovedOld || marker.old.exists() {
+        return Err(format!("finish: {finish:?}"));
+    }
+    step(steps, "finish", serde_json::json!("old bundle removed"));
+    let _ = install::remove_all(&workdir);
+    Ok(())
+}
+
+fn fake_old_bundle(bundle: &Path) -> Result<(), String> {
+    let macos = bundle.join("Contents/MacOS");
+    std::fs::create_dir_all(&macos).map_err(|e| e.to_string())?;
+    let plist = format!(
+        r#"<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>CFBundleIdentifier</key><string>{}</string>
+  <key>CFBundleExecutable</key><string>{}</string>
+  <key>CFBundleShortVersionString</key><string>0.0.1</string>
+</dict></plist>
+"#,
+        env!("PRODUCT_BUNDLE_ID"),
+        env!("PRODUCT_NAME")
+    );
+    std::fs::write(bundle.join("Contents/Info.plist"), plist).map_err(|e| e.to_string())?;
+    let exe = macos.join(env!("PRODUCT_NAME"));
+    std::fs::write(&exe, "#!/bin/sh\nexit 0\n").map_err(|e| e.to_string())?;
+    std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755))
+        .map_err(|e| e.to_string())
+}
