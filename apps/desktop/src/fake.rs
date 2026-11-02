@@ -76,6 +76,12 @@ impl FakeProvider {
 
     /// Starts at the login view; any server URL and non-empty code signs in,
     /// except the code `WRONG-CODE-0000`.
+    /// Sets the connection state, for self-test scenes of the offline states.
+    pub fn set_connection(&self, state: ConnectionState) {
+        self.with(|s| s.connection = state);
+        self.emit(vec![Change::Connection]);
+    }
+
     pub fn signed_out() -> Arc<Self> {
         let provider = Arc::new(Self {
             state: Mutex::new(State::sample(now_ms(), false)),

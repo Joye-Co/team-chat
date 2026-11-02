@@ -149,6 +149,14 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
     let base: Arc<dyn ChatProvider> = match start {
         Start::SignedOut => fake::FakeProvider::signed_out(),
         Start::SignedIn | Start::Empty => fake::FakeProvider::new(),
+        Start::Offline => {
+            let fake = fake::FakeProvider::new();
+            fake.set_connection(crate::data::ConnectionState::Reconnecting {
+                attempt: 3,
+                retry_in_ms: 8_000,
+            });
+            fake
+        }
     };
     let base: Arc<dyn ChatProvider> = if start == Start::Empty {
         worst_case::Empty::new(base)

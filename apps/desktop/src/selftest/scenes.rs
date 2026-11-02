@@ -25,6 +25,8 @@ pub enum Start {
     SignedOut,
     /// Signed in, but no 群, 话题 or messages: a new team on its first day.
     Empty,
+    /// Signed in with the sample data while the connection is down.
+    Offline,
 }
 
 pub struct Scene {
@@ -94,6 +96,47 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedOut,
         setup: |_, _| {},
         open: open_main,
+    },
+    Scene {
+        name: "login-code",
+        about: "The login view with half an invite code typed and the boxes focused",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "K7QM2X", false, cx),
+    },
+    Scene {
+        name: "login-server",
+        about: "The login view with the server field open",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "", true, cx),
+    },
+    Scene {
+        name: "login-error",
+        about: "The login view after a wrong invite code",
+        start: Start::SignedOut,
+        setup: |services, _| {
+            services.provider.login(crate::data::LoginRequest {
+                server_url: "https://team.example".into(),
+                credential: crate::data::Credential::InviteCode("WRONG-CODE-0000".into()),
+                device_name: "selftest".into(),
+            })
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "offline",
+        about: "The connection banner above the sidebar footer while reconnecting",
+        start: Start::Offline,
+        setup: open_first_topic,
+        open: open_main,
+    },
+    Scene {
+        name: "settings-profile",
+        about: "Settings: 我的资料",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_profile,
     },
     Scene {
         name: "settings",
@@ -332,6 +375,27 @@ pub fn open_main(
     options.window_min_size = None;
     gpui_kit::open_window(options, cx, move |window, cx| {
         cx.new(|cx| RootView::new(services, None, window, cx))
+    })
+    .map(|(handle, _)| handle)
+    .map_err(|e| e.to_string())
+}
+
+/// The main window signed out, with the login form filled for a scene.
+pub fn open_login(
+    services: Services,
+    content: Size<Pixels>,
+    code: &'static str,
+    server_open: bool,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let mut options = main_window_options(false, cx);
+    options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(None, content, cx)));
+    options.window_min_size = None;
+    gpui_kit::open_window(options, cx, move |window, cx| {
+        let root = cx.new(|cx| RootView::new(services, None, window, cx));
+        let login = root.read(cx).login().clone();
+        login.update(cx, |l, cx| l.preview(code, server_open, window, cx));
+        root
     })
     .map(|(handle, _)| handle)
     .map_err(|e| e.to_string())
