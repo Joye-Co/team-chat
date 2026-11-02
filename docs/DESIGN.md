@@ -121,7 +121,7 @@ never opacity.
 | `count-solid` | `#697079FF` (white on it 5.0) | `#5C6370FF` (6.1) | Neutral unread badge: unread topics and DMs without a mention (§7.8) |
 | `tile-ring` | `#FFFFFFFF` | `#FFFFFF1A` | 1 pt ring around a bot tile on a selected row, so the tile keeps its edge on the selection fill |
 | `opt-bg` / `opt-hover` | `#F4F5F7FF` / `#ECEEF1FF` | `#2A2D33FF` / `#32353CFF` | Option rows in ask cards (no border) |
-| `disabled-bg` / `disabled-text` | `#ECEEF1FF` / `#8A8F98FF` | `#2E3138FF` / `#70767FFF` | Disabled primary button: a neutral fill, never `accent` at reduced opacity |
+| `disabled-bg` / `disabled-text` | `#1F232914` / `#8A8F98FF` | `#FFFFFF0F` / `#8A8F98FF` | Disabled primary button: a neutral fill, never `accent` at reduced opacity. Translucent, so it reads one step above every surface (`content`, `overlay`) and never as a darker hole |
 | `tile` | `#EBEDF0FF` | `#34343BFF` | Group tile in dialogs |
 | `desk` | `#E9EBEFFF` | `#0E0F12FF` | Mockups only: the desk behind a framed window (settings, login, worst case) |
 
@@ -800,7 +800,7 @@ The more often a control is used, the less it moves.
 | Menus, popovers, select | 150 ms opacity + 4 pt travel from the trigger | opacity only |
 | @mention popup, switcher | None: appear and filter at once | same |
 | Dialogs and sheets | 200 ms opacity + scale 0.98 → 1; exit 150 ms | opacity only |
-| New message from others while visible | 200 ms opacity + 6 pt rise | opacity only |
+| New message from others while visible | 120 ms opacity only, no rise (it fires 100+ times a day, often while the person reads); none when the window is not focused or for a batch of more than 3 | same |
 | My sent message | None | — |
 | Pending row enter / exit | Enter 200 ms opacity + 6 pt rise; exit 160 ms opacity after a 400 ms hold | opacity only |
 | Busy indicators (dots, spinners, skeletons) | Wait **400 ms** before showing; once shown, stay at least 500 ms | same |
@@ -810,8 +810,8 @@ The more often a control is used, the less it moves.
 | Chip change | 160 ms crossfade | instant |
 | Ask card after answer | Height snaps, content fades 160 ms; check scales 0.6 → 1 over 200 ms | no scale |
 | Composer focus ring | 120 ms opacity | instant |
-| Side panel | Width snaps; content fades 120 ms | instant |
-| New sidebar row | 200 ms opacity + 6 pt from the left | opacity only |
+| Side panel | Width snaps. When it opens by itself (a bot starts work), content fades 120 ms; ⌘⌥I and the button stay instant | instant |
+| New sidebar row | 200 ms opacity + 6 pt from the left, only for an occasional row (a new 群 or DM); never for a batch | opacity only |
 | Never animated | Selection, keyboard navigation, switching 群 or topics, counts, tabs, theme change, resize, composer growth | |
 
 ## 13. Dark mode
