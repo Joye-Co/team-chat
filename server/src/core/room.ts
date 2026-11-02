@@ -1085,6 +1085,36 @@ export class GroupRoom extends DurableObject<Env> {
     });
   }
 
+  /**
+   * Point-in-time recovery of this room's SQLite (30 days). Without `apply` it only returns the
+   * bookmark and the current lastSeq. With `apply` the object restarts on that bookmark: every
+   * write after `at` is lost. Internal (admin route only); see docs/RUNBOOK.md.
+   */
+  async pointInTime(
+    groupId: string,
+    at: number,
+    apply: boolean,
+  ): Promise<Result<{ bookmark: string; lastSeq: number; applied: boolean }>> {
+    const r = await run(async () => {
+      await this.ready(groupId);
+      let bookmark: string;
+      try {
+        bookmark = await this.ctx.storage.getBookmarkForTime(at);
+      } catch {
+        // Local dev (miniflare) has no point-in-time recovery.
+        throw new ApiError("invalid", "point-in-time recovery is not available here");
+      }
+      if (apply) {
+        await this.ctx.storage.onNextSessionRestoreBookmark(bookmark);
+        this.log.warn("point-in-time restore scheduled", { at, lastSeq: this.lastSeq });
+      }
+      return { bookmark, lastSeq: this.lastSeq, applied: apply };
+    });
+    // Restart so the next request opens the restored database.
+    if (r.ok && apply) this.ctx.waitUntil(Promise.resolve().then(() => this.ctx.abort("point-in-time restore")));
+    return r;
+  }
+
   /** Feature RPC registered with `registerRoomRpc`. */
   async rpc(groupId: string, name: string, actor: Actor | null, args: unknown): Promise<Result<unknown>> {
     return run(async () => {

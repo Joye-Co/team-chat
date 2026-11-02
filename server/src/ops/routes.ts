@@ -6,6 +6,7 @@
 //   POST /v1/admin/import/groups/:id/state     gzip JSON room state snapshot, right after the events
 //   GET  /v1/admin/import/d1                   row counts per D1 table (restore pre-check)
 //   POST /v1/admin/import/d1                   { table, columns, rows } -> INSERT OR IGNORE
+//   POST /v1/admin/pitr/groups/:id             { at, apply? } point-in-time recovery of one room
 //   POST /v1/admin/import/d1/done              records the D1 restore in the audit log
 import { z } from "zod";
 import { audit } from "../core/audit";
@@ -199,6 +200,23 @@ export function registerOpsRoutes(): void {
       const r = unwrap(await roomStub(env, params.id).rpc(params.id, "ops.importState", null, parsed.data)) as { rows: number };
       await audit(env.DB, null, { action: "admin.import.groupState", target: params.id, details: { rows: r.rows } });
       return { groupId: params.id, rows: r.rows };
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/admin/pitr/groups/:id",
+    auth: "none",
+    async handler({ request, env, params, body }) {
+      await requireAdmin(request, env);
+      const b = await body(z.object({ at: z.int().positive(), apply: z.boolean().optional() }));
+      const now = Date.now();
+      if (b.at > now || b.at < now - 30 * 24 * 60 * 60 * 1000) throw new ApiError("invalid", "at must be within the last 30 days");
+      const r = unwrap(await roomStub(env, params.id).pointInTime(params.id, b.at, b.apply === true));
+      if (r.applied) {
+        await audit(env.DB, null, { action: "admin.pitr.group", target: params.id, details: { at: b.at, lastSeqBefore: r.lastSeq } });
+      }
+      return { groupId: params.id, ...r };
     },
   });
 

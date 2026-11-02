@@ -352,3 +352,21 @@ describe("logs carry no secrets", () => {
     expect(all).not.toContain("secret plan");
   });
 });
+
+describe("point-in-time recovery", () => {
+  it("returns a bookmark without applying, and refuses times outside 30 days", async () => {
+    const [a, b] = await Promise.all([createMember(), createMember()]);
+    const gid = await createGroup(a, [b.id]);
+    await populate(gid, a, b, 1);
+    const dry = await api(`/v1/admin/pitr/groups/${gid}`, { headers: ADMIN, body: { at: Date.now() - 1000 } });
+    if (dry.status === 200) {
+      expect(dry.body).toMatchObject({ applied: false, bookmark: expect.any(String), lastSeq: expect.any(Number) });
+    } else {
+      // The local runtime has no point-in-time recovery; Cloudflare does (checked in the runbook drill).
+      expect(dry.body.error.message).toContain("not available");
+    }
+    const old = await api(`/v1/admin/pitr/groups/${gid}`, { headers: ADMIN, body: { at: Date.now() - 31 * 24 * 3600 * 1000 } });
+    expect(old.status).toBe(400);
+    expect((await api(`/v1/admin/pitr/groups/${gid}`, { body: { at: Date.now() } })).status).toBe(401);
+  });
+});
