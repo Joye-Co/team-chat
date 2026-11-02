@@ -98,6 +98,12 @@ crate::copy! {
     MENU_WINDOW = "窗口",
     MENU_MINIMIZE = "最小化",
     MENU_SHOW_MAIN = "显示主窗口",
+    MENU_CLOSE_WINDOW = "关闭窗口",
+    MENU_ZOOM = "缩放",
+    MENU_BRING_ALL_TO_FRONT = "前置全部窗口",
+    MENU_VIEW = "显示",
+    MENU_SIDE_PANEL = "话题详情",
+    MENU_FULL_SCREEN = "切换全屏幕",
     // menu bar item
     STATUS_ITEM_UNREAD = "{n} 条未读",
     STATUS_ITEM_MENTIONS = "{n} 条@你的消息",
