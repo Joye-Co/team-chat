@@ -105,6 +105,9 @@ async fn git(dir: Option<&Path>, args: &[&str]) -> Result<String, String> {
     }
 }
 
+/// Fetch refspec of the bare mirrors kept for `repo.url`.
+const MIRROR_REFSPEC: &str = "+refs/heads/*:refs/remotes/origin/*";
+
 static GIT_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Makes `<run>/work`: a git worktree on a new branch `bot/<runId>`, or an empty folder.
@@ -130,32 +133,29 @@ pub async fn prepare(
     let git_dir = if let Some(url) = &repo.url {
         let h = hex(&Sha256::digest(url.as_bytes()))[..16].to_string();
         let mirror = cfg.work_root.join("repos").join(format!("{h}.git"));
-        if mirror.join("HEAD").exists() {
-            git(
-                Some(&mirror),
-                &[
-                    "fetch",
-                    "--quiet",
-                    "--prune",
-                    "origin",
-                    "+refs/heads/*:refs/heads/*",
-                ],
-            )
-            .await?;
-        } else {
+        if !mirror.join("HEAD").exists() {
             std::fs::create_dir_all(cfg.work_root.join("repos")).map_err(|e| e.to_string())?;
             let m = mirror.to_string_lossy().to_string();
             git(None, &["clone", "--bare", "--quiet", "--", url, &m]).await?;
-            git(
-                Some(&mirror),
-                &[
-                    "config",
-                    "remote.origin.fetch",
-                    "+refs/heads/*:refs/heads/*",
-                ],
-            )
-            .await?;
         }
+        // Remote heads go to refs/remotes/origin/*, never to refs/heads/*: the local heads hold
+        // the bot/<runId> branches of runs, and a fetch must not delete or overwrite them.
+        // Mirrors made by older daemons mapped remote heads onto refs/heads/*; this resets them.
+        git(
+            Some(&mirror),
+            &[
+                "config",
+                "--replace-all",
+                "remote.origin.fetch",
+                MIRROR_REFSPEC,
+            ],
+        )
+        .await?;
+        git(
+            Some(&mirror),
+            &["fetch", "--quiet", "--prune", "origin", MIRROR_REFSPEC],
+        )
+        .await?;
         mirror
     } else {
         let p = PathBuf::from(repo.path.as_deref().unwrap_or_default());
@@ -163,7 +163,18 @@ pub async fn prepare(
         let _ = git(Some(&p), &["fetch", "--quiet", "origin"]).await;
         p
     };
-    let start = match &repo.base_branch {
+    let base = match &repo.base_branch {
+        Some(b) => Some(b.clone()),
+        // The default branch: what HEAD names (in a mirror, the remote's default at clone time).
+        None => git(
+            Some(&git_dir),
+            &["symbolic-ref", "--quiet", "--short", "HEAD"],
+        )
+        .await
+        .ok()
+        .filter(|b| safe_ref(b)),
+    };
+    let start = match &base {
         Some(b) => {
             let remote = format!("refs/remotes/origin/{b}");
             if git(
@@ -184,7 +195,16 @@ pub async fn prepare(
     let w = work.to_string_lossy().to_string();
     git(
         Some(&git_dir),
-        &["worktree", "add", "--quiet", "-b", &branch, &w, &start],
+        &[
+            "worktree",
+            "add",
+            "--quiet",
+            "--no-track",
+            "-b",
+            &branch,
+            &w,
+            &start,
+        ],
     )
     .await?;
     meta.git_dir = Some(git_dir);
@@ -193,16 +213,61 @@ pub async fn prepare(
     Ok((work, meta))
 }
 
-/// Removes a finished run folder and its worktree registration.
+/// Commits of `branch` that no remote-tracking ref and no other local branch has. These exist
+/// only in this git dir: deleting the branch would lose them.
+async fn unpushed_commits(git_dir: &Path, branch: &str) -> Result<u64, String> {
+    let n = git(
+        Some(git_dir),
+        &[
+            "rev-list",
+            "--count",
+            branch,
+            "--not",
+            "--remotes",
+            "--exclude=bot/*",
+            "--branches",
+        ],
+    )
+    .await?;
+    n.parse().map_err(|_| format!("rev-list gave {n}"))
+}
+
+/// Removes a finished run folder and its worktree registration. The run's branch is deleted
+/// only when all its commits are also on a remote or another branch; otherwise it is kept (it
+/// costs no disk beyond its objects) and the daemon log says so.
 pub async fn remove_run(dir: &Path) {
     if let Some(meta) = read_meta(dir)
         && let Some(gd) = &meta.git_dir
     {
         let _guard = GIT_LOCK.lock().await;
-        let w = dir.join("work").to_string_lossy().to_string();
+        let work = dir.join("work");
+        let w = work.to_string_lossy().to_string();
+        if let Ok(st) = git(Some(&work), &["status", "--porcelain"]).await
+            && !st.is_empty()
+        {
+            eprintln!(
+                "{} cleanup: run {} had uncommitted changes in its worktree; removed",
+                now_ms(),
+                meta.run_id
+            );
+        }
         let _ = git(Some(gd), &["worktree", "remove", "--force", &w]).await;
         if let Some(b) = &meta.branch {
-            let _ = git(Some(gd), &["branch", "-D", b]).await;
+            match unpushed_commits(gd, b).await {
+                Ok(0) => {
+                    let _ = git(Some(gd), &["branch", "-D", b]).await;
+                }
+                Ok(n) => eprintln!(
+                    "{} cleanup: kept branch {b} in {} ({n} commits not pushed)",
+                    now_ms(),
+                    gd.display()
+                ),
+                Err(e) => eprintln!(
+                    "{} cleanup: kept branch {b} in {} ({e})",
+                    now_ms(),
+                    gd.display()
+                ),
+            }
         }
         let _ = git(Some(gd), &["worktree", "prune"]).await;
     }

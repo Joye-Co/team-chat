@@ -230,3 +230,104 @@ async fn worktree_scratch_and_cleanup() {
         .unwrap();
     assert!(br.stdout.is_empty(), "run branch deleted");
 }
+
+fn git_out(dir: &std::path::Path, args: &[&str]) -> String {
+    let s = Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        s.status.success(),
+        "git {args:?}: {}",
+        String::from_utf8_lossy(&s.stderr)
+    );
+    String::from_utf8_lossy(&s.stdout).trim().to_string()
+}
+
+fn commit(dir: &std::path::Path, msg: &str) {
+    git(
+        dir,
+        &[
+            "-c",
+            "user.email=a@b",
+            "-c",
+            "user.name=a",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            msg,
+        ],
+    );
+}
+
+/// Two runs on one `repo.url` share a bare mirror. The second run's fetch must not delete or
+/// refuse to update the first run's branch, and cleanup keeps a branch with unpushed commits.
+#[tokio::test]
+async fn mirror_runs_keep_their_branches() {
+    let dir = tempfile::tempdir().unwrap();
+    let origin = dir.path().join("origin");
+    std::fs::create_dir_all(&origin).unwrap();
+    git(&origin, &["init", "-q", "-b", "main"]);
+    commit(&origin, "init");
+    let mut text = base_config(dir.path());
+    text.push_str("keep_runs_hours = 0\n[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\n");
+    let cfg = Config::parse(&text).unwrap();
+    let url = origin.to_string_lossy().to_string();
+
+    // Run A starts from the default branch, commits, pushes, then commits again: the remote
+    // bot/ra and the local bot/ra now differ.
+    let a_spec = RepoSpec {
+        url: Some(url.clone()),
+        path: None,
+        base_branch: None,
+    };
+    let (work_a, meta_a) = daemon::workspace::prepare(&cfg, "ra", Some(&a_spec))
+        .await
+        .unwrap();
+    commit(&work_a, "a1");
+    git(&work_a, &["push", "-q", "origin", "bot/ra"]);
+    commit(&work_a, "a2");
+    let a_head = git_out(&work_a, &["rev-parse", "HEAD"]);
+
+    // Upstream moves on; run B (same url) must start from the new tip.
+    commit(&origin, "upstream");
+    let upstream = git_out(&origin, &["rev-parse", "main"]);
+    let b_spec = RepoSpec {
+        url: Some(url.clone()),
+        path: None,
+        base_branch: Some("main".into()),
+    };
+    let (work_b, _) = daemon::workspace::prepare(&cfg, "rb", Some(&b_spec))
+        .await
+        .expect("second run on the same repo.url prepares");
+    assert_eq!(git_out(&work_b, &["rev-parse", "HEAD"]), upstream);
+    // Run A's branch and worktree are intact.
+    assert_eq!(git_out(&work_a, &["rev-parse", "HEAD"]), a_head);
+    let mirror = meta_a.git_dir.clone().unwrap();
+    assert_eq!(
+        git_out(&mirror, &["rev-parse", "refs/heads/bot/ra"]),
+        a_head
+    );
+    // A third run with no base branch also starts from the fetched default branch.
+    let (work_c, _) = daemon::workspace::prepare(&cfg, "rc", Some(&a_spec))
+        .await
+        .unwrap();
+    assert_eq!(git_out(&work_c, &["rev-parse", "HEAD"]), upstream);
+
+    // Cleanup (keep_runs_hours = 0): A has an unpushed commit, so its branch stays; C has none.
+    let removed = daemon::workspace::cleanup(&cfg, &["rb".to_string()]).await;
+    assert_eq!(removed, 2);
+    assert!(!work_a.exists() && !work_c.exists() && work_b.exists());
+    assert_eq!(
+        git_out(&mirror, &["rev-parse", "refs/heads/bot/ra"]),
+        a_head
+    );
+    assert_eq!(
+        git_out(&mirror, &["branch", "--list", "bot/rc"]),
+        "",
+        "branch without own commits deleted"
+    );
+}
