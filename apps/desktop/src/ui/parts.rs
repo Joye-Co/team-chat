@@ -196,7 +196,10 @@ impl RenderOnce for EmptyState {
             .justify_center()
             .p(space::S20)
             .child(
+                // Full width up to 280 pt, so the description wraps in a
+                // narrow column such as the sidebar.
                 div()
+                    .w_full()
                     .max_w(px(280.))
                     .flex()
                     .flex_col()
