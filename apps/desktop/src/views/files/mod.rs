@@ -15,19 +15,47 @@ use gpui::{App, AsyncApp, Pixels, px};
 use gpui_component::{WindowExt as _, notification::Notification};
 
 use crate::{
-    copy::{fill, files as f},
+    copy::{files as f, fill},
     data::{ChatProvider, FileAttachment, FileError, RejectedFile},
 };
 
-/// Largest inline preview box.
+/// Largest inline preview box (§7.11: 360 x 320).
 pub const PREVIEW_MAX_W: Pixels = px(360.);
-pub const PREVIEW_MAX_H: Pixels = px(240.);
+pub const PREVIEW_MAX_H: Pixels = px(320.);
 /// Smallest preview side, so a thin image stays clickable.
 pub const PREVIEW_MIN: Pixels = px(48.);
-/// Width of a file row in the timeline.
-pub const FILE_ROW_W: Pixels = px(420.);
-/// Height of a file row (fixed, so progress does not change the row height).
-pub const FILE_ROW_H: Pixels = px(48.);
+/// Width of a file row in the timeline: the one measure (§4.4).
+pub const FILE_ROW_W: Pixels = px(620.);
+/// Height of a file row: 12 + 40 pt tile + 12 (fixed, so progress does not
+/// change the row height).
+pub const FILE_ROW_H: Pixels = px(64.);
+/// Height of a 产出 or file row in the side panel (§7.11).
+pub const PANEL_ROW_H: Pixels = px(48.);
+
+/// A file name cut in the middle (§15): it keeps the last 12 characters and
+/// the extension, and the start as far as `budget` (in pt at 14 pt text)
+/// allows, joined by `…`.
+pub fn middle_name(name: &str, budget: f32) -> String {
+    let width = |c: char| if c.is_ascii() { 7.6 } else { 14.0 };
+    let total: f32 = name.chars().map(width).sum();
+    if total <= budget {
+        return name.to_string();
+    }
+    let chars: Vec<char> = name.chars().collect();
+    let tail_len = chars.len().min(12);
+    let tail: String = chars[chars.len() - tail_len..].iter().collect();
+    let mut room = budget - tail.chars().map(width).sum::<f32>() - 14.0;
+    let mut head = String::new();
+    for &c in &chars[..chars.len() - tail_len] {
+        room -= width(c);
+        if room < 0.0 {
+            break;
+        }
+        head.push(c);
+    }
+    let head = head.trim_end_matches(|c: char| c.is_whitespace() || "-_.（(【[·".contains(c));
+    format!("{head}…{tail}")
+}
 /// Images up to this size download by themselves for the inline preview.
 pub const AUTO_DOWNLOAD_MAX_BYTES: u64 = 20_000_000;
 
@@ -83,12 +111,56 @@ pub fn rejected_text(r: &RejectedFile) -> String {
 /// in Finder instead, so one click on a teammate's file never runs it.
 pub fn opens_unsafely(name: &str) -> bool {
     const RISKY: &[&str] = &[
-        "app", "command", "sh", "bash", "zsh", "csh", "ksh", "fish", "tool", "terminal", "pkg",
-        "mpkg", "scpt", "scptd", "applescript", "workflow", "action", "jar", "py", "rb", "pl",
-        "php", "webloc", "inetloc", "fileloc", "url", "shortcut", "dylib", "so", "bundle",
-        "plugin", "kext", "prefpane", "osax", "saver", "qlgenerator", "mdimporter", "service",
-        "xpc", "configprofile", "mobileconfig", "lnk", "exe", "bat", "cmd", "ps1", "vbs",
-        "jnlp", "dmg", "iso",
+        "app",
+        "command",
+        "sh",
+        "bash",
+        "zsh",
+        "csh",
+        "ksh",
+        "fish",
+        "tool",
+        "terminal",
+        "pkg",
+        "mpkg",
+        "scpt",
+        "scptd",
+        "applescript",
+        "workflow",
+        "action",
+        "jar",
+        "py",
+        "rb",
+        "pl",
+        "php",
+        "webloc",
+        "inetloc",
+        "fileloc",
+        "url",
+        "shortcut",
+        "dylib",
+        "so",
+        "bundle",
+        "plugin",
+        "kext",
+        "prefpane",
+        "osax",
+        "saver",
+        "qlgenerator",
+        "mdimporter",
+        "service",
+        "xpc",
+        "configprofile",
+        "mobileconfig",
+        "lnk",
+        "exe",
+        "bat",
+        "cmd",
+        "ps1",
+        "vbs",
+        "jnlp",
+        "dmg",
+        "iso",
     ];
     let lower = name.to_ascii_lowercase();
     let ext = Path::new(&lower)
@@ -152,7 +224,9 @@ pub fn notify_error(message: String, cx: &mut App) {
 }
 
 pub fn notify(note: Notification, cx: &mut App) {
-    let target = cx.active_window().or_else(|| cx.windows().into_iter().next());
+    let target = cx
+        .active_window()
+        .or_else(|| cx.windows().into_iter().next());
     if let Some(window) = target {
         let _ = window.update(cx, |_, window, cx| window.push_notification(note, cx));
     } else {
@@ -190,7 +264,13 @@ mod tests {
 
     #[test]
     fn risky_files_are_not_opened() {
-        for name in ["run.command", "Installer.APP", "x.sh", "Makefile", "a.webloc"] {
+        for name in [
+            "run.command",
+            "Installer.APP",
+            "x.sh",
+            "Makefile",
+            "a.webloc",
+        ] {
             assert!(opens_unsafely(name), "{name}");
         }
         for name in ["报告.pdf", "photo.JPG", "notes.md", "data.csv", "a.zip"] {
@@ -200,9 +280,18 @@ mod tests {
     }
 
     #[test]
+    fn long_names_keep_their_end() {
+        let n = "websocket-reconnect-trace-2025-11-03-build-4412.log";
+        let cut = middle_name(n, 300.);
+        assert!(cut.ends_with("ld-4412.log"), "{cut}");
+        assert!(cut.contains('…'));
+        assert_eq!(middle_name("a.pdf", 300.), "a.pdf");
+    }
+
+    #[test]
     fn previews_keep_the_aspect_ratio() {
         let (w, h) = preview_size(Some(4000), Some(3000));
-        assert_eq!((f32::from(w), f32::from(h)), (320., 240.));
+        assert_eq!((f32::from(w), f32::from(h)), (360., 270.));
         let (w, h) = preview_size(Some(100), Some(50));
         assert_eq!((f32::from(w), f32::from(h)), (100., 50.));
         let (w, h) = preview_size(Some(2000), Some(10));

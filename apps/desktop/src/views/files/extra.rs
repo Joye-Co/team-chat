@@ -9,14 +9,9 @@ use std::sync::Arc;
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ObjectFit, ParentElement,
     SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _, px, relative,
 };
-use gpui_component::{
-    Disableable as _, Icon, IconName, Sizable as _,
-    button::{Button, ButtonVariants as _},
-    progress::Progress,
-    tooltip::Tooltip,
-};
+use gpui_component::{Disableable as _, tooltip::Tooltip};
 
 use super::{
     AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text, open_file,
@@ -26,7 +21,8 @@ use crate::{
     copy::{files as f, fill},
     data::{ChatProvider, FileAttachment, Message, TransferState, download_key, upload_key},
     provider::files::THUMB_SOURCE_MAX_BYTES,
-    theme,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -49,8 +45,8 @@ impl MessageExtra for AttachmentsExtra {
         } else {
             message.id.as_str()
         };
-        let mut images = div().flex().flex_wrap().gap(px(6.));
-        let mut files = div().flex().flex_col().gap(px(4.));
+        let mut images = div().flex().flex_wrap().gap(space::S8);
+        let mut files = div().flex().flex_col().gap(space::S8);
         let (mut n_images, mut n_files) = (0, 0);
         for (index, file) in message.attachments.iter().enumerate() {
             let id = |part: &str| -> ElementId {
@@ -73,10 +69,10 @@ impl MessageExtra for AttachmentsExtra {
         }
         Some(
             div()
-                .mt(px(4.))
+                .mt(space::S8)
                 .flex()
                 .flex_col()
-                .gap(px(6.))
+                .gap(space::S8)
                 .when(n_images > 0, |el| el.child(images))
                 .when(n_files > 0, |el| el.child(files))
                 .into_any_element(),
@@ -91,7 +87,7 @@ fn image_preview(
     id: impl Fn(&str) -> ElementId,
     cx: &mut App,
 ) -> AnyElement {
-    let colors = theme::colors(cx);
+    let k = theme::colors(cx);
     let (w, h) = preview_size(file.width, file.height);
     let (g, t) = (message.group_id.clone(), message.topic_id.clone());
     let thumb = provider.thumbnail(&g, &t, file);
@@ -104,101 +100,211 @@ fn image_preview(
         // Fetch it once for the preview; the provider shares the transfer.
         drop(provider.fetch_file(&g, &t, file));
     }
+    // While it loads: a `field` skeleton of the final size with the image
+    // glyph and the name (§7.11, U30).
+    let skeleton = |line: AnyElement| {
+        div()
+            .flex()
+            .flex_col()
+            .items_center()
+            .gap(space::S6)
+            .px(space::S12)
+            .max_w_full()
+            .child(ui::icon(Lucide::FileImage, theme::icon::EMPTY, k.text_3))
+            .child(line)
+            .into_any_element()
+    };
+    let name_line = div()
+        .max_w_full()
+        .t_meta()
+        .text_color(k.text_3)
+        .one_line()
+        .child(file.name.clone())
+        .into_any_element();
     let inner = match (&thumb, state) {
         (Some(path), _) => img(path.clone())
             .size_full()
             .object_fit(ObjectFit::Cover)
             .into_any_element(),
-        (None, Some(TransferState::Running { .. })) => Progress::new(id("progress"))
-            .value(state.map(|s| s.percent()).unwrap_or(0.))
-            .w(w * 0.6)
-            .into_any_element(),
-        (None, Some(TransferState::Failed(e))) => div()
-            .px(px(8.))
-            .text_xs()
-            .text_color(colors.danger)
-            .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
-            .into_any_element(),
-        _ => Icon::new(IconName::File)
-            .text_color(colors.muted_foreground)
-            .into_any_element(),
+        (None, Some(TransferState::Failed(e))) => skeleton(
+            div()
+                .t_meta()
+                .text_color(k.danger_text)
+                .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
+                .into_any_element(),
+        ),
+        _ => skeleton(name_line),
+    };
+    let progress = match (&thumb, state) {
+        (None, Some(s @ TransferState::Running { .. })) => Some(s.percent()),
+        _ => None,
     };
     let provider = provider.clone();
     let file2 = file.clone();
     div()
         .id(id("image"))
+        .relative()
         .w(w)
         .h(h)
         .flex_none()
-        .rounded(px(6.))
+        .rounded(theme::radius::MD)
         .overflow_hidden()
         .border_1()
-        .border_color(colors.border)
-        .bg(colors.code_background)
+        .border_color(k.border)
+        .bg(k.field)
         .flex()
         .items_center()
         .justify_center()
         .cursor_pointer()
         .child(inner)
+        .when_some(progress, |el, p| el.child(track(p, cx)))
         .tooltip(move |window, cx| Tooltip::new(f::OPEN_IMAGE).build(window, cx))
         .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file2, OpenAction::Open, cx))
         .into_any_element()
 }
 
-fn file_icon(file: &FileAttachment) -> IconName {
+/// The type glyph of a file tile.
+fn file_icon(file: &FileAttachment) -> Lucide {
     if file.is_image() {
-        IconName::File
+        Lucide::FileImage
     } else if super::is_html(&file.name) {
-        IconName::Globe
+        Lucide::FileCode
     } else {
-        IconName::FileText
+        Lucide::FileText
     }
 }
 
-/// The frame of a file row: icon, name and the line under it, then actions.
-fn row_frame(
-    file: &FileAttachment,
-    detail: AnyElement,
-    actions: Vec<AnyElement>,
-    cx: &App,
-) -> gpui::Div {
-    let colors = theme::colors(cx);
+/// The type word of a file in its meta line (`网页 · 18 KB`).
+fn kind_word(file: &FileAttachment) -> &'static str {
+    if file.is_image() {
+        f::KIND_IMAGE
+    } else if super::is_html(&file.name) {
+        f::KIND_PAGE
+    } else {
+        f::KIND_FILE
+    }
+}
+
+/// The inset progress track of a file row (§7.11): left 12, right 12,
+/// bottom 6, 3 pt tall, radius 1.5, `field` track and `accent` fill, so the
+/// bar never crosses the row's rounded corners or border.
+fn track(percent: f32, cx: &App) -> gpui::Div {
+    let k = theme::colors(cx);
     div()
-        .w(FILE_ROW_W)
-        .max_w_full()
-        .h(FILE_ROW_H)
-        .flex_none()
-        .px(px(10.))
-        .rounded(px(6.))
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.background)
-        .flex()
-        .items_center()
-        .gap(px(10.))
-        .child(
-            Icon::new(file_icon(file))
-                .text_color(colors.muted_foreground)
-                .flex_none(),
-        )
+        .absolute()
+        .left(space::S12)
+        .right(space::S12)
+        .bottom(space::S6)
+        .h(px(3.))
+        .rounded(px(1.5))
+        .bg(k.field)
+        .overflow_hidden()
         .child(
             div()
-                .flex_1()
-                .min_w(px(0.))
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .child(
-                    div()
-                        .text_sm()
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(file.name.clone()),
-                )
-                .child(detail),
+                .h_full()
+                .w(relative((percent / 100.).clamp(0., 1.)))
+                .rounded(px(1.5))
+                .bg(k.accent),
         )
-        .child(div().flex_none().flex().gap(px(2.)).children(actions))
+}
+
+/// The frame of a file row (§7.11). In the timeline: 12 pt padding (8 at the
+/// right), radius 12, 1 pt `border`, a 40 pt `accent-soft` tile with the type
+/// glyph, the name 14/500 cut in the middle, the meta line 12/16 `text-2`, and
+/// 32 pt icon buttons that show on hover (always while `pin_actions`). In the
+/// side panel (`compact`): a 48 pt row with a 32 pt tile, no border, a hover
+/// fill.
+#[allow(clippy::too_many_arguments)]
+fn row_frame(
+    group: SharedString,
+    file: &FileAttachment,
+    compact: bool,
+    meta: AnyElement,
+    progress: Option<f32>,
+    actions: Vec<AnyElement>,
+    pin_actions: bool,
+    cx: &App,
+) -> gpui::Div {
+    let k = theme::colors(cx);
+    let tile = if compact { px(32.) } else { px(40.) };
+    let glyph = if compact {
+        theme::icon::ROW
+    } else {
+        theme::icon::EMPTY
+    };
+    let budget = if compact { 200. } else { 400. };
+    let row = div()
+        .group(group.clone())
+        .relative()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(space::S12)
+        .overflow_hidden();
+    let row = if compact {
+        row.h(super::PANEL_ROW_H)
+            .mx(-space::S8)
+            .px(space::S8)
+            .rounded(theme::radius::MD)
+            .hover(|s| s.bg(k.hover))
+    } else {
+        row.w_full()
+            .max_w(FILE_ROW_W)
+            .h(FILE_ROW_H)
+            .pl(space::S12)
+            .pr(space::S8)
+            .rounded(theme::radius::LG)
+            .border_1()
+            .border_color(k.border)
+            .bg(k.content)
+    };
+    row.child(
+        div()
+            .flex_none()
+            .size(tile)
+            .rounded(theme::radius::MD)
+            .bg(k.accent_soft)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(ui::icon(file_icon(file), glyph, k.accent_text)),
+    )
+    .child(
+        div()
+            .flex_1()
+            .min_w(px(0.))
+            .flex()
+            .flex_col()
+            .when(!compact, |el| el.gap(space::S2))
+            .child(
+                div()
+                    .t_ui()
+                    .medium()
+                    .text_color(k.text_1)
+                    .one_line()
+                    .child(super::middle_name(&file.name, budget)),
+            )
+            .child(div().t_meta().text_color(k.text_2).one_line().child(meta)),
+    )
+    .child(
+        div()
+            .flex_none()
+            .flex()
+            .gap(space::S2)
+            .when(!pin_actions, |el| {
+                el.invisible().group_hover(group, |s| s.visible())
+            })
+            .children(actions),
+    )
+    .when_some(progress, |el, p| {
+        // In the side panel the track runs under the text column, 2 pt
+        // from the row's bottom, so it never covers the meta line.
+        el.child(if compact {
+            track(p, cx).left(px(52.)).right(space::S8).bottom(px(1.))
+        } else {
+            track(p, cx)
+        })
+    })
 }
 
 fn upload_row(
@@ -207,32 +313,30 @@ fn upload_row(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    let colors = theme::colors(cx);
-    let detail = match state {
-        TransferState::Failed(e) => div()
-            .text_xs()
-            .text_color(colors.danger)
-            .child(fill(f::UPLOAD_FAILED, &[("reason", error_text(e))]))
-            .into_any_element(),
-        TransferState::Queued => div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(f::QUEUED)
-            .into_any_element(),
-        s => div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .child(Progress::new(id("up")).value(s.percent()).w(px(160.)))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(fill(f::UPLOADING, &[("p", &format!("{:.0}", s.percent()))])),
-            )
-            .into_any_element(),
+    let k = theme::colors(cx);
+    let (meta, progress) = match state {
+        TransferState::Failed(e) => (
+            div()
+                .text_color(k.danger_text)
+                .child(fill(f::UPLOAD_FAILED, &[("reason", error_text(e))]))
+                .into_any_element(),
+            None,
+        ),
+        TransferState::Queued => (div().child(f::QUEUED).into_any_element(), Some(0.)),
+        s => (
+            div()
+                .tnum()
+                .child(fill(f::UPLOADING, &[("p", &format!("{:.0}", s.percent()))]))
+                .into_any_element(),
+            Some(s.percent()),
+        ),
     };
-    row_frame(file, detail, Vec::new(), cx).into_any_element()
+    let group = group_name(&id);
+    row_frame(group, file, false, meta, progress, Vec::new(), false, cx).into_any_element()
+}
+
+fn group_name(id: &impl Fn(&str) -> ElementId) -> SharedString {
+    SharedString::from(format!("{}", id("row")))
 }
 
 /// A row for a file in the timeline or the side panel.
@@ -243,10 +347,18 @@ pub fn file_row(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    file_row_in(&message.group_id, &message.topic_id, file, provider, false, id, cx)
+    file_row_in(
+        &message.group_id,
+        &message.topic_id,
+        file,
+        provider,
+        false,
+        id,
+        cx,
+    )
 }
 
-/// A file row; `compact` (the side panel) shows icon buttons with tooltips.
+/// A file row; `compact` is the 48 pt side-panel row (§7.11).
 pub fn file_row_in(
     group_id: &str,
     topic_id: &str,
@@ -256,64 +368,76 @@ pub fn file_row_in(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    let colors = theme::colors(cx);
+    let k = theme::colors(cx);
     let state = provider.file_transfer(&download_key(file));
-    let size = size_text(file.size);
-    let detail = match state {
-        Some(s @ TransferState::Running { .. }) => div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .child(Progress::new(id("down")).value(s.percent()).w(px(140.)))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(fill(f::DOWNLOADING, &[("p", &format!("{:.0}", s.percent()))])),
-            )
-            .into_any_element(),
-        Some(TransferState::Failed(e)) => div()
-            .text_xs()
-            .text_color(colors.danger)
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .text_ellipsis()
-            .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
-            .into_any_element(),
-        _ => div()
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(size)
-            .into_any_element(),
+    let plain = fill(
+        f::META,
+        &[("kind", kind_word(file)), ("size", &size_text(file.size))],
+    );
+    let (meta, progress) = match state {
+        Some(s @ TransferState::Running { .. }) => (
+            div()
+                .tnum()
+                .child(format!(
+                    "{} · {}",
+                    size_text(file.size),
+                    fill(f::DOWNLOADING, &[("p", &format!("{:.0}", s.percent()))])
+                ))
+                .into_any_element(),
+            Some(s.percent()),
+        ),
+        Some(TransferState::Failed(e)) => (
+            div()
+                .text_color(k.danger_text)
+                .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
+                .into_any_element(),
+            None,
+        ),
+        _ => (div().child(plain).into_any_element(), None),
     };
-    let running = matches!(state, Some(TransferState::Running { .. }));
+    let running = progress.is_some();
     let failed = matches!(state, Some(TransferState::Failed(_)));
-    let action = |part: &str, label: &'static str, what: OpenAction| {
+    let action = |part: &str, label: &'static str, what: OpenAction, glyph: Lucide| {
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
-        let icon = match (part, what) {
-            ("retry", _) => IconName::RefreshCw,
-            (_, OpenAction::RevealInFinder) => IconName::FolderOpen,
-            _ => IconName::ExternalLink,
-        };
-        let button = Button::new(id(part)).xsmall().ghost();
-        let button = if compact {
-            button.icon(icon).tooltip(label)
-        } else {
-            button.label(label)
-        };
-        button
+        ui::icon_button(id(part), glyph)
+            .tooltip(label)
             .disabled(running)
-            .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
+            .on_click(move |_, _, cx| {
+                cx.stop_propagation();
+                open_file(&provider, &g, &t, &file, what, cx)
+            })
             .into_any_element()
     };
     let actions = if failed {
-        vec![action("retry", f::RETRY, OpenAction::Open)]
+        vec![action(
+            "retry",
+            f::RETRY,
+            OpenAction::Open,
+            Lucide::RefreshCw,
+        )]
+    } else if running {
+        Vec::new()
     } else {
         vec![
-            action("open", f::OPEN, OpenAction::Open),
-            action("reveal", f::REVEAL, OpenAction::RevealInFinder),
+            action("open", f::OPEN, OpenAction::Open, Lucide::ExternalLink),
+            action(
+                "reveal",
+                f::REVEAL,
+                OpenAction::RevealInFinder,
+                Lucide::FolderOpen,
+            ),
         ]
     };
-    row_frame(file, detail, actions, cx).into_any_element()
+    let group = group_name(&id);
+    let provider2 = provider.clone();
+    let (g, t, file2) = (group_id.to_string(), topic_id.to_string(), file.clone());
+    row_frame(group, file, compact, meta, progress, actions, failed, cx)
+        .id(id("frame"))
+        .when(!running, |el| {
+            el.cursor_pointer().on_click(move |_, _, cx| {
+                open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx)
+            })
+        })
+        .into_any_element()
 }
