@@ -21,4 +21,13 @@ crate::copy! {
     DELETE_CONFIRM = "删除这条消息？",
     SET_STATUS = "设置状态",
     TOGGLE_PANEL = "详情",
+    NEW_MESSAGES = "以下是新消息",
+    JUMP_NEW = "{n} 条新消息",
+    JUMP_LATEST = "回到最新",
+    COPY_CODE = "复制代码",
+    QUOTE_UNAVAILABLE = "原消息不在已加载的范围内",
+    MENU_QUOTE = "引用回复",
+    MENU_COPY = "复制",
+    MENU_COPY_LINK = "复制链接",
+    DELETE_CONFIRM_DETAIL = "删除后其他成员只会看到“此消息已删除”。",
 }

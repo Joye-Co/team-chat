@@ -12,6 +12,9 @@
 //!       capture every scene's window in each theme; see `selftest/mod.rs`.
 //!   desktop --selftest-nav --report <path>
 //!       drive the navigation actions and dialogs (views/nav/selftest.rs).
+//!   desktop --selftest-timeline <n> --report <path>
+//!       open a topic with n generated messages, scroll it top to bottom by
+//!       code and write frame times (see views/timeline/selftest.rs).
 
 // The skeleton defines API that the timeline, composer, navigation and
 // chat-core tracks use; unused parts are not warnings yet.
@@ -24,6 +27,7 @@ mod data;
 mod drafts;
 #[allow(dead_code)]
 mod fake;
+mod markdown;
 mod selftest;
 #[allow(dead_code)]
 mod theme;
@@ -46,10 +50,16 @@ use crate::{app::Services, data::ChatProvider};
 /// Exit code set by self-tests before they quit the app.
 static EXIT_CODE: AtomicI32 = AtomicI32::new(0);
 
+/// Sets the exit code a self-test reports when the app quits.
+pub fn set_exit_code(code: i32) {
+    EXIT_CODE.store(code, Ordering::SeqCst);
+}
+
 #[derive(Debug, Default)]
 struct Args {
     selftest_smoke: bool,
     selftest_nav: bool,
+    selftest_timeline: Option<usize>,
     report: Option<PathBuf>,
     signed_out: bool,
     hold_ms: u64,
@@ -62,6 +72,13 @@ fn parse_args() -> Result<Args, String> {
         match arg.as_str() {
             "--selftest-smoke" => args.selftest_smoke = true,
             "--selftest-nav" => args.selftest_nav = true,
+            "--selftest-timeline" => {
+                args.selftest_timeline = Some(
+                    it.next()
+                        .and_then(|v| v.parse().ok())
+                        .ok_or("--selftest-timeline needs a message count")?,
+                )
+            }
             "--report" => args.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--signed-out" => args.signed_out = true,
             "--hold-ms" => {
@@ -74,7 +91,8 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown argument: {other}")),
         }
     }
-    if (args.selftest_smoke || args.selftest_nav) && args.report.is_none() {
+    if (args.selftest_smoke || args.selftest_nav || args.selftest_timeline.is_some())
+        && args.report.is_none() {
         return Err("a self-test needs --report <path>".into());
     }
     Ok(args)
@@ -93,7 +111,7 @@ fn main() {
                 eprintln!("{error}");
             }
             eprintln!(
-                "usage: desktop [--signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]]"
+                "usage: desktop [--signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]"
             );
             std::process::exit(2);
         }
@@ -104,7 +122,9 @@ fn main() {
     application.on_reopen(views::nav::show_main_window);
     application.run(move |cx: &mut App| {
         gpui_kit::init(cx);
-        let provider: Arc<dyn ChatProvider> = if args.signed_out {
+        let provider: Arc<dyn ChatProvider> = if let Some(n) = args.selftest_timeline {
+            views::timeline::selftest::provider(n)
+        } else if args.signed_out {
             fake::FakeProvider::signed_out()
         } else {
             fake::FakeProvider::new()
@@ -112,9 +132,15 @@ fn main() {
         let services = Services::new(provider, cx);
         app::install_menus_and_actions(services.clone(), cx);
         // The smoke test leaves the menu bar alone; the nav test checks the item.
-        views::nav::install(services.clone(), !args.selftest_smoke, cx);
+        views::nav::install(
+            services.clone(),
+            !args.selftest_smoke && args.selftest_timeline.is_none(),
+            cx,
+        );
 
-        if args.selftest_nav {
+        if let Some(n) = args.selftest_timeline {
+            views::timeline::selftest::run(services, n, args.report.clone().unwrap(), cx);
+        } else if args.selftest_nav {
             views::nav::selftest::run(services, args.report.clone().unwrap(), finish, cx);
         } else if args.selftest_smoke {
             run_smoke(

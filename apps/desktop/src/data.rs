@@ -508,6 +508,12 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn send(&self, request: SendRequest) -> ClientMsgId;
     /// Starts a topic whose root is this message.
     fn start_topic(&self, request: StartTopicRequest) -> ClientMsgId;
+    /// Sends a [`SendState::Failed`] message of mine again, with the same
+    /// `client_msg_id` (the server deduplicates on it). Emits
+    /// `Change::Messages`. Providers that can fail a send must implement it.
+    fn retry_send(&self, group_id: &str, client_msg_id: &str) {
+        let _ = (group_id, client_msg_id);
+    }
     /// Replaces the body of my message.
     fn edit(&self, group_id: &str, message_id: &str, body: String);
     /// Deletes my message (or any message, for an owner).

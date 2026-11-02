@@ -1,0 +1,174 @@
+//! Extension point: extra content attached to a message row.
+//!
+//! A row renders, in order: header, the extras placed [`Placement::AboveBody`]
+//! (a quote), the Markdown body, then the extras placed
+//! [`Placement::BelowBody`] (attachments, image previews, 产出 references,
+//! cards). Each extra is one [`MessageExtra`] in [`REGISTRY`].
+//!
+//! To add one: write a unit struct in your own module that implements
+//! [`MessageExtra`], and add `&your_module::YourExtra` to [`REGISTRY`]. The
+//! renderer runs for every visible row on every frame, so it must be cheap and
+//! must never block: read snapshots from the provider (which never waits) and
+//! return `None` when the message has nothing for you. A row's height is
+//! measured with its extras, so content that changes size later (an image
+//! that finishes loading) must keep a fixed box or ask the timeline to
+//! remeasure through a provider change for that topic.
+
+use std::sync::Arc;
+
+use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, div, px};
+
+use crate::{
+    copy::timeline as t,
+    data::{ChatProvider, Member, Message},
+    theme,
+};
+
+/// What an extra can read while it renders.
+pub struct ExtrasContext<'a> {
+    pub provider: &'a Arc<dyn ChatProvider>,
+    pub members: &'a [Member],
+    /// The messages in the timeline window, oldest first (to find a quoted
+    /// message without asking the provider).
+    pub window_messages: &'a [Message],
+    /// My member id.
+    pub me: Option<&'a str>,
+}
+
+impl ExtrasContext<'_> {
+    pub fn member(&self, id: &str) -> Option<&Member> {
+        self.members.iter().find(|m| m.id == id)
+    }
+
+    pub fn message(&self, id: &str) -> Option<&Message> {
+        self.window_messages.iter().find(|m| m.id == id)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Placement {
+    AboveBody,
+    BelowBody,
+}
+
+/// Extra content for a message row.
+pub trait MessageExtra: Sync {
+    fn placement(&self) -> Placement {
+        Placement::BelowBody
+    }
+
+    /// The element to show for `message`, or `None`. Deleted messages are
+    /// never passed in.
+    fn render(
+        &self,
+        message: &Message,
+        ctx: &ExtrasContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement>;
+}
+
+/// Every extra, in display order within its placement.
+pub static REGISTRY: &[&dyn MessageExtra] = &[&QuoteExtra];
+
+/// The extras of `message` for one placement.
+pub fn render(
+    placement: Placement,
+    message: &Message,
+    ctx: &ExtrasContext,
+    window: &mut Window,
+    cx: &mut App,
+) -> Vec<AnyElement> {
+    if message.deleted_at.is_some() {
+        return Vec::new();
+    }
+    REGISTRY
+        .iter()
+        .filter(|extra| extra.placement() == placement)
+        .filter_map(|extra| extra.render(message, ctx, window, cx))
+        .collect()
+}
+
+/// The quoted message above the body: author and the first line.
+pub struct QuoteExtra;
+
+/// Longest quote preview, in characters.
+const QUOTE_CHARS: usize = 120;
+
+impl MessageExtra for QuoteExtra {
+    fn placement(&self) -> Placement {
+        Placement::AboveBody
+    }
+
+    fn render(
+        &self,
+        message: &Message,
+        ctx: &ExtrasContext,
+        _window: &mut Window,
+        cx: &mut App,
+    ) -> Option<AnyElement> {
+        let quoted_id = message.quote_of.as_deref()?;
+        let colors = theme::colors(cx);
+        let (name, text) = match ctx.message(quoted_id) {
+            Some(q) if q.deleted_at.is_some() => (
+                ctx.member(&q.author_id).map(|m| m.name.clone()),
+                t::DELETED.to_string(),
+            ),
+            Some(q) => (
+                ctx.member(&q.author_id).map(|m| m.name.clone()),
+                quote_preview(&q.body),
+            ),
+            None => (None, t::QUOTE_UNAVAILABLE.to_string()),
+        };
+        Some(
+            div()
+                .mb(px(2.))
+                .pl(px(8.))
+                .border_l_2()
+                .border_color(colors.border)
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .flex()
+                .gap(px(4.))
+                .min_w(px(0.))
+                .children(name.map(|n| div().flex_none().child(n)))
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(text),
+                )
+                .into_any_element(),
+        )
+    }
+}
+
+/// The first non-empty line of a body without leading Markdown marks, cut to
+/// [`QUOTE_CHARS`].
+pub fn quote_preview(body: &str) -> String {
+    let line = body
+        .lines()
+        .map(|l| l.trim().trim_start_matches(['#', '>', '-', '*', '`', ' ']))
+        .find(|l| !l.is_empty())
+        .unwrap_or_default();
+    let mut out: String = line.chars().take(QUOTE_CHARS).collect();
+    if line.chars().count() > QUOTE_CHARS {
+        out.push('…');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::quote_preview;
+
+    #[test]
+    fn preview_takes_the_first_text_line() {
+        assert_eq!(quote_preview("\n## 标题\n正文"), "标题");
+        assert_eq!(quote_preview("```\ncargo test\n```"), "cargo test");
+        let long = "字".repeat(200);
+        assert_eq!(quote_preview(&long).chars().count(), 121);
+    }
+}

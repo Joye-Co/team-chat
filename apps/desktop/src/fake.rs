@@ -1064,6 +1064,43 @@ impl ChatProvider for FakeProvider {
         id
     }
 
+    fn retry_send(&self, group_id: &str, client_msg_id: &str) {
+        let topic = self.with(|s| {
+            let key = s.messages.iter().find_map(|((g, t), list)| {
+                (g == group_id
+                    && list.iter().any(|m| {
+                        m.client_msg_id == client_msg_id && m.send_state == SendState::Failed
+                    }))
+                .then(|| (g.clone(), t.clone()))
+            })?;
+            let id = s.id("msg");
+            let group = s.group_mut(group_id)?;
+            group.last_seq += 1;
+            let seq = group.last_seq;
+            let list = s.messages.get_mut(&key)?;
+            let ix = list.iter().position(|m| m.client_msg_id == client_msg_id)?;
+            let mut m = list.remove(ix);
+            m.id = id;
+            m.created_seq = seq;
+            m.send_state = SendState::Sent;
+            list.push(m);
+            if let Some(t) = s
+                .topics
+                .iter_mut()
+                .find(|t| t.id == key.1 && t.group_id == key.0)
+            {
+                t.last_seq = seq;
+            }
+            Some(key.1)
+        });
+        if let Some(topic_id) = topic {
+            self.emit(vec![Change::Messages {
+                group_id: group_id.into(),
+                topic_id,
+            }]);
+        }
+    }
+
     fn edit(&self, group_id: &str, message_id: &str, body: String) {
         let topic = self.with(|s| {
             for ((g, t), list) in s.messages.iter_mut() {

@@ -1,38 +1,134 @@
 //! The topic view: header (title, status chip, panel toggle) and the message
-//! timeline. The timeline is a GPUI `list` (variable row heights, virtualized,
-//! anchored at the bottom). It keeps a window of the newest messages and grows
-//! it with `load_older`.
+//! timeline.
+//!
+//! The timeline is a GPUI `list` (variable row heights, virtualized, anchored
+//! at the bottom, following the tail). GPUI's list keeps the measured height
+//! of every row in a sum tree; rows that were not measured yet carry an
+//! estimate ([`EST_ROW_HEIGHT`]), and a changed row is remeasured with its old
+//! height as the estimate, so edits, acks and streaming keep the scroll
+//! position. Message windows are turned into list updates by
+//! [`model::diff`].
+//!
+//! Memory: only a window of the newest messages is held ([`WINDOW`] rows, more
+//! while the user reads older ones). Near the top the window grows by
+//! [`PAGE`] (from the provider's cache, or with `load_older`); back at the
+//! bottom it shrinks to [`WINDOW`] again.
+//!
+//! Extension points: [`extras`] (content attached to a row) and the row
+//! context menu in `timeline/menu.rs`. Quote replies are emitted as
+//! [`TimelineEvent::Quote`] for the composer.
+
+pub mod extras;
+mod menu;
+mod model;
+mod row;
+pub mod selftest;
+
+use std::{
+    cell::Cell,
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use gpui::{
-    Context, Entity, InteractiveElement, IntoElement, ListAlignment, ListState, ParentElement,
-    Render, Styled, Subscription, Window, div, list, prelude::FluentBuilder as _, px,
+    AnyElement, Context, Entity, EventEmitter, FollowMode, InteractiveElement, IntoElement,
+    ListAlignment, ListState, ParentElement, Pixels, Render, Styled, Subscription, Window, div,
+    list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
     button::{Button, ButtonVariants as _},
+    input::TextareaState,
 };
 
 use crate::{
     app::{Changes, Services},
     copy::{fill, timeline as t},
-    data::{Change, GroupId, Member, Message, MessageWindow, SendState, Topic, TopicId},
+    data::{
+        Change, GroupId, Member, MemberLevel, Message, MessageId, SessionState, Topic, TopicId,
+    },
     theme,
-    views::{avatar, status_chip, time_text},
+    views::status_chip,
 };
 
-/// Messages read from the provider when a topic opens.
+use model::ListOp;
+
+/// Messages kept in memory while the user is at the bottom.
 pub const WINDOW: usize = 100;
+/// Messages added to the window when the user nears its top.
+pub const PAGE: usize = 100;
+/// Grow the window when the first visible row is closer than this to its top.
+const LOAD_AHEAD: usize = 30;
+/// Height estimate of a row that was not measured yet.
+pub const EST_ROW_HEIGHT: Pixels = px(56.);
+/// While a message streams, the timeline refreshes at most this often.
+const STREAM_REFRESH: Duration = Duration::from_millis(100);
+
+/// Events for other views.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TimelineEvent {
+    /// The user chose 引用回复 on a message: the composer should quote it
+    /// (`SendRequest::quote_of`).
+    Quote {
+        group_id: GroupId,
+        topic_id: TopicId,
+        message_id: MessageId,
+    },
+}
+
+/// A message being edited in place.
+struct Editing {
+    key: String,
+    message_id: MessageId,
+    input: Entity<TextareaState>,
+    _subscription: Subscription,
+}
+
+/// Paint times, for the timeline self-test.
+#[derive(Default)]
+pub struct FrameProbe {
+    /// When the timeline finished painting its last frame.
+    pub painted: Cell<Option<Instant>>,
+}
 
 pub struct TimelineView {
     services: Services,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
-    window: MessageWindow,
     members: Vec<Member>,
+    me: Option<String>,
+    i_am_owner: bool,
     typing: Vec<String>,
+    /// The window in memory, oldest first.
+    messages: Vec<Message>,
+    /// Older messages exist (in the provider, or trimmed from the window).
+    has_older: bool,
+    /// What the provider returned last time (before trimming).
+    provider_len: usize,
+    provider_has_older: bool,
+    provider_loading: bool,
+    /// How many of the newest messages the window holds.
+    wanted: usize,
+    /// A grow of the window is running; cleared when it lands.
+    older_requested: bool,
+    /// The first unread message when the topic opened.
+    divider_key: Option<String>,
+    /// Messages that arrived while the user was scrolled up.
+    new_below: usize,
     list: ListState,
+    /// End of the visible range from the last user scroll.
+    visible_end: Rc<Cell<usize>>,
+    /// Highest seq this view already marked read.
+    marked_seq: u64,
+    last_refresh: Option<Instant>,
+    refresh_scheduled: bool,
+    editing: Option<Editing>,
+    probe: Option<Rc<FrameProbe>>,
+    activation: Option<Subscription>,
     _subscriptions: Vec<Subscription>,
 }
+
+impl EventEmitter<TimelineEvent> for TimelineView {}
 
 impl TimelineView {
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
@@ -43,197 +139,307 @@ impl TimelineView {
                 };
                 let touches = changes.touches_topic(&g, &tid)
                     || changes.any(|c| matches!(c, Change::Topics { group_id } if *group_id == g))
-                    || changes.any(|c| matches!(c, Change::Members));
+                    || changes.any(|c| matches!(c, Change::Members | Change::Session));
                 if touches {
-                    this.refresh(cx);
-                    cx.notify();
+                    this.on_changes(cx);
                 }
             }),
             cx.observe(&services.nav, |this, nav, cx| {
                 let open = nav.read(cx).topic.clone();
                 if open != this.open {
-                    this.open = open;
-                    this.window = MessageWindow::default();
-                    this.list.reset(0);
-                    this.refresh(cx);
+                    this.open_topic(open, cx);
                 }
                 cx.notify();
             }),
         ];
-        let open = services.nav.read(cx).topic.clone();
+        let list = ListState::new(0, ListAlignment::Bottom, px(800.));
+        list.set_follow_mode(FollowMode::Tail);
+        let visible_end: Rc<Cell<usize>> = Rc::default();
+        let end = visible_end.clone();
+        list.set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
         let mut this = Self {
             services,
-            open,
+            open: None,
             topic: None,
-            window: MessageWindow::default(),
             members: Vec::new(),
+            me: None,
+            i_am_owner: false,
             typing: Vec::new(),
-            list: ListState::new(0, ListAlignment::Bottom, px(800.)),
+            messages: Vec::new(),
+            has_older: false,
+            provider_len: 0,
+            provider_has_older: false,
+            provider_loading: false,
+            wanted: WINDOW,
+            older_requested: false,
+            divider_key: None,
+            new_below: 0,
+            list,
+            visible_end,
+            marked_seq: 0,
+            last_refresh: None,
+            refresh_scheduled: false,
+            editing: None,
+            probe: None,
+            activation: None,
             _subscriptions: subscriptions,
         };
-        this.refresh(cx);
+        let open = this.services.nav.read(cx).topic.clone();
+        this.open_topic(open, cx);
         this
-    }
-
-    /// Re-reads the snapshot of the open topic and updates the list in place.
-    fn refresh(&mut self, _cx: &mut Context<Self>) {
-        let p = self.services.provider.clone();
-        let Some((g, tid)) = self.open.clone() else {
-            self.topic = None;
-            self.window = MessageWindow::default();
-            self.list.reset(0);
-            return;
-        };
-        self.members = p.members();
-        self.topic = p.topic(&g, &tid);
-        self.typing = p.typing(&g, &tid);
-        let limit = self.window.messages.len().max(WINDOW);
-        let new = p.messages(&g, &tid, limit);
-        let old = std::mem::take(&mut self.window);
-        apply_window_change(&self.list, &old.messages, &new.messages);
-        self.window = new;
-        if let Some(topic) = &self.topic
-            && topic.unread > 0
-        {
-            p.mark_read(&g, &tid, topic.last_seq);
-        }
     }
 
     /// Number of messages in the window (for self-tests).
     pub fn message_count(&self) -> usize {
-        self.window.messages.len()
+        self.messages.len()
     }
 
-    fn load_older(&mut self, cx: &mut Context<Self>) {
-        if let Some((g, tid)) = &self.open {
-            self.services.provider.load_older(g, tid);
+    fn open_topic(&mut self, open: Option<(GroupId, TopicId)>, cx: &mut Context<Self>) {
+        self.open = open;
+        self.messages.clear();
+        self.list.reset(0);
+        self.list.set_follow_mode(FollowMode::Tail);
+        self.visible_end.set(0);
+        self.wanted = WINDOW;
+        self.has_older = false;
+        self.provider_len = 0;
+        self.provider_has_older = false;
+        self.provider_loading = false;
+        self.older_requested = false;
+        self.new_below = 0;
+        self.marked_seq = 0;
+        self.editing = None;
+        self.refresh(cx);
+        let me = self.me.clone();
+        self.divider_key = self
+            .topic
+            .as_ref()
+            .and_then(|topic| model::first_unread_key(&self.messages, topic.unread, me.as_deref()));
+    }
+
+    /// A provider change for this topic: refresh now, or within
+    /// [`STREAM_REFRESH`] while a message streams.
+    fn on_changes(&mut self, cx: &mut Context<Self>) {
+        let streaming = self.messages.iter().rev().any(|m| m.streaming);
+        if streaming && let Some(last) = self.last_refresh {
+            let since = last.elapsed();
+            if since < STREAM_REFRESH {
+                if !self.refresh_scheduled {
+                    self.refresh_scheduled = true;
+                    let wait = STREAM_REFRESH - since;
+                    cx.spawn(async move |this, cx| {
+                        cx.background_executor().timer(wait).await;
+                        let _ = this.update(cx, |this, cx| {
+                            this.refresh_scheduled = false;
+                            this.refresh(cx);
+                            cx.notify();
+                        });
+                    })
+                    .detach();
+                }
+                return;
+            }
         }
+        self.refresh(cx);
         cx.notify();
     }
 
-    fn render_message(&self, message: &Message, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
-        let author = self.members.iter().find(|m| m.id == message.author_id);
-        let name = author.map(|m| m.name.clone()).unwrap_or_default();
-        let deleted = message.deleted_at.is_some();
-        let state = match message.send_state {
-            SendState::Sent => None,
-            SendState::Pending => Some((t::PENDING, colors.muted_foreground)),
-            SendState::Failed => Some((t::FAILED, colors.danger)),
+    /// Re-reads the snapshot of the open topic and updates the list in place.
+    fn refresh(&mut self, _cx: &mut Context<Self>) {
+        self.last_refresh = Some(Instant::now());
+        let p = self.services.provider.clone();
+        let Some((g, tid)) = self.open.clone() else {
+            self.topic = None;
+            self.messages.clear();
+            self.list.reset(0);
+            return;
         };
-        div()
-            .px(px(16.))
-            .py(px(6.))
-            .flex()
-            .gap(px(10.))
-            .child(avatar(author, theme::AVATAR_SIZE, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(6.))
-                            .text_xs()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(gpui::FontWeight::SEMIBOLD)
-                                    .child(name),
-                            )
-                            .when_some(author.and_then(|a| a.role.clone()), |el, role| {
-                                el.child(div().text_color(colors.muted_foreground).child(role))
-                            })
-                            .child(
-                                div()
-                                    .text_color(colors.muted_foreground)
-                                    .child(time_text(message.created_at)),
-                            )
-                            .when(message.edited_at.is_some() && !deleted, |el| {
-                                el.child(div().text_color(colors.muted_foreground).child(t::EDITED))
-                            })
-                            .when_some(state, |el, (text, color)| {
-                                el.child(div().text_color(color).child(text))
-                            }),
-                    )
-                    .child(if deleted {
-                        div()
-                            .text_sm()
-                            .italic()
-                            .text_color(colors.muted_foreground)
-                            .child(t::DELETED)
-                    } else {
-                        div().text_sm().child(message.body.clone())
-                    })
-                    .when(message.streaming, |el| {
-                        el.child(
-                            div()
-                                .text_xs()
-                                .text_color(colors.muted_foreground)
-                                .child(t::STREAMING),
-                        )
-                    }),
-            )
-    }
-}
+        match p.session() {
+            SessionState::SignedIn { me, .. } => {
+                self.i_am_owner = me.level == MemberLevel::Owner;
+                self.me = Some(me.id);
+            }
+            _ => {
+                self.me = None;
+                self.i_am_owner = false;
+            }
+        }
+        self.members = p.members();
+        self.topic = p.topic(&g, &tid);
+        self.typing = p.typing(&g, &tid);
 
-/// Updates `list` for a new window: prepends, appends and changed rows become
-/// splices so the scroll position holds; anything else resets the list.
-fn apply_window_change(list: &ListState, old: &[Message], new: &[Message]) {
-    let same = |a: &Message, b: &Message| a.client_msg_id == b.client_msg_id;
-    if old.is_empty() || new.is_empty() {
-        list.reset(new.len());
-        return;
-    }
-    let Some(start) = new.iter().position(|m| same(m, &old[0])) else {
-        list.reset(new.len());
-        return;
-    };
-    if new.len() < start + old.len() || !old.iter().zip(&new[start..]).all(|(a, b)| same(a, b)) {
-        list.reset(new.len());
-        return;
-    }
-    // Changed rows (edit, delete, ack, stream) are measured again.
-    for (ix, (a, b)) in old.iter().zip(&new[start..]).enumerate() {
-        if a != b {
-            list.splice(ix..ix + 1, 1);
+        let following = self.list.is_following_tail();
+        let window = p.messages(&g, &tid, self.wanted);
+        let was_loading = self.provider_loading;
+        self.provider_len = window.messages.len();
+        self.provider_has_older = window.has_older;
+        self.provider_loading = window.loading_older;
+        let mut messages = window.messages;
+        let mut has_older = window.has_older;
+        if messages.len() > self.wanted {
+            messages.drain(..messages.len() - self.wanted);
+            has_older = true;
+        }
+
+        let old_first = self.messages.first().map(|m| model::key(m).to_string());
+        let appended = model::appended(&self.messages, &messages);
+        let me = self.me.as_deref();
+        let mine_appended = messages[messages.len() - appended..]
+            .iter()
+            .any(|m| Some(m.author_id.as_str()) == me);
+        let others_appended = messages[messages.len() - appended..]
+            .iter()
+            .filter(|m| Some(m.author_id.as_str()) != me)
+            .count();
+        let ops = model::diff(&self.messages, &messages);
+        self.apply(&ops);
+        let grew_at_top =
+            old_first.is_some() && messages.first().map(model::key) != old_first.as_deref();
+        self.messages = messages;
+        self.has_older = has_older;
+        if grew_at_top || !has_older || (was_loading && !self.provider_loading) {
+            self.older_requested = false;
+        }
+
+        if mine_appended {
+            // My own new message: show it.
+            self.jump_to_latest();
+        } else if !following && appended > 0 {
+            self.new_below += others_appended;
+            // Keep what the user reads in the window.
+            self.wanted += appended;
+        }
+        if let Some(editing) = &self.editing
+            && !self
+                .messages
+                .iter()
+                .any(|m| model::key(m) == editing.key && m.deleted_at.is_none())
+        {
+            self.editing = None;
         }
     }
-    let appended = new.len() - start - old.len();
-    if appended > 0 {
-        list.splice(old.len()..old.len(), appended);
-    }
-    if start > 0 {
-        list.splice(0..0, start);
-    }
-}
 
-impl Render for TimelineView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
-        let Some(topic) = self.topic.clone() else {
-            let hint = if self.services.nav.read(cx).current_group().is_some() {
-                t::NEW_TOPIC_HINT
-            } else {
-                t::SELECT_TOPIC
-            };
-            return div()
-                .size_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(colors.muted_foreground)
-                .child(hint)
-                .into_any_element();
+    fn apply(&self, ops: &[ListOp]) {
+        let mut estimate = false;
+        for op in ops {
+            match op {
+                ListOp::Reset(count) => {
+                    self.list.reset(*count);
+                    estimate = true;
+                }
+                ListOp::Splice { range, count } => {
+                    self.list.splice(range.clone(), *count);
+                    estimate |= *count > 1;
+                }
+                ListOp::Remeasure(ix) => self.list.remeasure_items(*ix..*ix + 1),
+            }
+        }
+        if estimate {
+            // Rows not measured yet get a non-zero height estimate.
+            let _ = self.list.clone().with_uniform_item_height(EST_ROW_HEIGHT);
+        }
+    }
+
+    fn jump_to_latest(&mut self) {
+        self.new_below = 0;
+        self.list.set_follow_mode(FollowMode::Tail);
+        self.list.scroll_to_end();
+    }
+
+    /// Grows the window by one page (from the cache, or by asking the
+    /// provider for the page before it).
+    fn grow_window(&mut self, cx: &mut Context<Self>) {
+        self.wanted += PAGE;
+        if self.provider_len < self.wanted
+            && self.provider_has_older
+            && !self.provider_loading
+            && let Some((g, t)) = &self.open
+        {
+            self.services.provider.load_older(g, t);
+        }
+        self.refresh(cx);
+        cx.notify();
+    }
+
+    /// Back at the bottom: drop the old rows the user scrolled through.
+    fn shrink_window(&mut self, cx: &mut Context<Self>) {
+        if self.wanted > WINDOW && self.list.is_following_tail() {
+            self.wanted = WINDOW;
+            self.refresh(cx);
+            cx.notify();
+        }
+    }
+
+    /// Work that depends on where the list is scrolled: grow or shrink the
+    /// window, reset the new-message count, mark read.
+    fn after_scroll(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.messages.is_empty() {
+            return;
+        }
+        let following = self.list.is_following_tail();
+        let top = self.list.logical_scroll_top().item_ix;
+        if self.has_older && !self.older_requested && top < LOAD_AHEAD && !following
+            || self.has_older && !self.older_requested && self.messages.len() < LOAD_AHEAD
+        {
+            self.older_requested = true;
+            cx.defer_in(window, |this, _, cx| this.grow_window(cx));
+        }
+        if following {
+            self.new_below = 0;
+            if self.wanted > WINDOW && self.messages.len() > WINDOW + PAGE {
+                cx.defer_in(window, |this, _, cx| this.shrink_window(cx));
+            }
+        }
+        self.mark_read(following, window);
+    }
+
+    /// Marks read up to the newest visible message while the window is active.
+    fn mark_read(&mut self, following: bool, window: &Window) {
+        let (Some((g, tid)), Some(topic)) = (&self.open, &self.topic) else {
+            return;
         };
-        let me = self.services.me();
-        let header = div()
+        if topic.unread == 0 || !window.is_window_active() {
+            return;
+        }
+        let seq = if following {
+            topic.last_seq
+        } else {
+            let end = self.visible_end.get().min(self.messages.len());
+            self.messages[..end]
+                .iter()
+                .map(|m| m.created_seq)
+                .max()
+                .unwrap_or(0)
+        };
+        if seq > self.marked_seq {
+            self.marked_seq = seq;
+            self.services.provider.mark_read(g, tid, seq);
+        }
+    }
+
+    fn quote(&mut self, message: &Message, cx: &mut Context<Self>) {
+        cx.emit(TimelineEvent::Quote {
+            group_id: message.group_id.clone(),
+            topic_id: message.topic_id.clone(),
+            message_id: message.id.clone(),
+        });
+    }
+
+    fn row_index(&self, key: &str) -> Option<usize> {
+        self.messages.iter().rposition(|m| model::key(m) == key)
+    }
+
+    fn remeasure_key(&self, key: &str) {
+        if let Some(ix) = self.row_index(key) {
+            self.list.remeasure_items(ix..ix + 1);
+        }
+    }
+
+    fn render_header(&self, topic: &Topic, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = theme::colors(cx);
+        div()
             .h(px(48.))
+            .flex_none()
             .px(px(16.))
             .flex()
             .items_center()
@@ -249,7 +455,7 @@ impl Render for TimelineView {
                     .child(topic.title.clone()),
             )
             .when_some(
-                status_chip(&topic, me.as_deref(), &self.members, cx),
+                status_chip(topic, self.me.as_deref(), &self.members, cx),
                 |el, chip| el.child(chip),
             )
             .child(
@@ -272,27 +478,11 @@ impl Render for TimelineView {
                             .nav
                             .update(cx, |nav, cx| nav.toggle_side_panel(cx))
                     })),
-            );
-
-        let older = if self.window.has_older {
-            Some(
-                div().flex().justify_center().py(px(4.)).child(
-                    Button::new("load-older")
-                        .small()
-                        .ghost()
-                        .label(if self.window.loading_older {
-                            t::LOADING_OLDER
-                        } else {
-                            t::LOAD_OLDER
-                        })
-                        .on_click(cx.listener(|this, _, _, cx| this.load_older(cx))),
-                ),
             )
-        } else {
-            None
-        };
+    }
 
-        let typing = match self.typing.as_slice() {
+    fn typing_text(&self) -> Option<String> {
+        match self.typing.as_slice() {
             [] => None,
             [one] => {
                 let name = self
@@ -304,33 +494,102 @@ impl Render for TimelineView {
                 Some(fill(t::TYPING_ONE, &[("name", &name)]))
             }
             many => Some(fill(t::TYPING_MANY, &[("n", &many.len().to_string())])),
+        }
+    }
+
+    fn probe_element(&self) -> Option<AnyElement> {
+        self.probe
+            .clone()
+            .map(|p| selftest::PaintProbe(p).into_any_element())
+    }
+}
+
+impl Render for TimelineView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.activation.is_none() {
+            self.activation = Some(cx.observe_window_activation(window, |_, _, cx| cx.notify()));
+        }
+        let colors = theme::colors(cx);
+        let Some(topic) = self.topic.clone() else {
+            let hint = if self.services.nav.read(cx).current_group().is_some() {
+                t::NEW_TOPIC_HINT
+            } else {
+                t::SELECT_TOPIC
+            };
+            return div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_color(colors.muted_foreground)
+                .child(hint)
+                .children(self.probe_element())
+                .into_any_element();
         };
+        self.after_scroll(window, cx);
 
         let view: Entity<Self> = cx.entity();
-        let timeline = list(self.list.clone(), move |ix, _window, cx| {
-            view.update(cx, |this, cx| match this.window.messages.get(ix).cloned() {
-                Some(m) => this.render_message(&m, cx).into_any_element(),
-                None => div().into_any_element(),
-            })
+        let timeline = list(self.list.clone(), move |ix, window, cx| {
+            view.update(cx, |this, cx| this.render_row(ix, window, cx))
         })
-        .flex_1();
+        .size_full();
+
+        let following = self.list.is_following_tail();
+        let jump = (!following && !self.messages.is_empty()).then(|| {
+            let label = if self.new_below > 0 {
+                fill(t::JUMP_NEW, &[("n", &self.new_below.to_string())])
+            } else {
+                t::JUMP_LATEST.to_string()
+            };
+            div().absolute().bottom(px(12.)).right(px(16.)).child(
+                Button::new("jump-latest")
+                    .small()
+                    .primary()
+                    .label(label)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.jump_to_latest();
+                        cx.notify();
+                    })),
+            )
+        });
+        let loading = (self.provider_loading && self.has_older).then(|| {
+            div()
+                .absolute()
+                .top(px(4.))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .text_xs()
+                .text_color(colors.muted_foreground)
+                .child(t::LOADING_OLDER)
+        });
 
         div()
             .id("timeline")
             .size_full()
             .flex()
             .flex_col()
-            .child(header)
-            .when_some(older, |el, b| el.child(b))
-            .child(timeline)
+            .child(self.render_header(&topic, cx))
+            .child(
+                div()
+                    .relative()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .child(timeline)
+                    .children(loading)
+                    .children(jump),
+            )
             .child(
                 div()
                     .h(px(18.))
+                    .flex_none()
                     .px(px(16.))
                     .text_xs()
                     .text_color(colors.muted_foreground)
-                    .when_some(typing, |el, text| el.child(text)),
+                    .when_some(self.typing_text(), |el, text| el.child(text)),
             )
+            .children(self.probe_element())
             .into_any_element()
     }
 }
