@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::entities::{Millis, Seq};
-use crate::limits::{Validation, ValidationError, check_name};
+use crate::limits::{Validation, ValidationError, check_chars, check_name};
 use crate::machine::{CliInfo, Health, RunLogEntry};
 use crate::serde_util::non_null;
 
@@ -45,7 +45,45 @@ pub enum RunStatus {
     Cancelled,
 }
 
-/// One run of a runner-backed bot in a topic.
+/// Max items of a run plan.
+pub const MAX_PLAN_ITEMS: usize = 30;
+/// Max length of one plan item's text, in Unicode code points (as a topic title).
+pub const MAX_PLAN_TEXT_CHARS: usize = 200;
+
+/// The state of one plan item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RunPlanState {
+    /// Finished.
+    Done,
+    /// The bot works on it now.
+    Current,
+    /// Waits for a member (an answer, a review).
+    Waiting,
+    /// Later.
+    Pending,
+}
+
+/// One item of a run plan: the bot's ordered to-do list.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPlanItem {
+    pub text: String,
+    pub state: RunPlanState,
+}
+
+/// A plan has at most 30 items, each with 1..200 characters of text.
+pub fn check_plan(field: &'static str, plan: &[RunPlanItem]) -> Validation {
+    if plan.len() > MAX_PLAN_ITEMS {
+        return fail(field, format!("at most {MAX_PLAN_ITEMS} items"));
+    }
+    for item in plan {
+        check_chars(field, &item.text, 1, MAX_PLAN_TEXT_CHARS)?;
+    }
+    Ok(())
+}
+
+/// One run of a bot in a topic: a runner-backed run, or one an external bot started.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BotRun {
@@ -86,6 +124,84 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub summary: Option<String>,
+    /// The latest plan the bot or its runner set; absent when there is none.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub plan: Option<Vec<RunPlanItem>>,
+}
+
+/// `POST /v1/runs` (a bot that is not runner-backed): starts a run of the calling bot in the
+/// topic, or returns its active run there. `plan`, when given, replaces the plan.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StartRunRequest {
+    pub group_id: String,
+    pub topic_id: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub plan: Option<Vec<RunPlanItem>>,
+}
+
+impl StartRunRequest {
+    pub fn validate(&self) -> Validation {
+        crate::limits::check_id("groupId", &self.group_id)?;
+        crate::limits::check_id("topicId", &self.topic_id)?;
+        match &self.plan {
+            Some(p) => check_plan("plan", p),
+            None => Ok(()),
+        }
+    }
+}
+
+/// `PUT /v1/runs/:id/plan` (the run's bot): replaces the whole plan of an active run.
+/// An empty list clears it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRunPlanRequest {
+    pub plan: Vec<RunPlanItem>,
+}
+
+impl SetRunPlanRequest {
+    pub fn validate(&self) -> Validation {
+        check_plan("plan", &self.plan)
+    }
+}
+
+/// How an external bot ends its run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EndRunStatus {
+    Done,
+    Failed,
+    Cancelled,
+}
+
+/// `POST /v1/runs/:id/end` (the run's bot, runs started with `POST /v1/runs` only).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EndRunRequest {
+    pub status: EndRunStatus,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub summary: Option<String>,
+}
+
+impl EndRunRequest {
+    pub fn validate(&self) -> Validation {
+        match &self.summary {
+            Some(s) => check_chars("summary", s, 0, 280),
+            None => Ok(()),
+        }
+    }
 }
 
 /// Data of the `run.updated` group event (`actorId` = the bot).

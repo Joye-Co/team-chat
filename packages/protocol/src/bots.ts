@@ -3,9 +3,11 @@
 import { z } from "zod";
 import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
 import { CliInfo, Health, Labels, RunLogEntry } from "./machine.ts";
+import { RunPlan } from "./plan.ts";
 
 export const RunStatus = z.enum(["created", "running", "waiting", "blocked", "done", "failed", "cancelled"]);
 export type RunStatus = z.infer<typeof RunStatus>;
+
 
 /** One run of a runner-backed bot in a topic. */
 export const BotRun = z.object({
@@ -24,6 +26,8 @@ export const BotRun = z.object({
   updatedAt: Millis,
   /** Short plain-text note: the result's first line, or why the run stopped. At most 280. */
   summary: z.string().max(280).optional(),
+  /** The latest plan the bot or its runner set; absent when there is none. */
+  plan: RunPlan.optional(),
 });
 export type BotRun = z.infer<typeof BotRun>;
 
@@ -46,6 +50,24 @@ export type RunEventsResponse = z.infer<typeof RunEventsResponse>;
 
 /** `GET /v1/runs/:id` */
 export const RunResponse = BotRun;
+
+/**
+ * `POST /v1/runs` (a bot that is not runner-backed, member of the group): starts a run of the
+ * calling bot in the topic, or returns its active run there. `plan`, when given, replaces the plan.
+ */
+export const StartRunRequest = z.object({ groupId: Id, topicId: Id, plan: RunPlan.optional() });
+export type StartRunRequest = z.infer<typeof StartRunRequest>;
+
+/** `PUT /v1/runs/:id/plan` (the run's bot): replaces the whole plan of an active run. */
+export const SetRunPlanRequest = z.object({ plan: RunPlan });
+export type SetRunPlanRequest = z.infer<typeof SetRunPlanRequest>;
+
+/** `POST /v1/runs/:id/end` (the run's bot, runs started with `POST /v1/runs` only). */
+export const EndRunRequest = z.object({
+  status: z.enum(["done", "failed", "cancelled"]),
+  summary: z.string().max(280).optional(),
+});
+export type EndRunRequest = z.infer<typeof EndRunRequest>;
 
 // ---------------------------------------------------------------------------
 // Runner-backed bots

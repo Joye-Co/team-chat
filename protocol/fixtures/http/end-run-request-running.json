@@ -1,0 +1,8 @@
+{
+  "kind": "EndRunRequest",
+  "valid": false,
+  "description": "only done, failed or cancelled end a run",
+  "value": {
+    "status": "running"
+  }
+}

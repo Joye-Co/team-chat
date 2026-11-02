@@ -1,0 +1,8 @@
+{
+  "kind": "StartRunRequest",
+  "valid": false,
+  "description": "missing topicId",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A"
+  }
+}

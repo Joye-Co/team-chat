@@ -973,6 +973,7 @@ fn bot_run(id: &str, topic: &str, status: RunStatus, updated: u64) -> BotRun {
         ended_at: None,
         updated_at: updated,
         summary: None,
+        plan: None,
     }
 }
 

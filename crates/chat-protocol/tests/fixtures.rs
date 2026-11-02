@@ -47,7 +47,10 @@ check!(
     HookInRequest,
     PostMessageRequest,
     SetBotRunnerRequest,
-    CreateMachineRequest
+    CreateMachineRequest,
+    StartRunRequest,
+    SetRunPlanRequest,
+    EndRunRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -130,6 +133,10 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("RunEventsResponse", plain::<RunEventsResponse>),
     ("SetBotRunnerRequest", validated::<SetBotRunnerRequest>),
     ("BotRunner", plain::<BotRunner>),
+    ("RunPlan", plain::<Vec<RunPlanItem>>),
+    ("StartRunRequest", validated::<StartRunRequest>),
+    ("SetRunPlanRequest", validated::<SetRunPlanRequest>),
+    ("EndRunRequest", validated::<EndRunRequest>),
     ("Machine", plain::<Machine>),
     ("CreateMachineRequest", validated::<CreateMachineRequest>),
     ("CreateMachineResponse", plain::<CreateMachineResponse>),

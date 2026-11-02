@@ -1,0 +1,25 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "plan",
+    "items": [
+      {
+        "text": "读失败的测试",
+        "state": "done"
+      },
+      {
+        "text": "修 sync 的重连",
+        "state": "current"
+      },
+      {
+        "text": "等 Joye 审 PR",
+        "state": "waiting"
+      },
+      {
+        "text": "合并",
+        "state": "pending"
+      }
+    ]
+  }
+}

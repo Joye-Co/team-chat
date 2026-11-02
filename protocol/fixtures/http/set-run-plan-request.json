@@ -1,0 +1,24 @@
+{
+  "kind": "SetRunPlanRequest",
+  "valid": true,
+  "value": {
+    "plan": [
+      {
+        "text": "写标题和正文",
+        "state": "done"
+      },
+      {
+        "text": "生成 3 张配图",
+        "state": "done"
+      },
+      {
+        "text": "等 Joye 确认",
+        "state": "waiting"
+      },
+      {
+        "text": "周四 20:00 发出",
+        "state": "pending"
+      }
+    ]
+  }
+}

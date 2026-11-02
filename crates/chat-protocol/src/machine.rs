@@ -219,6 +219,11 @@ pub enum RunEvent {
     },
     #[serde(rename = "input.accepted", rename_all = "camelCase")]
     InputAccepted { input_id: String },
+    /// The CLI's to-do list (Claude Code TodoWrite, Codex plan updates); replaces the run plan.
+    #[serde(rename = "plan", rename_all = "camelCase")]
+    Plan {
+        items: Vec<crate::bots::RunPlanItem>,
+    },
     /// state: "preparing" | "running" | "retrying" | "stalled" | "warning" | "error"
     #[serde(rename = "status", rename_all = "camelCase")]
     Status {

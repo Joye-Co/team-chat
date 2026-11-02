@@ -1,0 +1,13 @@
+{
+  "kind": "SetRunPlanRequest",
+  "valid": false,
+  "description": "provider state names are not plan states",
+  "value": {
+    "plan": [
+      {
+        "text": "x",
+        "state": "in_progress"
+      }
+    ]
+  }
+}

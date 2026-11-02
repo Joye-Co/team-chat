@@ -119,6 +119,7 @@ RunEvent =
   | { type: "approval.request", approvalId, itemId?, title, detail? }   // answer with run.approval
   | { type: "approval.resolved", approvalId, decision: "approve" | "deny" }
   | { type: "input.accepted",   inputId }                               // the CLI took this run.input
+  | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md)
   | { type: "status",           state: "preparing" | "running" | "retrying" | "stalled" | "error", message? }
 ```
 
@@ -126,6 +127,13 @@ RunEvent =
 - `status: "stalled"` is sent once after `stall_minutes` (default 5) without any event; the
   next event clears it. BotDesk uses it for the topic's stuck state.
 - `tool.result.itemId` equals the `tool.call.itemId` it answers.
+- `plan` carries the CLI's own to-do list, mapped by the daemon: Claude Code's `TodoWrite` tool
+  input (`todos[].content`, `status` `completed` -> `done`, `in_progress` -> `current`,
+  `pending` -> `pending`) and Codex's `turn/plan/updated` notification (`plan[].step`, `status`
+  `completed` -> `done`, `inProgress` -> `current`, `pending` -> `pending`). The daemon cuts each
+  text to 200 characters, keeps the first 30 items, drops empty texts, and sends a plan only
+  when it differs from the last one it sent for the run. The tool call itself is still sent as
+  `tool.call`.
 
 ## Sequence numbers, acks and replay
 

@@ -59,7 +59,11 @@ import {
   RunEventsResponse,
   RunUpdatedEvent,
   SetBotRunnerRequest,
+  StartRunRequest,
+  SetRunPlanRequest,
+  EndRunRequest,
 } from "./bots.ts";
+import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
 
 export * from "./common.ts";
@@ -78,6 +82,7 @@ export * from "./hooks.ts";
 export * from "./audit.ts";
 export * from "./machine.ts";
 export * from "./bots.ts";
+export * from "./plan.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -622,6 +627,10 @@ export const schemas = {
   RunEventsResponse,
   SetBotRunnerRequest,
   BotRunner,
+  RunPlan,
+  StartRunRequest,
+  SetRunPlanRequest,
+  EndRunRequest,
   Machine,
   CreateMachineRequest,
   CreateMachineResponse,

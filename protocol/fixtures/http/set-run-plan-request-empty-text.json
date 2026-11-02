@@ -1,0 +1,13 @@
+{
+  "kind": "SetRunPlanRequest",
+  "valid": false,
+  "description": "empty item text",
+  "value": {
+    "plan": [
+      {
+        "text": "",
+        "state": "pending"
+      }
+    ]
+  }
+}

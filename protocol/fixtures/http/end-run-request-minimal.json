@@ -1,0 +1,7 @@
+{
+  "kind": "EndRunRequest",
+  "valid": true,
+  "value": {
+    "status": "failed"
+  }
+}

@@ -62,6 +62,34 @@ export function addBotsFixtures({ ok, bad, T0, ID, base }: BotsCtx) {
   ok("events/run.updated.json", "Event", { ...base, actorId: ID.bot, type: "run.updated", data: { run } });
   ok("events/run.updated-waiting.json", "Event", { ...base, actorId: ID.bot, type: "run.updated", data: { run: { ...run, status: "waiting", endedAt: undefined, summary: undefined } } }, "the run asked a question", );
 
+  // Run plans
+  const plan = [
+    { text: "写标题和正文", state: "done" },
+    { text: "生成 3 张配图", state: "done" },
+    { text: "等 Joye 确认", state: "waiting" },
+    { text: "周四 20:00 发出", state: "pending" },
+  ];
+  const planned = { ...created, status: "running", startedAt: T0, plan, updatedAt: T0 + 5_000 };
+  ok("entities/bot-run-plan.json", "BotRun", planned, "an external bot's run with a plan, no machine");
+  bad("entities/bot-run-plan-bad-state.json", "BotRun", { ...planned, plan: [{ text: "x", state: "skipped" }] }, "unknown plan state");
+  ok("events/run.updated-plan.json", "Event", { ...base, actorId: ID.bot, type: "run.updated", data: { run: planned } }, "a plan update replaces the whole plan");
+  ok("entities/run-plan.json", "RunPlan", plan);
+  ok("entities/run-plan-empty.json", "RunPlan", [], "clears the plan");
+  ok("http/start-run-request.json", "StartRunRequest", { groupId: ID.general, topicId: ID.topic, plan });
+  ok("http/start-run-request-minimal.json", "StartRunRequest", { groupId: ID.general, topicId: ID.topic });
+  bad("http/start-run-request-missing-topic.json", "StartRunRequest", { groupId: ID.general }, "missing topicId");
+  ok("http/set-run-plan-request.json", "SetRunPlanRequest", { plan });
+  ok("http/set-run-plan-request-clear.json", "SetRunPlanRequest", { plan: [] }, "an empty plan clears it");
+  ok("http/set-run-plan-request-text-max.json", "SetRunPlanRequest", { plan: [{ text: "字".repeat(200), state: "current" }] }, "200 code points");
+  bad("http/set-run-plan-request-text-too-long.json", "SetRunPlanRequest", { plan: [{ text: "字".repeat(201), state: "current" }] }, "item text over 200 code points");
+  bad("http/set-run-plan-request-empty-text.json", "SetRunPlanRequest", { plan: [{ text: "", state: "pending" }] }, "empty item text");
+  bad("http/set-run-plan-request-bad-state.json", "SetRunPlanRequest", { plan: [{ text: "x", state: "in_progress" }] }, "provider state names are not plan states");
+  bad("http/set-run-plan-request-too-many.json", "SetRunPlanRequest", { plan: Array.from({ length: 31 }, (_, i) => ({ text: `step ${i + 1}`, state: "pending" })) }, "more than 30 items");
+  bad("http/set-run-plan-request-missing-plan.json", "SetRunPlanRequest", {}, "missing plan");
+  ok("http/end-run-request.json", "EndRunRequest", { status: "done", summary: "已排期，周四 20:00 发出" });
+  ok("http/end-run-request-minimal.json", "EndRunRequest", { status: "failed" });
+  bad("http/end-run-request-running.json", "EndRunRequest", { status: "running" }, "only done, failed or cancelled end a run");
+
   const entries = [
     { t: "run.event", runId: R.run, seq: 1, at: T0 + 11_000, event: { type: "status", state: "running" } },
     { t: "run.event", runId: R.run, seq: 2, at: T0 + 12_000, event: { type: "tool.call", itemId: "c1", tool: "bash", title: "cargo test", input: { command: "cargo test" } } },

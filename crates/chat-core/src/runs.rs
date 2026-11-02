@@ -452,7 +452,7 @@ impl ProcessView {
                 state: state.clone(),
                 message: message.clone(),
             }),
-            RunEvent::InputAccepted { .. } | RunEvent::Unknown => {}
+            RunEvent::InputAccepted { .. } | RunEvent::Plan { .. } | RunEvent::Unknown => {}
         }
     }
 }

@@ -1,0 +1,33 @@
+{
+  "kind": "BotRun",
+  "valid": true,
+  "description": "an external bot's run with a plan, no machine",
+  "value": {
+    "id": "01JBX0RUN000000000000000AU",
+    "botId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "status": "running",
+    "createdAt": 1762128000000,
+    "updatedAt": 1762128005000,
+    "startedAt": 1762128000000,
+    "plan": [
+      {
+        "text": "写标题和正文",
+        "state": "done"
+      },
+      {
+        "text": "生成 3 张配图",
+        "state": "done"
+      },
+      {
+        "text": "等 Joye 确认",
+        "state": "waiting"
+      },
+      {
+        "text": "周四 20:00 发出",
+        "state": "pending"
+      }
+    ]
+  }
+}

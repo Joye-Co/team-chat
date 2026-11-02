@@ -3,6 +3,7 @@
 // clients read with `GET /v1/runs/:id/events`.
 import { z } from "zod";
 import { Id, Millis, Seq } from "./common.ts";
+import { RunPlan } from "./plan.ts";
 
 export const MACHINE_PROTOCOL_VERSION = 1 as const;
 
@@ -112,6 +113,8 @@ export const RunEvent = z.discriminatedUnion("type", [
   }),
   z.object({ type: z.literal("approval.resolved"), approvalId: z.string().min(1), decision: z.enum(["approve", "deny"]) }),
   z.object({ type: z.literal("input.accepted"), inputId: z.string().min(1) }),
+  /** The CLI's to-do list (Claude Code TodoWrite, Codex plan updates); replaces the run plan. */
+  z.object({ type: z.literal("plan"), items: RunPlan }),
   z.object({
     type: z.literal("status"),
     state: z.enum(["preparing", "running", "retrying", "stalled", "warning", "error"]),

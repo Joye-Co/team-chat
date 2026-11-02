@@ -651,7 +651,14 @@ bot) turns @mentions into runs and run progress into topic messages.
 ```ts
 RunStatus = "created" | "running" | "waiting" | "blocked" | "done" | "failed" | "cancelled"
 BotRun = { id, botId, groupId, topicId, machineId?, status: RunStatus, requestedBy?,
-           createdAt, startedAt?, endedAt?, updatedAt, summary? /* <= 280 */ }
+           createdAt, startedAt?, endedAt?, updatedAt, summary? /* <= 280 */,
+           plan?: RunPlanItem[] /* the latest plan; absent = none */ }
+RunPlanState = "done" | "current" | "waiting" | "pending"
+RunPlanItem = { text /* 1..200 code points */, state: RunPlanState }
+RunPlan = RunPlanItem[]                    // in order, at most 30 items
+StartRunRequest = { groupId, topicId, plan?: RunPlan }
+SetRunPlanRequest = { plan: RunPlan }      // replaces the whole plan; [] clears it
+EndRunRequest = { status: "done" | "failed" | "cancelled", summary? /* <= 280 */ }
 run.updated (stored event) data: { run: BotRun }      // actorId = the bot
 RunLogEntry = run.event | run.done | run.session frames of machine-protocol.md, as stored
 RunEventsResponse = { run: BotRun, entries: RunLogEntry[], hasMore: boolean, lastSeq: number }
@@ -676,6 +683,9 @@ CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine,
 | `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
 | `GET /v1/runs/:id/events?afterSeq=&limit=` | member of the run's group | | `RunEventsResponse`; `limit` 1..500, default 200 |
 | `GET /v1/runs/:id/session` | owner | | the raw CLI session, gzip (`application/gzip`); 404 until uploaded |
+| `POST /v1/runs` | a bot that is not runner-backed, member of the group | `StartRunRequest` | `BotRun`: a new `running` run, or the bot's active run in the topic |
+| `PUT /v1/runs/:id/plan` | the run's bot | `SetRunPlanRequest` | `BotRun`; `conflict` when the run ended |
+| `POST /v1/runs/:id/end` | the run's bot, runs from `POST /v1/runs` only | `EndRunRequest` | `BotRun`; `conflict` when the run ended |
 | `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
 | `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
 
@@ -705,3 +715,26 @@ Rules:
   `GET /v1/runs/:id/events`, paged by `seq` (gaps are normal: the daemon may drop deltas).
 - The raw session (the CLI's own file, gzip) is stored in R2 at `sessions/<runId>.jsonl.gz`.
   Only owners can download it.
+
+### Run plans
+
+A run plan is the bot's ordered to-do list for one run, so members see what it does next:
+`done` (finished), `current` (works on it now), `waiting` (waits for a member, such as a
+review) and `pending` (later). Only the run's owner sets it: the run's bot with its own token
+(`PUT /v1/runs/:id/plan`, or `plan` on `POST /v1/runs`), or the machine that holds the run with
+a `plan` run event (machine-protocol.md; the daemon maps Claude Code's TodoWrite and Codex plan
+updates to it). Any other caller gets `forbidden`, an unknown run `not_found`, an ended run
+`conflict`.
+
+- Every update replaces the whole plan. An empty list clears it: the run then has no `plan`.
+- The server keeps only the latest plan with the run and stores a `run.updated` event with the
+  whole run (`plan` included, `updatedAt` bumped) on every change, so clients sync it like the
+  status. A plan equal to the current one stores nothing. Several plan events in one daemon
+  batch store one `run.updated` with the last plan.
+- A plan survives the end of the run, as the record of what was done.
+- External bots (SDK) make their own runs: `POST /v1/runs` starts a `running` run of the calling
+  bot in a topic of a group it is in (or returns its active run there, so a retry makes no
+  second run), and `POST /v1/runs/:id/end` ends it. These runs have no machine, no run log and
+  no stall detection; they do not change the topic status or its responsible member (the bot
+  sets those itself with `topic.update`). A runner-backed bot gets `conflict` on
+  `POST /v1/runs`: its runs come from mentions.

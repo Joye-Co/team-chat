@@ -1,0 +1,8 @@
+{
+  "kind": "EndRunRequest",
+  "valid": true,
+  "value": {
+    "status": "done",
+    "summary": "已排期，周四 20:00 发出"
+  }
+}

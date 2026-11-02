@@ -1,0 +1,133 @@
+{
+  "kind": "SetRunPlanRequest",
+  "valid": false,
+  "description": "more than 30 items",
+  "value": {
+    "plan": [
+      {
+        "text": "step 1",
+        "state": "pending"
+      },
+      {
+        "text": "step 2",
+        "state": "pending"
+      },
+      {
+        "text": "step 3",
+        "state": "pending"
+      },
+      {
+        "text": "step 4",
+        "state": "pending"
+      },
+      {
+        "text": "step 5",
+        "state": "pending"
+      },
+      {
+        "text": "step 6",
+        "state": "pending"
+      },
+      {
+        "text": "step 7",
+        "state": "pending"
+      },
+      {
+        "text": "step 8",
+        "state": "pending"
+      },
+      {
+        "text": "step 9",
+        "state": "pending"
+      },
+      {
+        "text": "step 10",
+        "state": "pending"
+      },
+      {
+        "text": "step 11",
+        "state": "pending"
+      },
+      {
+        "text": "step 12",
+        "state": "pending"
+      },
+      {
+        "text": "step 13",
+        "state": "pending"
+      },
+      {
+        "text": "step 14",
+        "state": "pending"
+      },
+      {
+        "text": "step 15",
+        "state": "pending"
+      },
+      {
+        "text": "step 16",
+        "state": "pending"
+      },
+      {
+        "text": "step 17",
+        "state": "pending"
+      },
+      {
+        "text": "step 18",
+        "state": "pending"
+      },
+      {
+        "text": "step 19",
+        "state": "pending"
+      },
+      {
+        "text": "step 20",
+        "state": "pending"
+      },
+      {
+        "text": "step 21",
+        "state": "pending"
+      },
+      {
+        "text": "step 22",
+        "state": "pending"
+      },
+      {
+        "text": "step 23",
+        "state": "pending"
+      },
+      {
+        "text": "step 24",
+        "state": "pending"
+      },
+      {
+        "text": "step 25",
+        "state": "pending"
+      },
+      {
+        "text": "step 26",
+        "state": "pending"
+      },
+      {
+        "text": "step 27",
+        "state": "pending"
+      },
+      {
+        "text": "step 28",
+        "state": "pending"
+      },
+      {
+        "text": "step 29",
+        "state": "pending"
+      },
+      {
+        "text": "step 30",
+        "state": "pending"
+      },
+      {
+        "text": "step 31",
+        "state": "pending"
+      }
+    ]
+  }
+}

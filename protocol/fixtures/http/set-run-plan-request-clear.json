@@ -1,0 +1,8 @@
+{
+  "kind": "SetRunPlanRequest",
+  "valid": true,
+  "description": "an empty plan clears it",
+  "value": {
+    "plan": []
+  }
+}
