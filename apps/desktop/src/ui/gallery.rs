@@ -448,6 +448,8 @@ impl Render for Gallery {
                     .h(size::SIDEBAR_ROW)
                     .px(space::S8)
                     .gap(space::S10)
+                    // The last row shows the keyboard focus ring (§7.1).
+                    .when(i == 3, |el| el.shadow(ui::rows::focus_ring(k.focus)))
                     .child(GroupGlyph::new().selected(selected).unread(unread))
                     .child(
                         div()

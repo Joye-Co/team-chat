@@ -38,7 +38,9 @@ gpui::actions!(
         OpenSettings,
         ToggleSidePanel,
         NewTopic,
-        MentionInComposer
+        MentionInComposer,
+        FocusNext,
+        FocusPrev
     ]
 );
 
@@ -370,6 +372,8 @@ impl Render for RootView {
                     .nav
                     .update(cx, |nav, cx| nav.toggle_side_panel(cx));
             }))
+            .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
+            .on_action(|_: &FocusPrev, window, cx| window.focus_prev(cx))
             .on_action(cx.listener(|this, _: &NewTopic, _, cx| {
                 this.services.nav.update(cx, |nav, cx| nav.new_topic(cx));
             }))
@@ -501,6 +505,10 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
         KeyBinding::new("cmd-n", NewTopic, None),
+        // Tab moves keyboard focus through the window's tab stops (§11);
+        // inputs keep their own Tab binding.
+        KeyBinding::new("tab", FocusNext, None),
+        KeyBinding::new("shift-tab", FocusPrev, None),
     ]);
     cx.on_action(|_: &Quit, cx| cx.quit());
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));

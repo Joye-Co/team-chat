@@ -205,6 +205,10 @@ fn option_row(
             el.cursor_pointer()
                 .hover(|s| s.bg(k.opt_hover))
                 .active(|s| s.bg(k.pressed))
+                // A tab stop with the row focus ring (§7.1); Enter or Space
+                // answers.
+                .tab_index(0)
+                .focus_visible(|s| s.shadow(crate::ui::rows::focus_ring(k.focus)))
                 .on_click(move |_, window, cx| press.run(window, cx))
         })
         .child(

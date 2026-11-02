@@ -30,6 +30,11 @@ pub enum RowSurface {
 /// An interactive row with the shared states (§7.1): hover fill at once,
 /// `pressed` on mouse down, the accent-tint selection, 40 % content when
 /// disabled, a pointer cursor. Height, padding and children are the caller's.
+///
+/// Sidebar and content rows are tab stops (Tab and Shift-Tab, `app.rs`):
+/// with keyboard focus they show the 2 pt `focus` ring inside the row, and
+/// Enter or Space runs their click. Overlay rows (menus, popups, the
+/// switcher) are not: their owner moves a selection with the arrow keys.
 pub fn list_row(
     id: impl Into<ElementId>,
     surface: RowSurface,
@@ -54,6 +59,36 @@ pub fn list_row(
         .when(!selected, |el| {
             el.hover(|s| s.bg(hover)).active(|s| s.bg(k.pressed))
         })
+        .when(surface != RowSurface::Overlay, |el| {
+            el.tab_index(0)
+                .focus_visible(|s| s.shadow(focus_ring(k.focus)))
+        })
+}
+
+/// The keyboard focus ring of a row (§7.1): 2 pt of `focus` inside its
+/// edge, drawn as an inset shadow so the row's layout does not move.
+pub fn focus_ring(color: gpui::Hsla) -> Vec<gpui::BoxShadow> {
+    vec![
+        gpui::BoxShadow::new(px(0.), px(0.), color)
+            .spread_radius(px(2.))
+            .inset(),
+    ]
+}
+
+/// Set by the screenshot self-test: its windows are never key, but the
+/// captures show the active look.
+static DRAW_AS_KEY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Draws every window as the key window (screenshot self-test only).
+pub fn draw_as_key_window() {
+    DRAW_AS_KEY.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Whether selections in `window` use the accent tint. Like a macOS source
+/// list, a window that is not key shows its selection in the unemphasized
+/// grey (`pressed`), so the key window is easy to see.
+pub fn selection_emphasized(window: &Window) -> bool {
+    window.is_window_active() || DRAW_AS_KEY.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A row that cannot be used: its content at 40 %, no hover, no pointer.
