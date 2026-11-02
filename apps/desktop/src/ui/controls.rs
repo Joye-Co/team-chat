@@ -475,6 +475,8 @@ pub fn select_trigger(
         .items_center()
         .gap(space::S6)
         .t_ui()
+        // 400 always: a row around the select may set a heavier weight.
+        .font_weight(gpui::FontWeight::NORMAL)
         .text_color(k.text_1)
         .child(div().flex_1().min_w(px(0.)).one_line().child(label.into()))
         .child(icon(Lucide::ChevronsUpDown, theme::icon::CHIP, k.text_3))
