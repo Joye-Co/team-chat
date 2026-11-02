@@ -111,6 +111,8 @@ export interface EventDraft {
   topicId?: string | null;
   messageId?: string | null;
   data: unknown;
+  /** In-memory facts for event decorators (e.g. who was just added to waitingOn). Never stored. */
+  hints?: Record<string, unknown>;
 }
 
 export interface RoomTx {
@@ -127,6 +129,8 @@ export interface RoomContext {
   log: Logger;
   memberIds(): string[];
   isMember(memberId: string): boolean;
+  /** "group" or "dm"; null only before the room has loaded its group from D1. */
+  groupKind: "group" | "dm" | null;
   /** Runs `fn` in one SQLite transaction; events it appends are fanned out and hooked after commit. */
   commit<T>(fn: (tx: RoomTx) => T): T;
   /** Sends a frame (e.g. a transient event) to the gateways of all members, or the given ones. */
@@ -177,6 +181,24 @@ export type EditExtension = (
 export const editExtensions: EditExtension[] = [];
 export function registerEditExtension(ext: EditExtension): void {
   editExtensions.push(ext);
+}
+
+export interface DecorateContext {
+  groupId: string;
+  groupKind: "group" | "dm" | null;
+  /** Room SQLite, read only. */
+  sql: SqlStorage;
+  /** The draft's `hints`, if any. */
+  hints: Record<string, unknown> | undefined;
+}
+/**
+ * Adds fields to the live `event` frame one member gets (e.g. `notify`). Runs in the room after
+ * commit, once per event and recipient. Never applied to `page` results.
+ */
+export type EventDecorator = (event: Event, memberId: string, c: DecorateContext) => Record<string, unknown> | undefined;
+export const eventDecorators: EventDecorator[] = [];
+export function registerEventDecorator(d: EventDecorator): void {
+  eventDecorators.push(d);
 }
 
 // ---------------------------------------------------------------------------

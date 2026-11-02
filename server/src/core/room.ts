@@ -4,11 +4,16 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   DEFAULT_TITLE_CHARS,
+  MAX_EXCERPT_CHARS,
+  type Card,
   type ClientFrameOf,
   type Event,
   type Message,
+  type MessageKind,
+  type NotifyLevel,
   type SendResult,
   type Topic,
+  type TopicState,
   type TopicStatus,
 } from "@chat/protocol";
 import { groupMemberIds, getGroup } from "./db";
@@ -26,10 +31,20 @@ import {
   type RoomTx,
   afterCommitHooks,
   editExtensions,
+  eventDecorators,
   messageExtensions,
   roomMigrations,
   roomRpcHandlers,
 } from "./registry";
+import {
+  ROOM_MESSAGING_MIGRATION,
+  type ReadTotals,
+  advanceTopicRead,
+  getPrefs,
+  groupReadState,
+  setFollowing,
+  topicState,
+} from "./topicstate";
 
 export const ROOM_CORE_MIGRATIONS: MigrationStep[] = [
   {
@@ -85,7 +100,7 @@ export const ROOM_CORE_MIGRATIONS: MigrationStep[] = [
 ];
 
 export function roomMigrationSteps(): MigrationStep[] {
-  return [...ROOM_CORE_MIGRATIONS, ...roomMigrations];
+  return [...ROOM_CORE_MIGRATIONS, ROOM_MESSAGING_MIGRATION, ...roomMigrations];
 }
 
 type TopicRow = {
@@ -97,6 +112,9 @@ type TopicRow = {
   root_message_id: string;
   last_seq: number;
   message_count: number;
+  waiting_on: string;
+  owner_id: string | null;
+  last_message_at: number | null;
 };
 
 type MessageRow = {
@@ -112,6 +130,7 @@ type MessageRow = {
   deleted_at: number | null;
   streaming: number;
   ext: string | null;
+  kind: MessageKind;
 };
 
 type EventRow = {
@@ -127,6 +146,14 @@ export interface RoomCounts {
   readSeq: number;
   unread: number;
   mentions: number;
+  topics: TopicState[];
+  muted: boolean;
+  notify: NotifyLevel;
+}
+
+/** Result of a per-topic read: the new group totals and the changed topic (none when nothing moved). */
+export interface TopicReadResult extends ReadTotals {
+  changed: TopicState | null;
 }
 
 export interface PageResult {
@@ -146,6 +173,14 @@ type SendFrame = ClientFrameOf<"send">;
 type EditFrame = ClientFrameOf<"edit">;
 type TopicUpdateFrame = ClientFrameOf<"topic.update">;
 
+/** First `MAX_EXCERPT_CHARS` code points, for quotes. */
+function excerpt(text: string): string {
+  return [...text].slice(0, MAX_EXCERPT_CHARS).join("");
+}
+
+/** At most one card press per member and message per this many ms. */
+const CARD_PRESS_INTERVAL_MS = 1000;
+
 export function defaultTitle(body: string): string {
   const firstLine = body.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
   return [...firstLine.trim()].slice(0, DEFAULT_TITLE_CHARS).join("");
@@ -163,6 +198,8 @@ async function run<T>(fn: () => T | Promise<T>): Promise<Result<T>> {
 export class GroupRoom extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   private groupId: string | null = null;
+  private groupKind: "group" | "dm" | null = null;
+  private readonly cardPressAt = new Map<string, number>();
   private members = new Set<string>();
   private lastSeq = 0;
   private log: Logger = baseLogger.child({ obj: "GroupRoom" });
@@ -185,6 +222,8 @@ export class GroupRoom extends DurableObject<Env> {
   private loadState(): void {
     const meta = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'group_id'").toArray();
     this.groupId = meta[0]?.value ?? null;
+    const kind = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'group_kind'").toArray()[0];
+    this.groupKind = (kind?.value as "group" | "dm" | undefined) ?? null;
     if (this.groupId) this.log = baseLogger.child({ obj: "GroupRoom", groupId: this.groupId });
     this.members = new Set(
       this.sql.exec<{ member_id: string }>("SELECT member_id FROM room_members").toArray().map((r) => r.member_id),
@@ -195,12 +234,13 @@ export class GroupRoom extends DurableObject<Env> {
 
   /** Binds this object to its group on first use; loads membership from D1 if never initialized. */
   private async ready(groupId: string): Promise<void> {
-    if (this.groupId === groupId) return;
-    if (this.groupId !== null) throw new ApiError("internal", "room bound to another group");
+    if (this.groupId === groupId && this.groupKind) return;
+    if (this.groupId !== null && this.groupId !== groupId) throw new ApiError("internal", "room bound to another group");
     const group = await getGroup(this.env.DB, groupId);
     if (!group) throw new ApiError("not_found", "group not found");
-    const ids = await groupMemberIds(this.env.DB, groupId);
-    this.bind(groupId, ids);
+    if (this.groupId === null) this.bind(groupId, await groupMemberIds(this.env.DB, groupId));
+    this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('group_kind', ?)", group.kind);
+    this.groupKind = group.kind;
   }
 
   private bind(groupId: string, memberIds: string[]): void {
@@ -230,6 +270,7 @@ export class GroupRoom extends DurableObject<Env> {
     const groupId = this.groupId;
     if (!groupId) throw new ApiError("internal", "room not ready");
     const events: Event[] = [];
+    const hints: (Record<string, unknown> | undefined)[] = [];
     const startSeq = this.lastSeq;
     const tx: RoomTx = {
       nextSeq: () => this.lastSeq + 1,
@@ -249,6 +290,7 @@ export class GroupRoom extends DurableObject<Env> {
         this.lastSeq = seq;
         const event = { seq, groupId, at, actorId: d.actorId, type: d.type, data: d.data } as Event;
         events.push(event);
+        hints.push(d.hints);
         return event;
       },
     };
@@ -259,15 +301,31 @@ export class GroupRoom extends DurableObject<Env> {
       this.lastSeq = startSeq;
       throw err;
     }
-    if (events.length > 0) this.afterCommit(events, extraRecipients);
+    if (events.length > 0) this.afterCommit(events, hints, extraRecipients);
     return value;
   }
 
-  private afterCommit(events: Event[], extraRecipients: string[]): void {
+  private afterCommit(
+    events: Event[],
+    hints: (Record<string, unknown> | undefined)[],
+    extraRecipients: string[],
+  ): void {
     const recipients = new Set([...this.members, ...extraRecipients]);
-    for (const event of events) {
-      for (const id of recipients) this.enqueue(id, { t: "event", event });
-    }
+    events.forEach((event, i) => {
+      const dc = { groupId: this.groupId as string, groupKind: this.groupKind, sql: this.sql, hints: hints[i] };
+      for (const id of recipients) {
+        let frame: Record<string, unknown> = { t: "event", event };
+        for (const d of eventDecorators) {
+          try {
+            const add = d(event, id, dc);
+            if (add) frame = { ...frame, ...add };
+          } catch (err) {
+            this.log.error("event decorator failed", { err, type: event.type, seq: event.seq });
+          }
+        }
+        this.enqueue(id, frame);
+      }
+    });
     if (afterCommitHooks.length === 0) return;
     const h: HookContext = {
       env: this.env,
@@ -335,6 +393,7 @@ export class GroupRoom extends DurableObject<Env> {
       log: this.log,
       memberIds: () => [...this.members],
       isMember: (id) => this.members.has(id),
+      groupKind: this.groupKind,
       commit: (fn) => this.commit(fn),
       broadcast: (frame, opts) => this.broadcast(frame, opts),
       waitUntil: (p) => this.ctx.waitUntil(p),
@@ -346,7 +405,7 @@ export class GroupRoom extends DurableObject<Env> {
   // -------------------------------------------------------------------------
 
   private toTopic(r: TopicRow): Topic {
-    return {
+    const t: Topic = {
       id: r.id,
       groupId: this.groupId as string,
       title: r.title,
@@ -356,7 +415,11 @@ export class GroupRoom extends DurableObject<Env> {
       rootMessageId: r.root_message_id,
       lastSeq: r.last_seq,
       messageCount: r.message_count,
+      waitingOn: JSON.parse(r.waiting_on ?? "[]") as string[],
+      ownerId: r.owner_id ?? null,
     };
+    if (r.last_message_at !== null && r.last_message_at !== undefined) t.lastMessageAt = r.last_message_at;
+    return t;
   }
 
   private toMessage(r: MessageRow): Message {
@@ -373,6 +436,7 @@ export class GroupRoom extends DurableObject<Env> {
       createdAt: r.created_at,
       editedAt: r.edited_at,
       deletedAt: r.deleted_at,
+      kind: r.kind ?? "text",
     };
     if (r.streaming) m.streaming = true;
     return m;
@@ -474,24 +538,38 @@ export class GroupRoom extends DurableObject<Env> {
       await this.ready(groupId);
       this.requireMember(memberId);
       const read = Math.min(readSeq, this.lastSeq);
-      const unread = this.sql
-        .exec<{ n: number }>(
-          "SELECT count(*) AS n FROM messages WHERE created_seq > ? AND author_id != ? AND deleted_at IS NULL",
-          read,
-          memberId,
-        )
-        .one().n;
-      const mentions = this.sql
-        .exec<{ n: number }>(
-          `SELECT count(*) AS n FROM mentions mn JOIN messages m ON m.id = mn.message_id
-           WHERE mn.member_id = ? AND mn.seq > ? AND m.deleted_at IS NULL AND m.author_id != ?`,
-          memberId,
-          read,
-          memberId,
-        )
-        .one().n;
-      return { lastSeq: this.lastSeq, readSeq: read, unread, mentions };
+      const state = groupReadState(this.sql, memberId, read);
+      const prefs = getPrefs(this.sql, memberId, this.groupKind);
+      return { lastSeq: this.lastSeq, ...state, muted: prefs.muted, notify: prefs.notify };
     });
+  }
+
+  /** Moves one topic's read position forward (`read` with `topicId`). */
+  async readTopic(
+    groupId: string,
+    memberId: string,
+    topicId: string,
+    seq: number,
+    groupRead: number,
+  ): Promise<Result<TopicReadResult>> {
+    return run(async () => {
+      await this.ready(groupId);
+      this.requireMember(memberId);
+      if (!this.topicRow(topicId)) throw new ApiError("not_found", "topic not found");
+      const read = Math.min(groupRead, this.lastSeq);
+      const moved = advanceTopicRead(this.sql, memberId, topicId, Math.min(seq, this.lastSeq));
+      const { topics: _all, ...totals } = groupReadState(this.sql, memberId, read);
+      return { ...totals, changed: moved ? topicState(this.sql, memberId, topicId, read) : null };
+    });
+  }
+
+  /** Validates a quote and fills its author and excerpt. */
+  private replyTo(messageId: string): { messageId: string; authorId: string; excerpt: string } {
+    const q = this.messageRow(messageId);
+    if (!q) throw new ApiError("not_found", "quoted message not found");
+    if (q.deleted_at !== null) throw new ApiError("invalid", "quoted message is deleted");
+    const card = q.ext ? ((JSON.parse(q.ext) as { card?: Card }).card ?? null) : null;
+    return { messageId: q.id, authorId: q.author_id, excerpt: excerpt(q.body !== "" ? q.body : (card?.title ?? "")) };
   }
 
   async send(groupId: string, actor: Actor, frame: SendFrame): Promise<Result<SendResult>> {
@@ -517,10 +595,14 @@ export class GroupRoom extends DurableObject<Env> {
 
       const room = this.roomContext();
       let ext: Record<string, unknown> | undefined;
+      if (frame.replyTo) ext = { replyTo: this.replyTo(frame.replyTo.messageId) };
+      const kind: MessageKind = frame.card ? "card" : "text";
+      if (frame.card) ext = { ...ext, card: frame.card };
       for (const e of messageExtensions) {
         const add = e(frame as Record<string, unknown>, room, actor);
         if (add) ext = { ...ext, ...add };
       }
+      const body = frame.card && frame.body === "" ? frame.card.title : frame.body;
 
       const now = Date.now();
       const messageId = ulid(now);
@@ -531,39 +613,47 @@ export class GroupRoom extends DurableObject<Env> {
         let createdTopic: Topic | undefined;
         if (!topicId) {
           topicId = ulid(now);
-          const title = frame.title ?? defaultTitle(frame.body);
+          const title = frame.title ?? defaultTitle(body);
           const seq = tx.nextSeq();
           this.sql.exec(
-            `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count)
-             VALUES (?, ?, 'open', ?, ?, ?, ?, 0)`,
+            `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count,
+                                 owner_id, last_message_at)
+             VALUES (?, ?, 'open', ?, ?, ?, ?, 0, ?, ?)`,
             topicId,
             title,
             actor.id,
             now,
             messageId,
             seq,
+            actor.id,
+            now,
           );
           const topic = this.toTopic(this.topicRow(topicId) as TopicRow);
           tx.append({ type: "topic.created", actorId: actor.id, topicId, data: { topic } });
+        } else {
+          this.sql.exec("UPDATE topics SET last_message_at = ? WHERE id = ?", now, topicId);
         }
         const seq = tx.nextSeq();
         this.sql.exec(
-          `INSERT INTO messages (id, client_msg_id, topic_id, author_id, body, mentions, created_seq, created_at, streaming, ext)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO messages (id, client_msg_id, topic_id, author_id, body, mentions, created_seq, created_at, streaming, ext, kind)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           messageId,
           frame.clientMsgId,
           topicId,
           actor.id,
-          frame.body,
+          body,
           JSON.stringify(mentions),
           seq,
           now,
           streaming ? 1 : 0,
           ext ? JSON.stringify(ext) : null,
+          kind,
         );
         for (const id of mentions) {
           this.sql.exec("INSERT OR IGNORE INTO mentions (member_id, seq, message_id) VALUES (?, ?, ?)", id, seq, messageId);
         }
+        // Auto-follow: the author (and creator) and every mentioned member.
+        for (const id of new Set([actor.id, ...mentions])) setFollowing(this.sql, id, topicId, true);
         const message = this.toMessage(this.messageRow(messageId) as MessageRow);
         tx.append({ type: "message.created", actorId: actor.id, topicId, messageId, data: { message } });
         this.touchTopic(topicId, seq, true);
@@ -583,27 +673,30 @@ export class GroupRoom extends DurableObject<Env> {
       if (!row) throw new ApiError("not_found", "message not found");
       if (row.author_id !== actor.id) throw new ApiError("forbidden", "only the author can edit");
       if (row.deleted_at !== null) throw new ApiError("conflict", "message is deleted");
-      const streaming = row.streaming === 1 && frame.streaming === true;
-      let changed: Record<string, unknown> | undefined;
-      if (editExtensions.length > 0) {
-        const room = this.roomContext();
-        const current = this.toMessage(row);
-        for (const e of editExtensions) {
-          const add = e(frame as Record<string, unknown>, room, actor, current);
-          if (add) changed = { ...changed, ...add };
-        }
+      if (frame.card && row.kind !== "card") throw new ApiError("invalid", "only a card message can get a card");
+      const current = this.toMessage(row);
+      let ext: Record<string, unknown> = row.ext ? (JSON.parse(row.ext) as Record<string, unknown>) : {};
+      const changed: Record<string, unknown> = {};
+      if (frame.card) changed.card = frame.card;
+      const room = this.roomContext();
+      for (const e of editExtensions) {
+        const add = e(frame as Record<string, unknown>, room, actor, current);
+        if (add) Object.assign(changed, add);
       }
-      const ext = changed ? JSON.stringify({ ...(row.ext ? JSON.parse(row.ext) : {}), ...changed }) : row.ext;
+      ext = { ...ext, ...changed };
+      const card = (ext.card as Card | undefined) ?? null;
+      const body = row.kind === "card" && frame.body === "" && card ? card.title : frame.body;
+      const streaming = row.streaming === 1 && frame.streaming === true;
       if (!streaming) this.dropDelta(row.id);
       const now = Date.now();
       return this.commit((tx) => {
         const seq = tx.nextSeq();
         this.sql.exec(
           "UPDATE messages SET body = ?, edited_at = ?, streaming = ?, ext = ? WHERE id = ?",
-          frame.body,
+          body,
           now,
           streaming ? 1 : 0,
-          ext,
+          Object.keys(ext).length > 0 ? JSON.stringify(ext) : null,
           row.id,
         );
         tx.append({
@@ -611,7 +704,7 @@ export class GroupRoom extends DurableObject<Env> {
           actorId: actor.id,
           topicId: row.topic_id,
           messageId: row.id,
-          data: { ...changed, messageId: row.id, body: frame.body, editedAt: now, streaming },
+          data: { ...changed, messageId: row.id, body, editedAt: now, streaming },
         });
         this.touchTopic(row.topic_id, seq);
         return { message: this.toMessage(this.messageRow(row.id) as MessageRow) };
@@ -637,14 +730,19 @@ export class GroupRoom extends DurableObject<Env> {
       const now = Date.now();
       return this.commit((tx) => {
         const seq = tx.nextSeq();
-        this.sql.exec("UPDATE messages SET body = '', deleted_at = ?, streaming = 0 WHERE id = ?", now, messageId);
-        // Scrub the body from stored events so the log no longer serves deleted text.
         this.sql.exec(
-          "UPDATE events SET data = json_set(data, '$.message.body', '') WHERE message_id = ? AND type = 'message.created'",
+          "UPDATE messages SET body = '', deleted_at = ?, streaming = 0, ext = json_remove(ext, '$.card') WHERE id = ?",
+          now,
+          messageId,
+        );
+        // Scrub the body and card from stored events so the log no longer serves deleted content.
+        this.sql.exec(
+          `UPDATE events SET data = json_remove(json_set(data, '$.message.body', ''), '$.message.card')
+           WHERE message_id = ? AND type = 'message.created'`,
           messageId,
         );
         this.sql.exec(
-          "UPDATE events SET data = json_set(data, '$.body', '') WHERE message_id = ? AND type = 'message.updated'",
+          "UPDATE events SET data = json_remove(json_set(data, '$.body', ''), '$.card') WHERE message_id = ? AND type = 'message.updated'",
           messageId,
         );
         tx.append({
@@ -655,6 +753,23 @@ export class GroupRoom extends DurableObject<Env> {
           data: { messageId, deletedAt: now },
         });
         this.touchTopic(row.topic_id, seq);
+        // Deleting the newest message moves the topic's last activity back.
+        const topic = this.topicRow(row.topic_id);
+        if (topic && topic.last_message_at !== null && row.created_at >= topic.last_message_at) {
+          const newest = this.sql
+            .exec<{ at: number | null }>(
+              "SELECT max(created_at) AS at FROM messages WHERE topic_id = ? AND deleted_at IS NULL",
+              row.topic_id,
+            )
+            .one().at;
+          if (newest !== topic.last_message_at) {
+            const s2 = tx.nextSeq();
+            this.sql.exec("UPDATE topics SET last_message_at = ?, last_seq = ? WHERE id = ?", newest, s2, row.topic_id);
+            const data: { topicId: string; lastMessageAt?: number } = { topicId: row.topic_id };
+            if (newest !== null) data.lastMessageAt = newest;
+            tx.append({ type: "topic.updated", actorId: actor.id, topicId: row.topic_id, data });
+          }
+        }
         return { messageId, deletedAt: now };
       });
     });
@@ -666,24 +781,83 @@ export class GroupRoom extends DurableObject<Env> {
       this.requireMember(actor.id);
       const row = this.topicRow(frame.topicId);
       if (!row) throw new ApiError("not_found", "topic not found");
-      if (frame.title === undefined && frame.status === undefined) {
+      if (
+        frame.title === undefined &&
+        frame.status === undefined &&
+        frame.waitingOn === undefined &&
+        frame.ownerId === undefined
+      ) {
         throw new ApiError("invalid", "nothing to update");
       }
+      const waitingOn = frame.waitingOn === undefined ? undefined : [...new Set(frame.waitingOn)];
+      for (const id of [...(waitingOn ?? []), ...(frame.ownerId ? [frame.ownerId] : [])]) {
+        if (!this.members.has(id)) throw new ApiError("invalid", "waitingOn and ownerId must be members of this group");
+      }
+      const before = JSON.parse(row.waiting_on ?? "[]") as string[];
+      const waitingAdded = (waitingOn ?? []).filter((id) => !before.includes(id));
       return this.commit((tx) => {
         const seq = tx.nextSeq();
         this.sql.exec(
-          "UPDATE topics SET title = ?, status = ?, last_seq = ? WHERE id = ?",
+          "UPDATE topics SET title = ?, status = ?, waiting_on = ?, owner_id = ?, last_seq = ? WHERE id = ?",
           frame.title ?? row.title,
           frame.status ?? row.status,
+          waitingOn === undefined ? row.waiting_on : JSON.stringify(waitingOn),
+          frame.ownerId === undefined ? row.owner_id : frame.ownerId,
           seq,
           row.id,
         );
-        const data: { topicId: string; title?: string; status?: TopicStatus } = { topicId: row.id };
+        // Auto-follow: members just added to waitingOn and a new owner.
+        const follow = new Set(waitingAdded);
+        if (frame.ownerId && frame.ownerId !== row.owner_id) follow.add(frame.ownerId);
+        for (const id of follow) setFollowing(this.sql, id, row.id, true);
+        const data: {
+          topicId: string;
+          title?: string;
+          status?: TopicStatus;
+          waitingOn?: string[];
+          ownerId?: string | null;
+        } = { topicId: row.id };
         if (frame.title !== undefined) data.title = frame.title;
         if (frame.status !== undefined) data.status = frame.status;
-        tx.append({ type: "topic.updated", actorId: actor.id, topicId: row.id, data });
+        if (waitingOn !== undefined) data.waitingOn = waitingOn;
+        if (frame.ownerId !== undefined) data.ownerId = frame.ownerId;
+        tx.append({ type: "topic.updated", actorId: actor.id, topicId: row.id, data, hints: { waitingAdded } });
         return { topic: this.toTopic(this.topicRow(row.id) as TopicRow) };
       });
+    });
+  }
+
+  /** A card button press (`card.action`): stored as `card.actioned` with the action's own value. */
+  async cardAction(
+    groupId: string,
+    actor: Actor,
+    messageId: string,
+    actionId: string,
+  ): Promise<Result<{ seq: number }>> {
+    return run(async () => {
+      await this.ready(groupId);
+      this.requireMember(actor.id);
+      const row = this.messageRow(messageId);
+      if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found");
+      const card = row.ext ? (JSON.parse(row.ext) as { card?: Card }).card : undefined;
+      const action = card?.actions?.find((a) => a.id === actionId);
+      if (!action) throw new ApiError("not_found", "card action not found");
+      const key = `${actor.id}:${messageId}`;
+      const now = Date.now();
+      const last = this.cardPressAt.get(key);
+      if (last !== undefined && now - last < CARD_PRESS_INTERVAL_MS) throw new ApiError("rate_limited", "one press per second");
+      this.cardPressAt.set(key, now);
+      if (this.cardPressAt.size > 1000) {
+        for (const [k, t] of this.cardPressAt) if (now - t >= CARD_PRESS_INTERVAL_MS) this.cardPressAt.delete(k);
+      }
+      const data: { messageId: string; actionId: string; value?: unknown } = { messageId, actionId };
+      if (action.value !== undefined) data.value = action.value;
+      const event = this.commit((tx) => {
+        const seq = tx.nextSeq();
+        this.touchTopic(row.topic_id, seq);
+        return tx.append({ type: "card.actioned", actorId: actor.id, topicId: row.topic_id, messageId, data });
+      });
+      return { seq: event.seq };
     });
   }
 

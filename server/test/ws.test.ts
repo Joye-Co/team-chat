@@ -210,13 +210,13 @@ describe("websocket", () => {
       mentions: 1,
     });
     cb.send({ t: "read", groupId: gid, seq: 3 });
-    const dir = await cb.next((f) => f.t === "directory" && f.groups?.[0]?.group.id === gid);
-    expect(dir.groups[0]).toMatchObject({ readSeq: 3, unread: 1, mentions: 0 });
+    const dir = await cb.next((f) => f.t === "reads" && f.groupId === gid);
+    expect(dir).toMatchObject({ readSeq: 3, unread: 1, mentions: 0 });
     // Cursor only moves forward, and never past lastSeq.
     cb.send({ t: "read", groupId: gid, seq: 1 });
     cb.send({ t: "read", groupId: gid, seq: 999 });
-    const dir2 = await cb.next((f) => f.t === "directory" && f.groups?.[0]?.readSeq === 4);
-    expect(dir2.groups[0]).toMatchObject({ unread: 0 });
+    const dir2 = await cb.next((f) => f.t === "reads" && f.readSeq === 4);
+    expect(dir2).toMatchObject({ unread: 0 });
     const list = await api("/v1/groups", { token: b.token });
     expect(list.body.find((s: any) => s.group.id === gid)).toMatchObject({ readSeq: 4, unread: 0 });
     // The author's own messages are never unread for the author.

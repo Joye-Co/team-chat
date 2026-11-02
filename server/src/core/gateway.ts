@@ -321,7 +321,8 @@ export class MemberGateway extends DurableObject<Env> {
       }
       case "read": {
         await this.requireMember(frame.groupId);
-        await this.markRead(frame.groupId, frame.seq);
+        if (frame.topicId) await this.markTopicRead(frame.groupId, frame.topicId, frame.seq);
+        else await this.markRead(frame.groupId, frame.seq);
         return;
       }
       case "fetch": {
@@ -437,9 +438,23 @@ export class MemberGateway extends DurableObject<Env> {
       counts.readSeq,
       Date.now(),
     );
-    // Sync the new read position and counts to every device of this member.
-    const { groups } = await this.loadDirectory(memberId, [groupId]);
-    if (groups.length > 0) this.broadcastFrame({ t: "directory", groups });
+    // Sync the new read position and counts to every device of this member. A group-wide read
+    // lists every topic that still has unread messages or is followed.
+    this.broadcastFrame({
+      t: "reads",
+      groupId,
+      readSeq: counts.readSeq,
+      unread: counts.unread,
+      mentions: counts.mentions,
+      topics: counts.topics,
+    });
+  }
+
+  private async markTopicRead(groupId: string, topicId: string, seq: number): Promise<void> {
+    const memberId = this.memberId as string;
+    const r = unwrap(await roomStub(this.env, groupId).readTopic(groupId, memberId, topicId, seq, this.cursor(groupId)));
+    if (!r.changed) return;
+    this.broadcastFrame({ t: "reads", groupId, readSeq: r.readSeq, unread: r.unread, mentions: r.mentions, topics: [r.changed] });
   }
 
   // -------------------------------------------------------------------------
@@ -485,6 +500,16 @@ export class MemberGateway extends DurableObject<Env> {
           // Closed meanwhile.
         }
       }
+    }
+    return sockets.length;
+  }
+
+  /** The member's level changed: update every socket so frames use the new permissions at once. */
+  async setLevel(level: Actor["level"]): Promise<number> {
+    const sockets = this.ctx.getWebSockets();
+    for (const ws of sockets) {
+      const st = ws.deserializeAttachment() as SocketState | null;
+      if (st) ws.serializeAttachment({ ...st, level });
     }
     return sockets.length;
   }
