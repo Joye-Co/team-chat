@@ -152,6 +152,21 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open,
     },
     Scene {
+        name: "cards",
+        about: "The 话题 of sample cards: status, fields, table, progress, list, code and actions",
+        start: Start::SignedIn,
+        setup: |services, cx| {
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(
+                    crate::views::cards::samples::GROUP.into(),
+                    crate::views::cards::samples::TOPIC.into(),
+                    cx,
+                )
+            })
+        },
+        open: open_main,
+    },
+    Scene {
         name: "switcher",
         about: "The Cmd+K quick switcher over the main window, with no query",
         start: Start::SignedIn,

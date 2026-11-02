@@ -25,21 +25,22 @@ use std::{
 
 use gpui::{
     AnyElement, App, FontWeight, Global, Hsla, IntoElement, ParentElement, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    px,
 };
-use gpui_component::{ActiveTheme as _, Sizable as _, tag::Tag};
+use gpui_component::ActiveTheme as _;
 
 use crate::{
     data::{
         Message,
         card::{Card, CardBlock, CardTone},
     },
-    theme,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
 /// Widest a card grows in the timeline.
-pub const CARD_MAX_WIDTH: f32 = 560.;
+pub const CARD_MAX_WIDTH: f32 = 460.;
 
 /// The timeline extra that draws card messages.
 pub struct CardExtra;
@@ -96,14 +97,18 @@ pub(crate) fn tone_color(tone: CardTone, cx: &App) -> Option<Hsla> {
     }
 }
 
-fn status_tag(tone: CardTone) -> Tag {
-    match tone {
-        CardTone::Neutral => Tag::secondary(),
-        CardTone::Info => Tag::info(),
-        CardTone::Success => Tag::success(),
-        CardTone::Warning => Tag::warning(),
-        CardTone::Danger => Tag::danger(),
-    }
+/// The chip of a card status: three weights only (§2.5). A warning is
+/// something that waits on the viewer.
+fn status_chip(tone: CardTone, label: impl Into<String>) -> ui::StatusChip {
+    use crate::{data::TopicStatus as S, theme::ChipKind as K};
+    let (status, kind) = match tone {
+        CardTone::Neutral => (S::Open, K::Quiet),
+        CardTone::Info => (S::InProgress, K::Quiet),
+        CardTone::Success => (S::Done, K::Quiet),
+        CardTone::Warning => (S::WaitingAnswer, K::You),
+        CardTone::Danger => (S::Blocked, K::Blocked),
+    };
+    ui::StatusChip::labeled(label, status, kind)
 }
 
 /// A stable element id inside a card: message id plus a part name.
@@ -124,24 +129,31 @@ pub fn render_card(
     let stripe = tone_color(tone, cx);
     let radius = cx.theme().radius_lg;
 
+    // §13.9: a status glyph, the title (one line) and the chip at the end.
+    let k = theme::colors(cx);
+    let glyph = match tone {
+        CardTone::Danger => Some((Lucide::CircleAlert, k.danger)),
+        CardTone::Success => Some((Lucide::CircleCheck, k.success)),
+        CardTone::Warning => Some((Lucide::CircleQuestionMark, k.glyph_wait)),
+        CardTone::Info => Some((Lucide::CircleDot, k.glyph_progress)),
+        CardTone::Neutral => None,
+    };
     let header = div()
         .flex()
-        .items_start()
-        .gap(px(8.))
+        .items_center()
+        .gap(space::S8)
+        .children(glyph.map(|(g, c)| ui::icon(g, theme::icon::TOOLBAR, c)))
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
-                .text_sm()
+                .t_ui()
                 .font_weight(FontWeight::SEMIBOLD)
-                .text_color(colors.foreground)
+                .text_color(colors.text_1)
+                .one_line()
                 .child(card.title.clone()),
         )
-        .children(
-            card.status
-                .as_ref()
-                .map(|s| status_tag(tone).small().flex_none().child(s.label.clone())),
-        );
+        .children(card.status.as_ref().map(|s| status_chip(tone, s.label.clone())));
 
     let blocks: Vec<AnyElement> = card
         .blocks
@@ -154,27 +166,22 @@ pub fn render_card(
 
     let actions = actions::render(card, message, ctx, window, cx);
 
-    div()
-        .mt(px(4.))
+    let _ = (stripe, radius);
+    ui::card(cx)
+        .mt(space::S4)
         .w_full()
         .max_w(px(CARD_MAX_WIDTH))
         .flex()
-        .rounded(radius)
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.background)
         .overflow_hidden()
-        .when_some(stripe, |el, color| {
-            el.child(div().w(px(3.)).flex_none().bg(color))
-        })
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
-                .p(px(12.))
+                .px(space::S14)
+                .py(space::S12)
                 .flex()
                 .flex_col()
-                .gap(px(10.))
+                .gap(space::S10)
                 .child(header)
                 .children(blocks)
                 .children(actions),

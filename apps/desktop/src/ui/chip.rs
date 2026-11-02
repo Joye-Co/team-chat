@@ -75,6 +75,16 @@ impl StatusChip {
         })
     }
 
+    /// A chip with a free label, drawn like the chip of `status` in `kind`
+    /// (cards use this for their status).
+    pub fn labeled(label: impl Into<String>, status: TopicStatus, kind: ChipKind) -> Self {
+        Self {
+            status,
+            kind,
+            parts: (label.into(), String::new(), String::new()),
+        }
+    }
+
     /// A quiet chip with a free label and no glyph (for example 等待加入).
     pub fn quiet(label: impl Into<String>) -> Self {
         Self {
