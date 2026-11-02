@@ -186,6 +186,7 @@ fn run(options: Options) -> i32 {
             // this Mac keeps the focus. The windows draw as inactive
             // windows (grey traffic lights).
             cx.set_activation_policy(ActivationPolicy::Accessory);
+            capture::keep_frames();
             let started = Instant::now();
             cx.spawn(async move |cx| {
                 let ok = run_all(&options, cx).await;
@@ -298,6 +299,11 @@ async fn shoot(
                         false,
                     )?;
                 }
+                // The new frame's resize callback cannot reach this window
+                // while this update holds it, so GPUI would keep drawing at
+                // the old size: a black band at the bottom, over the rounded
+                // corners. Read the size here.
+                window.bounds_changed(cx);
                 window.refresh();
                 capture::order_front(window)?;
                 Ok::<_, String>(())

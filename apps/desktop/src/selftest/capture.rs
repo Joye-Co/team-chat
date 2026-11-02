@@ -51,36 +51,15 @@ pub fn order_front(_window: &Window) -> Result<(), String> {
 /// window's own (settings, 960 x 720) and only the extra point goes.
 #[cfg(target_os = "macos")]
 pub fn undo_clamp(window: &Window, width: f64, height: f64, own_size: bool) -> Result<(), String> {
-    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    use objc2::runtime::AnyClass;
     use objc2_foundation::{NSPoint, NSRect, NSSize};
 
-    extern "C-unwind" fn keep_frame(
-        _: *mut AnyObject,
-        _: Sel,
-        rect: NSRect,
-        _: *mut AnyObject,
-    ) -> NSRect {
-        rect
-    }
-
     let ns_window = ns_window(window)?;
-    // SAFETY: a live NSWindow on the main thread. `class_addMethod` only adds
-    // the method to GPUI's own window subclass (it fails, harmlessly, when the
-    // method is already there) with the signature of
-    // `-[NSWindow constrainFrameRect:toScreen:]`; `frame` is a getter and
-    // `setFrame:display:` a setter.
+    // SAFETY: a live NSWindow on the main thread. `class` and `frame` are
+    // getters and `setFrame:display:` a setter.
     unsafe {
         let class: *const AnyClass = objc2::msg_send![ns_window, class];
-        let imp: Imp = std::mem::transmute::<
-            extern "C-unwind" fn(*mut AnyObject, Sel, NSRect, *mut AnyObject) -> NSRect,
-            Imp,
-        >(keep_frame);
-        objc2::ffi::class_addMethod(
-            class.cast_mut(),
-            objc2::sel!(constrainFrameRect:toScreen:),
-            imp,
-            c"{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@".as_ptr(),
-        );
+        keep_frames_of(class);
         let frame: NSRect = objc2::msg_send![ns_window, frame];
         if frame.size.width != width || frame.size.height == height {
             return Ok(());
@@ -97,6 +76,54 @@ pub fn undo_clamp(window: &Window, width: f64, height: f64, own_size: bool) -> R
         let _: () = objc2::msg_send![ns_window, setFrame: next, display: true];
     }
     Ok(())
+}
+
+/// Adds the frame-keeping `constrainFrameRect:toScreen:` to GPUI's window
+/// class before the first window opens, so every capture window opens at
+/// its requested size. A window that AppKit shrank and the self-test then
+/// grew could be captured before its Metal layer drew at the new size: a
+/// black band at the bottom, over the rounded corners.
+#[cfg(target_os = "macos")]
+pub fn keep_frames() {
+    if let Some(class) = objc2::runtime::AnyClass::get(c"GPUIWindow") {
+        // SAFETY: GPUI's own NSWindow subclass, on the main thread.
+        unsafe { keep_frames_of(class) }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn keep_frames() {}
+
+/// SAFETY: `class` is a live NSWindow subclass; call on the main thread.
+/// `class_addMethod` only adds the method to that class (it fails,
+/// harmlessly, when the method is already there) with the signature of
+/// `-[NSWindow constrainFrameRect:toScreen:]`.
+#[cfg(target_os = "macos")]
+unsafe fn keep_frames_of(class: *const objc2::runtime::AnyClass) {
+    use objc2::runtime::{AnyObject, Imp, Sel};
+    use objc2_foundation::NSRect;
+
+    extern "C-unwind" fn keep_frame(
+        _: *mut AnyObject,
+        _: Sel,
+        rect: NSRect,
+        _: *mut AnyObject,
+    ) -> NSRect {
+        rect
+    }
+
+    unsafe {
+        let imp: Imp = std::mem::transmute::<
+            extern "C-unwind" fn(*mut AnyObject, Sel, NSRect, *mut AnyObject) -> NSRect,
+            Imp,
+        >(keep_frame);
+        objc2::ffi::class_addMethod(
+            class.cast_mut(),
+            objc2::sel!(constrainFrameRect:toScreen:),
+            imp,
+            c"{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@".as_ptr(),
+        );
+    }
 }
 
 #[cfg(not(target_os = "macos"))]
