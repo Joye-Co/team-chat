@@ -584,7 +584,9 @@ Command-style panels sit 96 pt from the window top; dialogs and alerts are cente
   `text-3`, snippet 13/20 `text-2`. Every match in every row type (topic titles, 群 names, message snippets) gets one mark: `hl-bg`, radius 4, padding 0 2, 20 pt tall, text color unchanged. Trailing: the same compact `等你答` / `等你审` chip as the topic list (one name and one style per state everywhere). Active row
   `selected` + `corner-down-left`. Footer 40: 12/16 `text-3` with 20 pt kbd. With no query:
   最近 (5 topics), then 群 and 私聊 (U34). Height follows the content up to 70 % of the window,
-  whole rows only. ⌘F opens it scoped to the 群 with a removable `在 qqbot 研发` token.
+  whole rows only. ⌘F opens it scoped to the 群 with a removable `在 qqbot 研发` token; while
+  scoped, the footer offers `⌘F 在全部群里搜索`, and ⌘F removes the scope. The list fades its
+  bottom 24 pt from `overlay` while more rows follow.
 - **Dialog**: width 440 (forms) or 560; padding 20; title `title` 16/24 with 16 below; body
   `body`; form fields 40 pt with labels above; footer right-aligned `md` buttons (secondary then
   primary), 20 pt above. Primary is disabled until the form is valid. No close `x` when a cancel
@@ -667,8 +669,9 @@ for the built-in server, 12 pt then a centered text button `使用其他服务�
 server field. The first box has focus and the caret when the screen opens; `加入` is enabled
 once 8 characters are in. A pasted `tc_` credential or a 12-character code of the earlier
 format shows as one locked field. Errors: the code boxes take the error border, `邀请码不对，请检查后再试。`
-shows under them, and the typed code stays in the boxes, selected (each character on the
-text-selection color), so the next keystroke replaces it.
+shows under them, and the typed code stays in the boxes with the caret after its last
+character and no selection color; the next character typed or pasted starts a new code from box
+1, and Backspace edits it from the end. Opening the server field moves the focus into it.
 
 ### 8.4 Settings (`settings-members-*`)
 
@@ -693,7 +696,8 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
   form fields save on blur; sign-out at the bottom; `退出并删除本机记录` in its own danger row
   (U40).
 - **通知**: per 群 one segmented control `所有消息 / 仅 @我 / 不提醒` (32 pt, selected segment a
-  `content` fill with a level-1 shadow); 群 and 私聊 in separate tables (U42).
+  `content` fill with a level-1 shadow) and a 静音 switch; 群 and 私聊 in separate tables (U42).
+  While a 群 is muted its control shows `不提醒`, disabled; unmuting brings back its level.
 - **机器**: rows with an icon by machine type, Chinese tags, status centered (U43).
 - **成本**: hidden until it exists (U43).
 - **通用** (replaces the earlier 关于 page; last in the section list, `settings` gear 16, as in the mockup): the about card
@@ -703,7 +707,7 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
 
 | Case | Treatment |
 | --- | --- |
-| No 群 at all | One centered welcome in the content area: character `jojo` 64, `display` `还没有群`, one `body` `text-2` sentence, `lg` buttons `新建群` primary and `发起私聊` secondary. Topic list, composer and side panel hidden (U06) |
+| No 群 at all | One centered welcome in the content area: character `jojo` 64, `display` `还没有群`, one `body` `text-2` sentence, `lg` buttons `新建群` primary and `发起私聊` secondary. Topic list, composer and side panel hidden (U06). The sidebar hides 待办 while it is empty and keeps the 群 and 私聊 headers with their `+` |
 | 群 with no topics | Topic list: one 12 `text-3` line `还没有话题` under the tabs; topic view: the composer with the new-topic placeholder |
 | No topic selected | Topic view: centered `body` `text-2` `选一个话题，或写下第一行开始新话题` |
 | Empty filter | `没有未读话题` / `没有等你的话题`, 12 `text-3`, top of the list |
