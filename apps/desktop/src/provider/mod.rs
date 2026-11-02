@@ -1214,6 +1214,25 @@ impl ChatProvider for CoreProvider {
         }
     }
 
+    fn quoted_message(
+        &self,
+        _group_id: &str,
+        quoting_id: &str,
+        quoted_id: &str,
+    ) -> Option<crate::data::QuotedMessage> {
+        let a = self.account()?;
+        let store = a.client.store();
+        if let Some(q) = store.message(quoted_id).ok().flatten() {
+            return Some(convert::quoted(&q));
+        }
+        let reply = store.message(quoting_id).ok().flatten()?.reply_to?;
+        (reply.message_id == quoted_id).then(|| crate::data::QuotedMessage {
+            author_id: reply.author_id,
+            body: reply.excerpt,
+            deleted: false,
+        })
+    }
+
     fn rename_topic(&self, _group_id: &str, topic_id: &str, title: String) {
         let Some(a) = self.account() else {
             return;

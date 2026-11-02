@@ -125,8 +125,19 @@ impl MessageExtra for QuoteExtra {
     ) -> Option<AnyElement> {
         let quoted_id = message.quote_of.as_deref()?;
         let colors = theme::colors(cx);
-        let (name, text) = match ctx.message(quoted_id) {
-            Some(q) if q.deleted_at.is_some() => (
+        let quoted = match ctx.message(quoted_id) {
+            Some(q) => Some(crate::data::QuotedMessage {
+                author_id: q.author_id.clone(),
+                body: q.body.clone(),
+                deleted: q.deleted_at.is_some(),
+            }),
+            // Older than the window: the cache, or the server's excerpt.
+            None => ctx
+                .provider
+                .quoted_message(&message.group_id, &message.id, quoted_id),
+        };
+        let (name, text) = match quoted {
+            Some(q) if q.deleted => (
                 ctx.member(&q.author_id).map(|m| m.name.clone()),
                 t::DELETED.to_string(),
             ),

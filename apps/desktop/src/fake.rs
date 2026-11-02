@@ -1221,6 +1221,25 @@ impl ChatProvider for FakeProvider {
         }
     }
 
+    fn quoted_message(
+        &self,
+        _group_id: &str,
+        _quoting_id: &str,
+        quoted_id: &str,
+    ) -> Option<QuotedMessage> {
+        self.with(|s| {
+            s.messages
+                .values()
+                .flatten()
+                .find(|m| m.id == quoted_id)
+                .map(|m| QuotedMessage {
+                    author_id: m.author_id.clone(),
+                    body: m.body.clone(),
+                    deleted: m.deleted_at.is_some(),
+                })
+        })
+    }
+
     fn rename_topic(&self, group_id: &str, topic_id: &str, title: String) {
         let found = self.with(|s| {
             let Some(t) = s

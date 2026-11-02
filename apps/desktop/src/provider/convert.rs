@@ -194,6 +194,15 @@ fn send_state(s: OutboxState) -> SendState {
     }
 }
 
+/// A cached message as a quote.
+pub fn quoted(m: &chat_core::proto::Message) -> crate::data::QuotedMessage {
+    crate::data::QuotedMessage {
+        author_id: m.author_id.clone(),
+        body: m.body.clone(),
+        deleted: m.deleted_at().is_some(),
+    }
+}
+
 /// A queued send shown as a pending or failed message. `topic_id` is the id
 /// the view asked for (a pending topic id for the first message of a topic).
 pub fn outbox_message(item: &OutboxItem, topic_id: &str, me: &str) -> Option<Message> {

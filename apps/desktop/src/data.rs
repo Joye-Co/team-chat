@@ -913,6 +913,15 @@ pub struct Draft {
     pub files: Vec<PendingFile>,
 }
 
+/// A quoted message outside the timeline window ([`ChatProvider::quoted_message`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct QuotedMessage {
+    pub author_id: MemberId,
+    /// The body, or the server's excerpt of it.
+    pub body: String,
+    pub deleted: bool,
+}
+
 // --- settings window: profile, 成员 admin, 机器, 通知, diagnostics ---
 
 /// Why a settings request failed. The settings views map each to copy text.
@@ -1195,6 +1204,16 @@ pub trait ChatProvider: Send + Sync + 'static {
         status: TopicStatus,
         waiting_on: Vec<MemberId>,
     );
+    /// A quoted message that is not in the timeline window: from the cache, or else the
+    /// author and excerpt the server put in the quoting message's `replyTo`.
+    fn quoted_message(
+        &self,
+        _group_id: &str,
+        _quoting_id: &str,
+        _quoted_id: &str,
+    ) -> Option<QuotedMessage> {
+        None
+    }
     /// Renames a topic (`topic.update` with `title`). The new title arrives as
     /// `Change::Topics`.
     fn rename_topic(&self, _group_id: &str, _topic_id: &str, _title: String) {}
