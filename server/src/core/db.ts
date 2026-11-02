@@ -1,5 +1,5 @@
 // D1 access for the core directory: members, groups and membership.
-import type { Group, Member } from "@chat/protocol";
+import { CharacterId, type Group, type Member } from "@chat/protocol";
 
 export interface MemberRow {
   id: string;
@@ -10,6 +10,8 @@ export interface MemberRow {
   avatar_url: string | null;
   deactivated: number;
   created_at: number;
+  /** jojo-friends character id (migration 0004); absent before it ran. */
+  character?: string | null;
 }
 
 export interface GroupRow {
@@ -32,6 +34,9 @@ export function toMember(row: MemberRow): Member {
     avatarUrl: row.avatar_url,
   };
   if (row.deactivated) m.deactivated = true;
+  // Only known ids reach the wire: clients reject unknown ones.
+  const character = CharacterId.safeParse(row.character);
+  if (character.success) m.character = character.data;
   return m;
 }
 

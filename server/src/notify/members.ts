@@ -18,8 +18,8 @@ registerRoute({
     const isOwner = a.member.level === "owner";
     const self = params.id === a.memberId;
     if (!isOwner && !self) throw new ApiError("forbidden", "only an owner can change other members");
-    if (!isOwner && (req.level !== undefined || req.deactivated !== undefined)) {
-      throw new ApiError("forbidden", "only an owner can change level or deactivate");
+    if (!isOwner && (req.level !== undefined || req.deactivated !== undefined || req.character !== undefined)) {
+      throw new ApiError("forbidden", "only an owner can change level, character or deactivate");
     }
     const target = await getMember(env.DB, params.id);
     if (!target) throw new ApiError("not_found", "member not found");
@@ -29,12 +29,14 @@ registerRoute({
       role: req.role === undefined ? target.role : req.role,
       level: req.level ?? target.level,
       deactivated: req.deactivated === undefined ? target.deactivated === 1 : req.deactivated,
+      character: req.character === undefined ? (target.character ?? null) : req.character,
     };
     const details: Record<string, unknown> = {};
     if (next.name !== target.name) details.name = [target.name, next.name];
     if (next.role !== target.role) details.role = [target.role, next.role];
     if (next.level !== target.level) details.level = [target.level, next.level];
     if (next.deactivated !== (target.deactivated === 1)) details.deactivated = [target.deactivated === 1, next.deactivated];
+    if (next.character !== (target.character ?? null)) details.character = [target.character ?? null, next.character];
     if (Object.keys(details).length === 0) return toMember(target);
 
     // A change that takes away an active owner needs another active owner. The check is part of
@@ -43,10 +45,10 @@ registerRoute({
     const now = Date.now();
     const results = await env.DB.batch([
       env.DB.prepare(
-        `UPDATE members SET name = ?, role = ?, level = ?, deactivated = ?
+        `UPDATE members SET name = ?, role = ?, level = ?, deactivated = ?, character = ?
          WHERE id = ? AND (? = 0 OR EXISTS
            (SELECT 1 FROM members o WHERE o.level = 'owner' AND o.deactivated = 0 AND o.id != ?))`,
-      ).bind(next.name, next.role, next.level, next.deactivated ? 1 : 0, target.id, losesOwner ? 1 : 0, target.id),
+      ).bind(next.name, next.role, next.level, next.deactivated ? 1 : 0, next.character, target.id, losesOwner ? 1 : 0, target.id),
       env.DB.prepare(
         `INSERT INTO audit (actor_id, credential_id, action, target, details, at)
          SELECT ?, ?, 'member.update', ?, ?, ? WHERE changes() = 1`,

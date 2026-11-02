@@ -292,12 +292,16 @@ export function registerCoreRoutes(): void {
       const token = newToken();
       await env.DB.batch([
         env.DB.prepare(
-          `INSERT INTO members (id, kind, name, role, level, created_at, created_by) VALUES (?, 'bot', ?, ?, 'member', ?, ?)`,
-        ).bind(memberId, req.name, req.role ?? null, now, a.memberId),
+          `INSERT INTO members (id, kind, name, role, level, created_at, created_by, character) VALUES (?, 'bot', ?, ?, 'member', ?, ?, ?)`,
+        ).bind(memberId, req.name, req.role ?? null, now, a.memberId, req.character ?? null),
         env.DB.prepare(
           "INSERT INTO tokens (id, token_hash, member_id, label, created_at) VALUES (?, ?, ?, 'bot', ?)",
         ).bind(tokenId, await sha256Hex(token), memberId, now),
-        auditStatement(env.DB, a, { action: "bot.create", target: memberId, details: { name: req.name, tokenId } }, now),
+        auditStatement(env.DB, a, {
+          action: "bot.create",
+          target: memberId,
+          details: { name: req.name, tokenId, ...(req.character ? { character: req.character } : {}) },
+        }, now),
       ]);
       const row = (await getMember(env.DB, memberId)) as MemberRow;
       const waitUntil = (p: Promise<unknown>) => ctx.waitUntil(p);

@@ -8,7 +8,10 @@
 //   local-secret                       make a local ADMIN_SECRET and write server/.dev.vars
 //   bootstrap --name <ownerName>       make the first owner, save its token
 //   invite --name <n> [--kind human|bot] [--level member|owner] [--role <r>]
-//   bot --name <n> [--role <r>]        make a bot member, save its token
+//   bot --name <n> [--role <r>] [--character <id>]
+//                                      make a bot member, save its token; <id> is a jojo-friends id
+//   set-member --member <id> [--character <id>|none] [--role <r>|none] [--level member|owner]
+//                                      change a member's character, 岗位 or level (owner token)
 //   revoke --member <id>               revoke every token of a member
 //   revoke --self                      revoke the saved owner token
 //   members                            list members (no secrets)
@@ -123,7 +126,7 @@ async function call(
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
   if (!command || command === "help" || flags.help) {
-    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 21).join("\n"));
+    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 23).join("\n"));
     return;
   }
   const envName = (str(flags, "env") ?? "local") as EnvName;
@@ -178,12 +181,25 @@ async function main() {
       const name = str(flags, "name", true) as string;
       const r = await call(base, "POST", "/v1/bots", {
         token: ownerToken(),
-        body: { name, role: str(flags, "role") },
+        body: { name, role: str(flags, "role"), character: str(flags, "character") },
       });
       const path = join(dir, `bot-${slug(name)}-${r.member.id}.token`);
       writeSecret(path, r.token);
       console.log(`bot ${r.member.id} (${r.member.name})`);
       console.log(`bot token: ${path}`);
+      return;
+    }
+    case "set-member": {
+      const member = str(flags, "member", true) as string;
+      // "none" clears a field; an absent flag leaves it unchanged.
+      const nullable = (k: string) => {
+        const v = str(flags, k);
+        return v === undefined ? undefined : v === "none" ? null : v;
+      };
+      const body = { character: nullable("character"), role: nullable("role"), level: str(flags, "level") };
+      if (Object.values(body).every((v) => v === undefined)) fail("pass --character, --role or --level");
+      const r = await call(base, "PATCH", `/v1/members/${member}`, { token: ownerToken(), body });
+      console.log([r.id, r.kind, r.level, r.name, r.role ?? "", r.character ?? ""].join("\t"));
       return;
     }
     case "revoke": {
@@ -197,7 +213,7 @@ async function main() {
     case "members": {
       const r = (await call(base, "GET", "/v1/members", { token: ownerToken() })) as any[];
       for (const m of r) {
-        console.log([m.id, m.kind, m.level, m.deactivated ? "deactivated" : "active", m.name, m.role ?? ""].join("\t"));
+        console.log([m.id, m.kind, m.level, m.deactivated ? "deactivated" : "active", m.name, m.role ?? "", m.character ?? ""].join("\t"));
       }
       return;
     }

@@ -467,7 +467,7 @@ Rules:
   change would leave no active owner. Deactivating a member revokes its tokens and closes its
   connections. Every change is audited and pushed to every connection as `directory` with the
   changed `members`.
-- `character` is owner only (`unauthorized` for a member, also on self); `null` clears it. Only
+- `character` is owner only (`forbidden` for a member, also on self); `null` clears it. Only
   the 26 jojo-friends ids are accepted (`invalid` otherwise); a new id is a protocol change,
   because clients bundle the images and reject unknown ids. Clients draw the character with the
   member's live status (idle, working, needs-input, success, error, offline); members without
