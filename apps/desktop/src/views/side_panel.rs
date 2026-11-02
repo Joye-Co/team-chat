@@ -14,7 +14,7 @@ use std::time::Duration;
 use gpui::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
     StatefulInteractiveElement as _, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 
@@ -764,10 +764,13 @@ impl SidePanel {
                         .presence(Some(m))
                         .on(k.content),
                 )
+                // The name identifies the member, so it keeps its width (up
+                // to 65 % of the row) and the 岗位 gives way first.
                 .child(
                     div()
-                        .flex_1()
+                        .flex_shrink_0()
                         .min_w(px(0.))
+                        .max_w(relative(0.65))
                         .t_ui()
                         .text_color(k.text_1)
                         .one_line()
@@ -776,8 +779,10 @@ impl SidePanel {
                 .when_some(m.role.clone().filter(|r| !r.is_empty()), |el, role| {
                     el.child(
                         div()
-                            .flex_none()
-                            .max_w(px(120.))
+                            .ml_auto()
+                            .flex_shrink_1()
+                            .min_w(px(0.))
+                            .max_w(px(96.))
                             .flex()
                             .items_center()
                             .gap(space::S4)
