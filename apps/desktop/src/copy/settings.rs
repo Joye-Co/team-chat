@@ -7,7 +7,7 @@ crate::copy! {
     MENU_HIDE = "隐藏",
 
     // Pages
-    PAGE_PROFILE = "个人",
+    PAGE_PROFILE = "我的资料",
     PAGE_MEMBERS = "成员",
     PAGE_MACHINES = "机器",
     PAGE_NOTIFICATIONS = "通知",
@@ -38,7 +38,7 @@ crate::copy! {
 
     // 成员
     MEMBERS = "成员",
-    MEMBERS_COUNT = "{n} 位成员",
+    MEMBERS_COUNT = "{n} 位",
     INVITE = "邀请成员",
     ADD_BOT_MEMBER = "添加自动成员",
     LEVEL = "权限",
@@ -49,7 +49,9 @@ crate::copy! {
     KIND_BOT = "自动成员",
     MEMBER_ONLINE = "在线",
     MEMBER_OFFLINE = "离线",
-    MEMBER_ME = "我",
+    MEMBER_ME = "（你）",
+    MEMBER_MORE = "更多",
+    DEACTIVATE_MENU = "停用…",
     MAKE_OWNER = "设为管理员",
     MAKE_MEMBER = "设为普通成员",
     DEACTIVATE = "停用",
@@ -115,6 +117,7 @@ crate::copy! {
     MACHINE_NEVER_SEEN = "还没有连上",
     REFRESH = "刷新",
     LOADING = "正在加载…",
+    RETRY = "重试",
     SIZE_GB = "{n} GB",
     SIZE_MB = "{n} MB",
 

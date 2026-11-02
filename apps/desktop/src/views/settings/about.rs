@@ -3,10 +3,10 @@
 
 use gpui::{
     AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription,
-    Window, div, prelude::FluentBuilder as _, px,
+    Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{
-    Disableable as _,
+    Disableable as _, Sizable as _,
     button::Button,
     input::{InputEvent, Textarea, TextareaState},
     switch::Switch,
@@ -17,7 +17,7 @@ use crate::{
     app::{Changes, Services},
     copy::{dev, fill, settings as s},
     data::{Change, ConnectionState, SessionState},
-    theme,
+    theme::{self, Type as _, space},
     updater::banner::AboutUpdate,
 };
 
@@ -124,52 +124,86 @@ impl Render for AboutPage {
         };
         let developer = self.services.nav.read(cx).developer_view;
         let busy = self.status.busy();
-        let value = |text: String| div().flex_1().min_w_0().truncate().child(text);
         div()
             .flex()
             .flex_col()
-            .child(self.update.clone())
-            .child(
-                div()
-                    .pt(px(8.))
-                    .child(widgets::field(s::SERVER, value(server.clone()), cx)),
-            )
-            .child(
-                widgets::section(s::DIAGNOSTICS, cx)
-                    .child(widgets::hint(s::DIAGNOSTICS_HINT, cx))
-                    .child(Textarea::new(&self.description))
-                    .child(
+            .child(widgets::group_rows(
+                vec![
+                    div().w_full().child(self.update.clone()),
+                    widgets::group_field(
+                        s::SERVER,
                         div()
-                            .flex()
-                            .items_center()
-                            .gap(px(12.))
-                            .child(
-                                Button::new("diagnostics-send")
-                                    .outline()
-                                    .label(s::DIAGNOSTICS_SEND)
-                                    .loading(busy)
-                                    .disabled(busy || server.is_empty())
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.send(window, cx)),
-                                    ),
-                            )
-                            .children(widgets::status_line(&self.status, cx)),
+                            .t_ui()
+                            .text_color(colors.text_2)
+                            .one_line()
+                            .child(server.clone()),
+                        cx,
                     ),
-            )
+                ],
+                space::S12,
+                cx,
+            ))
+            .child(widgets::section_header(s::DIAGNOSTICS, cx))
             .child(
-                widgets::section(s::DEVELOPER_VIEW, cx)
+                widgets::group(cx).child(
+                    widgets::group_row()
+                        .flex_col()
+                        .items_stretch()
+                        .gap(space::S8)
+                        .child(Textarea::new(&self.description).small())
+                        .child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(space::S12)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .child(match widgets::status_line(&self.status, cx) {
+                                            Some(line) => line,
+                                            None => widgets::hint(s::DIAGNOSTICS_HINT, cx),
+                                        }),
+                                )
+                                .child(
+                                    Button::new("diagnostics-send")
+                                        .small()
+                                        .label(s::DIAGNOSTICS_SEND)
+                                        .loading(busy)
+                                        .disabled(busy || server.is_empty())
+                                        .on_click(cx.listener(|this, _, window, cx| {
+                                            this.send(window, cx)
+                                        })),
+                                ),
+                        ),
+                ),
+            )
+            .child(widgets::section_header(s::DEVELOPER_VIEW, cx))
+            .child(
+                widgets::group(cx)
                     .child(
-                        Switch::new("developer-view")
-                            .checked(developer)
-                            .label(s::DEVELOPER_VIEW)
-                            .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                let on = *checked;
-                                this.services
-                                    .nav
-                                    .update(cx, |nav, cx| nav.set_developer_view(on, cx));
-                            })),
+                        widgets::group_row()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(space::S2)
+                                    .child(div().t_ui().child(s::DEVELOPER_VIEW))
+                                    .child(widgets::hint(s::DEVELOPER_VIEW_HINT, cx)),
+                            )
+                            .child(
+                                Switch::new("developer-view")
+                                    .checked(developer)
+                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
+                                        let on = *checked;
+                                        this.services
+                                            .nav
+                                            .update(cx, |nav, cx| nav.set_developer_view(on, cx));
+                                    })),
+                            ),
                     )
-                    .child(widgets::hint(s::DEVELOPER_VIEW_HINT, cx))
                     .when(developer, |el| {
                         let connection = match provider.connection() {
                             ConnectionState::Offline => dev::STATE_OFFLINE.to_string(),
@@ -190,19 +224,23 @@ impl Render for AboutPage {
                             SessionState::SignedIn { me, .. } => me.id.clone(),
                             _ => String::new(),
                         };
-                        el.child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .gap(px(2.))
-                                .p(px(8.))
-                                .rounded(px(6.))
-                                .bg(colors.code_background)
-                                .font_family("Menlo")
-                                .text_xs()
-                                .child(fill(dev::CONNECTION, &[("state", &connection)]))
-                                .child(fill(dev::SERVER, &[("url", &server)]))
-                                .child(fill(dev::MEMBER_ID, &[("id", &me)])),
+                        el.child(widgets::group_sep(space::S12, cx)).child(
+                            widgets::group_row().child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .flex()
+                                    .flex_col()
+                                    .gap(space::S2)
+                                    .p(space::S8)
+                                    .rounded(theme::radius::ROW)
+                                    .bg(colors.code_bg)
+                                    .text_color(colors.code_text)
+                                    .t_code()
+                                    .child(fill(dev::CONNECTION, &[("state", &connection)]))
+                                    .child(fill(dev::SERVER, &[("url", &server)]))
+                                    .child(fill(dev::MEMBER_ID, &[("id", &me)])),
+                            ),
                         )
                     }),
             )

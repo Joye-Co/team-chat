@@ -2,8 +2,8 @@
 //! text of a request, the one-time secret block, and helpers for replies.
 
 use gpui::{
-    App, Div, ElementId, IntoElement, ParentElement, SharedString, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, MouseButton,
+    ParentElement, Pixels, SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, Selectable as _, Sizable as _,
@@ -14,7 +14,7 @@ use gpui_component::{
 use crate::{
     copy::{fill, settings as s},
     data::{AdminError, AdminReply, MemberLevel, Millis},
-    theme::{self, Type as _, space},
+    theme::{self, Elevation, Type as _, space},
 };
 
 /// Waits for a reply off the UI thread. A dropped sender is [`AdminError::Other`].
@@ -91,7 +91,8 @@ pub fn check_len(text: &str, max: usize) -> Result<(), String> {
     }
 }
 
-/// A page title.
+/// A page title (15 / 20, 600). Pages show it in the toolbar band through
+/// [`page_header`]; this form is for a page without a band.
 pub fn page_title(text: &'static str, cx: &App) -> Div {
     let colors = theme::colors(cx);
     div()
@@ -101,14 +102,150 @@ pub fn page_title(text: &'static str, cx: &App) -> Div {
         .child(text)
 }
 
-/// A group of rows with a small heading.
-pub fn section(title: impl Into<SharedString>, cx: &App) -> Div {
+/// The page header that sits in the 52 pt toolbar band of the settings
+/// window: the title 15 / 600, an optional count 12 pt `text-2`, and the
+/// page actions at the trailing edge (DESIGN.md §13.10).
+pub fn page_header(
+    title: &'static str,
+    count: Option<String>,
+    actions: Option<AnyElement>,
+    cx: &App,
+) -> Div {
     let colors = theme::colors(cx);
-    div().flex().flex_col().gap(space::S8).pt(space::S20).child(
-        div()
-            .t_section()
-            .text_color(colors.text_3)
-            .child(title.into()),
+    div()
+        .size_full()
+        .px(space::S20)
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .child(
+            div()
+                .flex_none()
+                .t_title()
+                .text_color(colors.text_1)
+                .child(title),
+        )
+        .children(count.map(|n| {
+            div()
+                .flex_1()
+                .min_w_0()
+                .t_callout()
+                .tnum()
+                .text_color(colors.text_2)
+                .one_line()
+                .child(n)
+        }))
+        .child(div().flex_1())
+        .children(actions.map(|a| {
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                // Buttons in the band stop the window drag.
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(a)
+        }))
+}
+
+/// A section header above a grouped section: 11 / 14, 600, `text-3`,
+/// aligned with the text inside the group.
+pub fn section_header(title: impl Into<SharedString>, cx: &App) -> Div {
+    let colors = theme::colors(cx);
+    div()
+        .px(space::S12)
+        .pt(space::S20)
+        .pb(space::S6)
+        .t_section()
+        .text_color(colors.text_3)
+        .one_line()
+        .child(title.into())
+}
+
+/// A grouped (inset) section: `group` surface, radius 10, the level-1 ring.
+/// Put [`group_row`]s in it, with [`group_sep`] between them.
+pub fn group(cx: &App) -> Div {
+    let colors = theme::colors(cx);
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .rounded(theme::radius::LG)
+        .bg(colors.group)
+        .shadow(colors.shadow(Elevation::Card))
+}
+
+/// One row of a grouped section: at least 52 pt, 12 pt side padding.
+pub fn group_row() -> Div {
+    div()
+        .w_full()
+        .min_h(px(52.))
+        .px(space::S12)
+        .py(space::S10)
+        .flex()
+        .items_center()
+        .gap(space::S10)
+}
+
+/// The hairline between two rows, inset to the text by `inset`.
+pub fn group_sep(inset: Pixels, cx: &App) -> Div {
+    div()
+        .w_full()
+        .flex_none()
+        .pl(inset)
+        .child(div().h(theme::HAIRLINE).w_full().bg(theme::colors(cx).sep))
+}
+
+/// Rows joined by inset hairlines.
+pub fn group_rows(rows: Vec<Div>, inset: Pixels, cx: &App) -> Div {
+    let n = rows.len();
+    let mut out = group(cx);
+    for (ix, row) in rows.into_iter().enumerate() {
+        out = out.child(row);
+        if ix + 1 < n {
+            out = out.child(group_sep(inset, cx));
+        }
+    }
+    out
+}
+
+/// A labelled row inside a group: the 13 pt label on the left, the control
+/// on the right.
+pub fn group_field(label: &'static str, control: impl IntoElement, cx: &App) -> Div {
+    let colors = theme::colors(cx);
+    group_row()
+        .child(
+            div()
+                .w(px(88.))
+                .flex_none()
+                .t_ui()
+                .text_color(colors.text_1)
+                .child(label),
+        )
+        .child(div().flex_1().min_w_0().child(control))
+}
+
+/// A footnote under a group: 12 pt `text-2`, aligned with the row text.
+pub fn footnote(text: impl Into<SharedString>, cx: &App) -> Div {
+    let colors = theme::colors(cx);
+    div()
+        .px(space::S12)
+        .pt(space::S6)
+        .t_callout()
+        .text_color(colors.text_2)
+        .child(text.into())
+}
+
+/// A group row that shows an empty list: one centered line in `text-2`.
+pub fn group_empty(text: impl Into<SharedString>, cx: &App) -> Div {
+    let colors = theme::colors(cx);
+    group(cx).child(
+        group_row()
+            .justify_center()
+            .t_callout()
+            .text_color(colors.text_2)
+            .text_center()
+            .child(text.into()),
     )
 }
 
@@ -123,6 +260,7 @@ pub fn field(label: &'static str, control: impl IntoElement, cx: &App) -> Div {
             div()
                 .w(px(88.))
                 .flex_none()
+                .t_ui()
                 .text_color(colors.text_2)
                 .child(label),
         )

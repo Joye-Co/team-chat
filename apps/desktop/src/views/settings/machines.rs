@@ -8,9 +8,10 @@ use gpui::{
     Styled, Task, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _, WindowExt as _,
+    Disableable as _, Icon, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputState},
+    spinner::Spinner,
     tag::Tag,
 };
 
@@ -22,7 +23,8 @@ use crate::{
     app::Services,
     copy::{common, fill, settings as s},
     data::{MachineCreated, MachineInfo},
-    theme,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
     views::{presence_dot, topic_list::relative_time},
 };
 
@@ -91,15 +93,20 @@ impl MachinesPage {
         cx.notify();
     }
 
-    fn card(&self, m: &MachineInfo, cx: &App) -> gpui::Div {
+    /// One machine as a row of the grouped list: health, name, facts and labels.
+    fn row(&self, m: &MachineInfo, cx: &App) -> gpui::Div {
         let colors = theme::colors(cx);
         let now = chrono::Local::now();
-        let state = if !m.connected {
-            Tag::secondary().small().child(s::MACHINE_OFFLINE)
+        let (state_icon, state_text): (gpui::AnyElement, &'static str) = if !m.connected {
+            (presence_dot(false, cx).into_any_element(), s::MACHINE_OFFLINE)
         } else if !m.healthy {
-            Tag::warning().small().child(s::MACHINE_UNHEALTHY)
+            (
+                ui::icon(Lucide::TriangleAlert, theme::icon::SMALL, colors.warning)
+                    .into_any_element(),
+                s::MACHINE_UNHEALTHY,
+            )
         } else {
-            Tag::success().small().child(s::MACHINE_ONLINE)
+            (presence_dot(true, cx).into_any_element(), s::MACHINE_ONLINE)
         };
         let mut facts: Vec<String> = Vec::new();
         if let (Some(free), Some(total)) = (m.disk_free_bytes, m.disk_total_bytes) {
@@ -114,127 +121,173 @@ impl MachinesPage {
         if let Some(v) = &m.version {
             facts.push(fill(s::MACHINE_VERSION, &[("v", v)]));
         }
-        let work = if m.active_runs > 0 {
+        facts.push(if m.active_runs > 0 {
             fill(s::MACHINE_BUSY, &[("n", &m.active_runs.to_string())])
         } else {
             s::MACHINE_IDLE.to_string()
-        };
-        let seen = match m.last_heartbeat_at {
-            _ if m.connected => None,
-            Some(at) => Some(fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))])),
-            None => Some(s::MACHINE_NEVER_SEEN.to_string()),
-        };
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .p(px(12.))
-            .rounded(px(8.))
-            .border_1()
-            .border_color(colors.border)
+        });
+        match m.last_heartbeat_at {
+            _ if m.connected => {}
+            Some(at) => facts.push(fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))])),
+            None => facts.push(s::MACHINE_NEVER_SEEN.to_string()),
+        }
+        widgets::group_row()
+            .items_start()
             .child(
                 div()
+                    .flex_none()
+                    .size(px(28.))
+                    .rounded(theme::radius::MD)
+                    .bg(colors.fill_field)
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .child(presence_dot(m.connected && m.healthy, cx))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_base()
-                            .child(m.name.clone()),
-                    )
-                    .child(state),
+                    .justify_center()
+                    .child(ui::icon(Lucide::Monitor, theme::icon::TOOLBAR, colors.text_2)),
             )
             .child(
                 div()
+                    .flex_1()
+                    .min_w_0()
                     .flex()
-                    .flex_wrap()
-                    .gap(px(12.))
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .children(facts)
-                    .child(work)
-                    .children(seen),
+                    .flex_col()
+                    .gap(space::S2)
+                    .child(div().t_ui().medium().one_line().child(m.name.clone()))
+                    .child(
+                        div()
+                            .t_callout()
+                            .tnum()
+                            .text_color(colors.text_2)
+                            .child(facts.join(" · ")),
+                    )
+                    .when(!m.labels.is_empty(), |el| {
+                        el.child(
+                            div()
+                                .pt(space::S4)
+                                .flex()
+                                .flex_wrap()
+                                .gap(space::S4)
+                                .children(
+                                    m.labels
+                                        .iter()
+                                        .map(|l| Tag::secondary().small().child(l.clone())),
+                                ),
+                        )
+                    }),
             )
-            .when(!m.labels.is_empty(), |el| {
-                el.child(
-                    div()
-                        .flex()
-                        .flex_wrap()
-                        .gap(px(4.))
-                        .children(m.labels.iter().map(|l| Tag::new().small().child(l.clone()))),
-                )
-            })
+            .child(
+                div()
+                    .w(px(92.))
+                    .h(px(18.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .t_callout()
+                    .text_color(colors.text_2)
+                    .child(state_icon)
+                    .child(state_text),
+            )
+    }
+
+    /// The header buttons: 刷新 and 添加机器.
+    pub fn header_actions(this: &Entity<Self>, cx: &App) -> gpui::AnyElement {
+        let page = this.read(cx);
+        let owner = i_am_owner(&page.services);
+        let services = page.services.clone();
+        let busy = page.status.busy();
+        let weak = this.downgrade();
+        let weak2 = weak.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(
+                Button::new("machines-refresh")
+                    .ghost()
+                    .small()
+                    .icon(Icon::new(Lucide::RotateCcw))
+                    .label(s::REFRESH)
+                    .loading(busy)
+                    .on_click(move |_, _, cx| {
+                        let _ = weak.update(cx, |this, cx| this.refresh(cx));
+                    }),
+            )
+            .child(
+                Button::new("machine-add")
+                    .primary()
+                    .small()
+                    .icon(Icon::new(Lucide::Plus))
+                    .label(s::MACHINE_ADD)
+                    .disabled(!owner)
+                    .on_click(move |_, window, cx| {
+                        let form = open_add_machine(services.clone(), window, cx);
+                        let page = weak2.clone();
+                        // Reload the list once the machine exists.
+                        cx.observe(&form, move |form, cx| {
+                            if form.read(cx).created().is_some() {
+                                let _ = page.update(cx, |p, cx| p.refresh(cx));
+                            }
+                        })
+                        .detach();
+                    }),
+            )
+            .into_any_element()
     }
 }
 
 impl Render for MachinesPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let owner = i_am_owner(&self.services);
-        let services = self.services.clone();
-        let page = cx.entity().downgrade();
-        let body = match &self.machines {
-            None => div().child(widgets::hint(s::LOADING, cx)),
-            Some(list) if list.is_empty() => div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(px(6.))
-                .py(px(40.))
-                .child(div().text_base().child(s::MACHINES_EMPTY))
-                .child(widgets::hint(s::MACHINES_EMPTY_HINT, cx)),
-            Some(list) => div()
-                .flex()
-                .flex_col()
-                .gap(px(10.))
-                .children(list.iter().map(|m| self.card(m, cx))),
+        let colors = theme::colors(cx);
+        let failed = match &self.status {
+            Status::Failed(text) => Some(text.clone()),
+            _ => None,
+        };
+        let body = match (&self.machines, failed.clone()) {
+            // The first load failed: an error row with 重试 (§11 Error loading).
+            (None, Some(text)) => widgets::group(cx).child(
+                widgets::group_row()
+                    .child(ui::icon(
+                        Lucide::CircleAlert,
+                        theme::icon::SMALL,
+                        colors.danger,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .t_callout()
+                            .text_color(colors.text_1)
+                            .child(text),
+                    )
+                    .child(
+                        Button::new("machines-retry")
+                            .small()
+                            .label(s::RETRY)
+                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                    ),
+            ),
+            (None, None) => widgets::group(cx).child(
+                widgets::group_row()
+                    .justify_center()
+                    .child(Spinner::new().small().color(colors.text_3)),
+            ),
+            (Some(list), _) if list.is_empty() => div().pt(px(96.)).child(
+                ui::EmptyState::new(Lucide::Server, s::MACHINES_EMPTY)
+                    .description(s::MACHINES_EMPTY_HINT),
+            ),
+            (Some(list), _) => {
+                let rows = list.iter().map(|m| self.row(m, cx)).collect();
+                widgets::group_rows(rows, px(50.), cx)
+            }
         };
         div()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .flex()
-                    .items_start()
-                    .justify_between()
-                    .child(widgets::page_title(s::MACHINES, cx))
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(8.))
-                            .child(
-                                Button::new("machines-refresh")
-                                    .ghost()
-                                    .small()
-                                    .label(s::REFRESH)
-                                    .loading(self.status.busy())
-                                    .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                            )
-                            .child(
-                                Button::new("machine-add")
-                                    .primary()
-                                    .small()
-                                    .label(s::MACHINE_ADD)
-                                    .disabled(!owner)
-                                    .on_click(move |_, window, cx| {
-                                        let form = open_add_machine(services.clone(), window, cx);
-                                        let page = page.clone();
-                                        // Reload the list once the machine exists.
-                                        cx.observe(&form, move |form, cx| {
-                                            if form.read(cx).created().is_some() {
-                                                let _ = page.update(cx, |p, cx| p.refresh(cx));
-                                            }
-                                        })
-                                        .detach();
-                                    }),
-                            ),
-                    ),
-            )
-            .when(matches!(self.status, Status::Failed(_)), |el| {
-                el.children(widgets::status_line(&self.status, cx))
+            .when(self.machines.is_some(), |el| {
+                el.children(failed.map(|text| {
+                    widgets::status_line(&Status::Failed(text), cx)
+                        .map(|l| l.px(space::S12).pb(space::S8))
+                }).flatten())
             })
             .child(body)
     }

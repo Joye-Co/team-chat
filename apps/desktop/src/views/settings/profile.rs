@@ -2,10 +2,10 @@
 
 use gpui::{
     AppContext as _, Context, Entity, IntoElement, ParentElement, PathPromptOptions, Render,
-    Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    Disableable as _, WindowExt as _,
+    Disableable as _, Icon, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
 };
@@ -15,7 +15,8 @@ use crate::{
     app::{Changes, Services},
     copy::{common, settings as s},
     data::{Change, Member, SessionState},
-    theme,
+    theme::{self, Type as _, space},
+    ui::Lucide,
     views::avatar,
 };
 
@@ -227,89 +228,110 @@ impl Render for ProfilePage {
         let colors = theme::colors(cx);
         let me = self.me();
         let signed_in = me.is_some();
+        let name = me.as_ref().map(|m| m.name.clone()).unwrap_or_default();
         div()
             .flex()
             .flex_col()
-            .child(widgets::page_title(s::PAGE_PROFILE, cx))
+            // Avatar: the picture, my name, the file rule and 更换头像….
+            .child(
+                widgets::group(cx).child(
+                    widgets::group_row()
+                        .gap(space::S12)
+                        .child(div().flex_none().child(avatar(me.as_ref(), px(48.), cx)))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(space::S2)
+                                .child(div().t_ui().medium().one_line().child(name))
+                                .child(
+                                    match widgets::status_line(&self.avatar, cx) {
+                                        Some(line) => line,
+                                        None => widgets::hint(s::AVATAR_HINT, cx),
+                                    }
+                                    .one_line(),
+                                ),
+                        )
+                        .child(
+                            Button::new("avatar-choose")
+                                .small()
+                                .label(s::AVATAR_CHOOSE)
+                                .loading(self.avatar.busy())
+                                .disabled(!signed_in || self.avatar.busy())
+                                .on_click(cx.listener(|this, _, _, cx| this.choose_avatar(cx))),
+                        ),
+                ),
+            )
+            .child(div().h(space::S20))
+            .child(widgets::group_rows(
+                vec![
+                    widgets::group_field(s::NAME, Input::new(&self.name).small(), cx),
+                    widgets::group_field(s::ROLE, Input::new(&self.role).small(), cx),
+                ],
+                space::S12,
+                cx,
+            ))
             .child(
                 div()
+                    .pt(space::S12)
                     .flex()
                     .items_center()
-                    .gap(px(16.))
-                    .child(avatar(me.as_ref(), px(64.), cx))
+                    .gap(space::S12)
                     .child(
                         div()
-                            .flex()
-                            .flex_col()
-                            .gap(px(4.))
-                            .child(
-                                Button::new("avatar-choose")
-                                    .outline()
-                                    .label(s::AVATAR_CHOOSE)
-                                    .loading(self.avatar.busy())
-                                    .disabled(!signed_in || self.avatar.busy())
-                                    .on_click(cx.listener(|this, _, _, cx| this.choose_avatar(cx))),
-                            )
-                            .child(widgets::hint(s::AVATAR_HINT, cx))
-                            .children(widgets::status_line(&self.avatar, cx)),
-                    ),
-            )
-            .child(
-                widgets::section(s::PROFILE, cx)
-                    .child(widgets::field(s::NAME, Input::new(&self.name), cx))
-                    .child(widgets::field(s::ROLE, Input::new(&self.role), cx))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(12.))
-                            .child(
-                                Button::new("profile-save")
-                                    .primary()
-                                    .label(common::SAVE)
-                                    .loading(self.save.busy())
-                                    .disabled(!signed_in || self.save.busy())
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.save(window, cx)),
-                                    ),
-                            )
+                            .flex_1()
+                            .min_w_0()
+                            .px(space::S12)
                             .children(widgets::status_line(&self.save, cx)),
-                    ),
-            )
-            .child(
-                widgets::section(s::ACCOUNT, cx)
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(8.))
-                            .child(
-                                Button::new("sign-out")
-                                    .outline()
-                                    .label(s::SIGN_OUT)
-                                    .disabled(!signed_in)
-                                    .on_click(cx.listener(|this, _, _, _| {
-                                        this.services.provider.sign_out(false)
-                                    })),
-                            )
-                            .child(
-                                Button::new("sign-out-wipe")
-                                    .danger()
-                                    .outline()
-                                    .label(s::SIGN_OUT_WIPE)
-                                    .disabled(!signed_in)
-                                    .on_click(cx.listener(|this, _, window, cx| {
-                                        this.confirm_wipe(window, cx)
-                                    })),
-                            ),
                     )
                     .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(s::SIGN_OUT_HINT),
+                        Button::new("profile-save")
+                            .primary()
+                            .small()
+                            .label(common::SAVE)
+                            .loading(self.save.busy())
+                            .disabled(!signed_in || self.save.busy())
+                            .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
                     ),
             )
-            .when(!signed_in, |el| el)
+            .child(widgets::section_header(s::ACCOUNT, cx))
+            .child(
+                widgets::group(cx).child(
+                    widgets::group_row()
+                        .gap(space::S8)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .t_callout()
+                                .text_color(colors.text_2)
+                                .child(s::SIGN_OUT_HINT),
+                        )
+                        .child(
+                            Button::new("sign-out-wipe")
+                                .small()
+                                .ghost()
+                                .text_color(colors.danger_text)
+                                .label(s::SIGN_OUT_WIPE)
+                                .disabled(!signed_in)
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.confirm_wipe(window, cx)
+                                })),
+                        )
+                        .child(
+                            Button::new("sign-out")
+                                .small()
+                                .icon(Icon::new(Lucide::LogOut))
+                                .label(s::SIGN_OUT)
+                                .disabled(!signed_in)
+                                .on_click(cx.listener(|this, _, _, _| {
+                                    this.services.provider.sign_out(false)
+                                })),
+                        ),
+                ),
+            )
     }
 }
 

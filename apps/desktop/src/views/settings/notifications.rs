@@ -2,11 +2,11 @@
 
 use gpui::{
     Context, ElementId, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
-    Window, div, px,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     switch::Switch,
 };
 
@@ -15,7 +15,8 @@ use crate::{
     app::{Changes, Services},
     copy::settings as s,
     data::{AdminReply, Change, NotifyLevel},
-    theme,
+    theme::{self, Type as _, space},
+    ui,
 };
 
 const LEVELS: [NotifyLevel; 3] = [NotifyLevel::All, NotifyLevel::Mentions, NotifyLevel::None];
@@ -102,14 +103,17 @@ impl Render for NotificationsPage {
                 let gid2 = g.id.clone();
                 let page = page.clone();
                 let page2 = page.clone();
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .py(px(6.))
-                    .border_b_1()
-                    .border_color(colors.border)
-                    .child(div().flex_1().min_w_0().truncate().child(g.name.clone()))
+                widgets::group_row()
+                    .child(ui::GroupTile::new(g.id.clone(), g.name.clone(), px(20.)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .t_ui()
+                            .when(prefs.muted, |el| el.text_color(colors.text_2))
+                            .one_line()
+                            .child(g.name.clone()),
+                    )
                     .child(widgets::choice(
                         SharedString::from(format!("notify-{}", g.id)),
                         &[s::NOTIFY_ALL, s::NOTIFY_MENTIONS, s::NOTIFY_NONE],
@@ -122,6 +126,7 @@ impl Render for NotificationsPage {
                     ))
                     .child(
                         Switch::new(ElementId::Name(format!("mute-{}", g.id).into()))
+                            .small()
                             .checked(prefs.muted)
                             .label(s::MUTE)
                             .on_click(move |on: &bool, _, cx| {
@@ -137,31 +142,30 @@ impl Render for NotificationsPage {
             .map(|f| {
                 let gid = f.group_id.clone();
                 let tid = f.topic.id.clone();
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(12.))
-                    .py(px(6.))
-                    .border_b_1()
-                    .border_color(colors.border)
+                widgets::group_row()
                     .child(
                         div()
                             .flex_1()
                             .min_w_0()
                             .flex()
                             .flex_col()
-                            .child(div().truncate().child(f.topic.title.clone()))
                             .child(
                                 div()
-                                    .text_xs()
-                                    .truncate()
-                                    .text_color(colors.muted_foreground)
+                                    .t_ui()
+                                    .medium()
+                                    .one_line()
+                                    .child(f.topic.title.replace('\n', " ")),
+                            )
+                            .child(
+                                div()
+                                    .t_callout()
+                                    .one_line()
+                                    .text_color(colors.text_2)
                                     .child(f.group_name.clone()),
                             ),
                     )
                     .child(
                         Button::new(ElementId::Name(format!("unfollow-{}", f.topic.id).into()))
-                            .ghost()
                             .small()
                             .label(s::UNFOLLOW)
                             .on_click(
@@ -173,22 +177,20 @@ impl Render for NotificationsPage {
         div()
             .flex()
             .flex_col()
-            .child(widgets::page_title(s::NOTIFICATIONS, cx))
-            .child(widgets::hint(s::NOTIFICATIONS_HINT, cx))
-            .children(widgets::status_line(&self.status, cx))
-            .child(
-                widgets::section(s::GROUP_NOTIFY, cx).child(if group_rows.is_empty() {
-                    widgets::hint(s::NO_GROUPS, cx)
-                } else {
-                    div().flex().flex_col().children(group_rows)
-                }),
-            )
-            .child(
-                widgets::section(s::FOLLOWED_TOPICS, cx).child(if topic_rows.is_empty() {
-                    widgets::hint(s::FOLLOWED_EMPTY, cx)
-                } else {
-                    div().flex().flex_col().children(topic_rows)
-                }),
-            )
+            .children(widgets::status_line(&self.status, cx).map(|l| l.px(space::S12).pb(space::S8)))
+            .child(widgets::section_header(s::GROUP_NOTIFY, cx).pt(space::S4))
+            .child(if group_rows.is_empty() {
+                widgets::group_empty(s::NO_GROUPS, cx)
+            } else {
+                // Inset to the name: 12 padding + 20 tile + 10 gap.
+                widgets::group_rows(group_rows, px(42.), cx)
+            })
+            .child(widgets::footnote(s::NOTIFICATIONS_HINT, cx))
+            .child(widgets::section_header(s::FOLLOWED_TOPICS, cx))
+            .child(if topic_rows.is_empty() {
+                widgets::group_empty(s::FOLLOWED_EMPTY, cx)
+            } else {
+                widgets::group_rows(topic_rows, space::S12, cx)
+            })
     }
 }

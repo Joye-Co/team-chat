@@ -6,10 +6,10 @@ use gpui::{
     SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _, WindowExt as _,
+    Disableable as _, Icon, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariant, ButtonVariants as _},
     input::{Input, InputState},
-    tag::Tag,
+    menu::{DropdownMenu as _, PopupMenuItem},
 };
 
 use super::{
@@ -25,7 +25,7 @@ use crate::{
     },
     theme,
     theme::{Type as _, space},
-    ui,
+    ui::{self, Lucide},
     views::presence_dot,
 };
 
@@ -128,10 +128,57 @@ impl MembersPage {
         });
     }
 
+    /// `8 位`: active members, for the header.
+    pub fn count_text(&self) -> String {
+        let n = self
+            .services
+            .provider
+            .members()
+            .iter()
+            .filter(|m| !m.deactivated)
+            .count();
+        fill(s::MEMBERS_COUNT, &[("n", &n.to_string())])
+    }
+
+    /// The header buttons: 添加自动成员 (secondary) then 邀请成员 (primary).
+    pub fn header_actions(&self, cx: &App) -> gpui::AnyElement {
+        let _ = cx;
+        let owner = i_am_owner(&self.services);
+        let services = self.services.clone();
+        let services2 = self.services.clone();
+        div()
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(
+                Button::new("add-bot")
+                    .small()
+                    .icon(Icon::new(Lucide::Bot))
+                    .label(s::ADD_BOT_MEMBER)
+                    .disabled(!owner)
+                    .on_click(move |_, window, cx| {
+                        open_add_bot(services2.clone(), window, cx);
+                    }),
+            )
+            .child(
+                Button::new("invite")
+                    .primary()
+                    .small()
+                    .icon(Icon::new(Lucide::UserPlus))
+                    .label(s::INVITE)
+                    .disabled(!owner)
+                    .on_click(move |_, window, cx| {
+                        open_invite(services.clone(), window, cx);
+                    }),
+            )
+            .into_any_element()
+    }
+
     fn row(&self, m: &Member, me: Option<&str>, owner: bool, cx: &mut Context<Self>) -> gpui::Div {
         let colors = theme::colors(cx);
         let is_me = me == Some(m.id.as_str());
         let id = m.id.clone();
+        let page = cx.entity().downgrade();
         let status_text = if m.deactivated {
             common::MEMBER_DEACTIVATED
         } else if m.online {
@@ -139,172 +186,192 @@ impl MembersPage {
         } else {
             s::MEMBER_OFFLINE
         };
-        let mut actions = div()
-            .w(px(196.))
-            .flex()
-            .flex_none()
-            .justify_end()
-            .items_center()
-            .gap(px(4.));
-        if owner {
-            if !m.deactivated {
-                let (label, level) = match m.level {
-                    MemberLevel::Owner => (s::MAKE_MEMBER, MemberLevel::Member),
-                    MemberLevel::Member => (s::MAKE_OWNER, MemberLevel::Owner),
-                };
-                let target = id.clone();
-                actions = actions.child(
-                    Button::new(ElementId::Name(format!("level-{id}").into()))
-                        .ghost()
-                        .small()
-                        .label(label)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_level(target.clone(), level, cx)
-                        })),
-                );
-            }
-            if !is_me {
-                let member = m.clone();
-                let target = id.clone();
-                actions = actions.child(if m.deactivated {
-                    Button::new(ElementId::Name(format!("reactivate-{id}").into()))
-                        .ghost()
-                        .small()
-                        .label(s::REACTIVATE)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.set_deactivated(target.clone(), false, cx)
+        // 权限: a menu button for owners, plain text otherwise (§13.10).
+        let level: gpui::AnyElement = if owner && !m.deactivated {
+            let current = m.level;
+            let target = id.clone();
+            let page = page.clone();
+            Button::new(ElementId::Name(format!("level-{id}").into()))
+                .small()
+                .w(px(92.))
+                .label(widgets::level_text(m.level))
+                .dropdown_caret(true)
+                .dropdown_menu(move |menu, _, _| {
+                    [MemberLevel::Owner, MemberLevel::Member]
+                        .into_iter()
+                        .fold(menu, |menu, level| {
+                            let page = page.clone();
+                            let target = target.clone();
+                            menu.item(
+                                PopupMenuItem::new(widgets::level_text(level))
+                                    .checked(level == current)
+                                    .on_click(move |_, _, cx| {
+                                        if level != current {
+                                            let target = target.clone();
+                                            let _ = page.update(cx, |this, cx| {
+                                                this.set_level(target, level, cx)
+                                            });
+                                        }
+                                    }),
+                            )
+                        })
+                })
+                .into_any_element()
+        } else {
+            div()
+                .w(px(92.))
+                .px(space::S8)
+                .t_callout()
+                .text_color(colors.text_2)
+                .child(widgets::level_text(m.level))
+                .into_any_element()
+        };
+        // 停用… or 恢复 in the row's ellipsis menu; the slot stays to keep columns.
+        let more: gpui::AnyElement = if owner && !is_me {
+            let member = m.clone();
+            let target = id.clone();
+            let deactivated = m.deactivated;
+            Button::new(ElementId::Name(format!("more-{id}").into()))
+                .ghost()
+                .small()
+                .w(px(28.))
+                .icon(Icon::new(Lucide::Ellipsis))
+                .tooltip(s::MEMBER_MORE)
+                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                    let page = page.clone();
+                    if deactivated {
+                        let target = target.clone();
+                        menu.item(PopupMenuItem::new(s::REACTIVATE).on_click(move |_, _, cx| {
+                            let target = target.clone();
+                            let _ = page
+                                .update(cx, |this, cx| this.set_deactivated(target, false, cx));
                         }))
-                } else {
-                    Button::new(ElementId::Name(format!("deactivate-{id}").into()))
-                        .ghost()
-                        .small()
-                        .text_color(colors.danger_text)
-                        .label(s::DEACTIVATE)
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.confirm_deactivate(&member, window, cx)
-                        }))
-                });
-            }
-        }
-        div()
-            .flex()
-            .items_center()
-            .gap(space::S10)
-            .h(px(52.))
-            .border_b_1()
-            .border_color(colors.sep)
-            .when(m.deactivated, |el| el.opacity(0.5))
-            .child(ui::MemberAvatar::new(Some(m), px(28.)))
+                    } else {
+                        let member = member.clone();
+                        menu.item(PopupMenuItem::new(s::DEACTIVATE_MENU).on_click(
+                            move |_, window, cx| {
+                                let _ = page.update(cx, |this, cx| {
+                                    this.confirm_deactivate(&member, window, cx)
+                                });
+                            },
+                        ))
+                    }
+                })
+                .into_any_element()
+        } else {
+            div().w(px(28.)).flex_none().into_any_element()
+        };
+        widgets::group_row()
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .flex()
-                    .flex_col()
+                    .items_center()
+                    .gap(space::S10)
+                    .when(m.deactivated, |el| el.opacity(0.5))
+                    .child(ui::MemberAvatar::new(Some(m), px(28.)).on(colors.group))
                     .child(
                         div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S4)
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .t_ui()
+                                            .medium()
+                                            .one_line()
+                                            .child(m.name.clone()),
+                                    )
+                                    .when(is_me, |el| {
+                                        el.child(
+                                            div()
+                                                .flex_none()
+                                                .t_callout()
+                                                .text_color(colors.text_2)
+                                                .child(s::MEMBER_ME),
+                                        )
+                                    }),
+                            )
+                            .children(m.role.clone().filter(|r| !r.is_empty()).map(|role| {
+                                div()
+                                    .t_callout()
+                                    .one_line()
+                                    .text_color(colors.text_2)
+                                    .child(role)
+                            })),
+                    )
+                    .child(
+                        div()
+                            .w(px(92.))
+                            .flex_none()
                             .flex()
                             .items_center()
-                            .gap(px(6.))
-                            .child(div().t_ui().medium().truncate().child(m.name.clone()))
-                            .when(is_me, |el| {
-                                el.child(Tag::secondary().small().child(s::MEMBER_ME))
-                            })
-                            .when(m.kind == MemberKind::Bot, |el| {
-                                el.child(ui::StatusChip::quiet(s::KIND_BOT))
-                            }),
-                    )
-                    .children(m.role.clone().filter(|r| !r.is_empty()).map(|role| {
-                        div()
+                            .gap(space::S6)
                             .t_callout()
-                            .truncate()
                             .text_color(colors.text_2)
-                            .child(role)
-                    })),
+                            .when(!m.deactivated, |el| {
+                                el.when(m.online, |el| el.child(presence_dot(true, cx)))
+                            })
+                            .child(status_text),
+                    ),
             )
             .child(
                 div()
-                    .w(px(92.))
-                    .flex_none()
-                    .t_callout()
-                    .text_color(colors.text_2)
-                    .child(widgets::level_text(m.level)),
-            )
-            .child(
-                div()
-                    .w(px(56.))
                     .flex_none()
                     .flex()
                     .items_center()
-                    .gap(space::S4)
-                    .t_callout()
-                    .text_color(colors.text_2)
-                    .when(!m.deactivated, |el| el.child(presence_dot(m.online, cx)))
-                    .child(status_text),
+                    .gap(space::S6)
+                    .when(m.deactivated, |el| el.opacity(0.5))
+                    .child(level)
+                    .child(more),
             )
-            .child(actions)
     }
 }
 
 impl Render for MembersPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = theme::colors(cx);
         let owner = i_am_owner(&self.services);
         let me = self.services.me();
         let members = sorted(self.services.provider.members());
-        let count = members.iter().filter(|m| !m.deactivated).count();
-        let services = self.services.clone();
-        let services2 = self.services.clone();
         let rows: Vec<_> = members
             .iter()
             .map(|m| self.row(m, me.as_deref(), owner, cx))
             .collect();
+        // Separators inset to the text: 12 padding + 28 avatar + 10 gap.
+        let list = widgets::group_rows(rows, px(50.), cx);
         div()
             .flex()
             .flex_col()
             .child(
                 div()
                     .flex()
-                    .items_start()
+                    .items_end()
                     .justify_between()
-                    .child(widgets::page_title(s::MEMBERS, cx))
+                    .gap(space::S12)
+                    .px(space::S12)
+                    .pb(space::S6)
+                    .t_caption()
+                    .text_color(colors.text_3)
                     .child(
                         div()
-                            .flex()
-                            .gap(px(8.))
-                            .child(
-                                Button::new("invite")
-                                    .primary()
-                                    .small()
-                                    .label(s::INVITE)
-                                    .disabled(!owner)
-                                    .on_click(move |_, window, cx| {
-                                        open_invite(services.clone(), window, cx);
-                                    }),
-                            )
-                            .child(
-                                Button::new("add-bot")
-                                    .outline()
-                                    .small()
-                                    .label(s::ADD_BOT_MEMBER)
-                                    .disabled(!owner)
-                                    .on_click(move |_, window, cx| {
-                                        open_add_bot(services2.clone(), window, cx);
-                                    }),
-                            ),
-                    ),
+                            .min_w_0()
+                            .one_line()
+                            .when(!owner, |el| el.child(s::OWNER_ONLY)),
+                    )
+                    .child(div().flex_none().w(px(126.)).child(s::LEVEL)),
             )
-            .child(
-                div()
-                    .flex()
-                    .justify_between()
-                    .child(widgets::hint(
-                        fill(s::MEMBERS_COUNT, &[("n", &count.to_string())]),
-                        cx,
-                    ))
-                    .when(!owner, |el| el.child(widgets::hint(s::OWNER_ONLY, cx))),
-            )
-            .children(widgets::status_line(&self.status, cx))
-            .child(div().flex().flex_col().pt(px(8.)).children(rows))
+            .children(widgets::status_line(&self.status, cx).map(|l| l.px(space::S12).pb(space::S8)))
+            .child(list)
     }
 }
 

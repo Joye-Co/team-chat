@@ -2,7 +2,7 @@
 //! Both render [`Updater`] state and call its commands; nothing here touches the network.
 
 use gpui::{
-    Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
+    Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div, img,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
@@ -16,6 +16,7 @@ use super::{Failure, Phase, Updater, version};
 use crate::{
     copy::{fill, update as u},
     theme::{self, Type as _},
+    ui::{Lucide, icon},
 };
 
 /// The line of text for a phase, or `None` when the phase has no banner text.
@@ -73,7 +74,7 @@ fn action_button(action: Action, id: &'static str, updater: &Entity<Updater>) ->
         Action::Dismiss => (u::DISMISS, false),
     };
     let button = Button::new((id, action as usize))
-        .small()
+        .xsmall()
         .label(label)
         .on_click(move |_, _, cx| {
             updater.update(cx, |up, cx| match action {
@@ -130,7 +131,15 @@ impl Render for UpdateBanner {
             _ => None,
         };
         let busy = matches!(phase, Phase::Installing(_) | Phase::WaitingForSends(_));
-        // A neutral band above the composer (DESIGN.md §13.14).
+        let failed = matches!(phase, Phase::Failed { .. });
+        // A neutral band (DESIGN.md §11, §13.14): 30 pt, radius 8, `fill-field`,
+        // a 13 pt glyph and 12 pt `text-2`. Never red: a failure shows only
+        // its glyph in the danger color.
+        let glyph = if failed {
+            Lucide::CircleAlert
+        } else {
+            Lucide::Download
+        };
         div()
             .flex_none()
             .w_full()
@@ -139,23 +148,35 @@ impl Render for UpdateBanner {
             .child(
                 div()
                     .w_full()
-                    .min_h(px(36.))
-                    .pl(theme::space::S12)
-                    .pr(theme::space::S6)
-                    .py(theme::space::S4)
+                    .min_h(px(30.))
+                    .pl(theme::space::S10)
+                    .pr(theme::space::S4)
+                    .py(theme::space::S2)
                     .rounded(theme::radius::ROW)
                     .bg(colors.fill_field)
                     .flex()
                     .items_center()
                     .gap(theme::space::S8)
                     .t_callout()
+                    .tnum()
                     .text_color(colors.text_2)
-                    .when(busy, |el| el.child(Spinner::new().small()))
+                    .map(|el| {
+                        if busy {
+                            el.child(Spinner::new().xsmall().color(colors.text_2))
+                        } else {
+                            el.child(icon(
+                                glyph,
+                                theme::icon::SMALL,
+                                if failed { colors.danger } else { colors.text_2 },
+                            ))
+                        }
+                    })
                     .child(div().flex_1().min_w(px(0.)).one_line().child(text))
                     .when_some(progress, |el, pct| {
                         el.child(
                             Progress::new("update-progress")
                                 .w(px(120.))
+                                .h(px(4.))
                                 .value(pct)
                                 .color(colors.accent),
                         )
@@ -194,53 +215,104 @@ impl Render for AboutUpdate {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let version_line = fill(u::VERSION, &[("version", version::CURRENT)]);
-        let root = div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(div().pt(px(16.)).pb(px(6.)).text_base().child(u::ABOUT))
-            .child(div().child(version_line));
-        let Some(updater) = self.updater.clone() else {
-            return root.into_any_element();
-        };
-        let phase = updater.read(cx).phase().clone();
+        let phase = self.updater.as_ref().map(|u| u.read(cx).phase().clone());
         let status = match &phase {
-            Phase::Idle => None,
-            Phase::Checking => Some(u::CHECKING.to_string()),
-            Phase::UpToDate => Some(u::UP_TO_DATE.to_string()),
-            other => banner_text(other),
+            None | Some(Phase::Idle) => None,
+            Some(Phase::Checking) => Some(u::CHECKING.to_string()),
+            Some(Phase::UpToDate) => Some(u::UP_TO_DATE.to_string()),
+            Some(other) => banner_text(other),
         };
+        let failed = matches!(phase, Some(Phase::Failed { .. }));
+        let busy = matches!(
+            phase,
+            Some(
+                Phase::Checking
+                    | Phase::Downloading { .. }
+                    | Phase::Installing(_)
+                    | Phase::WaitingForSends(_)
+            )
+        );
         let mut buttons: Vec<Button> = Vec::new();
-        match &phase {
-            Phase::Available(i) | Phase::Failed { info: Some(i), .. } => {
-                let up = updater.clone();
-                buttons.push(
-                    Button::new("about-update")
-                        .small()
-                        .primary()
-                        .label(fill(u::UPDATE_TO, &[("version", &i.version)]))
-                        .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
-                );
+        if let (Some(updater), Some(phase)) = (self.updater.clone(), &phase) {
+            match phase {
+                Phase::Available(i) | Phase::Failed { info: Some(i), .. } => {
+                    let up = updater.clone();
+                    buttons.push(
+                        Button::new("about-update")
+                            .small()
+                            .primary()
+                            .label(fill(u::UPDATE_TO, &[("version", &i.version)]))
+                            .on_click(move |_, _, cx| up.update(cx, |u, cx| u.start_update(cx))),
+                    );
+                }
+                Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. } => {
+                    let up = updater.clone();
+                    buttons.push(
+                        Button::new("about-check")
+                            .small()
+                            .label(u::CHECK)
+                            .on_click(move |_, _, cx| up.update(cx, |u, cx| u.check_now(cx))),
+                    );
+                }
+                _ => {}
             }
-            Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. } => {
-                let up = updater.clone();
-                buttons.push(
-                    Button::new("about-check")
-                        .small()
-                        .outline()
-                        .label(u::CHECK)
-                        .on_click(move |_, _, cx| up.update(cx, |u, cx| u.check_now(cx))),
-                );
-            }
-            _ => {}
         }
-        root.when_some(status, |el, s| {
-            el.child(div().text_color(colors.muted_foreground).child(s))
-        })
-        .when(!buttons.is_empty(), |el| {
-            el.child(div().flex().gap(px(8.)).children(buttons))
-        })
-        .into_any_element()
+        // One row of the 关于 group (DESIGN.md §5.5): the app icon, the
+        // product and version, the update state and its button.
+        div()
+            .w_full()
+            .min_h(px(52.))
+            .px(theme::space::S12)
+            .py(theme::space::S10)
+            .flex()
+            .items_center()
+            .gap(theme::space::S12)
+            .child(img(crate::ui::icons::APP_ICON_88).flex_none().size(px(40.)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .gap(theme::space::S2)
+                    .child(
+                        div()
+                            .t_ui()
+                            .semibold()
+                            .text_color(colors.text_1)
+                            .one_line()
+                            .child(env!("PRODUCT_NAME")),
+                    )
+                    .child(
+                        div()
+                            .t_callout()
+                            .tnum()
+                            .text_color(colors.text_2)
+                            .one_line()
+                            .child(version_line),
+                    )
+                    .when_some(status, |el, s| {
+                        el.child(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(theme::space::S6)
+                                .t_callout()
+                                .tnum()
+                                .text_color(if failed {
+                                    colors.danger_text
+                                } else {
+                                    colors.text_2
+                                })
+                                .when(busy, |el| {
+                                    el.child(Spinner::new().xsmall().color(colors.text_3))
+                                })
+                                .child(div().min_w(px(0.)).child(s)),
+                        )
+                    }),
+            )
+            .children(buttons.into_iter().map(|b| div().flex_none().child(b)))
+            .into_any_element()
     }
 }
 
