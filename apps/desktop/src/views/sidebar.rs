@@ -185,7 +185,9 @@ impl Sidebar {
                     .items_center()
                     .gap(space::S6)
                     .cursor_pointer()
-                    .t_section()
+                    // Quieter than the rows under it (the mockup): GPUI draws
+                    // 600 heavier than the browser, so the label takes 500.
+                    .t_meta_medium()
                     .text_color(k.text_2)
                     .child(label)
                     .when_some(count.filter(|&n| n > 0), |el, n| {
@@ -246,10 +248,16 @@ impl Sidebar {
                 .selected(selected)
                 .into_any_element(),
         };
-        // One trailing element: the red @ badge; a muted 群 shows the bell;
-        // an unread DM shows the neutral count. An unread 群 shows by weight.
+        // One trailing element, one rule with the topic rows (§7.6, §7.8):
+        // @ mentions are red (`n` on a 群, `@n` on a DM, beside the DMs'
+        // neutral counts); a muted 群 shows the bell; an unread DM shows the
+        // neutral count. An unread 群 shows by weight. Counts cap at 99+.
         let trailing = if group.mentions > 0 {
-            Some(CountBadge::new(group.mentions, BadgeKind::MentionCount).into_any_element())
+            let kind = match group.kind {
+                GroupKind::Group => BadgeKind::MentionCount,
+                GroupKind::Dm => BadgeKind::Mention,
+            };
+            Some(CountBadge::new(group.mentions, kind).into_any_element())
         } else if muted {
             Some(ui::icon(Lucide::BellOff, theme::icon::CHIP, k.text_3).into_any_element())
         } else if group.kind == GroupKind::Dm && group.unread > 0 {
@@ -348,7 +356,6 @@ impl Sidebar {
         } else {
             title
         };
-        let hang = !untitled && hangs(&title);
         let tip = title.clone();
         ui::list_row(
             ElementId::NamedInteger("todo-row".into(), ix as u64),
@@ -383,7 +390,6 @@ impl Sidebar {
                         .one_line()
                         .text_color(if untitled { k.text_2 } else { k.text_1 })
                         .when(selected, |el| el.semibold())
-                        .when(hang, |el| el.ml(px(-7.)))
                         .child(title),
                 )
                 .child(
@@ -432,12 +438,6 @@ fn todo_reason(item: &TodoItem, members: &[Member]) -> String {
 /// The first line of a title; newlines become spaces.
 pub fn topic_line(title: &str) -> String {
     title.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-/// A title that starts with a full-width bracket hangs it 0.5 em into the
-/// margin, so titles keep one left edge (§7.6).
-pub fn hangs(title: &str) -> bool {
-    matches!(title.chars().next(), Some('【' | '（' | '「' | '《' | '〔'))
 }
 
 impl Render for Sidebar {

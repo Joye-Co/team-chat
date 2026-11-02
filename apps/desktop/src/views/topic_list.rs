@@ -21,10 +21,7 @@ use crate::{
     data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
     theme::{self, Type as _, size, space},
     ui::{self, BadgeKind, CountBadge, Lucide, RowSurface, StatusChip},
-    views::{
-        sidebar::{hangs, topic_line},
-        topic_menu,
-    },
+    views::{sidebar::topic_line, topic_menu},
 };
 
 /// The tabs above the topics of a group (DESIGN.md §8.1): 全部, 未读, 等我.
@@ -452,7 +449,6 @@ impl TopicListView {
         } else {
             (title, false)
         };
-        let hang = !untitled && hangs(&title);
         let tip = SharedString::from(title.clone());
         let preview = match self.typing_text(&topic.id) {
             Some(t) => t,
@@ -522,7 +518,6 @@ impl TopicListView {
                                         .one_line()
                                         .when(unread || selected, |el| el.semibold())
                                         .text_color(if untitled { k.text_2 } else { k.text_1 })
-                                        .when(hang, |el| el.ml(px(-7.)))
                                         .child(title),
                                 )
                                 .child(
@@ -574,25 +569,8 @@ impl TopicListView {
 /// A one-line preview of a message body: Markdown marks and line breaks
 /// removed.
 pub fn plain_preview(body: &str) -> String {
-    let mut out = String::new();
-    for line in body.lines() {
-        let line = line
-            .trim()
-            .trim_start_matches(['#', '>', '-', '*', '+'])
-            .trim();
-        if line.starts_with("```") || line.is_empty() {
-            continue;
-        }
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        out.push_str(line);
-        if out.chars().count() > 200 {
-            break;
-        }
-    }
-    let out: String = out.chars().filter(|c| !matches!(c, '*' | '`')).collect();
-    topic_line(&out)
+    let head: String = body.chars().take(400).collect();
+    crate::views::search::plain::plain(&head)
 }
 
 impl Render for TopicListView {
