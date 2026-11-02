@@ -1,5 +1,5 @@
 //! Two members chat: A starts a topic; B gets topic.created then message.created; B replies;
-//! A gets the reply.
+//! A gets the reply. Then A renames the group; B gets group.updated live and its cache follows.
 
 use super::{Ctx, Run, Scenario};
 use crate::check;
@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 
 pub const SCENARIO: Scenario = Scenario {
     name: "chat",
-    about: "A starts a topic, B receives it in order and replies, A receives the reply",
+    about: "A starts a topic, B receives it in order and replies, A receives the reply; A renames the group and B sees group.updated",
     in_all: true,
     timeout_secs: 90,
     run: start,
@@ -129,6 +129,68 @@ async fn run(c: &mut Ctx) -> Result<()> {
     c.metric("topicDeliveryMs", (first_ms * 10.0).round() / 10.0);
     c.metric("replyDeliveryMs", (reply_ms * 10.0).round() / 10.0);
     c.note("A got B's reply after the root, messageCount 2");
+
+    // Rename: A renames the group (with spaces the server collapses); B gets group.updated on
+    // the wire and its cached group takes the new name; the same name again adds no event.
+    let t2 = Instant::now();
+    let new_name = format!("{} 改名", h.name("chat"));
+    let stored =
+        ca.c.rename_group(&g, &format!("  {}  ", new_name.replace(' ', "   ")))
+            .await??;
+    check!(stored == new_name, "server stored {stored:?}");
+    let ev = rb
+        .next_matching(TIMEOUT, |f| {
+            f["t"] == "event"
+                && f["event"]["groupId"] == g.as_str()
+                && f["event"]["type"] == "group.updated"
+        })
+        .await?;
+    check!(
+        ev["event"]["data"]["name"] == new_name.as_str(),
+        "group.updated name {}",
+        ev["event"]["data"]["name"]
+    );
+    check!(
+        ev["event"]["actorId"] == a.id.as_str(),
+        "group.updated actor {}",
+        ev["event"]["actorId"]
+    );
+    let rename_seq = ev["event"]["seq"].as_u64().unwrap_or(0);
+    cb.wait(Duration::from_secs(10), "B: the new group name", |cl| {
+        cl.store()
+            .group(&g)
+            .ok()
+            .flatten()
+            .filter(|row| row.group.name == new_name)
+    })
+    .await?;
+    let rename_ms = t2.elapsed().as_secs_f64() * 1000.0;
+    let again = ca.c.rename_group(&g, &new_name).await??;
+    check!(again == new_name, "same-name rename stored {again:?}");
+    let (_, groups) = h
+        .api(reqwest::Method::GET, "/v1/groups", Some(b.token()), None)
+        .await?;
+    let listed = groups
+        .as_array()
+        .and_then(|gs| gs.iter().find(|s| s["group"]["id"] == g.as_str()))
+        .map(|s| {
+            (
+                s["group"]["name"].clone(),
+                s["lastSeq"].as_u64().unwrap_or(0),
+            )
+        });
+    check!(
+        listed.as_ref().is_some_and(|(n, _)| n == new_name.as_str()),
+        "GET /v1/groups name {listed:?}"
+    );
+    check!(
+        listed.is_some_and(|(_, last)| last == rename_seq),
+        "the same name again added an event"
+    );
+    c.metric("renameDeliveryMs", (rename_ms * 10.0).round() / 10.0);
+    c.note(format!(
+        "B got group.updated (seq {rename_seq}) and its cache shows the new name; the same name again added nothing"
+    ));
     ca.shutdown().await;
     cb.shutdown().await;
     Ok(())

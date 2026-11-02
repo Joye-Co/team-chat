@@ -140,7 +140,7 @@ impl Harness {
         })
     }
 
-    fn name(&self, label: &str) -> String {
+    pub fn name(&self, label: &str) -> String {
         let mut n = format!("e2e-{}-{label}", self.run_id);
         n.truncate(64);
         n

@@ -40,7 +40,7 @@ their tokens are revoked at the end of the run.
 
 | Name | Checks |
 | --- | --- |
-| `chat` | A starts a topic; B gets `topic.created` then `message.created` (raw wire order); B replies; A gets it |
+| `chat` | A starts a topic; B gets `topic.created` then `message.created` (raw wire order); B replies; A gets it; A renames the group, B gets `group.updated` and its cache follows; the same name again adds no event |
 | `catchup` | B is offline; A sends 50; B restarts with its cache and has all 50 in order, no duplicates |
 | `idempotent` | The same `clientMsgId` twice (also after a reconnect) gives one message and `duplicate: true` |
 | `gap` | B's test hook drops one live event; the next event shows the gap and B fetches it |
