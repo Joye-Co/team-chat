@@ -33,6 +33,7 @@ export const TEXT = {
   done: "完成了。",
   failed: (why: string) => (why ? `没有完成：${why}` : "没有完成。"),
   cancelled: "已停止，没有完成。",
+  followUpLimit: "后面的消息没有接着处理，需要的话请再 @我。",
   approval: (title: string, detail?: string) =>
     `需要你确认：${title}${detail ? `\n\n${detail}` : ""}\n\n回复「同意」或「拒绝」。`,
   approve: "同意",

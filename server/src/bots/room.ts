@@ -114,14 +114,58 @@ registerEventImporter((event, sql) => {
   );
 });
 
+/** Removes a bot's topic claims in this group (the bot was deactivated). Internal. */
+registerRoomRpc("bots.release", (room, actor, args) => {
+  const { botId } = args as { botId: string };
+  if (actor) throw new ApiError("forbidden", "internal only");
+  const r = room.sql.exec("DELETE FROM bot_topics WHERE bot_id = ?", botId);
+  return { released: r.rowsWritten };
+});
+
 /** What BotDesk.onMessage gets. */
 export interface TopicMessage {
   groupId: string;
   topicId: string;
   messageId: string;
   authorId: string;
+  /** The author's level, for approvals by text (only the requester or an owner). */
+  authorLevel?: "owner" | "member";
   body: string;
   mentioned: boolean;
+}
+
+/** Who pressed a card button, as BotDesk.cardAction gets it. */
+export interface CardPress {
+  groupId: string;
+  messageId: string;
+  actionId: string;
+  actorId: string;
+  actorKind: "human" | "bot" | null;
+  actorLevel: "owner" | "member" | null;
+}
+
+type MemberInfo = { id: string; kind: string; level: string; deactivated: number; runner: number };
+
+async function memberInfo(db: D1Database, ids: string[]): Promise<Map<string, MemberInfo>> {
+  const uniq = [...new Set(ids)];
+  const rows = await db
+    .prepare(
+      `SELECT m.id, m.kind, m.level, m.deactivated, r.member_id IS NOT NULL AS runner FROM members m
+       LEFT JOIN bot_runners r ON r.member_id = m.id AND r.enabled = 1
+       WHERE m.id IN (${uniq.map(() => "?").join(",")})`,
+    )
+    .bind(...uniq)
+    .all<MemberInfo>();
+  return new Map(rows.results.map((r) => [r.id, r]));
+}
+
+/** In a DM, the member other than `authorId` (a DM message is addressed to it, @ or not). */
+function dmPeer(sql: SqlStorage, authorId: string): string | undefined {
+  const kind = sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'group_kind'").toArray()[0]?.value;
+  if (kind !== "dm") return undefined;
+  return sql
+    .exec<{ member_id: string }>("SELECT member_id FROM room_members WHERE member_id != ? LIMIT 1", authorId)
+    .toArray()[0]?.member_id;
 }
 
 /** Events older than this are imports (restore from the archive), not live writes: no hand-off. */
@@ -161,7 +205,7 @@ registerEventWriter((event: ArchivedEvent, sql) => {
   if (message.kind === "system") return;
   const claimed = claimedBot(sql, message.topicId);
   if (claimed === message.authorId) return;
-  if (!claimed && message.mentions.length === 0) return;
+  if (!claimed && message.mentions.length === 0 && !dmPeer(sql, message.authorId)) return;
   const payload: OutboxMessage = {
     topicId: message.topicId,
     messageId: message.id,
@@ -194,40 +238,50 @@ interface DeliverContext {
 async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
   if (row.kind === "card") {
     const p = JSON.parse(row.payload) as OutboxCard;
-    await deskStub(c.env, p.botId).cardAction(p.botId, {
+    // Who pressed: BotDesk takes an approval only from a person who may answer it.
+    const who = (await memberInfo(c.env.DB, [p.actorId])).get(p.actorId);
+    const press: CardPress = {
       groupId: c.groupId,
       messageId: p.messageId,
       actionId: p.actionId,
       actorId: p.actorId,
-    });
+      actorKind: who && !who.deactivated ? (who.kind as "human" | "bot") : null,
+      actorLevel: who && !who.deactivated ? (who.level as "owner" | "member") : null,
+    };
+    await deskStub(c.env, p.botId).cardAction(p.botId, press);
     return;
   }
   const m = JSON.parse(row.payload) as OutboxMessage;
   // The responsible bot now (a run may have claimed the topic since the message was written).
   const claimed = claimedBot(c.sql, m.topicId);
   if (claimed === m.authorId) return;
-  if (!claimed && m.mentions.length === 0) return;
-  const ids = [...new Set([m.authorId, ...m.mentions])];
-  const rows = await c.env.DB.prepare(
-    `SELECT m.id, m.kind, r.member_id IS NOT NULL AS runner FROM members m
-     LEFT JOIN bot_runners r ON r.member_id = m.id AND r.enabled = 1
-     WHERE m.id IN (${ids.map(() => "?").join(",")}) AND m.deactivated = 0`,
-  )
-    .bind(...ids)
-    .all<{ id: string; kind: string; runner: number }>();
-  const byId = new Map(rows.results.map((r) => [r.id, r]));
+  const peer = dmPeer(c.sql, m.authorId);
+  if (!claimed && m.mentions.length === 0 && !peer) return;
+  const byId = await memberInfo(c.env.DB, [m.authorId, ...m.mentions, ...(claimed ? [claimed] : []), ...(peer ? [peer] : [])]);
+  const usable = (id: string | undefined) => {
+    const x = id ? byId.get(id) : undefined;
+    return Boolean(x && x.kind === "bot" && x.runner && !x.deactivated);
+  };
   // A bot's messages never reach another bot: no loops.
   const author = byId.get(m.authorId);
-  if (!author || author.kind !== "human") return;
-  const target = claimed ?? m.mentions.find((id) => byId.get(id)?.runner);
+  if (!author || author.kind !== "human" || author.deactivated) return;
+  let target: string | undefined;
+  if (claimed) {
+    // A deactivated (or runner-disabled) bot gets no more work in topics it claimed.
+    if (!usable(claimed)) return;
+    target = claimed;
+  } else {
+    target = m.mentions.find((id) => usable(id)) ?? (usable(peer) ? peer : undefined);
+  }
   if (!target) return;
   const args: TopicMessage = {
     groupId: c.groupId,
     topicId: m.topicId,
     messageId: m.messageId,
     authorId: m.authorId,
+    authorLevel: author.level as "owner" | "member",
     body: m.body,
-    mentioned: m.mentions.includes(target),
+    mentioned: m.mentions.includes(target) || target === peer,
   };
   await deskStub(c.env, target).onMessage(target, args);
 }

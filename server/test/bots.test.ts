@@ -287,11 +287,23 @@ describe("machines", () => {
     expect(welcome).toMatchObject({ t: "welcome", protocol: 1, machineId: m.body.machine.id, runs: [] });
     d.send({ t: "heartbeat", at: Date.now(), health: { ...HEALTH, diskFreeBytes: 42e9 }, runs: [] });
     await d.next((f) => f.t === "heartbeat.ack");
-    const list = await api("/v1/machines", { token: member.token });
+    const list = await api("/v1/machines", { token: owner.token });
     const mine = list.body.find((x: any) => x.id === m.body.machine.id);
     expect(mine).toMatchObject({ connected: true, healthy: true, labels: ["mac", "main"], daemonVersion: "0.1.0", runningRuns: [] });
     expect(mine.health.diskFreeBytes).toBe(42e9);
     expect(typeof mine.lastHeartbeatAt).toBe("number");
+    // A member sees only the name and state, nothing about the machine itself.
+    const seen = (await api("/v1/machines", { token: member.token })).body.find((x: any) => x.id === m.body.machine.id);
+    expect(seen).toEqual({
+      id: m.body.machine.id,
+      name: "mac-mini",
+      labels: [],
+      createdBy: owner.id,
+      createdAt: mine.createdAt,
+      connected: true,
+      healthy: true,
+      runningRuns: [],
+    });
 
     // A second link replaces the first.
     const { d: d2 } = await Daemon.connect(m.body.token);
@@ -780,6 +792,322 @@ describe("run plans", () => {
     expect(end.data.run.plan).toEqual(plan2);
     // External-run endpoints do not end a runner's run.
     expect((await api(`/v1/runs/${runId}/end`, { token: w.bot.token, body: { status: "done" } })).status).toBe(403);
+    c.close();
+    d.close();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Review fixes: who may approve, deactivation, DMs, stuck runs, stopping runs
+// ---------------------------------------------------------------------------
+
+/** A running run of `w.bot` in a new topic, with an approval waiting. */
+async function waitingApproval(w: World, d: Daemon, c: Client): Promise<{ topicId: string; runId: string; card: any }> {
+  const topicId = await mention(c, w);
+  const { runId } = await d.next((f) => f.t === "run.assign");
+  d.send({ t: "run.accept", runId });
+  await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+  d.event(runId, { type: "approval.request", approvalId: "a1", title: "rm -rf build", detail: "rm -rf build" });
+  const card = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.kind === "card"), 5000, "approval card");
+  await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "waiting");
+  return { topicId, runId, card };
+}
+
+describe("runner-backed bots: review fixes", () => {
+  it("take an approval only from the requester or an owner, never from another member or a bot", async () => {
+    const w = await world();
+    const intern = await createMember({ name: "intern" });
+    const sdkBot = await createMember({ kind: "bot", name: "sdk" });
+    for (const id of [intern.id, sdkBot.id]) {
+      expect((await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: id } })).status).toBe(200);
+    }
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const { c: ci } = await Client.connect(intern.token);
+    const { c: cb } = await Client.connect(sdkBot.token);
+    const { topicId, card } = await waitingApproval(w, d, c);
+
+    // Another bot presses approve, and an intern presses it or types 同意: nothing reaches the machine.
+    await cb.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:a1" });
+    await ci.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "approve:a1" });
+    await ci.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
+    // The intern's 同意 is plain input for the run.
+    await d.next((f) => f.t === "run.input" && f.text === "同意");
+    expect(d.frames.filter((f) => f.t === "run.approval")).toEqual([]);
+
+    // The requester's press counts, and is audited.
+    await c.ok({ t: "card.action", groupId: w.gid, messageId: card.id, actionId: "deny:a1" });
+    expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "a1", decision: "deny" });
+    const audit = await env.DB.prepare("SELECT actor_id, details FROM audit WHERE action = 'run.approval' AND actor_id = ?")
+      .bind(w.human.id)
+      .first<{ actor_id: string; details: string }>();
+    expect(JSON.parse(audit?.details ?? "{}")).toMatchObject({ decision: "deny", via: "card" });
+    c.close();
+    ci.close();
+    cb.close();
+    d.close();
+  });
+
+  it("let an owner approve by text", async () => {
+    const w = await world();
+    await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: w.owner.id } });
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const { c: co } = await Client.connect(w.owner.token);
+    const { topicId } = await waitingApproval(w, d, c);
+    await co.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "同意" });
+    expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "a1", decision: "approve" });
+    c.close();
+    co.close();
+    d.close();
+  });
+
+  it("stop a deactivated bot's runs, release its topics and give it no more work", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+
+    const off = await api(`/v1/members/${w.bot.id}`, { method: "PATCH", token: w.owner.token, body: { deactivated: true } });
+    expect(off.status, JSON.stringify(off.body)).toBe(200);
+    expect(await d.next((f) => f.t === "run.cancel")).toMatchObject({ runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "cancelled");
+    const claims = await runInDurableObject(env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(w.gid)), (_o, state) =>
+      state.storage.sql.exec("SELECT count(*) AS n FROM bot_topics WHERE bot_id = ?", w.bot.id).one().n,
+    );
+    expect(claims).toBe(0);
+
+    // Messages in its old topic and new mentions start nothing.
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "再试一次" });
+    await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev again", mentions: [w.bot.id] });
+    await new Promise((r) => setTimeout(r, 300));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    expect(d.frames.filter((f) => f.t === "run.input")).toEqual([]);
+    c.close();
+    d.close();
+  });
+
+  it("answer a message in a DM with a runner-backed bot without an @", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const dm = await api("/v1/dms", { token: w.human.token, body: { memberId: w.bot.id } });
+    expect(dm.status).toBe(200);
+    const { c } = await Client.connect(w.human.token);
+    const res = await c.ok({ t: "send", groupId: dm.body.group.id, clientMsgId: clientMsgId(), body: "帮我整理今天的待办" });
+    const assign = await d.next((f) => f.t === "run.assign");
+    expect(assign).toMatchObject({ botMemberId: w.bot.id, topicId: res.message.topicId });
+    expect(assign.prompt).toContain("帮我整理今天的待办");
+    c.close();
+    d.close();
+  });
+
+  it("end a run whose card cannot be posted instead of leaving it running", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    // The owner removes the bot from the group mid-run: its posts now fail.
+    expect((await api(`/v1/groups/${w.gid}/members/${w.bot.id}`, { method: "DELETE", token: w.owner.token })).status).toBe(200);
+    d.event(runId, { type: "message.delta", itemId: "m", text: "working" });
+    d.event(runId, { type: "approval.request", approvalId: "a9", title: "push" });
+    const s = d.done(runId, { status: "succeeded", resultText: "ok" });
+    await d.acked(runId, s);
+    expect(await d.next((f) => f.t === "run.approval")).toMatchObject({ approvalId: "a9", decision: "deny" });
+    const row = await runInDurableObject(deskOf(w.bot.id), (_o, state) =>
+      state.storage.sql.exec("SELECT status, ended_at, approval_id, applied_seq FROM runs WHERE id = ?", runId).one(),
+    );
+    expect(row).toMatchObject({ status: "done", approval_id: null, applied_seq: s });
+    expect(row.ended_at).toBeTypeOf("number");
+    c.close();
+    d.close();
+  });
+
+  it("apply stored frames again when an earlier apply did not finish", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    // As after a reset between store and apply: run.done is stored but not applied.
+    await runInDurableObject(deskOf(w.bot.id), (_o, state) => {
+      state.storage.sql.exec(
+        "INSERT INTO run_log (run_id, seq, at, frame) VALUES (?, 1, ?, ?)",
+        runId,
+        Date.now(),
+        JSON.stringify({ t: "run.done", runId, seq: 1, at: Date.now(), durationMs: 1, status: "succeeded", resultText: "all good" }),
+      );
+      state.storage.sql.exec("UPDATE runs SET last_seq = 1 WHERE id = ?", runId);
+    });
+    // The daemon resends it (it got no ack): the run now ends.
+    d.seq.set(runId, 0);
+    const s = d.done(runId, { status: "succeeded", resultText: "all good" });
+    await d.acked(runId, s);
+    await waitUntil(() => topicStatuses(c, topicId).at(-1) === "done", 5000, "done");
+    expect(botMessages(c, topicId, w.bot.id).filter((m) => m.body === "all good")).toHaveLength(1);
+    c.close();
+    d.close();
+  });
+
+  it("end a run that never reached a machine", async () => {
+    const w = await world();
+    const { c } = await Client.connect(w.human.token);
+    const topic = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "a topic" });
+    const topicId = topic.message.topicId as string;
+    const runId = "01J0000000000000000STUCK0";
+    await (deskOf(w.bot.id) as any).getRun(w.bot.id, "none");
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state) => {
+      const old = Date.now() - 10 * 60_000;
+      state.storage.sql.exec(
+        `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, updated_at, last_event_at)
+         VALUES (?, ?, ?, 'created', ?, 'm0', ?, ?, ?)`,
+        runId,
+        w.gid,
+        topicId,
+        w.human.id,
+        old,
+        old,
+        old,
+      );
+      await state.storage.setAlarm(Date.now() + 60_000);
+    });
+    expect(await runDurableObjectAlarm(deskOf(w.bot.id))).toBe(true);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "failed");
+    // The topic takes a new run again.
+    const { d } = await Daemon.connect(w.machineToken);
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "@dev go", mentions: [w.bot.id] });
+    await d.next((f) => f.t === "run.assign");
+    c.close();
+    d.close();
+  });
+
+  it("let a person in the group stop a run", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+
+    const outsider = await createMember();
+    expect((await api(`/v1/runs/${runId}/cancel`, { method: "POST", token: outsider.token })).status).toBe(404);
+    expect((await api(`/v1/runs/${runId}/cancel`, { method: "POST", token: w.bot.token })).status).toBe(403);
+    const r = await api(`/v1/runs/${runId}/cancel`, { method: "POST", token: w.human.token });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body).toMatchObject({ id: runId, status: "cancelled" });
+    expect(await d.next((f) => f.t === "run.cancel")).toMatchObject({ runId });
+    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.cancelled), 5000, "cancel note");
+    await waitUntil(() => topicStatuses(c, topicId).at(-1) === "open", 5000, "open");
+    expect((await api(`/v1/runs/${runId}/cancel`, { method: "POST", token: w.human.token })).status).toBe(409);
+    // A late run.done of the machine changes nothing.
+    const s = d.done(runId, { status: "cancelled" });
+    await d.acked(runId, s);
+    expect((await api(`/v1/runs/${runId}`, { token: w.human.token })).body.status).toBe("cancelled");
+    c.close();
+    d.close();
+  });
+
+  it("start a run for input left after a follow-up run too", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId: a } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId: a });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "M1 late" });
+    await d.next((f) => f.t === "run.input" && f.text === "M1 late");
+    d.done(a, { status: "succeeded", resultText: "A done" });
+    const b = await d.next((f) => f.t === "run.assign" && f.runId !== a);
+    expect(b.prompt).toContain("M1 late");
+    d.send({ t: "run.accept", runId: b.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === b.runId && e.data.run.status === "running");
+    await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "M2 late" });
+    await d.next((f) => f.t === "run.input" && f.text === "M2 late");
+    d.done(b.runId, { status: "succeeded", resultText: "B done" });
+    const third = await d.next((f) => f.t === "run.assign" && f.runId !== a && f.runId !== b.runId);
+    expect(third.prompt).toContain("M2 late");
+    c.close();
+    d.close();
+  });
+
+  it("not count the daemon's own stall report as progress", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    const before = Date.now() - 6 * 60_000;
+    await runInDurableObject(deskOf(w.bot.id), (_o, state) => {
+      state.storage.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", before, runId);
+    });
+    const s = d.event(runId, { type: "status", state: "stalled" });
+    await d.acked(runId, s);
+    await waitUntil(() => topicStatuses(c, topicId).at(-1) === "blocked", 5000, "blocked");
+    const row = await runInDurableObject(deskOf(w.bot.id), (_o, state) =>
+      state.storage.sql.exec("SELECT last_event_at, stalled FROM runs WHERE id = ?", runId).one(),
+    );
+    expect(row).toEqual({ last_event_at: before, stalled: 1 });
+    c.close();
+    d.close();
+  });
+
+  it("route runs only on labels an owner gave the machine", async () => {
+    const label = `own-${crypto.randomUUID().slice(0, 6)}`;
+    const w = await world({ labels: [label] });
+    // The daemon claims the bot's label itself; the owner gave the machine another one.
+    const { d } = await Daemon.connect(w.machineToken, { labels: [label] });
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.noMachine), 5000, "no machine note");
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(0);
+    c.close();
+    d.close();
+  });
+
+  it("post the final answer once: not also at the end of the progress message", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    d.event(runId, { type: "tool.call", itemId: "c1", tool: "bash", title: "cargo test" });
+    d.event(runId, { type: "message", itemId: "m1", role: "assistant", text: "全部通过。" });
+    const progress = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.streaming), 5000, "progress");
+    d.done(runId, { status: "succeeded", resultText: "全部通过。" });
+    const final = await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === progress.id && !e.data.streaming);
+    expect(final.data.body).toContain("cargo test");
+    expect(final.data.body).not.toContain("全部通过");
+    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === "全部通过。"), 5000, "result");
+    c.close();
+    d.close();
+  });
+
+  it("handle a message once when the room hook calls the desk again", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    const sent = await c.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "once" });
+    await d.next((f) => f.t === "run.input" && f.text === "once");
+    const m = { groupId: w.gid, topicId, messageId: sent.message.id, authorId: w.human.id, body: "once", mentioned: false };
+    await (deskOf(w.bot.id) as any).onMessage(w.bot.id, m);
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.filter((f) => f.t === "run.input" && f.text === "once")).toHaveLength(1);
     c.close();
     d.close();
   });

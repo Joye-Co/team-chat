@@ -133,10 +133,23 @@ export function registerBotRoutes(): void {
     method: "GET",
     path: "/v1/machines",
     auth: "member",
-    async handler({ env }) {
+    async handler({ env, auth }) {
       const now = Date.now();
       const views = await loadMachineViews(env, { includeRevoked: true });
-      return views.map(({ row, view }) => toMachine(view, row.created_by, row.created_at, now));
+      const all = views.map(({ row, view }) => toMachine(view, row.created_by, row.created_at, now));
+      if ((auth as AuthContext).member.level === "owner") return all;
+      // Members see which machine ran a run, nothing about the machine itself.
+      return all.map((m) => ({
+        id: m.id,
+        name: m.name,
+        labels: [],
+        createdBy: m.createdBy,
+        createdAt: m.createdAt,
+        ...(m.revoked ? { revoked: true } : {}),
+        connected: m.connected,
+        healthy: m.healthy,
+        runningRuns: [],
+      }));
     },
   });
 
@@ -294,6 +307,21 @@ export function registerBotRoutes(): void {
       if (row.bot_id !== a.memberId) throw new ApiError("forbidden", "only the run's bot ends it");
       const run = unwrap(await deskStub(env, row.bot_id).endExternal(row.bot_id, row.id, req.status, req.summary));
       await auditStatement(env.DB, a, { action: "run.end", target: row.id, details: { status: req.status } }).run();
+      return run;
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/cancel",
+    auth: "member",
+    async handler({ env, params, auth }) {
+      const a = auth as AuthContext;
+      // People in the run's group stop runs; a bot ends its own runs with /end.
+      if (a.member.kind !== "human") throw new ApiError("forbidden", "only people stop runs");
+      const row = await visibleRun(env.DB, a, params.id);
+      const run = unwrap(await deskStub(env, row.bot_id).cancel(row.bot_id, row.id, a.memberId));
+      await auditStatement(env.DB, a, { action: "run.cancel", target: row.id, details: { botId: row.bot_id } }).run();
       return run;
     },
   });

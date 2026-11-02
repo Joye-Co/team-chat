@@ -27,7 +27,7 @@ import {
 } from "./dispatch";
 import { type BotsEnv, linkStub } from "./env";
 import type { SeqFrame } from "./link";
-import type { ClaimResult, TopicMessage } from "./room";
+import type { CardPress, ClaimResult, TopicMessage } from "./room";
 import { loadMachines, loadRunner } from "./store";
 
 type RunRow = {
@@ -58,9 +58,15 @@ type RunRow = {
   plan: string | null;
   /** 1 = started by an external bot with `POST /v1/runs` (no machine). */
   external: number;
+  /** Highest run_log seq whose effects were applied (frames are stored before they apply). */
+  applied_seq: number;
 };
 
 const ACTIVE = "ended_at IS NULL";
+/** A run still `created` with no machine this long after it was made failed to start. */
+const START_STUCK_MS = 2 * 60_000;
+/** Follow-up runs in a row (leftover input after a run ended) before the bot stops chaining. */
+const MAX_FOLLOW_UPS = 5;
 /** Plan updates over HTTP, per run: 2 per second, bursts of 10. */
 const PLAN_RATE = { rate: 2, burst: 10 };
 
@@ -83,6 +89,12 @@ export function sanitizePlan(items: unknown): RunPlan | null {
     if (out.length === MAX_PLAN_ITEMS) break;
   }
   return out;
+}
+
+/** A daemon status event from its own stall detector (machine-protocol.md). */
+function isStallStatus(event: unknown): boolean {
+  const e = event as { type?: unknown; state?: unknown } | null;
+  return e?.type === "status" && (e.state === "stalled" || e.state === "retrying");
 }
 
 function samePlan(a: RunPlan | null, b: RunPlan): boolean {
@@ -159,6 +171,16 @@ export class BotDesk extends DurableObject<BotsEnv> {
           up: `
             ALTER TABLE runs ADD COLUMN plan TEXT;
             ALTER TABLE runs ADD COLUMN external INTEGER NOT NULL DEFAULT 0;
+          `,
+        },
+        {
+          // Runs made before this step applied every stored frame.
+          name: "desk-3-applied",
+          up: `
+            ALTER TABLE runs ADD COLUMN applied_seq INTEGER NOT NULL DEFAULT 0;
+            UPDATE runs SET applied_seq = last_seq;
+            CREATE INDEX inputs_message ON inputs(message_id);
+            CREATE INDEX runs_trigger ON runs(trigger_message_id);
           `,
         },
       ]);
@@ -330,6 +352,7 @@ export class BotDesk extends DurableObject<BotsEnv> {
     if (this.messagesInFlight.has(m.messageId)) throw new ApiError("conflict", "message is being handled");
     this.messagesInFlight.add(m.messageId);
     try {
+      if (!(await this.botActive())) return;
       const active = this.activeRun(m.topicId);
       if (active) return await this.serial(active.id, () => this.toActive(active.id, m));
       if (!m.mentioned) return;
@@ -351,6 +374,31 @@ export class BotDesk extends DurableObject<BotsEnv> {
     );
   }
 
+  /** False when this bot member is deactivated: it gets no more work. */
+  private async botActive(): Promise<boolean> {
+    const row = await this.env.DB.prepare("SELECT deactivated FROM members WHERE id = ?")
+      .bind(this.botId)
+      .first<{ deactivated: number }>();
+    return Boolean(row && !row.deactivated);
+  }
+
+  /** Only a human who is the run's requester, or an owner, may answer its approval. */
+  private mayApprove(r: RunRow, actorId: string, kind: string | null | undefined, level: string | null | undefined): boolean {
+    return kind === "human" && (actorId === r.requested_by || level === "owner");
+  }
+
+  private async auditApproval(r: RunRow, actorId: string, decision: string, via: "card" | "text"): Promise<void> {
+    try {
+      await this.env.DB.prepare(
+        "INSERT INTO audit (actor_id, credential_id, action, target, details, at) VALUES (?, NULL, 'run.approval', ?, ?, ?)",
+      )
+        .bind(actorId, r.id, JSON.stringify({ approvalId: r.approval_id, decision, via, botId: this.botId }), Date.now())
+        .run();
+    } catch (err) {
+      this.log.warn("approval audit failed", { runId: r.id, err });
+    }
+  }
+
   private async toActive(runId: string, m: TopicMessage): Promise<void> {
     const r = this.run(runId);
     if (!r) return;
@@ -361,7 +409,19 @@ export class BotDesk extends DurableObject<BotsEnv> {
     }
     const link = r.machine_id ? linkStub(this.env, r.machine_id) : null;
     const decision = r.approval_id ? approvalDecision(m.body) : null;
-    if (r.approval_id && decision && link) {
+    // The room hook sends only human messages; other members' 同意 stays plain input.
+    if (r.approval_id && decision && link && this.mayApprove(r, m.authorId, "human", m.authorLevel)) {
+      await this.auditApproval(r, m.authorId, decision, "text");
+      // Recorded as an input so a retried call does not answer twice.
+      this.sql.exec(
+        "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
+        ulid(),
+        r.id,
+        m.messageId,
+        m.authorId,
+        m.body,
+        Date.now(),
+      );
       await link.toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision } as never);
       return;
     }
@@ -379,7 +439,7 @@ export class BotDesk extends DurableObject<BotsEnv> {
   }
 
   /** A card button of this bot's message was pressed (approval cards). */
-  async cardAction(botId: string, a: { groupId: string; messageId: string; actionId: string; actorId: string }): Promise<void> {
+  async cardAction(botId: string, a: CardPress): Promise<void> {
     this.bind(botId);
     const r = this.sql
       .exec<RunRow>(`SELECT * FROM runs WHERE ${ACTIVE} AND approval_id IS NOT NULL AND group_id = ?`, a.groupId)
@@ -388,6 +448,11 @@ export class BotDesk extends DurableObject<BotsEnv> {
     if (!r?.machine_id || !r.approval_id) return;
     const decision = a.actionId.startsWith("approve:") ? "approve" : a.actionId.startsWith("deny:") ? "deny" : null;
     if (!decision) return;
+    if (!this.mayApprove(r, a.actorId, a.actorKind, a.actorLevel)) {
+      this.log.info("approval press ignored", { runId: r.id, actorId: a.actorId, kind: a.actorKind });
+      return;
+    }
+    await this.auditApproval(r, a.actorId, decision, "card");
     await linkStub(this.env, r.machine_id).toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision } as never);
   }
 
@@ -422,28 +487,36 @@ export class BotDesk extends DurableObject<BotsEnv> {
     );
     const r = this.run(runId) as RunRow;
     await this.serial(runId, async () => {
-      await this.env.DB.prepare(
-        "INSERT INTO bot_runs (id, bot_id, group_id, topic_id, machine_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)",
-      )
-        .bind(runId, botId, m.groupId, m.topicId, now)
-        .run();
-      await this.post(r, `run:${runId}:ack`, TEXT.ack);
-      await this.setStatus(r, "created");
-      await this.topic(r, "in_progress");
+      try {
+        await this.env.DB.prepare(
+          "INSERT OR IGNORE INTO bot_runs (id, bot_id, group_id, topic_id, machine_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)",
+        )
+          .bind(runId, botId, m.groupId, m.topicId, now)
+          .run();
+        await this.post(r, `run:${runId}:ack`, TEXT.ack);
+        await this.setStatus(r, "created");
+        await this.topic(r, "in_progress");
 
-      const machine = pickMachine(await loadMachines(this.env), runner, Date.now());
-      if (!machine) return this.end(r, "failed", TEXT.noMachine, "blocked", TEXT.noMachine);
+        const machine = pickMachine(await loadMachines(this.env), runner, Date.now());
+        if (!machine) return this.end(r, "failed", TEXT.noMachine, "blocked", TEXT.noMachine);
 
-      const names = await this.names([...claim.messages.map((x) => x.authorId), m.authorId, botId]);
-      const prompt = buildPrompt({
-        botName: names.get(botId) ?? "bot",
-        title: claim.title,
-        messages: claim.messages.filter((x) => x.body !== "" && x.id !== m.messageId),
-        names,
-        request: { authorId: m.authorId, body: m.body },
-        followUps,
-      });
-      await this.assign(r, runner, machine, prompt);
+        const names = await this.names([...claim.messages.map((x) => x.authorId), m.authorId, botId]);
+        const prompt = buildPrompt({
+          botName: names.get(botId) ?? "bot",
+          title: claim.title,
+          messages: claim.messages.filter((x) => x.body !== "" && x.id !== m.messageId),
+          names,
+          request: { authorId: m.authorId, body: m.body },
+          followUps,
+        });
+        await this.assign(r, runner, machine, prompt);
+      } catch (err) {
+        // A run that never reached a machine must not block the topic.
+        this.log.error("run start failed", { runId, err });
+        if (this.run(runId)?.ended_at === null && !this.run(runId)?.machine_id) {
+          await this.end(r, "failed", TEXT.failed(""), "blocked", TEXT.failed(""));
+        }
+      }
       await this.scheduleStall();
     });
   }
@@ -529,24 +602,27 @@ export class BotDesk extends DurableObject<BotsEnv> {
     return this.serial(runId, async () => {
       const r = this.run(runId);
       if (!r) throw new ApiError("not_found", "unknown run");
-      const fresh: SeqFrame[] = [];
       for (const f of [...frames].sort((a, b) => a.seq - b.seq)) {
-        const res = this.sql.exec(
+        this.sql.exec(
           "INSERT OR IGNORE INTO run_log (run_id, seq, at, frame) VALUES (?, ?, ?, ?)",
           runId,
           f.seq,
           f.at,
           JSON.stringify(f),
         );
-        if (res.rowsWritten > 0) fresh.push(f);
       }
       const top = Math.max(r.last_seq, ...frames.map((f) => f.seq));
       this.sql.exec("UPDATE runs SET last_seq = ? WHERE id = ?", top, runId);
-      if (fresh.length === 0 || r.ended_at !== null) {
-        // A late run.session still records its upload.
-        return { lastSeq: top };
-      }
-      await this.apply(r, fresh);
+      // A late run.session still records its upload.
+      if (r.ended_at !== null) return { lastSeq: top };
+      // Stored frames whose effects did not apply yet (also after a failed or interrupted apply).
+      const pending = this.sql
+        .exec<{ seq: number; frame: string }>("SELECT seq, frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq", runId, r.applied_seq)
+        .toArray()
+        .map((x) => JSON.parse(x.frame) as SeqFrame);
+      if (pending.length === 0) return { lastSeq: top };
+      await this.apply(r, pending);
+      this.sql.exec("UPDATE runs SET applied_seq = max(applied_seq, ?) WHERE id = ?", pending[pending.length - 1].seq, runId);
       return { lastSeq: top };
     });
   }
@@ -556,6 +632,13 @@ export class BotDesk extends DurableObject<BotsEnv> {
     const now = Date.now();
     let done: Extract<SeqFrame, { t: "run.done" }> | null = null;
     let planChanged = false;
+    // The daemon's own stall reports are not progress: they must not restart the stall clock.
+    const progressed = frames.some((f) => f.t !== "run.event" || !isStallStatus(f.event));
+    const stallReported = frames.some((f) => f.t === "run.event" && isStallStatus(f.event) && (f.event as { state?: unknown }).state === "stalled");
+    if (!progressed) {
+      if (stallReported) await this.markStalled(r);
+      return;
+    }
     this.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", now, r.id);
     r.last_event_at = now;
     if (r.stalled) {
@@ -588,6 +671,9 @@ export class BotDesk extends DurableObject<BotsEnv> {
           await this.askApproval(r, String(ev.approvalId), String(ev.title ?? ""), ev.detail ? String(ev.detail) : undefined);
           break;
         }
+        case "status":
+          // A stall report among real progress: the progress wins.
+          break;
         case "approval.resolved":
           if (r.approval_id === ev.approvalId) {
             this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
@@ -644,6 +730,15 @@ export class BotDesk extends DurableObject<BotsEnv> {
   /** Ends the streaming progress message with its full text. */
   private async closeProgress(r: RunRow): Promise<void> {
     if (!r.progress_message_id) return;
+    if (r.progress_text.trim() === "" && r.progress_full === 0) {
+      // Nothing but the answer was streamed: the result message alone says it.
+      try {
+        unwrap(await this.room(r).remove(r.group_id, this.actor(), r.progress_message_id));
+      } catch (err) {
+        this.log.warn("progress remove failed", { runId: r.id, err });
+      }
+      return;
+    }
     try {
       unwrap(
         await this.room(r).edit(r.group_id, this.actor(), {
@@ -680,7 +775,20 @@ export class BotDesk extends DurableObject<BotsEnv> {
     } catch (err) {
       // A card the room rejects (for example an action id that is too long) falls back to text.
       this.log.warn("approval card failed", { runId: r.id, err });
-      await this.post(r, `${cmid}:text`, body, { mentions: [r.requested_by] });
+      try {
+        await this.post(r, `${cmid}:text`, body, { mentions: [r.requested_by] });
+      } catch (err2) {
+        // Nobody can be asked (for example the bot left the group): the answer is no.
+        this.log.warn("approval post failed, denying", { runId: r.id, err: err2 });
+        this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
+        r.approval_id = null;
+        if (r.machine_id) {
+          await linkStub(this.env, r.machine_id)
+            .toRun({ t: "run.approval", runId: r.id, approvalId, decision: "deny" } as never)
+            .catch((e) => this.log.warn("approval deny failed", { runId: r.id, err: e }));
+        }
+        return;
+      }
     }
     await this.setStatus(r, "waiting");
     await this.topic(r, "waiting_answer", [r.requested_by]);
@@ -689,6 +797,7 @@ export class BotDesk extends DurableObject<BotsEnv> {
   private async finish(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<void> {
     if (f.status === "succeeded") {
       const result = (f.resultText ?? "").trim() || (f.summary ?? "").trim() || TEXT.done;
+      this.dropResultFromProgress(r, result);
       await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result));
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
@@ -703,14 +812,45 @@ export class BotDesk extends DurableObject<BotsEnv> {
         r.id,
       )
       .toArray();
-    if (left.length > 0 && !r.follow_up_of) {
-      const last = left[left.length - 1];
+    if (left.length === 0) return;
+    if (this.followUpDepth(r) >= MAX_FOLLOW_UPS) {
+      try {
+        await this.note(r, TEXT.followUpLimit);
+      } catch (err) {
+        this.log.warn("follow-up note failed", { runId: r.id, err });
+      }
+      return;
+    }
+    const last = left[left.length - 1];
+    try {
       await this.start(
         { groupId: r.group_id, topicId: r.topic_id, messageId: last.message_id, authorId: last.author_id, body: last.body, mentioned: true },
         r,
         left.slice(0, -1).map((x) => ({ authorId: x.author_id, body: x.body })),
       );
+    } catch (err) {
+      this.log.error("follow-up start failed", { runId: r.id, err });
     }
+  }
+
+  /** How many runs in a row before `r` were follow-ups. */
+  private followUpDepth(r: RunRow): number {
+    let depth = 0;
+    let parent = r.follow_up_of;
+    while (parent && depth < MAX_FOLLOW_UPS) {
+      depth++;
+      parent = this.run(parent)?.follow_up_of ?? null;
+    }
+    return depth;
+  }
+
+  /** The CLI's last assistant message is also the result: keep it out of the progress text. */
+  private dropResultFromProgress(r: RunRow, result: string): void {
+    const text = r.progress_text.trimEnd();
+    if (!result || !text.endsWith(result)) return;
+    const rest = text.slice(0, text.length - result.length).trimEnd();
+    r.progress_text = rest;
+    this.sql.exec("UPDATE runs SET progress_text = ? WHERE id = ?", rest, r.id);
   }
 
   /** Final state: closes the progress message, posts `body`, sets the run and topic status. */
@@ -733,13 +873,21 @@ export class BotDesk extends DurableObject<BotsEnv> {
   // -------------------------------------------------------------------------
 
   private async scheduleStall(): Promise<void> {
-    const next = this.sql
+    const stall = this.sql
       .exec<{ at: number | null }>(
         `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL`,
       )
       .one().at;
-    if (next === null) return;
-    const at = next + STALL_MS;
+    const stuck = this.sql
+      .exec<{ at: number | null }>(
+        `SELECT min(created_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL`,
+      )
+      .one().at;
+    const times = [stall === null ? null : stall + STALL_MS, stuck === null ? null : stuck + START_STUCK_MS].filter(
+      (x): x is number => x !== null,
+    );
+    if (times.length === 0) return;
+    const at = Math.min(...times);
     const cur = await this.ctx.storage.getAlarm();
     if (cur === null || cur > at || cur < Date.now()) await this.ctx.storage.setAlarm(at);
   }
@@ -756,18 +904,93 @@ export class BotDesk extends DurableObject<BotsEnv> {
       await this.serial(id, async () => {
         const r = this.run(id);
         if (!r || r.external || r.ended_at !== null || r.stalled || r.status !== "running" || r.last_event_at > now - STALL_MS) return;
-        this.sql.exec("UPDATE runs SET stalled = 1 WHERE id = ?", id);
-        r.stalled = 1;
-        try {
-          await this.note(r, TEXT.stalled);
-        } catch (err) {
-          this.log.warn("stall note failed", { runId: id, err });
-        }
-        await this.setStatus(r, "blocked");
-        await this.topic(r, "blocked");
+        await this.markStalled(r);
+      });
+    }
+    // Runs whose start broke before they reached a machine (for example a reset mid-start).
+    const stuck = this.sql
+      .exec<{ id: string }>(
+        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'created' AND machine_id IS NULL AND created_at <= ?`,
+        now - START_STUCK_MS,
+      )
+      .toArray();
+    for (const { id } of stuck) {
+      await this.serial(id, async () => {
+        const r = this.run(id);
+        if (!r || r.ended_at !== null || r.machine_id || r.status !== "created") return;
+        await this.end(r, "failed", TEXT.failed(""), "blocked", TEXT.failed(""));
       });
     }
     await this.scheduleStall();
+  }
+
+  /** No progress: one note, the run and the topic show blocked until events come again. */
+  private async markStalled(r: RunRow): Promise<void> {
+    if (r.stalled || r.ended_at !== null || r.approval_id) return;
+    this.sql.exec("UPDATE runs SET stalled = 1 WHERE id = ?", r.id);
+    r.stalled = 1;
+    try {
+      await this.note(r, TEXT.stalled);
+    } catch (err) {
+      this.log.warn("stall note failed", { runId: r.id, err });
+    }
+    await this.setStatus(r, "blocked");
+    await this.topic(r, "blocked");
+  }
+
+  // -------------------------------------------------------------------------
+  // Stopping runs (members, and a deactivated bot)
+  // -------------------------------------------------------------------------
+
+  /** A member stops a run: the machine gets run.cancel, and the run ends here at once. */
+  async cancel(botId: string, runId: string, actorId: string): Promise<Result<BotRun>> {
+    return result(() => {
+      this.bind(botId);
+      return this.serial(runId, async () => {
+        const r = this.run(runId);
+        if (!r) throw new ApiError("not_found", "run not found");
+        if (r.ended_at !== null) throw new ApiError("conflict", "the run ended");
+        await this.stop(r);
+        this.log.info("run cancelled", { runId, actorId });
+        return this.toRun(r);
+      });
+    });
+  }
+
+  private async stop(r: RunRow): Promise<void> {
+    if (r.machine_id && !r.external) {
+      try {
+        await linkStub(this.env, r.machine_id).toRun({ t: "run.cancel", runId: r.id } as never);
+      } catch (err) {
+        this.log.warn("run.cancel failed", { runId: r.id, err });
+      }
+    }
+    this.planBuckets.delete(r.id);
+    if (r.external) {
+      await this.setStatus(r, "cancelled", { ended_at: Date.now(), summary: TEXT.cancelled });
+      return;
+    }
+    await this.end(r, "cancelled", TEXT.cancelled, "open", TEXT.cancelled);
+  }
+
+  /** The bot was deactivated: stop its active runs and give up its topics. */
+  async deactivated(botId: string): Promise<void> {
+    this.bind(botId);
+    const active = this.sql.exec<{ id: string }>(`SELECT id FROM runs WHERE ${ACTIVE}`).toArray();
+    for (const { id } of active) {
+      await this.serial(id, async () => {
+        const r = this.run(id);
+        if (r && r.ended_at === null) await this.stop(r);
+      });
+    }
+    const groups = this.sql.exec<{ group_id: string }>("SELECT DISTINCT group_id FROM runs").toArray();
+    for (const { group_id } of groups) {
+      try {
+        unwrap(await roomStub(this.env, group_id).rpc(group_id, "bots.release", null, { botId }));
+      } catch (err) {
+        this.log.warn("claim release failed", { groupId: group_id, err });
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

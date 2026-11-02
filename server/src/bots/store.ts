@@ -89,8 +89,9 @@ export async function loadMachineViews(env: Env, opts: { includeRevoked?: boolea
   );
 }
 
+/** Machines for routing runs: only the labels an owner gave count (daemon labels are shown only). */
 export async function loadMachines(env: Env): Promise<MachineView[]> {
-  return (await loadMachineViews(env)).map((x) => x.view);
+  return (await loadMachineViews(env)).map(({ row, view }) => ({ ...view, labels: JSON.parse(row.labels) as string[] }));
 }
 
 export const MACHINE_TOKEN_PATTERN = /^tm_[A-Za-z0-9_-]{43}$/;
