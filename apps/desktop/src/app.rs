@@ -426,6 +426,10 @@ impl RootView {
         &self.login
     }
 
+    pub fn sidebar(&self) -> &Entity<Sidebar> {
+        &self.sidebar
+    }
+
     pub fn timeline(&self) -> &Entity<TimelineView> {
         &self.timeline
     }

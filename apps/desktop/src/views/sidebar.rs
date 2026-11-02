@@ -122,6 +122,9 @@ pub struct Sidebar {
     muted: HashSet<GroupId>,
     todo: Vec<TodoItem>,
     collapsed: HashSet<Section>,
+    /// The 群 of each child of the scroll area, in order (`None` for headers
+    /// and 待办 rows), so a child's bounds can be found by 群.
+    row_groups: Vec<Option<GroupId>>,
     _subscriptions: Vec<Subscription>,
     /// Re-renders when the window becomes key or stops being key.
     activation: Option<Subscription>,
@@ -157,6 +160,7 @@ impl Sidebar {
             muted: HashSet::new(),
             todo: Vec::new(),
             collapsed: HashSet::new(),
+            row_groups: Vec::new(),
             _subscriptions: subscriptions,
             activation: None,
             emphasized: true,
@@ -283,6 +287,16 @@ impl Sidebar {
             .into_any_element()
     }
 
+    /// Where the row of a 群 or DM was drawn last frame, in window
+    /// coordinates (the self-test opens a row's menu with it).
+    pub fn group_row_bounds(&self, group_id: &str) -> Option<gpui::Bounds<gpui::Pixels>> {
+        let ix = self
+            .row_groups
+            .iter()
+            .position(|g| g.as_deref() == Some(group_id))?;
+        self.scroll.bounds_for_item(ix)
+    }
+
     fn group_row(
         &self,
         group: &GroupSummary,
@@ -396,8 +410,23 @@ impl Sidebar {
             if g.kind == GroupKind::Group {
                 let add_services = services.clone();
                 let (add_id, add_name) = (g.id.clone(), g.name.clone());
+                let rename_services = services.clone();
+                let (rename_id, rename_name) = (g.id.clone(), g.name.clone());
                 // The destructive item in its own group, in `danger-text`.
                 menu.item(
+                    menu_item(Lucide::Pencil, nav::RENAME_GROUP, false).on_click(
+                        move |_, window, cx| {
+                            super::nav::rename::open_rename_group(
+                                rename_services.clone(),
+                                rename_id.clone(),
+                                rename_name.clone(),
+                                window,
+                                cx,
+                            );
+                        },
+                    ),
+                )
+                .item(
                     menu_item(Lucide::UserPlus, nav::ADD_MEMBERS, false).on_click(
                         move |_, window, cx| {
                             super::nav::dialogs::open_add_members(
@@ -572,28 +601,22 @@ impl Render for Sidebar {
             .filter(|g| g.kind == GroupKind::Dm)
             .cloned()
             .collect();
-        let group_rows: Vec<_> = if self.collapsed.contains(&Section::Groups) {
-            // A collapsed section keeps the selected and unread rows (Slack).
-            groups
-                .iter()
+        // A collapsed section keeps the selected and unread rows (Slack).
+        let shown = |collapsed: bool, list: &[GroupSummary]| -> Vec<GroupSummary> {
+            list.iter()
                 .filter(|g| {
-                    place == Some(Place::Group(g.id.clone())) || g.mentions > 0 || g.unread > 0
+                    !collapsed
+                        || place == Some(Place::Group(g.id.clone()))
+                        || g.mentions > 0
+                        || g.unread > 0
                 })
-                .map(|g| row_of(self, g, cx))
+                .cloned()
                 .collect()
-        } else {
-            groups.iter().map(|g| row_of(self, g, cx)).collect()
         };
-        let dm_rows: Vec<_> = if self.collapsed.contains(&Section::Dms) {
-            dms.iter()
-                .filter(|g| {
-                    place == Some(Place::Group(g.id.clone())) || g.mentions > 0 || g.unread > 0
-                })
-                .map(|g| row_of(self, g, cx))
-                .collect()
-        } else {
-            dms.iter().map(|g| row_of(self, g, cx)).collect()
-        };
+        let groups = shown(self.collapsed.contains(&Section::Groups), &groups);
+        let dms = shown(self.collapsed.contains(&Section::Dms), &dms);
+        let group_rows: Vec<_> = groups.iter().map(|g| row_of(self, g, cx)).collect();
+        let dm_rows: Vec<_> = dms.iter().map(|g| row_of(self, g, cx)).collect();
         let todo_count = self.todo.len() as u32;
         let todo_open = !self.collapsed.contains(&Section::Todo);
         let todo_rows: Vec<_> = if todo_open {
@@ -607,6 +630,16 @@ impl Render for Sidebar {
             Vec::new()
         };
         let more_todo = todo_open && self.todo.len() > TODO_ROWS;
+        // The children of the scroll area below, in order.
+        let has_todo_header = !self.todo.is_empty();
+        self.row_groups = std::iter::repeat_n(
+            None,
+            usize::from(has_todo_header) + todo_rows.len() + usize::from(more_todo) + 1,
+        )
+        .chain(groups.iter().map(|g| Some(g.id.clone())))
+        .chain(std::iter::once(None))
+        .chain(dms.iter().map(|g| Some(g.id.clone())))
+        .collect();
 
         // 待办 shows only while something waits for me.
         let has_todo = !self.todo.is_empty();

@@ -322,6 +322,41 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::nav::selftest::scenes::rename_topic,
     },
     Scene {
+        name: "group-menu",
+        about: "The menu of a 群 row in the sidebar (right-click): 静音, 重命名群…, 添加成员, 离开群",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::group_menu,
+    },
+    Scene {
+        name: "rename-group",
+        about: "The dialog that renames a 群 (from its menu), the name prefilled and selected",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::rename_group,
+    },
+    Scene {
+        name: "rename-group-error",
+        about: "The 重命名群 dialog with a new name typed and the server's refusal under the field",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::rename_group_error,
+    },
+    Scene {
+        name: "topic-dm",
+        about: "A 话题 in a 私聊 with a person: the header breadcrumb shows the peer's avatar, not #",
+        start: Start::SignedIn,
+        setup: |s, cx| crate::views::nav::selftest::scenes::open_dm_topic(s, false, cx),
+        open: open_main,
+    },
+    Scene {
+        name: "topic-dm-bot",
+        about: "A 话题 in a 私聊 with a bot: the breadcrumb shows the bot's tile with its character",
+        start: Start::SignedIn,
+        setup: |s, cx| crate::views::nav::selftest::scenes::open_dm_topic(s, true, cx),
+        open: open_main,
+    },
+    Scene {
         name: "start-dm",
         about: "The member picker that starts a DM",
         start: Start::SignedIn,
@@ -490,7 +525,7 @@ pub fn open_long_topic(services: &Services, cx: &mut App) {
 /// cover the bottom edge: it does not show in a capture of the window, and
 /// `Bounds::centered` would clip a 900 pt window to a visible frame that the
 /// Dock shortens (887 pt on a 982 pt display).
-fn capture_bounds(content: Size<Pixels>, cx: &App) -> Bounds<Pixels> {
+pub fn capture_bounds(content: Size<Pixels>, cx: &App) -> Bounds<Pixels> {
     let Some(display) = cx.primary_display() else {
         return Bounds::centered(None, content, cx);
     };

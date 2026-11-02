@@ -1362,6 +1362,12 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn add_group_members(&self, _group_id: &str, _member_ids: Vec<MemberId>) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// Renames a 群 (`PATCH /v1/groups/:id`); `name` is already checked with
+    /// `views::nav::dialogs::validate_group_name`. The new name arrives as
+    /// `Change::Groups`. A DM cannot be renamed.
+    fn rename_group(&self, _group_id: &str, _name: String) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Leaves a group (`DELETE /v1/groups/:id/members/<me>`). Emits `Change::Groups`.
     fn leave_group(&self, _group_id: &str) {}
     /// My mute preference of a group (`GroupSummary.muted`).

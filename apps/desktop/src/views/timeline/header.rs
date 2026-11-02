@@ -14,11 +14,14 @@ use super::TimelineView;
 use crate::ui::NamedButton as _;
 use crate::{
     copy::{fill, realtime as r, timeline as t},
-    data::{Topic, TopicStatus},
+    data::{GroupKind, Topic, TopicStatus},
     theme::{self, Type as _, space},
     ui::{self, Lucide},
     views::topic_menu,
 };
+
+/// The 私聊 peer's avatar in the breadcrumb: the size of the `hash` glyph's line.
+const BREADCRUMB_AVATAR: gpui::Pixels = px(16.);
 
 impl TimelineView {
     pub(super) fn render_header(
@@ -121,6 +124,21 @@ impl TimelineView {
                 .child("·")
                 .into_any_element()
         };
+        // A 群 shows `# name`; a 私聊 the peer's 16 pt avatar (a person's
+        // circle or a bot's tile, as in its sidebar row) and the name.
+        let peer = group.as_ref().filter(|g| g.kind == GroupKind::Dm).map(|g| {
+            g.dm_peer
+                .as_ref()
+                .and_then(|p| self.members.iter().find(|m| &m.id == p))
+        });
+        let lead = match peer {
+            Some(peer) => div()
+                .flex_none()
+                .mr(px(2.))
+                .child(ui::MemberAvatar::new(peer, BREADCRUMB_AVATAR).on(colors.content))
+                .into_any_element(),
+            None => ui::icon(Lucide::Hash, theme::icon::CHIP, colors.text_3).into_any_element(),
+        };
         let mut items: Vec<AnyElement> = vec![
             div()
                 .flex_shrink(1.)
@@ -128,7 +146,7 @@ impl TimelineView {
                 .flex()
                 .items_center()
                 .gap(space::S4)
-                .child(ui::icon(Lucide::Hash, theme::icon::CHIP, colors.text_3))
+                .child(lead)
                 .child(ui::truncating("topic-group-name", group_name))
                 .into_any_element(),
         ];

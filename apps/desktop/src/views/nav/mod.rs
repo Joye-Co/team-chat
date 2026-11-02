@@ -8,6 +8,7 @@
 
 pub mod dialogs;
 pub mod menus;
+pub mod rename;
 pub mod selftest;
 #[cfg(target_os = "macos")]
 mod status_item;

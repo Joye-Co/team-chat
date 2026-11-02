@@ -164,7 +164,10 @@ impl RenderOnce for MemberAvatar {
 
         // People: a circle.
         let text = monogram(&self.name, size);
-        let (font, line) = if small {
+        let (font, line) = if size <= px(16.) {
+            // Breadcrumb size: one character that keeps a margin in the disc.
+            (px(10.), size)
+        } else if small {
             type_scale::META
         } else {
             let share = if text.chars().count() > 1 { 0.38 } else { 0.44 };

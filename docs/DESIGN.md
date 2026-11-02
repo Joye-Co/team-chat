@@ -617,7 +617,8 @@ bottom hairline.
 rule. Row 1 (52): title `heading` 18/26 (takes all free width, truncates), then trailing (gap 4)
 32 pt icon buttons `bell` (follow), `panel-right` (state shown by the icon, U16), `ellipsis`.
 Row 2 (40), `small` 13/20 `text-2`, gap 8, items split by a `text-3` `·`: breadcrumb `hash` 14
-`text-3` + 群 name (truncates first); the status label (quiet `等你…`, or a 20 pt avatar + `等回答`;
+`text-3` + 群 name (truncates first; in a 私聊 the peer's 16 pt avatar, a person's circle or a bot's
+tile as in its sidebar row, takes the place of `hash`); the status label (quiet `等你…`, or a 20 pt avatar + `等回答`;
 hidden while the ask card is on screen, §7.8); `users` 14 + `n 位成员` (opens members in the side
 panel). The title shows in every state, including while the start block is on screen (Slack's
 channel header and intro both name the channel).

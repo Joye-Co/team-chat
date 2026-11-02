@@ -37,12 +37,17 @@ crate::copy! {
     GROUP_NAME_LABEL = "群名称",
     GROUP_NAME_PLACEHOLDER = "例如：产品讨论",
     GROUP_NAME_REQUIRED = "请填写群名称",
+    GROUP_NAME_TOO_LONG = "群名称最多 {n} 个字",
     PICK_MEMBERS = "选择成员",
     MEMBER_FILTER_PLACEHOLDER = "搜索成员",
     SELECTED_COUNT = "已选 {n} 位成员",
     NO_MEMBERS_MATCH = "没有找到这位成员",
     CREATE = "创建",
     ADD = "添加",
+    // rename group dialog
+    RENAME_GROUP = "重命名群…",
+    RENAME_GROUP_TITLE = "重命名群",
+    RENAME_GROUP_FORBIDDEN = "你已不在这个群里，不能重命名",
     // add members dialog
     ADD_MEMBERS = "添加成员",
     ADD_MEMBERS_TITLE = "添加成员到「{name}」",

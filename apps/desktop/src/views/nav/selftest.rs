@@ -436,6 +436,158 @@ pub mod scenes {
         })
     }
 
+    /// The 群 open in the sidebar, or the first 群.
+    fn open_group(services: &Services, cx: &App) -> Option<crate::data::GroupSummary> {
+        let open = match services.nav.read(cx).place.clone() {
+            Some(crate::app::Place::Group(id)) => Some(id),
+            _ => None,
+        };
+        let groups: Vec<_> = services
+            .provider
+            .groups()
+            .into_iter()
+            .filter(|g| g.kind == crate::data::GroupKind::Group)
+            .collect();
+        groups
+            .iter()
+            .find(|g| Some(&g.id) == open.as_ref())
+            .or(groups.first())
+            .cloned()
+    }
+
+    /// The menu of the open 群's sidebar row, opened by a right-click on
+    /// the row once it is drawn (the real pointer does not move).
+    pub fn group_menu(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        let group = open_group(&services, cx).ok_or("no 群")?;
+        let mut options = crate::app::main_window_options(false, cx);
+        options.window_bounds = Some(gpui::WindowBounds::Windowed(
+            crate::selftest::scenes::capture_bounds(content, cx),
+        ));
+        options.window_min_size = None;
+        let (handle, root) = gpui_kit::open_window(options, cx, move |window, cx| {
+            gpui::AppContext::new(cx, |cx| {
+                crate::app::RootView::new(services, None, window, cx)
+            })
+        })
+        .map_err(|e| e.to_string())?;
+        let sidebar = root.read(cx).sidebar().clone();
+        handle
+            .update(cx, |_, window, _| {
+                right_click_when_drawn(sidebar, group.id, 0, window)
+            })
+            .map_err(|e| e.to_string())?;
+        Ok(handle)
+    }
+
+    fn right_click_when_drawn(
+        sidebar: gpui::Entity<crate::views::sidebar::Sidebar>,
+        group_id: String,
+        tries: u32,
+        window: &mut Window,
+    ) {
+        window.on_next_frame(move |window, cx| {
+            let Some(bounds) = sidebar.read(cx).group_row_bounds(&group_id) else {
+                if tries < 10 {
+                    right_click_when_drawn(sidebar, group_id, tries + 1, window);
+                }
+                return;
+            };
+            let position = bounds.center();
+            let modifiers = gpui::Modifiers::default();
+            window.dispatch_event(
+                gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position,
+                    pressed_button: None,
+                    modifiers,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::MouseDown(gpui::MouseDownEvent {
+                    button: gpui::MouseButton::Right,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                    first_mouse: false,
+                }),
+                cx,
+            );
+            window.dispatch_event(
+                gpui::PlatformInput::MouseUp(gpui::MouseUpEvent {
+                    button: gpui::MouseButton::Right,
+                    position,
+                    modifiers,
+                    click_count: 1,
+                }),
+                cx,
+            );
+            window.refresh();
+        });
+    }
+
+    /// The 重命名群 dialog of the open 群, its name selected.
+    pub fn rename_group(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            if let Some(g) = open_group(&services, cx) {
+                super::super::rename::open_rename_group(services, g.id, g.name, window, cx);
+            }
+        })
+    }
+
+    /// The 重命名群 dialog after the server refused: a new name typed and
+    /// the error under the field.
+    pub fn rename_group_error(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            if let Some(g) = open_group(&services, cx) {
+                let typed = format!("{} · 新名称", g.name);
+                let error = crate::copy::nav::RENAME_GROUP_FORBIDDEN.into();
+                super::super::rename::open_with(
+                    services,
+                    g.id,
+                    g.name,
+                    Some((typed, error)),
+                    window,
+                    cx,
+                );
+            }
+        })
+    }
+
+    /// Opens the newest 话题 of a 私聊 whose peer is a bot (`bot`) or a
+    /// person, so the header shows the peer's avatar in place of `#`.
+    pub fn open_dm_topic(services: &Services, bot: bool, cx: &mut App) {
+        let members = services.provider.members();
+        let dm = services.provider.groups().into_iter().find(|g| {
+            g.kind == crate::data::GroupKind::Dm
+                && g.dm_peer
+                    .as_ref()
+                    .is_some_and(|p| members.iter().any(|m| &m.id == p && m.is_bot() == bot))
+                && !services.provider.topics(&g.id).is_empty()
+        });
+        let Some(dm) = dm else {
+            return;
+        };
+        let topic = services.provider.topics(&dm.id).into_iter().next();
+        services.nav.update(cx, |nav, cx| {
+            nav.open_group(dm.id.clone(), cx);
+            if let Some(t) = topic {
+                nav.open_topic(dm.id.clone(), t.id, cx);
+            }
+        });
+    }
+
     /// The member picker that starts a DM.
     pub fn start_dm(
         services: Services,

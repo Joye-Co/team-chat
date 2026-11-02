@@ -1486,6 +1486,10 @@ impl ChatProvider for CoreProvider {
         self.add_group_members_inner(group_id, member_ids)
     }
 
+    fn rename_group(&self, group_id: &str, name: String) -> AdminReply<()> {
+        self.rename_group_inner(group_id, name)
+    }
+
     fn leave_group(&self, group_id: &str) {
         self.leave_group_inner(group_id);
     }

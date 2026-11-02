@@ -465,6 +465,21 @@ impl CoreProvider {
         })
     }
 
+    pub(super) fn rename_group_inner(&self, group_id: &str, name: String) -> AdminReply<()> {
+        let gid = group_id.to_string();
+        self.request(move |client, _| async move {
+            client
+                .rename_group(&gid, &name)
+                .await
+                .map_err(|_| AdminError::Other)?
+                .map_err(|e| {
+                    tracing::warn!(error = %e, "rename group refused");
+                    admin_error(&e)
+                })?;
+            Ok(())
+        })
+    }
+
     pub(super) fn send_diagnostics_inner(&self, description: String) -> AdminReply<String> {
         self.request(move |client, _| async move {
             let header = diagnostics_header(&description);

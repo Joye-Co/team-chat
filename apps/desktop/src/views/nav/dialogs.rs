@@ -36,17 +36,29 @@ pub fn pickable_members(members: &[Member], me: Option<&str>) -> Vec<Member> {
         .collect()
 }
 
-/// Checks the new-group form. Returns the request or the error text.
-pub fn validate_new_group(
-    name: &str,
-    selected: &[MemberId],
-) -> Result<CreateGroupRequest, &'static str> {
-    let name = name.trim();
+/// Longest 群 name, in characters (docs/protocol.md).
+pub const MAX_GROUP_NAME_CHARS: usize = 64;
+
+/// A 群 name as the server stores it: trimmed, every run of whitespace (also
+/// full-width spaces) one space, 1 to 64 characters. New 群 and rename use it.
+pub fn validate_group_name(name: &str) -> Result<String, String> {
+    let name = name.split_whitespace().collect::<Vec<_>>().join(" ");
     if name.is_empty() {
-        return Err(nav::GROUP_NAME_REQUIRED);
+        return Err(nav::GROUP_NAME_REQUIRED.to_string());
     }
+    if name.chars().count() > MAX_GROUP_NAME_CHARS {
+        return Err(fill(
+            nav::GROUP_NAME_TOO_LONG,
+            &[("n", &MAX_GROUP_NAME_CHARS.to_string())],
+        ));
+    }
+    Ok(name)
+}
+
+/// Checks the new-group form. Returns the request or the error text.
+pub fn validate_new_group(name: &str, selected: &[MemberId]) -> Result<CreateGroupRequest, String> {
     Ok(CreateGroupRequest {
-        name: name.chars().take(80).collect(),
+        name: validate_group_name(name)?,
         member_ids: selected.to_vec(),
     })
 }
@@ -69,7 +81,7 @@ pub struct NewGroupForm {
     members: Vec<Member>,
     /// In pick order.
     selected: Vec<MemberId>,
-    error: Option<&'static str>,
+    error: Option<gpui::SharedString>,
     scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
@@ -154,7 +166,7 @@ impl NewGroupForm {
                         })
                     }
                     Err(error) => {
-                        self.error = Some(error);
+                        self.error = Some(error.into());
                         cx.notify();
                         return;
                     }
@@ -187,7 +199,7 @@ impl NewGroupForm {
                         if this.mode == FormMode::NewGroup {
                             super::clear_pending(cx);
                         }
-                        this.error = Some(crate::views::settings::widgets::error_text(e));
+                        this.error = Some(crate::views::settings::widgets::error_text(e).into());
                         cx.notify();
                     }
                 }
@@ -262,7 +274,7 @@ impl Render for NewGroupForm {
                         .error(self.error.is_some()),
                 )
             })
-            .when_some(self.error.filter(|_| new_group), |el, e| {
+            .when_some(self.error.clone().filter(|_| new_group), |el, e| {
                 el.child(ui::field_help(e, true, cx))
             })
             .child(
@@ -326,7 +338,7 @@ impl Render for NewGroupForm {
                     .when(edges.0, |el| el.child(edge_fade(true, k.overlay)))
                     .when(edges.1, |el| el.child(edge_fade(false, k.overlay))),
             )
-            .when_some(self.error.filter(|_| !new_group), |el, e| {
+            .when_some(self.error.clone().filter(|_| !new_group), |el, e| {
                 el.child(div().pt(space::S8).child(ui::field_help(e, true, cx)))
             })
             .child(
@@ -703,10 +715,29 @@ mod tests {
         let req = validate_new_group("  设计  ", &["m-alex".into()]).unwrap();
         assert_eq!(req.name, "设计");
         assert_eq!(req.member_ids, vec!["m-alex".to_string()]);
-        let long: String = "长".repeat(200);
+        let long: String = "长".repeat(65);
         assert_eq!(
-            validate_new_group(&long, &[]).unwrap().name.chars().count(),
-            80
+            validate_new_group(&long, &[]).unwrap_err(),
+            "群名称最多 64 个字"
+        );
+        assert_eq!(
+            validate_group_name(&"长".repeat(64))
+                .unwrap()
+                .chars()
+                .count(),
+            64
+        );
+    }
+
+    #[test]
+    fn group_names_collapse_whitespace_like_the_server() {
+        assert_eq!(
+            validate_group_name(" 前端\u{3000}\t 小组 \n").unwrap(),
+            "前端 小组"
+        );
+        assert_eq!(
+            validate_group_name("\u{3000}\n").unwrap_err(),
+            nav::GROUP_NAME_REQUIRED
         );
     }
 

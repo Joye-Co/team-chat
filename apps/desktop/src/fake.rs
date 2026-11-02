@@ -1413,6 +1413,23 @@ impl ChatProvider for FakeProvider {
         reply_now(Ok(()))
     }
 
+    fn rename_group(&self, group_id: &str, name: String) -> AdminReply<()> {
+        let found = self.with(|s| {
+            let Some(g) = s.groups.iter_mut().find(|g| g.id == group_id) else {
+                return Err(AdminError::NotFound);
+            };
+            if g.kind == GroupKind::Dm {
+                return Err(AdminError::Forbidden);
+            }
+            g.name = name;
+            Ok(())
+        });
+        if found.is_ok() {
+            self.emit(vec![Change::Groups, Change::Todo]);
+        }
+        reply_now(found)
+    }
+
     fn open_dm(&self, member_id: &str) -> AdminReply<GroupId> {
         let id = self.with(|s| {
             if member_id == ME {
