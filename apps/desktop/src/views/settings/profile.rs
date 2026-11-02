@@ -1,13 +1,13 @@
 //! 个人: my name, 岗位 and avatar, and sign out.
 
 use gpui::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement, PathPromptOptions, Render,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement, PathPromptOptions, Render,
     Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    Disableable as _, Icon, Sizable as _, WindowExt as _,
-    button::{Button, ButtonVariant, ButtonVariants as _},
-    input::{Input, InputEvent, InputState},
+    Disableable as _, Icon, WindowExt as _,
+    button::ButtonVariant,
+    input::{InputEvent, InputState},
 };
 
 use super::widgets::{self, Status, answer};
@@ -16,7 +16,7 @@ use crate::{
     copy::{common, settings as s},
     data::{Change, Member, SessionState},
     theme::{self, Type as _, space},
-    ui::Lucide,
+    ui::{self, Lucide},
     views::avatar,
 };
 
@@ -64,16 +64,8 @@ impl ProfilePage {
                     }
                 },
             ),
-            cx.subscribe_in(&name, window, |this, _, e: &InputEvent, window, cx| {
-                if matches!(e, InputEvent::PressEnter { .. }) {
-                    this.save(window, cx);
-                }
-            }),
-            cx.subscribe_in(&role, window, |this, _, e: &InputEvent, window, cx| {
-                if matches!(e, InputEvent::PressEnter { .. }) {
-                    this.save(window, cx);
-                }
-            }),
+            cx.subscribe_in(&name, window, Self::on_input),
+            cx.subscribe_in(&role, window, Self::on_input),
         ];
         let mut this = Self {
             services,
@@ -86,6 +78,30 @@ impl ProfilePage {
         };
         this.fill_from_me(window, cx);
         this
+    }
+
+    /// Return and leaving a changed field save it.
+    fn on_input(
+        &mut self,
+        _: &Entity<InputState>,
+        e: &InputEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        match e {
+            InputEvent::PressEnter { .. } => self.save(window, cx),
+            InputEvent::Blur if self.edited(cx) => self.save(window, cx),
+            _ => {}
+        }
+    }
+
+    /// True when the fields differ from the values they were filled from.
+    fn edited(&self, cx: &App) -> bool {
+        let current = (
+            self.name.read(cx).value().to_string(),
+            self.role.read(cx).value().to_string(),
+        );
+        self.shown.as_ref() != Some(&current)
     }
 
     fn me(&self) -> Option<Member> {
@@ -228,110 +244,132 @@ impl Render for ProfilePage {
         let colors = theme::colors(cx);
         let me = self.me();
         let signed_in = me.is_some();
-        let name = me.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let save_error = matches!(self.save, Status::Failed(_));
         div()
             .flex()
             .flex_col()
-            // Avatar: the picture, my name, the file rule and 更换头像….
+            // Avatar: the picture, 更换头像… and its help (§8.4).
+            .child(widgets::section_label(s::AVATAR, true, cx))
             .child(
-                widgets::group(cx).child(
-                    widgets::group_row()
-                        .gap(space::S12)
-                        .child(div().flex_none().child(avatar(me.as_ref(), px(48.), cx)))
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S16)
+                    .child(div().flex_none().child(avatar(me.as_ref(), px(64.), cx)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap(space::S6)
+                            .child(
+                                ui::secondary_button("avatar-choose", s::AVATAR_CHOOSE, cx)
+                                    .loading(self.avatar.busy())
+                                    .disabled(!signed_in || self.avatar.busy())
+                                    .on_click(cx.listener(|this, _, _, cx| this.choose_avatar(cx))),
+                            )
+                            .child(match widgets::status_line(&self.avatar, cx) {
+                                Some(line) => line,
+                                None => widgets::hint(s::AVATAR_HINT, cx),
+                            }),
+                    ),
+            )
+            // Name and 岗位 save on blur and on Return (§8.4).
+            .child(
+                div()
+                    .pt(space::S24)
+                    .flex()
+                    .flex_col()
+                    .gap(space::S16)
+                    .child(widgets::field(
+                        s::NAME,
+                        ui::TextField::new("profile-name", &self.name, ui::FieldKind::Form)
+                            .error(save_error)
+                            .disabled(!signed_in),
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(widgets::field(
+                                s::ROLE,
+                                ui::TextField::new("profile-role", &self.role, ui::FieldKind::Form)
+                                    .disabled(!signed_in),
+                                cx,
+                            ))
+                            .child(div().pt(space::S6).child(
+                                match widgets::status_line(&self.save, cx) {
+                                    Some(line) => line,
+                                    None => widgets::hint(s::PROFILE_SAVE_HINT, cx),
+                                },
+                            )),
+                    ),
+            )
+            // Sign out, then the danger row on its own (U40).
+            .child(widgets::section_label(s::ACCOUNT, false, cx))
+            .child(widgets::table_of(
+                None,
+                vec![
+                    widgets::table_row()
+                        .child(widgets::title_cell(
+                            s::SIGN_OUT,
+                            Some(s::SIGN_OUT_HINT.into()),
+                            cx,
+                        ))
+                        .child(
+                            ui::secondary_button("sign-out", s::SIGN_OUT, cx)
+                                .icon(Icon::new(Lucide::LogOut))
+                                .disabled(!signed_in)
+                                .on_click(cx.listener(|this, _, _, _| {
+                                    this.services.provider.sign_out(false)
+                                })),
+                        ),
+                ],
+                cx,
+            ))
+            .child(div().h(space::S16))
+            .child(widgets::table_of(
+                None,
+                vec![
+                    widgets::table_row()
                         .child(
                             div()
                                 .flex_1()
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
-                                .gap(space::S2)
-                                .child(div().t_ui().medium().one_line().child(name))
                                 .child(
-                                    match widgets::status_line(&self.avatar, cx) {
-                                        Some(line) => line,
-                                        None => widgets::hint(s::AVATAR_HINT, cx),
-                                    }
-                                    .one_line(),
+                                    div()
+                                        .t_ui()
+                                        .medium()
+                                        .text_color(colors.text_1)
+                                        .child(s::SIGN_OUT_WIPE),
+                                )
+                                .child(
+                                    div()
+                                        .t_small()
+                                        .text_color(colors.text_2)
+                                        .child(s::SIGN_OUT_WIPE_HINT),
                                 ),
                         )
                         .child(
-                            Button::new("avatar-choose")
-                                .small()
-                                .label(s::AVATAR_CHOOSE)
-                                .loading(self.avatar.busy())
-                                .disabled(!signed_in || self.avatar.busy())
-                                .on_click(cx.listener(|this, _, _, cx| this.choose_avatar(cx))),
+                            // Secondary with a danger label: the alert that
+                            // follows carries the filled danger button.
+                            ui::secondary_button("sign-out-wipe", s::SIGN_OUT_WIPE_BUTTON, cx)
+                                .text_color(colors.danger_text)
+                                .disabled(!signed_in)
+                                .on_click(
+                                    cx.listener(|this, _, window, cx| {
+                                        this.confirm_wipe(window, cx)
+                                    }),
+                                ),
                         ),
-                ),
-            )
-            .child(div().h(space::S20))
-            .child(widgets::group_rows(
-                vec![
-                    widgets::group_field(s::NAME, Input::new(&self.name), cx),
-                    widgets::group_field(s::ROLE, Input::new(&self.role), cx),
                 ],
-                space::S12,
                 cx,
             ))
-            .child(
-                div()
-                    .pt(space::S12)
-                    .flex()
-                    .items_center()
-                    .gap(space::S12)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .px(space::S12)
-                            .children(widgets::status_line(&self.save, cx)),
-                    )
-                    .child(
-                        Button::new("profile-save")
-                            .primary()
-                            .small()
-                            .label(common::SAVE)
-                            .loading(self.save.busy())
-                            .disabled(!signed_in || self.save.busy())
-                            .on_click(cx.listener(|this, _, window, cx| this.save(window, cx))),
-                    ),
-            )
-            .child(widgets::section_header(s::ACCOUNT, cx))
-            .child(
-                widgets::group(cx).child(
-                    widgets::group_row()
-                        .gap(space::S8)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .t_callout()
-                                .text_color(colors.text_2)
-                                .child(s::SIGN_OUT_HINT),
-                        )
-                        .child(
-                            Button::new("sign-out-wipe")
-                                .small()
-                                .ghost()
-                                .text_color(colors.danger_text)
-                                .label(s::SIGN_OUT_WIPE)
-                                .disabled(!signed_in)
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.confirm_wipe(window, cx)
-                                })),
-                        )
-                        .child(
-                            Button::new("sign-out")
-                                .small()
-                                .icon(Icon::new(Lucide::LogOut))
-                                .label(s::SIGN_OUT)
-                                .disabled(!signed_in)
-                                .on_click(cx.listener(|this, _, _, _| {
-                                    this.services.provider.sign_out(false)
-                                })),
-                        ),
-                ),
-            )
     }
 }
 

@@ -1,23 +1,24 @@
 //! 通知: mute and notify level per 群, and the topics I follow.
 
 use gpui::{
-    Context, ElementId, IntoElement, ParentElement, Render, SharedString, Styled, Subscription,
-    Window, div, prelude::FluentBuilder as _, px,
+    App, Context, ElementId, IntoElement, ParentElement, Render, SharedString, Styled,
+    Subscription, Window, div,
 };
-use gpui_component::{
-    Sizable as _,
-    button::Button,
-    switch::Switch,
-};
+use gpui_component::switch::Switch;
 
 use super::widgets::{self, Status, answer};
 use crate::{
     app::{Changes, Services},
-    copy::settings as s,
-    data::{AdminReply, Change, NotifyLevel},
+    copy::{fill, settings as s},
+    data::{AdminReply, Change, GroupKind, NotifyLevel},
     theme::{self, Type as _, space},
     ui,
 };
+
+/// The 提醒 column: the segmented control.
+const SEGMENTS: gpui::Pixels = gpui::px(216.);
+/// The 静音 column: the switch.
+const MUTE_COL: gpui::Pixels = gpui::px(44.);
 
 const LEVELS: [NotifyLevel; 3] = [NotifyLevel::All, NotifyLevel::Mentions, NotifyLevel::None];
 
@@ -89,52 +90,89 @@ fn level_ix(level: NotifyLevel) -> usize {
     LEVELS.iter().position(|l| *l == level).unwrap_or(1)
 }
 
+impl NotificationsPage {
+    /// One 群 or 私聊 row: its glyph or avatar, the name, the segmented
+    /// level control and the mute switch.
+    fn group_row(
+        &self,
+        g: &crate::data::GroupSummary,
+        members: &[crate::data::Member],
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let colors = theme::colors(cx);
+        let prefs = self.services.provider.group_prefs(&g.id);
+        let gid = g.id.clone();
+        let gid2 = g.id.clone();
+        let page = cx.entity().downgrade();
+        let page2 = page.clone();
+        let leading = if g.kind == GroupKind::Dm {
+            let peer = g
+                .dm_peer
+                .as_ref()
+                .and_then(|p| members.iter().find(|m| &m.id == p));
+            ui::MemberAvatar::new(peer, theme::size::AVATAR_ROW)
+                .on(colors.content)
+                .into_any_element()
+        } else {
+            ui::GroupGlyph::new().into_any_element()
+        };
+        widgets::table_row()
+            .h(theme::size::SETTINGS_ROW)
+            .py_0()
+            .child(div().flex_none().child(leading))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .t_ui()
+                    .medium()
+                    .text_color(if prefs.muted {
+                        colors.text_2
+                    } else {
+                        colors.text_1
+                    })
+                    .one_line()
+                    .child(g.name.clone()),
+            )
+            .child(div().w(SEGMENTS).flex_none().child(widgets::choice(
+                SharedString::from(format!("notify-{}", g.id)),
+                &[s::NOTIFY_ALL, s::NOTIFY_MENTIONS, s::NOTIFY_NONE],
+                level_ix(prefs.notify),
+                false,
+                move |ix, _, cx| {
+                    let level = LEVELS[ix.min(2)];
+                    let _ = page.update(cx, |this, cx| this.set_level(&gid, level, cx));
+                },
+                cx,
+            )))
+            .child(
+                div().w(MUTE_COL).flex_none().child(
+                    Switch::new(ElementId::Name(format!("mute-{}", g.id).into()))
+                        .checked(prefs.muted)
+                        .tooltip(s::MUTE_GROUP)
+                        .on_click(move |on: &bool, _, cx| {
+                            let on = *on;
+                            let _ = page2.update(cx, |this, cx| this.set_muted(&gid2, on, cx));
+                        }),
+                ),
+            )
+    }
+}
+
 impl Render for NotificationsPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
         let provider = self.services.provider.clone();
         let groups = provider.groups();
-        let page = cx.entity().downgrade();
+        let members = provider.members();
+        let (dms, groups): (Vec<_>, Vec<_>) =
+            groups.into_iter().partition(|g| g.kind == GroupKind::Dm);
         let group_rows: Vec<_> = groups
             .iter()
-            .map(|g| {
-                let prefs = provider.group_prefs(&g.id);
-                let gid = g.id.clone();
-                let gid2 = g.id.clone();
-                let page = page.clone();
-                let page2 = page.clone();
-                widgets::group_row()
-                    .child(ui::GroupTile::new(g.id.clone(), g.name.clone(), px(20.)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .t_ui()
-                            .when(prefs.muted, |el| el.text_color(colors.text_2))
-                            .one_line()
-                            .child(g.name.clone()),
-                    )
-                    .child(widgets::choice(
-                        SharedString::from(format!("notify-{}", g.id)),
-                        &[s::NOTIFY_ALL, s::NOTIFY_MENTIONS, s::NOTIFY_NONE],
-                        level_ix(prefs.notify),
-                        false,
-                        move |ix, _, cx| {
-                            let level = LEVELS[ix.min(2)];
-                            let _ = page.update(cx, |this, cx| this.set_level(&gid, level, cx));
-                        },
-                    ))
-                    .child(
-                        Switch::new(ElementId::Name(format!("mute-{}", g.id).into()))
-                            .small()
-                            .checked(prefs.muted)
-                            .label(s::MUTE)
-                            .on_click(move |on: &bool, _, cx| {
-                                let on = *on;
-                                let _ = page2.update(cx, |this, cx| this.set_muted(&gid2, on, cx));
-                            }),
-                    )
-            })
+            .map(|g| self.group_row(g, &members, cx))
+            .collect();
+        let dm_rows: Vec<_> = dms
+            .iter()
+            .map(|g| self.group_row(g, &members, cx))
             .collect();
         let followed = provider.followed_topics();
         let topic_rows: Vec<_> = followed
@@ -142,55 +180,56 @@ impl Render for NotificationsPage {
             .map(|f| {
                 let gid = f.group_id.clone();
                 let tid = f.topic.id.clone();
-                widgets::group_row()
+                widgets::table_row()
+                    .child(widgets::title_cell(
+                        f.topic.title.replace('\n', " "),
+                        Some(f.group_name.clone().into()),
+                        cx,
+                    ))
                     .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(
-                                div()
-                                    .t_ui()
-                                    .medium()
-                                    .one_line()
-                                    .child(f.topic.title.replace('\n', " ")),
-                            )
-                            .child(
-                                div()
-                                    .t_callout()
-                                    .one_line()
-                                    .text_color(colors.text_2)
-                                    .child(f.group_name.clone()),
-                            ),
-                    )
-                    .child(
-                        Button::new(ElementId::Name(format!("unfollow-{}", f.topic.id).into()))
-                            .small()
-                            .label(s::UNFOLLOW)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.unfollow(&gid, &tid, cx)),
-                            ),
+                        ui::secondary_button(
+                            ElementId::Name(format!("unfollow-{}", f.topic.id).into()),
+                            s::UNFOLLOW,
+                            cx,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| this.unfollow(&gid, &tid, cx))),
                     )
             })
             .collect();
+        // 群 and 私聊 tables name their columns once, so the rows carry
+        // controls without repeated labels.
+        let header = |first: String, cx: &App| {
+            widgets::table_header(cx)
+                .gap(space::S12)
+                .child(div().flex_1().min_w_0().tnum().child(first))
+                .child(div().w(SEGMENTS).flex_none().child(s::NOTIFY_LEVEL))
+                .child(div().w(MUTE_COL).flex_none().child(s::MUTE))
+        };
+        let table =
+            |header: Option<gpui::Div>, rows: Vec<gpui::Div>, empty: &'static str, cx: &App| {
+                if rows.is_empty() {
+                    widgets::table_empty(None, empty, cx)
+                } else {
+                    widgets::table_of(header, rows, cx)
+                }
+            };
+        let group_header = header(
+            fill(s::GROUPS_HEADER, &[("n", &group_rows.len().to_string())]),
+            cx,
+        );
+        let dm_header = header(
+            fill(s::DMS_HEADER, &[("n", &dm_rows.len().to_string())]),
+            cx,
+        );
         div()
             .flex()
             .flex_col()
-            .children(widgets::status_line(&self.status, cx).map(|l| l.px(space::S12).pb(space::S8)))
-            .child(widgets::section_header(s::GROUP_NOTIFY, cx).pt(space::S4))
-            .child(if group_rows.is_empty() {
-                widgets::group_empty(s::NO_GROUPS, cx)
-            } else {
-                // Inset to the name: 12 padding + 20 tile + 10 gap.
-                widgets::group_rows(group_rows, px(42.), cx)
-            })
+            .children(widgets::status_line(&self.status, cx).map(|l| l.pb(space::S12)))
+            .child(table(Some(group_header), group_rows, s::NO_GROUPS, cx))
             .child(widgets::footnote(s::NOTIFICATIONS_HINT, cx))
-            .child(widgets::section_header(s::FOLLOWED_TOPICS, cx))
-            .child(if topic_rows.is_empty() {
-                widgets::group_empty(s::FOLLOWED_EMPTY, cx)
-            } else {
-                widgets::group_rows(topic_rows, space::S12, cx)
-            })
+            .child(div().h(space::S24))
+            .child(table(Some(dm_header), dm_rows, s::NO_DMS, cx))
+            .child(widgets::section_label(s::FOLLOWED_TOPICS, false, cx))
+            .child(table(None, topic_rows, s::FOLLOWED_EMPTY, cx))
     }
 }

@@ -7,13 +7,7 @@ use gpui::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, SharedString,
     Styled, Task, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    Disableable as _, Icon, Sizable as _, WindowExt as _,
-    button::{Button, ButtonVariants as _},
-    input::{Input, InputState},
-    spinner::Spinner,
-    tag::Tag,
-};
+use gpui_component::{Disableable as _, Icon, WindowExt as _, input::InputState};
 
 use super::{
     i_am_owner,
@@ -24,8 +18,8 @@ use crate::{
     copy::{common, fill, settings as s},
     data::{MachineCreated, MachineInfo},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
-    views::{presence_dot, topic_list::relative_time},
+    ui::{self, ButtonSpec as _, Lucide},
+    views::topic_list::relative_time,
 };
 
 /// How often the open page reloads the list.
@@ -35,6 +29,9 @@ pub struct MachinesPage {
     services: Services,
     machines: Option<Vec<MachineInfo>>,
     status: Status,
+    /// True once a load has run for the busy delay (DESIGN.md §12: busy
+    /// indicators wait 400 ms), so a fast load never flashes a skeleton.
+    busy_shown: bool,
     /// The periodic reload; dropped with the page.
     _poll: Task<()>,
 }
@@ -58,6 +55,7 @@ impl MachinesPage {
             services,
             machines: None,
             status: Status::Idle,
+            busy_shown: false,
             _poll: poll,
         }
     }
@@ -75,10 +73,24 @@ impl MachinesPage {
             return;
         }
         self.status = Status::Busy(s::LOADING.into());
+        self.busy_shown = false;
         let reply = self.services.provider.machines();
+        cx.spawn(async move |this, cx| {
+            cx.background_executor()
+                .timer(theme::motion::BUSY_DELAY)
+                .await;
+            let _ = this.update(cx, |this, cx| {
+                if this.status.busy() {
+                    this.busy_shown = true;
+                    cx.notify();
+                }
+            });
+        })
+        .detach();
         cx.spawn(async move |this, cx| {
             let result = answer(reply).await;
             let _ = this.update(cx, |this, cx| {
+                this.busy_shown = false;
                 match result {
                     Ok(list) => {
                         this.machines = Some(list);
@@ -93,20 +105,17 @@ impl MachinesPage {
         cx.notify();
     }
 
-    /// One machine as a row of the grouped list: health, name, facts and labels.
+    /// One machine as a table row: a 36 pt tile with the machine glyph, the
+    /// name with its facts and labels, and the status column (U43).
     fn row(&self, m: &MachineInfo, cx: &App) -> gpui::Div {
         let colors = theme::colors(cx);
         let now = chrono::Local::now();
-        let (state_icon, state_text): (gpui::AnyElement, &'static str) = if !m.connected {
-            (presence_dot(false, cx).into_any_element(), s::MACHINE_OFFLINE)
+        let (dot, state_text) = if !m.connected {
+            (None, s::MACHINE_OFFLINE)
         } else if !m.healthy {
-            (
-                ui::icon(Lucide::TriangleAlert, theme::icon::SMALL, colors.warning)
-                    .into_any_element(),
-                s::MACHINE_UNHEALTHY,
-            )
+            (Some(colors.you_glyph), s::MACHINE_UNHEALTHY)
         } else {
-            (presence_dot(true, cx).into_any_element(), s::MACHINE_ONLINE)
+            (Some(colors.online), s::MACHINE_ONLINE)
         };
         let mut facts: Vec<String> = Vec::new();
         if let (Some(free), Some(total)) = (m.disk_free_bytes, m.disk_total_bytes) {
@@ -121,28 +130,32 @@ impl MachinesPage {
         if let Some(v) = &m.version {
             facts.push(fill(s::MACHINE_VERSION, &[("v", v)]));
         }
-        facts.push(if m.active_runs > 0 {
+        let activity = if m.active_runs > 0 {
             fill(s::MACHINE_BUSY, &[("n", &m.active_runs.to_string())])
         } else {
             s::MACHINE_IDLE.to_string()
-        });
-        match m.last_heartbeat_at {
-            _ if m.connected => {}
-            Some(at) => facts.push(fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))])),
-            None => facts.push(s::MACHINE_NEVER_SEEN.to_string()),
-        }
-        widgets::group_row()
-            .items_start()
+        };
+        let seen = match m.last_heartbeat_at {
+            _ if m.connected => None,
+            Some(at) => Some(fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))])),
+            None => Some(s::MACHINE_NEVER_SEEN.to_string()),
+        };
+        widgets::table_row()
+            .items_center()
             .child(
                 div()
                     .flex_none()
-                    .size(px(28.))
+                    .size(theme::size::AVATAR_MESSAGE)
                     .rounded(theme::radius::MD)
-                    .bg(colors.fill_field)
+                    .bg(colors.field)
                     .flex()
                     .items_center()
                     .justify_center()
-                    .child(ui::icon(Lucide::Monitor, theme::icon::TOOLBAR, colors.text_2)),
+                    .child(ui::icon(
+                        Lucide::Monitor,
+                        theme::icon::HEADER,
+                        colors.text_2,
+                    )),
             )
             .child(
                 div()
@@ -150,51 +163,57 @@ impl MachinesPage {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .gap(space::S2)
-                    .child(div().t_ui().medium().one_line().child(m.name.clone()))
                     .child(
                         div()
-                            .t_callout()
+                            .flex()
+                            .items_center()
+                            .gap(space::S6)
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .t_ui()
+                                    .medium()
+                                    .one_line()
+                                    .child(m.name.clone()),
+                            )
+                            .children(m.labels.iter().take(3).map(|l| {
+                                div()
+                                    .flex_none()
+                                    .h(theme::size::CHIP_COMPACT)
+                                    .px(space::S6)
+                                    .rounded(theme::radius::SM)
+                                    .bg(colors.field)
+                                    .flex()
+                                    .items_center()
+                                    .t_meta()
+                                    .text_color(colors.text_2)
+                                    .child(l.clone())
+                            })),
+                    )
+                    .child(
+                        div()
+                            .t_small()
                             .tnum()
                             .text_color(colors.text_2)
+                            .one_line()
                             .child(facts.join(" · ")),
-                    )
-                    .when(!m.labels.is_empty(), |el| {
-                        el.child(
-                            div()
-                                .pt(space::S4)
-                                .flex()
-                                .flex_wrap()
-                                .gap(space::S4)
-                                .children(
-                                    m.labels
-                                        .iter()
-                                        .map(|l| Tag::secondary().small().child(l.clone())),
-                                ),
-                        )
-                    }),
+                    ),
             )
-            .child(
-                div()
-                    .w(px(92.))
-                    .h(px(18.))
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .t_callout()
-                    .text_color(colors.text_2)
-                    .child(state_icon)
-                    .child(state_text),
-            )
+            .child(widgets::status_cell(
+                widgets::state_dot(dot, cx),
+                state_text,
+                Some(seen.unwrap_or(activity).into()),
+                cx,
+            ))
     }
 
-    /// The header buttons: 刷新 and 添加机器.
+    /// The page actions: 刷新 (icon button) and 添加机器 (36 pt page primary).
     pub fn header_actions(this: &Entity<Self>, cx: &App) -> gpui::AnyElement {
         let page = this.read(cx);
         let owner = i_am_owner(&page.services);
         let services = page.services.clone();
-        let busy = page.status.busy();
+        let busy = page.busy_shown;
         let weak = this.downgrade();
         let weak2 = weak.clone();
         div()
@@ -202,34 +221,34 @@ impl MachinesPage {
             .items_center()
             .gap(space::S8)
             .child(
-                Button::new("machines-refresh")
-                    .ghost()
-                    .small()
-                    .icon(Icon::new(Lucide::RotateCcw))
-                    .label(s::REFRESH)
+                ui::icon_button("machines-refresh", Lucide::RotateCcw)
+                    .tooltip(s::REFRESH)
                     .loading(busy)
                     .on_click(move |_, _, cx| {
                         let _ = weak.update(cx, |this, cx| this.refresh(cx));
                     }),
             )
             .child(
-                Button::new("machine-add")
-                    .primary()
-                    .small()
-                    .icon(Icon::new(Lucide::Plus))
-                    .label(s::MACHINE_ADD)
-                    .disabled(!owner)
-                    .on_click(move |_, window, cx| {
-                        let form = open_add_machine(services.clone(), window, cx);
-                        let page = weak2.clone();
-                        // Reload the list once the machine exists.
-                        cx.observe(&form, move |form, cx| {
-                            if form.read(cx).created().is_some() {
-                                let _ = page.update(cx, |p, cx| p.refresh(cx));
-                            }
-                        })
-                        .detach();
-                    }),
+                ui::button(
+                    "machine-add",
+                    s::MACHINE_ADD,
+                    ui::ButtonKind::Primary,
+                    ui::ButtonSize::Page,
+                    cx,
+                )
+                .icon(Icon::new(Lucide::Plus))
+                .disabled_fill(!owner, cx)
+                .on_click(move |_, window, cx| {
+                    let form = open_add_machine(services.clone(), window, cx);
+                    let page = weak2.clone();
+                    // Reload the list once the machine exists.
+                    cx.observe(&form, move |form, cx| {
+                        if form.read(cx).created().is_some() {
+                            let _ = page.update(cx, |p, cx| p.refresh(cx));
+                        }
+                    })
+                    .detach();
+                }),
             )
             .into_any_element()
     }
@@ -237,47 +256,46 @@ impl MachinesPage {
 
 impl Render for MachinesPage {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
         let failed = match &self.status {
             Status::Failed(text) => Some(text.clone()),
             _ => None,
         };
+        let header = |n: usize, cx: &App| {
+            widgets::table_header(cx)
+                .gap(space::S12)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .tnum()
+                        .child(fill(s::MACHINES_HEADER, &[("n", &n.to_string())])),
+                )
+                .child(div().w(widgets::STATUS_COL).flex_none().child(s::STATUS))
+        };
         let body = match (&self.machines, failed.clone()) {
-            // The first load failed: an error row with 重试 (§11 Error loading).
-            (None, Some(text)) => widgets::group(cx).child(
-                widgets::group_row()
-                    .child(ui::icon(
-                        Lucide::CircleAlert,
-                        theme::icon::SMALL,
-                        colors.danger,
-                    ))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .t_callout()
-                            .text_color(colors.text_1)
-                            .child(text),
-                    )
-                    .child(
-                        Button::new("machines-retry")
-                            .small()
-                            .label(s::RETRY)
-                            .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                    ),
+            // The first load failed: an inline error row with 重试 (§8.5).
+            (None, Some(text)) => widgets::error_row(
+                text,
+                ui::button(
+                    "machines-retry",
+                    s::RETRY,
+                    ui::ButtonKind::Secondary,
+                    ui::ButtonSize::Sm,
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                cx,
             ),
-            (None, None) => widgets::group(cx).child(
-                widgets::group_row()
-                    .justify_center()
-                    .child(Spinner::new().small().color(colors.text_3)),
-            ),
-            (Some(list), _) if list.is_empty() => div().pt(px(96.)).child(
-                ui::EmptyState::new(Lucide::Server, s::MACHINES_EMPTY)
+            // Skeleton rows while the first load runs.
+            (None, None) if self.busy_shown => widgets::skeleton_table(3, cx),
+            (None, None) => div(),
+            (Some(list), _) if list.is_empty() => div().pt(px(72.)).child(
+                ui::EmptyState::new(Lucide::Monitor, s::MACHINES_EMPTY)
                     .description(s::MACHINES_EMPTY_HINT),
             ),
             (Some(list), _) => {
                 let rows = list.iter().map(|m| self.row(m, cx)).collect();
-                widgets::group_rows(rows, px(50.), cx)
+                widgets::table_of(Some(header(list.len(), cx)), rows, cx)
             }
         };
         div()
@@ -285,8 +303,7 @@ impl Render for MachinesPage {
             .flex_col()
             .when(self.machines.is_some(), |el| {
                 el.children(failed.and_then(|text| {
-                    widgets::status_line(&Status::Failed(text), cx)
-                        .map(|l| l.px(space::S12).pb(space::S8))
+                    widgets::status_line(&Status::Failed(text), cx).map(|l| l.pb(space::S8))
                 }))
             })
             .child(body)
@@ -372,10 +389,10 @@ impl Render for MachineForm {
             return div()
                 .flex()
                 .flex_col()
-                .gap(px(12.))
+                .gap(space::S16)
                 .child(
                     div()
-                        .text_base()
+                        .t_body()
                         .child(fill(s::MACHINE_CREATED, &[("name", &created.machine.name)])),
                 )
                 .child(widgets::hint(s::SHOWN_ONCE, cx))
@@ -393,10 +410,8 @@ impl Render for MachineForm {
                     cx,
                 ))
                 .child(
-                    div().flex().justify_end().child(
-                        Button::new("machine-done")
-                            .primary()
-                            .label(s::DONE)
+                    div().pt(space::S4).flex().justify_end().child(
+                        ui::primary_button("machine-done", s::DONE, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )
@@ -406,11 +421,17 @@ impl Render for MachineForm {
         div()
             .flex()
             .flex_col()
-            .gap(px(10.))
-            .child(widgets::field(s::MACHINE_NAME, Input::new(&self.name), cx))
-            .child(widgets::field(
+            .gap(space::S16)
+            .child(widgets::form_input(
+                "machine-name",
+                s::MACHINE_NAME,
+                &self.name,
+                cx,
+            ))
+            .child(widgets::form_input(
+                "machine-labels",
                 s::MACHINE_LABELS,
-                Input::new(&self.labels),
+                &self.labels,
                 cx,
             ))
             .children(widgets::status_line(&self.status, cx))
@@ -418,17 +439,14 @@ impl Render for MachineForm {
                 div()
                     .flex()
                     .justify_end()
-                    .gap(px(8.))
+                    .pt(space::S4)
+                    .gap(space::S8)
                     .child(
-                        Button::new("machine-cancel")
-                            .ghost()
-                            .label(common::CANCEL)
+                        ui::secondary_button("machine-cancel", common::CANCEL, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("machine-submit")
-                            .primary()
-                            .label(s::MACHINE_CREATE)
+                        ui::primary_button("machine-submit", s::MACHINE_CREATE, cx)
                             .loading(busy)
                             .disabled(busy)
                             .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
@@ -448,7 +466,7 @@ pub fn open_add_machine(
     window.open_dialog(cx, move |dialog, _, _| {
         let dialog = crate::ui::SheetExt::sheet(dialog);
         dialog
-            .w(px(560.))
+            .w(theme::size::DIALOG_WIDTH)
             .title(SharedString::from(s::MACHINE_ADD))
             .overlay_closable(false)
             .child(shown.clone())

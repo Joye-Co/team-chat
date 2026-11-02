@@ -19,7 +19,6 @@ use gpui::{
     TitlebarOptions, Window, WindowBounds, WindowOptions, div, prelude::FluentBuilder as _, px,
     size,
 };
-use gpui_component::sidebar::{Sidebar, SidebarMenu, SidebarMenuItem};
 
 use crate::{
     app::Services,
@@ -170,30 +169,20 @@ impl SettingsView {
             Page::Machines => self.machines.clone().into_any_element(),
             Page::Notifications => self.notifications.clone().into_any_element(),
             Page::About => self.about.clone().into_any_element(),
-            Page::Cost => div()
-                .pt(px(96.))
-                .child(
-                    ui::EmptyState::new(ui::icons::Lucide::ChartColumn, s::COMING_SOON)
-                        .description(s::COST_HINT),
-                )
+            // Hidden until it exists (U43); kept for the self-test scene.
+            Page::Cost => ui::EmptyState::new(ui::icons::Lucide::ChartColumn, s::COMING_SOON)
+                .description(s::COST_HINT)
                 .into_any_element(),
         }
     }
 
-    /// The page header in the toolbar band: title, count and page actions.
-    fn render_header(&self, cx: &App) -> gpui::Div {
-        let (count, actions) = match self.page {
-            Page::Members => {
-                let page = self.members.read(cx);
-                (Some(page.count_text()), Some(page.header_actions(cx)))
-            }
-            Page::Machines => (
-                None,
-                Some(MachinesPage::header_actions(&self.machines, cx)),
-            ),
-            _ => (None, None),
-        };
-        widgets::page_header(self.page.title(), count, actions, cx)
+    /// The page primary action at the right of the page title.
+    fn page_actions(&self, cx: &App) -> Option<gpui::AnyElement> {
+        match self.page {
+            Page::Members => Some(self.members.read(cx).header_actions(cx)),
+            Page::Machines => Some(MachinesPage::header_actions(&self.machines, cx)),
+            _ => None,
+        }
     }
 }
 
@@ -203,69 +192,84 @@ impl Page {
         match self {
             Page::Profile => Lucide::User,
             Page::Members => Lucide::Users,
-            Page::Machines => Lucide::Server,
+            Page::Machines => Lucide::Monitor,
             Page::Notifications => Lucide::Bell,
             Page::Cost => Lucide::ChartColumn,
             Page::About => Lucide::Info,
         }
     }
+
+    /// The pages in the section list: 成本 is hidden until it exists (U43).
+    const LISTED: [Page; 5] = [
+        Page::Profile,
+        Page::Members,
+        Page::Machines,
+        Page::Notifications,
+        Page::About,
+    ];
 }
+
+/// Width of the section list (§8.4).
+const SECTION_LIST: gpui::Pixels = px(200.);
+/// Section list rows (§8.4).
+const SECTION_ROW: gpui::Pixels = px(36.);
 
 impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let current = self.page;
-        let entity = cx.entity().downgrade();
-        let item = |page: Page| {
-            let entity = entity.clone();
-            SidebarMenuItem::new(page.title())
-                .icon(ui::icons::icon(page.icon(), theme::icon::TOOLBAR, colors.text_2))
-                .active(page == current)
-                .when(page == Page::Cost, |item| {
-                    item.suffix(|_, cx| {
-                        let k = theme::colors(cx);
-                        div()
-                            .flex_none()
-                            .t_caption()
-                            .font_weight(gpui::FontWeight::NORMAL)
-                            .text_color(k.text_3)
-                            .child(s::COMING_SOON)
-                    })
-                })
-                .on_click(move |_, _, cx| {
-                    let _ = entity.update(cx, |this, cx| this.select(page, cx));
-                })
-        };
-        // 关于 sits apart from the pages that hold team data.
-        let pages = SidebarMenu::new()
-            .gap(space::S2)
-            .children(Page::ALL.into_iter().filter(|p| *p != Page::About).map(item));
-        let about = SidebarMenu::new().child(item(Page::About));
+        let rows = Page::LISTED.into_iter().map(|page| {
+            let on = page == current;
+            ui::list_row(
+                gpui::SharedString::from(format!("settings-page-{}", page.slug())),
+                ui::RowSurface::Sidebar,
+                on,
+                cx,
+            )
+            .h(SECTION_ROW)
+            .px(space::S10)
+            .gap(space::S10)
+            .child(ui::icon(
+                page.icon(),
+                theme::icon::ROW,
+                if on { colors.text_1 } else { colors.text_2 },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .t_ui()
+                    .one_line()
+                    .text_color(if on { colors.text_1 } else { colors.text_2 })
+                    .when(on, |el| el.semibold())
+                    .child(page.title()),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| this.select(page, cx)))
+        });
         div()
             .size_full()
             .flex()
-            .bg(colors.window_bg)
+            .bg(colors.content)
             .text_color(colors.text_1)
             .t_ui()
             .child(
                 div()
-                    .w(px(220.))
+                    .w(SECTION_LIST)
                     .flex_none()
                     .h_full()
                     .flex()
                     .flex_col()
                     .bg(colors.sidebar)
-                    // The traffic lights sit in this band (§5.5).
+                    // The traffic lights sit in this band.
                     .child(ui::toolbar_band("settings-pane-toolbar"))
                     .child(
-                        Sidebar::new("settings-pages")
-                            .collapsible(false)
-                            .w_full()
-                            .flex_1()
-                            .bg(colors.sidebar)
-                            .border_0()
-                            .child(pages)
-                            .child(about),
+                        div()
+                            .px(space::S8)
+                            .pt(space::S4)
+                            .flex()
+                            .flex_col()
+                            .gap(space::S2)
+                            .children(rows),
                     ),
             )
             .child(ui::vhairline(cx))
@@ -274,18 +278,26 @@ impl Render for SettingsView {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .flex()
-                    .flex_col()
-                    .child(ui::toolbar_band("settings-page-toolbar").child(self.render_header(cx)))
+                    .relative()
                     .child(
                         div()
                             .id("settings-page")
-                            .flex_1()
-                            .min_h(px(0.))
+                            .size_full()
                             .overflow_y_scroll()
-                            .px(space::S20)
-                            .pb(space::S20)
-                            .child(self.render_page()),
+                            .child(widgets::page(
+                                self.page.title(),
+                                self.page_actions(cx),
+                                self.render_page(),
+                                cx,
+                            )),
+                    )
+                    // The top 36 pt drags the window, as a title bar does.
+                    .child(
+                        ui::toolbar_band("settings-page-drag")
+                            .absolute()
+                            .top_0()
+                            .left_0()
+                            .h(px(28.)),
                     ),
             )
     }
@@ -321,10 +333,10 @@ pub fn open_window(
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(900.), px(640.)),
+            size(px(960.), px(720.)),
             cx,
         ))),
-        window_min_size: Some(size(px(640.), px(480.))),
+        window_min_size: Some(size(px(760.), px(560.))),
         titlebar: Some(TitlebarOptions {
             title: Some(s::TITLE.into()),
             appears_transparent: true,

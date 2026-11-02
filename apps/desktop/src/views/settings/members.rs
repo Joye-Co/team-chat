@@ -2,14 +2,16 @@
 //! members, change levels and deactivate members.
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, IntoElement, ParentElement, Render,
-    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, ElementId, Entity, InteractiveElement as _, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Icon, Sizable as _, WindowExt as _,
-    button::{Button, ButtonVariant, ButtonVariants as _},
-    input::{Input, InputState},
+    Disableable as _, Icon, WindowExt as _,
+    button::ButtonVariant,
+    input::{InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
+    tooltip::Tooltip,
 };
 
 use super::{
@@ -18,6 +20,7 @@ use super::{
 };
 use crate::{
     app::{Changes, Services},
+    characters::{CharacterStatus, status::StatusBoard},
     copy::{common, fill, settings as s},
     data::{
         BotCreated, Change, InviteCreated, InviteRequest, Member, MemberKind, MemberLevel,
@@ -25,8 +28,7 @@ use crate::{
     },
     theme,
     theme::{Type as _, space},
-    ui::{self, Lucide},
-    views::presence_dot,
+    ui::{self, ButtonSpec as _, Lucide},
 };
 
 /// Members in list order: active people first, then active bot members, then
@@ -46,19 +48,30 @@ pub struct MembersPage {
     services: Services,
     /// The last row request's result (level or deactivate).
     status: Status,
+    /// Filters the table by name or 岗位.
+    search: Entity<InputState>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl MembersPage {
-    pub fn new(services: Services, _window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let subscriptions = vec![cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
-            if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
-                cx.notify();
-            }
-        })];
+    pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let search = cx.new(|cx| InputState::new(window, cx).placeholder(s::SEARCH_MEMBERS));
+        let subscriptions = vec![
+            cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
+                if changes.any(|c| matches!(c, Change::Members | Change::Session)) {
+                    cx.notify();
+                }
+            }),
+            cx.subscribe(&search, |_, _, e: &InputEvent, cx| {
+                if matches!(e, InputEvent::Change) {
+                    cx.notify();
+                }
+            }),
+        ];
         Self {
             services,
             status: Status::Idle,
+            search,
             _subscriptions: subscriptions,
         }
     }
@@ -128,50 +141,53 @@ impl MembersPage {
         });
     }
 
-    /// `8 位`: active members, for the header.
+    /// `8 位`: active members.
     pub fn count_text(&self) -> String {
-        let n = self
-            .services
+        fill(s::MEMBERS_COUNT, &[("n", &self.active_count().to_string())])
+    }
+
+    fn active_count(&self) -> usize {
+        self.services
             .provider
             .members()
             .iter()
             .filter(|m| !m.deactivated)
-            .count();
-        fill(s::MEMBERS_COUNT, &[("n", &n.to_string())])
+            .count()
     }
 
-    /// The header buttons: 添加自动成员 (secondary) then 邀请成员 (primary).
+    /// The page primary: `添加成员 ▾` (36 pt) with 邀请成员 and 添加自动成员.
     pub fn header_actions(&self, cx: &App) -> gpui::AnyElement {
-        let _ = cx;
         let owner = i_am_owner(&self.services);
         let services = self.services.clone();
-        let services2 = self.services.clone();
-        div()
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .child(
-                Button::new("add-bot")
-                    .small()
-                    .icon(Icon::new(Lucide::Bot))
-                    .label(s::ADD_BOT_MEMBER)
-                    .disabled(!owner)
-                    .on_click(move |_, window, cx| {
-                        open_add_bot(services2.clone(), window, cx);
-                    }),
-            )
-            .child(
-                Button::new("invite")
-                    .primary()
-                    .small()
+        ui::button(
+            "add-member",
+            s::ADD_MEMBER,
+            ui::ButtonKind::Primary,
+            ui::ButtonSize::Page,
+            cx,
+        )
+        .icon(Icon::new(Lucide::UserPlus))
+        .dropdown_caret(true)
+        .disabled_fill(!owner, cx)
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+            let invite = services.clone();
+            let bot = services.clone();
+            menu.item(
+                PopupMenuItem::new(s::INVITE)
                     .icon(Icon::new(Lucide::UserPlus))
-                    .label(s::INVITE)
-                    .disabled(!owner)
                     .on_click(move |_, window, cx| {
-                        open_invite(services.clone(), window, cx);
+                        open_invite(invite.clone(), window, cx);
                     }),
             )
-            .into_any_element()
+            .item(
+                PopupMenuItem::new(s::ADD_BOT_MEMBER)
+                    .icon(Icon::new(Lucide::Bot))
+                    .on_click(move |_, window, cx| {
+                        open_add_bot(bot.clone(), window, cx);
+                    }),
+            )
+        })
+        .into_any_element()
     }
 
     fn row(&self, m: &Member, me: Option<&str>, owner: bool, cx: &mut Context<Self>) -> gpui::Div {
@@ -179,51 +195,66 @@ impl MembersPage {
         let is_me = me == Some(m.id.as_str());
         let id = m.id.clone();
         let page = cx.entity().downgrade();
-        let status_text = if m.deactivated {
-            common::MEMBER_DEACTIVATED
+        // A bot's live state wins over presence (§8.4): 工作中, 等人回答.
+        let live = m
+            .is_bot()
+            .then(|| StatusBoard::status(cx, m))
+            .unwrap_or_default();
+        let (dot, status_text) = if m.deactivated {
+            (None, common::MEMBER_DEACTIVATED)
+        } else if live == CharacterStatus::Working {
+            (Some(colors.accent), s::MEMBER_WORKING)
+        } else if live == CharacterStatus::NeedsInput {
+            (Some(colors.you_glyph), s::MEMBER_WAITING)
+        } else if live == CharacterStatus::Error {
+            (Some(colors.danger), s::MEMBER_ERROR)
         } else if m.online {
-            s::MEMBER_ONLINE
+            (Some(colors.online), s::MEMBER_ONLINE)
         } else {
-            s::MEMBER_OFFLINE
+            (None, s::MEMBER_OFFLINE)
         };
-        // 权限: a menu button for owners, plain text otherwise (§13.10).
-        let level: gpui::AnyElement = if owner && !m.deactivated {
+        // 权限: a select for owners; plain text for my own row (§7.4).
+        let level: gpui::AnyElement = if owner && !m.deactivated && !is_me {
             let current = m.level;
             let target = id.clone();
             let page = page.clone();
-            Button::new(ElementId::Name(format!("level-{id}").into()))
-                .small()
-                .w(px(92.))
-                .label(widgets::level_text(m.level))
-                .dropdown_caret(true)
-                .dropdown_menu(move |menu, _, _| {
-                    [MemberLevel::Owner, MemberLevel::Member]
-                        .into_iter()
-                        .fold(menu, |menu, level| {
-                            let page = page.clone();
-                            let target = target.clone();
-                            menu.item(
-                                PopupMenuItem::new(widgets::level_text(level))
-                                    .checked(level == current)
-                                    .on_click(move |_, _, cx| {
-                                        if level != current {
-                                            let target = target.clone();
-                                            let _ = page.update(cx, |this, cx| {
-                                                this.set_level(target, level, cx)
-                                            });
-                                        }
-                                    }),
-                            )
-                        })
-                })
-                .into_any_element()
+            widgets::select_button(
+                ElementId::Name(format!("level-{id}").into()),
+                widgets::level_text(m.level),
+                cx,
+            )
+            .dropdown_menu(move |menu, _, _| {
+                [MemberLevel::Owner, MemberLevel::Member]
+                    .into_iter()
+                    .fold(menu, |menu, level| {
+                        let page = page.clone();
+                        let target = target.clone();
+                        menu.item(
+                            PopupMenuItem::new(widgets::level_text(level))
+                                .checked(level == current)
+                                .on_click(move |_, _, cx| {
+                                    if level != current {
+                                        let target = target.clone();
+                                        let _ = page.update(cx, |this, cx| {
+                                            this.set_level(target, level, cx)
+                                        });
+                                    }
+                                }),
+                        )
+                    })
+            })
+            .into_any_element()
         } else {
             div()
-                .w(px(92.))
-                .px(space::S8)
-                .t_callout()
+                .id(ElementId::Name(format!("level-text-{id}").into()))
+                .pl(space::S12)
+                .t_ui()
                 .text_color(colors.text_2)
+                .one_line()
                 .child(widgets::level_text(m.level))
+                .when(is_me, |el| {
+                    el.tooltip(|window, cx| Tooltip::new(s::LEVEL_SELF).build(window, cx))
+                })
                 .into_any_element()
         };
         // 停用… or 恢复 in the row's ellipsis menu; the slot stays to keep columns.
@@ -231,46 +262,52 @@ impl MembersPage {
             let member = m.clone();
             let target = id.clone();
             let deactivated = m.deactivated;
-            Button::new(ElementId::Name(format!("more-{id}").into()))
-                .ghost()
-                .small()
-                .w(px(28.))
-                .icon(Icon::new(Lucide::Ellipsis))
-                .tooltip(s::MEMBER_MORE)
-                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-                    let page = page.clone();
-                    if deactivated {
+            ui::icon_button(
+                ElementId::Name(format!("more-{id}").into()),
+                Lucide::Ellipsis,
+            )
+            .tooltip(s::MEMBER_MORE)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                let page = page.clone();
+                if deactivated {
+                    let target = target.clone();
+                    menu.item(PopupMenuItem::new(s::REACTIVATE).on_click(move |_, _, cx| {
                         let target = target.clone();
-                        menu.item(PopupMenuItem::new(s::REACTIVATE).on_click(move |_, _, cx| {
-                            let target = target.clone();
-                            let _ = page
-                                .update(cx, |this, cx| this.set_deactivated(target, false, cx));
-                        }))
-                    } else {
-                        let member = member.clone();
-                        menu.item(PopupMenuItem::new(s::DEACTIVATE_MENU).on_click(
-                            move |_, window, cx| {
-                                let _ = page.update(cx, |this, cx| {
-                                    this.confirm_deactivate(&member, window, cx)
-                                });
-                            },
-                        ))
-                    }
-                })
-                .into_any_element()
+                        let _ = page.update(cx, |this, cx| this.set_deactivated(target, false, cx));
+                    }))
+                } else {
+                    let member = member.clone();
+                    menu.item(PopupMenuItem::new(s::DEACTIVATE_MENU).on_click(
+                        move |_, window, cx| {
+                            let _ = page.update(cx, |this, cx| {
+                                this.confirm_deactivate(&member, window, cx)
+                            });
+                        },
+                    ))
+                }
+            })
+            .into_any_element()
         } else {
-            div().w(px(28.)).flex_none().into_any_element()
+            div().into_any_element()
         };
-        widgets::group_row()
+        let role = m.role.clone().filter(|r| !r.trim().is_empty());
+        widgets::table_row()
+            .h(theme::size::SETTINGS_ROW)
+            .py_0()
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .items_center()
-                    .gap(space::S10)
-                    .when(m.deactivated, |el| el.opacity(0.5))
-                    .child(ui::MemberAvatar::new(Some(m), px(28.)).on(colors.group))
+                    .gap(space::S12)
+                    .when(m.deactivated, |el| el.opacity(0.4))
+                    // The idle art: the status column says the state.
+                    .child(
+                        ui::MemberAvatar::new(Some(m), theme::size::AVATAR_MESSAGE)
+                            .status(CharacterStatus::Idle)
+                            .on(colors.content),
+                    )
                     .child(
                         div()
                             .flex_1()
@@ -280,7 +317,7 @@ impl MembersPage {
                             .child(
                                 div()
                                     .flex()
-                                    .items_center()
+                                    .items_baseline()
                                     .gap(space::S4)
                                     .min_w_0()
                                     .child(
@@ -289,49 +326,58 @@ impl MembersPage {
                                             .t_ui()
                                             .medium()
                                             .one_line()
-                                            .child(m.name.clone()),
+                                            .child(m.name.trim().to_string()),
                                     )
                                     .when(is_me, |el| {
                                         el.child(
                                             div()
                                                 .flex_none()
-                                                .t_callout()
-                                                .text_color(colors.text_2)
+                                                .t_meta()
+                                                .text_color(colors.text_3)
                                                 .child(s::MEMBER_ME),
                                         )
                                     }),
                             )
-                            .children(m.role.clone().filter(|r| !r.is_empty()).map(|role| {
-                                div()
-                                    .t_callout()
-                                    .one_line()
-                                    .text_color(colors.text_2)
-                                    .child(role)
-                            })),
-                    )
-                    .child(
-                        div()
-                            .w(px(92.))
-                            .flex_none()
-                            .flex()
-                            .items_center()
-                            .gap(space::S6)
-                            .t_callout()
-                            .text_color(colors.text_2)
-                            .when(!m.deactivated, |el| {
-                                el.when(m.online, |el| el.child(presence_dot(true, cx)))
-                            })
-                            .child(status_text),
+                            .when(role.is_some() || m.is_bot(), |el| {
+                                el.child(
+                                    div()
+                                        .flex()
+                                        .items_center()
+                                        .gap(space::S4)
+                                        .min_w_0()
+                                        .t_small()
+                                        .text_color(colors.text_2)
+                                        .when(m.is_bot(), |el| {
+                                            el.child(ui::icon(
+                                                Lucide::Bot,
+                                                theme::icon::TAG,
+                                                colors.text_2,
+                                            ))
+                                        })
+                                        .children(
+                                            role.map(|r| div().min_w_0().one_line().child(r)),
+                                        ),
+                                )
+                            }),
                     ),
             )
             .child(
+                widgets::status_cell(widgets::state_dot(dot, cx), status_text, None, cx)
+                    .when(m.deactivated, |el| el.opacity(0.4)),
+            )
+            .child(
                 div()
+                    .w(widgets::LEVEL_COL)
+                    .flex_none()
+                    .when(m.deactivated, |el| el.opacity(0.4))
+                    .child(level),
+            )
+            .child(
+                div()
+                    .w(widgets::TRAILING_COL)
                     .flex_none()
                     .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .when(m.deactivated, |el| el.opacity(0.5))
-                    .child(level)
+                    .justify_end()
                     .child(more),
             )
     }
@@ -342,36 +388,65 @@ impl Render for MembersPage {
         let colors = theme::colors(cx);
         let owner = i_am_owner(&self.services);
         let me = self.services.me();
-        let members = sorted(self.services.provider.members());
-        let rows: Vec<_> = members
-            .iter()
-            .map(|m| self.row(m, me.as_deref(), owner, cx))
+        let query = self.search.read(cx).value().trim().to_lowercase();
+        let members: Vec<Member> = sorted(self.services.provider.members())
+            .into_iter()
+            .filter(|m| {
+                query.is_empty()
+                    || m.name.to_lowercase().contains(&query)
+                    || m.role
+                        .as_deref()
+                        .is_some_and(|r| r.to_lowercase().contains(&query))
+            })
             .collect();
-        // Separators inset to the text: 12 padding + 28 avatar + 10 gap.
-        let list = widgets::group_rows(rows, px(50.), cx);
+        let header = widgets::table_header(cx)
+            .gap(space::S12)
+            .child(div().flex_1().min_w_0().tnum().child(fill(
+                s::MEMBERS_HEADER,
+                &[("n", &self.active_count().to_string())],
+            )))
+            .child(div().w(widgets::STATUS_COL).flex_none().child(s::STATUS))
+            .child(div().w(widgets::LEVEL_COL).flex_none().child(s::LEVEL))
+            .child(div().w(widgets::TRAILING_COL).flex_none());
+        let table = if members.is_empty() {
+            widgets::table_empty(
+                Some(header),
+                fill(s::NO_MATCH, &[("q", self.search.read(cx).value().trim())]),
+                cx,
+            )
+        } else {
+            let rows: Vec<_> = members
+                .iter()
+                .map(|m| self.row(m, me.as_deref(), owner, cx))
+                .collect();
+            widgets::table_of(Some(header), rows, cx)
+        };
         div()
             .flex()
             .flex_col()
             .child(
-                div()
-                    .flex()
-                    .items_end()
-                    .justify_between()
-                    .gap(space::S12)
-                    .px(space::S12)
-                    .pb(space::S6)
-                    .t_caption()
-                    .text_color(colors.text_3)
-                    .child(
-                        div()
-                            .min_w_0()
-                            .one_line()
-                            .when(!owner, |el| el.child(s::OWNER_ONLY)),
-                    )
-                    .child(div().flex_none().w(px(126.)).child(s::LEVEL)),
+                ui::TextField::new(
+                    "members-search",
+                    &self.search,
+                    ui::FieldKind::SearchBordered,
+                )
+                .width(px(320.)),
             )
-            .children(widgets::status_line(&self.status, cx).map(|l| l.px(space::S12).pb(space::S8)))
-            .child(list)
+            .child(
+                div()
+                    .pt(space::S16)
+                    .children(widgets::status_line(&self.status, cx).map(|l| l.pb(space::S8)))
+                    .child(table),
+            )
+            .child(widgets::footnote(
+                if owner {
+                    s::MEMBERS_NOTE
+                } else {
+                    s::OWNER_ONLY
+                },
+                cx,
+            ))
+            .text_color(colors.text_1)
     }
 }
 
@@ -461,7 +536,7 @@ impl Render for InviteForm {
             return div()
                 .flex()
                 .flex_col()
-                .gap(px(12.))
+                .gap(space::S16)
                 .child(widgets::hint(s::SHOWN_ONCE, cx))
                 .child(widgets::secret_block(
                     "invite-code",
@@ -484,10 +559,8 @@ impl Render for InviteForm {
                 ))
                 .child(widgets::hint(s::INVITE_DOWNLOAD_HINT, cx))
                 .child(
-                    div().flex().justify_end().child(
-                        Button::new("invite-done")
-                            .primary()
-                            .label(s::DONE)
+                    div().pt(space::S4).flex().justify_end().child(
+                        ui::primary_button("invite-done", s::DONE, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )
@@ -501,9 +574,9 @@ impl Render for InviteForm {
         div()
             .flex()
             .flex_col()
-            .gap(px(10.))
-            .child(widgets::field(s::NAME, Input::new(&self.name), cx))
-            .child(widgets::field(s::ROLE, Input::new(&self.role), cx))
+            .gap(space::S16)
+            .child(widgets::form_input("member-name", s::NAME, &self.name, cx))
+            .child(widgets::form_input("member-role", s::ROLE, &self.role, cx))
             .child(widgets::field(
                 s::KIND,
                 widgets::choice(
@@ -521,6 +594,7 @@ impl Render for InviteForm {
                             cx.notify();
                         });
                     },
+                    cx,
                 ),
                 cx,
             ))
@@ -541,6 +615,7 @@ impl Render for InviteForm {
                             cx.notify();
                         });
                     },
+                    cx,
                 ),
                 cx,
             ))
@@ -549,17 +624,14 @@ impl Render for InviteForm {
                 div()
                     .flex()
                     .justify_end()
-                    .gap(px(8.))
+                    .pt(space::S4)
+                    .gap(space::S8)
                     .child(
-                        Button::new("invite-cancel")
-                            .ghost()
-                            .label(common::CANCEL)
+                        ui::secondary_button("invite-cancel", common::CANCEL, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("invite-submit")
-                            .primary()
-                            .label(s::INVITE_CREATE)
+                        ui::primary_button("invite-submit", s::INVITE_CREATE, cx)
                             .loading(busy)
                             .disabled(busy)
                             .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
@@ -575,7 +647,7 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
     window.open_dialog(cx, move |dialog, _, _| {
         let dialog = crate::ui::SheetExt::sheet(dialog);
         dialog
-            .w(px(460.))
+            .w(theme::size::DIALOG_WIDTH)
             .title(SharedString::from(s::INVITE))
             .overlay_closable(false)
             .child(shown.clone())
@@ -728,10 +800,10 @@ impl Render for BotForm {
             return div()
                 .flex()
                 .flex_col()
-                .gap(px(12.))
+                .gap(space::S16)
                 .child(
                     div()
-                        .text_base()
+                        .t_body()
                         .child(fill(s::BOT_CREATED, &[("name", &name)])),
                 )
                 .map(|el| match &created.credential {
@@ -750,10 +822,8 @@ impl Render for BotForm {
                     )),
                 })
                 .child(
-                    div().flex().justify_end().child(
-                        Button::new("bot-done")
-                            .primary()
-                            .label(s::DONE)
+                    div().pt(space::S4).flex().justify_end().child(
+                        ui::primary_button("bot-done", s::DONE, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ),
                 )
@@ -769,21 +839,22 @@ impl Render for BotForm {
             .map(|(ix, rt)| {
                 let rt = rt.clone();
                 let input = runtime_input.clone();
-                Button::new(ElementId::NamedInteger("known-runtime".into(), ix as u64))
-                    .ghost()
-                    .xsmall()
-                    .label(rt.clone())
-                    .on_click(move |_, window, cx| {
-                        input.update(cx, |st, cx| st.set_value(rt.clone(), window, cx));
-                    })
+                ui::text_button(
+                    ElementId::NamedInteger("known-runtime".into(), ix as u64),
+                    rt.clone(),
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    input.update(cx, |st, cx| st.set_value(rt.clone(), window, cx));
+                })
             })
             .collect();
         div()
             .flex()
             .flex_col()
-            .gap(px(10.))
-            .child(widgets::field(s::NAME, Input::new(&self.name), cx))
-            .child(widgets::field(s::ROLE, Input::new(&self.role), cx))
+            .gap(space::S16)
+            .child(widgets::form_input("member-name", s::NAME, &self.name, cx))
+            .child(widgets::form_input("member-role", s::ROLE, &self.role, cx))
             .child(widgets::field(
                 s::BOT_MODE,
                 widgets::choice(
@@ -798,6 +869,7 @@ impl Render for BotForm {
                             cx.notify();
                         });
                     },
+                    cx,
                 ),
                 cx,
             ))
@@ -810,9 +882,10 @@ impl Render for BotForm {
                 cx,
             ))
             .when(self.runner, |el| {
-                el.child(widgets::field(
+                el.child(widgets::form_input(
+                    "member-runtime",
                     s::RUNNER_RUNTIME,
-                    Input::new(&self.runtime),
+                    &self.runtime,
                     cx,
                 ))
                 .when(!known.is_empty(), |el| {
@@ -821,21 +894,27 @@ impl Render for BotForm {
                             .flex()
                             .flex_wrap()
                             .items_center()
-                            .gap(px(4.))
-                            .pl(px(100.))
+                            .gap(space::S4)
                             .child(widgets::hint(s::RUNNER_RUNTIME_KNOWN, cx))
                             .children(known),
                     )
                 })
-                .child(widgets::field(
+                .child(widgets::form_input(
+                    "member-labels",
                     s::RUNNER_LABELS,
-                    Input::new(&self.labels),
+                    &self.labels,
                     cx,
                 ))
-                .child(widgets::field(s::RUNNER_REPO, Input::new(&self.repo), cx))
-                .child(widgets::field(
+                .child(widgets::form_input(
+                    "member-repo",
+                    s::RUNNER_REPO,
+                    &self.repo,
+                    cx,
+                ))
+                .child(widgets::form_input(
+                    "member-branch",
                     s::RUNNER_BRANCH,
-                    Input::new(&self.branch),
+                    &self.branch,
                     cx,
                 ))
             })
@@ -844,17 +923,14 @@ impl Render for BotForm {
                 div()
                     .flex()
                     .justify_end()
-                    .gap(px(8.))
+                    .pt(space::S4)
+                    .gap(space::S8)
                     .child(
-                        Button::new("bot-cancel")
-                            .ghost()
-                            .label(common::CANCEL)
+                        ui::secondary_button("bot-cancel", common::CANCEL, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("bot-submit")
-                            .primary()
-                            .label(s::BOT_CREATE)
+                        ui::primary_button("bot-submit", s::BOT_CREATE, cx)
                             .loading(busy)
                             .disabled(busy)
                             .on_click(cx.listener(|this, _, _, cx| this.submit(cx))),
@@ -870,7 +946,7 @@ pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> En
     window.open_dialog(cx, move |dialog, _, _| {
         let dialog = crate::ui::SheetExt::sheet(dialog);
         dialog
-            .w(px(500.))
+            .w(theme::size::DIALOG_WIDTH)
             .title(SharedString::from(s::ADD_BOT_MEMBER))
             .overlay_closable(false)
             .child(shown.clone())

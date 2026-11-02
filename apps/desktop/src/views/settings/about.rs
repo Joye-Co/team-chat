@@ -1,13 +1,13 @@
 //! 关于: version, server, update status, 发送诊断, and the developer-view
 //! switch.
 
+use gpui::Focusable as _;
 use gpui::{
     AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription,
     Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _,
-    button::Button,
+    Disableable as _,
     input::{InputEvent, Textarea, TextareaState},
     switch::Switch,
 };
@@ -18,6 +18,7 @@ use crate::{
     copy::{dev, fill, settings as s},
     data::{Change, ConnectionState, SessionState},
     theme::{self, Type as _, space},
+    ui,
     updater::banner::AboutUpdate,
 };
 
@@ -124,85 +125,90 @@ impl Render for AboutPage {
         };
         let developer = self.services.nav.read(cx).developer_view;
         let busy = self.status.busy();
+        let failed = matches!(self.status, Status::Failed(_));
+        let focused = self
+            .description
+            .read(cx)
+            .focus_handle(cx)
+            .is_focused(_window);
         div()
             .flex()
             .flex_col()
-            .child(widgets::group_rows(
+            .child(widgets::table_of(
+                None,
                 vec![
                     div().w_full().child(self.update.clone()),
-                    widgets::group_field(
+                    widgets::table_row().child(widgets::title_cell(
                         s::SERVER,
-                        div()
-                            .t_ui()
-                            .text_color(colors.text_2)
-                            .one_line()
-                            .child(server.clone()),
+                        Some(server.clone().into()),
                         cx,
-                    ),
+                    )),
                 ],
-                space::S12,
                 cx,
             ))
-            .child(widgets::section_header(s::DIAGNOSTICS, cx))
+            // 诊断: a form-style text area with its label, help and 发送诊断.
+            .child(widgets::section_label(s::DIAGNOSTICS, false, cx))
             .child(
-                widgets::group(cx).child(
-                    widgets::group_row()
-                        .flex_col()
-                        .items_stretch()
-                        .gap(space::S8)
-                        .child(Textarea::new(&self.description))
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::S12)
-                                .child(
-                                    div()
-                                        .flex_1()
-                                        .min_w_0()
-                                        .child(match widgets::status_line(&self.status, cx) {
-                                            Some(line) => line,
-                                            None => widgets::hint(s::DIAGNOSTICS_HINT, cx),
-                                        }),
-                                )
-                                .child(
-                                    Button::new("diagnostics-send")
-                                        .small()
-                                        .label(s::DIAGNOSTICS_SEND)
-                                        .loading(busy)
-                                        .disabled(busy || server.is_empty())
-                                        .on_click(cx.listener(|this, _, window, cx| {
-                                            this.send(window, cx)
-                                        })),
-                                ),
-                        ),
-                ),
-            )
-            .child(widgets::section_header(s::DEVELOPER_VIEW, cx))
-            .child(
-                widgets::group(cx)
+                div()
+                    .w_full()
+                    .px(space::S2)
+                    .py(space::S2)
+                    .rounded(theme::radius::FIELD)
+                    .bg(colors.content)
+                    .border_1()
+                    .border_color(if failed {
+                        colors.danger
+                    } else if focused {
+                        colors.focus_border
+                    } else {
+                        colors.border
+                    })
+                    .when(focused && !failed, |el| el.shadow(colors.focus_halo()))
+                    .when(failed, |el| el.shadow(colors.error_halo()))
                     .child(
-                        widgets::group_row()
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(space::S2)
-                                    .child(div().t_ui().child(s::DEVELOPER_VIEW))
-                                    .child(widgets::hint(s::DEVELOPER_VIEW_HINT, cx)),
-                            )
-                            .child(
-                                Switch::new("developer-view")
-                                    .checked(developer)
-                                    .on_click(cx.listener(|this, checked: &bool, _, cx| {
-                                        let on = *checked;
-                                        this.services
-                                            .nav
-                                            .update(cx, |nav, cx| nav.set_developer_view(on, cx));
-                                    })),
-                            ),
+                        Textarea::new(&self.description)
+                            .appearance(false)
+                            .text_size(theme::type_scale::BODY.0)
+                            .line_height(theme::type_scale::BODY.1),
+                    ),
+            )
+            .child(
+                div()
+                    .pt(space::S8)
+                    .flex()
+                    .items_start()
+                    .gap(space::S12)
+                    .child(div().flex_1().min_w_0().pt(space::S2).child(
+                        match widgets::status_line(&self.status, cx) {
+                            Some(line) => line,
+                            None => widgets::hint(s::DIAGNOSTICS_HINT, cx),
+                        },
+                    ))
+                    .child(
+                        ui::secondary_button("diagnostics-send", s::DIAGNOSTICS_SEND, cx)
+                            .loading(busy)
+                            .disabled(busy || server.is_empty())
+                            .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
+                    ),
+            )
+            .child(
+                widgets::table(cx)
+                    .mt(space::S24)
+                    .child(
+                        widgets::table_row()
+                            .child(widgets::title_cell(
+                                s::DEVELOPER_VIEW,
+                                Some(s::DEVELOPER_VIEW_HINT.into()),
+                                cx,
+                            ))
+                            .child(Switch::new("developer-view").checked(developer).on_click(
+                                cx.listener(|this, checked: &bool, _, cx| {
+                                    let on = *checked;
+                                    this.services
+                                        .nav
+                                        .update(cx, |nav, cx| nav.set_developer_view(on, cx));
+                                }),
+                            )),
                     )
                     .when(developer, |el| {
                         let connection = match provider.connection() {
@@ -224,16 +230,16 @@ impl Render for AboutPage {
                             SessionState::SignedIn { me, .. } => me.id.clone(),
                             _ => String::new(),
                         };
-                        el.child(widgets::group_sep(space::S12, cx)).child(
-                            widgets::group_row().child(
+                        el.child(
+                            div().px(space::S16).pb(space::S16).child(
                                 div()
-                                    .flex_1()
-                                    .min_w_0()
+                                    .w_full()
                                     .flex()
                                     .flex_col()
                                     .gap(space::S2)
-                                    .p(space::S8)
-                                    .rounded(theme::radius::ROW)
+                                    .px(space::S12)
+                                    .py(space::S10)
+                                    .rounded(theme::radius::MD)
                                     .bg(colors.code_bg)
                                     .text_color(colors.code_text)
                                     .t_code()
