@@ -14,6 +14,7 @@
 #      ~/.config/team-chat/<env>/admin-secret (TEAM_CHAT_CONFIG_DIR overrides
 #      ~/.config/team-chat) and is never printed.
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
 
 VERSION=""

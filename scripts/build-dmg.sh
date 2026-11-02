@@ -10,6 +10,7 @@
 # Files in apps/desktop/resources/ (if it exists) are copied into Contents/Resources;
 # an AppIcon.icns there replaces the generated icon.
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
 
 skip_build=0

@@ -4,6 +4,7 @@
 # Usage: scripts/build-daemon.sh [--skip-build]
 # Env: CARGO_TARGET_DIR, DIST (default dist/), DAEMON_PACKAGE (default daemon)
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
 
 skip_build=0

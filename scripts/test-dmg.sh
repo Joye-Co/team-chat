@@ -4,6 +4,7 @@
 #
 # Usage: scripts/test-dmg.sh [dist/<name>-<version>.dmg]
 set -euo pipefail
+# shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
 need jq hdiutil codesign plutil shasum
 
