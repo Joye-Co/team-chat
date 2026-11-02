@@ -5,6 +5,17 @@
     "": {
       "name": "team-chat",
     },
+    "packages/bot-sdk": {
+      "name": "@chat/bot-sdk",
+      "dependencies": {
+        "@chat/protocol": "workspace:*",
+        "zod": "^4.6.7",
+      },
+      "devDependencies": {
+        "@types/bun": "^1.4.4",
+        "typescript": "^7.0.2",
+      },
+    },
     "packages/protocol": {
       "name": "@chat/protocol",
       "dependencies": {
@@ -39,6 +50,8 @@
     },
   },
   "packages": {
+    "@chat/bot-sdk": ["@chat/bot-sdk@workspace:packages/bot-sdk"],
+
     "@chat/protocol": ["@chat/protocol@workspace:packages/protocol"],
 
     "@chat/search": ["@chat/search@workspace:packages/search"],
