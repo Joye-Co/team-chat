@@ -136,6 +136,7 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         Err(e) => return Outcome::failed(format!("cannot start {program}: {e}")),
     };
     let pgid = child.id().map(|p| p as i32).unwrap_or(0);
+    crate::workspace::record_process(&spec.run_dir, pgid, &program);
     let kill = |sig: i32| {
         if pgid > 0 {
             // SAFETY: plain syscall addressing the child's session/process group.

@@ -144,6 +144,7 @@ impl Proc {
             .kill_on_drop(true);
         let mut child = cmd.spawn()?;
         let pgid = child.id().map(|p| p as i32).unwrap_or(0);
+        crate::workspace::record_process(&spec.run_dir, pgid, program);
         let stdin = child.stdin.take();
         let stdout = child.stdout.take().expect("piped stdout");
         Ok(Proc {

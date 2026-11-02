@@ -20,6 +20,12 @@ pub struct RunMeta {
     pub git_dir: Option<PathBuf>,
     #[serde(default)]
     pub branch: Option<String>,
+    /// Process group of the CLI, so a daemon that restarts after a crash can stop it.
+    #[serde(default)]
+    pub pgid: Option<i32>,
+    /// The CLI program, checked against the process before that group is killed.
+    #[serde(default)]
+    pub program: Option<String>,
 }
 
 pub fn runs_dir(cfg: &Config) -> PathBuf {
@@ -33,6 +39,15 @@ pub fn run_dir(cfg: &Config, run_id: &str) -> PathBuf {
 pub fn write_meta(dir: &Path, meta: &RunMeta) {
     if let Ok(s) = serde_json::to_vec_pretty(meta) {
         let _ = std::fs::write(dir.join("run.json"), s);
+    }
+}
+
+/// Records the CLI's process group in `run.json` (the run folder of `run_dir`).
+pub fn record_process(run_dir: &Path, pgid: i32, program: &str) {
+    if let Some(mut meta) = read_meta(run_dir) {
+        meta.pgid = Some(pgid);
+        meta.program = Some(program.to_string());
+        write_meta(run_dir, &meta);
     }
 }
 

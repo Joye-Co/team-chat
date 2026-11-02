@@ -604,3 +604,128 @@ async fn unknown_run_after_reconnect_is_cancelled() {
         .unwrap()
         .unwrap();
 }
+
+/// A daemon that starts after a crash finds an unfinished run folder: it stops the CLI that was
+/// left running, replays the frames the server has not acked, and ends the run with run.done
+/// (failed: daemon restarted) and a failed run.session. On a graceful stop it waits for the
+/// ack of run.done before it exits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn restart_recovers_unfinished_runs() {
+    use std::os::unix::process::CommandExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+
+    // What the crashed daemon left: a CLI in its own process group, run.json, two frames.
+    let mut left = std::process::Command::new("/bin/sleep")
+        .arg("600")
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    let pid = left.id() as i32;
+    let dir = tmp.path().join("work/runs/rc1");
+    std::fs::create_dir_all(dir.join("work")).unwrap();
+    std::fs::write(
+        dir.join("run.json"),
+        serde_json::json!({ "runId": "rc1", "startedAt": now_ms() - 5000, "pgid": pid, "program": "/bin/sleep" })
+            .to_string(),
+    )
+    .unwrap();
+    let frame = |seq: u64, event: RunEvent| {
+        serde_json::to_string(&Up::RunEvent {
+            run_id: "rc1".into(),
+            seq,
+            at: now_ms(),
+            event,
+        })
+        .unwrap()
+    };
+    let lines = [
+        frame(
+            1,
+            RunEvent::Status {
+                state: "running".into(),
+                message: None,
+            },
+        ),
+        frame(
+            2,
+            RunEvent::Message {
+                item_id: "m1".into(),
+                turn_id: None,
+                role: "assistant".into(),
+                text: "half done".into(),
+            },
+        ),
+    ];
+    std::fs::write(
+        dir.join("events.jsonl"),
+        format!("{}\n{}\n{{\"t\":\"run.ev", lines[0], lines[1]),
+    )
+    .unwrap();
+
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    match next(&mut ws).await {
+        Up::Hello { runs, .. } => {
+            let c = runs.iter().find(|c| c.run_id == "rc1").expect("cursor");
+            assert!(c.done);
+            assert_eq!(c.last_seq, 4);
+        }
+        f => panic!("{f:?}"),
+    }
+    // The leftover CLI is stopped.
+    let mut stopped = false;
+    for _ in 0..100 {
+        if left.try_wait().unwrap().is_some() {
+            stopped = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(stopped, "leftover CLI still runs");
+
+    send(
+        &mut ws,
+        &welcome(vec![KnownRun {
+            run_id: "rc1".into(),
+            acked_seq: 1,
+        }]),
+    )
+    .await;
+    let frames = collect(&mut ws, "rc1", true, |f| matches!(f, Up::RunSession(_))).await;
+    let seqs: Vec<u64> = frames.iter().filter_map(Up::seq).collect();
+    assert_eq!(seqs, vec![2, 3, 4]);
+    let d = done(&frames);
+    assert_eq!(d.status, "failed");
+    assert_eq!(d.error.as_deref(), Some("daemon restarted"));
+    assert!(matches!(frames.last(), Some(Up::RunSession(s)) if !s.ok));
+    let meta: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(dir.join("run.json")).unwrap()).unwrap();
+    assert!(meta["finishedAt"].is_u64());
+
+    // Graceful stop with a running run: run.done (cancelled) goes out, and the daemon exits
+    // soon after the server acks it.
+    send(&mut ws, &assign("r2", "fake", "hang", None)).await;
+    collect(&mut ws, "r2", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    stop_tx.send(()).unwrap();
+    let frames = collect(&mut ws, "r2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&frames).status, "cancelled");
+    tokio::time::timeout(Duration::from_secs(8), daemon)
+        .await
+        .expect("daemon exits once run.done is acked")
+        .unwrap()
+        .unwrap();
+}

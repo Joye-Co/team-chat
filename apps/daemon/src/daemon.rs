@@ -86,10 +86,12 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
         link_tx,
         run_tx,
     };
+    d.recover();
     {
         let cfg = d.cfg.clone();
+        let active: Vec<String> = d.runs.keys().cloned().collect();
         tokio::spawn(async move {
-            crate::workspace::cleanup(&cfg, &[]).await;
+            crate::workspace::cleanup(&cfg, &active).await;
         });
     }
     let hb = Duration::from_secs(d.cfg.heartbeat_secs.max(1));
@@ -115,13 +117,18 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
             }
         }
     }
-    // Shutdown: stop every run and give them a moment to report.
+    // Shutdown: stop every run and give them a moment to report and the server a moment to
+    // ack their last frames (run.done), so it shows the runs as stopped, not lost.
     log!("daemon stopping");
     for r in d.runs.values() {
         let _ = r.control.send(Control::Cancel);
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    while d.runs.values().any(|r| !r.done) {
+    while d
+        .runs
+        .values()
+        .any(|r| !r.done || (d.welcomed && !r.orphan && !r.buffer.is_empty()))
+    {
         tokio::select! {
             Some((id, msg)) = run_rx.recv() => d.on_run(id, msg),
             Some(ev) = link_rx.recv() => d.on_link(ev),
@@ -131,7 +138,179 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     Ok(())
 }
 
+/// Unfinished runs are recovered at start; finished ones too when they ended this recently
+/// (the server may not have acked their last frames).
+const RECOVER_FINISHED_MS: u64 = 3_600_000;
+
+/// Stops a CLI process group a crashed daemon left behind. A pid can be reused, so a live
+/// group leader must still name the CLI program; while any member of the group lives, its id
+/// is not reused.
+fn kill_leftover(meta: &crate::workspace::RunMeta) {
+    let Some(pgid) = meta.pgid.filter(|p| *p > 1) else {
+        return;
+    };
+    // SAFETY: signal 0 only probes whether the group exists.
+    if unsafe { libc::kill(-pgid, 0) } != 0 {
+        return;
+    }
+    // SAFETY: probe of the leader pid.
+    if unsafe { libc::kill(pgid, 0) } == 0 {
+        let name = meta
+            .program
+            .as_deref()
+            .and_then(|p| std::path::Path::new(p).file_name())
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
+        let cmd = std::process::Command::new("ps")
+            .args(["-p", &pgid.to_string(), "-o", "command="])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        if name.is_empty() || !cmd.contains(&name) {
+            return;
+        }
+    }
+    log!(
+        "run {}: stopping CLI left by the previous daemon",
+        meta.run_id
+    );
+    // SAFETY: plain syscall; a negative pid addresses the process group.
+    unsafe {
+        libc::kill(-pgid, libc::SIGKILL);
+    }
+}
+
 impl Daemon {
+    /// Rebuilds run state after a restart from `run.json` and `events.jsonl`: stops CLIs left
+    /// running, ends unfinished runs with `run.done` (failed: daemon restarted) and a failed
+    /// `run.session`, and keeps the frames the server may not have, for replay after welcome.
+    fn recover(&mut self) {
+        let Ok(rd) = std::fs::read_dir(crate::workspace::runs_dir(&self.cfg)) else {
+            return;
+        };
+        let now = now_ms();
+        for e in rd.flatten() {
+            let dir = e.path();
+            let id = e.file_name().to_string_lossy().to_string();
+            if !valid_run_id(&id) {
+                continue;
+            }
+            let Some(mut meta) = crate::workspace::read_meta(&dir) else {
+                continue;
+            };
+            let unfinished = meta.finished_at.is_none();
+            if !unfinished
+                && meta
+                    .finished_at
+                    .is_some_and(|f| now.saturating_sub(f) > RECOVER_FINISHED_MS)
+            {
+                continue;
+            }
+            if unfinished {
+                kill_leftover(&meta);
+            }
+            let log_path = dir.join("events.jsonl");
+            let mut buffer: VecDeque<(u64, bool, String)> = VecDeque::new();
+            let (mut has_done, mut has_session, mut last) = (false, false, 0u64);
+            for line in std::fs::read_to_string(&log_path)
+                .unwrap_or_default()
+                .lines()
+            {
+                // A crash can cut the last line: skip what does not parse.
+                let Ok(up) = serde_json::from_str::<Up>(line) else {
+                    continue;
+                };
+                let Some(seq) = up.seq() else { continue };
+                has_done |= matches!(up, Up::RunDone(_));
+                has_session |= matches!(up, Up::RunSession(_));
+                let delta = matches!(
+                    up,
+                    Up::RunEvent {
+                        event: RunEvent::MessageDelta { .. },
+                        ..
+                    }
+                );
+                last = last.max(seq);
+                buffer.push_back((seq, delta, line.to_string()));
+            }
+            if buffer.len() > BUFFER_SOFT_CAP {
+                buffer.retain(|(_, d, _)| !d);
+            }
+            if !unfinished && buffer.is_empty() {
+                continue;
+            }
+            let mut log = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .ok();
+            let mut add = |up: Up, buffer: &mut VecDeque<(u64, bool, String)>, seq: u64| {
+                if let Ok(text) = serde_json::to_string(&up) {
+                    if let Some(f) = log.as_mut() {
+                        let _ = writeln!(f, "{text}");
+                    }
+                    buffer.push_back((seq, false, text));
+                }
+            };
+            if !has_done {
+                last += 1;
+                add(
+                    Up::RunDone(RunDone {
+                        run_id: id.clone(),
+                        seq: last,
+                        at: now,
+                        status: "failed".into(),
+                        exit_code: None,
+                        result_text: None,
+                        summary: None,
+                        error: Some("daemon restarted".into()),
+                        session_id: None,
+                        usage: None,
+                        duration_ms: now.saturating_sub(meta.started_at),
+                    }),
+                    &mut buffer,
+                    last,
+                );
+            }
+            if !has_session {
+                last += 1;
+                add(
+                    Up::RunSession(RunSession {
+                        run_id: id.clone(),
+                        seq: last,
+                        at: now,
+                        ok: false,
+                        source: None,
+                        bytes: None,
+                        gzip_bytes: None,
+                        sha256: None,
+                        error: Some("daemon restarted".into()),
+                    }),
+                    &mut buffer,
+                    last,
+                );
+            }
+            if unfinished {
+                meta.finished_at = Some(now);
+                crate::workspace::write_meta(&dir, &meta);
+            }
+            log!("run {id} recovered: {} frames to replay", buffer.len());
+            let (control, _) = mpsc::unbounded_channel();
+            self.runs.insert(
+                id,
+                RunEntry {
+                    control,
+                    next_seq: last + 1,
+                    buffer,
+                    done: true,
+                    finished: true,
+                    orphan: false,
+                    log: None,
+                },
+            );
+        }
+    }
+
     fn active_count(&self) -> u32 {
         self.runs.values().filter(|r| !r.done).count() as u32
     }
