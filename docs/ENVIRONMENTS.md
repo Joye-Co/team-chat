@@ -8,11 +8,17 @@ for incidents, rollback, rotation and restore are in [RUNBOOK.md](RUNBOOK.md).
 | local | `http://127.0.0.1:<port>` | `wrangler dev` | local | local | development |
 | e2e | `https://chat-api-e2e.huangdeshiou.workers.dev` | `chat-api-e2e` | `chat-e2e` (`67fb03a3-eabb-40d9-b446-808f301c21f3`) | `chat-files-e2e` | `tools/e2e` runs; data is disposable |
 | staging | `https://chat-api-staging.huangdeshiou.workers.dev` | `chat-api-staging` | `chat-staging` (`95271ff5-2e69-4ce7-ba26-bbbdfe29f760`) | `chat-files-staging` | team trial before production |
-| production | not deployed yet | `chat-api-prod` | `chat-prod` (not made yet) | `chat-files-prod` | daily use |
+| production | `https://chat-api-prod.huangdeshiou.workers.dev` | `chat-api-prod` | `chat-prod` (`6785a4f4-5089-4410-8d30-d38d5cadc413`) | `chat-files-prod` | daily use |
 
 - The D1 databases are in location `oc`, next to the Durable Objects (location hint `oc`).
-- The D1 ids are in `server/wrangler.jsonc` under `env.<env>`. The staging URL is in
-  `product.json` `servers.staging`; the desktop app and `server/scripts/admin.ts` read it there.
+- The D1 ids are in `server/wrangler.jsonc` under `env.<env>`. The staging and production URLs
+  are in `product.json` `servers`; the desktop app (its default server is production),
+  `scripts/release.sh`, `ops/restore` and `server/scripts/admin.ts` read them there.
+- The monitor Worker `chat-monitor` (`ops/monitor`) watches production and staging; see
+  [RUNBOOK.md](RUNBOOK.md#monitor-alerts).
+- Workers invocation logs are off on every `chat-api-*` Worker (`invocation_logs: false`;
+  checked on 2026-11-03 with the Cloudflare API `script-settings`), because they store the full
+  request URL. App logs (JSON lines with the path only) stay on.
 - Health: `curl https://chat-api-<env>.huangdeshiou.workers.dev/v1/health` returns
   `{"ok":true,"version":"0.0.0-<env>"}`.
 - Only the agents or people whose task says so deploy. Never deploy production without the
@@ -27,11 +33,16 @@ Never print these files; pipe them into commands.
 | --- | --- |
 | `admin-secret` | Worker secret `ADMIN_SECRET` (protects `POST /v1/admin/bootstrap` and the admin routes) |
 | `hook-secret-key` | Worker secret `HOOK_SECRET_KEY` (encrypts integration hook secrets in D1; if you lose it, every hook must be made again) |
-| `owner-token` | token of the first owner (`Joye` on staging, `e2e-owner` on e2e); `admin.ts` and `tools/e2e` read this file |
-| `owner.token` | staging only: a copy of `owner-token` |
+| `owner-token` | token of the first owner (`Joye` on staging and production, `e2e-owner` on e2e); `admin.ts` and `tools/e2e` read this file |
+| `owner.token` | staging and production: a copy of `owner-token` |
+| `monitor-token` | staging and production: token of the monitor bot `监测` (Worker secret `MONITOR_TOKEN_<ENV>` of `chat-monitor`) |
+| `bots/<name>.token` | staging and production: token of each roster bot ([ROSTER.md](ROSTER.md)) |
+| `joye-signin-code` | production: Joye's sign-in code (8 characters, single use, expires 7 days after it was made) |
+| `invites/实习生<n>.code`, `invites/实习生<n>.link` | production: the four intern invite codes and their download links (`/download#code=...`) |
+| `github-hook.json` | production: `{ hookId, groupId, url, secret, repo }` of the GitHub hook of the 开发 group; `scripts/github-webhook.sh` reads it |
 | `invite-*.txt`, `bot-*.token`, `machine-*.token` | written by `admin.ts` |
 
-## First setup of an env (done for e2e and staging)
+## First setup of an env (done for e2e, staging and production)
 
 ```sh
 cd server
@@ -68,9 +79,11 @@ State on 2026-11-03 (from `wrangler deployments list` and `wrangler d1 migration
 | --- | --- | --- | --- |
 | e2e | 2026-11-02 23:03, version `0566745e` (main `6ec0691`) | through `0006_ops` | none |
 | staging | 2026-11-02 23:03, version `7b88d141` (main `6ec0691`) | through `0006_ops` | none |
+| production | 2026-11-02 23:10, version `966b82ac` (main `fb10286`, server code as `6ec0691`) | through `0006_ops` | none |
+| monitor | 2026-11-02 23:14, `chat-monitor` version `d5fc2c6a` | (no D1) | |
 
-Deploys carry no commit message, so the deployed commit is not recorded here. No new Worker
-secret since the first setup. Update this table after each deploy:
+Deploys carry no commit message, so wrangler does not record the commit; the commit in the table
+is the one the deploy was made from. No new Worker secret since the first setup. Update this table after each deploy:
 
 ```sh
 cd server
@@ -78,12 +91,39 @@ bunx wrangler deployments list --env <env> | tail -n 4
 bunx wrangler d1 migrations list DB --env <env> --remote
 ```
 
+## Production setup (2026-11-03)
+
+What exists in production after the first setup. Leave no test data in production: no test
+groups, topics, members or bots. Check a deploy with `/v1/health`, the read-only WebSocket check
+below and the monitor, never with `tools/e2e`.
+
+| Kind | What |
+| --- | --- |
+| Owner | `Joye` (human, owner), `01M6F8FFH2K1FDRF123W1120YH`; signs in with `joye-signin-code` |
+| Bots | the eight bots of [ROSTER.md](ROSTER.md) with their character, 岗位 and level (Jojo is owner); `监测` (monitor); `GitHub Joye-Co/team-chat` (the sender of the GitHub hook, made by `POST /v1/hooks`) |
+| Groups | `General` (`01M6F8FFH2K1FDRF123W1120YK`, the default group: every member; there is no rename route, so it is not called 全员), `开发` (Joye, Forge, Watch, Scout, Ledger, Tata, the GitHub hook sender), `运维` (Joye, Watch, 监测), `监测` (only 监测: the monitor round trip) |
+| Runner | Jojo: labels `mac-mini`, runtime placeholder `claude`, **disabled** until Joye installs the daemon and runs `admin.ts runner` (see [USER-ACTIONS.md](USER-ACTIONS.md)) |
+| Invites | 实习生1 to 实习生4 (human, member), made 2026-11-02 23:12 UTC, expire 2026-11-09 23:12 UTC |
+| Hook | GitHub hook `01M6F8JV5Z23M3E2AF40J2564Z` into `开发`; the GitHub webhook is not added yet (`scripts/github-webhook.sh`) |
+| Messages | one test alert from 监测 in `运维`, topic 监测告警测试（无需处理）; the monitor's round trips in `监测` |
+
+Staging has the same roster, `开发`, `运维` and `监测` (its default group `General` also holds the
+test bots `selftest-integrate` and `selftest-final` and the groups 自测 and 自测 final).
+
+Read-only WebSocket check (hello, welcome, a `fetch` of every group, ping; no writes):
+
+```sh
+bun scripts/ws-check.ts https://chat-api-prod.huangdeshiou.workers.dev ~/.config/team-chat/production/owner-token
+# {"ok":true,"welcomeMs":...,"groups":[...],"pong":true,...}; exit 0 on success
+```
+
 ## admin.ts
 
 `bun server/scripts/admin.ts <command> --env <env>` from the repository root. The base URL comes
 from `--url`, else from `product.json` `servers.<env>`. For e2e there is no `product.json` entry,
 so pass `--url https://chat-api-e2e.huangdeshiou.workers.dev`. It prints only ids and file
-paths.
+paths. It reads the owner token from `owner-token` and the admin secret from `admin-secret` of
+the env folder.
 
 ```sh
 bun server/scripts/admin.ts members --env staging
@@ -104,6 +144,8 @@ All scenarios except `soak` run by default (`--minutes <n>` adds soak). `pipelin
 writes on one socket without waiting for acks; it is the check for the subrequest depth limit
 (see Logs), so run it on a deployed env after any change to how Durable Objects call each other.
 Last run on e2e (`sz8xgx`, 2026-11-03): all 10 pass; load delivery p50 63 ms, p95 157 ms. Last soak (`p24gpf`, 30 minutes): pass.
+First run on staging (`hj8xdn`, 2026-11-03): all 10 pass; load delivery p50 59 ms, p95 132 ms.
+Never run `tools/e2e` against production: it leaves its groups and members behind.
 
 Use the e2e env for routine runs. Each run leaves its groups and members in place (only their
 tokens are revoked), so run against staging only when a release needs it.

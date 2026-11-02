@@ -10,13 +10,20 @@ command line, a log or a chat: read it from its file.
 | staging | `chat-api-staging` | `chat-staging` | `chat-files-staging` | `chat-monitor` |
 | production | `chat-api-prod` | `chat-prod` | `chat-files-prod` | `chat-monitor` |
 
-Secret files live in `~/.config/team-chat/<env>/` (mode 600):
+Production URL: `https://chat-api-prod.huangdeshiou.workers.dev` (`product.json`
+`servers.production`). Monitor: `chat-monitor` (cron only, no public HTTP surface).
+
+Secret files live in `~/.config/team-chat/<env>/` (folder mode 700, files mode 600). The full
+list is in [ENVIRONMENTS.md](ENVIRONMENTS.md#secret-files).
 
 | File | What |
 | --- | --- |
 | `admin-secret` | the Worker secret `ADMIN_SECRET` of that env |
-| `owner-token` | the owner's token (from `bun server/scripts/admin.ts bootstrap`) |
-| `monitor-token` | the monitor bot's token in that env |
+| `hook-secret-key` | the Worker secret `HOOK_SECRET_KEY` (encrypts hook secrets in D1) |
+| `owner-token` (and its copy `owner.token`) | the owner's token (from `bun server/scripts/admin.ts bootstrap`) |
+| `monitor-token` | the monitor bot's token in that env (Worker secret `MONITOR_TOKEN_<ENV>` of `chat-monitor`) |
+| `bots/<name>.token` | each roster bot's token |
+| `github-hook.json` | production: URL and secret of the GitHub hook of `开发` |
 
 In the commands below, `ADMIN=~/.config/team-chat/production/admin-secret` and the admin header
 is sent with `-H @<(printf 'x-admin-secret: %s' "$(cat $ADMIN)")`, so the secret never shows in
@@ -28,10 +35,10 @@ the process list or the shell history.
 2. Before a deploy that has a new D1 migration, save a D1 bookmark (see
    [D1 Time Travel](#d1-time-travel-restore)): `cd server && bunx wrangler d1 time-travel info chat-prod`.
 3. Staging first: `cd server && bun run deploy:staging` (applies D1 migrations, then deploys).
-4. Wait for two green monitor checks of staging (10 minutes, no alert in the ops group), or run
+4. Wait for two green monitor checks of staging (10 minutes, no alert in the `运维` group), or run
    the end-to-end clients in `tools/e2e` against staging.
 5. Production: `cd server && bun run deploy:production`.
-6. Watch the ops group for 15 minutes and the Workers logs (Cloudflare dashboard, Workers,
+6. Watch the `运维` group for 15 minutes and the Workers logs (Cloudflare dashboard, Workers,
    `chat-api-prod`, Logs). Errors are JSON lines with `"level":"error"`.
 
 Monitor deploy: `cd ops/monitor && bunx wrangler deploy`. The monitor reaches `chat-api-prod`
@@ -39,21 +46,27 @@ and `chat-api-staging` through service bindings (a Worker cannot fetch another W
 same workers.dev subdomain: Cloudflare error 1042), so both API Workers must exist before the
 first monitor deploy; wrangler refuses a binding to a missing Worker. First time only:
 
+Done for staging and production on 2026-11-03 (bot `监测`, ops group `运维`, probe group `监测`).
+
 1. In each of staging and production: make the bot and keep its token in a file:
-   `bun server/scripts/admin.ts bot --env production --name 监测 --role ops` (writes a token file
+   `bun server/scripts/admin.ts bot --env production --name 监测 --role 监测` (writes a token file
    and prints its path; rename it to `monitor-token`).
-2. Make a group named `ops` (or set `opsGroup` in `ops/monitor/wrangler.jsonc` to its id) and add
-   the monitor bot and the people on call to it. Every human member of `ops` is mentioned on
+2. Make the ops group `运维` (`opsGroup` in `ops/monitor/wrangler.jsonc` is its exact name; an id
+   also works) and add the monitor bot and the people on call to it. Every human member of `运维` is mentioned on
    alert cards (a group notifies only on mentions by default); set `oncall` (member ids of that
    env) in `TARGETS` to mention fewer people.
-3. Make a group named `监测` with only the monitor bot in it (`probeGroup`). The round-trip
-   message every 5 minutes goes there, not into `ops`, so `ops` holds only alerts and summaries.
+3. Make a group named `监测` with only the monitor bot in it (`probeGroup`): make it with the
+   monitor bot's own token (`POST /v1/groups` `{ "name": "监测", "memberIds": [] }`), so no person
+   is in it. The round-trip message every 5 minutes goes there, not into `运维`, so `运维` holds
+   only alerts and summaries.
 4. `cd ops/monitor && bunx wrangler secret put MONITOR_TOKEN_PRODUCTION < ~/.config/team-chat/production/monitor-token`,
    the same for `MONITOR_TOKEN_STAGING`.
 5. Deploy. Within 5 minutes a 监测往返 topic appears in each `监测` group and the Workers logs of
    `chat-monitor` show `"msg":"check"` lines with `"ok":true` for both targets (a failing first
    check shows its reason there); at 01:00 UTC the daily summary card appears in the 监测告警
-   topic of `ops`.
+   topic of `运维`.
+6. Before the first deploy, run one archive pass on each env (Daily archive, "Run it now"): a new
+   env has no complete archive, and the monitor raises **备份过期** after two checks.
 
 ## Roll back
 
@@ -74,10 +87,10 @@ The monitor rolls back the same way: `cd ops/monitor && bunx wrangler rollback <
 A release that breaks the app (crash at launch, lost sign-in) must stop being offered at once:
 every client checks for updates every 6 hours.
 
-1. Withdraw it: `bun server/scripts/admin.ts withdraw-release --env production --url https://chat-api-prod.huangdeshiou.workers.dev --version <v>`.
+1. Withdraw it: `bun server/scripts/admin.ts withdraw-release --env production --version <v>`.
    `GET /v1/updates/latest` offers the previous good release again and the bad DMG cannot be
    downloaded. Clients that did not install it yet stay on their version.
-2. Tell the people who installed it in the ops group: download the previous DMG from the
+2. Tell the people who installed it in the `运维` group: download the previous DMG from the
    GitHub release of that version and drag it over the app. The app does not go back by
    itself, and it never offers an older version as an update.
 3. Fix forward: release a higher version with `scripts/release.sh`; it is offered to everyone.
@@ -98,13 +111,28 @@ every client checks for updates every 6 hours.
 
 - Revoke every token of the member: `bun server/scripts/admin.ts revoke --env production --member <id>`.
   Their open sockets close at once.
-- A person signs in again with a new invite (`admin.ts invite`). A bot gets its new token from
+- A person signs in again with a sign-in code for their member (same member, new token):
+  `curl -s -H @<(printf 'authorization: Bearer %s' "$(cat ~/.config/team-chat/production/owner-token)") -H 'content-type: application/json' -d '{"name":"<name>","kind":"human","level":"member","memberId":"<id>"}' https://chat-api-prod.huangdeshiou.workers.dev/v1/invites | jq -r .code > <file>`
+  (make `<file>` with `umask 077` first; the code is a secret). A sign-in code is refused for a
+  deactivated member. A bot gets its new token from
   the bot's owner flow. Until a route issues a new token for an existing member, a revoked bot
   member cannot get a new token: make a new bot member and move it into its groups.
-- **Monitor token**: make a new monitor bot (Deploy, first time, step 1), add it to `ops`, put
+- **Monitor token**: make a new monitor bot (Deploy, first time, step 1), add it to `运维`, put
   the new secret, then revoke the old bot's tokens.
 
 **Webhook secrets** (`POST /v1/hooks`): delete the hook and make a new one; update the sender.
+For the GitHub hook of `开发`: `DELETE /v1/hooks/<hookId>` (id in `github-hook.json`), make a new
+github hook for the `开发` group, write its `{ hookId, groupId, url, secret, repo }` to
+`~/.config/team-chat/production/github-hook.json` (mode 600), delete the old webhook in the
+GitHub repository settings, then run `scripts/github-webhook.sh`.
+
+**HOOK_SECRET_KEY**: it cannot be changed in place: every hook secret in D1 is encrypted with it.
+After a leak: put a new key (as for ADMIN_SECRET, file `hook-secret-key`), then delete and make
+again every hook (`GET /v1/hooks`) and update each sender.
+
+**Invite and sign-in codes** expire 7 days after they are made and are single use. An unused code
+that leaked cannot be revoked by a route: it stops working when it expires, or when the
+member it was made for is deactivated. Make a new one with `admin.ts invite`.
 
 ## D1 Time Travel restore
 
@@ -184,8 +212,8 @@ The cron `0 3 * * *` on `chat-api-*` writes to the env's own bucket:
 - List: `GET /v1/admin/archive?prefix=archive/d1/`. Download one object:
   `GET /v1/admin/archive/object?key=<key>`. Copy all of it to a folder:
   `bun ops/restore/restore.ts fetch --from production --from-url https://chat-api-prod.huangdeshiou.workers.dev --out /tmp/archive-prod`
-  (`product.json` has no production URL yet, so production commands pass `--from-url` or
-  `--to-url`).
+  (`--from-url` and `--to-url` are optional for staging and production: the URLs are in
+  `product.json`).
 - 产出 and their versions are rebuilt from their events; ready-file records from the D1 `files`
   table. Not archived:
   - uploaded file bytes (`files/`, `avatars/`, `releases/` in R2). They stay in the env's
@@ -205,8 +233,10 @@ server version, with its D1 migrations applied.
 
 **One group** (its room lost or damaged; its D1 row and members exist in the target):
 
-1. If the room still has data, it cannot be imported over: use point-in-time recovery, or
-   restore into a new group (make it, then pass its id; the archive's events carry no group id).
+1. If the room still has data, it cannot be imported over: use point-in-time recovery.
+   `restore.ts group` restores a group's archive only into the group with the same id; it has no
+   option to read one group and write another (open problem, 2026-11-03), so restoring into a
+   new group is not possible yet.
 2. `bun ops/restore/restore.ts group --from production --from-url https://chat-api-prod.huangdeshiou.workers.dev --to production --to-url https://chat-api-prod.huangdeshiou.workers.dev --group <groupId>`
    (events, then room state, then the group's ready-file records from D1).
 3. Members reset their cache for that group (see point-in-time recovery, step 3).
@@ -249,7 +279,7 @@ the WebSocket, sends a message in its 监测往返 topic of the `监测` group a
 `message.created` event, then reads the archive freshness (`GET /v1/ops/archive`). Two failed
 checks in a row (`FAIL_THRESHOLD`) raise one **不可用** card (or **备份过期** for the archive);
 the next good check raises one **已恢复** card with the outage length. Nothing is posted in
-between. Cards go to the 监测告警 topic of the ops group of the first healthy env in `TARGETS`
+between. Cards go to the 监测告警 topic of the ops group (`运维`) of the first healthy env in `TARGETS`
 order (production, then staging) and mention the people of that ops group; when no env is
 healthy they wait in the monitor and are posted when one is back (dropped after 3 days).
 
@@ -259,7 +289,7 @@ healthy they wait in the monitor and are posted when one is back (dropped after 
 | `health: 5xx` or `health: timeout` | the Worker runs but fails or hangs at once | Workers logs; roll back the last deploy |
 | `websocket: 401` | the monitor token was revoked or the D1 tokens table is damaged | `admin.ts members`; D1 Time Travel if tokens are gone |
 | `websocket: 5xx`, `welcome: …` | the member gateway Durable Object fails | Workers logs for `MemberGateway` errors |
-| `round trip: monitor bot is not in the ops group` | membership changed | add the bot to `ops` again |
+| `round trip: monitor bot is not in the `运维` group` | membership changed | add the bot to `运维` again |
 | `round trip: no monitor token configured` | the Worker secret is missing | `wrangler secret put MONITOR_TOKEN_<ENV>` |
 | `round trip ack: timeout` or `round trip: internal` | the group room fails or is overloaded | Workers logs for `GroupRoom`; roll back |
 | `round trip event: timeout` | the message was stored but fan-out to gateways is broken: people do not get messages live | Workers logs for `deliver failed`; roll back |
@@ -274,7 +304,7 @@ itself is down: check `chat-monitor` in the dashboard (Workers, Logs, cron event
 
 ## Incident checklist
 
-1. **Acknowledge** in the ops group: who handles it, start time.
+1. **Acknowledge** in the `运维` group: who handles it, start time.
 2. **Scope**: which env; health or round trip; one group or all (try another group with
    the `tools/e2e` clients); since which deploy (`wrangler deployments list`).
 3. **Stop the damage**: a bad deploy → roll back first, debug later. A leaked secret → rotate it
@@ -285,7 +315,7 @@ itself is down: check `chat-monitor` in the dashboard (Workers, Logs, cron event
    restore): a D1 restore to a time before the revoke brings the revoked credential back.
 5. **Verify**: the monitor's 已恢复 card; the owner and one intern see the latest messages; a
    bot replies.
-6. **Tell the team** in the ops group what happened, what was lost (time range), and whether
+6. **Tell the team** in the `运维` group what happened, what was lost (time range), and whether
    members must reset their cache.
-7. **Follow up** within two days: a short write-up in the ops group (cause, fix, what to change),
+7. **Follow up** within two days: a short write-up in the `运维` group (cause, fix, what to change),
    and a task for each change.
