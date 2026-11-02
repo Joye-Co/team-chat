@@ -656,18 +656,29 @@ impl Render for TimelineView {
                 .child(t::LOADING_OLDER)
         });
         // The top 24 pt fade so a row scrolled under the header never shows
-        // as a hard sliver (§4.4).
+        // as a hard sliver (§4.4). A second, 16 pt layer eases it: a linear
+        // fade alone leaves half a title line under the header at half
+        // strength, which still reads as a cut line.
+        let layer = |h: gpui::Pixels| {
+            div()
+                .absolute()
+                .top_0()
+                .left_0()
+                .right_0()
+                .h(h)
+                .bg(gpui::linear_gradient(
+                    180.,
+                    gpui::linear_color_stop(colors.content, 0.),
+                    gpui::linear_color_stop(colors.content.opacity(0.), 1.),
+                ))
+        };
         let fade = div()
             .absolute()
             .top_0()
             .left_0()
             .right_0()
-            .h(space::S24)
-            .bg(gpui::linear_gradient(
-                180.,
-                gpui::linear_color_stop(colors.content, 0.),
-                gpui::linear_color_stop(colors.content.opacity(0.), 1.),
-            ));
+            .child(layer(space::S24))
+            .child(layer(space::S16));
 
         div()
             .id("timeline")
