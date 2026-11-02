@@ -590,9 +590,10 @@ impl ChatProvider for WorstCase {
         &self,
         name: String,
         role: Option<String>,
+        character: Option<crate::data::CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
-        self.inner.create_bot_member(name, role, runner)
+        self.inner.create_bot_member(name, role, character, runner)
     }
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.inner.create_machine(name, labels)
@@ -734,9 +735,10 @@ impl ChatProvider for Empty {
         &self,
         name: String,
         role: Option<String>,
+        character: Option<crate::data::CharacterId>,
         runner: Option<RunnerSetup>,
     ) -> AdminReply<BotCreated> {
-        self.inner.create_bot_member(name, role, runner)
+        self.inner.create_bot_member(name, role, character, runner)
     }
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.inner.create_machine(name, labels)
