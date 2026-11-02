@@ -49,6 +49,19 @@ function messageTopic(sql: SqlStorage, messageId: string): string | null {
   return sql.exec<{ topic_id: string }>("SELECT topic_id FROM messages WHERE id = ?", messageId).toArray()[0]?.topic_id ?? null;
 }
 
+/** Same statements as the live delete in server/src/core/room.ts (removeNow). Keep in step. */
+export function scrubDeletedEvents(sql: SqlStorage, messageId: string): void {
+  sql.exec(
+    `UPDATE events SET data = json_remove(json_set(data, '$.message.body', ''), '$.message.card')
+     WHERE message_id = ? AND type = 'message.created'`,
+    messageId,
+  );
+  sql.exec(
+    "UPDATE events SET data = json_remove(json_set(data, '$.body', ''), '$.card') WHERE message_id = ? AND type = 'message.updated'",
+    messageId,
+  );
+}
+
 export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
   const data = (e.data ?? {}) as Obj;
   switch (e.type) {
@@ -159,6 +172,9 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
         (data.deletedAt as number) ?? e.at,
         id,
       );
+      // Archive files written before the delete still hold the body: scrub the imported rows the
+      // same way the live delete does (GroupRoom.removeNow), so a restore never serves it again.
+      scrubDeletedEvents(sql, id);
       touch(sql, e.topicId ?? messageTopic(sql, id), e.seq);
       return;
     }
