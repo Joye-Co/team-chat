@@ -21,5 +21,4 @@ crate::copy! {
     OPEN_TOPIC = "打开话题",
     OPEN_ARTIFACT = "打开产出",
     OPEN_LINK = "在浏览器中打开",
-    ARTIFACT_LATER = "产出窗口即将推出",
 }

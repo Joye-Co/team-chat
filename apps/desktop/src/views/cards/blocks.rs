@@ -82,7 +82,7 @@ pub fn render(
             render_image(message, ctx, file_id, alt.as_deref(), cx)
         }
         CardBlock::Divider => ui::hairline(cx).into_any_element(),
-        CardBlock::Link { label, target } => render_link(&key, message, label, target),
+        CardBlock::Link { label, target } => render_link(&key, message, ctx, label, target),
         CardBlock::Unknown => div().into_any_element(),
     }
 }
@@ -455,14 +455,26 @@ fn render_image(
     }
 }
 
-fn render_link(key: &str, message: &Message, label: &str, target: &LinkTarget) -> AnyElement {
+fn render_link(
+    key: &str,
+    message: &Message,
+    ctx: &ExtrasContext,
+    label: &str,
+    target: &LinkTarget,
+) -> AnyElement {
     div()
         .flex()
-        .child(link_button(key, message, label, target))
+        .child(link_button(key, message, ctx, label, target))
         .into_any_element()
 }
 
-fn link_button(key: &str, message: &Message, label: &str, target: &LinkTarget) -> AnyElement {
+fn link_button(
+    key: &str,
+    message: &Message,
+    ctx: &ExtrasContext,
+    label: &str,
+    target: &LinkTarget,
+) -> AnyElement {
     let id = ElementId::Name(format!("{key}-link").into());
     let button = Button::new(id)
         .ghost()
@@ -490,11 +502,20 @@ fn link_button(key: &str, message: &Message, label: &str, target: &LinkTarget) -
                 .on_click(move |_, _, cx| crate::views::nav::open_topic(g.clone(), t.clone(), cx))
                 .into_any_element()
         }
-        LinkTarget::Artifact { .. } => button
-            .icon(IconName::FileText)
-            .tooltip(c::ARTIFACT_LATER)
-            .disabled(true)
-            .into_any_element(),
+        LinkTarget::Artifact {
+            artifact_id,
+            version,
+        } => {
+            let provider = ctx.provider.clone();
+            let (id, version) = (artifact_id.clone(), *version);
+            button
+                .icon(IconName::FileText)
+                .tooltip(c::OPEN_ARTIFACT)
+                .on_click(move |_, _, cx| {
+                    crate::views::artifacts::window::open_artifact(&provider, &id, version, cx)
+                })
+                .into_any_element()
+        }
     }
 }
 
