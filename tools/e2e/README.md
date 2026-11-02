@@ -47,6 +47,7 @@ their tokens are revoked at the end of the run.
 | `streaming` | A bot streams with deltas and a final edit; humans see growing text and the final body; one `message.updated` stored |
 | `permissions` | A non-member can neither read nor write (WS frames and HTTP); bad and revoked tokens get 401 |
 | `reactions` | A and B add and remove reactions; caches follow live, a repeated add stores nothing, a fresh client rebuilds the list from the log |
+| `plan` | A bot starts a run with a plan; a member's cache gets it; an update replaces the whole plan, `[]` clears it; a member gets 403 and a 201-character item 400; after the end a late member catches up to the final plan |
 | `load` | 5 humans + 5 bots in 3 groups send 100 messages each at once; all caches equal the server log; p50/p95 latency |
 | `soak` | `--minutes N` of low-rate chat with network blips and restarts (sends queued while stopped); consistency at the end |
 
