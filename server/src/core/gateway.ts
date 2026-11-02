@@ -5,6 +5,7 @@ import {
   ClientFrame,
   type ClientFrameOf,
   type GroupSummary,
+  type Member,
   MAX_CARD_BYTES,
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
@@ -110,6 +111,11 @@ export class MemberGateway extends DurableObject<Env> {
   private readonly barriers = new WeakMap<WebSocket, Promise<void>>();
   /** Last write number per socket and group (see `ORDERED`). */
   private readonly writeSeq = new Map<string, number>();
+  /**
+   * Sockets inside `hello` (directory loading). Frames delivered meanwhile are kept here and sent
+   * after `welcome`, so an event committed after its room's summary was read is not lost.
+   */
+  private readonly syncing = new Map<WebSocket, string[]>();
   /** Changes with each instance, so numbers restart after hibernation or a restart. */
   private readonly epoch = crypto.randomUUID().slice(0, 8);
 
@@ -280,7 +286,11 @@ export class MemberGateway extends DurableObject<Env> {
     const rid = typeof frame.rid === "string" ? frame.rid : undefined;
     try {
       if (frame.t === "ping") return this.send(ws, { t: "pong" });
-      if (frame.t === "hello") return await this.hello(ws, state, frame as ClientFrameOf<"hello">);
+      if (frame.t === "hello") {
+        // One hello per socket: each one loads the whole directory.
+        if (state.ready || this.syncing.has(ws)) throw new ApiError("invalid", "hello was already sent");
+        return await this.hello(ws, state, frame as ClientFrameOf<"hello">);
+      }
       if (!state.ready) throw new ApiError("invalid", "send hello first");
 
       const feature = frameHandlers.get(frame.t);
@@ -429,18 +439,35 @@ export class MemberGateway extends DurableObject<Env> {
       ws.close(4001, "unauthorized");
       return;
     }
-    const { members, groups } = await this.loadDirectory(state.memberId);
-    state.ready = true;
-    state.client = { name: frame.client.name.slice(0, 64), version: frame.client.version.slice(0, 32) };
-    ws.serializeAttachment(state);
-    this.send(ws, {
-      t: "welcome",
-      protocol: PROTOCOL_VERSION,
-      me: toMember(memberRow),
-      members,
-      groups,
-      serverTime: Date.now(),
-    });
+    this.syncing.set(ws, []);
+    let buffered: string[] = [];
+    let members: Member[];
+    try {
+      const dir = await this.loadDirectory(state.memberId);
+      members = dir.members;
+      const groups = dir.groups;
+      state.ready = true;
+      state.client = { name: frame.client.name.slice(0, 64), version: frame.client.version.slice(0, 32) };
+      ws.serializeAttachment(state);
+      this.send(ws, {
+        t: "welcome",
+        protocol: PROTOCOL_VERSION,
+        me: toMember(memberRow),
+        members,
+        groups,
+        serverTime: Date.now(),
+      });
+      // Frames delivered while the directory loaded. Some may be older than welcome's lastSeq;
+      // clients drop seqs they already have.
+      buffered = this.syncing.get(ws) ?? [];
+    } finally {
+      this.syncing.delete(ws);
+    }
+    for (const text of buffered) this.sendText(ws, text);
+    await this.presenceSnapshot(ws, state, members);
+  }
+
+  private async presenceSnapshot(ws: WebSocket, state: SocketState, members: Member[]): Promise<void> {
     // Presence snapshot: ask the other members' gateways (the truth is their open sockets).
     const others = members.filter((m) => m.id !== state.memberId && !m.deactivated);
     const online = await Promise.allSettled(others.map((m) => gatewayStub(this.env, m.id).isOnline()));
@@ -521,10 +548,15 @@ export class MemberGateway extends DurableObject<Env> {
   // -------------------------------------------------------------------------
 
   private send(ws: WebSocket, frame: ServerFrame | Record<string, unknown> | unknown): void {
+    this.sendText(ws, JSON.stringify(frame));
+  }
+
+  private sendText(ws: WebSocket, text: string): void {
     try {
-      ws.send(JSON.stringify(frame));
-    } catch {
-      // Socket closed meanwhile.
+      ws.send(text);
+    } catch (err) {
+      // Normal when the socket closed meanwhile; on an open socket the frame was refused.
+      if (ws.readyState === WebSocket.OPEN) this.log.warn("socket send failed", { err, bytes: text.length });
     }
   }
 
@@ -534,13 +566,8 @@ export class MemberGateway extends DurableObject<Env> {
 
   private broadcastFrame(frame: unknown): void {
     const text = JSON.stringify(frame);
-    for (const ws of this.readySockets()) {
-      try {
-        ws.send(text);
-      } catch {
-        // Closed meanwhile.
-      }
-    }
+    for (const ws of this.readySockets()) this.sendText(ws, text);
+    for (const [ws, buf] of this.syncing) if (ws.readyState === WebSocket.OPEN) buf.push(text);
   }
 
   // -------------------------------------------------------------------------
@@ -550,15 +577,12 @@ export class MemberGateway extends DurableObject<Env> {
   /** Delivers frames (events, transient events, directory) to every ready socket. */
   async deliver(frames: unknown[]): Promise<number> {
     const sockets = this.readySockets();
-    for (const f of frames) {
-      const text = JSON.stringify(f);
-      for (const ws of sockets) {
-        try {
-          ws.send(text);
-        } catch {
-          // Closed meanwhile.
-        }
-      }
+    const texts = frames.map((f) => JSON.stringify(f));
+    for (const text of texts) {
+      for (const ws of sockets) this.sendText(ws, text);
+    }
+    for (const [ws, buf] of this.syncing) {
+      if (ws.readyState === WebSocket.OPEN) buf.push(...texts);
     }
     return sockets.length;
   }

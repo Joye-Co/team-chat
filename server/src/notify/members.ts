@@ -6,7 +6,7 @@ import { type MemberRow, getMember, toMember } from "../core/db";
 import { gatewayStub } from "../core/env";
 import { ApiError } from "../core/errors";
 import { registerRoute } from "../core/registry";
-import { notifyMembersChanged, revokeTokens } from "../core/routes";
+import { afterDeactivate, notifyMembersChanged, revokeTokens } from "../core/routes";
 
 registerRoute({
   method: "PATCH",
@@ -59,6 +59,7 @@ registerRoute({
     if (details.deactivated && next.deactivated) {
       await revokeTokens(env, a, target.id, "all");
       await gatewayStub(env, target.id).closeSockets({ reason: "member deactivated" });
+      await afterDeactivate(env, target.id);
     } else if (details.level) {
       await gatewayStub(env, target.id).setLevel(next.level);
     }

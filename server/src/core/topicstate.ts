@@ -59,6 +59,14 @@ const UNREAD_CTE = `
     GROUP BY m.topic_id
   )`;
 
+/** The group cursor, raised to the seq at which the member joined (older history is read). */
+function fromJoin(sql: SqlStorage, memberId: string, groupRead: number): number {
+  const joined =
+    sql.exec<{ joined_seq: number }>("SELECT joined_seq FROM room_members WHERE member_id = ?", memberId).toArray()[0]
+      ?.joined_seq ?? 0;
+  return Math.max(groupRead, joined);
+}
+
 /**
  * Every topic with unread > 0, mentions > 0 or following, plus the group totals.
  * `groupRead` is the member's group cursor, already cut to lastSeq.
@@ -66,8 +74,9 @@ const UNREAD_CTE = `
 export function groupReadState(
   sql: SqlStorage,
   memberId: string,
-  groupRead: number,
+  cursor: number,
 ): ReadTotals & { topics: TopicState[] } {
+  const groupRead = fromJoin(sql, memberId, cursor);
   const rows = sql
     .exec<StateRow>(
       `${UNREAD_CTE}
@@ -95,7 +104,8 @@ export function groupReadState(
 }
 
 /** One topic's state for this member (also when it has nothing unread and is not followed). */
-export function topicState(sql: SqlStorage, memberId: string, topicId: string, groupRead: number): TopicState {
+export function topicState(sql: SqlStorage, memberId: string, topicId: string, cursor: number): TopicState {
+  const groupRead = fromJoin(sql, memberId, cursor);
   const r = sql
     .exec<StateRow>(
       `${UNREAD_CTE}

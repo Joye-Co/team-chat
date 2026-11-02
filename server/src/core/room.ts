@@ -4,6 +4,7 @@
 import { DurableObject } from "cloudflare:workers";
 import {
   DEFAULT_TITLE_CHARS,
+  MAX_BODY_CHARS,
   MAX_EXCERPT_CHARS,
   type Card,
   type ClientFrameOf,
@@ -20,6 +21,7 @@ import { groupMemberIds, getGroup } from "./db";
 import { type Env, gatewayStub } from "./env";
 import { ApiError, type Result, toErrorBody } from "./errors";
 import { ulid } from "./ids";
+import { scrubDeletedMessage } from "./scrub";
 import { LIMITS } from "./ratelimit";
 import { logger as baseLogger, type Logger } from "./logger";
 import { type MigrationStep, runMigrations } from "./migrations";
@@ -101,6 +103,15 @@ export const ROOM_CORE_MIGRATIONS: MigrationStep[] = [
       );
     `,
   },
+  {
+    // joined_seq: a member added later starts with everything before it read.
+    // messages_reply: finds the quotes of a deleted message.
+    name: "core-2",
+    up: `
+      ALTER TABLE room_members ADD COLUMN joined_seq INTEGER NOT NULL DEFAULT 0;
+      CREATE INDEX messages_reply ON messages(json_extract(ext, '$.replyTo.messageId'));
+    `,
+  },
 ];
 
 export function roomMigrationSteps(): MigrationStep[] {
@@ -172,6 +183,11 @@ const MAX_EXPORT_LIMIT = 1000;
 const DELTA_FLUSH_MS = 100;
 const DELTA_FLUSH_BYTES = 8 * 1024;
 const DELIVER_BATCH = 200;
+/** Delivery tries per batch before the member's gateway is asked to resync the group. */
+const DELIVER_TRIES = 3;
+const DELIVER_RETRY_MS = 250;
+/** A fetch or history page stops adding rows after this much JSON (it always has one row). */
+const MAX_PAGE_BYTES = 4 * 1024 * 1024;
 /** A write waits at most this long for the write numbered before it on the same socket. */
 const TURN_WAIT_MS = 2000;
 /** Socket write orders kept before idle ones are dropped. */
@@ -199,6 +215,20 @@ const CARD_PRESS_INTERVAL_MS = 1000;
 export function defaultTitle(body: string): string {
   const firstLine = body.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
   return [...firstLine.trim()].slice(0, DEFAULT_TITLE_CHARS).join("");
+}
+
+/**
+ * How many of the first `limit` rows fit in `maxBytes` (string lengths, about the JSON size);
+ * at least one, so a page always moves forward.
+ */
+function fitBytes<R>(rows: R[], limit: number, maxBytes: number, size: (r: R) => number): number {
+  let bytes = 0;
+  const n = Math.min(rows.length, limit);
+  for (let i = 0; i < n; i++) {
+    bytes += size(rows[i]) + 128;
+    if (bytes > maxBytes && i > 0) return i;
+  }
+  return n;
 }
 
 async function run<T>(fn: () => T | Promise<T>): Promise<Result<T>> {
@@ -350,6 +380,7 @@ export class GroupRoom extends DurableObject<Env> {
     const h: HookContext = {
       env: this.env,
       groupId: this.groupId as string,
+      groupKind: this.groupKind,
       memberIds: [...this.members],
       log: this.log,
       sql: this.sql,
@@ -387,16 +418,36 @@ export class GroupRoom extends DurableObject<Env> {
     try {
       while (box.queue.length > 0) {
         const batch = box.queue.splice(0, DELIVER_BATCH);
-        try {
-          await gatewayStub(this.env, memberId).deliver(batch);
-        } catch (err) {
-          // Clients catch up by seq; a dead gateway must not stall the others.
-          this.log.warn("deliver failed", { memberId, err, frames: batch.length });
+        let delivered = false;
+        for (let attempt = 1; attempt <= DELIVER_TRIES && !delivered; attempt++) {
+          try {
+            await gatewayStub(this.env, memberId).deliver(batch);
+            delivered = true;
+          } catch (err) {
+            this.log.warn("deliver failed", { memberId, err, frames: batch.length, attempt });
+            if (attempt < DELIVER_TRIES) await new Promise((r) => setTimeout(r, DELIVER_RETRY_MS * attempt));
+          }
         }
+        // A dead gateway must not stall the others. Frames are lost, so ask the gateway to push
+        // the group's current lastSeq (a directory frame): the client then fetches the gap.
+        if (!delivered) this.ctx.waitUntil(this.resync(memberId));
       }
     } finally {
       box.busy = false;
       if (box.queue.length === 0) this.outbox.delete(memberId);
+    }
+  }
+
+  private async resync(memberId: string): Promise<void> {
+    const groupId = this.groupId as string;
+    for (let attempt = 1; attempt <= DELIVER_TRIES; attempt++) {
+      await new Promise((r) => setTimeout(r, 2000 * attempt));
+      try {
+        await gatewayStub(this.env, memberId).groupChanged(memberId, groupId);
+        return;
+      } catch (err) {
+        this.log.warn("resync failed", { memberId, err, attempt });
+      }
     }
   }
 
@@ -414,7 +465,10 @@ export class GroupRoom extends DurableObject<Env> {
       if (this.turns.size >= MAX_TURNS) {
         for (const [k, t] of this.turns) if (now - t.at > TURN_IDLE_MS && t.waiters.size === 0) this.turns.delete(k);
       }
-      turn = { next: order.n, waiters: new Map(), at: now };
+      // Numbers start at 1 per gateway epoch and socket, so a new turn waits for write 1 even
+      // when a later write arrives first. (After a room restart mid-stream, the first write
+      // waits once, at most TURN_WAIT_MS.)
+      turn = { next: 1, waiters: new Map(), at: now };
       this.turns.set(order.key, turn);
     }
     const t = turn;
@@ -579,7 +633,14 @@ export class GroupRoom extends DurableObject<Env> {
       await this.ready(groupId);
       if (this.members.has(memberId)) return { seq: null };
       const event = this.commit((tx) => {
-        this.sql.exec("INSERT OR IGNORE INTO room_members (member_id, added_at) VALUES (?, ?)", memberId, Date.now());
+        // Everything before the member joined counts as read (its own memberAdded event too).
+        this.sql.exec(
+          `INSERT INTO room_members (member_id, added_at, joined_seq) VALUES (?, ?, ?)
+           ON CONFLICT (member_id) DO UPDATE SET joined_seq = excluded.joined_seq`,
+          memberId,
+          Date.now(),
+          tx.nextSeq(),
+        );
         this.members.add(memberId);
         return tx.append({ type: "group.memberAdded", actorId, data: { memberId } });
       });
@@ -836,21 +897,8 @@ export class GroupRoom extends DurableObject<Env> {
       const now = Date.now();
       return this.commit((tx) => {
         const seq = tx.nextSeq();
-        this.sql.exec(
-          "UPDATE messages SET body = '', deleted_at = ?, streaming = 0, ext = json_remove(ext, '$.card') WHERE id = ?",
-          now,
-          messageId,
-        );
-        // Scrub the body and card from stored events so the log no longer serves deleted content.
-        this.sql.exec(
-          `UPDATE events SET data = json_remove(json_set(data, '$.message.body', ''), '$.message.card')
-           WHERE message_id = ? AND type = 'message.created'`,
-          messageId,
-        );
-        this.sql.exec(
-          "UPDATE events SET data = json_remove(json_set(data, '$.body', ''), '$.card') WHERE message_id = ? AND type = 'message.updated'",
-          messageId,
-        );
+        // Scrub the content from the row, stored events and quotes, so the log no longer serves it.
+        scrubDeletedMessage(this.sql, messageId, now);
         tx.append({
           type: "message.deleted",
           actorId: actor.id,
@@ -1028,6 +1076,28 @@ export class GroupRoom extends DurableObject<Env> {
     if (d.timer) clearTimeout(d.timer);
     this.deltas.delete(messageId);
     if (d.buf === "") return;
+    // Keep the text so far, so members who load the message later see it (no event).
+    try {
+      this.sql.exec(
+        "UPDATE messages SET body = body || ? WHERE id = ? AND streaming = 1 AND deleted_at IS NULL AND length(body) + length(?) <= ?",
+        d.buf,
+        messageId,
+        d.buf,
+        MAX_BODY_CHARS,
+      );
+      this.sql.exec(
+        `UPDATE events SET data = json_set(data, '$.message.body', json_extract(data, '$.message.body') || ?)
+         WHERE message_id = ? AND type = 'message.created'
+           AND EXISTS (SELECT 1 FROM messages WHERE id = ? AND streaming = 1 AND deleted_at IS NULL
+                       AND body = json_extract(events.data, '$.message.body') || ?)`,
+        d.buf,
+        messageId,
+        messageId,
+        d.buf,
+      );
+    } catch (err) {
+      this.log.warn("delta store failed", { messageId, err });
+    }
     this.broadcast({
       t: "transient",
       event: { type: "message.delta", groupId: this.groupId, topicId: d.topicId, messageId, append: d.buf },
@@ -1047,12 +1117,12 @@ export class GroupRoom extends DurableObject<Env> {
     });
   }
 
-  private page(afterSeq: number, limit: number): PageResult {
+  private page(afterSeq: number, limit: number, maxBytes = MAX_PAGE_BYTES): PageResult {
     const rows = this.sql
       .exec<EventRow>("SELECT seq, type, at, actor_id, data FROM events WHERE seq > ? ORDER BY seq LIMIT ?", afterSeq, limit + 1)
       .toArray() as EventRow[];
-    const hasMore = rows.length > limit;
-    return { events: rows.slice(0, limit).map((r) => this.toEvent(r)), hasMore, lastSeq: this.lastSeq };
+    const n = fitBytes(rows, limit, maxBytes, (r) => r.data.length);
+    return { events: rows.slice(0, n).map((r) => this.toEvent(r)), hasMore: rows.length > n, lastSeq: this.lastSeq };
   }
 
   async history(
@@ -1075,7 +1145,8 @@ export class GroupRoom extends DurableObject<Env> {
           n + 1,
         )
         .toArray() as MessageRow[];
-      return { messages: rows.slice(0, n).map((r) => this.toMessage(r)), hasMore: rows.length > n };
+      const k = fitBytes(rows, n, MAX_PAGE_BYTES, (r) => r.body.length + (r.ext?.length ?? 0));
+      return { messages: rows.slice(0, k).map((r) => this.toMessage(r)), hasMore: rows.length > k };
     });
   }
 
@@ -1100,7 +1171,7 @@ export class GroupRoom extends DurableObject<Env> {
   ): Promise<Result<PageResult & { groupId: string }>> {
     return run(async () => {
       await this.ready(groupId);
-      return { groupId, ...this.page(afterSeq, Math.max(1, Math.min(limit, MAX_EXPORT_LIMIT))) };
+      return { groupId, ...this.page(afterSeq, Math.max(1, Math.min(limit, MAX_EXPORT_LIMIT)), Number.MAX_SAFE_INTEGER) };
     });
   }
 

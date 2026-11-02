@@ -19,7 +19,7 @@ import { type Env, gatewayStub, roomStub } from "./env";
 import { ApiError, unwrap } from "./errors";
 import { ulid } from "./ids";
 import { logger } from "./logger";
-import { registerRoute } from "./registry";
+import { memberDeactivatedHooks, registerRoute } from "./registry";
 
 export const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 export const DEFAULT_GROUP_NAME = "General";
@@ -83,13 +83,15 @@ export async function removeMemberFromGroup(
   groupId: string,
   memberId: string,
 ): Promise<void> {
-  const before = await groupMemberIds(env.DB, groupId);
+  const before = new Set(await groupMemberIds(env.DB, groupId));
+  before.add(memberId);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM group_members WHERE group_id = ? AND member_id = ?").bind(groupId, memberId),
     auditStatement(env.DB, actor, { action: "group.member.remove", target: groupId, details: { memberId } }),
   ]);
+  // Idempotent: a retry after a failed room call (D1 already changed) still updates the room.
   unwrap(await roomStub(env, groupId).memberRemoved(groupId, actor.memberId, memberId));
-  notifyGroupChanged(env, waitUntil, groupId, before);
+  notifyGroupChanged(env, waitUntil, groupId, [...before]);
 }
 
 async function addToDefaultGroups(env: Env, waitUntil: Wait, actor: AuthContext | null, memberId: string) {
@@ -129,6 +131,17 @@ export async function revokeTokens(
   return revoked;
 }
 
+/** Runs the feature hooks for a deactivated member (for example: stop a bot's runs). */
+export async function afterDeactivate(env: Env, memberId: string): Promise<void> {
+  for (const hook of memberDeactivatedHooks) {
+    try {
+      await hook(env, memberId);
+    } catch (err) {
+      logger.error("member deactivated hook failed", { memberId, err });
+    }
+  }
+}
+
 /** Deactivates a member: rejects its tokens from now on and closes its sockets. */
 export async function deactivateMember(env: Env, actor: AuthContext, memberId: string): Promise<void> {
   if (actor.member.level !== "owner") throw new ApiError("forbidden", "owner only");
@@ -138,6 +151,7 @@ export async function deactivateMember(env: Env, actor: AuthContext, memberId: s
   ]);
   if (!r[0].meta.changes) throw new ApiError("not_found", "member not found");
   await gatewayStub(env, memberId).closeSockets({ reason: "member deactivated" });
+  await afterDeactivate(env, memberId);
 }
 
 // ---------------------------------------------------------------------------
@@ -409,7 +423,11 @@ export function registerCoreRoutes(): void {
         throw new ApiError("forbidden", "only an owner can remove other members");
       }
       if (group.kind === "dm") throw new ApiError("forbidden", "cannot leave a DM");
-      if (!(await isGroupMember(env.DB, group.id, params.memberId))) throw new ApiError("not_found", "not a member");
+      if (!(await isGroupMember(env.DB, group.id, params.memberId))) {
+        // D1 says gone. A removal whose room call failed is finished here; otherwise 404.
+        const inRoom = unwrap(await roomStub(env, group.id).memberIds(group.id)).includes(params.memberId);
+        if (!inRoom) throw new ApiError("not_found", "not a member");
+      }
       await removeMemberFromGroup(env, (p) => ctx.waitUntil(p), a, group.id, params.memberId);
       return { ok: true };
     },

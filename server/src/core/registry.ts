@@ -243,6 +243,8 @@ export function registerGatewayMigration(step: MigrationStep): void {
 export interface HookContext {
   env: Env;
   groupId: string;
+  /** "group" or "dm". */
+  groupKind: "group" | "dm" | null;
   /** Members of the group after the commit. */
   memberIds: string[];
   log: Logger;
@@ -261,6 +263,16 @@ export const afterCommitHooks: AfterCommitHook[] = [];
 /** Runs after the event is committed, without delaying the sender's ack. Errors are logged. */
 export function registerAfterCommit(hook: AfterCommitHook): void {
   afterCommitHooks.push(hook);
+}
+
+/**
+ * Runs after a member is deactivated (its tokens are revoked and sockets closed), e.g. to stop
+ * a bot's runs. Errors are logged by the caller; the deactivation stands.
+ */
+export type MemberDeactivatedHook = (env: Env, memberId: string) => Promise<void> | void;
+export const memberDeactivatedHooks: MemberDeactivatedHook[] = [];
+export function registerMemberDeactivated(hook: MemberDeactivatedHook): void {
+  memberDeactivatedHooks.push(hook);
 }
 
 // ---------------------------------------------------------------------------
