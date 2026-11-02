@@ -41,7 +41,7 @@ import {
 import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
 import { editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
 import { Card } from "./card.ts";
-import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, UpdateMemberRequest } from "./members.ts";
+import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, UpdateGroupRequest, UpdateMemberRequest } from "./members.ts";
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
 import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
@@ -612,6 +612,7 @@ export const schemas = {
   UpdateMemberRequest,
   MemberResponse,
   UpdateGroupPrefsRequest,
+  UpdateGroupRequest,
   UpdateInfo,
   DiagnosticsResponse,
   Hook,

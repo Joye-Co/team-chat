@@ -224,7 +224,8 @@ log records `group.memberAdded` / `group.memberRemoved`.
   name, kind and level are used; the request's are ignored. It is refused for a deactivated
   member (`invalid` when made, `unauthorized` when redeemed).
 - Bootstrap: the first owner is made with `POST /v1/admin/bootstrap`, protected by the
-  `ADMIN_SECRET` Worker secret. It also makes a group called "General".
+  `ADMIN_SECRET` Worker secret. It also makes the default group, called "全员" (environments
+  bootstrapped before this change called it "General" until it was renamed).
 
 # V1 extensions
 
@@ -508,6 +509,7 @@ Module: `members.ts` / `members.rs`.
 | --- | --- | --- | --- |
 | `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated?, character?: CharacterId \| null }` | `Member` |
 | `PATCH /v1/groups/:id/prefs` | group member, for self | `UpdateGroupPrefsRequest { muted?, notify? }` | `GroupSummary` |
+| `PATCH /v1/groups/:id` | group member, or an owner | `UpdateGroupRequest { name }` | `GroupSummary` |
 
 ```ts
 NotifyLevel = "all" | "mentions" | "none"
@@ -527,6 +529,14 @@ Rules:
   member's live status (idle, working, needs-input, success, error, offline); members without
   one keep their initial avatar. `welcome`, `directory`, `GET /v1/members` and `GET /v1/me`
   carry it.
+- Rename (`PATCH /v1/groups/:id`): any member of the group, or an owner who is not in it, may
+  rename a group. A DM cannot be renamed (`forbidden`, message "a DM cannot be renamed"). The
+  server trims the name and turns every run of whitespace (also full-width spaces and line
+  breaks) into one space, then needs 1..64 characters (`invalid` otherwise). `POST /v1/groups`
+  stores names by the same rule. A new name updates D1, is audited (`group.rename`) and
+  appends `group.updated { name }` to the group log, so every client's cache and sidebar
+  update; the same name again (after normalizing) appends nothing. An owner outside the group
+  gets a `GroupSummary` with `readSeq`, `unread` and `mentions` 0.
 - Prefs are per member. The server pushes the new `GroupSummary` to my other connections as a
   `directory` frame.
 

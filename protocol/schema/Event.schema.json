@@ -2063,6 +2063,33 @@
                 "summary": {
                   "type": "string",
                   "maxLength": 280
+                },
+                "plan": {
+                  "maxItems": 30,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200
+                      },
+                      "state": {
+                        "type": "string",
+                        "enum": [
+                          "done",
+                          "current",
+                          "waiting",
+                          "pending"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "text",
+                      "state"
+                    ]
+                  }
                 }
               },
               "required": [

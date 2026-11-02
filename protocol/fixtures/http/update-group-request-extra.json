@@ -1,0 +1,14 @@
+{
+  "kind": "UpdateGroupRequest",
+  "valid": true,
+  "description": "unknown fields are dropped",
+  "value": {
+    "name": "全员",
+    "memberIds": [
+      "01JBX0ALICE0000000000000AB"
+    ]
+  },
+  "normalized": {
+    "name": "全员"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateGroupRequest",
+  "valid": false,
+  "description": "limit: 65 characters",
+  "value": {
+    "name": "群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群群"
+  }
+}

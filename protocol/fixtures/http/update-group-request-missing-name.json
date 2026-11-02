@@ -1,0 +1,6 @@
+{
+  "kind": "UpdateGroupRequest",
+  "valid": false,
+  "description": "missing name",
+  "value": {}
+}

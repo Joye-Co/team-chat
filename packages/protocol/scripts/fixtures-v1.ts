@@ -224,6 +224,11 @@ export function addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSum
   ok("http/member-response.json", "MemberResponse", { ...ownerFull, avatarUrl: `https://chat-api-e2e.example.workers.dev/v1/members/${ID.owner}/avatar?v=3` });
   ok("http/update-group-prefs-request.json", "UpdateGroupPrefsRequest", { muted: true, notify: "none" });
   ok("http/update-group-prefs-request-notify.json", "UpdateGroupPrefsRequest", { notify: "all" });
+  ok("http/update-group-request.json", "UpdateGroupRequest", { name: "研发 群 🚀" });
+  add("http/update-group-request-extra.json", { kind: "UpdateGroupRequest", valid: true, description: "unknown fields are dropped", value: { name: "全员", memberIds: [ID.alice] }, normalized: { name: "全员" } });
+  bad("http/update-group-request-empty-name.json", "UpdateGroupRequest", { name: "" }, "limit: empty name");
+  bad("http/update-group-request-name-too-long.json", "UpdateGroupRequest", { name: "群".repeat(65) }, "limit: 65 characters");
+  bad("http/update-group-request-missing-name.json", "UpdateGroupRequest", {}, "missing name");
   bad("http/update-group-prefs-request-bad-notify.json", "UpdateGroupPrefsRequest", { notify: "loud" }, "unknown notify level");
   for (const reason of ["mention", "waiting", "result", "message"]) {
     ok(`server/event-notify-${reason}.json`, "ServerFrame", { t: "event", event: { ...base, type: "message.created", data: { message } }, notify: reason });

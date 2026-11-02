@@ -90,6 +90,21 @@ impl UpdateGroupPrefsRequest {
     }
 }
 
+/// `PATCH /v1/groups/:id`: renames a group (not a DM). The server trims the name and
+/// collapses runs of whitespace to one space before it checks the length. Response:
+/// `GroupSummary`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UpdateGroupRequest {
+    pub name: String,
+}
+
+impl UpdateGroupRequest {
+    pub fn validate(&self) -> Validation {
+        check_name("name", &self.name)
+    }
+}
+
 /// Why an event should notify the receiving member (`event.notify`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

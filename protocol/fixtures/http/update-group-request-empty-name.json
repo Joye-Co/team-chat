@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateGroupRequest",
+  "valid": false,
+  "description": "limit: empty name",
+  "value": {
+    "name": ""
+  }
+}

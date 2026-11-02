@@ -32,6 +32,13 @@ export const UpdateGroupPrefsRequest = z.object({
 });
 export type UpdateGroupPrefsRequest = z.infer<typeof UpdateGroupPrefsRequest>;
 
+/**
+ * `PATCH /v1/groups/:id`: renames a group (not a DM). The server trims the name and collapses
+ * runs of whitespace to one space, then checks the length (1..64). Response: `GroupSummary`.
+ */
+export const UpdateGroupRequest = z.object({ name: Name });
+export type UpdateGroupRequest = z.infer<typeof UpdateGroupRequest>;
+
 /** Why an event should notify the receiving member. */
 export const NotifyReason = z.enum(["mention", "waiting", "result", "message"]);
 export type NotifyReason = z.infer<typeof NotifyReason>;

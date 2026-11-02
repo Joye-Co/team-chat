@@ -2219,6 +2219,10 @@
         },
         "role": {
           "type": "string"
+        },
+        "memberId": {
+          "type": "string",
+          "minLength": 1
         }
       },
       "required": [
@@ -4303,6 +4307,19 @@
         }
       }
     },
+    "UpdateGroupRequest": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        }
+      },
+      "required": [
+        "name"
+      ]
+    },
     "UpdateInfo": {
       "type": "object",
       "properties": {
@@ -5932,6 +5949,33 @@
         "summary": {
           "type": "string",
           "maxLength": 280
+        },
+        "plan": {
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "done",
+                  "current",
+                  "waiting",
+                  "pending"
+                ]
+              }
+            },
+            "required": [
+              "text",
+              "state"
+            ]
+          }
         }
       },
       "required": [
@@ -6268,6 +6312,46 @@
           "required": [
             "type",
             "inputId"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "plan"
+            },
+            "items": {
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "current",
+                      "waiting",
+                      "pending"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "state"
+                ]
+              }
+            }
+          },
+          "required": [
+            "type",
+            "items"
           ]
         },
         {
@@ -6653,6 +6737,46 @@
                   "properties": {
                     "type": {
                       "type": "string",
+                      "const": "plan"
+                    },
+                    "items": {
+                      "maxItems": 30,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "current",
+                              "waiting",
+                              "pending"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "text",
+                          "state"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "items"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
                       "const": "status"
                     },
                     "state": {
@@ -6897,6 +7021,33 @@
             "summary": {
               "type": "string",
               "maxLength": 280
+            },
+            "plan": {
+              "maxItems": 30,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "state": {
+                    "type": "string",
+                    "enum": [
+                      "done",
+                      "current",
+                      "waiting",
+                      "pending"
+                    ]
+                  }
+                },
+                "required": [
+                  "text",
+                  "state"
+                ]
+              }
             }
           },
           "required": [
@@ -7265,6 +7416,46 @@
                         "properties": {
                           "type": {
                             "type": "string",
+                            "const": "plan"
+                          },
+                          "items": {
+                            "maxItems": 30,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "text": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "state": {
+                                  "type": "string",
+                                  "enum": [
+                                    "done",
+                                    "current",
+                                    "waiting",
+                                    "pending"
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "text",
+                                "state"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "items"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
                             "const": "status"
                           },
                           "state": {
@@ -7581,6 +7772,132 @@
         "envAllowlist",
         "enabled",
         "updatedAt"
+      ]
+    },
+    "RunPlan": {
+      "maxItems": 30,
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "text": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "done",
+              "current",
+              "waiting",
+              "pending"
+            ]
+          }
+        },
+        "required": [
+          "text",
+          "state"
+        ]
+      }
+    },
+    "StartRunRequest": {
+      "type": "object",
+      "properties": {
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "topicId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "plan": {
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "done",
+                  "current",
+                  "waiting",
+                  "pending"
+                ]
+              }
+            },
+            "required": [
+              "text",
+              "state"
+            ]
+          }
+        }
+      },
+      "required": [
+        "groupId",
+        "topicId"
+      ]
+    },
+    "SetRunPlanRequest": {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "maxItems": 30,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "done",
+                  "current",
+                  "waiting",
+                  "pending"
+                ]
+              }
+            },
+            "required": [
+              "text",
+              "state"
+            ]
+          }
+        }
+      },
+      "required": [
+        "plan"
+      ]
+    },
+    "EndRunRequest": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "done",
+            "failed",
+            "cancelled"
+          ]
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 280
+        }
+      },
+      "required": [
+        "status"
       ]
     },
     "Machine": {
@@ -8762,6 +9079,46 @@
                   "required": [
                     "type",
                     "inputId"
+                  ]
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "const": "plan"
+                    },
+                    "items": {
+                      "maxItems": 30,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "state": {
+                            "type": "string",
+                            "enum": [
+                              "done",
+                              "current",
+                              "waiting",
+                              "pending"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "text",
+                          "state"
+                        ]
+                      }
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "items"
                   ]
                 },
                 {
