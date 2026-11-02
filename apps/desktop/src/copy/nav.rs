@@ -11,7 +11,7 @@ crate::copy! {
     GROUPS = "群",
     DMS = "私聊",
     NO_GROUPS = "还没有群",
-    NO_GROUPS_HINT = "管理员把你加进群后，群会出现在侧边栏里。",
+    NO_GROUPS_HINT = "新建一个群，或等管理员把你加进群。",
     QUICK_SWITCH = "快速切换",
     QUICK_SWITCH_SHORTCUT = "⌘K",
     NEW_TOPIC = "新话题",
