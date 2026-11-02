@@ -475,9 +475,9 @@ NotifyReason = "mention" | "waiting" | "result" | "message"
 { t: "event", event, notify?: NotifyReason }    // present = show a notification
 ```
 
-The member gateway sets `notify` per receiving member on live `event` frames only (never on
-`page`). No notification for an event whose `actorId` is me, in a muted group, or when my level
-is `none`. Otherwise, the first rule that matches wins:
+The server sets `notify` per receiving member on live `event` frames only (never on `page`).
+No notification for an event whose `actorId` is me or when my level is `none`. In a muted group
+only rule 1 (`mention`) applies. Otherwise, the first rule that matches wins:
 
 1. `mention`: `message.created` that mentions me.
 2. `waiting`: `topic.updated` whose `waitingOn` now includes me and did not before.
