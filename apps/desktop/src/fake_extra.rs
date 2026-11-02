@@ -73,14 +73,12 @@ fn snippet(text: &str, at: usize, len: usize) -> (String, usize) {
         .collect();
     let start = at.saturating_sub(CONTEXT);
     let end = (at + len + CONTEXT).min(chars.len());
-    let mut out: String = chars[start..end].iter().collect();
+    let rest: String = chars[start..].iter().collect();
+    let mut out = crate::markdown::clip(&rest, end - start);
     let mut offset = at - start;
     if start > 0 {
         out.insert(0, '…');
         offset += 1;
-    }
-    if end < chars.len() {
-        out.push('…');
     }
     (out, offset)
 }
