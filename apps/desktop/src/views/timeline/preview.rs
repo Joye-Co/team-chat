@@ -46,6 +46,8 @@ pub enum Sample {
     Worst,
     /// The composer's states: offline slab, quote chip, format bar, emoji.
     Compose,
+    /// The short topic with the hover toolbar's emoji picker open.
+    React,
 }
 
 struct Topics {
@@ -93,6 +95,7 @@ fn message(topic: &str, seq: u64, author: &str, at: Millis, body: &str) -> Messa
         quote_of: None,
         attachments: Vec::new(),
         artifact_refs: Vec::new(),
+        reactions: Vec::new(),
     }
 }
 
@@ -214,6 +217,16 @@ impl TopicSamples {
                 "我倾向 B，staging 上周刚因为配置出过一次事。",
             ),
         ];
+        main[3].reactions = vec![
+            Reaction {
+                emoji: "👍".into(),
+                member_ids: vec![crate::fake::ME.into(), "m-tata".into()],
+            },
+            Reaction {
+                emoji: "👀".into(),
+                member_ids: vec!["m-sentry".into()],
+            },
+        ];
         main[4].artifact_refs = vec![ArtifactRef {
             artifact_id: ARTIFACT.into(),
             version: 2,
@@ -282,6 +295,24 @@ impl TopicSamples {
             ),
             message(t, 4, crate::fake::ME, today_at(0, 5, 0), "我来看。"),
         ];
+        // Past two names a pill shows the count: `👀 99+`, `✅ 14`.
+        let many = |n: usize, mine: bool| {
+            let mut ids: Vec<String> = (0..n).map(|i| format!("m-reader-{i}")).collect();
+            if mine {
+                ids[0] = crate::fake::ME.into();
+            }
+            ids
+        };
+        worst[1].reactions = vec![
+            Reaction {
+                emoji: "👀".into(),
+                member_ids: many(120, false),
+            },
+            Reaction {
+                emoji: "✅".into(),
+                member_ids: many(14, true),
+            },
+        ];
         worst[2].attachments = vec![FileAttachment {
             file_id: "f-v21-trace".into(),
             name:
@@ -338,14 +369,18 @@ impl TopicSamples {
         ];
 
         let mut drafts = HashMap::new();
-        drafts.insert(
-            DraftKey::topic(GROUP, SHORT),
-            Draft {
-                body: "标题可以再短一点，**一键分享**放到开头".into(),
-                quote_of: Some(short[2].id.clone()),
-                ..Default::default()
-            },
-        );
+        // short-topic-* shows the empty composer (the mockup); the compose
+        // scene shows the quote chip and a draft.
+        if offline {
+            drafts.insert(
+                DraftKey::topic(GROUP, SHORT),
+                Draft {
+                    body: "标题可以再短一点，**一键分享**放到开头".into(),
+                    quote_of: Some(short[2].id.clone()),
+                    ..Default::default()
+                },
+            );
+        }
         drafts.insert(
             DraftKey::topic(GROUP, MAIN),
             Draft {
@@ -633,13 +668,13 @@ fn open(
         Sample::Main => MAIN,
         Sample::Short => SHORT,
         Sample::Worst => WORST,
-        Sample::Compose => SHORT,
+        Sample::Compose | Sample::React => SHORT,
     };
     services.nav.update(cx, |nav, cx| {
         nav.open_group(GROUP.into(), cx);
         nav.open_topic(GROUP.into(), topic.into(), cx);
         // main-* and worst-case-* show the topic view without the side panel.
-        if nav.side_panel_open != (sample == Sample::Short) {
+        if nav.side_panel_open != matches!(sample, Sample::Short | Sample::React) {
             nav.toggle_side_panel(cx);
         }
     });
@@ -664,6 +699,9 @@ fn open(
                     timeline.update(cx, |t, cx| t.preview_hover(1, cx));
                 }
                 Sample::Worst => {}
+                Sample::React => {
+                    timeline.update(cx, |t, cx| t.preview_reacting(1, cx));
+                }
                 Sample::Compose => {
                     composer.update(cx, |c, cx| c.preview_tools(cx));
                 }
@@ -687,4 +725,8 @@ pub fn open_compose(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWin
 
 pub fn open_worst(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
     open(s, c, Sample::Worst, cx)
+}
+
+pub fn open_react(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::React, cx)
 }

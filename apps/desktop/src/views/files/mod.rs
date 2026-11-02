@@ -70,14 +70,19 @@ pub fn size_text(bytes: u64) -> String {
             format!("{v:.0}")
         }
     };
+    // MB and GB keep one decimal (`112.4 MB`), without a trailing `.0`.
+    let mb = |v: f64| {
+        let t = format!("{v:.1}");
+        t.strip_suffix(".0").map(str::to_string).unwrap_or(t)
+    };
     if b < K {
         fill(f::SIZE_B, &[("n", &bytes.to_string())])
     } else if b < K * K {
         fill(f::SIZE_KB, &[("n", &one(b / K))])
     } else if b < K * K * K {
-        fill(f::SIZE_MB, &[("n", &one(b / K / K))])
+        fill(f::SIZE_MB, &[("n", &mb(b / K / K))])
     } else {
-        fill(f::SIZE_GB, &[("n", &one(b / K / K / K))])
+        fill(f::SIZE_GB, &[("n", &mb(b / K / K / K))])
     }
 }
 
@@ -259,6 +264,8 @@ mod tests {
         assert_eq!(size_text(1_500), "1.5 KB");
         assert_eq!(size_text(25_000_000), "25 MB");
         assert_eq!(size_text(100_000_000), "100 MB");
+        assert_eq!(size_text(112_400_000), "112.4 MB");
+        assert_eq!(size_text(25_600_000), "25.6 MB");
         assert_eq!(size_text(2_400_000_000), "2.4 GB");
     }
 

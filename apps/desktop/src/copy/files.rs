@@ -9,6 +9,7 @@ crate::copy! {
     QUEUED = "等待上传",
     UPLOADING = "正在上传 {p}%",
     DOWNLOADING = "正在下载 {p}%",
+    CANCEL_DOWNLOAD = "取消下载",
     UPLOAD_FAILED = "上传失败：{reason}",
     DOWNLOAD_FAILED = "下载失败：{reason}",
     OPEN_FAILED = "无法打开「{name}」：{reason}",

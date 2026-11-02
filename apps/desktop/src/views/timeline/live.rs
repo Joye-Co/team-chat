@@ -63,7 +63,11 @@ fn pulse_dots(color: gpui::Hsla, reduce_motion: bool) -> impl IntoElement {
 /// `m:ss` since `since`.
 fn elapsed(since: Millis, now: Millis) -> String {
     let s = ((now - since).max(0) / 1000) as u64;
-    format!("{}:{:02}", s / 60, s % 60)
+    if s < 3600 {
+        format!("{}:{:02}", s / 60, s % 60)
+    } else {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    }
 }
 
 /// `4 分 12 秒`, or `12 秒` under a minute.
@@ -350,7 +354,8 @@ impl TimelineView {
                                         .one_line()
                                         .child(name),
                                 )
-                                .child(div().flex_1().min_w(px(80.)).one_line().child(label)),
+                                // The dots follow the label at once (no gap when it is short).
+                                .child(div().flex_shrink(1.).min_w(px(0.)).one_line().child(label)),
                         )
                         .child(pulse_dots(colors.text_3, reduce))
                         .when_some(run.started_at, |el, at| {
@@ -462,7 +467,8 @@ impl TimelineView {
             .filter(|id| Some(id.as_str()) != self.me.as_deref())
             .filter_map(|id| self.members.iter().find(|m| &m.id == id))
             .filter(|m| !m.is_bot())
-            .map(|m| m.name.clone())
+            // Short names only: an email or a long name never shows in full.
+            .map(|m| crate::ui::emoji::short_name(&m.name))
             .collect();
         match names.as_slice() {
             [] => None,
@@ -512,6 +518,8 @@ mod tests {
         assert_eq!(duration_text(252_000), "4 分 12 秒");
         assert_eq!(duration_text(12_400), "12 秒");
         assert_eq!(elapsed(0, 134_000), "2:14");
+        assert_eq!(elapsed(0, 3_599_000), "59:59");
+        assert_eq!(elapsed(0, 10_680_000), "2:58:00");
     }
 
     #[test]

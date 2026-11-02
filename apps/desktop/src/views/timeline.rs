@@ -133,6 +133,9 @@ pub struct TimelineView {
     focus: focus::FocusState,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
+    /// The emoji picker is open for this message row: from the hover
+    /// toolbar (`false`) or from the add pill under the reactions (`true`).
+    reacting: Option<(String, bool)>,
     /// Bot runs of the open topic, newest first.
     runs: Vec<crate::data::BotRunSummary>,
     /// Runs whose log this view asked for once (steps and live labels).
@@ -146,6 +149,9 @@ pub struct TimelineView {
     card_visible: bool,
     /// A card row was drawn since the last render (set by `render_row`).
     card_seen: bool,
+    /// The new-messages divider row was drawn since the last render: it is
+    /// on screen, so the jump pill must not show (§8.1, U14).
+    divider_painted: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -216,12 +222,14 @@ impl TimelineView {
             activation: None,
             focus: focus::FocusState::default(),
             hovered: None,
+            reacting: None,
             runs: Vec::new(),
             followed_runs: Default::default(),
             open_steps: Default::default(),
             ticking: false,
             card_visible: false,
             card_seen: false,
+            divider_painted: false,
             _subscriptions: subscriptions,
         };
         let open = this.services.nav.read(cx).topic.clone();
@@ -573,6 +581,12 @@ impl Render for TimelineView {
         self.keep_ticking(cx);
         // The list lays out after the header: when what it painted changes
         // whether a card is on screen, draw the header again.
+        // The divider row drawn last frame is on screen: the unread
+        // messages are seen, and the jump pill goes (or never shows).
+        if std::mem::take(&mut self.divider_painted) && !self.unread_seen {
+            self.unread_seen = true;
+            cx.defer_in(window, |_, _, cx| cx.notify());
+        }
         let card_visible = std::mem::take(&mut self.card_seen);
         if card_visible != self.card_visible {
             self.card_visible = card_visible;

@@ -269,6 +269,7 @@ impl State {
             quote_of: None,
             attachments: Vec::new(),
             artifact_refs: Vec::new(),
+            reactions: Vec::new(),
         };
         let topic = self
             .topics
@@ -1203,6 +1204,25 @@ impl ChatProvider for FakeProvider {
             self.emit(vec![Change::Messages {
                 group_id: group_id.into(),
                 topic_id,
+            }]);
+        }
+    }
+
+    fn react(&self, group_id: &str, topic_id: &str, message_id: &str, emoji: &str, on: bool) {
+        let changed = self.with(|s| {
+            let list = s
+                .messages
+                .get_mut(&(group_id.to_string(), topic_id.to_string()))?;
+            let m = list
+                .iter_mut()
+                .find(|m| m.id == message_id && m.deleted_at.is_none())?;
+            crate::data::apply_reaction(&mut m.reactions, emoji, ME, on);
+            Some(())
+        });
+        if changed.is_some() {
+            self.emit(vec![Change::Messages {
+                group_id: group_id.into(),
+                topic_id: topic_id.into(),
             }]);
         }
     }

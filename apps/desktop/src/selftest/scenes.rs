@@ -364,6 +364,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::timeline::preview::open_worst,
     },
     Scene {
+        name: "topic-react",
+        about: "short-topic-* with the hover toolbar's emoji picker open (add reaction)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_react,
+    },
+    Scene {
         name: "topic-compose",
         about: "The composer while reconnecting: the sidebar banner, a quote chip, the format bar and the emoji picker",
         start: Start::SignedIn,

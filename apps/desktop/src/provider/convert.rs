@@ -138,6 +138,14 @@ pub fn message(m: &proto::Message) -> Message {
         quote_of: m.reply_to.as_ref().map(|r| r.message_id.clone()),
         attachments: file_refs(m.attachments.as_deref()),
         artifact_refs: artifact_refs(m.artifact_refs.as_deref()),
+        reactions: m
+            .reactions()
+            .iter()
+            .map(|r| crate::data::Reaction {
+                emoji: r.emoji.clone(),
+                member_ids: r.member_ids.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -218,6 +226,7 @@ pub fn outbox_message(item: &OutboxItem, topic_id: &str, me: &str) -> Option<Mes
         quote_of: reply_to.clone(),
         attachments: file_refs(attachments.as_deref()),
         artifact_refs: artifact_refs(refs.as_deref()),
+        reactions: Vec::new(),
     })
 }
 

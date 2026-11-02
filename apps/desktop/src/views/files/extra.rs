@@ -376,11 +376,11 @@ pub fn file_row_in(
     );
     let (meta, progress) = match state {
         Some(s @ TransferState::Running { .. }) => (
+            // `文件 · 112.4 MB · 正在下载 64%`
             div()
                 .tnum()
                 .child(format!(
-                    "{} · {}",
-                    size_text(file.size),
+                    "{plain} · {}",
                     fill(f::DOWNLOADING, &[("p", &format!("{:.0}", s.percent()))])
                 ))
                 .into_any_element(),
@@ -417,7 +417,18 @@ pub fn file_row_in(
             Lucide::RefreshCw,
         )]
     } else if running {
-        Vec::new()
+        // Downloading: cancel `x` (§7.11).
+        let provider = provider.clone();
+        let file = file.clone();
+        vec![
+            ui::icon_button(id("cancel"), Lucide::X)
+                .tooltip(f::CANCEL_DOWNLOAD)
+                .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
+                    provider.cancel_download(&file);
+                })
+                .into_any_element(),
+        ]
     } else {
         vec![
             action("open", f::OPEN, OpenAction::Open, Lucide::ExternalLink),
@@ -432,12 +443,21 @@ pub fn file_row_in(
     let group = group_name(&id);
     let provider2 = provider.clone();
     let (g, t, file2) = (group_id.to_string(), topic_id.to_string(), file.clone());
-    row_frame(group, file, compact, meta, progress, actions, failed, cx)
-        .id(id("frame"))
-        .when(!running, |el| {
-            el.cursor_pointer().on_click(move |_, _, cx| {
-                open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx)
-            })
-        })
-        .into_any_element()
+    // Actions stay on while the file downloads or after it failed.
+    row_frame(
+        group,
+        file,
+        compact,
+        meta,
+        progress,
+        actions,
+        failed || running,
+        cx,
+    )
+    .id(id("frame"))
+    .when(!running, |el| {
+        el.cursor_pointer()
+            .on_click(move |_, _, cx| open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx))
+    })
+    .into_any_element()
 }

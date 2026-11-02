@@ -984,6 +984,12 @@ impl ChatProvider for CoreProvider {
                     m.topic_id = topic_id.to_string();
                     m
                 }));
+            // My reactions that the server has not confirmed yet show at once.
+            for (message_id, emoji, on) in a.client.pending_reactions(&real).unwrap_or_default() {
+                if let Some(m) = window.messages.iter_mut().find(|m| m.id == message_id) {
+                    crate::data::apply_reaction(&mut m.reactions, &emoji, me, on);
+                }
+            }
             for item in a.client.pending_sends(&real).unwrap_or_default() {
                 if known.contains(&item.id) {
                     continue;
@@ -1014,6 +1020,7 @@ impl ChatProvider for CoreProvider {
                 quote_of: req.quote_of,
                 attachments: Vec::new(),
                 artifact_refs: Vec::new(),
+                reactions: Vec::new(),
             });
         }
         window
@@ -1128,6 +1135,19 @@ impl ChatProvider for CoreProvider {
             && let Err(e) = a.client.delete_message(message_id)
         {
             tracing::warn!(error = %e, "delete refused");
+        }
+    }
+
+    fn react(&self, group_id: &str, topic_id: &str, message_id: &str, emoji: &str, on: bool) {
+        if let Some(a) = self.account() {
+            if let Err(e) = a.client.react(message_id, emoji, on) {
+                tracing::warn!(error = %e, "reaction refused");
+                return;
+            }
+            self.emit(vec![Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
         }
     }
 
@@ -1278,6 +1298,10 @@ impl ChatProvider for CoreProvider {
 
     fn fetch_file(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Reply<PathBuf> {
         self.fetch_file_inner(group_id, topic_id, file)
+    }
+
+    fn cancel_download(&self, file: &FileAttachment) {
+        self.cancel_download_inner(file)
     }
 
     fn topic_files(&self, _group_id: &str, topic_id: &str) -> Vec<TopicFile> {

@@ -204,6 +204,7 @@ fn generate(count: usize, now: Millis) -> Vec<Message> {
                 quote_of: None,
                 attachments: Vec::new(),
                 artifact_refs: Vec::new(),
+                reactions: Vec::new(),
             }
         })
         .collect()

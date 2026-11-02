@@ -728,12 +728,6 @@ fn clipboard_files(entries: &[ClipboardEntry]) -> Vec<NewFile> {
     files
 }
 
-/// Emoji in the picker: the reactions a team uses most.
-const EMOJI: &[&str] = &[
-    "👍", "👌", "🙏", "👏", "🎉", "✅", "❌", "👀", "🤔", "😂", "😅", "🙂", "😮", "😢", "🔥", "💯",
-    "🚀", "⚠️", "📌", "💡", "☕", "🐛", "🛠️", "📎",
-];
-
 /// A Markdown format the format bar and ⌘B / ⌘I / ⌘⇧X apply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Format {
@@ -960,7 +954,6 @@ impl ComposerView {
         if !self.emoji_open {
             return None;
         }
-        let colors = theme::colors(cx);
         let reduce = cx.reduce_motion();
         Some(
             ui::menu_surface(cx)
@@ -969,30 +962,20 @@ impl ComposerView {
                 .left(px(72.))
                 .bottom(relative(1.))
                 .mb(space::S8)
-                .w(px(8. * 36. + 8.))
+                .w(ui::emoji::picker_width())
                 .flex_row()
                 .flex_wrap()
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                     this.emoji_open = false;
                     cx.notify();
                 }))
-                .children(EMOJI.iter().enumerate().map(|(i, e)| {
-                    div()
-                        .id(("emoji", i))
-                        .size(px(36.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(theme::radius::SM)
-                        .cursor_pointer()
-                        .text_size(px(20.))
-                        .hover(|el| el.bg(colors.hover))
-                        .active(|el| el.bg(colors.pressed))
-                        .child(*e)
-                        .on_click(cx.listener(move |this, _, window, cx| {
+                .children(ui::emoji::EMOJI.iter().enumerate().map(|(i, e)| {
+                    ui::emoji::picker_cell(("emoji", i), e, cx).on_click(cx.listener(
+                        move |this, _, window, cx| {
                             this.emoji_open = false;
                             this.insert_text(e, window, cx);
-                        }))
+                        },
+                    ))
                 }))
                 .with_animation(
                     "emoji-picker-in",

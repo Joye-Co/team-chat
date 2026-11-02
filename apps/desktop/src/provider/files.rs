@@ -80,6 +80,8 @@ struct Inner {
 struct Download {
     waiters: Vec<oneshot::Sender<Result<PathBuf, FileError>>>,
     topics: HashSet<(String, String)>,
+    /// Cancels the running download (its partial file is removed).
+    abort: Option<tokio::task::AbortHandle>,
 }
 
 /// One message with files that waits for its uploads.
@@ -886,8 +888,28 @@ impl CoreProvider {
             }) as chat_core::files::ProgressFn
         };
         let handle = a.client.download_file(convert::to_file_ref(file), progress);
+        if let Some(d) = self.files().inner().downloads.get_mut(&sha) {
+            d.abort = Some(handle.abort_handle());
+        }
         chat_core::background().spawn(async move {
             let result = match handle.await {
+                Err(e) if e.is_cancelled() => {
+                    // Cancelled: no download and no error, the row is at rest.
+                    let download = {
+                        let mut i = this.files().inner();
+                        i.transfers.remove(&key);
+                        i.last_emit.remove(&key);
+                        i.downloads.remove(&sha).unwrap_or_default()
+                    };
+                    this.emit(
+                        download
+                            .topics
+                            .into_iter()
+                            .map(|(group_id, topic_id)| Change::Messages { group_id, topic_id })
+                            .collect(),
+                    );
+                    return;
+                }
                 Ok(Ok(p)) => Ok(p),
                 Ok(Err(e)) => {
                     tracing::warn!(error = %e, "download failed");
@@ -924,6 +946,19 @@ impl CoreProvider {
             );
         });
         rx
+    }
+
+    /// Cancels a running download of `file`; its row goes back to rest.
+    pub(super) fn cancel_download_inner(&self, file: &FileAttachment) {
+        let abort = self
+            .files()
+            .inner()
+            .downloads
+            .get_mut(&file.sha256)
+            .and_then(|d| d.abort.take());
+        if let Some(abort) = abort {
+            abort.abort();
+        }
     }
 
     pub(super) fn topic_files_inner(&self, topic_id: &str) -> Vec<TopicFile> {
@@ -1290,6 +1325,7 @@ fn job_message(j: &UploadJob, view_topic: &str, me: &str) -> Message {
             })
             .collect(),
         artifact_refs: Vec::new(),
+        reactions: Vec::new(),
     }
 }
 

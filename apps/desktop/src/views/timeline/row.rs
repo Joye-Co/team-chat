@@ -16,6 +16,7 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
     input::Textarea,
     menu::{ContextMenuExt as _, DropdownMenu as _},
+    popover::Popover,
 };
 
 use super::{TimelineView, extras, model};
@@ -65,6 +66,12 @@ impl TimelineView {
         }
         if new_day {
             item = item.child(date_divider(message.created_at, cx));
+        }
+        if self.divider_key.as_deref() == Some(key.as_str()) {
+            // The first unread row is drawn, so it is on screen (the jump
+            // pill must not show), also when it is the first row and has no
+            // divider line.
+            self.divider_painted = true;
         }
         if divider {
             item = item.child(new_messages_divider(cx));
@@ -289,8 +296,15 @@ impl TimelineView {
                 .into_any_element()
         };
 
-        let toolbar = (hovered && !deleted && editing_is_none(self, key))
+        // The toolbar stays while its emoji picker is open.
+        let picking = self
+            .reacting
+            .as_ref()
+            .is_some_and(|(k, from_pill)| k == key && !from_pill);
+        let toolbar = ((hovered || picking) && !deleted && editing_is_none(self, key))
             .then(|| self.render_hover_toolbar(message, key, cx));
+        let reactions = (!deleted && !message.reactions.is_empty())
+            .then(|| self.render_reactions(message, key, cx));
 
         let menu_message = message.clone();
         let view = cx.entity().downgrade();
@@ -335,6 +349,7 @@ impl TimelineView {
                     .children(body)
                     .children(marks)
                     .children(below)
+                    .children(reactions)
                     .children(failed),
             )
             .children(toolbar)
@@ -353,8 +368,9 @@ impl TimelineView {
     }
 
     /// The hover toolbar (§7.5): a level-1 capsule 18 pt above the row, at
-    /// the right edge of the content box: reply (quotes into the composer),
-    /// copy as quote and more (the row menu).
+    /// the right edge of the content box: add reaction (the emoji picker),
+    /// reply (quotes into the composer), copy as quote and more (the row
+    /// menu).
     fn render_hover_toolbar(
         &self,
         message: &Message,
@@ -378,7 +394,14 @@ impl TimelineView {
             .gap(space::S2)
             .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .when(sent, |el| {
-                el.child(
+                el.child(self.reaction_picker(
+                    message,
+                    key,
+                    false,
+                    tool("react", Lucide::FaceSlightlySmilingPlus).tooltip(t::ADD_REACTION),
+                    cx,
+                ))
+                .child(
                     tool("reply", Lucide::Reply)
                         .tooltip(t::REPLY)
                         .on_click(cx.listener({
@@ -411,6 +434,160 @@ impl TimelineView {
                     }),
             )
             .into_any_element()
+    }
+
+    /// The reactions under the body and attachments (§7.5): 26 pt pills 6 pt
+    /// apart, then the add pill. A click toggles my reaction; the tooltip
+    /// names everyone who reacted.
+    fn render_reactions(&self, message: &Message, key: &str, cx: &mut Context<Self>) -> AnyElement {
+        let me = self.me.clone().unwrap_or_default();
+        let name = |id: &str| {
+            self.members
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.name.clone())
+                .unwrap_or_default()
+        };
+        let pills = message
+            .reactions
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let names: Vec<String> = r.member_ids.iter().map(|id| name(id)).collect();
+                let mine = r.member_ids.contains(&me);
+                let label = ui::emoji::reaction_label(&names);
+                let known: Vec<&str> = names
+                    .iter()
+                    .filter(|n| !n.is_empty())
+                    .map(String::as_str)
+                    .collect();
+                let tip = fill(
+                    t::REACTED_BY,
+                    &[("names", &known.join("、")), ("emoji", &r.emoji)],
+                );
+                let emoji = r.emoji.clone();
+                let m = message.clone();
+                ui::emoji::reaction_pill(
+                    ElementId::Name(format!("reaction-{key}-{i}").into()),
+                    r.emoji.clone().into(),
+                    label.into(),
+                    mine,
+                    cx,
+                )
+                .tooltip(tip)
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.react(&m, &emoji, !mine, cx);
+                }))
+                .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let add = self.reaction_picker(
+            message,
+            key,
+            true,
+            ui::emoji::reaction_add(ElementId::Name(format!("reaction-add-{key}").into()), cx)
+                .tooltip(t::ADD_REACTION),
+            cx,
+        );
+        div()
+            .mt(space::S6)
+            .flex()
+            .flex_wrap()
+            .gap(space::S6)
+            .children(pills)
+            .child(add)
+            .into_any_element()
+    }
+
+    /// The emoji picker (the composer's grid) in a popover on `trigger`:
+    /// the hover toolbar's add reaction, or the add pill (`from_pill`).
+    /// Picking an emoji adds my reaction, or removes it when it is there.
+    fn reaction_picker(
+        &self,
+        message: &Message,
+        key: &str,
+        from_pill: bool,
+        trigger: Button,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let open = self.reacting.as_ref() == Some(&(key.to_string(), from_pill));
+        let view = cx.entity().downgrade();
+        let me = self.me.clone().unwrap_or_default();
+        let m = message.clone();
+        let close = cx.entity().downgrade();
+        let open_key = key.to_string();
+        Popover::new(ElementId::Name(
+            format!("react-picker-{key}-{from_pill}").into(),
+        ))
+        .anchor(if from_pill {
+            gpui::Anchor::BottomLeft
+        } else {
+            gpui::Anchor::TopRight
+        })
+        .appearance(false)
+        .trigger(gpui_component::Selectable::selected(trigger, open))
+        .open(open)
+        .on_open_change(move |open, _, cx| {
+            let key = open_key.clone();
+            let open = *open;
+            close
+                .update(cx, |this, cx| {
+                    this.reacting = open.then_some((key, from_pill));
+                    cx.notify();
+                })
+                .ok();
+        })
+        .content(move |_, _, cx| {
+            let view = view.clone();
+            let m = m.clone();
+            let me = me.clone();
+            let dismiss = view.clone();
+            ui::menu_surface(cx)
+                .w(ui::emoji::picker_width())
+                .flex_row()
+                .flex_wrap()
+                .on_mouse_down_out(move |_, _, cx| {
+                    dismiss
+                        .update(cx, |this, cx| {
+                            this.reacting = None;
+                            cx.notify();
+                        })
+                        .ok();
+                })
+                .children(ui::emoji::EMOJI.iter().enumerate().map(|(i, e)| {
+                    let view = view.clone();
+                    let m = m.clone();
+                    let on = !m
+                        .reactions
+                        .iter()
+                        .any(|r| r.emoji == *e && r.member_ids.contains(&me));
+                    ui::emoji::picker_cell(("react-emoji", i), e, cx).on_click(move |_, _, cx| {
+                        view.update(cx, |this, cx| {
+                            this.reacting = None;
+                            this.react(&m, e, on, cx);
+                        })
+                        .ok();
+                    })
+                }))
+        })
+        .into_any_element()
+    }
+
+    /// Adds (`on`) or removes my reaction.
+    pub(super) fn react(
+        &mut self,
+        message: &Message,
+        emoji: &str,
+        on: bool,
+        cx: &mut Context<Self>,
+    ) {
+        if message.id.is_empty() {
+            return;
+        }
+        self.services
+            .provider
+            .react(&message.group_id, &message.topic_id, &message.id, emoji, on);
+        cx.notify();
     }
 
     /// The topic start block (§8.1): the responsible member at 48 pt, the
@@ -551,6 +728,15 @@ impl TimelineView {
         self.services
             .provider
             .retry_send(&message.group_id, &message.client_msg_id);
+    }
+
+    /// Opens the hover toolbar's emoji picker on row `ix` (screenshot scenes).
+    pub fn preview_reacting(&mut self, ix: usize, cx: &mut Context<Self>) {
+        self.reacting = self
+            .messages
+            .get(ix)
+            .map(|m| (model::key(m).to_string(), false));
+        cx.notify();
     }
 
     /// Shows the hover toolbar on row `ix` (screenshot scenes).

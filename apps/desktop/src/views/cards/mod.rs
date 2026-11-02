@@ -46,8 +46,18 @@ pub const CARD_MAX_WIDTH: f32 = 620.;
 pub struct CardExtra;
 
 impl MessageExtra for CardExtra {
+    /// The body shows above the card (`草稿好了…` over the draft card), except
+    /// when it is only the fallback the server makes from the card title.
     fn hides_body(&self, message: &Message, ctx: &ExtrasContext) -> bool {
-        !message.id.is_empty() && ctx.provider.card(&message.group_id, &message.id).is_some()
+        if message.id.is_empty() {
+            return false;
+        }
+        ctx.provider
+            .card(&message.group_id, &message.id)
+            .is_some_and(|card| {
+                let body = message.body.trim();
+                body.is_empty() || body == card.title.trim()
+            })
     }
 
     fn render(

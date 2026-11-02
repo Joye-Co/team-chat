@@ -175,6 +175,39 @@ pub struct Message {
     pub attachments: Vec<FileAttachment>,
     /// 产出 the message points to.
     pub artifact_refs: Vec<ArtifactRef>,
+    /// Who reacted with which emoji, in the order the emoji were first used.
+    pub reactions: Vec<Reaction>,
+}
+
+/// Adds (`on`) or removes `member` under `emoji`: one reaction per emoji per
+/// member; a new emoji goes last and an emoji with nobody left goes away.
+pub fn apply_reaction(list: &mut Vec<Reaction>, emoji: &str, member: &str, on: bool) {
+    let ix = list.iter().position(|r| r.emoji == emoji);
+    match (ix, on) {
+        (Some(i), true) => {
+            if !list[i].member_ids.iter().any(|m| m == member) {
+                list[i].member_ids.push(member.to_string());
+            }
+        }
+        (None, true) => list.push(Reaction {
+            emoji: emoji.to_string(),
+            member_ids: vec![member.to_string()],
+        }),
+        (Some(i), false) => {
+            list[i].member_ids.retain(|m| m != member);
+            if list[i].member_ids.is_empty() {
+                list.remove(i);
+            }
+        }
+        (None, false) => {}
+    }
+}
+
+/// One emoji under a message and who reacted with it, oldest first.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Reaction {
+    pub emoji: String,
+    pub member_ids: Vec<MemberId>,
 }
 
 /// Largest file one message or 产出 can carry (`docs/protocol.md`).
@@ -1101,6 +1134,10 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn edit(&self, group_id: &str, message_id: &str, body: String);
     /// Deletes my message (or any message, for an owner).
     fn delete(&self, group_id: &str, message_id: &str);
+    /// Adds (`on`) or removes my reaction to a message: one per emoji per
+    /// member. Emits `Change::Messages` for the topic at once (the change
+    /// shows before the server confirms it) and again when it is confirmed.
+    fn react(&self, _group_id: &str, _topic_id: &str, _message_id: &str, _emoji: &str, _on: bool) {}
     /// Sets the status and who the topic waits on.
     fn set_topic_status(
         &self,
@@ -1190,6 +1227,10 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn fetch_file(&self, _group_id: &str, _topic_id: &str, _file: &FileAttachment) -> Reply<PathBuf> {
         reply_err(FileError::Other)
     }
+    /// Cancels a running download of `file`: the partial file is removed and
+    /// its row goes back to rest (`file_transfer` returns `None`). Emits
+    /// `Change::Messages` for the topics that show it.
+    fn cancel_download(&self, _file: &FileAttachment) {}
     /// Files attached to the cached messages of a topic, newest first.
     fn topic_files(&self, _group_id: &str, _topic_id: &str) -> Vec<TopicFile> {
         Vec::new()

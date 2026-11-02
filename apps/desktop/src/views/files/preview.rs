@@ -122,6 +122,7 @@ impl FilesPreview {
             quote_of: None,
             attachments: Vec::new(),
             artifact_refs: Vec::new(),
+            reactions: Vec::new(),
         };
         let mut a = base("pv-1", &other, "首页的新稿子和数据都在这里，看看有没有问题。", now - 600_000);
         a.attachments = vec![photo(), pdf()];

@@ -47,6 +47,7 @@ crate::copy! {
     STEPS_DURATION_MIN = "{m} 分 {s} 秒",
     STEPS_DURATION_SEC = "{s} 秒",
     ADD_REACTION = "添加表情回应",
+    REACTED_BY = "{names} 回应了 {emoji}",
     REPLY = "回复",
     COPY_QUOTE = "复制为引用",
     MORE = "更多",
