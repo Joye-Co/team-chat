@@ -4,7 +4,9 @@
 // empty D1 and Durable Objects (A's R2 bucket, which holds the file bytes, stays),
 // restores the whole env from that folder, and compares what members see in B with what they
 // saw in A (messages, topics, read cursors, 产出 and their files). A message deleted after the first archive
-// run must be gone from every archive file and from B. Exits 0 when all match.
+// run must be gone from every archive file and from B. Then it copies the group's archive into a
+// new empty group of B (--from-group) and checks that the copy has the same topics and messages
+// under new ids, next to the untouched source group. Exits 0 when all match.
 // Report: ops/restore/.drill/report.json (no secrets).
 //
 //   bun ops/restore/drill.ts [--port 8798]
@@ -14,7 +16,7 @@ import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, openSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AdminApi, ROOT, dirSource, flag, gunzipText, httpSource, parseArgs } from "./lib";
-import { fetchArchive, restoreEnv } from "./restore";
+import { fetchArchive, restoreEnv, restoreGroup } from "./restore";
 
 const { flags } = parseArgs(["drill", ...process.argv.slice(2)]);
 const PORT = Number(flag(flags, "port") ?? 8798);
@@ -228,7 +230,7 @@ async function seed(): Promise<Seeded> {
 }
 
 /** Everything one member sees: members, groups, every event and every topic's history. */
-async function view(token: string): Promise<any> {
+async function view(token: string, skipArtifacts: string[] = []): Promise<any> {
   const members = await http<any[]>("/v1/members", { token });
   const groups = await http<any[]>("/v1/groups", { token });
   const { ws } = await Ws.open(token);
@@ -255,6 +257,7 @@ async function view(token: string): Promise<any> {
   const artifacts: Record<string, any[]> = {};
   for (const g of groups) {
     const gid = g.group.id;
+    if (skipArtifacts.includes(gid)) continue;
     const list = await http<any[]>(`/v1/artifacts?groupId=${encodeURIComponent(gid)}`, { token });
     artifacts[gid] = [];
     for (const a of list) {
@@ -377,6 +380,65 @@ async function main() {
     };
     // A send without topicId writes topic.created and then message.created.
     report.writeAfterRestore = { seq: sent.message.createdSeq, expected: g.lastSeq + 2 };
+
+    // Copy the group's archive into a new, empty group (restore.ts group --from-group).
+    const ownerId = after.owner.members.find((m: any) => m.level === "owner")?.id;
+    const copy = await http<any>("/v1/groups", {
+      token: seeded.ownerToken,
+      body: { name: "Drill 副本", memberIds: g.group.memberIds.filter((id: string) => id !== ownerId) },
+    });
+    const copyId = copy.group.id as string;
+    const archiveDir = dirSource(join(WORK, "archive"));
+    const copied = await restoreGroup(archiveDir, admin, copyId, { fromGroup: g.group.id });
+    const again2 = await restoreGroup(archiveDir, admin, copyId, { fromGroup: g.group.id }); // a re-run is a no-op
+    // 产出 of a copy are listed but do not open: their D1 rows and file bytes belong to the source group.
+    const copyView = await view(seeded.memberToken, [copyId]);
+    const copyArtifacts = await http<any[]>(`/v1/artifacts?groupId=${encodeURIComponent(copyId)}`, { token: seeded.memberToken });
+    const copyArtifactStatus = await Promise.all(
+      copyArtifacts.map(async (a) => (await fetch(`${BASE}/v1/artifacts/${a.id}`, { headers: { authorization: `Bearer ${seeded.memberToken}` } })).status),
+    );
+    const srcEvents = before.member.events[g.group.id] as any[];
+    const copyEvents = copyView.events[copyId] as any[];
+    const srcTopics = srcEvents.filter((e) => e.type === "topic.created").map((e) => e.data.topic);
+    const copyTopics = copyEvents.filter((e) => e.type === "topic.created").map((e) => e.data.topic);
+    const srcIds = new Set(srcEvents.flatMap((e) => [e.data?.topic?.id, e.data?.message?.id].filter(Boolean)));
+    const copyHistory = copyTopics.map((t: any) => copyView.history[t.id] as any[]);
+    const srcHistory = srcTopics.map((t: any) => before.member.history[t.id] as any[]);
+    const strip = (msgs: any[]) => msgs.map((m) => ({ body: m.body, authorId: m.authorId, createdSeq: m.createdSeq, deleted: !!m.deletedAt, kind: m.kind }));
+    const copyText = JSON.stringify(copyEvents);
+    report.groupCopy = {
+      fromGroup: g.group.id === copied.fromGroup,
+      imported: copied.imported,
+      rerunImported: again2.imported,
+      events: [srcEvents.length, copyEvents.length],
+      topics: [srcTopics.length, copyTopics.length],
+      sameTitles: JSON.stringify(srcTopics.map((t: any) => t.title)) === JSON.stringify(copyTopics.map((t: any) => t.title)),
+      sameMessages: JSON.stringify(srcHistory.map(strip)) === JSON.stringify(copyHistory.map(strip)),
+      reusedIds: copyEvents.filter((e) => srcIds.has(e.data?.topic?.id) || srcIds.has(e.data?.message?.id)).length,
+      sourceGroupIdInCopy: copyText.includes(g.group.id),
+      deletedTextInCopy: copyText.includes(LATE_DELETE),
+      artifactsListed: copyArtifacts.length,
+      artifactStatus: copyArtifactStatus,
+      sourceUntouched: JSON.stringify(copyView.events[g.group.id].slice(0, srcEvents.length)) === JSON.stringify(srcEvents),
+    };
+    const { ws: cw } = await Ws.open(seeded.memberToken);
+    const cSent = await cw.ok({ t: "send", groupId: copyId, topicId: copyTopics[0].id, clientMsgId: crypto.randomUUID(), body: "副本里写" });
+    cw.close();
+    (report.groupCopy as any).writeSeq = [cSent.message.createdSeq, copied.lastSeq + 1];
+    const gc = report.groupCopy as any;
+    const copyOk =
+      gc.fromGroup &&
+      gc.imported === srcEvents.length &&
+      gc.rerunImported === 0 &&
+      copyEvents.length === srcEvents.length &&
+      srcTopics.length > 0 &&
+      gc.sameTitles &&
+      gc.sameMessages &&
+      gc.reusedIds === 0 &&
+      !gc.sourceGroupIdInCopy &&
+      !gc.deletedTextInCopy &&
+      gc.sourceUntouched &&
+      cSent.message.createdSeq === copied.lastSeq + 1;
     report.ok =
       differences.length === 0 &&
       sent.message.createdSeq === g.lastSeq + 2 &&
@@ -387,7 +449,8 @@ async function main() {
       report.deletedTextInArchive === 0 &&
       (report.archive as { scrubbed: number }).scrubbed > 0 &&
       !JSON.stringify(after).includes(LATE_DELETE) &&
-      again.message.attachments?.length === 1;
+      again.message.attachments?.length === 1 &&
+      copyOk;
   } finally {
     await stopStack(proc);
   }

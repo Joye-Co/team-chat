@@ -8,7 +8,13 @@
 // Admin secrets default to ~/.config/team-chat/<env>/admin-secret (mode 600).
 //
 //   bun ops/restore/restore.ts d1    <source> <target> [--date YYYY-MM-DD] [--resume] [--revocations <file>]
-//   bun ops/restore/restore.ts group <source> <target> --group <id> [--date YYYY-MM-DD]
+//   bun ops/restore/restore.ts group <source> <target> --group <id> [--from-group <id>] [--date YYYY-MM-DD]
+//
+// --from-group: restore that group's archive into the group --group (another group, for example
+// a new empty group made for the incident). The target group must exist in the target D1 and have
+// no events yet; its members come from the target D1. The source group id and every topic, message
+// and 产出 id get new ids (the same on a re-run). Attachment and 产出 files stay owned by the
+// source group (their D1 rows name it), see docs/RUNBOOK.md.
 //   bun ops/restore/restore.ts env   <source> <target> [--date YYYY-MM-DD] [--resume] [--revocations <file>]
 //
 // --revocations: a file from `bun server/scripts/admin.ts revocations-save` taken from the source
@@ -110,13 +116,88 @@ export async function restoreD1(
   return { key, dump, rows, inserted, skippedTables, reapplied };
 }
 
+/** Replaces every string value found in `map` (exact match, at any depth). Ids are unique. */
+export function remapValue(v: unknown, map: Map<string, string>): unknown {
+  if (typeof v === "string") return map.get(v) ?? v;
+  if (Array.isArray(v)) return v.map((x) => remapValue(x, map));
+  if (v && typeof v === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, x] of Object.entries(v)) out[k] = remapValue(x, map);
+    return out;
+  }
+  return v;
+}
+
+const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+
+/**
+ * A new id for `oldId` in the target group: same for every run (a re-run goes on where it
+ * stopped), unique per target group. A ULID keeps its 10-character time part, so ids still sort
+ * by creation time.
+ */
+export function copiedId(toGroup: string, oldId: string): string {
+  const h = new Bun.CryptoHasher("sha256").update(`restore-copy:${toGroup}:${oldId}`).digest();
+  let tail = "";
+  for (let i = 0; i < 26; i++) tail += CROCKFORD[h[i] & 31];
+  return /^[0-9A-HJKMNP-TV-Z]{26}$/.test(oldId) ? oldId.slice(0, 10) + tail.slice(0, 16) : tail;
+}
+
+/**
+ * The id map of a copy into another group: the source group id to the target id, and every
+ * topic, message and 产出 id the archived events create to a new id. Clients key topics,
+ * messages and 产出 by id alone, so a copy next to its source must not reuse them. File ids stay:
+ * the file rows in D1 belong to the source group.
+ */
+export function copyIdMap(fromGroup: string, toGroup: string, ndjsonTexts: string[]): Map<string, string> {
+  const map = new Map<string, string>([[fromGroup, toGroup]]);
+  const add = (id: unknown) => {
+    if (typeof id === "string" && id !== "" && !map.has(id)) map.set(id, copiedId(toGroup, id));
+  };
+  for (const text of ndjsonTexts) {
+    for (const line of text.split("\n")) {
+      if (line.trim() === "") continue;
+      const e = JSON.parse(line) as { type?: string; topicId?: unknown; messageId?: unknown; data?: any };
+      if (e.type === "topic.created") add(e.data?.topic?.id);
+      else if (e.type === "message.created") add(e.data?.message?.id);
+      else if (e.type === "artifact.created") add(e.data?.artifact?.id);
+    }
+  }
+  return map;
+}
+
+function remapGzip(text: string, map: Map<string, string>, ndjson: boolean): Uint8Array {
+  const out = ndjson
+    ? text
+        .split("\n")
+        .map((line) => (line.trim() === "" ? line : JSON.stringify(remapValue(JSON.parse(line), map))))
+        .join("\n")
+    : JSON.stringify(remapValue(JSON.parse(text), map));
+  return Bun.gzipSync(new TextEncoder().encode(out));
+}
+
+const GROUP_ID = /^[A-Za-z0-9_-]{1,64}$/;
+
 export async function restoreGroup(
   source: ArchiveSource,
   target: AdminApi,
   groupId: string,
-  opts: { date?: string } = {},
-): Promise<{ groupId: string; files: number; imported: number; lastSeq: number; stateRows: number; fileRows: number }> {
-  const keys = await source.list(`archive/groups/${groupId}/`);
+  opts: { date?: string; fromGroup?: string } = {},
+): Promise<{ groupId: string; fromGroup: string; files: number; imported: number; lastSeq: number; stateRows: number; fileRows: number }> {
+  const fromGroup = opts.fromGroup ?? groupId;
+  if (!GROUP_ID.test(groupId) || !GROUP_ID.test(fromGroup)) fail("a group id has letters, digits, - and _ only");
+  const retarget = fromGroup !== groupId;
+  const keys = await source.list(`archive/groups/${fromGroup}/`);
+  if (retarget && !keys.some((k) => parseGroupFileKey(k))) fail(`no archived events of group ${fromGroup} in ${source.describe}`);
+  let map: Map<string, string> | null = null;
+  if (retarget) {
+    const texts: string[] = [];
+    for (const k of keys) if (parseGroupFileKey(k)) texts.push(gunzipText(await source.get(k)));
+    map = copyIdMap(fromGroup, groupId, texts);
+  }
+  const read = async (k: string, ndjson: boolean) => {
+    const bytes = await source.get(k);
+    return map ? remapGzip(gunzipText(bytes), map, ndjson) : bytes;
+  };
   const files = keys
     .map((k) => ({ k, p: parseGroupFileKey(k) }))
     .filter((x) => x.p)
@@ -128,7 +209,7 @@ export async function restoreGroup(
     const r = await target.json<{ imported: number; lastSeq: number }>(`/v1/admin/import/groups/${groupId}`, {
       method: "POST",
       headers: { "content-type": "application/gzip" },
-      body: await source.get(f.k),
+      body: await read(f.k, true),
     });
     imported += r.imported;
     lastSeq = r.lastSeq;
@@ -143,7 +224,7 @@ export async function restoreGroup(
     const r = await target.json<{ rows: number }>(`/v1/admin/import/groups/${groupId}/state`, {
       method: "POST",
       headers: { "content-type": "application/gzip" },
-      body: await source.get(state.k),
+      body: await read(state.k, false),
     });
     stateRows = r.rows;
   }
@@ -153,7 +234,7 @@ export async function restoreGroup(
     const r = await target.json<{ rows: number }>(`/v1/admin/import/groups/${groupId}/files`, { method: "POST" });
     fileRows = r.rows;
   }
-  return { groupId, files: files.length, imported, lastSeq, stateRows, fileRows };
+  return { groupId, fromGroup, files: files.length, imported, lastSeq, stateRows, fileRows };
 }
 
 export async function restoreEnv(
@@ -219,7 +300,7 @@ if (import.meta.main) {
       }
       case "group": {
         const id = flag(flags, "group") ?? fail("--group <id> is required");
-        return restoreGroup(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), id, { date });
+        return restoreGroup(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), id, { date, fromGroup: flag(flags, "from-group") });
       }
       case "env":
         return restoreEnv(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), { date, resume, revocations });
