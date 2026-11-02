@@ -130,6 +130,40 @@ async fn codex_steer_and_approval() {
     );
 }
 
+/// A steer that reaches codex as the turn ends fails after `turn/completed`; its text must get
+/// the next turn instead of being lost.
+#[tokio::test]
+async fn codex_late_steer_gets_next_turn() {
+    let dir = tempfile::tempdir().unwrap();
+    let s = spec(
+        dir.path(),
+        "codex",
+        &fake("fake_codex.py"),
+        &[],
+        "late work",
+    );
+    let mut steered = false;
+    let (o, evs) = drive(s, |e| match e {
+        RunEvent::MessageDelta { .. } if !steered => {
+            steered = true;
+            Some(Control::Input {
+                input_id: "in1".into(),
+                text: "also docs".into(),
+            })
+        }
+        _ => None,
+    })
+    .await;
+    assert_eq!(o.status, Status::Succeeded, "{o:?}");
+    assert_eq!(o.result_text.as_deref(), Some("codex: also docs"));
+    assert_eq!(
+        evs.iter()
+            .filter(|e| matches!(e, RunEvent::TurnCompleted { .. }))
+            .count(),
+        2
+    );
+}
+
 #[tokio::test]
 async fn acp_permission_flow() {
     let dir = tempfile::tempdir().unwrap();

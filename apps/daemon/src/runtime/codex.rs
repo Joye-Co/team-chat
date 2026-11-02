@@ -259,6 +259,9 @@ impl CodexNormalizer {
     }
 }
 
+/// How long to wait, after a turn completed, for the answer to a steer sent as it ended.
+const STEER_WAIT: Duration = Duration::from_secs(10);
+
 #[derive(Debug)]
 enum Pending {
     Initialize,
@@ -303,6 +306,9 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     let mut approvals: HashMap<String, Value> = HashMap::new();
     let mut approval_n = 0u32;
     let mut control_open = true;
+    // Set when a turn completed: the run ends (or the next turn starts) once no steer is
+    // unanswered, or at this deadline.
+    let mut ending: Option<tokio::time::Instant> = None;
 
     let id = ids.next_id();
     pending.insert(id, Pending::Initialize);
@@ -316,6 +322,26 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
 
     let outcome_status;
     loop {
+        // The last turn ended and no steer is unanswered: start the next turn or end the run.
+        if ending.is_some() && !pending.values().any(|k| matches!(k, Pending::Steer { .. })) {
+            ending = None;
+            take_late_input(&mut control, &mut queued, &emit);
+            if !queued.is_empty() {
+                let text = queued.drain(..).collect::<Vec<_>>().join("\n\n");
+                let id = ids.next_id();
+                pending.insert(id, Pending::TurnStart);
+                turn_running = true;
+                let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": {
+                    "threadId": thread_id.clone().unwrap_or_default(), "input": text_input(&text) } })).await;
+            } else {
+                outcome_status = if norm.last_turn_status.as_deref() == Some("completed") {
+                    Status::Succeeded
+                } else {
+                    Status::Failed
+                };
+                break;
+            }
+        }
         tokio::select! {
             line = p.next_line() => {
                 let Some(line) = line else {
@@ -417,19 +443,10 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                         }
                         if method == "turn/completed" {
                             active_turn = None;
-                            take_late_input(&mut control, &mut queued, &emit);
-                            if !queued.is_empty() {
-                                let text = queued.drain(..).collect::<Vec<_>>().join("\n\n");
-                                let id = ids.next_id();
-                                pending.insert(id, Pending::TurnStart);
-                                turn_running = true;
-                                let _ = p.write_json(&json!({ "id": id, "method": "turn/start", "params": {
-                                    "threadId": thread_id.clone().unwrap_or_default(), "input": text_input(&text) } })).await;
-                            } else {
-                                outcome_status = if norm.last_turn_status.as_deref() == Some("completed") { Status::Succeeded }
-                                    else { Status::Failed };
-                                break;
-                            }
+                            turn_running = false;
+                            // A steer sent as the turn ended gets its answer after this; wait
+                            // for it, so input that missed the turn starts the next one.
+                            ending = Some(tokio::time::Instant::now() + STEER_WAIT);
                         }
                     }
                     Rpc::Other => {}
@@ -469,6 +486,19 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                             status: Status::Cancelled, exit_code: code, result_text: norm.last_message,
                             error: None, session_id: thread_id, session_file, usage: norm.usage,
                         };
+                    }
+                }
+            }
+            _ = tokio::time::sleep_until(ending.unwrap_or_else(tokio::time::Instant::now)), if ending.is_some() => {
+                // No answer to a steer in time: its text gets the next turn.
+                let ids_left: Vec<u64> = pending
+                    .iter()
+                    .filter(|(_, k)| matches!(k, Pending::Steer { .. }))
+                    .map(|(i, _)| *i)
+                    .collect();
+                for i in ids_left {
+                    if let Some(Pending::Steer { text }) = pending.remove(&i) {
+                        queued.push_back(text);
                     }
                 }
             }

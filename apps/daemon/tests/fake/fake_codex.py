@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """Fake `codex app-server`: JSON-RPC lines on stdio following the v2 schema
 (`codex app-server generate-ts`). A turn streams 4 deltas 0.2 s apart; turn/steer input is
-appended to the reply; a command approval is asked when the prompt says "approve"."""
+appended to the reply; a command approval is asked when the prompt says "approve". When the
+prompt says "late", the turn waits for a steer and then completes before it answers the steer
+with an error (a steer that arrives as the turn ends)."""
 import json, os, sys, threading, time
 
 assert sys.argv[1:2] == ["app-server"]
@@ -25,9 +27,16 @@ def run_turn(tid, text):
         out({"method": "item/completed", "params": {"threadId": thread, "turnId": tid, "item": {"type": "commandExecution", "id": "c1", "command": "rm -rf build", "status": "completed" if dec == "accept" else "declined", "aggregatedOutput": "", "exitCode": 0 if dec == "accept" else None}}})
     mid = "m-" + tid
     reply = "codex: " + text
+    late = "late" in text
+    if late:
+        state["late_go"] = threading.Event(); state["late_done"] = threading.Event()
+        with lock:
+            state["late_turn"] = tid
     for i in range(4):
         out({"method": "item/agentMessage/delta", "params": {"threadId": thread, "turnId": tid, "itemId": mid, "delta": "."}})
         time.sleep(0.2)
+    if late:
+        state["late_go"].wait(10)
     with lock:
         steer = state["steer"]; state["steer"] = []; state["turn"] = None
     if steer:
@@ -35,6 +44,8 @@ def run_turn(tid, text):
     open(path, "a").write(json.dumps({"turn": tid, "reply": reply}) + "\n")
     out({"method": "item/completed", "params": {"threadId": thread, "turnId": tid, "item": {"type": "agentMessage", "id": mid, "text": reply}}})
     out({"method": "turn/completed", "params": {"threadId": thread, "turn": {"id": tid, "items": [], "status": "completed", "error": None}}})
+    if late:
+        state["late_done"].set()
 
 for line in sys.stdin:
     m = json.loads(line)
@@ -56,6 +67,11 @@ for line in sys.stdin:
         out({"id": mid, "result": {"turn": {"id": tid, "items": [], "status": "inProgress"}}})
         text = "".join(i["text"] for i in m["params"]["input"])
         threading.Thread(target=run_turn, args=(tid, text), daemon=True).start()
+    elif meth == "turn/steer" and state.get("late_turn") == m["params"]["expectedTurnId"]:
+        # The turn completes first; the steer then fails because no turn is active.
+        state["late_turn"] = None
+        state["late_go"].set(); state["late_done"].wait(10)
+        out({"id": mid, "error": {"code": -32600, "message": "no active turn"}})
     elif meth == "turn/steer":
         with lock:
             ok = state["turn"] == m["params"]["expectedTurnId"]
