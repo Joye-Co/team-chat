@@ -9,6 +9,7 @@
     "skipLibCheck": true,
     "noUncheckedIndexedAccess": false,
     "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
     "types": ["@cloudflare/workers-types", "@cloudflare/vitest-plugin/types"]
   },
   "include": ["src", "test", "vitest.config.ts"]

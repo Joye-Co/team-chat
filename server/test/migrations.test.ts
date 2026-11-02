@@ -8,7 +8,9 @@ describe("Durable Object migrations", () => {
   it("migrate a GroupRoom from an empty object and re-run idempotently", async () => {
     const stub = env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(`empty-${crypto.randomUUID()}`));
     await runInDurableObject(stub, async (_room: GroupRoom, state) => {
-      expect(appliedMigrations(state.storage)).toEqual(["core-1", "messaging-1"]);
+      const registered = roomMigrationSteps().map((s) => s.name);
+      expect(registered[0]).toBe("core-1");
+      expect(appliedMigrations(state.storage)).toEqual(registered);
       const tables = state.storage.sql
         .exec<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
         .toArray()
@@ -23,7 +25,7 @@ describe("Durable Object migrations", () => {
       ];
       expect(runMigrations(state.storage, steps)).toEqual(["search-1", "search-2"]);
       expect(runMigrations(state.storage, steps)).toEqual([]);
-      expect(appliedMigrations(state.storage)).toEqual(["core-1", "messaging-1", "search-1", "search-2"]);
+      expect(appliedMigrations(state.storage)).toEqual([...registered, "search-1", "search-2"]);
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM search_test").one().n).toBe(1);
       // A failing step rolls back and is not recorded.
       const bad = [...steps, { name: "bad-1", up: "CREATE TABLE ok_t (x); SELECT * FROM missing_table" }];
