@@ -119,6 +119,41 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: crate::views::files::preview::open,
     },
+    Scene {
+        name: "search",
+        about: "The search dialog with results for a Chinese query in all 群",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::search::preview::open_dialog,
+    },
+    Scene {
+        name: "search-hit",
+        about: "A search hit 5,000 messages up opened in its 话题 and highlighted",
+        start: Start::SignedIn,
+        setup: crate::views::search::preview::open_far_hit,
+        open: open_main,
+    },
+    Scene {
+        name: "process",
+        about: "The 过程 tab of a 话题 where a bot member works",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_running,
+        open: open_main,
+    },
+    Scene {
+        name: "process-failed",
+        about: "The 过程 tab of a failed bot run",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_failed,
+        open: open_main,
+    },
+    Scene {
+        name: "process-dev",
+        about: "The 过程 tab with the developer view on: ids and raw events",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_running_developer,
+        open: open_main,
+    },
 ];
 
 pub fn find(name: &str) -> Option<&'static Scene> {

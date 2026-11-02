@@ -5,6 +5,7 @@
 //! entries every [`POLL`]. The developer view adds ids, the raw log entries
 //! and the raw session download.
 
+pub mod preview;
 mod steps;
 
 use std::{path::PathBuf, time::Duration};

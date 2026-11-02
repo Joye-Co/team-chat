@@ -24,6 +24,8 @@ mod realtime_live;
 #[cfg(test)]
 mod files_live;
 mod process;
+#[cfg(test)]
+mod search_live;
 pub mod selftest_live;
 pub mod session;
 

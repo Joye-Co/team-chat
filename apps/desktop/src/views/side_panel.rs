@@ -27,8 +27,6 @@ pub struct SidePanel {
     members: Vec<Member>,
     /// The 产出 and files of the topic (views/artifacts/panel.rs).
     outputs: Entity<TopicOutputs>,
-    /// 0 = 详情, 1 = 过程.
-    tab: usize,
     process: Entity<ProcessView>,
     _subscriptions: Vec<Subscription>,
 }
@@ -66,19 +64,19 @@ impl SidePanel {
             open,
             topic: None,
             members: Vec::new(),
-            tab: 0,
             process,
             _subscriptions: subscriptions,
         };
         this.refresh();
+        this.sync_process_visibility(cx);
         this
     }
 
     /// Switches between 详情 (0) and 过程 (1).
     pub fn set_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
-        self.tab = tab.min(1);
-        self.sync_process_visibility(cx);
-        cx.notify();
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.set_side_panel_tab(tab.min(1), cx));
     }
 
     pub fn process(&self) -> &Entity<ProcessView> {
@@ -86,7 +84,8 @@ impl SidePanel {
     }
 
     fn sync_process_visibility(&mut self, cx: &mut Context<Self>) {
-        let visible = self.tab == 1 && self.services.nav.read(cx).side_panel_open;
+        let nav = self.services.nav.read(cx);
+        let visible = nav.side_panel_tab == 1 && nav.side_panel_open;
         self.process
             .update(cx, |view, cx| view.set_visible(visible, cx));
     }
@@ -113,6 +112,7 @@ impl Render for SidePanel {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let developer = self.services.nav.read(cx).developer_view;
+        let tab = self.services.nav.read(cx).side_panel_tab;
         let section = |title: &'static str| {
             div()
                 .pt(px(12.))
@@ -134,7 +134,7 @@ impl Render for SidePanel {
                     TabBar::new("side-panel-tabs")
                         .segmented()
                         .small()
-                        .selected_index(self.tab)
+                        .selected_index(tab)
                         .on_click(cx.listener(|this, ix: &usize, _, cx| this.set_tab(*ix, cx)))
                         .child(Tab::new().label(pc::TAB_DETAILS))
                         .child(Tab::new().label(pc::TAB_PROCESS)),
@@ -154,7 +154,7 @@ impl Render for SidePanel {
         let Some(topic) = self.topic.clone() else {
             return div().size_full().bg(colors.panel).child(header);
         };
-        if self.tab == 1 {
+        if tab == 1 {
             return div()
                 .size_full()
                 .flex()

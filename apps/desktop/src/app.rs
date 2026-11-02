@@ -101,6 +101,8 @@ pub struct Navigation {
     pub topic: Option<(GroupId, TopicId)>,
     pub side_panel_open: bool,
     pub developer_view: bool,
+    /// The side panel tab: 0 = 详情, 1 = 过程.
+    pub side_panel_tab: usize,
     /// A message to scroll to and highlight (from search).
     pub focus: Option<FocusRequest>,
 }
@@ -124,6 +126,7 @@ impl Navigation {
             topic: None,
             side_panel_open: true,
             developer_view: false,
+            side_panel_tab: 0,
             focus: None,
         }
     }
@@ -189,6 +192,13 @@ impl Navigation {
     pub fn toggle_side_panel(&mut self, cx: &mut Context<Self>) {
         self.side_panel_open = !self.side_panel_open;
         cx.notify();
+    }
+
+    pub fn set_side_panel_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
+        if self.side_panel_tab != tab {
+            self.side_panel_tab = tab;
+            cx.notify();
+        }
     }
 
     pub fn set_developer_view(&mut self, on: bool, cx: &mut Context<Self>) {

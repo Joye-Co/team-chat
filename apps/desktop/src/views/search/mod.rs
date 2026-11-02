@@ -4,6 +4,7 @@
 //! its 群, 话题, author, time and a snippet with the match highlighted, and
 //! Enter opens the topic at that message (`Navigation::open_message`).
 
+pub mod preview;
 mod results;
 
 use std::cell::Cell;
@@ -136,7 +137,22 @@ impl Render for SearchDialog {
 
 /// Opens the search dialog in `window`.
 pub fn open(services: Services, everywhere: bool, window: &mut Window, cx: &mut App) {
+    open_with_query(services, everywhere, "", window, cx);
+}
+
+/// Opens the search dialog with `query` typed in (empty for none).
+pub fn open_with_query(
+    services: Services,
+    everywhere: bool,
+    query: &str,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let dialog = cx.new(|cx| SearchDialog::new(services, everywhere, window, cx));
+    if !query.is_empty() {
+        let list = dialog.read(cx).list().clone();
+        list.update(cx, |state, cx| state.set_query(query, window, cx));
+    }
     let first = Cell::new(true);
     window.open_dialog(cx, move |d, window, cx| {
         if first.replace(false) {
