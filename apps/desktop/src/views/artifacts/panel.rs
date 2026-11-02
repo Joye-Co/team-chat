@@ -22,7 +22,7 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{self, Lucide},
     views::{
-        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify, notify_error},
+        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify, notify_error, size_text},
         time_text,
     },
 };
@@ -176,13 +176,21 @@ impl Render for TopicOutputs {
             .map(|a| {
                 let (kind, glyph) = match a.kind {
                     ArtifactKind::Page => (ca::PANEL_KIND_PAGE, Lucide::FileCode),
+                    ArtifactKind::Image => (f::KIND_IMAGE, Lucide::FileImage),
                     _ => (ca::KIND_FILE, Lucide::FileText),
                 };
-                let meta = format!(
-                    "{kind} · {} · {}",
-                    fill(ca::VERSION_SHORT, &[("n", &a.version.to_string())]),
-                    time_text(a.updated_at)
-                );
+                // A page shows its version and time (`网页 · v3 · 今天 14:31`);
+                // a first-version image its size (`图片 · 2.4 MB`).
+                let meta = match a.size_bytes {
+                    Some(bytes) if a.kind == ArtifactKind::Image && a.version <= 1 => {
+                        format!("{kind} · {}", size_text(bytes))
+                    }
+                    _ => format!(
+                        "{kind} · {} · {}",
+                        fill(ca::VERSION_SHORT, &[("n", &a.version.to_string())]),
+                        time_text(a.updated_at)
+                    ),
+                };
                 let author = self
                     .members
                     .iter()
