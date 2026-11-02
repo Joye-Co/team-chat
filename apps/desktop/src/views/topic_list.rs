@@ -187,9 +187,72 @@ pub struct TopicListView {
     activation: Option<Subscription>,
     /// The selection uses the accent tint (the window is key).
     emphasized: bool,
+    /// Keyboard focus of the list itself: ↑↓ move `cursor`, Enter opens it
+    /// (DESIGN.md §11).
+    focus: gpui::FocusHandle,
+    cursor: Option<usize>,
+    /// The cursor ring shows (the list has keyboard focus).
+    cursor_visible: bool,
+}
+
+gpui::actions!(topic_list, [CursorUp, CursorDown, OpenCursor]);
+
+/// ↑↓ and Enter while the topic list has focus.
+pub fn bind_keys(cx: &mut gpui::App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("up", CursorUp, Some("TopicList")),
+        gpui::KeyBinding::new("down", CursorDown, Some("TopicList")),
+        gpui::KeyBinding::new("enter", OpenCursor, Some("TopicList")),
+    ]);
+}
+
+/// The row a cursor move lands on: from the cursor, else from the open
+/// topic, else from the edge.
+fn cursor_target(
+    cursor: Option<usize>,
+    open: Option<usize>,
+    len: usize,
+    down: bool,
+) -> Option<usize> {
+    if len == 0 {
+        return None;
+    }
+    Some(match cursor.or(open) {
+        Some(ix) if down => (ix + 1).min(len - 1),
+        Some(ix) => ix.saturating_sub(1),
+        None if down => 0,
+        None => len - 1,
+    })
 }
 
 impl TopicListView {
+    fn open_index(&self, cx: &Context<Self>) -> Option<usize> {
+        let open = self.services.nav.read(cx).topic.clone()?;
+        self.rows
+            .iter()
+            .position(|r| r.group_id == open.0 && r.topic.id == open.1)
+    }
+
+    fn move_cursor(&mut self, down: bool, window: &mut Window, cx: &mut Context<Self>) {
+        let open = self.open_index(cx);
+        self.cursor = cursor_target(self.cursor, open, self.rows.len(), down);
+        if let Some(ix) = self.cursor {
+            self.scroll
+                .scroll_to_item(ix, gpui::ScrollStrategy::Nearest);
+        }
+        window.focus(&self.focus, cx);
+        cx.notify();
+    }
+
+    fn open_cursor(&mut self, cx: &mut Context<Self>) {
+        let Some(row) = self.cursor.and_then(|ix| self.rows.get(ix)).cloned() else {
+            return;
+        };
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.open_topic(row.group_id, row.topic.id, cx));
+    }
+
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
@@ -242,6 +305,9 @@ impl TopicListView {
             _subscriptions: subscriptions,
             activation: None,
             emphasized: true,
+            focus: cx.focus_handle(),
+            cursor: None,
+            cursor_visible: false,
         };
         this.refresh(cx);
         this
@@ -516,6 +582,9 @@ impl TopicListView {
                     cx,
                 )
                 .when(selected && !self.emphasized, |el| el.bg(k.pressed))
+                .when(self.cursor_visible && self.cursor == Some(ix), |el| {
+                    el.shadow(ui::rows::focus_ring(k.focus))
+                })
                 .relative()
                 .size_full()
                 .items_start()
@@ -645,6 +714,10 @@ impl Render for TopicListView {
             self.activation = Some(cx.observe_window_activation(window, |_, _, cx| cx.notify()));
         }
         self.emphasized = ui::rows::selection_emphasized(window);
+        self.cursor_visible = self.focus.is_focused(window);
+        if self.cursor.is_some_and(|ix| ix >= self.rows.len()) {
+            self.cursor = None;
+        }
         let k = theme::colors(cx);
         let base = self.scroll.0.borrow().base_handle.clone();
         let edges = scroll_edges(&base);
@@ -756,6 +829,22 @@ impl Render for TopicListView {
             .flex()
             .flex_col()
             .bg(k.content)
+            .track_focus(&self.focus)
+            .key_context("TopicList")
+            .on_action(
+                cx.listener(|this, _: &CursorUp, window, cx| this.move_cursor(false, window, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &CursorDown, window, cx| this.move_cursor(true, window, cx)),
+            )
+            .on_action(cx.listener(|this, _: &OpenCursor, window, cx| {
+                // A focused row runs its own click on Enter.
+                if this.focus.is_focused(window) {
+                    this.open_cursor(cx)
+                } else {
+                    cx.propagate()
+                }
+            }))
             .child(header)
             .when(self.place.is_some(), |el| el.child(self.tabs(cx)))
             .child(body)
@@ -765,6 +854,48 @@ impl Render for TopicListView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn arrows_and_enter_open_topics_from_the_list(cx: &mut gpui::TestAppContext) {
+        use std::sync::Arc;
+
+        use crate::{data::ChatProvider, fake::FakeProvider};
+
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = FakeProvider::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services
+                .nav
+                .update(cx, |nav, cx| nav.open_group("g-dev".into(), cx));
+            TopicListView::new(services, cx)
+        });
+        cx.run_until_parked();
+        view.update_in(cx, |this, window, cx| window.focus(&this.focus, cx));
+        cx.simulate_keystrokes("down down enter");
+        cx.run_until_parked();
+        let (expected, open) = view.update(cx, |this, cx| {
+            let row = this.rows[1].clone();
+            (
+                Some((row.group_id, row.topic.id)),
+                this.services.nav.read(cx).topic.clone(),
+            )
+        });
+        assert_eq!(open, expected);
+    }
+
+    #[test]
+    fn arrow_keys_move_the_cursor_inside_the_list() {
+        assert_eq!(cursor_target(None, None, 0, true), None);
+        assert_eq!(cursor_target(None, None, 5, true), Some(0));
+        assert_eq!(cursor_target(None, None, 5, false), Some(4));
+        assert_eq!(cursor_target(None, Some(2), 5, true), Some(3));
+        assert_eq!(cursor_target(Some(4), Some(2), 5, true), Some(4));
+        assert_eq!(cursor_target(Some(0), None, 5, false), Some(0));
+    }
     use crate::data::ChatProvider;
     use crate::fake::{FakeProvider, ME};
     use chrono::Duration as D;
