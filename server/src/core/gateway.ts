@@ -5,6 +5,7 @@ import {
   ClientFrame,
   type ClientFrameOf,
   type GroupSummary,
+  MAX_CARD_BYTES,
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
   type ServerFrame,
@@ -222,6 +223,9 @@ export class MemberGateway extends DurableObject<Env> {
     if (!schema) return { ok: false, rid, error: { code: "invalid", message: `unknown frame type ${t}` } };
     const result = schema.safeParse(raw);
     if (!result.success) {
+      if (obj.card !== undefined && new TextEncoder().encode(JSON.stringify(obj.card)).byteLength > MAX_CARD_BYTES) {
+        return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };
+      }
       const issue = result.error.issues[0];
       const where = issue?.path.join(".") || "(root)";
       return { ok: false, rid, error: { code: "invalid", message: `invalid frame: ${where} ${issue?.message ?? ""}`.trim() } };
