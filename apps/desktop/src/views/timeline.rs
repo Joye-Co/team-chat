@@ -147,6 +147,20 @@ pub struct TimelineView {
     reacting: Option<(String, bool)>,
     /// Bot runs of the open topic, newest first.
     runs: Vec<crate::data::BotRunSummary>,
+    /// Working runs at the last refresh, rows of runs that just ended (with
+    /// the time they ended) and when each run's row first showed
+    /// (`timeline/live.rs`).
+    live_shown: Vec<crate::data::BotRunSummary>,
+    live_leaving: Vec<(crate::data::BotRunSummary, Instant)>,
+    live_entered: std::collections::HashMap<String, Instant>,
+    /// Opening a topic: its pending rows show without an animation.
+    live_quiet: bool,
+    /// Messages from others that arrived while the list followed the tail
+    /// in the focused window, with the time they arrived: they fade in once
+    /// (§12, 120 ms opacity, no rise).
+    arrived: std::collections::HashMap<String, Instant>,
+    /// The window was the key window at the last render.
+    window_active: bool,
     /// Runs whose log this view asked for once (steps and live labels).
     followed_runs: std::collections::HashSet<String>,
     /// Steps rows the user opened.
@@ -235,6 +249,12 @@ impl TimelineView {
             hovered: None,
             reacting: None,
             runs: Vec::new(),
+            live_shown: Vec::new(),
+            live_leaving: Vec::new(),
+            live_entered: Default::default(),
+            live_quiet: false,
+            arrived: Default::default(),
+            window_active: false,
             followed_runs: Default::default(),
             open_steps: Default::default(),
             ticking: false,
@@ -279,7 +299,10 @@ impl TimelineView {
         self.hovered = None;
         self.open_steps.clear();
         self.focus.clear();
+        self.reset_live();
+        self.live_quiet = true;
         self.refresh(cx);
+        self.live_quiet = false;
         let me = self.me.clone();
         let read_seq = self
             .open
@@ -419,6 +442,19 @@ impl TimelineView {
             self.older_requested = false;
         }
 
+        // New messages from others fade in while the person looks at the
+        // end of the topic; not a batch of more than 3 and not in a window
+        // in the background (§12).
+        self.arrived
+            .retain(|_, at| at.elapsed() < theme::motion::FAST * 4);
+        if following && self.window_active && (1..=3).contains(&others_appended) {
+            let now = Instant::now();
+            for m in &self.messages[self.messages.len() - appended..] {
+                if Some(m.author_id.as_str()) != me {
+                    self.arrived.insert(model::key(m).to_string(), now);
+                }
+            }
+        }
         if mine_appended {
             // My own new message: show it.
             self.jump_to_latest();
@@ -435,6 +471,7 @@ impl TimelineView {
         {
             self.editing = None;
         }
+        self.track_live(self.live_quiet, _cx);
         self.continue_focus(_cx);
     }
 
@@ -566,6 +603,7 @@ impl Render for TimelineView {
         if self.activation.is_none() {
             self.activation = Some(cx.observe_window_activation(window, |_, _, cx| cx.notify()));
         }
+        self.window_active = window.is_window_active();
         let colors = theme::colors(cx);
         let Some(topic) = self.topic.clone() else {
             return div()

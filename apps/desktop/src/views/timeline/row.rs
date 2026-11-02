@@ -7,9 +7,9 @@
 //! meta line.
 
 use gpui::{
-    AnyElement, App, ClipboardItem, Context, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnimationExt as _, AnyElement, App, ClipboardItem, Context, ElementId, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
@@ -84,7 +84,21 @@ impl TimelineView {
         } else {
             Some(space::S6)
         };
-        let message_row = self.render_message(&message, &key, grouped, window, cx);
+        let mut message_row = self.render_message(&message, &key, grouped, window, cx);
+        if self
+            .arrived
+            .get(&key)
+            .is_some_and(|at| at.elapsed() < theme::motion::FAST)
+        {
+            message_row = div()
+                .child(message_row)
+                .with_animation(
+                    ElementId::Name(format!("arrive-{key}").into()),
+                    gpui::Animation::new(theme::motion::FAST).with_easing(theme::motion::out_fn()),
+                    |el, t| el.opacity(t),
+                )
+                .into_any_element();
+        }
         item.children(gap.map(|h| div().flex_none().h(h)))
             .child(message_row)
             .into_any_element()
