@@ -8,7 +8,8 @@
 #      DESKTOP_PACKAGE (default desktop)
 #
 # Files in apps/desktop/resources/ (if it exists) are copied into Contents/Resources;
-# an AppIcon.icns there replaces the generated icon.
+# an AppIcon.icns there replaces assets/brand/AppIcon.icns. The DMG window uses
+# assets/brand/dmg/background.tiff and fixed icon positions (scripts/dmg-layout.py).
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -17,13 +18,13 @@ skip_build=0
 for arg in "$@"; do
   case "$arg" in
     --skip-build) skip_build=1 ;;
-    -h | --help) sed -n '2,12p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,13p' "$0"; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
 
 [ "$(uname -s)" = Darwin ] || die "build-dmg.sh runs on macOS only"
-need jq codesign hdiutil sips iconutil python3 shasum plutil
+need jq codesign hdiutil python3 shasum plutil
 cargo_env
 
 NAME="$(product name)"
@@ -34,6 +35,8 @@ VERSION="$(workspace_version)"
 BUNDLE_VERSION="${VERSION%%-*}"
 MACOS_MIN="${MACOS_MIN:-13.0}"
 PACKAGE="${DESKTOP_PACKAGE:-desktop}"
+BRAND="$ROOT/assets/brand"
+[ -s "$BRAND/AppIcon.icns" ] && [ -s "$BRAND/dmg/background.tiff" ] || die "missing assets/brand files; run bun assets/brand/render.mjs"
 
 xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
@@ -89,16 +92,9 @@ cat >"$APP/Contents/Info.plist" <<PLIST
 PLIST
 plutil -lint -s "$APP/Contents/Info.plist" || die "Info.plist is not valid"
 
-log "drawing the icon"
-ICONSET="$WORK/AppIcon.iconset"
-mkdir -p "$ICONSET"
-python3 -I "$ROOT/scripts/make-icon.py" "$WORK/icon-1024.png" 1024
-for s in 16 32 128 256 512; do
-  sips -z "$s" "$s" "$WORK/icon-1024.png" --out "$ICONSET/icon_${s}x${s}.png" >/dev/null
-  d=$((s * 2))
-  sips -z "$d" "$d" "$WORK/icon-1024.png" --out "$ICONSET/icon_${s}x${s}@2x.png" >/dev/null
-done
-iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+log "adding the icon"
+# assets/brand/AppIcon.icns is built from docs/design/brand/icon.svg by assets/brand/render.mjs.
+cp "$BRAND/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 
 if [ -d "$ROOT/apps/desktop/resources" ]; then
   log "copying apps/desktop/resources"
@@ -112,13 +108,17 @@ codesign --verify --deep --strict "$APP"
 
 log "making the DMG"
 ln -s /Applications "$STAGE/Applications"
+mkdir -p "$STAGE/.background"
+cp "$BRAND/dmg/background.tiff" "$STAGE/.background/background.tiff"
+cp "$BRAND/AppIcon.icns" "$STAGE/.VolumeIcon.icns"
 mkdir -p "$DIST"
 DMG="$DIST/$NAME-$VERSION.dmg"
+RW="$WORK/rw.dmg"
 rm -f "$DMG" "$DMG.sha256"
 ok=0
 for attempt in 1 2 3; do
   # hdiutil sometimes fails with "Resource busy" when other builds run; retry.
-  if hdiutil create -quiet -volname "$NAME" -srcfolder "$STAGE" -fs HFS+ -format UDZO -imagekey zlib-level=9 -ov "$DMG"; then
+  if hdiutil create -quiet -volname "$NAME" -srcfolder "$STAGE" -fs HFS+ -format UDRW -ov "$RW"; then
     ok=1
     break
   fi
@@ -126,6 +126,28 @@ for attempt in 1 2 3; do
   sleep $((attempt * 2))
 done
 [ "$ok" = 1 ] || die "hdiutil create failed"
+
+# Finder layout: written straight into .DS_Store (no Finder, no AppleScript, no GUI).
+# The window is the 660 x 400 pt background; icon centers match assets/brand/src/dmg-background.html.
+MNT="$WORK/mnt"
+mkdir -p "$MNT"
+hdiutil attach -quiet -nobrowse -noautoopen -readwrite -mountpoint "$MNT" "$RW"
+detach_rw() { hdiutil detach -quiet "$MNT" 2>/dev/null || hdiutil detach -quiet -force "$MNT"; }
+if ! python3 -I "$ROOT/scripts/dmg-layout.py" "$MNT" --volume-name "$NAME" \
+  --background .background/background.tiff --window 660x400 --icon-size 128 --text-size 13 \
+  --item "$NAME.app=180,186" --item "Applications=480,186"; then
+  detach_rw
+  die "dmg-layout.py failed"
+fi
+# The volume icon needs the custom-icon flag on the volume root; SetFile ships with Xcode tools.
+if command -v SetFile >/dev/null 2>&1; then
+  SetFile -a C "$MNT" || log "SetFile failed; the volume keeps the default icon"
+else
+  log "no SetFile; the volume keeps the default icon"
+fi
+sync
+detach_rw
+hdiutil convert -quiet "$RW" -format UDZO -imagekey zlib-level=9 -ov -o "$DMG"
 hdiutil verify -quiet "$DMG"
 write_sha256 "$DMG"
 
