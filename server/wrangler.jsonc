@@ -7,7 +7,9 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-15",
   "compatibility_flags": ["nodejs_compat"],
-  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": true } },
+  // Invocation logs stay off: they store the full request URL, and /download?code= carries an
+  // invite code. The app logger logs every request with its path only (core/worker.ts).
+  "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
   // Daily archive of every group log and of D1 to R2 (server/src/ops). Keep in sync with ARCHIVE_CRON.
   "triggers": { "crons": ["0 3 * * *"] },
   "vars": { "ENVIRONMENT": "local", "VERSION": "0.0.0-dev" },
@@ -30,7 +32,7 @@
   "env": {
     "e2e": {
       "name": "chat-api-e2e",
-      "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": true } },
+      "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
       "triggers": { "crons": ["0 3 * * *"] },
       "vars": { "ENVIRONMENT": "e2e", "VERSION": "0.0.0-e2e" },
       "d1_databases": [
@@ -48,7 +50,7 @@
     },
     "staging": {
       "name": "chat-api-staging",
-      "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": true } },
+      "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
       "triggers": { "crons": ["0 3 * * *"] },
       "vars": { "ENVIRONMENT": "staging", "VERSION": "0.0.0-staging" },
       "d1_databases": [
@@ -66,7 +68,7 @@
     },
     "production": {
       "name": "chat-api-prod",
-      "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": true } },
+      "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": false } },
       "triggers": { "crons": ["0 3 * * *"] },
       "vars": { "ENVIRONMENT": "production", "VERSION": "0.0.0" },
       "d1_databases": [
