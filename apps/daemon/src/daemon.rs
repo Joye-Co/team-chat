@@ -44,6 +44,8 @@ struct RunEntry {
 pub struct Daemon {
     cfg: Arc<Config>,
     token: Arc<String>,
+    /// Masks secrets in every frame a run sends (run events, run.done, run.session).
+    redactor: Arc<crate::redact::Redactor>,
     clis: Vec<CliInfo>,
     runs: HashMap<String, RunEntry>,
     recent: VecDeque<String>,
@@ -65,9 +67,11 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     let clis = health::discover_clis(&cfg).await;
     let (link_tx, mut link_rx) = mpsc::unbounded_channel();
     let (run_tx, mut run_rx) = mpsc::unbounded_channel();
+    let redactor = Arc::new(crate::redact::Redactor::for_daemon(&cfg, &token));
     let mut d = Daemon {
         cfg: Arc::new(cfg),
         token: Arc::new(token),
+        redactor,
         clis,
         runs: HashMap::new(),
         recent: VecDeque::new(),
@@ -423,6 +427,7 @@ impl Daemon {
             control_tx: ctl_tx,
             control_rx: ctl_rx,
             out: self.run_tx.clone(),
+            redactor: self.redactor.clone(),
         }));
     }
 
@@ -456,7 +461,7 @@ impl Daemon {
                     Up::RunSession(s) => s.seq = seq,
                     _ => {}
                 }
-                let Ok(text) = serde_json::to_string(&up) else {
+                let Some(text) = self.redactor.frame(&up) else {
                     return;
                 };
                 if r.log.is_none() {

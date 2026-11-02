@@ -38,10 +38,17 @@ pub async fn upload(
     target: &SessionUpload,
     server_url: &str,
     token: &str,
+    redactor: &crate::redact::Redactor,
 ) -> Result<Uploaded, String> {
     let raw = tokio::fs::read(file)
         .await
         .map_err(|e| format!("cannot read session file: {e}"))?;
+    // The session goes to the server: mask secrets the CLI saw, as in run events.
+    let r = redactor.clone();
+    let raw =
+        tokio::task::spawn_blocking(move || r.text(&String::from_utf8_lossy(&raw)).into_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
     let sha = hex(&Sha256::digest(&raw));
     let raw_len = raw.len() as u64;
     let gz = tokio::task::spawn_blocking(move || {

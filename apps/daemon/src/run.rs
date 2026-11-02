@@ -2,6 +2,7 @@
 
 use crate::config::{Config, RuntimeConfig};
 use crate::proto::{RunAssign, RunDone, RunEvent, RunSession, Up, now_ms, truncate};
+use crate::redact::DeltaGate;
 use crate::runtime::{self, Control, Outcome, RunSpec, Status};
 use crate::workspace;
 use std::sync::Arc;
@@ -83,6 +84,7 @@ pub struct RunCtx {
     pub control_tx: mpsc::UnboundedSender<Control>,
     pub control_rx: mpsc::UnboundedReceiver<Control>,
     pub out: RunOut,
+    pub redactor: Arc<crate::redact::Redactor>,
 }
 
 pub async fn supervise(ctx: RunCtx) {
@@ -94,6 +96,7 @@ pub async fn supervise(ctx: RunCtx) {
         control_tx,
         control_rx,
         out,
+        redactor,
     } = ctx;
     let run_id = assign.run_id.clone();
     let started = Instant::now();
@@ -191,30 +194,32 @@ pub async fn supervise(ctx: RunCtx) {
                 sha256: None,
                 error: Some("no session file".into()),
             },
-            Some(f) => match crate::upload::upload(f, target, &cfg.server_url, &token).await {
-                Ok(u) => RunSession {
-                    run_id: run_id.clone(),
-                    seq: 0,
-                    at: now_ms(),
-                    ok: true,
-                    source: Some(source.into()),
-                    bytes: Some(u.bytes),
-                    gzip_bytes: Some(u.gzip_bytes),
-                    sha256: Some(u.sha256),
-                    error: None,
-                },
-                Err(e) => RunSession {
-                    run_id: run_id.clone(),
-                    seq: 0,
-                    at: now_ms(),
-                    ok: false,
-                    source: Some(source.into()),
-                    bytes: None,
-                    gzip_bytes: None,
-                    sha256: None,
-                    error: Some(e),
-                },
-            },
+            Some(f) => {
+                match crate::upload::upload(f, target, &cfg.server_url, &token, &redactor).await {
+                    Ok(u) => RunSession {
+                        run_id: run_id.clone(),
+                        seq: 0,
+                        at: now_ms(),
+                        ok: true,
+                        source: Some(source.into()),
+                        bytes: Some(u.bytes),
+                        gzip_bytes: Some(u.gzip_bytes),
+                        sha256: Some(u.sha256),
+                        error: None,
+                    },
+                    Err(e) => RunSession {
+                        run_id: run_id.clone(),
+                        seq: 0,
+                        at: now_ms(),
+                        ok: false,
+                        source: Some(source.into()),
+                        bytes: None,
+                        gzip_bytes: None,
+                        sha256: None,
+                        error: Some(e),
+                    },
+                }
+            }
         };
         send(Up::RunSession(frame));
     }
@@ -246,13 +251,26 @@ async fn run_runtime(
         .max_duration_ms
         .map(|ms| tokio::time::Instant::now() + Duration::from_millis(ms));
     let mut tick = tokio::time::interval(Duration::from_secs(15));
+    // Streamed text is released per line, so redaction sees a secret whole.
+    let mut gate = DeltaGate::default();
     let outcome = loop {
+        let hold_until = gate
+            .deadline()
+            .map(tokio::time::Instant::from_std)
+            .unwrap_or_else(|| tokio::time::Instant::now() + Duration::from_secs(3600));
         tokio::select! {
             o = &mut fut => break o,
             Some(ev) = emit_rx.recv() => {
                 last = Instant::now();
                 stalled = false;
-                event(ev);
+                for ev in gate.push(ev) {
+                    event(ev);
+                }
+            }
+            _ = tokio::time::sleep_until(hold_until), if gate.holding() => {
+                for ev in gate.tick(std::time::Instant::now()) {
+                    event(ev);
+                }
             }
             _ = tick.tick() => {
                 if !stalled && last.elapsed() >= stall {
@@ -269,6 +287,11 @@ async fn run_runtime(
         }
     };
     while let Ok(ev) = emit_rx.try_recv() {
+        for ev in gate.push(ev) {
+            event(ev);
+        }
+    }
+    for ev in gate.flush() {
         event(ev);
     }
     let mut outcome = outcome;

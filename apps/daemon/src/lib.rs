@@ -7,6 +7,7 @@ pub mod doctor;
 pub mod health;
 pub mod product;
 pub mod proto;
+pub mod redact;
 pub mod run;
 pub mod runtime;
 pub mod service;
