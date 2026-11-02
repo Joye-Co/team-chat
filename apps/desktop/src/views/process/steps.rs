@@ -2,7 +2,8 @@
 
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
-    StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
+    ScrollHandle, StatefulInteractiveElement as _, Styled, Window, canvas, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -41,13 +42,14 @@ pub fn render_steps(
     process: &RunProcess,
     bot_name: &str,
     developer: bool,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> Vec<AnyElement> {
     let start = process.steps.len().saturating_sub(MAX_STEPS);
     process.steps[start..]
         .iter()
         .enumerate()
-        .filter_map(|(i, step)| render_step(start + i, step, bot_name, developer, cx))
+        .filter_map(|(i, step)| render_step(start + i, step, bot_name, developer, window, cx))
         .collect()
 }
 
@@ -69,28 +71,109 @@ fn block(_cx: &App) -> gpui::Div {
         .gap(space::S4)
 }
 
+/// The fade at the right edge of a block whose line is wider than it.
+const LINE_FADE: gpui::Pixels = px(16.);
+
 /// Command lines and output: `code` 13/20 Menlo on `code-bg`, radius 8.
 /// Lines never wrap: a long path or command scrolls sideways (§15), so a
-/// log reads line by line. `id` is unique within the step list.
-fn mono_box(id: ElementId, text: String, cx: &App) -> impl IntoElement {
+/// log reads line by line. The text scrolls inside the block's padding, and
+/// while a line runs past the right edge a short fade there says so. `id` is
+/// unique within the step list.
+fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = theme::colors(cx);
+    // The scroll position lives as long as the block is drawn, so a scrolled
+    // line stays put while the run streams new steps.
+    let handle = window
+        .use_keyed_state(id.clone(), cx, |_, _| ScrollHandle::new())
+        .read(cx)
+        .clone();
+    let fade_handle = handle.clone();
+    let bg = k.code_bg;
     div()
-        .id(id)
         .mt(space::S2)
         .w_full()
         .min_w(px(0.))
-        .overflow_x_scroll()
+        .relative()
         .rounded(theme::radius::MD)
-        .bg(k.code_bg)
+        .bg(bg)
+        .px(space::S10)
+        .py(space::S8)
         .child(
             div()
-                .px(space::S10)
-                .py(space::S8)
-                .t_code()
-                .text_color(k.text_1)
-                .whitespace_nowrap()
-                .child(text),
+                .id(id)
+                .w_full()
+                .min_w(px(0.))
+                .flex()
+                .overflow_x_scroll()
+                .track_scroll(&handle)
+                .child(
+                    div()
+                        .flex_none()
+                        .t_code()
+                        .text_color(k.text_1)
+                        .whitespace_nowrap()
+                        .child(text),
+                ),
         )
+        .child(
+            // Painted after the scroll area has its sizes for this frame, so
+            // the fade shows from the first frame and goes at the line's end.
+            canvas(
+                |_, _, _| {},
+                move |bounds, _, window, _| {
+                    if line_runs_past(&fade_handle) {
+                        window.paint_quad(gpui::fill(
+                            bounds,
+                            gpui::linear_gradient(
+                                90.,
+                                gpui::linear_color_stop(bg.opacity(0.), 0.),
+                                gpui::linear_color_stop(bg, 1.),
+                            ),
+                        ));
+                    }
+                },
+            )
+            .absolute()
+            .top(space::S8)
+            .bottom(space::S8)
+            .right(space::S10)
+            .w(LINE_FADE),
+        )
+}
+
+/// Where a path is cut: the folders before the last two parts, and those
+/// parts (`apps/desktop/src/` and `views/login.rs`). A path of one or two
+/// parts has no head.
+fn split_path(path: &str) -> (&str, &str) {
+    let trimmed = path.trim_end_matches('/');
+    let mut cuts = trimmed.rmatch_indices('/').map(|(i, _)| i);
+    match (cuts.next(), cuts.next()) {
+        (Some(_), Some(i)) => path.split_at(i + 1),
+        _ => ("", path),
+    }
+}
+
+/// A file path on one line, cut in the middle so the file name and its
+/// folder stay (`apps/desktop…/views/login.rs`); the tooltip has the whole
+/// path only when it is cut (§15). Style the returned box (type, color).
+fn path_line(id: ElementId, path: &str) -> gpui::Stateful<gpui::Div> {
+    let (head, tail) = split_path(path);
+    let line = ui::truncating(id, path.to_string());
+    if head.is_empty() {
+        return line.text_ellipsis_middle();
+    }
+    // An end cut whose ellipsis carries the last two parts: the kept start
+    // is always inside the folders, and the line stays one text (no gap
+    // between two cut boxes).
+    line.text_overflow(gpui::TextOverflow::Truncate(
+        format!("…/{}", tail.trim_start_matches('/')).into(),
+    ))
+}
+
+/// True while text in the scroll area of `handle` runs past its right edge.
+fn line_runs_past(handle: &ScrollHandle) -> bool {
+    let max = handle.max_offset().x;
+    max > px(0.5) && handle.offset().x > -max + px(0.5)
 }
 
 /// The id of the `slot`th box of step `ix`.
@@ -183,7 +266,8 @@ fn render_step(
     step: &ProcessStep,
     bot_name: &str,
     developer: bool,
-    cx: &App,
+    window: &mut Window,
+    cx: &mut App,
 ) -> Option<AnyElement> {
     let colors = theme::colors(cx);
     let el = match step {
@@ -264,7 +348,7 @@ fn render_step(
             });
             block(cx)
                 .child(header)
-                .child(mono_box(mono_id(ix, 0), clip(title, 400), cx))
+                .child(mono_box(mono_id(ix, 0), clip(title, 400), window, cx))
                 .when_some(input.clone().filter(|_| developer), |el, json| {
                     el.child(label(
                         fill(dev::RUN_TOOL_INPUT, &[("json", &clip(&json, 600))]),
@@ -272,7 +356,7 @@ fn render_step(
                     ))
                 })
                 .when_some(out, |el, (head, more)| {
-                    el.child(mono_box(mono_id(ix, 1), head, cx))
+                    el.child(mono_box(mono_id(ix, 1), head, window, cx))
                         .when(more > 0, |el| {
                             el.child(label(fill(p::MORE_LINES, &[("n", &more.to_string())]), cx))
                         })
@@ -282,7 +366,8 @@ fn render_step(
             let rows: Vec<_> = changes
                 .iter()
                 .take(50)
-                .map(|c| {
+                .enumerate()
+                .map(|(row, c)| {
                     let kind = match c.kind {
                         FileChangeKind::Added => p::FILE_ADDED,
                         FileChangeKind::Modified => p::FILE_MODIFIED,
@@ -299,12 +384,15 @@ fn render_step(
                                 .child(kind),
                         )
                         .child(
-                            div()
-                                .min_w(px(0.))
-                                .t_code()
-                                .text_color(colors.text_1)
-                                .one_line()
-                                .child(c.path.clone()),
+                            path_line(
+                                ElementId::NamedInteger(
+                                    "process-file".into(),
+                                    (ix * 64 + row) as u64,
+                                ),
+                                &c.path,
+                            )
+                            .t_code()
+                            .text_color(colors.text_1),
                         )
                 })
                 .collect();
@@ -334,7 +422,7 @@ fn render_step(
                         .child(clip(title, 400)),
                 )
                 .when_some(detail.clone(), |el, d| {
-                    el.child(mono_box(mono_id(ix, 2), clip(&d, 1200), cx))
+                    el.child(mono_box(mono_id(ix, 2), clip(&d, 1200), window, cx))
                 })
                 .child(
                     div()
@@ -455,5 +543,16 @@ mod tests {
         let (head, more) = head_lines(&text, 12);
         assert_eq!(head.lines().count(), 12);
         assert_eq!(more, 8);
+    }
+
+    #[test]
+    fn a_path_is_cut_before_its_last_two_parts() {
+        assert_eq!(
+            split_path("apps/desktop/src/views/login.rs"),
+            ("apps/desktop/src/", "views/login.rs")
+        );
+        assert_eq!(split_path("src/login.rs"), ("", "src/login.rs"));
+        assert_eq!(split_path("login.rs"), ("", "login.rs"));
+        assert_eq!(split_path("a/b/c/"), ("a/", "b/c/"));
     }
 }

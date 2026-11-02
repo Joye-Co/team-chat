@@ -533,7 +533,7 @@ pub fn status_badge(status: RunStatus, _cx: &App) -> impl IntoElement {
 }
 
 impl Render for ProcessView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let developer = self.services.nav.read(cx).developer_view;
         let section = |title: &'static str, cx: &App| {
@@ -570,7 +570,7 @@ impl Render for ProcessView {
             .and_then(|r| self.member(&r.bot_id))
             .map(|m| m.name.clone())
             .unwrap_or_default();
-        let steps = steps::render_steps(&self.process, &bot_name, developer, cx);
+        let steps = steps::render_steps(&self.process, &bot_name, developer, window, cx);
         let state_line = match (
             &self.process.error,
             self.process.loaded,
