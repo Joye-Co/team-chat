@@ -62,6 +62,9 @@ bun run deploy:staging    # the same for staging
 
 Then check `/v1/health` and run `tools/e2e` against the env (below).
 
+State on 2026-11-03: e2e and staging run `origin/main` at `d2edf55` (D1 migrations through
+`0004_characters`). No new Worker secret since the first setup.
+
 ## admin.ts
 
 `bun server/scripts/admin.ts <command> --env <env>` from the repository root. The base URL comes
@@ -84,8 +87,33 @@ bun server/scripts/admin.ts help                                             # a
 cargo run -p e2e -- --base-url https://chat-api-e2e.huangdeshiou.workers.dev --secrets-dir ~/.config/team-chat/e2e
 ```
 
+All scenarios except `soak` run by default (`--minutes <n>` adds soak). `pipeline` sends 50
+writes on one socket without waiting for acks; it is the check for the subrequest depth limit
+(see Logs), so run it on a deployed env after any change to how Durable Objects call each other.
+Last run on e2e (`e2wgg0`): all 8 pass; load delivery p50 71 ms, p95 153 ms.
+
 Use the e2e env for routine runs. Each run leaves its groups and members in place (only their
 tokens are revoked), so run against staging only when a release needs it.
+
+## Bots and the desktop app against a deployed env
+
+```sh
+# Runner-backed bot: the real daemon with the fake Claude Code CLI. Makes its own group,
+# member, bot runner and machine, then removes the runner and the machine.
+CARGO_TARGET_DIR=<your target dir> bun apps/daemon/e2e/local-e2e.ts \
+  --base-url https://chat-api-e2e.huangdeshiou.workers.dev \
+  --owner-token-file ~/.config/team-chat/e2e/owner-token
+
+# Bot SDK echo example (make the bot with admin.ts bot, add it to a group, then mention it)
+CHAT_URL=https://chat-api-e2e.huangdeshiou.workers.dev CHAT_TOKEN_FILE=<bot token file> \
+  bun examples/echo-bot.ts
+
+# Desktop app from the DMG against staging, signed in with a test bot token (never the owner's)
+TeamChat.app/Contents/MacOS/TeamChat --selftest-live https://chat-api-staging.huangdeshiou.workers.dev \
+  --token-file ~/.config/team-chat/staging/bot-selftest-integrate-<id>.token --report <json>
+```
+
+The staging bot `selftest-integrate` and its group 自测 exist for this check only.
 
 ## Logs
 
@@ -103,5 +131,9 @@ bunx wrangler deployments list --env staging          # what is deployed
   the cause of an `internal` ack, use the Workers Logs dashboard, or reproduce the frames with
   a small WebSocket script against the e2e env.
 - `wrangler dev` does not enforce some production limits, for example the subrequest depth
-  limit. Run `tools/e2e` against the e2e env after a change to how Durable Objects call each
-  other.
+  limit (16). A Durable Object counts each outgoing call against its newest unfinished incoming
+  request, so a gateway that called a room while a room delivery was its newest request nested
+  one level deeper per write, and pipelined writes failed after about 8 with `internal`. The
+  gateway now starts each write's room call when the frame arrives and the room keeps the
+  socket's order (`server/src/core/gateway.ts`, `GroupRoom.ordered`). Run `tools/e2e` (with
+  `pipeline`) against the e2e env after a change to how Durable Objects call each other.
