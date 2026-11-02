@@ -1,0 +1,9 @@
+{"t":"welcome","protocol":1,"machineId":"01JA0000000000000000000M01","serverTime":1793627400000,"runs":[{"runId":"01JA0000000000000000000R01","ackedSeq":12}]}
+{"t":"heartbeat.ack","at":1793627400000}
+{"t":"run.assign","runId":"01JA0000000000000000000R01","botMemberId":"01JA0000000000000000000B01","groupId":"01JA0000000000000000000G01","topicId":"01JA0000000000000000000T01","runtime":"claude","prompt":"Topic: Fix the flaky test\n\nJoye: @dev please fix tests/sync.rs","model":"sonnet","repo":{"url":"https://github.com/Joye-Co/team-chat","baseBranch":"main"},"envAllowlist":["GITHUB_TOKEN"],"leaseMs":600000,"maxDurationMs":3600000,"sessionUpload":{"url":"https://chat-api-staging.example.workers.dev/v1/machine/runs/01JA0000000000000000000R01/session"}}
+{"t":"run.assign","runId":"01JA0000000000000000000R02","botMemberId":"01JA0000000000000000000B01","groupId":"01JA0000000000000000000G01","topicId":"01JA0000000000000000000T02","runtime":"codex","prompt":"Write a summary","envAllowlist":[],"leaseMs":600000}
+{"t":"run.input","runId":"01JA0000000000000000000R01","inputId":"01JA0000000000000000000I01","text":"Also update the docs","authorId":"01JA0000000000000000000H01"}
+{"t":"run.approval","runId":"01JA0000000000000000000R01","approvalId":"a1","decision":"approve"}
+{"t":"run.cancel","runId":"01JA0000000000000000000R01","reason":"stopped by Joye"}
+{"t":"ack","runId":"01JA0000000000000000000R01","seq":16}
+{"t":"error","error":{"code":"unauthorized","message":"machine token revoked"}}

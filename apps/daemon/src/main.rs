@@ -48,7 +48,7 @@ fn main() {
         }
         "install-service" => {
             let _ = load_cfg();
-            match daemon::service::install(&daemon::service::agents_dir(), &config_path, load) {
+            match daemon::service::install(&daemon::service::agents_dir(), &config_path, &daemon::service::log_dir(), load) {
                 Ok(p) => println!("installed {}", p.display()),
                 Err(e) => exit_with(&e),
             }

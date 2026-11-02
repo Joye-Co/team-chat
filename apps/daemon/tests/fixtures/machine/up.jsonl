@@ -1,0 +1,21 @@
+{"t":"hello","protocol":1,"machine":{"id":"01JA0000000000000000000M01","name":"mac-mini","labels":["mac","main"],"daemonVersion":"0.1.0","os":"macos","arch":"aarch64","maxParallelRuns":2},"clis":[{"runtime":"codex","kind":"codex","command":"codex","version":"codex-cli 0.159.0","available":true},{"runtime":"claude","kind":"claude","command":"claude","version":"2.1.310 (Claude Code)","available":true}],"health":{"diskFreeBytes":120000000000,"diskTotalBytes":494000000000,"load1":1.5,"load5":1.2,"load15":0.9,"cpuCount":10,"activeRuns":1},"runs":[{"runId":"01JA0000000000000000000R01","lastSeq":12,"done":false}]}
+{"t":"heartbeat","at":1793627400000,"health":{"diskFreeBytes":120000000000,"diskTotalBytes":494000000000,"load1":1.5,"load5":1.2,"load15":0.9,"cpuCount":10,"activeRuns":1},"runs":[{"runId":"01JA0000000000000000000R01","lastSeq":14,"done":false}]}
+{"t":"run.accept","runId":"01JA0000000000000000000R01"}
+{"t":"run.reject","runId":"01JA0000000000000000000R02","reason":"busy","message":"max_parallel_runs reached"}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":1,"at":1793627400001,"event":{"type":"status","state":"preparing"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":2,"at":1793627400002,"event":{"type":"session","sessionId":"0b6a3c1e-2f4d-4e5a-9b7c-1d2e3f4a5b6c","runtime":"claude","model":"claude-sonnet"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":3,"at":1793627400003,"event":{"type":"turn.started","turnId":"t1"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":4,"at":1793627400004,"event":{"type":"message.delta","itemId":"msg_1:0","turnId":"t1","text":"Look"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":5,"at":1793627400005,"event":{"type":"message","itemId":"msg_1:0","turnId":"t1","role":"assistant","text":"Looking at the test."}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":6,"at":1793627400006,"event":{"type":"reasoning","itemId":"msg_1:1","turnId":"t1","text":"Run the tests first."}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":7,"at":1793627400007,"event":{"type":"tool.call","itemId":"toolu_1","turnId":"t1","tool":"Bash","title":"Bash: cargo test","input":{"command":"cargo test"}}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":8,"at":1793627400008,"event":{"type":"tool.result","itemId":"toolu_1","turnId":"t1","ok":false,"output":"1 test failed","exitCode":101}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":9,"at":1793627400009,"event":{"type":"file.change","itemId":"toolu_2:file","turnId":"t1","changes":[{"path":"src/lib.rs","kind":"modify","diff":"@@ -1 +1 @@\n-a\n+b\n"}]}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":10,"at":1793627400010,"event":{"type":"approval.request","approvalId":"a1","itemId":"c1","title":"run command: rm -rf build","detail":"clean the build"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":11,"at":1793627400011,"event":{"type":"approval.resolved","approvalId":"a1","decision":"approve"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":12,"at":1793627400012,"event":{"type":"input.accepted","inputId":"01JA0000000000000000000I01"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":13,"at":1793627400013,"event":{"type":"status","state":"stalled","message":"no output for 5 minutes"}}
+{"t":"run.event","runId":"01JA0000000000000000000R01","seq":14,"at":1793627400014,"event":{"type":"turn.completed","turnId":"t1","status":"completed"}}
+{"t":"run.done","runId":"01JA0000000000000000000R01","seq":15,"at":1793627400015,"status":"succeeded","exitCode":0,"resultText":"Fixed the test.\nDetails follow.","summary":"Fixed the test.","sessionId":"0b6a3c1e-2f4d-4e5a-9b7c-1d2e3f4a5b6c","usage":{"inputTokens":1200,"outputTokens":300,"costUsd":0.012},"durationMs":64000}
+{"t":"run.session","runId":"01JA0000000000000000000R01","seq":16,"at":1793627400016,"ok":true,"source":"cli","bytes":52011,"gzipBytes":9120,"sha256":"9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08"}
+{"t":"run.done","runId":"01JA0000000000000000000R03","seq":4,"at":1793627400020,"status":"failed","exitCode":1,"error":"claude exited before the turn ended: auth","durationMs":900}
