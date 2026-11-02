@@ -714,13 +714,16 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
 // --- bot member ---
 
 /// The 26 characters as a grid of 40 pt ghost buttons with the idle look at 32 pt; the chosen
-/// one is selected. `pick` gets the clicked character.
+/// one is selected: the selected fill and a 2 pt `accent` ring inside its edge, so the choice
+/// reads at a glance in both themes. `pick` gets the clicked character.
 pub fn character_picker(
     id: &'static str,
     selected: Option<CharacterId>,
     disabled: bool,
     pick: impl Fn(CharacterId, &mut Window, &mut App) + Clone + 'static,
+    cx: &App,
 ) -> gpui::Div {
+    let accent = theme::colors(cx).accent;
     div()
         .flex()
         .flex_wrap()
@@ -733,10 +736,26 @@ pub fn character_picker(
                 .size(px(40.))
                 .p_0()
                 .selected(selected == Some(c))
+                .when(selected == Some(c), |b| {
+                    b.shadow(ui::rows::focus_ring(accent))
+                })
                 .disabled(disabled)
                 .child(characters::image(c, CharacterStatus::Idle, px(32.)))
                 .on_click(move |_, window, cx| pick(c, window, cx))
         }))
+}
+
+/// The look a new bot gets until one is picked by hand: the roster's character for `name`,
+/// else the first of the 26 that no member in `taken` uses, else the first one.
+pub fn default_character(name: &str, taken: &[CharacterId]) -> CharacterId {
+    characters::roster_character(name)
+        .or_else(|| {
+            CharacterId::ALL
+                .iter()
+                .copied()
+                .find(|c| !taken.contains(c))
+        })
+        .unwrap_or(CharacterId::ALL[0])
 }
 
 /// The add-bot-member dialog: name and 岗位, then either an outside
@@ -752,7 +771,7 @@ pub struct BotForm {
     branch: Entity<InputState>,
     /// Runtime names that machines report.
     known_runtimes: Vec<String>,
-    /// The character picked by hand; until then the roster's one for the name.
+    /// The character picked by hand; until then [`default_character`] for the typed name.
     character: Option<CharacterId>,
     status: Status,
     created: Option<BotCreated>,
@@ -801,10 +820,18 @@ impl BotForm {
         }
     }
 
-    /// The character the new bot gets: picked by hand, or the roster's one for the name.
-    fn chosen_character(&self, cx: &App) -> Option<CharacterId> {
-        self.character
-            .or_else(|| characters::roster_character(&self.value(&self.name, cx)))
+    /// The character the new bot gets: picked by hand, or [`default_character`] for the name.
+    fn chosen_character(&self, cx: &App) -> CharacterId {
+        self.character.unwrap_or_else(|| {
+            let taken: Vec<CharacterId> = self
+                .services
+                .provider
+                .members()
+                .into_iter()
+                .filter_map(|m| m.character)
+                .collect();
+            default_character(&self.value(&self.name, cx), &taken)
+        })
     }
 
     pub fn created(&self) -> Option<&BotCreated> {
@@ -869,7 +896,7 @@ impl BotForm {
         } else {
             None
         };
-        let character = self.chosen_character(cx);
+        let character = Some(self.chosen_character(cx));
         let reply = self.services.provider.create_bot_member(
             name,
             (!role.is_empty()).then_some(role),
@@ -961,15 +988,21 @@ impl Render for BotForm {
             .child(widgets::form_input("member-role", s::ROLE, &self.role, cx))
             .child(widgets::field(
                 s::BOT_CHARACTER,
-                character_picker("bot-character", self.chosen_character(cx), busy, {
-                    let page = cx.entity().downgrade();
-                    move |c, _, cx| {
-                        let _ = page.update(cx, |this, cx| {
-                            this.character = Some(c);
-                            cx.notify();
-                        });
-                    }
-                }),
+                character_picker(
+                    "bot-character",
+                    Some(self.chosen_character(cx)),
+                    busy,
+                    {
+                        let page = cx.entity().downgrade();
+                        move |c, _, cx| {
+                            let _ = page.update(cx, |this, cx| {
+                                this.character = Some(c);
+                                cx.notify();
+                            });
+                        }
+                    },
+                    cx,
+                ),
                 cx,
             ))
             .child(widgets::field(
@@ -1107,6 +1140,7 @@ impl Render for CharacterForm {
                 move |c, window, cx| {
                     let _ = page.update(cx, |this, cx| this.pick(c, window, cx));
                 },
+                cx,
             ))
             .children(widgets::status_line(
                 "member-character-status",
@@ -1204,5 +1238,21 @@ mod tests {
         );
         let ids: Vec<_> = list.iter().map(|m| m.id.as_str()).collect();
         assert_eq!(ids, vec!["5", "6", "3", "4", "8", "7", "2", "1"]);
+    }
+
+    #[test]
+    fn a_new_bot_always_gets_a_character() {
+        // The roster wins, even when another member uses that look.
+        assert_eq!(
+            default_character("Jojo", &[CharacterId::Jojo]),
+            CharacterId::Jojo
+        );
+        // A name outside the roster gets the first free look.
+        let all = CharacterId::ALL;
+        assert_eq!(default_character("新机器人", &[]), all[0]);
+        assert_eq!(default_character("新机器人", &[all[0], all[2]]), all[1]);
+        // All 26 used: the first one.
+        assert_eq!(default_character("新机器人", all), all[0]);
+        assert_eq!(default_character("", &all[..25]), all[25]);
     }
 }

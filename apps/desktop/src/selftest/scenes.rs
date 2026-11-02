@@ -71,7 +71,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "todo",
-        about: "The 待办 list with its first entry open",
+        about: "The 待办 list (its sidebar header selected) with the first entry that waits on me open and selected",
         start: Start::SignedIn,
         setup: open_todo,
         open: open_main,
@@ -154,6 +154,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_bot_dialog,
+    },
+    Scene {
+        name: "settings-add-bot-new",
+        about: "Settings: the add-bot dialog with a name outside the roster: the first free character is selected",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_bot_dialog_new_name,
     },
     Scene {
         name: "settings-character",
@@ -302,9 +309,9 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "add-members",
-        about: "The sheet that adds members to a 群 (from the 群 menu)",
+        about: "The sheet that adds members to the open 群 (from its menu in the sidebar)",
         start: Start::SignedIn,
-        setup: open_first_topic,
+        setup: crate::views::nav::selftest::scenes::open_smallest_group,
         open: crate::views::nav::selftest::scenes::add_members,
     },
     Scene {
@@ -454,7 +461,14 @@ pub fn open_first_topic(services: &Services, cx: &mut App) {
 }
 
 pub fn open_todo(services: &Services, cx: &mut App) {
-    let first = services.provider.todo().into_iter().next();
+    // An entry that waits on me stays in the list once read (a mention
+    // leaves it), so the list shows its row selected.
+    let todo = services.provider.todo();
+    let first = todo
+        .iter()
+        .find(|item| item.reason == crate::data::TodoReason::WaitingOnMe)
+        .or(todo.first())
+        .cloned();
     services.nav.update(cx, |nav, cx| {
         nav.open_todo(cx);
         if let Some(item) = first {

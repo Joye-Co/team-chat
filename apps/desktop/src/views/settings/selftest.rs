@@ -731,6 +731,24 @@ pub fn open_bot_dialog(
     )
 }
 
+/// 成员 with the add-bot dialog open and a name typed that the roster does not know: the
+/// grid selects the first character no member uses.
+pub fn open_bot_dialog_new_name(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let form = super::members::open_add_bot(s, w, cx);
+            form.update(cx, |f, cx| f.fill("发布巡检", None, w, cx));
+        },
+        cx,
+    )
+}
+
 /// 成员 with the character dialog of the first bot open.
 pub fn open_character_dialog(
     services: Services,
