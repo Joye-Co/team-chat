@@ -42,7 +42,13 @@ pub struct ClientConfig {
     /// Size limit of the downloaded-file cache (`data_dir/files`); least recently used
     /// files are removed past it. Default 2 GiB.
     pub file_cache_max_bytes: u64,
+    /// Test hook for end-to-end tests (tools/e2e): a live event for which it returns true
+    /// is dropped as if it never arrived. Always `None` in the app.
+    pub drop_live_event: Option<DropLiveEvent>,
 }
+
+/// `(group_id, seq) -> drop?`; see [`ClientConfig::drop_live_event`].
+pub type DropLiveEvent = Arc<dyn Fn(&str, u64) -> bool + Send + Sync>;
 
 impl ClientConfig {
     pub fn new(
@@ -65,6 +71,7 @@ impl ClientConfig {
             fetch_limit: 500,
             history_limit: 100,
             file_cache_max_bytes: 2 * 1024 * 1024 * 1024,
+            drop_live_event: None,
         }
     }
 

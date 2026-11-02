@@ -271,6 +271,7 @@ struct Session {
     pong_deadline: Option<Instant>,
     welcome_deadline: Instant,
     out: Vec<ClientFrame>,
+    drop_live_event: Option<crate::client::DropLiveEvent>,
 }
 
 impl Session {
@@ -287,6 +288,7 @@ impl Session {
             request_timeout: c.request_timeout,
             fetch_limit: c.fetch_limit.clamp(1, crate::proto::MAX_PAGE_LIMIT),
             history_limit: c.history_limit.clamp(1, crate::proto::MAX_PAGE_LIMIT),
+            drop_live_event: c.drop_live_event.clone(),
             me: String::new(),
             welcomed: false,
             next_rid: 1,
@@ -659,6 +661,12 @@ impl Session {
         let frame = match frame {
             Incoming::Unsupported => return Some(SessionEnd::Unsupported),
             Incoming::Event(entry, notify) => {
+                if let Some(drop) = &self.drop_live_event
+                    && drop(entry.group_id(), entry.seq())
+                {
+                    debug!(group = %entry.group_id(), seq = entry.seq(), "test hook dropped event");
+                    return None;
+                }
                 if self.welcomed {
                     let gid = entry.group_id().to_string();
                     let note = notify.map(|reason| (reason, entry.clone()));

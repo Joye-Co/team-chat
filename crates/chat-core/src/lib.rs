@@ -34,8 +34,8 @@ pub mod updates;
 
 pub use artifacts::{LocalArtifactFile, NewVersion};
 pub use client::{
-    Client, ClientConfig, ClientError, ClientUpdate, ConnectionState, EditRequest, Notification,
-    SearchRequest, SendFailure, SendRequest, TopicPatch, background,
+    Client, ClientConfig, ClientError, ClientUpdate, ConnectionState, DropLiveEvent, EditRequest,
+    Notification, SearchRequest, SendFailure, SendRequest, TopicPatch, background,
 };
 pub use client_ext::ArtifactFolder;
 pub use files::{Phase, Progress, ProgressFn, UploadRequest, no_progress};
