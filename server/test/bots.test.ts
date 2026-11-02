@@ -573,3 +573,169 @@ describe("runner-backed bots", () => {
     d.close();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Run plans (docs/protocol.md, "Run plans")
+// ---------------------------------------------------------------------------
+
+describe("run plans", () => {
+  const plan = [
+    { text: "写标题和正文", state: "done" },
+    { text: "生成 3 张配图", state: "current" },
+    { text: "等 Joye 确认", state: "pending" },
+  ];
+  const plan2 = [
+    { text: "写标题和正文", state: "done" },
+    { text: "生成 3 张配图", state: "done" },
+    { text: "等 Joye 确认", state: "waiting" },
+    { text: "周四 20:00 发出", state: "pending" },
+  ];
+  const runUpdates = (c: Client, runId: string) => c.events().filter((e) => e.type === "run.updated" && e.data.run.id === runId);
+
+  async function externalWorld() {
+    const owner = await createMember({ level: "owner", name: "Joye" });
+    const human = await createMember({ name: "Alice" });
+    const bot = await createMember({ kind: "bot", name: "taro" });
+    const other = await createMember({ kind: "bot", name: "other" });
+    const gid = await createGroup(owner, [human.id, bot.id, other.id]);
+    const { c } = await Client.connect(human.token);
+    const sent = await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "@taro 写一条小红书", mentions: [bot.id] });
+    return { owner, human, bot, other, gid, c, topicId: sent.message.topicId as string };
+  }
+
+  it("let an external bot start a run with a plan, replace it, clear it and end the run", async () => {
+    const { human, bot, other, gid, c, topicId } = await externalWorld();
+    const start = await api("/v1/runs", { token: bot.token, body: { groupId: gid, topicId, plan } });
+    expect(start.status, JSON.stringify(start.body)).toBe(200);
+    expect(start.body).toMatchObject({ botId: bot.id, groupId: gid, topicId, status: "running", plan });
+    expect(start.body.machineId).toBeUndefined();
+    expect(start.body.requestedBy).toBeUndefined();
+    const runId = start.body.id as string;
+    const first = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId);
+    expect(first.actorId).toBe(bot.id);
+    expect(first.data.run.plan).toEqual(plan);
+
+    // Starting again returns the active run: no second run in the topic.
+    const again = await api("/v1/runs", { token: bot.token, body: { groupId: gid, topicId } });
+    expect(again.body.id).toBe(runId);
+
+    // An update replaces the whole plan and fans out with the run.
+    const put = await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan: plan2 } });
+    expect(put.status, JSON.stringify(put.body)).toBe(200);
+    expect(put.body.plan).toEqual(plan2);
+    const second = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.plan?.length === 4);
+    expect(second.data.run.plan).toEqual(plan2);
+    expect(second.data.run.updatedAt).toBeGreaterThanOrEqual(first.data.run.updatedAt);
+    expect((await api(`/v1/runs/${runId}`, { token: human.token })).body.plan).toEqual(plan2);
+
+    // The same plan again stores nothing.
+    const before = runUpdates(c, runId).length;
+    expect((await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan: plan2 } })).status).toBe(200);
+    // A later change proves the room is past the no-op.
+    await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan: [] } });
+    const cleared = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && !e.data.run.plan);
+    expect(cleared.data.run.plan).toBeUndefined();
+    expect(runUpdates(c, runId).length).toBe(before + 1);
+
+    // Only the run's bot sets the plan; invalid plans are rejected.
+    expect((await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: human.token, body: { plan } })).status).toBe(403);
+    expect((await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: other.token, body: { plan } })).status).toBe(403);
+    const outsider = await createMember({ kind: "bot", name: "outsider" });
+    expect((await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: outsider.token, body: { plan } })).status).toBe(404);
+    const long = await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan: [{ text: "字".repeat(201), state: "current" }] } });
+    expect(long.status).toBe(400);
+    const badState = await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan: [{ text: "x", state: "in_progress" }] } });
+    expect(badState.status).toBe(400);
+    const tooMany = Array.from({ length: 31 }, (_, i) => ({ text: `step ${i}`, state: "pending" }));
+    expect((await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan: tooMany } })).status).toBe(400);
+
+    // Only the run's bot ends it; an ended run takes no plan.
+    expect((await api(`/v1/runs/${runId}/end`, { token: other.token, body: { status: "done" } })).status).toBe(403);
+    await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan: plan2 } });
+    const end = await api(`/v1/runs/${runId}/end`, { token: bot.token, body: { status: "done", summary: "已排期" } });
+    expect(end.status, JSON.stringify(end.body)).toBe(200);
+    expect(end.body).toMatchObject({ status: "done", summary: "已排期", plan: plan2 });
+    expect(end.body.endedAt).toBeTypeOf("number");
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "done");
+    expect((await api(`/v1/runs/${runId}/plan`, { method: "PUT", token: bot.token, body: { plan } })).status).toBe(409);
+    expect((await api(`/v1/runs/${runId}/end`, { token: bot.token, body: { status: "done" } })).status).toBe(409);
+
+    // A new start after the end makes a new run.
+    const next = await api("/v1/runs", { token: bot.token, body: { groupId: gid, topicId } });
+    expect(next.body.id).not.toBe(runId);
+    expect(next.body.plan).toBeUndefined();
+    c.close();
+  });
+
+  it("start runs only for external bots in their groups and topics", async () => {
+    const { human, bot, gid, c, topicId } = await externalWorld();
+    expect((await api("/v1/runs", { token: human.token, body: { groupId: gid, topicId } })).status).toBe(403);
+    expect((await api("/v1/runs", { token: bot.token, body: { groupId: gid, topicId: "01NOPE00000000000000000000" } })).status).toBe(404);
+    const outsider = await createMember({ kind: "bot", name: "outsider" });
+    expect((await api("/v1/runs", { token: outsider.token, body: { groupId: gid, topicId } })).status).toBe(404);
+    expect((await api("/v1/runs", { token: bot.token, body: { groupId: gid } })).status).toBe(400);
+    // A runner-backed bot gets runs from mentions only.
+    const w = await world();
+    const { c: c2 } = await Client.connect(w.human.token);
+    const t2 = await c2.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "hi" });
+    expect((await api("/v1/runs", { token: w.bot.token, body: { groupId: w.gid, topicId: t2.message.topicId } })).status).toBe(409);
+    c.close();
+    c2.close();
+  });
+
+  it("never mark an external run stalled", async () => {
+    const { bot, gid, c, topicId } = await externalWorld();
+    const runId = (await api("/v1/runs", { token: bot.token, body: { groupId: gid, topicId, plan } })).body.id as string;
+    await runInDurableObject(deskOf(bot.id), async (_o, state) => {
+      state.storage.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
+      await state.storage.setAlarm(Date.now());
+    });
+    await runDurableObjectAlarm(deskOf(bot.id));
+    expect((await api(`/v1/runs/${runId}`, { token: bot.token })).body.status).toBe("running");
+    expect(botMessages(c, topicId, bot.id)).toHaveLength(0);
+    c.close();
+  });
+
+  it("take the runner's plan events from the machine that holds the run", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "running");
+    d.event(runId, { type: "plan", items: plan });
+    d.event(runId, { type: "plan", items: plan2 });
+    const s = d.event(runId, { type: "plan", items: plan2 });
+    await d.acked(runId, s);
+    const got = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.plan?.length === 4);
+    expect(got.data.run.plan).toEqual(plan2);
+    expect(got.data.run.status).toBe("running");
+    // One batch or several, the last plan wins and equal plans store nothing new.
+    const withPlan = () => runUpdates(c, runId).filter((e) => e.data.run.plan);
+    expect(withPlan().at(-1).data.run.plan).toEqual(plan2);
+    const n = withPlan().filter((e) => JSON.stringify(e.data.run.plan) === JSON.stringify(plan2)).length;
+    expect(n).toBe(1);
+    // Items past the limits are cut to them (a newer or broken daemon), bad items are dropped.
+    const s2 = d.event(runId, {
+      type: "plan",
+      items: [{ text: ` ${"字".repeat(250)} `, state: "current" }, { text: "", state: "pending" }, { text: "x", state: "in_progress" }, ...Array.from({ length: 40 }, (_, i) => ({ text: `step ${i}`, state: "pending" }))],
+    });
+    await d.acked(runId, s2);
+    const cut = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.plan?.length === 30);
+    expect(cut.data.run.plan[0]).toEqual({ text: "字".repeat(200), state: "current" });
+    expect(cut.data.run.plan[1]).toEqual({ text: "step 0", state: "pending" });
+    const s3 = d.event(runId, { type: "plan", items: plan2 });
+    await d.acked(runId, s3);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.plan?.length === 4 && e.seq > cut.seq);
+    // The bot's own token may set the plan of its runner's run too; the machine's run ends with the plan kept.
+    const done = d.done(runId, { status: "succeeded", exitCode: 0, resultText: "好了", summary: "好了" });
+    await d.acked(runId, done);
+    const end = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "done");
+    expect(end.data.run.plan).toEqual(plan2);
+    // External-run endpoints do not end a runner's run.
+    expect((await api(`/v1/runs/${runId}/end`, { token: w.bot.token, body: { status: "done" } })).status).toBe(403);
+    c.close();
+    d.close();
+  });
+});

@@ -3,12 +3,13 @@
 // messages and topic status, and later topic messages into run input. The normalized run log
 // lives in its SQLite.
 import { DurableObject } from "cloudflare:workers";
-import type { BotRun, BotRunner, Card, RunAssignFrame, RunStatus, TopicStatus } from "@chat/protocol";
+import { type BotRun, type BotRunner, type Card, MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS, type RunAssignFrame, type RunPlan, RunPlanItem, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { roomStub } from "../core/env";
-import { ApiError, unwrap } from "../core/errors";
+import { ApiError, type Result, toErrorBody, unwrap } from "../core/errors";
 import { ulid } from "../core/ids";
 import { logger as baseLogger, type Logger } from "../core/logger";
 import { runMigrations } from "../core/migrations";
+import { TokenBucket } from "../core/ratelimit";
 import type { Actor } from "../core/registry";
 import {
   LEASE_MS,
@@ -53,9 +54,40 @@ type RunRow = {
   excluded: string;
   last_seq: number;
   follow_up_of: string | null;
+  /** JSON of the latest plan, or null. */
+  plan: string | null;
+  /** 1 = started by an external bot with `POST /v1/runs` (no machine). */
+  external: number;
 };
 
 const ACTIVE = "ended_at IS NULL";
+/** Plan updates over HTTP, per run: 2 per second, bursts of 10. */
+const PLAN_RATE = { rate: 2, burst: 10 };
+
+/** Runs `fn` and turns its error into a Result (thrown errors lose their class over RPC). */
+async function result<T>(fn: () => Promise<T>): Promise<Result<T>> {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (err) {
+    return { ok: false, error: toErrorBody(err) };
+  }
+}
+
+/** A daemon's plan items cut to the protocol limits; null when `items` is not a list. */
+export function sanitizePlan(items: unknown): RunPlan | null {
+  if (!Array.isArray(items)) return null;
+  const out: RunPlan = [];
+  for (const it of items) {
+    const parsed = RunPlanItem.safeParse({ ...(it as object), text: typeof it?.text === "string" ? [...it.text.trim()].slice(0, MAX_PLAN_TEXT_CHARS).join("") : it?.text });
+    if (parsed.success) out.push({ text: parsed.data.text, state: parsed.data.state });
+    if (out.length === MAX_PLAN_ITEMS) break;
+  }
+  return out;
+}
+
+function samePlan(a: RunPlan | null, b: RunPlan): boolean {
+  return (a ?? []).length === b.length && (a ?? []).every((x, i) => x.text === b[i].text && x.state === b[i].state);
+}
 const MAX_PAGE = 500;
 const DEFAULT_PAGE = 200;
 
@@ -65,6 +97,7 @@ export class BotDesk extends DurableObject<BotsEnv> {
   private log: Logger = baseLogger.child({ obj: "BotDesk" });
   /** One chain per run so frames, accepts and timeouts of one run apply in order. */
   private readonly chains = new Map<string, Promise<unknown>>();
+  private readonly planBuckets = new Map<string, TokenBucket>();
 
   constructor(ctx: DurableObjectState, env: BotsEnv) {
     super(ctx, env);
@@ -121,6 +154,13 @@ export class BotDesk extends DurableObject<BotsEnv> {
             CREATE INDEX inputs_run ON inputs(run_id);
           `,
         },
+        {
+          name: "desk-2-plan",
+          up: `
+            ALTER TABLE runs ADD COLUMN plan TEXT;
+            ALTER TABLE runs ADD COLUMN external INTEGER NOT NULL DEFAULT 0;
+          `,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -169,15 +209,34 @@ export class BotDesk extends DurableObject<BotsEnv> {
       groupId: r.group_id,
       topicId: r.topic_id,
       status: r.status,
-      requestedBy: r.requested_by,
       createdAt: r.created_at,
       updatedAt: r.updated_at,
     };
+    if (r.requested_by) run.requestedBy = r.requested_by;
     if (r.machine_id) run.machineId = r.machine_id;
     if (r.started_at !== null) run.startedAt = r.started_at;
     if (r.ended_at !== null) run.endedAt = r.ended_at;
     if (r.summary) run.summary = r.summary;
+    const plan = this.planOf(r);
+    if (plan && plan.length > 0) run.plan = plan;
     return run;
+  }
+
+  private planOf(r: Pick<RunRow, "plan">): RunPlan | null {
+    if (!r.plan) return null;
+    try {
+      return JSON.parse(r.plan) as RunPlan;
+    } catch {
+      return null;
+    }
+  }
+
+  /** Keeps `plan` as the run's latest plan. Returns false when it equals the current one. */
+  private storePlan(r: RunRow, plan: RunPlan): boolean {
+    if (samePlan(this.planOf(r), plan)) return false;
+    r.plan = plan.length > 0 ? JSON.stringify(plan) : null;
+    this.sql.exec("UPDATE runs SET plan = ? WHERE id = ?", r.plan, r.id);
+    return true;
   }
 
   // -------------------------------------------------------------------------
@@ -475,6 +534,7 @@ export class BotDesk extends DurableObject<BotsEnv> {
     const progress = new Progress(r.progress_text, JSON.parse(r.items) as Record<string, string>, r.progress_full === 1);
     const now = Date.now();
     let done: Extract<SeqFrame, { t: "run.done" }> | null = null;
+    let planChanged = false;
     this.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", now, r.id);
     r.last_event_at = now;
     if (r.stalled) {
@@ -518,11 +578,19 @@ export class BotDesk extends DurableObject<BotsEnv> {
         case "input.accepted":
           this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id);
           break;
+        case "plan": {
+          // The link reads events loosely (newer daemons): keep what fits the plan rules.
+          const plan = sanitizePlan(ev.items);
+          if (plan && this.storePlan(r, plan)) planChanged = true;
+          break;
+        }
         default:
           break;
       }
     }
     await this.flush(r, progress);
+    // The final run.updated of `finish` carries the plan too.
+    if (planChanged && !done) await this.setStatus(r, r.status);
     if (done) await this.finish(r, done);
     else await this.scheduleStall();
   }
@@ -646,7 +714,7 @@ export class BotDesk extends DurableObject<BotsEnv> {
   private async scheduleStall(): Promise<void> {
     const next = this.sql
       .exec<{ at: number | null }>(
-        `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND status = 'running' AND stalled = 0 AND approval_id IS NULL`,
+        `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL`,
       )
       .one().at;
     if (next === null) return;
@@ -659,14 +727,14 @@ export class BotDesk extends DurableObject<BotsEnv> {
     const now = Date.now();
     const due = this.sql
       .exec<{ id: string }>(
-        `SELECT id FROM runs WHERE ${ACTIVE} AND status = 'running' AND stalled = 0 AND approval_id IS NULL AND last_event_at <= ?`,
+        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL AND last_event_at <= ?`,
         now - STALL_MS,
       )
       .toArray();
     for (const { id } of due) {
       await this.serial(id, async () => {
         const r = this.run(id);
-        if (!r || r.ended_at !== null || r.stalled || r.status !== "running" || r.last_event_at > now - STALL_MS) return;
+        if (!r || r.external || r.ended_at !== null || r.stalled || r.status !== "running" || r.last_event_at > now - STALL_MS) return;
         this.sql.exec("UPDATE runs SET stalled = 1 WHERE id = ?", id);
         r.stalled = 1;
         try {
@@ -679,6 +747,97 @@ export class BotDesk extends DurableObject<BotsEnv> {
       });
     }
     await this.scheduleStall();
+  }
+
+  // -------------------------------------------------------------------------
+  // Runs of external bots and plans over HTTP (docs/protocol.md, "Run plans")
+  // -------------------------------------------------------------------------
+
+  /**
+   * Starts a run of this (external) bot in the topic, or returns its active run there. The API
+   * Worker checked that the caller is this bot, not runner-backed, and a member of the group.
+   */
+  async startExternal(botId: string, groupId: string, topicId: string, plan?: RunPlan): Promise<Result<BotRun>> {
+    return result(() => this.doStartExternal(botId, groupId, topicId, plan));
+  }
+
+  private async doStartExternal(botId: string, groupId: string, topicId: string, plan?: RunPlan): Promise<BotRun> {
+    this.bind(botId);
+    const active = this.activeRun(topicId);
+    if (active) {
+      if (plan) return this.doSetPlan(botId, active.id, plan);
+      return this.toRun(active);
+    }
+    // The topic must exist in the group (the room also checks membership).
+    unwrap(await roomStub(this.env, groupId).rpc(groupId, "bots.topicExists", this.actor(), { topicId }));
+    const now = Date.now();
+    const runId = ulid(now);
+    return this.serial(runId, async () => {
+      if (this.activeRun(topicId)) {
+        const again = this.activeRun(topicId) as RunRow;
+        return this.toRun(again);
+      }
+      this.sql.exec(
+        `INSERT INTO runs (id, group_id, topic_id, status, requested_by, trigger_message_id, created_at, started_at, updated_at, last_event_at, external, plan)
+         VALUES (?, ?, ?, 'running', '', '', ?, ?, ?, ?, 1, ?)`,
+        runId,
+        groupId,
+        topicId,
+        now,
+        now,
+        now,
+        now,
+        plan && plan.length > 0 ? JSON.stringify(plan) : null,
+      );
+      await this.env.DB.prepare(
+        "INSERT INTO bot_runs (id, bot_id, group_id, topic_id, machine_id, created_at) VALUES (?, ?, ?, ?, NULL, ?)",
+      )
+        .bind(runId, botId, groupId, topicId, now)
+        .run();
+      const r = this.run(runId) as RunRow;
+      await this.setStatus(r, "running");
+      return this.toRun(r);
+    });
+  }
+
+  /** Replaces the plan of an active run of this bot (HTTP; the caller is the bot). */
+  async setPlan(botId: string, runId: string, plan: RunPlan): Promise<Result<BotRun>> {
+    return result(() => this.doSetPlan(botId, runId, plan));
+  }
+
+  private async doSetPlan(botId: string, runId: string, plan: RunPlan): Promise<BotRun> {
+    this.bind(botId);
+    let bucket = this.planBuckets.get(runId);
+    if (!bucket) {
+      bucket = new TokenBucket(PLAN_RATE.rate, PLAN_RATE.burst);
+      this.planBuckets.set(runId, bucket);
+    }
+    if (!bucket.take()) throw new ApiError("rate_limited", "too many plan updates for this run");
+    return this.serial(runId, async () => {
+      const r = this.run(runId);
+      if (!r) throw new ApiError("not_found", "run not found");
+      if (r.ended_at !== null) throw new ApiError("conflict", "the run ended");
+      if (this.storePlan(r, plan)) await this.setStatus(r, r.status);
+      return this.toRun(r);
+    });
+  }
+
+  /** Ends a run that this external bot started. */
+  async endExternal(botId: string, runId: string, status: "done" | "failed" | "cancelled", summary?: string): Promise<Result<BotRun>> {
+    return result(() => this.doEndExternal(botId, runId, status, summary));
+  }
+
+  private async doEndExternal(botId: string, runId: string, status: "done" | "failed" | "cancelled", summary?: string): Promise<BotRun> {
+    this.bind(botId);
+    return this.serial(runId, async () => {
+      const r = this.run(runId);
+      if (!r) throw new ApiError("not_found", "run not found");
+      if (!r.external) throw new ApiError("forbidden", "runs of a runner end on the machine");
+      if (r.ended_at !== null) throw new ApiError("conflict", "the run ended");
+      this.planBuckets.delete(runId);
+      await this.setStatus(r, status, { ended_at: Date.now(), summary: summary ? cut(summary, 280) : r.summary });
+      return this.toRun(r);
+    });
   }
 
   // -------------------------------------------------------------------------

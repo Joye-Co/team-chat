@@ -1,10 +1,10 @@
 // HTTP routes of the bots feature (docs/protocol.md, "Bot runs").
-import { CreateMachineRequest, SetBotRunnerRequest } from "@chat/protocol";
+import { CreateMachineRequest, EndRunRequest, SetBotRunnerRequest, SetRunPlanRequest, StartRunRequest } from "@chat/protocol";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
 import { sha256Hex } from "../core/crypto";
 import { getMember, isGroupMember } from "../core/db";
-import { ApiError } from "../core/errors";
+import { ApiError, unwrap } from "../core/errors";
 import { ulid } from "../core/ids";
 import { registerRoute } from "../core/registry";
 import { toMachine } from "./dispatch";
@@ -245,6 +245,56 @@ export function registerBotRoutes(): void {
       const page = await deskStub(env, row.bot_id).events(row.bot_id, row.id, afterSeq, n);
       if (!page) throw new ApiError("not_found", "run not found");
       return page;
+    },
+  });
+
+  // -------------------------------------------------------------------------
+  // Runs of external bots and run plans (docs/protocol.md, "Run plans")
+  // -------------------------------------------------------------------------
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs",
+    auth: "member",
+    async handler({ env, auth, body }) {
+      const a = auth as AuthContext;
+      const req = await body(StartRunRequest);
+      if (a.member.kind !== "bot") throw new ApiError("forbidden", "only bots start runs");
+      if (!(await isGroupMember(env.DB, req.groupId, a.memberId))) throw new ApiError("not_found", "group not found");
+      if (await loadRunner(env.DB, a.memberId)) throw new ApiError("conflict", "a runner-backed bot gets runs from mentions");
+      const run = unwrap(await deskStub(env, a.memberId).startExternal(a.memberId, req.groupId, req.topicId, req.plan));
+      await auditStatement(env.DB, a, { action: "run.start", target: run.id, details: { topicId: req.topicId, planItems: req.plan?.length ?? 0 } }).run();
+      return run;
+    },
+  });
+
+  registerRoute({
+    method: "PUT",
+    path: "/v1/runs/:id/plan",
+    auth: "member",
+    async handler({ env, params, auth, body }) {
+      const a = auth as AuthContext;
+      const req = await body(SetRunPlanRequest);
+      const row = await visibleRun(env.DB, a, params.id);
+      if (row.bot_id !== a.memberId) throw new ApiError("forbidden", "only the run's bot sets its plan");
+      const run = unwrap(await deskStub(env, row.bot_id).setPlan(row.bot_id, row.id, req.plan));
+      await auditStatement(env.DB, a, { action: "run.plan", target: row.id, details: { planItems: req.plan.length } }).run();
+      return run;
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/end",
+    auth: "member",
+    async handler({ env, params, auth, body }) {
+      const a = auth as AuthContext;
+      const req = await body(EndRunRequest);
+      const row = await visibleRun(env.DB, a, params.id);
+      if (row.bot_id !== a.memberId) throw new ApiError("forbidden", "only the run's bot ends it");
+      const run = unwrap(await deskStub(env, row.bot_id).endExternal(row.bot_id, row.id, req.status, req.summary));
+      await auditStatement(env.DB, a, { action: "run.end", target: row.id, details: { status: req.status } }).run();
+      return run;
     },
   });
 

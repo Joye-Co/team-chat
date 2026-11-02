@@ -60,6 +60,15 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
   return { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
 });
 
+/** Checks that a topic exists in this group (external bots start runs in it). */
+registerRoomRpc("bots.topicExists", (room, actor, args) => {
+  const { topicId } = args as { topicId: string };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  const topic = room.sql.exec<{ id: string }>("SELECT id FROM topics WHERE id = ?", topicId).toArray()[0];
+  if (!topic) throw new ApiError("not_found", "topic not found");
+  return { ok: true };
+});
+
 /** Stores a `run.updated` event (actor = the bot) for clients. */
 registerRoomRpc("bots.runUpdated", (room, actor, args) => {
   const { run } = args as { run: BotRun };
