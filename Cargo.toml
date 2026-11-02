@@ -21,6 +21,8 @@ chat-core = { path = "crates/chat-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
-# gpui-pre with CJK line-break rules and measured truncation; see docs/ARCHITECTURE.md.
+# gpui-pre with CJK line-break rules, measured truncation and a font-smoothing switch;
+# gpui-pre-apple draws undilated glyphs without smoothing. See docs/ARCHITECTURE.md.
 [patch.crates-io]
 gpui-pre = { path = "third_party/gpui-pre" }
+gpui-pre-apple = { path = "third_party/gpui-pre-apple" }
