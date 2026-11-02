@@ -28,6 +28,7 @@ mod process;
 mod search_live;
 pub mod selftest_live;
 pub mod session;
+mod settings;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -49,6 +50,10 @@ use crate::{
         TransferState,
     },
     drafts::DraftStore,
+};
+use crate::data::{
+    BotCreated, GroupPrefs, InviteCreated, InviteRequest, MachineCreated, MachineInfo,
+    MemberLevel, NotifyLevel, AdminReply, RunnerSetup,
 };
 
 use convert::{pending_cid, pending_topic_id};
@@ -781,8 +786,10 @@ impl ChatProvider for CoreProvider {
     fn session(&self) -> SessionState {
         let s = self.state();
         if let Some(a) = &s.account {
+            // The cached row has my latest name, 岗位 and avatar.
+            let me = a.client.member(&a.me.id).ok().flatten();
             return SessionState::SignedIn {
-                me: convert::member(&a.me, true),
+                me: convert::member(me.as_ref().unwrap_or(&a.me), true),
                 server_url: a.server_url.clone(),
             };
         }
@@ -1343,6 +1350,62 @@ impl ChatProvider for CoreProvider {
         dir: std::path::PathBuf,
     ) -> crate::data::SessionDownload {
         self.download_session_inner(run_id, dir)
+    }
+
+    // --- settings window (provider/settings.rs) ---
+
+    fn update_profile(&self, name: String, role: Option<String>) -> AdminReply<Member> {
+        self.update_profile_inner(name, role)
+    }
+
+    fn upload_avatar(&self, path: PathBuf) -> AdminReply<Member> {
+        self.upload_avatar_inner(path)
+    }
+
+    fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {
+        self.create_invite_inner(request)
+    }
+
+    fn set_member_level(&self, member_id: &str, level: MemberLevel) -> AdminReply<Member> {
+        self.set_member_level_inner(member_id, level)
+    }
+
+    fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {
+        self.set_member_deactivated_inner(member_id, deactivated)
+    }
+
+    fn create_bot_member(
+        &self,
+        name: String,
+        role: Option<String>,
+        runner: Option<RunnerSetup>,
+    ) -> AdminReply<BotCreated> {
+        self.create_bot_member_inner(name, role, runner)
+    }
+
+    fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
+        self.machines_inner()
+    }
+
+    fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
+        self.create_machine_inner(name, labels)
+    }
+
+    fn group_prefs(&self, group_id: &str) -> GroupPrefs {
+        self.group_prefs_inner(group_id)
+    }
+
+    fn set_group_prefs(
+        &self,
+        group_id: &str,
+        muted: Option<bool>,
+        notify: Option<NotifyLevel>,
+    ) -> AdminReply<()> {
+        self.set_group_prefs_inner(group_id, muted, notify)
+    }
+
+    fn send_diagnostics(&self, description: String) -> AdminReply<String> {
+        self.send_diagnostics_inner(description)
     }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {

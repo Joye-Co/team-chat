@@ -12,6 +12,7 @@ crate::copy! {
     MEMBER_KIND_BOT = "bot",
     MEMBER_KIND_HUMAN = "human",
     PROVIDER = "provider: {name}",
+    MEMBER_ID = "member id: {id}",
     STATE_OFFLINE = "offline",
     STATE_CONNECTING = "connecting",
     STATE_ONLINE = "online",

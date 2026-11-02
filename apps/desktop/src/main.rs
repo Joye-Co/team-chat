@@ -21,6 +21,8 @@
 //!   desktop --selftest-timeline <n> --report <path>
 //!       open a topic with n generated messages, scroll it top to bottom by
 //!       code and write frame times (see views/timeline/selftest.rs).
+//!   desktop --selftest-settings --report <path> [--live <url> --token-file <path>]
+//!       drive the settings window and its forms (views/settings/selftest.rs).
 
 // The skeleton defines API that the timeline, composer, navigation and
 // chat-core tracks use; unused parts are not warnings yet.
@@ -129,6 +131,19 @@ fn main() {
     }
     if let Some(code) = updater::selftest::main_if_requested() {
         std::process::exit(code);
+    }
+    if let Some(settings) = views::settings::selftest::args() {
+        let settings = settings.unwrap_or_else(|error| {
+            eprintln!("{error}");
+            std::process::exit(2)
+        });
+        gpui_kit::application()
+            .with_assets(gpui_kit::assets::Assets)
+            .run(move |cx: &mut App| {
+                gpui_kit::init(cx);
+                views::settings::selftest::run(settings, finish, cx);
+            });
+        std::process::exit(EXIT_CODE.load(Ordering::SeqCst));
     }
     let args = match parse_args() {
         Ok(args) => args,

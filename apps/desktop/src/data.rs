@@ -829,6 +829,151 @@ pub struct Draft {
     pub files: Vec<PendingFile>,
 }
 
+// --- settings window: profile, 成员 admin, 机器, 通知, diagnostics ---
+
+/// Why a settings request failed. The settings views map each to copy text.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AdminError {
+    /// This provider (or the server) does not support the request yet.
+    Unsupported,
+    /// Not signed in, or the server cannot be reached.
+    Offline,
+    /// Only an owner may do this.
+    Forbidden,
+    NotFound,
+    /// The change would leave the team with no active owner.
+    LastOwner,
+    /// The server refused the input (name too long, bad labels, ...).
+    Invalid,
+    /// The file is too big (avatar over 1 MiB, diagnostics over 5 MiB).
+    TooLarge,
+    /// Too many requests; try again later.
+    RateLimited,
+    Other,
+}
+
+/// The answer to a settings request. The view awaits it off the UI thread
+/// (`cx.spawn`); dropping the sender means [`AdminError::Other`].
+pub type AdminReply<T> = futures::channel::oneshot::Receiver<Result<T, AdminError>>;
+
+/// An [`AdminReply`] that is already answered.
+pub fn reply_now<T>(result: Result<T, AdminError>) -> AdminReply<T> {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    let _ = tx.send(result);
+    rx
+}
+
+/// A secret shown once (invite code, credential, install command). `Debug`
+/// never prints it.
+#[derive(Clone, PartialEq, Eq)]
+pub struct SecretText(String);
+
+impl SecretText {
+    pub fn new(text: impl Into<String>) -> Self {
+        Self(text.into())
+    }
+    /// The secret itself, for the copy button and the one-time display.
+    pub fn expose(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Debug for SecretText {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretText(<redacted>)")
+    }
+}
+
+/// `POST /v1/invites`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InviteRequest {
+    pub name: String,
+    pub kind: MemberKind,
+    pub level: MemberLevel,
+    pub role: Option<String>,
+}
+
+/// A new invite: the code is shown once.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InviteCreated {
+    pub code: SecretText,
+    /// `<server>/download?code=<code>`: the latest DMG for this invitee.
+    pub download_url: SecretText,
+    pub expires_at: Millis,
+}
+
+/// A new bot member made with `POST /v1/bots`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BotCreated {
+    pub member: Member,
+    /// Its credential, shown once. `None` for a runner-backed member (the
+    /// provider revokes the credential, because the server runs it).
+    pub credential: Option<SecretText>,
+}
+
+/// How a runner-backed member works (`PUT /v1/bots/:id/runner`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunnerSetup {
+    /// A runtime name that a machine reports.
+    pub runtime: String,
+    /// Machine labels the run needs.
+    pub labels: Vec<String>,
+    /// Repository URL or a folder on the machine.
+    pub repo: Option<String>,
+    pub base_branch: Option<String>,
+}
+
+/// A connected (or known) machine, for the 机器 page.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MachineInfo {
+    pub id: String,
+    pub name: String,
+    pub labels: Vec<String>,
+    pub connected: bool,
+    pub healthy: bool,
+    pub last_heartbeat_at: Option<Millis>,
+    pub version: Option<String>,
+    pub disk_free_bytes: Option<u64>,
+    pub disk_total_bytes: Option<u64>,
+    /// Runs on it now.
+    pub active_runs: u32,
+    pub max_parallel_runs: Option<u32>,
+    /// Runtime names it can run.
+    pub runtimes: Vec<String>,
+}
+
+/// A new machine: its credential and install command are shown once.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MachineCreated {
+    pub machine: MachineInfo,
+    pub credential: SecretText,
+    /// Shell lines that install the machine service with this credential.
+    pub install_command: SecretText,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum NotifyLevel {
+    All,
+    Mentions,
+    None,
+}
+
+/// My notification preferences of one group.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct GroupPrefs {
+    pub muted: bool,
+    pub notify: NotifyLevel,
+}
+
+/// A topic I follow, for the 通知 page.
+#[derive(Clone, Debug, PartialEq)]
+pub struct FollowedTopic {
+    pub group_id: GroupId,
+    pub group_name: String,
+    pub topic: Topic,
+}
+
+
 /// The source of all chat state for the views.
 ///
 /// Rules for implementations:
@@ -1083,6 +1228,94 @@ pub trait ChatProvider: Send + Sync + 'static {
         let (tx, rx) = futures::channel::oneshot::channel();
         let _ = tx.send(Err(RunLoadError::Unavailable));
         rx
+    }
+
+    // --- settings window (all have defaults, so providers can add them later) ---
+
+    /// Changes my name and 岗位 (`PATCH /v1/members/<me>`). Emits `Change::Members`.
+    fn update_profile(&self, _name: String, _role: Option<String>) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Uploads my avatar from a png, jpeg or webp file of at most 1 MiB.
+    fn upload_avatar(&self, _path: PathBuf) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: makes an invite code.
+    fn create_invite(&self, _request: InviteRequest) -> AdminReply<InviteCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: changes a member's level. Emits `Change::Members`.
+    fn set_member_level(&self, _member_id: &str, _level: MemberLevel) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: deactivates (or reactivates) a member. Emits `Change::Members`.
+    fn set_member_deactivated(&self, _member_id: &str, _deactivated: bool) -> AdminReply<Member> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: adds a bot member. With `runner`, it is runner-backed (the server
+    /// runs it on a machine) and no credential is returned.
+    fn create_bot_member(
+        &self,
+        _name: String,
+        _role: Option<String>,
+        _runner: Option<RunnerSetup>,
+    ) -> AdminReply<BotCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The machines and their health, fresh from the server.
+    fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Owner: registers a machine.
+    fn create_machine(&self, _name: String, _labels: Vec<String>) -> AdminReply<MachineCreated> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// My mute and notify level of a group, from the cache.
+    fn group_prefs(&self, group_id: &str) -> GroupPrefs {
+        let dm = self
+            .groups()
+            .iter()
+            .any(|g| g.id == group_id && g.kind == GroupKind::Dm);
+        GroupPrefs {
+            muted: self.group_muted(group_id),
+            notify: if dm {
+                NotifyLevel::All
+            } else {
+                NotifyLevel::Mentions
+            },
+        }
+    }
+    /// Sets my mute and notify level (`PATCH /v1/groups/:id/prefs`). Emits `Change::Groups`.
+    fn set_group_prefs(
+        &self,
+        _group_id: &str,
+        _muted: Option<bool>,
+        _notify: Option<NotifyLevel>,
+    ) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Topics I follow, newest activity first. The default reads
+    /// [`ChatProvider::topic_following`] of every topic of my groups.
+    fn followed_topics(&self) -> Vec<FollowedTopic> {
+        let mut out = Vec::new();
+        for g in self.groups() {
+            for topic in self.topics(&g.id) {
+                if self.topic_following(&g.id, &topic.id) {
+                    out.push(FollowedTopic {
+                        group_id: g.id.clone(),
+                        group_name: g.name.clone(),
+                        topic,
+                    });
+                }
+            }
+        }
+        out.sort_by(|x, y| y.topic.last_activity_at.cmp(&x.topic.last_activity_at));
+        out
+    }
+    /// Uploads recent logs (secrets removed) with the user's description.
+    /// Returns the report id.
+    fn send_diagnostics(&self, _description: String) -> AdminReply<String> {
+        reply_now(Err(AdminError::Unsupported))
     }
 
     // --- changes ---

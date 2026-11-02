@@ -8,15 +8,12 @@
 //! window kind. The runner forces the theme, waits for the frames, captures
 //! the window and closes it.
 
-use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Pixels, Size, TitlebarOptions, WindowBounds,
-    WindowOptions, px, size,
-};
+use gpui::{AnyWindowHandle, App, AppContext as _, Bounds, Pixels, Size, WindowBounds};
 
 use crate::{
     app::{Place, RootView, Services, main_window_options},
-    copy, fake,
-    views::settings::SettingsView,
+    fake,
+    views::settings::selftest as settings_scenes,
 };
 
 /// What a scene's provider starts with.
@@ -90,6 +87,41 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: open_settings,
+    },
+    Scene {
+        name: "settings-members",
+        about: "Settings: 成员 with the owner actions",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_members,
+    },
+    Scene {
+        name: "settings-machines",
+        about: "Settings: 机器 and their health",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_machines,
+    },
+    Scene {
+        name: "settings-notifications",
+        about: "Settings: 通知 per 群 and followed 话题",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_notifications,
+    },
+    Scene {
+        name: "settings-cost",
+        about: "Settings: 成本 placeholder",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_cost,
+    },
+    Scene {
+        name: "settings-about",
+        about: "Settings: 关于, diagnostics and the developer view",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_about,
     },
     Scene {
         name: "update",
@@ -226,26 +258,8 @@ pub fn open_main(
 /// The settings window at its own size (the requested size is ignored).
 pub fn open_settings(
     services: Services,
-    _content: Size<Pixels>,
+    content: Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(640.), px(560.)),
-            cx,
-        ))),
-        titlebar: Some(TitlebarOptions {
-            title: Some(copy::settings::TITLE.into()),
-            ..Default::default()
-        }),
-        focus: false,
-        show: true,
-        ..Default::default()
-    };
-    gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| SettingsView::new(services, window, cx))
-    })
-    .map(|(handle, _)| handle)
-    .map_err(|e| e.to_string())
+    settings_scenes::open_profile(services, content, cx)
 }

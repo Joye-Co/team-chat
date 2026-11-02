@@ -15,6 +15,8 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use crate::{data::*, drafts::DraftStore};
 
+mod settings;
+
 pub const ME: &str = "m-joye";
 /// The topic with 10,000 messages.
 pub const LONG_TOPIC: &str = "t-perf";
@@ -26,6 +28,7 @@ pub struct FakeProvider {
     state: Mutex<State>,
     subscribers: Mutex<Vec<UnboundedSender<Vec<Change>>>>,
     drafts: DraftStore,
+    settings: Mutex<settings::FakeSettings>,
 }
 
 struct State {
@@ -60,21 +63,27 @@ const DAY: i64 = 24 * HOUR;
 impl FakeProvider {
     /// Signed in as Joye with the sample data.
     pub fn new() -> Arc<Self> {
-        Arc::new(Self {
+        let provider = Arc::new(Self {
             state: Mutex::new(State::sample(now_ms(), true)),
             subscribers: Mutex::new(Vec::new()),
             drafts: DraftStore::new(),
-        })
+            settings: Mutex::new(settings::FakeSettings::new()),
+        });
+        provider.seed_followed();
+        provider
     }
 
     /// Starts at the login view; any server URL and non-empty code signs in,
     /// except the code `WRONG-CODE-0000`.
     pub fn signed_out() -> Arc<Self> {
-        Arc::new(Self {
+        let provider = Arc::new(Self {
             state: Mutex::new(State::sample(now_ms(), false)),
             subscribers: Mutex::new(Vec::new()),
             drafts: DraftStore::new(),
-        })
+            settings: Mutex::new(settings::FakeSettings::new()),
+        });
+        provider.seed_followed();
+        provider
     }
 
     fn emit(&self, changes: Vec<Change>) {
@@ -1384,6 +1393,70 @@ impl ChatProvider for FakeProvider {
         self.emit(vec![Change::RunLog {
             run_id: run_id.to_string(),
         }]);
+    }
+
+    // --- settings window (fake/settings.rs) ---
+
+    fn update_profile(&self, name: String, role: Option<String>) -> AdminReply<Member> {
+        self.update_profile_fake(name, role)
+    }
+
+    fn upload_avatar(&self, path: std::path::PathBuf) -> AdminReply<Member> {
+        self.upload_avatar_fake(path)
+    }
+
+    fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {
+        self.create_invite_fake(request)
+    }
+
+    fn set_member_level(&self, member_id: &str, level: MemberLevel) -> AdminReply<Member> {
+        self.set_member_level_fake(member_id, level)
+    }
+
+    fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {
+        self.set_member_deactivated_fake(member_id, deactivated)
+    }
+
+    fn create_bot_member(
+        &self,
+        name: String,
+        role: Option<String>,
+        runner: Option<RunnerSetup>,
+    ) -> AdminReply<BotCreated> {
+        self.create_bot_member_fake(name, role, runner)
+    }
+
+    fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
+        self.machines_fake()
+    }
+
+    fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
+        self.create_machine_fake(name, labels)
+    }
+
+    fn group_prefs(&self, group_id: &str) -> GroupPrefs {
+        self.group_prefs_fake(group_id)
+    }
+
+    fn set_group_prefs(
+        &self,
+        group_id: &str,
+        muted: Option<bool>,
+        notify: Option<NotifyLevel>,
+    ) -> AdminReply<()> {
+        self.set_group_prefs_fake(group_id, muted, notify)
+    }
+
+    fn topic_following(&self, group_id: &str, topic_id: &str) -> bool {
+        self.topic_following_fake(group_id, topic_id)
+    }
+
+    fn set_topic_following(&self, group_id: &str, topic_id: &str, follow: bool) {
+        self.set_topic_following_fake(group_id, topic_id, follow);
+    }
+
+    fn send_diagnostics(&self, description: String) -> AdminReply<String> {
+        self.send_diagnostics_fake(description)
     }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {

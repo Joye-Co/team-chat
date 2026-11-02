@@ -23,12 +23,11 @@ use gpui::{
 };
 
 use crate::{
-    copy,
     data::{Change, ChatProvider, GroupId, SessionState, TopicId},
     theme,
     views::{
-        composer::ComposerView, connection_banner::ConnectionBanner, login::LoginView, settings::SettingsView, side_panel::SidePanel,
-        sidebar::Sidebar, timeline::TimelineView, topic_list::TopicListView,
+        composer::ComposerView, connection_banner::ConnectionBanner, login::LoginView,
+        side_panel::SidePanel, sidebar::Sidebar, timeline::TimelineView, topic_list::TopicListView,
     },
 };
 
@@ -402,23 +401,9 @@ pub fn open_main_window(
     Ok(view)
 }
 
-/// Opens the settings window.
+/// Opens the settings window, or brings the open one to the front.
 pub fn open_settings_window(services: Services, cx: &mut App) {
-    let options = WindowOptions {
-        window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-            None,
-            size(px(640.), px(560.)),
-            cx,
-        ))),
-        titlebar: Some(TitlebarOptions {
-            title: Some(copy::settings::TITLE.into()),
-            ..Default::default()
-        }),
-        ..Default::default()
-    };
-    let _ = gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| SettingsView::new(services, window, cx))
-    });
+    crate::views::settings::open(services, cx);
 }
 
 /// Key bindings, menus and global actions. Call once after `gpui_kit::init`.
