@@ -20,6 +20,7 @@ mod engine;
 pub mod http;
 pub mod logging;
 pub mod proto;
+pub mod search;
 pub mod store;
 pub mod token;
 pub mod transient;
@@ -29,6 +30,7 @@ pub use client::{
     SendFailure, SendRequest, TopicPatch, background,
 };
 pub use http::{ApiError, HttpClient};
+pub use search::SearchError;
 pub use store::{
     GroupRow, LogEntry, Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Store, TopicRow,
 };

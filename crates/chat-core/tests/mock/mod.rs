@@ -52,6 +52,8 @@ pub struct State {
     pub refuse: bool,
     /// Ack every `topic.update` with this error.
     pub topic_update_error: Option<ErrorCode>,
+    /// Ack every `search` with this error.
+    pub search_error: Option<ErrorCode>,
     // Observations.
     pub client_frames: Vec<Value>,
     pub accepted: usize,
@@ -476,6 +478,13 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 }
                 None => g.read_seq = g.read_seq.max(seq),
             }
+        }
+        "search" if s.search_error.is_some() => {
+            let code = s.search_error.unwrap();
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": false, "error": {"code": code, "message": "refused"}}),
+            );
         }
         "search" => {
             let hits = json!([{"groupId": G, "topicId": "T", "messageId": "M", "authorId": me, "snippet": v["query"], "createdAt": 1, "seq": 1}]);
