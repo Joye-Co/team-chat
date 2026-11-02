@@ -1,10 +1,10 @@
 // Sample data for the v2 mockups. Bots are the real roster (assets/bots/roster.json).
 export const M = {
-  joye: { name: "Joye", palette: "slate", online: true, role: "负责人" },
-  li: { name: "李雪", palette: "rose", online: true, role: "产品实习生" },
-  chen: { name: "陈晨", palette: "sage", online: false, role: "设计实习生" },
-  wang: { name: "王一鸣", palette: "sky", online: true, role: "前端实习生" },
-  alex: { name: "Alex Chen", palette: "clay", online: true, role: "后端实习生" },
+  joye: { name: "Joye", online: true, role: "负责人" },
+  li: { name: "李雪", online: true, role: "产品实习生" },
+  chen: { name: "陈晨", online: false, role: "设计实习生" },
+  wang: { name: "王一鸣", online: true, role: "前端实习生" },
+  alex: { name: "Alex Chen", online: true, role: "后端实习生" },
   jojo: { name: "Jojo", char: "jojo", role: "主助手", state: "idle" },
   tata: { name: "Tata", char: "o03", role: "产品负责人", state: "idle" },
   pocket: { name: "Pocket", char: "o05", role: "幕僚长", state: "working" },
@@ -22,12 +22,12 @@ export const sidebar = {
     { icon: "at-sign", title: "登录页支持粘贴邀请码", ctx: "qqbot 研发 · 李雪 @你" },
   ],
   groups: [
-    { name: "qqbot 研发", palette: "sky", mention: 2, selected: true },
-    { name: "运维告警", palette: "clay", unread: true },
-    { name: "社媒", palette: "rose", unread: true },
+    { name: "qqbot 研发", mention: 2, selected: true },
+    { name: "运维告警", unread: true },
+    { name: "社媒", unread: true },
     { name: "夹夹增长", palette: "sage" },
     { name: "产品周会", palette: "sand" },
-    { name: "全员", palette: "slate", muted: true },
+    { name: "全员", muted: true },
   ],
   dms: [
     { m: "pocket", count: 0 },
