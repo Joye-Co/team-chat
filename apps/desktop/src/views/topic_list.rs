@@ -319,14 +319,20 @@ impl TopicListView {
                         .iter()
                         .filter(|r| f.keeps(&r.topic, me.as_deref()))
                         .count() as u32;
-                    Tab::new().flex_1().label(f.label()).suffix(
+                    Tab::new().flex_1().child(
                         div()
-                            .ml(space::S4)
-                            .t_caption()
-                            .font_weight(gpui::FontWeight::NORMAL)
-                            .tnum()
-                            .text_color(colors.text_3)
-                            .child(CountBadge::text(n, BadgeKind::Unread)),
+                            .flex()
+                            .items_center()
+                            .gap(space::S4)
+                            .child(f.label())
+                            .child(
+                                div()
+                                    .t_caption()
+                                    .font_weight(gpui::FontWeight::NORMAL)
+                                    .tnum()
+                                    .text_color(colors.text_3)
+                                    .child(CountBadge::text(n, BadgeKind::Unread)),
+                            ),
                     )
                 }))
                 .on_click(move |ix, _, cx| {

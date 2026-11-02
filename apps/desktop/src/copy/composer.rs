@@ -1,10 +1,14 @@
 //! The composer under the timeline.
 
 crate::copy! {
-    PLACEHOLDER = "写消息，Enter 发送，Shift+Enter 换行",
+    PLACEHOLDER = "写消息",
     PLACEHOLDER_NEW_TOPIC = "写下新话题的第一条消息，第一行会作为标题",
     PLACEHOLDER_EDIT = "修改消息，Enter 保存，Esc 取消",
     SEND = "发送",
+    HINT_SEND = "发送",
+    HINT_NEWLINE = "换行",
+    HINT_SELECT = "选择",
+    HINT_MENTION = "提及",
     ATTACH = "添加文件",
     MENTION = "提及成员",
     QUOTING = "引用 {name}",

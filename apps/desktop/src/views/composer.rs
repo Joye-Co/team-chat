@@ -19,13 +19,13 @@ mod tests;
 use std::time::Instant;
 
 use gpui::{
-    AppContext, ClipboardEntry, Context, ElementId, Entity, EntityInputHandler, ExternalPaths,
+    AppContext, ClipboardEntry, Context, Focusable as _, ElementId, Entity, EntityInputHandler, ExternalPaths,
     InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
     relative,
 };
 use gpui_component::{
-    Disableable as _,
+    Disableable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     input::{
         Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Paste, Textarea, TextareaState,
@@ -39,8 +39,8 @@ use crate::{
         Change, DraftKey, Member, MemberId, MessageId, NewFile, PendingFile, SendRequest,
         StartTopicRequest,
     },
-    theme,
-    views::avatar,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
 };
 
 pub use model::MentionQuery;
@@ -674,22 +674,20 @@ impl ComposerView {
         div()
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(space::S6)
             .max_w(px(360.))
-            .px(px(8.))
-            .py(px(2.))
-            .rounded(px(4.))
-            .bg(colors.code_background)
-            .text_xs()
-            .child(div().truncate().child(text))
+            .h(px(26.))
+            .pl(space::S8)
+            .pr(space::S4)
+            .rounded(theme::radius::MD)
+            .bg(colors.fill_field)
+            .t_callout()
+            .text_color(colors.text_2)
+            .child(div().min_w(px(0.)).truncate().child(text))
             .child(
-                div()
-                    .id(id)
-                    .flex_none()
-                    .text_color(colors.muted_foreground)
-                    .cursor_pointer()
-                    .hover(|s| s.text_color(colors.foreground))
-                    .child(c::REMOVE)
+                ui::icon_button(id, Lucide::X)
+                    .xsmall()
+                    .tooltip(c::REMOVE)
                     .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
             )
     }
@@ -705,20 +703,19 @@ impl ComposerView {
                 ))))
                 .flex()
                 .items_center()
-                .gap(px(8.))
-                .px(px(8.))
-                .py(px(4.))
-                .rounded(px(4.))
-                .cursor_pointer()
-                .when(i == popup.selected, |el| el.bg(colors.row_selected))
-                .hover(|s| s.bg(colors.row_hover))
-                .child(avatar(Some(m), px(20.), cx))
-                .child(div().text_sm().child(m.name.clone()))
+                .gap(space::S8)
+                .h(px(32.))
+                .px(space::S6)
+                .rounded(theme::radius::SM)
+                .when(i == popup.selected, |el| el.bg(colors.fill_active))
+                .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.elevated))
+                .child(div().flex_none().t_ui().medium().child(m.name.clone()))
                 .when_some(m.role.clone(), |el, role| {
                     el.child(
                         div()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
+                            .min_w(px(0.))
+                            .t_callout()
+                            .text_color(colors.text_2)
                             .truncate()
                             .child(role),
                     )
@@ -730,23 +727,41 @@ impl ComposerView {
                 .absolute()
                 .left(px(0.))
                 .bottom(relative(1.))
-                .mb(px(4.))
+                .mb(space::S8)
                 .w(px(300.))
-                .p(px(4.))
-                .rounded(px(6.))
-                .border_1()
-                .border_color(colors.border)
-                .bg(colors.background)
-                .shadow_md()
+                .rounded(theme::radius::LG)
+                .bg(colors.elevated)
+                .shadow(colors.shadow(theme::Elevation::Popover))
                 .flex()
                 .flex_col()
-                .children(rows),
+                .child(
+                    div()
+                        .px(space::S10)
+                        .pt(space::S8)
+                        .pb(space::S4)
+                        .t_section()
+                        .text_color(colors.text_3)
+                        .child(crate::copy::nav::SECTION_MEMBERS),
+                )
+                .child(div().px(px(5.)).pb(px(5.)).flex().flex_col().children(rows))
+                .child(ui::hairline(cx))
+                .child(
+                    div()
+                        .h(px(28.))
+                        .px(space::S10)
+                        .flex()
+                        .items_center()
+                        .gap(space::S12)
+                        .child(ui::KbdHint::new(&["up", "down"]).label(c::HINT_SELECT))
+                        .child(ui::KbdHint::new(&["enter"]).label(c::HINT_MENTION))
+                        .child(ui::KbdHint::new(&["escape"]).label(crate::copy::common::CLOSE)),
+                ),
         )
     }
 }
 
 impl Render for ComposerView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let enabled = self.key.is_some();
         let editing = self.editing.is_some();
@@ -763,7 +778,7 @@ impl Render for ComposerView {
         };
         let has_chips = quote.is_some() || !files.is_empty();
 
-        let mut chips = div().flex().flex_wrap().gap(px(6.));
+        let mut chips = div().flex().flex_wrap().gap(space::S6);
         if let Some(q) = quote {
             chips = chips.child(self.render_chip(
                 "quote-remove".into(),
@@ -782,86 +797,124 @@ impl Render for ComposerView {
             ));
         }
 
+        let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
+        let has_text = !self.last_text.trim().is_empty() || has_chips;
+        let send = Button::new("send")
+            .icon(gpui_component::Icon::new(if editing {
+                Lucide::Check
+            } else {
+                Lucide::ArrowUp
+            }))
+            .with_size(px(28.))
+            .rounded_full()
+            .tooltip(if editing {
+                crate::copy::common::SAVE
+            } else {
+                c::SEND
+            })
+            .disabled(!enabled)
+            .map(|b| {
+                if has_text && enabled {
+                    b.primary()
+                } else {
+                    b.ghost().bg(colors.fill_pressed).text_color(colors.text_3)
+                }
+            })
+            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
+
         div()
             .id("composer")
-            .p(px(12.))
-            .border_t_1()
-            .border_color(colors.border)
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(colors.row_hover))
+            .flex_none()
+            .px(space::S20)
+            .pb(space::S16)
+            .bg(colors.content)
             .on_drop(
                 cx.listener(|this, paths: &ExternalPaths, _, cx| this.on_drop_paths(paths, cx)),
             )
-            .when(editing, |el| {
-                el.child(
-                    div()
-                        .flex()
-                        .gap(px(8.))
-                        .text_xs()
-                        .child(div().text_color(colors.accent).child(c::EDITING))
-                        .child(
-                            div()
-                                .text_color(colors.muted_foreground)
-                                .child(c::EDIT_HINT),
-                        ),
-                )
-            })
-            .when_some(title_line, |el, line| {
-                el.child(
-                    div()
-                        .text_xs()
-                        .text_color(colors.muted_foreground)
-                        .truncate()
-                        .child(line),
-                )
-            })
-            .when(has_chips, |el| el.child(chips))
-            .when(self.too_long, |el| {
-                el.child(div().text_xs().text_color(colors.danger).child(c::TOO_LONG))
-            })
-            .children(
-                self.rejected
-                    .iter()
-                    .map(|line| div().text_xs().text_color(colors.danger).child(line.clone())),
-            )
             .child(
                 div()
+                    .id("composer-box")
+                    .rounded(theme::radius::COMPOSER)
+                    .border_1()
+                    .border_color(if focused {
+                        colors.control_border_focus
+                    } else {
+                        colors.control_border
+                    })
+                    .bg(colors.content)
+                    .pt(space::S8)
+                    .px(space::S8)
+                    .pb(space::S8)
                     .flex()
-                    .items_end()
-                    .gap(px(8.))
+                    .flex_col()
+                    .gap(space::S6)
+                    .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(colors.fill_hover))
+                    .when(editing, |el| {
+                        el.child(
+                            div()
+                                .flex()
+                                .gap(space::S8)
+                                .t_callout()
+                                .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
+                                .child(div().text_color(colors.text_2).child(c::EDIT_HINT)),
+                        )
+                    })
+                    .when_some(title_line, |el, line| {
+                        el.child(
+                            div()
+                                .t_callout()
+                                .text_color(colors.text_2)
+                                .truncate()
+                                .child(line),
+                        )
+                    })
+                    .when(has_chips, |el| el.child(chips))
+                    .when(self.too_long, |el| {
+                        el.child(div().t_callout().text_color(colors.danger_text).child(c::TOO_LONG))
+                    })
+                    .children(self.rejected.iter().map(|line| {
+                        div()
+                            .t_callout()
+                            .text_color(colors.danger_text)
+                            .child(line.clone())
+                    }))
                     .child(
                         div()
                             .relative()
-                            .flex_1()
+                            .w_full()
                             .capture_action(cx.listener(Self::on_enter))
                             .capture_action(cx.listener(Self::on_tab))
                             .capture_action(cx.listener(Self::on_up))
                             .capture_action(cx.listener(Self::on_down))
                             .capture_action(cx.listener(Self::on_escape))
                             .capture_action(cx.listener(Self::on_paste))
-                            .child(Textarea::new(&self.input).disabled(!enabled))
+                            .child(
+                                // XSmall keeps the editor's own inset at 4 / 2 pt;
+                                // the box padding makes up the rest (§5.4).
+                                Textarea::new(&self.input)
+                                    .appearance(false)
+                                    .xsmall()
+                                    .t_message()
+                                    .disabled(!enabled),
+                            )
                             .children(self.render_mentions(cx)),
                     )
                     .child(
-                        Button::new("attach")
-                            .ghost()
-                            .icon(gpui_component::IconName::Plus)
-                            .tooltip(c::ATTACH)
-                            .disabled(!enabled || editing)
-                            .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
-                    )
-                    .child(
-                        Button::new("send")
-                            .primary()
-                            .label(if editing {
-                                crate::copy::common::SAVE
-                            } else {
-                                c::SEND
-                            })
-                            .disabled(!enabled)
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                        div()
+                            .h(px(28.))
+                            .flex()
+                            .items_center()
+                            .gap(space::S12)
+                            .child(
+                                ui::icon_button("attach", Lucide::Paperclip)
+                                    .tooltip(c::ATTACH)
+                                    .disabled(!enabled || editing)
+                                    .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
+                            )
+                            .child(div().flex_1())
+                            .child(ui::KbdHint::new(&["enter"]).label(c::HINT_SEND))
+                            .child(ui::KbdHint::new(&["shift-enter"]).label(c::HINT_NEWLINE))
+                            .child(send),
                     ),
             )
     }

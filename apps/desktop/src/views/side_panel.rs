@@ -3,12 +3,12 @@
 //! and seqs) and 过程 (the process view of bot runs, `views/process`).
 
 use gpui::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription,
-    Window, div, prelude::FluentBuilder as _, px,
+    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonVariants as _},
     tab::{Tab, TabBar},
 };
 
@@ -16,8 +16,9 @@ use crate::{
     app::{Changes, Services},
     copy::{dev, fill, panel as p, process as pc},
     data::{Change, GroupId, Member, Topic, TopicId},
-    theme,
-    views::{artifacts::panel::TopicOutputs, avatar, process::ProcessView, status_chip},
+    theme::{self, Type as _, space},
+    ui::{self, MemberAvatar},
+    views::{artifacts::panel::TopicOutputs, process::ProcessView, status_chip},
 };
 
 pub struct SidePanel {
@@ -115,44 +116,27 @@ impl Render for SidePanel {
         let tab = self.services.nav.read(cx).side_panel_tab;
         let section = |title: &'static str| {
             div()
-                .pt(px(12.))
-                .pb(px(4.))
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child(title)
+                .pt(space::S16)
+                .pb(space::S6)
+                .child(ui::SectionHeader::new(title))
         };
-        let me = self.services.me();
-        let header = div()
-            .h(px(48.))
-            .px(px(12.))
-            .flex()
-            .items_center()
-            .border_b_1()
-            .border_color(colors.border)
-            .child(
-                div().flex_1().child(
-                    TabBar::new("side-panel-tabs")
-                        .segmented()
-                        .small()
-                        .selected_index(tab)
-                        .on_click(cx.listener(|this, ix: &usize, _, cx| this.set_tab(*ix, cx)))
-                        .child(Tab::new().label(pc::TAB_DETAILS))
-                        .child(Tab::new().label(pc::TAB_PROCESS)),
-                ),
-            )
-            .child(
-                Button::new("collapse-panel")
-                    .small()
-                    .ghost()
-                    .label(p::COLLAPSE)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.services
-                            .nav
-                            .update(cx, |nav, cx| nav.toggle_side_panel(cx))
-                    })),
-            );
+        let header = ui::toolbar_band("panel-toolbar").px(space::S12).child(
+            TabBar::new("side-panel-tabs")
+                .segmented()
+                .small()
+                .w_full()
+                .selected_index(tab)
+                .on_click(cx.listener(|this, ix: &usize, _, cx| this.set_tab(*ix, cx)))
+                .child(Tab::new().flex_1().label(pc::TAB_DETAILS))
+                .child(Tab::new().flex_1().label(pc::TAB_PROCESS)),
+        );
         let Some(topic) = self.topic.clone() else {
-            return div().size_full().bg(colors.panel).child(header);
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .bg(colors.panel)
+                .child(header);
         };
         if tab == 1 {
             return div()
@@ -160,82 +144,101 @@ impl Render for SidePanel {
                 .flex()
                 .flex_col()
                 .bg(colors.panel)
-                .text_sm()
+                .t_ui()
                 .child(header)
                 .child(div().flex_1().min_h(px(0.)).child(self.process.clone()));
         }
-        let person = |m: Option<&Member>, cx: &mut Context<Self>| {
+        let person = |m: Option<&Member>| {
             div()
+                .min_w(px(0.))
                 .flex()
                 .items_center()
-                .gap(px(6.))
-                .py(px(2.))
-                .child(avatar(m, px(20.), cx))
-                .child(m.map(|m| m.name.clone()).unwrap_or_default())
-                .when_some(m.and_then(|m| m.role.clone()), |el, role| {
-                    el.child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(role),
-                    )
-                })
+                .gap(space::S6)
+                .child(MemberAvatar::new(m, px(20.)).on(colors.panel))
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .one_line()
+                        .child(m.map(|m| m.name.clone()).unwrap_or_default()),
+                )
         };
+        // 谁在做什么: label column 56 pt, then the members (§13.7).
+        let row = |label: &'static str, value: gpui::AnyElement| {
+            div()
+                .min_h(px(28.))
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(
+                    div()
+                        .w(px(56.))
+                        .flex_none()
+                        .text_color(colors.text_2)
+                        .child(label),
+                )
+                .child(div().flex_1().min_w(px(0.)).child(value))
+        };
+        let me = self.services.me();
+        let chip = status_chip(&topic, me.as_deref(), &self.members, cx);
         let owner = topic
             .owner_id
             .as_deref()
-            .map(|id| person(self.member(id), cx).into_any_element());
-        let waiting: Vec<_> = topic
-            .waiting_on
-            .iter()
-            .map(|id| person(self.member(id), cx).into_any_element())
-            .collect();
+            .map(|id| row(p::OWNER, person(self.member(id)).into_any_element()));
+        let waiting = (!topic.waiting_on.is_empty()).then(|| {
+            row(
+                p::WAITING_ON,
+                div()
+                    .py(space::S4)
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .children(topic.waiting_on.iter().map(|id| person(self.member(id))))
+                    .into_any_element(),
+            )
+        });
 
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(colors.panel)
-            .text_sm()
+            .t_ui()
             .child(header)
             .child(
                 div()
-                    .px(px(12.))
+                    .id("panel-body")
+                    .flex_1()
+                    .min_h(px(0.))
+                    .overflow_y_scroll()
+                    .px(space::S16)
+                    .pb(space::S16)
                     .flex()
                     .flex_col()
-                    .child(section(p::STATUS))
-                    .when_some(
-                        status_chip(&topic, me.as_deref(), &self.members, cx),
-                        |el, chip| el.child(chip),
+                    .child(div().h(space::S12))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .children(chip.map(|c| {
+                                row(p::STATUS, div().flex().child(c).into_any_element())
+                            }))
+                            .children(owner)
+                            .children(waiting),
                     )
-                    .when_some(owner, |el, o| el.child(section(p::OWNER)).child(o))
-                    .when(!waiting.is_empty(), |el| {
-                        el.child(section(p::WAITING_ON)).children(waiting)
-                    })
                     .child(self.outputs.clone())
                     .when(developer, |el| {
-                        el.child(
+                        el.child(section(dev::TITLE)).child(
                             div()
-                                .pt(px(12.))
-                                .text_xs()
-                                .text_color(colors.muted_foreground)
-                                .child(dev::TITLE),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .child(fill(dev::GROUP_ID, &[("id", &topic.group_id)])),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .child(fill(dev::TOPIC_ID, &[("id", &topic.id)])),
-                        )
-                        .child(
-                            div().text_xs().child(fill(
-                                dev::LAST_SEQ,
-                                &[("seq", &topic.last_seq.to_string())],
-                            )),
+                                .flex()
+                                .flex_col()
+                                .t_code()
+                                .text_color(colors.text_2)
+                                .child(fill(dev::GROUP_ID, &[("id", &topic.group_id)]))
+                                .child(fill(dev::TOPIC_ID, &[("id", &topic.id)]))
+                                .child(fill(
+                                    dev::LAST_SEQ,
+                                    &[("seq", &topic.last_seq.to_string())],
+                                )),
                         )
                     }),
             )
