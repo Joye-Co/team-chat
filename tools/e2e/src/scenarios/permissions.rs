@@ -102,14 +102,7 @@ async fn run(c: &mut Ctx) -> Result<()> {
     ];
     for (what, f) in frames {
         let ans = rx.request(f).await?;
-        // V1 extension frames: a server without them answers `invalid` (unknown frame type).
-        let ext = what == "search" || what == "topic.follow";
-        let codes: &[&str] = if ext {
-            &["forbidden", "not_found", "invalid"]
-        } else {
-            &deny
-        };
-        seen.push(refused(what, &ans, codes)?);
+        seen.push(refused(what, &ans, &deny)?);
     }
     // Frames without an ack must not leak either: typing and read are ignored or refused.
     rx.send(json!({ "t": "typing", "groupId": g, "topicId": topic }))

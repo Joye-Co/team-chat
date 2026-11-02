@@ -91,11 +91,11 @@ async fn run(c: &mut Ctx) -> Result<()> {
         ev2["event"]["data"]["message"]["topicId"] == topic.id.as_str(),
         "message in another topic"
     );
-    // Notifications are a V1 extension: when the server marks the event, it must say mention.
-    match ev2["notify"].as_str() {
-        Some(n) => check!(n == "mention", "B was mentioned but notify is {n}"),
-        None => c.note("the server sent no notify reason (notifications not on this server)"),
-    }
+    check!(
+        ev2["notify"] == "mention",
+        "B was mentioned but notify is {}",
+        ev2["notify"]
+    );
     c.note(format!(
         "B got topic.created (seq {s1}) then message.created (seq {s2})"
     ));
