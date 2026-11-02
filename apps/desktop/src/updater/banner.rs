@@ -5,7 +5,7 @@ use gpui::{
     App, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
     img, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Sizable as _, button::Button, spinner::Spinner};
+use gpui_component::{Sizable as _, button::Button};
 
 use super::{Failure, Phase, Updater, version};
 use crate::{
@@ -196,7 +196,7 @@ impl Render for UpdateBanner {
                 .into_any_element()
         });
         let glyph = if busy {
-            Spinner::new()
+            crate::ui::spinner()
                 .with_size(theme::icon::ROW)
                 .color(colors.text_2)
                 .into_any_element()
@@ -341,7 +341,7 @@ impl Render for AboutUpdate {
                                 })
                                 .when(busy, |el| {
                                     el.child(
-                                        Spinner::new()
+                                        crate::ui::spinner()
                                             .with_size(theme::icon::CHIP)
                                             .color(colors.text_3),
                                     )

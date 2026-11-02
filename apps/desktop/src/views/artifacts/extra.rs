@@ -5,7 +5,6 @@ use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement as _, Styled, Window, div, px,
 };
-use gpui_component::spinner::Spinner;
 
 use super::{CARD_H, CARD_W, window};
 use crate::{
@@ -138,7 +137,7 @@ impl MessageExtra for ArtifactRefsExtra {
                             )),
                     )
                     .child(if opening {
-                        Spinner::new().into_any_element()
+                        crate::ui::spinner().into_any_element()
                     } else {
                         ui::icon(Lucide::ExternalLink, theme::icon::HEADER, k.text_2)
                             .into_any_element()
