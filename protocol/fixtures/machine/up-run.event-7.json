@@ -1,0 +1,21 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 7,
+    "at": 1793627400007,
+    "event": {
+      "type": "tool.call",
+      "itemId": "toolu_1",
+      "turnId": "t1",
+      "tool": "Bash",
+      "title": "Bash: cargo test",
+      "input": {
+        "command": "cargo test"
+      }
+    }
+  }
+}

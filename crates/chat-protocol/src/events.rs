@@ -5,6 +5,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::bots::RunUpdatedData;
 use crate::card::Card;
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
 use crate::files::ArtifactEventData;
@@ -56,6 +57,8 @@ pub enum EventData {
     ArtifactCreated(ArtifactEventData),
     #[serde(rename = "artifact.versionAdded")]
     ArtifactVersionAdded(ArtifactEventData),
+    #[serde(rename = "run.updated")]
+    RunUpdated(RunUpdatedData),
 }
 
 impl EventData {
@@ -72,6 +75,7 @@ impl EventData {
             Self::CardActioned(_) => "card.actioned",
             Self::ArtifactCreated(_) => "artifact.created",
             Self::ArtifactVersionAdded(_) => "artifact.versionAdded",
+            Self::RunUpdated(_) => "run.updated",
         }
     }
 }

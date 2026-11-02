@@ -47,6 +47,18 @@ import { TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } 
 import { UpdateInfo } from "./updates.ts";
 import { DiagnosticsResponse } from "./diagnostics.ts";
 import { AuditResponse, AuditEntry } from "./audit.ts";
+import {
+  BotRun,
+  BotRunner,
+  CreateMachineRequest,
+  CreateMachineResponse,
+  Machine,
+  MachinesResponse,
+  RunEventsResponse,
+  RunUpdatedEvent,
+  SetBotRunnerRequest,
+} from "./bots.ts";
+import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
 
 export * from "./common.ts";
 export * from "./topic.ts";
@@ -60,6 +72,8 @@ export * from "./updates.ts";
 export * from "./diagnostics.ts";
 export * from "./hooks.ts";
 export * from "./audit.ts";
+export * from "./machine.ts";
+export * from "./bots.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -230,6 +244,7 @@ export const Event = z.discriminatedUnion("type", [
   CardActionedEvent,
   ArtifactCreatedEvent,
   ArtifactVersionAddedEvent,
+  RunUpdatedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -591,6 +606,19 @@ export const schemas = {
   PostMessageRequest,
   AuditEntry,
   AuditResponse,
+  // Bot runs and machines
+  BotRun,
+  RunEvent,
+  RunLogEntry,
+  RunEventsResponse,
+  SetBotRunnerRequest,
+  BotRunner,
+  Machine,
+  CreateMachineRequest,
+  CreateMachineResponse,
+  MachinesResponse,
+  MachineUpFrame,
+  MachineDownFrame,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

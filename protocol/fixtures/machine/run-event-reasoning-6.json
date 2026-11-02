@@ -1,0 +1,10 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "reasoning",
+    "itemId": "msg_1:1",
+    "turnId": "t1",
+    "text": "Run the tests first."
+  }
+}

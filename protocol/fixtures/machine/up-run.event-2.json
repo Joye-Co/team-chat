@@ -1,0 +1,17 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 2,
+    "at": 1793627400002,
+    "event": {
+      "type": "session",
+      "sessionId": "0b6a3c1e-2f4d-4e5a-9b7c-1d2e3f4a5b6c",
+      "runtime": "claude",
+      "model": "claude-sonnet"
+    }
+  }
+}

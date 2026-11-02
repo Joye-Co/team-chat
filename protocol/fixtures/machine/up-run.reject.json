@@ -1,0 +1,11 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.reject",
+    "runId": "01JA0000000000000000000R02",
+    "reason": "busy",
+    "message": "max_parallel_runs reached"
+  }
+}

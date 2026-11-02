@@ -1,0 +1,23 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 9,
+    "at": 1793627400009,
+    "event": {
+      "type": "file.change",
+      "itemId": "toolu_2:file",
+      "turnId": "t1",
+      "changes": [
+        {
+          "path": "src/lib.rs",
+          "kind": "modify",
+          "diff": "@@ -1 +1 @@\n-a\n+b\n"
+        }
+      ]
+    }
+  }
+}

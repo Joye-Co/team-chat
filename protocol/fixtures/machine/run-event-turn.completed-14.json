@@ -1,0 +1,9 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "turn.completed",
+    "turnId": "t1",
+    "status": "completed"
+  }
+}

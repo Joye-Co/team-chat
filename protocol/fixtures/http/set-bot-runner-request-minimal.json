@@ -1,0 +1,8 @@
+{
+  "kind": "SetBotRunnerRequest",
+  "valid": true,
+  "description": "scratch folder, any machine",
+  "value": {
+    "runtime": "claude"
+  }
+}

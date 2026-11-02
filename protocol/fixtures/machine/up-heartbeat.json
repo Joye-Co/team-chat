@@ -1,0 +1,25 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "heartbeat",
+    "at": 1793627400000,
+    "health": {
+      "diskFreeBytes": 120000000000,
+      "diskTotalBytes": 494000000000,
+      "load1": 1.5,
+      "load5": 1.2,
+      "load15": 0.9,
+      "cpuCount": 10,
+      "activeRuns": 1
+    },
+    "runs": [
+      {
+        "runId": "01JA0000000000000000000R01",
+        "lastSeq": 14,
+        "done": false
+      }
+    ]
+  }
+}

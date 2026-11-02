@@ -1278,6 +1278,7 @@ dependencies = [
 name = "daemon"
 version = "0.1.0"
 dependencies = [
+ "chat-protocol",
  "flate2",
  "futures-util",
  "libc",

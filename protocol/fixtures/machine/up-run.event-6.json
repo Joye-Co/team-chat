@@ -1,0 +1,17 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 6,
+    "at": 1793627400006,
+    "event": {
+      "type": "reasoning",
+      "itemId": "msg_1:1",
+      "turnId": "t1",
+      "text": "Run the tests first."
+    }
+  }
+}

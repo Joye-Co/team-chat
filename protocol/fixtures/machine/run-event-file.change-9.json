@@ -1,0 +1,16 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "file.change",
+    "itemId": "toolu_2:file",
+    "turnId": "t1",
+    "changes": [
+      {
+        "path": "src/lib.rs",
+        "kind": "modify",
+        "diff": "@@ -1 +1 @@\n-a\n+b\n"
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 5,
+    "at": 1793627400005,
+    "event": {
+      "type": "message",
+      "itemId": "msg_1:0",
+      "turnId": "t1",
+      "role": "assistant",
+      "text": "Looking at the test."
+    }
+  }
+}

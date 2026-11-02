@@ -1,0 +1,11 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.approval",
+    "runId": "01JA0000000000000000000R01",
+    "approvalId": "a1",
+    "decision": "approve"
+  }
+}

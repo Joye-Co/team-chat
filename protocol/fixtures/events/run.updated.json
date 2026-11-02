@@ -1,0 +1,27 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 42,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0BOT000000000000000AC",
+    "type": "run.updated",
+    "data": {
+      "run": {
+        "id": "01JBX0RUN000000000000000AU",
+        "botId": "01JBX0BOT000000000000000AC",
+        "groupId": "01JBX0GENERAL000000000000A",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "machineId": "01JBX0MACHINE00000000000AV",
+        "status": "done",
+        "requestedBy": "01JBX0OWNER0000000000000AA",
+        "createdAt": 1762128010000,
+        "startedAt": 1762128011000,
+        "endedAt": 1762128070000,
+        "updatedAt": 1762128070000,
+        "summary": "修好了 sync 测试"
+      }
+    }
+  }
+}

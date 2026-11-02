@@ -1,0 +1,128 @@
+// Bot runs for clients: runner-backed bot configuration, machines and their health, run
+// status events in the group log and the run log. See docs/protocol.md, "Bot runs".
+import { z } from "zod";
+import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
+import { CliInfo, Health, Labels, RunLogEntry } from "./machine.ts";
+
+export const RunStatus = z.enum(["created", "running", "waiting", "blocked", "done", "failed", "cancelled"]);
+export type RunStatus = z.infer<typeof RunStatus>;
+
+/** One run of a runner-backed bot in a topic. */
+export const BotRun = z.object({
+  id: Id,
+  botId: Id,
+  groupId: Id,
+  topicId: Id,
+  /** The machine the run was given to; absent while none was picked. */
+  machineId: Id.optional(),
+  status: RunStatus,
+  /** The member whose message started the run. */
+  requestedBy: Id.optional(),
+  createdAt: Millis,
+  startedAt: Millis.optional(),
+  endedAt: Millis.optional(),
+  updatedAt: Millis,
+  /** Short plain-text note: the result's first line, or why the run stopped. At most 280. */
+  summary: z.string().max(280).optional(),
+});
+export type BotRun = z.infer<typeof BotRun>;
+
+/** Stored group event; `actorId` = the bot. Sent when a run is created and when its status changes. */
+export const RunUpdatedEvent = z.object({
+  ...eventBase,
+  type: z.literal("run.updated"),
+  data: z.object({ run: BotRun }),
+});
+
+/** `GET /v1/runs/:id/events?afterSeq=&limit=` (member of the run's group). */
+export const RunEventsResponse = z.object({
+  run: BotRun,
+  entries: z.array(RunLogEntry),
+  hasMore: z.boolean(),
+  /** Highest seq stored for this run. */
+  lastSeq: Seq,
+});
+export type RunEventsResponse = z.infer<typeof RunEventsResponse>;
+
+/** `GET /v1/runs/:id` */
+export const RunResponse = BotRun;
+
+// ---------------------------------------------------------------------------
+// Runner-backed bots
+// ---------------------------------------------------------------------------
+
+export const RunnerRepo = z
+  .object({
+    url: z.string().min(1).max(2048).optional(),
+    path: z.string().min(1).max(1024).optional(),
+  })
+  .refine((r) => (r.url === undefined) !== (r.path === undefined), { message: "repo needs url or path, not both" });
+
+const EnvName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]{0,127}$/);
+
+/** `PUT /v1/bots/:id/runner` (owner). Makes the bot runner-backed. */
+export const SetBotRunnerRequest = z.object({
+  /** A runtime name that machines report in `hello.clis[].runtime`, e.g. "codex" or "claude". */
+  runtime: z.string().min(1).max(64),
+  /** A machine qualifies when it has every one of these labels. */
+  labels: Labels.optional(),
+  repo: RunnerRepo.optional(),
+  baseBranch: z.string().min(1).max(200).optional(),
+  model: z.string().min(1).max(200).optional(),
+  envAllowlist: z.array(EnvName).max(50).optional(),
+  /** Absent = true. */
+  enabled: z.boolean().optional(),
+});
+export type SetBotRunnerRequest = z.infer<typeof SetBotRunnerRequest>;
+
+/** `GET` and `PUT /v1/bots/:id/runner` */
+export const BotRunner = z.object({
+  botId: Id,
+  runtime: z.string().min(1).max(64),
+  labels: Labels,
+  repo: RunnerRepo.optional(),
+  baseBranch: z.string().optional(),
+  model: z.string().optional(),
+  envAllowlist: z.array(z.string()),
+  enabled: z.boolean(),
+  updatedAt: Millis,
+});
+export type BotRunner = z.infer<typeof BotRunner>;
+
+// ---------------------------------------------------------------------------
+// Machines
+// ---------------------------------------------------------------------------
+
+export const Machine = z.object({
+  id: Id,
+  name: Name,
+  /** Owner labels and the labels the daemon reports, merged. */
+  labels: z.array(z.string()),
+  createdBy: Id,
+  createdAt: Millis,
+  revoked: z.boolean().optional(),
+  /** A daemon link is open now. */
+  connected: z.boolean(),
+  /** Accepts new runs: connected, recent heartbeat, enough free disk. */
+  healthy: z.boolean(),
+  lastHeartbeatAt: Millis.optional(),
+  daemonVersion: z.string().optional(),
+  os: z.string().optional(),
+  arch: z.string().optional(),
+  maxParallelRuns: z.int().nonnegative().optional(),
+  health: Health.optional(),
+  clis: z.array(CliInfo).optional(),
+  /** Ids of the runs this machine holds now. */
+  runningRuns: z.array(Id),
+});
+export type Machine = z.infer<typeof Machine>;
+
+/** `POST /v1/machines` (owner) */
+export const CreateMachineRequest = z.object({ name: Name, labels: Labels.optional() });
+export type CreateMachineRequest = z.infer<typeof CreateMachineRequest>;
+/** The token (`tm_` + 43 base64url) is shown only in this response. */
+export const CreateMachineResponse = z.object({ machine: Machine, token: z.string().min(1) });
+export type CreateMachineResponse = z.infer<typeof CreateMachineResponse>;
+/** `GET /v1/machines` (owner) */
+export const MachinesResponse = z.array(Machine);
+

@@ -1,0 +1,10 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.cancel",
+    "runId": "01JA0000000000000000000R01",
+    "reason": "stopped by Joye"
+  }
+}

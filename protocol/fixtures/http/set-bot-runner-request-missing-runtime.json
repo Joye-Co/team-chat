@@ -1,0 +1,10 @@
+{
+  "kind": "SetBotRunnerRequest",
+  "valid": false,
+  "description": "missing runtime",
+  "value": {
+    "labels": [
+      "mac"
+    ]
+  }
+}

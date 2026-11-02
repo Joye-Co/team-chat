@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use chat_protocol::machine::{Down, RunEvent, RunLogEntry, Up};
 use chat_protocol::*;
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::Value;
@@ -44,7 +45,9 @@ check!(
     UpdateInfo,
     CreateHookRequest,
     HookInRequest,
-    PostMessageRequest
+    PostMessageRequest,
+    SetBotRunnerRequest,
+    CreateMachineRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -120,6 +123,19 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("PostMessageRequest", validated::<PostMessageRequest>),
     ("AuditEntry", plain::<AuditEntry>),
     ("AuditResponse", plain::<AuditResponse>),
+    // Bot runs and machines
+    ("BotRun", plain::<BotRun>),
+    ("RunEvent", plain::<RunEvent>),
+    ("RunLogEntry", plain::<RunLogEntry>),
+    ("RunEventsResponse", plain::<RunEventsResponse>),
+    ("SetBotRunnerRequest", validated::<SetBotRunnerRequest>),
+    ("BotRunner", plain::<BotRunner>),
+    ("Machine", plain::<Machine>),
+    ("CreateMachineRequest", validated::<CreateMachineRequest>),
+    ("CreateMachineResponse", plain::<CreateMachineResponse>),
+    ("MachinesResponse", plain::<MachinesResponse>),
+    ("MachineUpFrame", plain::<Up>),
+    ("MachineDownFrame", plain::<Down>),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -251,7 +267,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 11);
+    assert_eq!(valid("Event", "type").len(), 12);
     assert_eq!(valid("TransientEvent", "type").len(), 3);
 }
 

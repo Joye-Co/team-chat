@@ -1,0 +1,8 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "status",
+    "state": "preparing"
+  }
+}

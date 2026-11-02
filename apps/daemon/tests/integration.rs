@@ -202,7 +202,7 @@ fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Dow
 
 fn welcome(runs: Vec<KnownRun>) -> Down {
     Down::Welcome {
-        protocol: 1,
+        protocol: ProtocolV1,
         machine_id: "m1".into(),
         server_time: now_ms(),
         runs,
@@ -295,13 +295,12 @@ async fn daemon_end_to_end() {
     assert_eq!(auth.as_deref(), Some(&*format!("Bearer {TOKEN}")));
     match next(&mut ws).await {
         Up::Hello {
-            protocol,
+            protocol: _,
             machine,
             clis,
             health,
             runs,
         } => {
-            assert_eq!(protocol, 1);
             assert_eq!(machine.name, "test-mac");
             assert_eq!(machine.max_parallel_runs, 3);
             assert_eq!(clis.len(), 1);

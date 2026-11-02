@@ -1,0 +1,18 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 10,
+    "at": 1793627400010,
+    "event": {
+      "type": "approval.request",
+      "approvalId": "a1",
+      "itemId": "c1",
+      "title": "run command: rm -rf build",
+      "detail": "clean the build"
+    }
+  }
+}

@@ -601,3 +601,68 @@ AuditEntry = {
 
 Every HTTP write and every admin action is audited. Message writes over WebSocket are in the group
 log and are not repeated in the audit log.
+
+## Bot runs
+
+Modules: `bots.ts` and `machine.ts` / `bots.rs` and `machine.rs`. A runner-backed bot is a bot
+member whose work runs as a coding CLI on a team machine (the machine daemon, see
+[machine-protocol.md](machine-protocol.md)). Its front desk on the server (BotDesk, one per
+bot) turns @mentions into runs and run progress into topic messages.
+
+```ts
+RunStatus = "created" | "running" | "waiting" | "blocked" | "done" | "failed" | "cancelled"
+BotRun = { id, botId, groupId, topicId, machineId?, status: RunStatus, requestedBy?,
+           createdAt, startedAt?, endedAt?, updatedAt, summary? /* <= 280 */ }
+run.updated (stored event) data: { run: BotRun }      // actorId = the bot
+RunLogEntry = run.event | run.done | run.session frames of machine-protocol.md, as stored
+RunEventsResponse = { run: BotRun, entries: RunLogEntry[], hasMore: boolean, lastSeq: number }
+
+SetBotRunnerRequest = { runtime, labels?: string[], repo?: { url } | { path }, baseBranch?,
+                        model?, envAllowlist?: string[], enabled? /* absent = true */ }
+BotRunner = { botId, runtime, labels, repo?, baseBranch?, model?, envAllowlist, enabled, updatedAt }
+Machine = { id, name, labels, createdBy, createdAt, revoked?, connected, healthy,
+            lastHeartbeatAt?, daemonVersion?, os?, arch?, maxParallelRuns?, health?: Health,
+            clis?: CliInfo[], runningRuns: string[] }
+CreateMachineRequest = { name, labels? }      CreateMachineResponse = { machine, token }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `PUT /v1/bots/:id/runner` | owner | `SetBotRunnerRequest` | `BotRunner` |
+| `GET /v1/bots/:id/runner` | owner | | `BotRunner`; 404 when the bot is not runner-backed |
+| `DELETE /v1/bots/:id/runner` | owner | | `{ ok: true }` |
+| `POST /v1/machines` | owner | `CreateMachineRequest` | `CreateMachineResponse` |
+| `GET /v1/machines` | owner | | `Machine[]` |
+| `DELETE /v1/machines/:id` | owner | | `{ ok: true }`; revokes the token, closes the link |
+| `GET /v1/runs/:id` | member of the run's group | | `BotRun` |
+| `GET /v1/runs/:id/events?afterSeq=&limit=` | member of the run's group | | `RunEventsResponse`; `limit` 1..500, default 200 |
+| `GET /v1/runs/:id/session` | owner | | the raw CLI session, gzip (`application/gzip`); 404 until uploaded |
+| `GET /v1/machine/ws` | machine token | | WebSocket upgrade (machine-protocol.md) |
+| `PUT /v1/machine/runs/:id/session` | machine token | gzip body | `{ ok: true }` |
+
+Rules:
+
+- Labels are 1..64 of `[A-Za-z0-9_.:-]`, at most 20. A machine's labels are its owner labels plus
+  the labels its daemon reports. A machine qualifies for a bot when it has all of the bot's
+  labels, reports the bot's `runtime` as available, is connected with a heartbeat in the last
+  90 s, has fewer active runs than `maxParallelRuns` and at least 5 GiB free disk (`healthy`).
+  Among those the server picks the one with the fewest active runs, then the lowest load.
+- Trigger: a `message.created` by a human that mentions a runner-backed bot starts a run in
+  that topic, unless the topic already has a responsible bot. The first bot that starts a run
+  in a topic becomes its only responsible bot. Messages written by bots never start runs or
+  reach a run (no loops).
+- While a run of the topic's bot is active (`created`, `running`, `waiting`, `blocked`), every
+  later human message in the topic goes to that run as input. A message that reaches the run
+  after its last turn ended starts a new run. When no run is active, only a new mention of the
+  bot starts a run.
+- The bot answers once with a short acknowledgement, streams progress into one streaming
+  message, and posts the result when the run ends. It sets the topic's `status`:
+  `in_progress` while it works, `waiting_answer` with `waitingOn` = the requester while the run
+  asks a question (reply 同意 or 拒绝 to an approval), `done` on success, `blocked` with one
+  short note when the run fails, its machine stays away past the lease, or no event comes for
+  10 minutes. A blocked run that sends events again goes back to `running`.
+- `run.updated` is stored in the group log when a run is created and on every status change, so
+  clients show runs from events. The process view reads the run log with
+  `GET /v1/runs/:id/events`, paged by `seq` (gaps are normal: the daemon may drop deltas).
+- The raw session (the CLI's own file, gzip) is stored in R2 at `sessions/<runId>.jsonl.gz`.
+  Only owners can download it.

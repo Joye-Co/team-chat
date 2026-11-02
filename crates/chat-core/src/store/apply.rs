@@ -603,7 +603,8 @@ fn apply_one(
         }
         EventData::CardActioned(_)
         | EventData::ArtifactCreated(_)
-        | EventData::ArtifactVersionAdded(_) => {
+        | EventData::ArtifactVersionAdded(_)
+        | EventData::RunUpdated(_) => {
             out.other_events.push(ev.clone());
         }
     }

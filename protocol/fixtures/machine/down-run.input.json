@@ -1,0 +1,12 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.input",
+    "runId": "01JA0000000000000000000R01",
+    "inputId": "01JA0000000000000000000I01",
+    "text": "Also update the docs",
+    "authorId": "01JA0000000000000000000H01"
+  }
+}

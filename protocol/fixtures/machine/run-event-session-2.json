@@ -1,0 +1,10 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "session",
+    "sessionId": "0b6a3c1e-2f4d-4e5a-9b7c-1d2e3f4a5b6c",
+    "runtime": "claude",
+    "model": "claude-sonnet"
+  }
+}

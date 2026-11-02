@@ -1,0 +1,11 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "approval.request",
+    "approvalId": "a1",
+    "itemId": "c1",
+    "title": "run command: rm -rf build",
+    "detail": "clean the build"
+  }
+}

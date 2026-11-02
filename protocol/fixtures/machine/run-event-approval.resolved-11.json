@@ -1,0 +1,9 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "approval.resolved",
+    "approvalId": "a1",
+    "decision": "approve"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.done",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 15,
+    "at": 1793627400015,
+    "status": "succeeded",
+    "exitCode": 0,
+    "resultText": "Fixed the test.\nDetails follow.",
+    "summary": "Fixed the test.",
+    "sessionId": "0b6a3c1e-2f4d-4e5a-9b7c-1d2e3f4a5b6c",
+    "usage": {
+      "inputTokens": 1200,
+      "outputTokens": 300,
+      "costUsd": 0.012
+    },
+    "durationMs": 64000
+  }
+}

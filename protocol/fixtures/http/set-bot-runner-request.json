@@ -1,0 +1,19 @@
+{
+  "kind": "SetBotRunnerRequest",
+  "valid": true,
+  "value": {
+    "runtime": "codex",
+    "labels": [
+      "mac",
+      "main"
+    ],
+    "repo": {
+      "url": "https://github.com/Joye-Co/team-chat"
+    },
+    "baseBranch": "main",
+    "model": "gpt-5.5",
+    "envAllowlist": [
+      "GITHUB_TOKEN"
+    ]
+  }
+}

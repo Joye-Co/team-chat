@@ -1,0 +1,10 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "message.delta",
+    "itemId": "msg_1:0",
+    "turnId": "t1",
+    "text": "Look"
+  }
+}

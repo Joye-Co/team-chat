@@ -1,0 +1,53 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": false,
+  "description": "unknown machine protocol",
+  "value": {
+    "t": "hello",
+    "protocol": 2,
+    "machine": {
+      "id": "01JA0000000000000000000M01",
+      "name": "mac-mini",
+      "labels": [
+        "mac",
+        "main"
+      ],
+      "daemonVersion": "0.1.0",
+      "os": "macos",
+      "arch": "aarch64",
+      "maxParallelRuns": 2
+    },
+    "clis": [
+      {
+        "runtime": "codex",
+        "kind": "codex",
+        "command": "codex",
+        "version": "codex-cli 0.159.0",
+        "available": true
+      },
+      {
+        "runtime": "claude",
+        "kind": "claude",
+        "command": "claude",
+        "version": "2.1.310 (Claude Code)",
+        "available": true
+      }
+    ],
+    "health": {
+      "diskFreeBytes": 120000000000,
+      "diskTotalBytes": 494000000000,
+      "load1": 1.5,
+      "load5": 1.2,
+      "load15": 0.9,
+      "cpuCount": 10,
+      "activeRuns": 1
+    },
+    "runs": [
+      {
+        "runId": "01JA0000000000000000000R01",
+        "lastSeq": 12,
+        "done": false
+      }
+    ]
+  }
+}

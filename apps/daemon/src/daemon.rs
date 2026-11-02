@@ -236,7 +236,7 @@ impl Daemon {
                 self.link = Some(tx);
                 self.last_rx = Instant::now();
                 let hello = Up::Hello {
-                    protocol: MACHINE_PROTOCOL,
+                    protocol: ProtocolV1,
                     machine: MachineInfo {
                         id: self.cfg.machine_id.clone(),
                         name: self.cfg.name.clone(),
@@ -270,14 +270,8 @@ impl Daemon {
         }
         match f {
             Down::Welcome {
-                protocol,
-                machine_id,
-                runs,
-                ..
+                machine_id, runs, ..
             } => {
-                if protocol != MACHINE_PROTOCOL {
-                    log!("server speaks machine protocol {protocol}");
-                }
                 if let Some(id) = &self.cfg.machine_id
                     && id != &machine_id
                 {

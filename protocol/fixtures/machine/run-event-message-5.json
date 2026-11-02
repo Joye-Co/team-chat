@@ -1,0 +1,11 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "message",
+    "itemId": "msg_1:0",
+    "turnId": "t1",
+    "role": "assistant",
+    "text": "Looking at the test."
+  }
+}

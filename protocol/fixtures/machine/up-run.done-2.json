@@ -1,0 +1,15 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.done",
+    "runId": "01JA0000000000000000000R03",
+    "seq": 4,
+    "at": 1793627400020,
+    "status": "failed",
+    "exitCode": 1,
+    "error": "claude exited before the turn ended: auth",
+    "durationMs": 900
+  }
+}

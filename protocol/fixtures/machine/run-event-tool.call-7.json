@@ -1,0 +1,14 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "tool.call",
+    "itemId": "toolu_1",
+    "turnId": "t1",
+    "tool": "Bash",
+    "title": "Bash: cargo test",
+    "input": {
+      "command": "cargo test"
+    }
+  }
+}

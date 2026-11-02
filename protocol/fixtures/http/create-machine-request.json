@@ -1,0 +1,11 @@
+{
+  "kind": "CreateMachineRequest",
+  "valid": true,
+  "value": {
+    "name": "mac-mini",
+    "labels": [
+      "mac",
+      "main"
+    ]
+  }
+}

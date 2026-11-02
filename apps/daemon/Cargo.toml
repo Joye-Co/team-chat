@@ -14,6 +14,7 @@ name = "daemon"
 path = "src/main.rs"
 
 [dependencies]
+chat-protocol.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "process", "io-util", "time", "sync", "fs", "net", "signal"] }

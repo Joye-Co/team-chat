@@ -1947,6 +1947,123 @@
         "type",
         "data"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "actorId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "run.updated"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "run": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "botId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "topicId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "machineId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "created",
+                    "running",
+                    "waiting",
+                    "blocked",
+                    "done",
+                    "failed",
+                    "cancelled"
+                  ]
+                },
+                "requestedBy": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "createdAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "startedAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "endedAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "updatedAt": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "summary": {
+                  "type": "string",
+                  "maxLength": 280
+                }
+              },
+              "required": [
+                "id",
+                "botId",
+                "groupId",
+                "topicId",
+                "status",
+                "createdAt",
+                "updatedAt"
+              ]
+            }
+          },
+          "required": [
+            "run"
+          ]
+        }
+      },
+      "required": [
+        "seq",
+        "groupId",
+        "at",
+        "actorId",
+        "type",
+        "data"
+      ]
     }
   ],
   "$defs": {

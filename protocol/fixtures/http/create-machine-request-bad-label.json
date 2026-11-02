@@ -1,0 +1,11 @@
+{
+  "kind": "CreateMachineRequest",
+  "valid": false,
+  "description": "label with a space",
+  "value": {
+    "name": "mac-mini",
+    "labels": [
+      "has space"
+    ]
+  }
+}

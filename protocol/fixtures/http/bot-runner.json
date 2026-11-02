@@ -1,0 +1,18 @@
+{
+  "kind": "BotRunner",
+  "valid": true,
+  "value": {
+    "botId": "01JBX0BOT000000000000000AC",
+    "runtime": "codex",
+    "labels": [
+      "mac"
+    ],
+    "repo": {
+      "path": "/Users/joye/code/team-chat"
+    },
+    "baseBranch": "main",
+    "envAllowlist": [],
+    "enabled": true,
+    "updatedAt": 1762128000000
+  }
+}

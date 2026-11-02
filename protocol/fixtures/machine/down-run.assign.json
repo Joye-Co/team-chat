@@ -1,0 +1,27 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JA0000000000000000000R01",
+    "botMemberId": "01JA0000000000000000000B01",
+    "groupId": "01JA0000000000000000000G01",
+    "topicId": "01JA0000000000000000000T01",
+    "runtime": "claude",
+    "prompt": "Topic: Fix the flaky test\n\nJoye: @dev please fix tests/sync.rs",
+    "model": "sonnet",
+    "repo": {
+      "url": "https://github.com/Joye-Co/team-chat",
+      "baseBranch": "main"
+    },
+    "envAllowlist": [
+      "GITHUB_TOKEN"
+    ],
+    "leaseMs": 600000,
+    "maxDurationMs": 3600000,
+    "sessionUpload": {
+      "url": "https://chat-api-staging.example.workers.dev/v1/machine/runs/01JA0000000000000000000R01/session"
+    }
+  }
+}

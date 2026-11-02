@@ -1,0 +1,16 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JA0000000000000000000R02",
+    "botMemberId": "01JA0000000000000000000B01",
+    "groupId": "01JA0000000000000000000G01",
+    "topicId": "01JA0000000000000000000T02",
+    "runtime": "codex",
+    "prompt": "Write a summary",
+    "envAllowlist": [],
+    "leaseMs": 600000
+  }
+}

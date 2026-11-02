@@ -1,0 +1,19 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R01",
+    "seq": 8,
+    "at": 1793627400008,
+    "event": {
+      "type": "tool.result",
+      "itemId": "toolu_1",
+      "turnId": "t1",
+      "ok": false,
+      "output": "1 test failed",
+      "exitCode": 101
+    }
+  }
+}

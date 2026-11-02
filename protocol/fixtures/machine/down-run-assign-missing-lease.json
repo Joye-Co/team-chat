@@ -1,0 +1,15 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": false,
+  "description": "missing leaseMs",
+  "value": {
+    "t": "run.assign",
+    "runId": "r1",
+    "botMemberId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "runtime": "codex",
+    "prompt": "x",
+    "envAllowlist": []
+  }
+}

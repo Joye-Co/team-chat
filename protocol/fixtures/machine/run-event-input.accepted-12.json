@@ -1,0 +1,8 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "input.accepted",
+    "inputId": "01JA0000000000000000000I01"
+  }
+}

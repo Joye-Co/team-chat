@@ -12,6 +12,7 @@
 //! [`encode_client_frame`], which runs [`ClientFrame::validate`] first.
 
 pub mod audit;
+pub mod bots;
 pub mod card;
 pub mod diagnostics;
 pub mod entities;
@@ -22,6 +23,7 @@ pub mod frames;
 pub mod hooks;
 pub mod http;
 pub mod limits;
+pub mod machine;
 pub mod members;
 pub mod message;
 pub mod reads;
@@ -31,6 +33,7 @@ pub mod topic;
 pub mod updates;
 
 pub use audit::*;
+pub use bots::*;
 pub use card::*;
 pub use diagnostics::*;
 pub use entities::*;

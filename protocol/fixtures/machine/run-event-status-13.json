@@ -1,0 +1,9 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "status",
+    "state": "stalled",
+    "message": "no output for 5 minutes"
+  }
+}

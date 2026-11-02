@@ -1,0 +1,12 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "error",
+    "error": {
+      "code": "unauthorized",
+      "message": "machine token revoked"
+    }
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "heartbeat.ack",
+    "at": 1793627400000
+  }
+}

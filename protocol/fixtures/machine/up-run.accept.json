@@ -1,0 +1,9 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.accept",
+    "runId": "01JA0000000000000000000R01"
+  }
+}

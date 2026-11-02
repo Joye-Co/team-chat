@@ -1,0 +1,19 @@
+{
+  "kind": "RunLogEntry",
+  "valid": true,
+  "value": {
+    "t": "run.event",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 2,
+    "at": 1762128012000,
+    "event": {
+      "type": "tool.call",
+      "itemId": "c1",
+      "tool": "bash",
+      "title": "cargo test",
+      "input": {
+        "command": "cargo test"
+      }
+    }
+  }
+}

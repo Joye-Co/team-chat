@@ -1,0 +1,12 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "tool.result",
+    "itemId": "toolu_1",
+    "turnId": "t1",
+    "ok": false,
+    "output": "1 test failed",
+    "exitCode": 101
+  }
+}

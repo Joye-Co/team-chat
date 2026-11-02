@@ -1,0 +1,17 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "welcome",
+    "protocol": 1,
+    "machineId": "01JA0000000000000000000M01",
+    "serverTime": 1793627400000,
+    "runs": [
+      {
+        "runId": "01JA0000000000000000000R01",
+        "ackedSeq": 12
+      }
+    ]
+  }
+}
