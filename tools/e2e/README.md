@@ -15,7 +15,7 @@ mkdir -p -m 700 ~/.config/team-chat/local-e2e
 (umask 077; printf 'ADMIN_SECRET=%s\n' "$(cat ~/.config/team-chat/local-e2e/admin-secret)" > server/.dev.vars)
 mkdir -p .tmp
 (cd server && bunx wrangler d1 migrations apply DB --local)
-(cd server && ./node_modules/.bin/wrangler dev --port 8790 --inspector-port 9790 --ip 127.0.0.1 \
+(cd server && "$PWD/node_modules/.bin/wrangler" dev --port 8790 --inspector-port 9790 --ip 127.0.0.1 \
   > ../.tmp/wrangler.log 2>&1 & echo $! > ../.tmp/wrangler.pid)
 
 cargo run -p e2e -- --base-url http://127.0.0.1:8790 --secrets-dir ~/.config/team-chat/local-e2e
