@@ -73,7 +73,9 @@ impl TimelineView {
                 .child(t::STREAMING)
                 .into_any_element()
         } else {
-            markdown::message_body("body", message.body.clone()).into_any_element()
+            markdown::message_body("body", message.body.clone())
+                .w_full()
+                .into_any_element()
         };
 
         let failed = message.send_state == SendState::Failed;
@@ -152,6 +154,7 @@ impl TimelineView {
         let can_delete = self.can_delete(&message);
         let row = div()
             .id(ElementId::Name(key.clone().into()))
+            .w_full()
             .px(px(16.))
             .pt(if grouped { px(2.) } else { px(8.) })
             .pb(px(2.))
@@ -196,6 +199,7 @@ impl TimelineView {
 
         if divider {
             div()
+                .w_full()
                 .flex()
                 .flex_col()
                 .child(new_messages_divider(colors.danger))
