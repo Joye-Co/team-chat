@@ -122,7 +122,7 @@ crate::copy! {
     MACHINE_CREATED = "已添加 {name}",
     MACHINE_CREDENTIAL = "机器凭证",
     MACHINE_INSTALL = "安装命令",
-    MACHINE_INSTALL_HINT = "在那台机器的终端里运行。命令里含有凭证，不要发到群里。",
+    MACHINE_INSTALL_HINT = "先在那台机器上安装应用，再在它的终端里运行。命令里含有凭证，不要发到群里。",
     MACHINE_ONLINE = "在线",
     MACHINE_OFFLINE = "离线",
     MACHINE_UNHEALTHY = "异常",

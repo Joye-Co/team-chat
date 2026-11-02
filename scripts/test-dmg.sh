@@ -41,6 +41,7 @@ check "Applications link" test "$(readlink "$MNT/Applications")" = /Applications
 check "only the app and the link at the top" test "$(find "$MNT" -mindepth 1 -maxdepth 1 ! -name '.*' | wc -l | tr -d ' ')" = 2
 check "executable" test -x "$APP/Contents/MacOS/$NAME"
 check "arm64 slice" bash -c "lipo -archs '$APP/Contents/MacOS/$NAME' | grep -qw arm64"
+check "machine daemon" test -x "$APP/Contents/MacOS/$(product slug)-daemon"
 check "icon" test -s "$APP/Contents/Resources/AppIcon.icns"
 check "Info.plist lint" plutil -lint -s "$PLIST"
 check "CFBundleIdentifier" test "$(pl CFBundleIdentifier)" = "$BUNDLE_ID"

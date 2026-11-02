@@ -133,9 +133,12 @@ fn toml_str(s: &str) -> String {
 }
 
 /// Shell lines that write the daemon config and token (mode 600) and install
-/// the launchd service. The daemon binary is `<slug>-daemon` from the release.
+/// the launchd service. The daemon ships inside the app (`Contents/MacOS/<slug>-daemon`,
+/// see scripts/build-dmg.sh), so the machine needs the app installed; a `<slug>-daemon` on
+/// `PATH` (a release asset) is the fallback.
 pub(super) fn install_command(server_url: &str, machine: &proto::Machine, token: &str) -> String {
     let slug = env!("PRODUCT_SLUG");
+    let app = env!("PRODUCT_NAME");
     let dir = format!("$HOME/.config/{slug}");
     let labels = machine
         .labels
@@ -153,7 +156,9 @@ pub(super) fn install_command(server_url: &str, machine: &proto::Machine, token:
          name = {name}\n\
          labels = [{labels}]\n\
          EOF\n\
-         {slug}-daemon doctor && {slug}-daemon install-service",
+         D=\"/Applications/{app}.app/Contents/MacOS/{slug}-daemon\"\n\
+         [ -x \"$D\" ] || D=\"$(command -v {slug}-daemon)\"\n\
+         \"$D\" doctor && \"$D\" install-service",
         token = shell_quote(token),
         server = toml_str(server_url),
         id = toml_str(&machine.id),
@@ -540,6 +545,12 @@ mod tests {
         assert!(cmd.contains("labels = [\"mac\", \"gpu\"]"));
         assert!(cmd.contains("server_url = \"https://x.example\""));
         assert!(cmd.ends_with("install-service"));
+        // The daemon comes from the installed app, with a PATH fallback.
+        let slug = env!("PRODUCT_SLUG");
+        assert!(cmd.contains(&format!(
+            ".app/Contents/MacOS/{slug}-daemon\"\n[ -x \"$D\" ] || D=\"$(command -v {slug}-daemon)\""
+        )));
+        assert!(cmd.contains("\"$D\" doctor && \"$D\" install-service"));
     }
 
     #[test]

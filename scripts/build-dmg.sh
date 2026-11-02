@@ -60,6 +60,16 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 log "assembling $NAME.app"
 cp "$BIN_PATH" "$APP/Contents/MacOS/$NAME"
 chmod 755 "$APP/Contents/MacOS/$NAME"
+# The machine daemon ships in the app: the 机器 install command runs it from here.
+DAEMON_PACKAGE="${DAEMON_PACKAGE:-daemon}"
+DAEMON_BIN="$(bin_name "$DAEMON_PACKAGE")"
+if [ "$skip_build" = 0 ]; then
+  log "building $DAEMON_PACKAGE $VERSION (release)"
+  MACOSX_DEPLOYMENT_TARGET="$MACOS_MIN" cargo build --release --locked -p "$DAEMON_PACKAGE" --bin "$DAEMON_BIN" --manifest-path "$ROOT/Cargo.toml"
+fi
+[ -x "$CARGO_TARGET_DIR/release/$DAEMON_BIN" ] || die "no daemon binary at $CARGO_TARGET_DIR/release/$DAEMON_BIN"
+cp "$CARGO_TARGET_DIR/release/$DAEMON_BIN" "$APP/Contents/MacOS/$(product slug)-daemon"
+chmod 755 "$APP/Contents/MacOS/$(product slug)-daemon"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 cat >"$APP/Contents/Info.plist" <<PLIST
