@@ -6,7 +6,7 @@ export type LogFields = Record<string, unknown>;
 
 const REDACTED = "[redacted]";
 const SENSITIVE_KEY =
-  /token|secret|password|passwd|authorization|cookie|invite_?code|^code$|^body$|^append$|^text$|^content$|^title$|api_?key|signature/i;
+  /token|secret|password|passwd|authorization|cookie|invite_?code|^body$|^append$|^text$|^content$|^title$|api_?key|signature/i;
 const TOKEN_VALUE = /tc_[A-Za-z0-9_-]{20,}/g;
 const BEARER_VALUE = /Bearer\s+\S+/gi;
 const INVITE_VALUE = /\b[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}\b/gi;
