@@ -284,11 +284,22 @@ async fn shoot(
             cx.activate(true);
             handle.update(cx, |_, window, cx| {
                 crate::theme::set_mode(theme_mode, cx);
-                capture::undo_clamp(
-                    window,
-                    f32::from(content.width).into(),
-                    f32::from(content.height).into(),
-                )?;
+                // The settings window keeps its own 960 x 720; the main and
+                // login windows take the requested size.
+                let own = crate::views::settings::WINDOW_SIZE;
+                let (own_w, own_h): (f64, f64) =
+                    (f32::from(own.width).into(), f32::from(own.height).into());
+                let (w, h) = capture::frame_size(window)?;
+                if w == own_w && (h - own_h).abs() <= 1. {
+                    capture::undo_clamp(window, own_w, own_h, true)?;
+                } else {
+                    capture::undo_clamp(
+                        window,
+                        f32::from(content.width).into(),
+                        f32::from(content.height).into(),
+                        false,
+                    )?;
+                }
                 window.refresh();
                 capture::order_front(window)?;
                 window.activate_window();
@@ -325,10 +336,29 @@ async fn shoot(
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;
+        // Hold the caret of the focused field visible while the window is
+        // captured, so a capture never lands on the off half of a blink.
+        hold_caret(handle, cx);
+        let _ = next_frame(handle, cx).await;
         let path = png.to_path_buf();
-        cx.background_executor()
-            .spawn(async move { capture::capture(number, &path) })
-            .await?;
+        let shot = cx
+            .background_executor()
+            .spawn(async move { capture::capture(number, &path) });
+        futures::pin_mut!(shot);
+        loop {
+            let tick = cx.background_executor().timer(Duration::from_millis(100));
+            futures::pin_mut!(tick);
+            match futures::future::select(shot, tick).await {
+                futures::future::Either::Left((result, _)) => {
+                    result?;
+                    break;
+                }
+                futures::future::Either::Right(((), pending)) => {
+                    hold_caret(handle, cx);
+                    shot = pending;
+                }
+            }
+        }
         let size = capture::png_size(png).ok_or("the PNG has no size")?;
         Ok((number, size))
     }
@@ -354,6 +384,19 @@ fn park_pointer(handle: AnyWindowHandle, cx: &mut AsyncApp) {
                 }),
                 cx,
             );
+        })
+    });
+}
+
+/// Shows the caret of the focused text field without blinking for the next
+/// 300 ms: gpui-component pauses the blink on every keystroke, and F20 has
+/// no binding and types nothing.
+fn hold_caret(handle: AnyWindowHandle, cx: &mut AsyncApp) {
+    let _ = cx.update(|cx| {
+        handle.update(cx, |_, window, cx| {
+            if let Ok(key) = gpui::Keystroke::parse("f20") {
+                window.dispatch_keystroke(key, cx);
+            }
         })
     });
 }

@@ -320,6 +320,12 @@ pub fn open(services: Services, cx: &mut App) {
     }
 }
 
+/// The settings window's size (§4.4).
+pub const WINDOW_SIZE: gpui::Size<gpui::Pixels> = gpui::Size {
+    width: px(960.),
+    height: px(720.),
+};
+
 /// Opens a settings window at `page`. Self-tests pass `focus: false`.
 pub fn open_window(
     services: Services,
@@ -330,7 +336,7 @@ pub fn open_window(
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(960.), px(720.)),
+            WINDOW_SIZE,
             cx,
         ))),
         window_min_size: Some(size(px(760.), px(560.))),

@@ -47,10 +47,10 @@ pub fn order_front(_window: &Window) -> Result<(), String> {
 /// to the screen's visible frame, which the Dock shortens (887 pt on a 982 pt
 /// display), in `constrainFrameRect:toScreen:`. The screenshot process adds
 /// an override to the window's class that keeps the frame as asked: the Dock
-/// does not show in a capture of one window. Windows with their own size
-/// (settings) keep it.
+/// does not show in a capture of one window. With `own_size`, the size is the
+/// window's own (settings, 960 x 720) and only the extra point goes.
 #[cfg(target_os = "macos")]
-pub fn undo_clamp(window: &Window, width: f64, height: f64) -> Result<(), String> {
+pub fn undo_clamp(window: &Window, width: f64, height: f64, own_size: bool) -> Result<(), String> {
     use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
     use objc2_foundation::{NSPoint, NSRect, NSSize};
 
@@ -85,6 +85,10 @@ pub fn undo_clamp(window: &Window, width: f64, height: f64) -> Result<(), String
         if frame.size.width != width || frame.size.height == height {
             return Ok(());
         }
+        // A window with its own size (settings) only loses the extra point.
+        if own_size && (frame.size.height - height).abs() > 1. {
+            return Ok(());
+        }
         let top = frame.origin.y + frame.size.height;
         let next = NSRect::new(
             NSPoint::new(frame.origin.x, (top - height).max(0.)),
@@ -96,8 +100,27 @@ pub fn undo_clamp(window: &Window, width: f64, height: f64) -> Result<(), String
 }
 
 #[cfg(not(target_os = "macos"))]
-pub fn undo_clamp(_window: &Window, _width: f64, _height: f64) -> Result<(), String> {
+pub fn undo_clamp(
+    _window: &Window,
+    _width: f64,
+    _height: f64,
+    _own_size: bool,
+) -> Result<(), String> {
     Ok(())
+}
+
+/// The window's frame size in points.
+#[cfg(target_os = "macos")]
+pub fn frame_size(window: &Window) -> Result<(f64, f64), String> {
+    let ns_window = ns_window(window)?;
+    // SAFETY: `frame` is a plain getter on a live NSWindow.
+    let frame: objc2_foundation::NSRect = unsafe { objc2::msg_send![ns_window, frame] };
+    Ok((frame.size.width, frame.size.height))
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn frame_size(_window: &Window) -> Result<(f64, f64), String> {
+    Ok((0., 0.))
 }
 
 /// The app that had the focus before the self-test activated itself.
@@ -163,6 +186,7 @@ pub fn capture(number: isize, png: &Path) -> Result<(), String> {
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }
+    to_srgb(png)?;
     match std::fs::metadata(png) {
         Ok(meta) if meta.len() > 0 => Ok(()),
         _ => Err(format!(
@@ -170,6 +194,26 @@ pub fn capture(number: isize, png: &Path) -> Result<(), String> {
             png.display()
         )),
     }
+}
+
+/// Converts a capture from the display's profile (Display P3 on a Mac
+/// screen) to sRGB, the space of the theme tokens and the mockups, so pixel
+/// values read from the PNG are the token values (`#2F6FEB` stays `#2F6FEB`).
+fn to_srgb(png: &Path) -> Result<(), String> {
+    const SRGB: &str = "/System/Library/ColorSync/Profiles/sRGB Profile.icc";
+    let output = Command::new("/usr/bin/sips")
+        .args(["--matchTo", SRGB])
+        .arg(png)
+        .output()
+        .map_err(|e| format!("cannot run sips: {e}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "sips could not convert {} to sRGB: {}",
+            png.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(())
 }
 
 /// Pixel width and height from a PNG header.
