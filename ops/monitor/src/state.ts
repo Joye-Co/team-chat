@@ -2,7 +2,7 @@
 // alert state, recent check results, alerts not yet posted, the topics it posts into and the
 // day of the last summary. All alert decisions happen here, in one place, in order.
 import { DurableObject } from "cloudflare:workers";
-import { type Alert, type CheckResult, INITIAL, type Status, type TargetState, step } from "./alerts";
+import { type Alert, type CheckResult, INITIAL, type Status, type TargetState, stateKey, step } from "./alerts";
 
 const RETAIN_MS = 8 * 24 * 60 * 60 * 1000;
 const PENDING_MAX_AGE_MS = 3 * 24 * 60 * 60 * 1000;
@@ -70,12 +70,13 @@ export class MonitorState extends DurableObject<Record<string, unknown>> {
     const raised: PendingAlert[] = [];
     this.ctx.storage.transactionSync(() => {
       for (const r of results) {
-        const { next, alert } = step(this.state(r.target), r, threshold);
+        const key = stateKey(r);
+        const { next, alert } = step(this.state(key), r, threshold);
         this.sql.exec(
           `INSERT INTO targets (name, status, fails, since, alerted, last_error) VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT (name) DO UPDATE SET status = excluded.status, fails = excluded.fails, since = excluded.since,
              alerted = excluded.alerted, last_error = excluded.last_error`,
-          r.target,
+          key,
           next.status,
           next.fails,
           next.since,
@@ -85,7 +86,7 @@ export class MonitorState extends DurableObject<Record<string, unknown>> {
         this.sql.exec(
           "INSERT INTO checks (at, target, ok, health_ms, rtt_ms, error) VALUES (?, ?, ?, ?, ?, ?)",
           r.at,
-          r.target,
+          key,
           r.ok ? 1 : 0,
           r.healthMs,
           r.rttMs,

@@ -18,6 +18,11 @@ export default defineConfig({
           MONITOR_TOKEN_PRODUCTION: "tc_test_production_token_value_000000",
           MONITOR_TOKEN_STAGING: "tc_test_staging_token_value_0000000000",
         },
+        // The deployed config binds the API Workers; in tests each binding answers who it is.
+        serviceBindings: {
+          API_PRODUCTION: (req: Request) => Response.json({ via: "API_PRODUCTION", url: req.url }),
+          API_STAGING: (req: Request) => Response.json({ via: "API_STAGING", url: req.url }),
+        },
       },
     }),
   ],

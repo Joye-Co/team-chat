@@ -2,7 +2,10 @@
 // production. Each target needs a monitor bot member in that env, in the env's ops group:
 //   bun server/scripts/admin.ts bot --env <env> --name monitor   (then add it to the ops group)
 //   wrangler secret put MONITOR_TOKEN_STAGING / MONITOR_TOKEN_PRODUCTION   (in ops/monitor)
-// `opsGroup` is the ops group's id or exact name. Alerts go to the first healthy target in order.
+// `opsGroup` is the ops group's id or exact name; alerts mention its human members (or the ids in
+// `oncall`). `probeGroup` holds the round-trip messages (the bot's own group, nobody watches it).
+// `service` names the service binding to the target's API Worker. Alerts go to the first healthy
+// target in order.
 // env.local runs against a local `wrangler dev` of the API (see docs/RUNBOOK.md).
 {
   "$schema": "../../server/node_modules/wrangler/config-schema.json",
@@ -13,10 +16,16 @@
   "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": true } },
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
-    "TARGETS": "[{\"name\":\"production\",\"baseUrl\":\"https://chat-api-prod.huangdeshiou.workers.dev\",\"opsGroup\":\"ops\",\"tokenSecret\":\"MONITOR_TOKEN_PRODUCTION\"},{\"name\":\"staging\",\"baseUrl\":\"https://chat-api-staging.huangdeshiou.workers.dev\",\"opsGroup\":\"ops\",\"tokenSecret\":\"MONITOR_TOKEN_STAGING\"}]",
+    "TARGETS": "[{\"name\":\"production\",\"baseUrl\":\"https://chat-api-prod.huangdeshiou.workers.dev\",\"service\":\"API_PRODUCTION\",\"opsGroup\":\"ops\",\"probeGroup\":\"监测\",\"tokenSecret\":\"MONITOR_TOKEN_PRODUCTION\"},{\"name\":\"staging\",\"baseUrl\":\"https://chat-api-staging.huangdeshiou.workers.dev\",\"service\":\"API_STAGING\",\"opsGroup\":\"ops\",\"probeGroup\":\"监测\",\"tokenSecret\":\"MONITOR_TOKEN_STAGING\"}]",
     "FAIL_THRESHOLD": "2",
     "SUMMARY_HOUR_UTC": "1"
   },
+  // A global fetch from this Worker to another Worker on the same workers.dev subdomain fails
+  // (Cloudflare error 1042), so the deployed targets go through service bindings.
+  "services": [
+    { "binding": "API_PRODUCTION", "service": "chat-api-prod" },
+    { "binding": "API_STAGING", "service": "chat-api-staging" }
+  ],
   "durable_objects": { "bindings": [{ "name": "MONITOR_STATE", "class_name": "MonitorState" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MonitorState"] }],
   "env": {

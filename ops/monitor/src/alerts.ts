@@ -16,6 +16,8 @@ export interface TargetState {
 
 export interface CheckResult {
   target: string;
+  /** "backup" for the archive freshness check; absent for the service check. */
+  check?: "backup";
   at: number;
   ok: boolean;
   healthMs: number | null;
@@ -25,8 +27,8 @@ export interface CheckResult {
 }
 
 export type Alert =
-  | { kind: "down"; target: string; at: number; since: number; fails: number; error: string }
-  | { kind: "up"; target: string; at: number; downSince: number; error: string | null };
+  | { kind: "down"; target: string; check?: "backup"; at: number; since: number; fails: number; error: string }
+  | { kind: "up"; target: string; check?: "backup"; at: number; downSince: number; error: string | null };
 
 export const INITIAL: TargetState = { status: "unknown", fails: 0, since: 0, alerted: false, lastError: null };
 
@@ -40,7 +42,7 @@ export function step(prev: TargetState, r: CheckResult, threshold: number): { ne
       lastError: null,
     };
     const alert: Alert | null = prev.alerted
-      ? { kind: "up", target: r.target, at: r.at, downSince: prev.since, error: prev.lastError }
+      ? { kind: "up", target: r.target, ...checkOf(r), at: r.at, downSince: prev.since, error: prev.lastError }
       : null;
     return { next, alert };
   }
@@ -50,6 +52,15 @@ export function step(prev: TargetState, r: CheckResult, threshold: number): { ne
   const raise = !prev.alerted && fails >= threshold;
   return {
     next: { status: "failing", fails, since, alerted: prev.alerted || raise, lastError: error },
-    alert: raise ? { kind: "down", target: r.target, at: r.at, since, fails, error } : null,
+    alert: raise ? { kind: "down", target: r.target, ...checkOf(r), at: r.at, since, fails, error } : null,
   };
+}
+
+function checkOf(r: CheckResult): { check?: "backup" } {
+  return r.check ? { check: r.check } : {};
+}
+
+/** Alert state key: one state per target and check. */
+export function stateKey(r: { target: string; check?: "backup" }): string {
+  return r.check ? `${r.target}:${r.check}` : r.target;
 }

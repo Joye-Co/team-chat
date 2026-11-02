@@ -56,9 +56,16 @@ test("Monitor Worker: logs on, 5-minute cron, targets with secrets named, never 
     expect(e.triggers?.crons, name).toEqual(["*/5 * * * *"]);
     const targets = JSON.parse(e.vars.TARGETS);
     expect(targets.length, name).toBeGreaterThan(0);
+    const services = new Set((e.services ?? []).map((s: any) => s.binding));
     for (const t of targets) {
       expect(t.tokenSecret).toMatch(/^MONITOR_TOKEN_[A-Z]+$/);
       expect(t.baseUrl).toMatch(/^https?:\/\//);
+      // A deployed Worker cannot global-fetch another Worker on workers.dev (error 1042).
+      if (t.baseUrl.includes(".workers.dev")) {
+        expect(services.has(t.service), `${name} ${t.name}`).toBe(true);
+        const svc = e.services.find((s: any) => s.binding === t.service).service;
+        expect(t.baseUrl).toContain(`//${svc}.`);
+      }
     }
     expect(JSON.stringify(e.vars)).not.toMatch(/tc_[A-Za-z0-9_-]{20,}/);
   }

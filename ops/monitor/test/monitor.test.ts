@@ -2,7 +2,7 @@ import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { type CheckResult, INITIAL, step } from "../src/alerts";
 import type { Target } from "../src/config";
-import type { ProbeResult } from "../src/probe";
+import { BACKUP_MAX_AGE_MS, type ProbeResult, backupCheck, probe } from "../src/probe";
 import { runMonitor } from "../src/run";
 
 const T0 = Date.UTC(2026, 10, 3, 0, 0, 0);
@@ -159,5 +159,166 @@ describe("monitor run", () => {
     h.up.staging = true;
     r = await h.run();
     expect(r.summary).toBe(true);
+  });
+});
+
+/** A fake API: health, a WebSocket that answers hello/send like the server, and the archive status. */
+function fakeApi(opts: { archivedAt: number | null; probeGroup?: boolean } = { archivedAt: null }) {
+  const sent: any[] = [];
+  const requests: string[] = [];
+  const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input));
+    requests.push(url.pathname);
+    if (url.pathname === "/v1/health") return Response.json({ ok: true, version: "1" });
+    if (url.pathname === "/v1/ops/archive") return Response.json({ lastCompleteAt: opts.archivedAt, lastRun: null });
+    if (url.pathname === "/v1/ws") {
+      expect(new Headers(init?.headers).get("authorization")).toMatch(/^Bearer tc_test_/);
+      const pair = new WebSocketPair();
+      const server = pair[1];
+      server.accept();
+      server.addEventListener("message", (e) => {
+        const f = JSON.parse(String(e.data));
+        if (f.t === "hello") {
+          const groups = [{ group: { id: "g-ops", kind: "group", name: "ops", memberIds: ["bot", "alice", "bob", "ci"] } }];
+          if (opts.probeGroup !== false) groups.push({ group: { id: "g-probe", kind: "group", name: "监测", memberIds: ["bot"] } });
+          const members = [
+            { id: "bot", kind: "bot" },
+            { id: "alice", kind: "human" },
+            { id: "bob", kind: "human", deactivated: true },
+            { id: "ci", kind: "bot" },
+          ];
+          server.send(JSON.stringify({ t: "welcome", me: { id: "bot" }, members, groups }));
+        } else if (f.t === "send") {
+          sent.push(f);
+          const message = { id: crypto.randomUUID(), clientMsgId: f.clientMsgId, topicId: "rt" };
+          server.send(JSON.stringify({ rid: f.rid, ok: true, result: { message, topic: { id: "rt" } } }));
+          server.send(JSON.stringify({ t: "event", event: { type: "message.created", data: { message } } }));
+        }
+      });
+      return new Response(null, { status: 101, webSocket: pair[0] });
+    }
+    return new Response("not found", { status: 404 });
+  }) as typeof fetch;
+  return { fetcher, sent, requests };
+}
+
+const PROD: Target = { name: "production", baseUrl: "https://prod.test", opsGroup: "ops", probeGroup: "监测", tokenSecret: "MONITOR_TOKEN_PRODUCTION" };
+
+describe("probe", () => {
+  it("round-trips in the probe group, names the people of the ops group and checks the archive", async () => {
+    const api = fakeApi({ archivedAt: T0 - 60 * MIN });
+    const r = await probe(PROD, "tc_test_production_token_value_000000", null, { fetcher: api.fetcher, now: () => T0 });
+    expect(r).toMatchObject({ ok: true, opsGroupId: "g-ops", topicId: "rt", oncall: ["alice"] });
+    expect(api.sent.map((f) => f.groupId)).toEqual(["g-probe"]);
+    expect(r.backup).toMatchObject({ check: "backup", ok: true });
+
+    const missing = fakeApi({ archivedAt: T0, probeGroup: false });
+    const m = await probe(PROD, "tc_test_production_token_value_000000", null, { fetcher: missing.fetcher, now: () => T0 });
+    expect(m).toMatchObject({ ok: false, error: "round trip: monitor bot is not in the probe group" });
+  });
+
+  it("fails the archive check when the newest complete pass is too old or missing", async () => {
+    const token = "tc_test_production_token_value_000000";
+    const stale = await backupCheck(fakeApi({ archivedAt: T0 - BACKUP_MAX_AGE_MS - MIN }).fetcher, PROD, token, () => T0);
+    expect(stale).toMatchObject({ ok: false, error: "backup: last complete archive 26 h ago" });
+    const never = await backupCheck(fakeApi({ archivedAt: null }).fetcher, PROD, token, () => T0);
+    expect(never).toMatchObject({ ok: false, error: "backup: no complete archive yet" });
+  });
+});
+
+describe("monitor targets", () => {
+  it("reaches deployed targets through their service bindings", async () => {
+    const targets = [
+      { ...PROD, service: "API_PRODUCTION" },
+      { name: "staging", baseUrl: "https://staging.test", opsGroup: "ops", tokenSecret: "MONITOR_TOKEN_STAGING", service: "API_NOPE" },
+    ];
+    const seen: string[] = [];
+    const viaProbe = async (t: Target, _token: string | null, topicId: string | null, o: any): Promise<ProbeResult> => {
+      const res = await o.fetcher(`${t.baseUrl}/v1/health`);
+      seen.push(`${t.name}:${(await res.json()).via}`);
+      return { target: t.name, at: T0, ok: false, healthMs: null, rttMs: null, error: "health: 500", opsGroupId: null, topicId };
+    };
+    const global = (async () => {
+      throw new Error("global fetch must not be used for a target with a service binding");
+    }) as typeof fetch;
+    const r = await runMonitor({ ...env, TARGETS: JSON.stringify(targets) } as any, {
+      probe: viaProbe,
+      fetcher: global,
+      now: () => T0,
+      log: () => {},
+    });
+    expect(seen).toEqual(["production:API_PRODUCTION"]);
+    expect(r.results.find((x) => x.target === "staging")?.error).toBe("config: service binding API_NOPE is missing");
+  });
+});
+
+describe("alerts reach people", () => {
+  it("mentions the people on call, and falls back to no mentions when the group refuses them", async () => {
+    const posts: any[] = [];
+    let refuse = false;
+    let up = true;
+    let backupOk = true;
+    let clock = T0 + 2 * 60 * MIN;
+    const fakeProbe = async (t: Target, _token: string | null, topicId: string | null): Promise<ProbeResult> => {
+      const ok = t.name === "staging" || up;
+      return {
+        target: t.name,
+        at: clock,
+        ok,
+        healthMs: ok ? 10 : null,
+        rttMs: ok ? 50 : null,
+        error: ok ? null : "health: 503",
+        opsGroupId: ok ? `ops-${t.name}` : null,
+        topicId,
+        oncall: [`oncall-${t.name}`],
+        backup: ok && t.name === "production"
+          ? { target: t.name, check: "backup", at: clock, ok: backupOk, healthMs: null, rttMs: null, error: backupOk ? null : "backup: no complete archive yet" }
+          : undefined,
+      };
+    };
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      posts.push({ url: String(input), body });
+      if (refuse && body.mentions) return Response.json({ error: { code: "invalid", message: "mention of a member outside this group" } }, { status: 400 });
+      return Response.json({ message: { id: crypto.randomUUID(), topicId: body.topicId ?? "alerts" } });
+    }) as typeof fetch;
+    const run = () => runMonitor(env, { probe: fakeProbe, fetcher, now: () => clock, log: () => {} });
+    const tick = () => {
+      clock += 5 * MIN;
+    };
+    await run(); // summary
+    posts.length = 0;
+
+    up = false;
+    tick();
+    await run();
+    tick();
+    await run();
+    const down = posts.find((p) => p.body.body.includes("【告警】production"));
+    expect(down.url).toBe("https://staging.test/v1/groups/ops-staging/messages");
+    // Staging ids: the alert is posted in staging's ops group.
+    expect(down.body.mentions).toEqual(["oncall-staging"]);
+
+    refuse = true;
+    up = true;
+    tick();
+    await run();
+    const recovered = posts.filter((p) => p.body.body.includes("【恢复】production"));
+    expect(recovered.map((p) => p.body.mentions)).toEqual([["oncall-production"], undefined]);
+
+    // The archive check has its own alert: 备份过期, then 备份已恢复.
+    refuse = false;
+    posts.length = 0;
+    backupOk = false;
+    tick();
+    await run();
+    tick();
+    await run();
+    expect(posts.map((p) => p.body.card.title)).toEqual(["production 备份过期"]);
+    expect(posts[0].body.mentions).toEqual(["oncall-production"]);
+    backupOk = true;
+    tick();
+    await run();
+    expect(posts.map((p) => p.body.card.title)).toEqual(["production 备份过期", "production 备份已恢复"]);
   });
 });

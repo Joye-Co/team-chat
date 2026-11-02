@@ -17,6 +17,8 @@ export interface Post {
   title: string;
   body: string;
   card: Card;
+  /** Members to notify: the group's default notify level is "mentions". */
+  mentions?: string[];
 }
 
 function minutes(ms: number): string {
@@ -28,7 +30,61 @@ function time(ms: number): string {
   return `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
-export function alertPost(a: Alert): Post {
+/** A 不可用 / 已恢复 card (or 备份过期 / 备份已恢复 for the archive check), mentioning `oncall`. */
+export function alertPost(a: Alert, oncall: string[] = []): Post {
+  const post = a.check === "backup" ? backupPost(a) : servicePost(a);
+  return oncall.length > 0 ? { ...post, mentions: [...new Set(oncall)] } : post;
+}
+
+function backupPost(a: Alert): Post {
+  if (a.kind === "down") {
+    const title = `${a.target} 备份过期`;
+    return {
+      title,
+      body: `【告警】${a.target} 每日归档没有按时完成：${a.error}（自 ${time(a.since)}）`,
+      card: {
+        v: 1,
+        title,
+        tone: "warning",
+        status: { label: "告警" },
+        blocks: [
+          {
+            type: "fields",
+            fields: [
+              { label: "环境", value: a.target },
+              { label: "原因", value: a.error },
+              { label: "开始", value: time(a.since) },
+            ],
+          },
+          { type: "text", text: "处理步骤见 docs/RUNBOOK.md 的每日归档一节。" },
+        ],
+      },
+    };
+  }
+  const title = `${a.target} 备份已恢复`;
+  return {
+    title,
+    body: `【恢复】${a.target} 每日归档已完成。`,
+    card: {
+      v: 1,
+      title,
+      tone: "success",
+      status: { label: "恢复" },
+      blocks: [
+        {
+          type: "fields",
+          fields: [
+            { label: "环境", value: a.target },
+            { label: "开始", value: time(a.downSince) },
+            { label: "恢复", value: time(a.at) },
+          ],
+        },
+      ],
+    },
+  };
+}
+
+function servicePost(a: Alert): Post {
   if (a.kind === "down") {
     const title = `${a.target} 不可用`;
     return {
@@ -130,6 +186,7 @@ export async function sendPost(
   post: Post,
 ): Promise<SendOutcome> {
   const body: Record<string, unknown> = { clientMsgId, body: post.body, card: post.card };
+  if (post.mentions && post.mentions.length > 0) body.mentions = post.mentions;
   if (topicId) body.topicId = topicId;
   else body.title = ALERT_TOPIC_TITLE;
   try {

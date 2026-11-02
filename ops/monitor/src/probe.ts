@@ -1,17 +1,24 @@
 // One check of one target: GET /v1/health, then a real round trip over the WebSocket: the
-// monitor bot sends a message in its own topic of the ops group and waits for the event.
+// monitor bot sends a message in its own topic of the probe group (default: the ops group) and
+// waits for the event. Then the archive freshness (GET /v1/ops/archive).
 import type { CheckResult } from "./alerts";
 import type { Target } from "./config";
 
 export const HEALTH_TIMEOUT_MS = 10_000;
 export const ROUND_TRIP_TIMEOUT_MS = 15_000;
 export const ROUND_TRIP_TITLE = "监测往返";
+/** The daily archive runs at 03:00 UTC; a pass older than this missed a day. */
+export const BACKUP_MAX_AGE_MS = 26 * 60 * 60 * 1000;
 
 export interface ProbeResult extends CheckResult {
   /** The ops group id as resolved from welcome (for posting alerts). */
   opsGroupId: string | null;
   /** The round-trip topic, to reuse next time. */
   topicId: string | null;
+  /** Archive freshness, checked only when the round trip passed. */
+  backup?: CheckResult;
+  /** People (human members) of the ops group: mentioned on alerts unless `oncall` is set. */
+  oncall?: string[];
 }
 
 class Fail extends Error {}
@@ -91,6 +98,13 @@ function findGroup(welcome: any, opsGroup: string): string | null {
   return hit?.group?.id ?? null;
 }
 
+function humansOf(welcome: any, groupId: string): string[] {
+  const group = (welcome.groups as any[]).find((g) => g?.group?.id === groupId)?.group;
+  const members: any[] = Array.isArray(welcome?.members) ? welcome.members : [];
+  const humans = new Set(members.filter((m) => m?.kind === "human" && !m?.deactivated).map((m) => m.id as string));
+  return (Array.isArray(group?.memberIds) ? (group.memberIds as string[]) : []).filter((id) => humans.has(id));
+}
+
 export async function probe(
   target: Target,
   token: string | null,
@@ -123,9 +137,12 @@ export async function probe(
       s.send({ t: "hello", protocol: 1, client: { name: "monitor", version: "1" } });
       const welcome = await s.wait((f) => f.t === "welcome" || f.t === "error", ROUND_TRIP_TIMEOUT_MS, "welcome");
       if (welcome.t !== "welcome") throw new Fail(`welcome: ${welcome.error?.code ?? "error"}`);
-      const groupId = findGroup(welcome, target.opsGroup);
-      if (!groupId) throw new Fail("round trip: monitor bot is not in the ops group");
-      result.opsGroupId = groupId;
+      const opsGroupId = findGroup(welcome, target.opsGroup);
+      if (!opsGroupId) throw new Fail("round trip: monitor bot is not in the ops group");
+      result.opsGroupId = opsGroupId;
+      result.oncall = humansOf(welcome, opsGroupId);
+      const groupId = target.probeGroup ? findGroup(welcome, target.probeGroup) : opsGroupId;
+      if (!groupId) throw new Fail("round trip: monitor bot is not in the probe group");
       for (let attempt = 0; attempt < 2; attempt++) {
         const clientMsgId = crypto.randomUUID();
         const rid = s.rid();
@@ -165,9 +182,38 @@ export async function probe(
     } finally {
       s.close();
     }
+    result.backup = await backupCheck(fetcher, target, token, now);
   } catch (err) {
     result.ok = false;
     result.error = err instanceof Fail ? err.message : "network error";
   }
   return result;
+}
+
+/** Fails when the newest complete archive pass is older than BACKUP_MAX_AGE_MS (or never ran). */
+export async function backupCheck(
+  fetcher: typeof fetch,
+  target: Target,
+  token: string,
+  now: () => number,
+): Promise<CheckResult> {
+  const at = now();
+  const r: CheckResult = { target: target.name, check: "backup", at, ok: false, healthMs: null, rttMs: null, error: null };
+  try {
+    const res = await withTimeout(
+      fetcher(`${target.baseUrl}/v1/ops/archive`, { headers: { authorization: `Bearer ${token}` } }),
+      HEALTH_TIMEOUT_MS,
+      "backup",
+    );
+    if (!res.ok) throw new Fail(`backup: ${res.status}`);
+    const body = (await res.json().catch(() => null)) as { lastCompleteAt?: number | null } | null;
+    const last = typeof body?.lastCompleteAt === "number" ? body.lastCompleteAt : null;
+    if (last === null) throw new Fail("backup: no complete archive yet");
+    const age = at - last;
+    if (age > BACKUP_MAX_AGE_MS) throw new Fail(`backup: last complete archive ${Math.round(age / 3_600_000)} h ago`);
+    r.ok = true;
+  } catch (err) {
+    r.error = err instanceof Fail ? err.message : "backup: network error";
+  }
+  return r;
 }
