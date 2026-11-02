@@ -46,6 +46,12 @@ valid_semver() {
   [[ "$1" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]
 }
 
+# The versions the server accepts for an app update: MAJOR.MINOR.PATCH without leading zeros,
+# no prerelease. Keep in step with ReleaseVersion in packages/protocol/src/updates.ts.
+valid_release_version() {
+  [[ "$1" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+}
+
 cargo_env() {
   # shellcheck disable=SC1091
   [ -f "$HOME/.cargo/env" ] && . "$HOME/.cargo/env"
