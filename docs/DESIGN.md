@@ -1,4 +1,4 @@
-# Design v2.1
+# Design v2.2
 
 **v2.1 is the production revision of v2.** v2 replaced v1 ("Native calm"), which Joye found ugly
 with too many basic UI and UX faults. Joye then judged the v2 mockups too small and cramped
@@ -10,6 +10,9 @@ states, accessibility, motion, dark mode, density, checklist).
 
 **The bar.** The app must look as good as Slack, Feishu 话题群 and GrokBot when the three are side
 by side at the same scale. "Acceptable" is not the bar.
+
+**v2.2** records what shipped after the v2.1 build and the coordinator's acceptance decisions;
+the list is at the end ("Changes in v2.2").
 
 Implementers follow this file exactly. When a value is not here, ask before you invent one.
 AGENTS.md and docs/PRODUCT.md win for product rules and interface words. This file wins for how
@@ -216,7 +219,9 @@ Theme fields: `font.family` `.SystemUIFont`, `font.size` 14, `mono_font.family` 
 
 System font (`.SystemUIFont`, SF Pro); Core Text falls back to **PingFang SC** for Han and to
 **Apple Color Emoji** for emoji. Mono: Menlo (code only). Weights 400, 500, 600 only. Tabular
-numerals on every number.
+numerals on every number. Glyphs render without font-smoothing dilation (no faux-bold stroke
+widening on light or dark text), so text has the same stroke weight as the mockups (Chrome
+renders them without it). A vendored gpui patch that does this is listed in docs/ARCHITECTURE.md.
 
 **Closed scale.** Ten styles. Each style is size, line height and weight together. Nothing else
 is allowed (U27). There is no 11 pt text.
@@ -230,7 +235,7 @@ is allowed (U27). There is no 11 pt text.
 | `body` | 14 / 22 | 400; 600 lead-ins and sender names | Message text, composer text, card text, option rows, names in messages |
 | `ui` | 14 / 20 | 400; 500 list titles; 600 unread and selected | Sidebar rows, topic row titles, tabs, buttons, menus, fields, popup rows, settings rows |
 | `small` | 13 / 20 | 400; 500 field labels | Topic row previews, live line, steps row, plan steps, card subtitles in panels, inline buttons, role text in popups, footnotes, switcher snippets |
-| `meta` | 12 / 16 | 400; 500 chips, badges' neighbors, section labels; 600 badges and sidebar section headers | Times, chips, badges, kbd, role tag, 待办 context, file metadata, typing line, field help and errors |
+| `meta` | 12 / 16 | 400; 500 chips, badges' neighbors, section labels; 600 badges; 500 sidebar section headers | Times, chips, badges, kbd, role tag, 待办 context, file metadata, typing line, field help and errors |
 | `code` | 13 / 20 | 400 Menlo | Inline code (12.5 is not allowed), code blocks, logs |
 | `code-entry` | 20 / 28 | 500 system UI, tabular figures, letter spacing 0 | Invite code boxes only (SF Pro, not a terminal font: Apple 2FA) |
 
@@ -406,7 +411,9 @@ their column. States: §7.1 (error and read-only apply to form fields). A select
 cannot change your own role) is plain text 14/20 `text-2` at the select's 12 pt text inset, with
 no fill, border or chevrons, and a tooltip `你不能改自己的权限` (Slack admin).
 
-Invite code (login): 8 boxes grouped 4-4 (equal groups; a short last group reads as a missing
+Invite code (login): 8 Crockford base32 characters, shown and typed as `XXXX-XXXX` (case is
+ignored, `I`/`L` read as 1 and `O` as 0, dashes and spaces are ignored); single use, and the
+server limits redeem attempts per IP. 8 boxes grouped 4-4 (equal groups; a short last group reads as a missing
 box), each 42 × 48, radius 10, 1 pt `border`, `code-entry`; 6 pt gaps, and between the groups a
 6 × 2 `border-strong` dash (radius 1) with a 6 pt gap on each side: 8 × 42 + 6 × 6 + 18 = 390,
 so the row ends exactly on the `加入` button's edges. The focused box uses the field
@@ -426,7 +433,7 @@ tag, time) · optional steps row · body · attachments (cards, files, images) �
 | Grouping | Same author within 5 minutes with nothing between: no avatar or meta line; the time shows in the gutter on hover 12 `text-3` (Slack, U13) |
 | Date divider | Text only: 12/16 500 `text-3` centered between two 0.5 pt `sep` lines that span the content box; 16 pt above, 4 below. `今天`, `昨天`, `11月2日 周日`. Sticky while its day scrolls; click jumps to a date |
 | New-messages divider | A `danger` hairline with `新消息` 12/500 `danger-text` at the right |
-| Reactions | 6 pt under the body, gap 6: 26 pt pills, radius 13, padding 0 8 0 6, gap 4, `field`; emoji 16/16, label 12/16 500: names for up to 2 (`👍 Joye、Tata`), else the count only (`✅ 14`, names in the tooltip), so no pill is wider than about 60 pt beyond the two-name case; mine `accent-soft` + 1 pt `accent` ring + `accent-text` |
+| Reactions | 6 pt under the body, gap 6: 26 pt pills, radius 13, padding 0 8 0 6, gap 4, `field`; emoji 16/16, label 12/16 500: names for up to 2 (`👍 Joye、Tata`), else the count only (`✅ 14`, names in the tooltip), so no pill is wider than about 60 pt beyond the two-name case; mine `accent-soft` + 1 pt `accent` ring + `accent-text`. Reactions are stored with their message in the 群's room (the server fans out `reaction.changed`); one change per message and emoji is in flight at a time |
 | Jumbo emoji | A message of one to three emoji and nothing else renders at 32/40 (Slack) |
 | Edited | `（已编辑）` 12 `text-3` after the last line (U12) |
 | First message | 16 pt below the header (or the topic start block) |
@@ -455,7 +462,7 @@ Anatomy: unread dot · 36 avatar of the responsible member · line 1 (title, tim
 | --- | --- |
 | Row | 68 pt, inset 8 in the list, radius 8, padding 12 10 12 18, gap 12; line 1 and line 2 are 20 pt each, 4 pt apart |
 | Avatar | The responsible member: person circle, or the bot tile (§7.9); no status pip in rows. On the selected row a bot tile gets a 1 pt `tile-ring` |
-| Title | `ui` 14/20 500; unread and selected 600 `text-1`. A leading full-width bracket (`【`, `（`, `「`) hangs 0.5 em into the margin so titles keep one left edge (Feishu) |
+| Title | `ui` 14/20 500; unread and selected 600 `text-1`. A leading full-width bracket (`【`, `（`, `「`) stays in place: no hang (removed in v2.2) |
 | Time | 12/16 `text-3` (§6.6 formats) |
 | Preview | `small` 13/20 `text-2`, Markdown stripped; the full string is laid out and the text system ends it with `…` 8 pt before the trailing element, so every preview ends on the same right edge; `生成中…` while a bot streams |
 | Trailing element | Exactly one, by priority (§9.1): compact `等你答` / `等你审` chip > `@n` red badge > `卡住了` label > other label (`等审`, `等回答`, `完成`) > neutral `count-solid` badge for unread without a mention. 进行中 shows nothing (U02) |
@@ -468,7 +475,7 @@ States: §7.1. No hairlines between rows (U24).
 | Row | Value |
 | --- | --- |
 | Search | §7.4, 36 pt, margins 0 12 8 |
-| Section header | 28 pt, 16 pt above (4 for the first), padding 0 8: chevron 12 `text-3` (rotates when collapsed), title 12/16 600 `text-2`, then for 待办 the count in `text-3` (`待办 3`), for 群 and 私聊 a `sm` icon button `plus` (新建群 / 发起私聊) |
+| Section header | 28 pt, 16 pt above (4 for the first), padding 0 8: chevron 12 `text-3` (rotates when collapsed), title 12/16 500 `text-2`, then for 待办 the count in `text-3` (`待办 3`), for 群 and 私聊 a `sm` icon button `plus` (新建群 / 发起私聊) |
 | 待办 row | Two lines, padding 6 8, radius 8, gap 10: 24 pt glyph slot (`circle-question-mark`, `eye` or `at-sign` 16 in `text-3`), title `ui` 14/20 500, context 12/16 `text-2` (`qqbot 研发 · Watch 等你回答`). Max 5 rows, then `全部 n 项`. The section itself says "for you", so the glyphs stay grey |
 | 群 row | 32 pt, radius 8, padding 0 8, gap 10: 24 pt slot with `hash` 16 `text-3` (`text-1` when unread, `sel-glyph` when selected), name `ui` 14. Unread: name 600 `text-1`. Mention: red badge `n`. Muted: row at 60 % + `bell-off` 14 |
 | 私聊 row | Same; the slot holds a 24 avatar (person with presence, or the bot tile with its pip). Unread DM: name 600 + neutral `count-solid` badge (red stays for @ mentions) |
@@ -526,11 +533,14 @@ Counts above 99 render as `99+` everywhere: badges, neutral badges, tabs and the
   the same footprint. On a selected row the tile gets a 1 pt `tile-ring`. People are
   circles and bots are squares: the shape alone says which. The mockups measure the bounds with
   `src/charbox.mjs` into `char-boxes.json`; the app computes the same box once per character.
-  **At 40 pt and below** the app draws the small variant: the status lamp at the top corner, the
-  question bubble, the working ring and the sleep marks are removed, because at list sizes they
-  read as notification badges. The face keeps the expression. The status then shows as a pip in
-  the presence position, only for `working` (`accent`), `needs-input` (`you-glyph`) and `error`
-  (`danger`). From 48 pt the full art is drawn.
+  **Up to 64 pt** the app draws the small variant: the status lamp at the top corner, the
+  question bubble, the working ring and the sleep marks are removed, because at these sizes they
+  read as notification badges (the 48 pt start block included). The face keeps the expression.
+  The status then shows as a pip in the presence position, only for `working` (`accent`),
+  `needs-input` (`you-glyph`) and `error` (`danger`). Above 64 pt the full art is drawn.
+- A bot's avatar signal (art and pip) is one status across all its runs, by priority:
+  **needs input > error > working > idle**. A bot that works in one topic and waits for an
+  answer in another shows needs input.
 - Role tag after a bot's name (messages, side panel, settings): 20 pt, radius 6, `field`, padding
   0 6, `bot` glyph 12 + 岗位 12/16 500 `text-2`. Confirmed by Joye on 2026-11-03: the character is
   the mark, plus this tag. People show 岗位 as plain `small` text where a list needs it.
@@ -608,7 +618,7 @@ panel). The title shows in every state, including while the start block is on sc
 channel header and intro both name the channel).
 
 **Topic start block**: the first thing in every topic (U01): the responsible member's avatar at
-48 pt (bot tile radius 12, idle art) with 12 pt below; title `display` 22/30 (2 lines max); one
+48 pt (bot tile radius 12, small idle art, §7.9) with 12 pt below; title `display` 22/30 (2 lines max); one
 line 8 pt below: `Joye 发起 · Taro 负责` (`small` `text-2`, truncates) + ` · 今天 14:05` (never
 truncated); 16 pt below it a 1 pt `border` rule, then the first message 12 pt under the rule.
 The status is not repeated here: the header row 2 shows it. The timeline
@@ -650,9 +660,9 @@ any time show `2025年11月4日 23:59`.
 960 × 640 window, `content`. One column, 390 wide, centered (24 pt above the optical center):
 app icon 72, drawn bare: the brand SVG cropped to its squircle (viewBox `100 100 824 824`; `icon-dark.svg` in dark mode), its own shadow filter removed and replaced by `drop-shadow(0 4 12 #0F11141F)` on the image; no tile, radius or frame around it (U39); 24 pt; `欢迎加入团队` `display`;
 6 pt; `输入管理员发给你的邀请码` `body` `text-2`; 28 pt; label `邀请码` (§7.4); 8 pt; the invite
-code boxes (§7.4); 24 pt; `加入` `lg` primary, full column width, disabled until complete; 16 pt;
+code boxes (§7.4); 24 pt; `加入` `lg` primary, full column width, disabled until complete;
 for the built-in server, 12 pt then a centered text button `使用其他服务器` 13/20 500
-`accent-text` (the raw host is not shown); for a custom server, the server line `server` 14 +
+`accent-text` (the raw host is not shown); for a custom server, 16 pt then the server line `server` 14 +
 `team.joye.co` 13/20 `text-3` + ` · ` + `更改` 13/20 500 `accent-text`. Both reveal a 40 pt
 server field. The first box has focus and the caret when the screen opens; `加入` is enabled
 once 8 characters are in. A pasted `tc_` credential or a 12-character code of the earlier
@@ -677,7 +687,7 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
   trimmed (U41). One primary `添加成员 ▾` (36 pt page primary) with `邀请同事` and `添加 AI 成员`.
   Order: me, the other owners, the other people, then bot members, then deactivated members; by
   name inside each part. The 权限 words are `管理员` and `普通成员`, the words of the login and
-  invite copy; the mockup's `所有者` and `成员` are superseded. Select text is regular (400). The
+  invite copy; earlier mockups' `所有者` and `成员` are superseded. Select text is regular (400). The
   page scrolls; its end keeps 32 pt under the footnote.
 - **我的资料**: avatar with `更换头像` and its help `PNG、JPEG 或 WebP，不超过 1 MB`; name and 岗位
   form fields save on blur; sign-out at the bottom; `退出并删除本机记录` in its own danger row
@@ -686,7 +696,7 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
   `content` fill with a level-1 shadow); 群 and 私聊 in separate tables (U42).
 - **机器**: rows with an icon by machine type, Chinese tags, status centered (U43).
 - **成本**: hidden until it exists (U43).
-- **通用** (last in the section list, `settings` gear 16, as in the mockup): the about card
+- **通用** (replaces the earlier 关于 page; last in the section list, `settings` gear 16, as in the mockup): the about card
   (app icon, version, update state, 检查更新, server), 诊断, and the developer-view switch.
 
 ### 8.5 Empty and error states
@@ -746,8 +756,9 @@ shows it.
   A Latin word next to Han gets one space (`staging 上`, `等 Aleksandra 回答`). Ellipsis is
   U+2026 `…`, drawn by one truncation helper that trims trailing punctuation and spaces before
   it (U26).
-- A title that starts with a full-width bracket (`【紧急】`, `（无标题）`) hangs the bracket's empty
-  half 0.5 em into the margin (Feishu's `halt` trim), so every title in a list keeps one left edge.
+- A title that starts with a full-width bracket (`【紧急】`, `（无标题）`) draws the bracket in
+  place, with no hang into the margin (the v2.1 `halt` trim is removed in v2.2). CJK punctuation
+  stays off line starts and ends (the vendored gpui line breaker).
 
 ## 11. Accessibility
 
@@ -843,7 +854,7 @@ Checked in `worst-case-*` at the 1100 × 680 minimum window.
 | `worst-case-*` | 1100 × 680 window on the desk, long names and titles, counts capped at 99+, a jumbo emoji message, emoji names, a huge file downloading, a failed send, a long typing line |
 | `switcher-*` | ⌘K over the scrim with grouped results and a message hit |
 | `settings-members-*` | Settings window on the desk, 成员 page with a centered column |
-| `login-*` | Invite-code login on the desk with the label, the focused box, the neutral disabled `加入` and the server line |
+| `login-*` | Invite-code login on the desk with the label, the 8-box 4-4 code with the focused box, the neutral disabled `加入` and, for the built-in server, `使用其他服务器` |
 
 Every mockup is rendered as `<name>.png` (scale 1) and `<name>@2x.png` (scale 2, the scale of the
 reference captures). Compare at 2x next to the Slack and Feishu captures.
@@ -877,7 +888,8 @@ Color
 - [ ] Red only for @ badges, 卡住了 and errors; unread without a mention is a neutral `count-solid` badge;
       完成 and 等{name}… are grey labels. [U20, U25]
 - [ ] No per-群 or per-person hues: `hash` glyphs in the sidebar, neutral avatars.
-- [ ] Bot avatars at ≤ 40 pt use the small art; pips only for working, needs-input and error.
+- [ ] Bot avatars up to 64 pt use the small art; pips only for working, needs-input and error;
+      one signal per bot across its runs (needs input > error > working > idle).
 - [ ] Contrast per §2 and §11 in both themes.
 
 Structure and behavior
@@ -888,7 +900,7 @@ Structure and behavior
       [U03, U04]
 - [ ] Every overlay uses the one overlay component with the scrim. [U05, U36, U37, U38]
 - [ ] Never more than one empty state on a screen. [U06]
-- [ ] Side panel closed by default, opens on bot work or 产出, never empty. [U07]
+- [ ] Side panel closed by default, opens by itself on bot work or the first 产出, never empty. [U07]
 - [ ] One instruction per place; placeholders name the destination; no permanent key hints;
       send is accent only with text. [U08, U09]
 - [ ] Markdown fences after text on the same line parse; never an empty code block. [U10]
@@ -915,7 +927,7 @@ Structure and behavior
 - [ ] Typing line for people only, aligned to the field text; no reserved space when empty. [U32]
 - [ ] Sending dims the body; failure shows `没有发出` + the text button `重试`. [U33]
 - [ ] Switcher: grouped, whole rows, recent items with no query. [U34, U35]
-- [ ] Login: centered column, label above the code, server behind a disclosure, dark icon. [U39]
+- [ ] Login: centered column, label above the 8-box code, `使用其他服务器` on the built-in server, dark icon. [U39]
 - [ ] Settings: help under its control, inline errors, danger row apart, headers inside the
       table, status dots by state, plain-text role for yourself, no 成本 page. [U40 to U43]
 - [ ] Columns resize and collapse; the topic view never clips; one content box. [U44, U45]
@@ -941,3 +953,19 @@ Structure and behavior
   the repo. With real photos most rows show a face and the initials disc is the exception.
 - A check that diffs this file's token tables against `tokens.mjs` and `theme.json` does not exist
   yet (DESIGN-MD-GUIDE §3).
+
+## Changes in v2.2
+
+- §7.9: the small character art (no lamp, bubble, working ring or sleep marks) is drawn up to
+  **64 pt** (was 40), so the 48 pt start block uses it too.
+- §7.6, §10: the full-width bracket hang is removed; titles draw a leading `【` or `（` in place.
+- §3, §7.7: sidebar section headers are **500** (was 600).
+- §8.4: the 权限 words are `管理员` and `普通成员`.
+- §7.4: invite codes are 8 Crockford characters (`XXXX-XXXX`); the server limits redeem
+  attempts per IP.
+- §7.5: reactions are stored with their message in the 群's room.
+- §3: text renders without font-smoothing dilation, so stroke weight matches the mockups.
+- §8.4: the 关于 page is now 通用.
+- §8.3: on the built-in server the login shows `使用其他服务器`, not the host.
+- §7.9: a bot's avatar signal across all its runs follows needs input > error > working > idle.
+- §8.1: the side panel is closed by default and opens by itself on bot work or the first 产出.
