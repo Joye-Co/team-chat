@@ -2,7 +2,9 @@
 //! circles, bots are rounded squares with a graphite mark. A photo goes
 //! through gpui-component's `Avatar`; without one the monogram box is drawn
 //! here with the §2.7 palettes, because `Avatar`'s initials and colors do not
-//! follow our rules.
+//! follow our rules. A member with a jojo-friends character draws the
+//! character with its live status instead (`crate::characters`); the
+//! character's own signal replaces the bot mark and the presence dot.
 
 use gpui::{
     App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
@@ -11,6 +13,7 @@ use gpui::{
 use gpui_component::avatar::Avatar;
 
 use crate::{
+    characters::{self, status::StatusBoard},
     data::Member,
     theme::{self, Type as _},
     ui::icons::{Lucide, icon},
@@ -31,6 +34,8 @@ pub struct MemberAvatar {
     /// The surface the avatar sits on: the color of the 1.5 pt rings.
     surface: Option<Hsla>,
     dimmed: bool,
+    /// The member, when it has a character (drawn with its live status).
+    character: Option<(characters::CharacterId, Member)>,
 }
 
 impl MemberAvatar {
@@ -44,6 +49,7 @@ impl MemberAvatar {
             online: false,
             surface: None,
             dimmed: member.is_some_and(|m| m.deactivated),
+            character: member.and_then(|m| m.character.map(|c| (c, m.clone()))),
         }
     }
 
@@ -63,8 +69,18 @@ impl MemberAvatar {
 
 impl RenderOnce for MemberAvatar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
         let size = self.size;
+        if let Some((character, member)) = &self.character {
+            let status = StatusBoard::status(cx, member);
+            return div()
+                .relative()
+                .flex_none()
+                .size(size)
+                .when(self.dimmed, |el| el.opacity(0.5))
+                .child(characters::image(*character, status, size))
+                .into_any_element();
+        }
+        let k = theme::colors(cx);
         let radius = if self.bot {
             theme::radius::bot(size)
         } else {
@@ -142,6 +158,7 @@ impl RenderOnce for MemberAvatar {
             .child(face)
             .children(mark)
             .children(dot)
+            .into_any_element()
     }
 }
 

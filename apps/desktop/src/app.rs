@@ -218,13 +218,21 @@ pub struct Services {
     pub provider: Arc<dyn ChatProvider>,
     pub hub: Entity<ChangeHub>,
     pub nav: Entity<Navigation>,
+    /// Keeps the live statuses of member characters (`characters::StatusBoard`).
+    pub characters: Entity<crate::characters::StatusTracker>,
 }
 
 impl Services {
     pub fn new(provider: Arc<dyn ChatProvider>, cx: &mut App) -> Self {
         let hub = ChangeHub::start(&provider, cx);
         let nav = cx.new(|_| Navigation::new());
-        Self { provider, hub, nav }
+        let characters = crate::characters::StatusTracker::start(&provider, &hub, cx);
+        Self {
+            provider,
+            hub,
+            nav,
+            characters,
+        }
     }
 
     /// My member id, when signed in.

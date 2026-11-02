@@ -158,7 +158,7 @@ fn shift_enter_adds_a_line_and_cmd_enter_sends(cx: &mut TestAppContext) {
 #[gpui::test]
 fn mention_list_picks_with_keys_and_sends_ids(cx: &mut TestAppContext) {
     let (h, cx) = open(cx, Some(TOPIC));
-    cx.simulate_input("请@小");
+    cx.simulate_input("请@F");
     let names = |h: &Harness, cx: &mut VisualTestContext| -> Vec<String> {
         h.view.update(cx, |this, _| {
             this.mention
@@ -167,10 +167,9 @@ fn mention_list_picks_with_keys_and_sends_ids(cx: &mut TestAppContext) {
                 .unwrap_or_default()
         })
     };
-    assert_eq!(names(&h, cx), vec!["小王", "小码"]);
-    cx.simulate_keystrokes("down");
+    assert_eq!(names(&h, cx), vec!["Forge"]);
     cx.simulate_keystrokes("enter");
-    assert_eq!(h.text(cx), "请@小码 ");
+    assert_eq!(h.text(cx), "请@Forge ");
     assert!(names(&h, cx).is_empty(), "list closes after a pick");
     cx.simulate_input("看下");
     // Esc closes an open list without touching the text.
@@ -180,7 +179,7 @@ fn mention_list_picks_with_keys_and_sends_ids(cx: &mut TestAppContext) {
     assert!(names(&h, cx).is_empty());
     cx.simulate_keystrokes("enter");
     let sent = h.last(TOPIC);
-    assert_eq!(sent.body, "请@小码 看下 @Alex");
+    assert_eq!(sent.body, "请@Forge 看下 @Alex");
     assert_eq!(sent.mentions, vec!["m-coder".to_string()]);
 }
 

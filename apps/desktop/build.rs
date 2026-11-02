@@ -1,6 +1,8 @@
 //! Exports product.json fields as compile-time constants so the product name lives in one place:
 //! PRODUCT_NAME, PRODUCT_SLUG, PRODUCT_BUNDLE_ID, PRODUCT_URL_SCHEME, and the server URLs
 //! PRODUCT_STAGING_URL and PRODUCT_PRODUCTION_URL (empty when not set yet).
+//! It also writes `character_assets.rs`: the bundled character SVGs (assets/characters/) as an
+//! embedded table that `src/characters/assets.rs` serves through the app's asset source.
 
 use std::{env, fs, path::PathBuf};
 
@@ -28,4 +30,37 @@ fn main() {
         let value = json["servers"][key].as_str().unwrap_or("");
         println!("cargo:rustc-env={var}={value}");
     }
+    embed_characters(&manifest);
+}
+
+/// `(asset path, bytes)` for every `assets/characters/<id>/<status>-<px>.svg`, sorted by path.
+fn embed_characters(manifest: &std::path::Path) {
+    let root = manifest.join("assets/characters");
+    println!("cargo:rerun-if-changed={}", root.display());
+    let mut files = Vec::new();
+    for dir in fs::read_dir(&root).expect("read assets/characters") {
+        let dir = dir.unwrap().path();
+        if !dir.is_dir() {
+            continue;
+        }
+        println!("cargo:rerun-if-changed={}", dir.display());
+        for file in fs::read_dir(&dir).unwrap() {
+            let file = file.unwrap().path();
+            if file.extension().is_some_and(|e| e == "svg") {
+                let rel = file.strip_prefix(manifest.join("assets")).unwrap();
+                files.push((rel.to_string_lossy().replace('\\', "/"), file));
+            }
+        }
+    }
+    files.sort();
+    let mut out = String::from("pub static FILES: &[(&str, &[u8])] = &[\n");
+    for (path, file) in &files {
+        out.push_str(&format!(
+            "    ({path:?}, include_bytes!({:?})),\n",
+            file.display().to_string()
+        ));
+    }
+    out.push_str("];\n");
+    let dest = PathBuf::from(env::var("OUT_DIR").unwrap()).join("character_assets.rs");
+    fs::write(dest, out).expect("write character_assets.rs");
 }

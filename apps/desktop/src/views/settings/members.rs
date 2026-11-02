@@ -829,6 +829,7 @@ mod tests {
             avatar_url: None,
             deactivated: off,
             online: false,
+            character: None,
         }
     }
 

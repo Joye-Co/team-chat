@@ -326,8 +326,12 @@ impl State {
         const SENTRY: &str = "m-sentry";
         const DOCS: &str = "m-docs";
         const DEPLOY: &str = "m-deploy";
+        const TATA: &str = "m-tata";
+        const LEDGER: &str = "m-ledger";
+        const TARO: &str = "m-taro";
         let everyone = [
-            ME, XIAOWANG, LIXUE, CHENCHEN, ALEX, CODER, REVIEWER, SENTRY, DOCS, DEPLOY,
+            ME, XIAOWANG, LIXUE, CHENCHEN, ALEX, DEPLOY, TATA, DOCS, CODER, SENTRY, REVIEWER,
+            LEDGER, TARO,
         ];
 
         self.add_group("g-dev", GroupKind::Group, "产品研发", &everyone, None);
@@ -360,7 +364,7 @@ impl State {
             &[ME, XIAOWANG],
             Some(XIAOWANG),
         );
-        self.add_group("d-coder", GroupKind::Dm, "小码", &[ME, CODER], Some(CODER));
+        self.add_group("d-coder", GroupKind::Dm, "Forge", &[ME, CODER], Some(CODER));
         self.add_group(
             "d-alex",
             GroupKind::Dm,
@@ -377,7 +381,7 @@ impl State {
             &[],
             Some(CODER),
             &[
-                (ME, "@小码 登录页需要支持两种方式：\n\n1. 邀请码 `XXXX-XXXX-XXXX`\n2. 粘贴已有的登录凭证\n\n服务器地址默认填 staging。", 3 * HOUR),
+                (ME, "@Forge 登录页需要支持两种方式：\n\n1. 邀请码 `XXXX-XXXX-XXXX`\n2. 粘贴已有的登录凭证\n\n服务器地址默认填 staging。", 3 * HOUR),
                 (CODER, "收到，我来做。预计 30 分钟内给出第一版。", 3 * HOUR - MIN),
                 (CODER, "进展：表单和校验已完成，正在接 Keychain。\n\n```rust\nlet entry = keyring::Entry::new(service, account)?;\nentry.set_password(&token)?;\n```", 2 * HOUR),
                 (XIAOWANG, "错误提示要区分「邀请码无效」和「连不上服务器」吗？", 90 * MIN),
@@ -494,7 +498,7 @@ impl State {
             &[],
             Some(DOCS),
             &[
-                (ME, "@文档助手 根据这周合并的 PR 写一份发布说明。", 15 * MIN),
+                (ME, "@Pocket 根据这周合并的 PR 写一份发布说明。", 15 * MIN),
                 (DOCS, "## V1 发布说明（草稿）\n\n### 新功能\n- 群和私聊\n- 话题状态与待办\n- 中文搜索\n\n### 修复\n- 断线重连后", MIN),
             ],
             0,
@@ -818,7 +822,15 @@ fn members() -> Vec<Member> {
         avatar_url: None,
         deactivated: false,
         online,
+        character: None,
     };
+    // The bots are the first roster (assets/bots/roster.json): same names,
+    // characters and 岗位. The ids stay the sample ids the other samples use.
+    let bot = |id: &str, name: &str, role: &str, level, character, online| Member {
+        character: Some(character),
+        ..m(id, MemberKind::Bot, name, role, level, online)
+    };
+    use crate::characters::CharacterId as C;
     use MemberKind::*;
     use MemberLevel::{Member as Regular, Owner};
     let mut list = vec![
@@ -834,18 +846,14 @@ fn members() -> Vec<Member> {
             Regular,
             true,
         ),
-        m("m-coder", Bot, "小码", "写代码和修 bug", Owner, true),
-        m("m-reviewer", Bot, "审阅员", "代码审查", Owner, true),
-        m("m-sentry", Bot, "运维哨兵", "监控和告警", Owner, true),
-        m("m-docs", Bot, "文档助手", "写文档和总结", Regular, true),
-        m(
-            "m-deploy",
-            Bot,
-            "Deploy Helper",
-            "Builds and releases",
-            Regular,
-            false,
-        ),
+        bot("m-deploy", "Jojo", "主助手", Owner, C::Jojo, true),
+        bot("m-tata", "Tata", "产品负责人", Regular, C::O03, true),
+        bot("m-docs", "Pocket", "幕僚长", Regular, C::O05, true),
+        bot("m-coder", "Forge", "开发", Regular, C::O08, true),
+        bot("m-sentry", "Watch", "运维", Regular, C::O11, true),
+        bot("m-reviewer", "Scout", "测试验收", Regular, C::O07, true),
+        bot("m-ledger", "Ledger", "数据", Regular, C::H02, false),
+        bot("m-taro", "Taro", "社媒发布", Regular, C::H03, true),
     ];
     list.push(Member {
         deactivated: true,

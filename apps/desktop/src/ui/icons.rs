@@ -68,6 +68,9 @@ impl AssetSource for AppAssets {
         if path == APP_ICON_88 {
             return Ok(Some(Cow::Borrowed(APP_ICON_88_BYTES)));
         }
+        if let Some(bytes) = crate::characters::assets::load(path) {
+            return Ok(Some(Cow::Borrowed(bytes)));
+        }
         if let Some(bytes) = ExtraIcons.load(path)? {
             return Ok(Some(bytes));
         }
@@ -77,6 +80,7 @@ impl AssetSource for AppAssets {
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
         let mut paths = gpui_kit::assets::Assets.list(path)?;
         paths.extend(ExtraIcons.list(path)?);
+        paths.extend(crate::characters::assets::list(path).map(SharedString::from));
         paths.sort();
         paths.dedup();
         Ok(paths)

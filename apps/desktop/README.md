@@ -36,7 +36,8 @@ Build: `. "$HOME/.cargo/env"; export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6; c
 | `src/app.rs` | skeleton, navigation | `Services`, `ChangeHub`/`Changes`, `Navigation`/`Place`, `RootView`, windows, menus, actions |
 | `src/theme.rs` | skeleton | Follows system light or dark; `theme::colors(cx)`, status chip colors, layout sizes |
 | `src/data.rs` | chat-core provider | `ChatProvider` trait and plain data types |
-| `src/fake.rs` | all | `FakeProvider` with sample data |
+| `src/fake.rs` | all | `FakeProvider` with sample data; its bots are the roster (docs/ROSTER.md) |
+| `src/characters/` | bot identity | Member characters: `image(character, status, size)`, the bot status rule and `StatusBoard`, the bundled SVGs (`assets/characters/`, made by `scripts/characters/render.sh`) |
 | `src/copy/` | all | The copy catalog, one file per area; `dev.rs` is the developer view |
 | `src/views/sidebar.rs`, `topic_list.rs` | navigation | 待办, 群, 私聊; topic list |
 | `src/views/timeline.rs` | timeline | Topic header and message list |

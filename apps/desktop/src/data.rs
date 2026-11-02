@@ -48,6 +48,8 @@ pub struct Member {
     pub deactivated: bool,
     /// Presence, from transient `presence` events.
     pub online: bool,
+    /// The jojo-friends character the avatar draws, when set (`characters`).
+    pub character: Option<crate::characters::CharacterId>,
 }
 
 impl Member {

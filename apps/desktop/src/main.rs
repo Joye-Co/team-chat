@@ -31,6 +31,7 @@
 // chat-core tracks use; unused parts are not warnings yet.
 #[allow(dead_code)]
 mod app;
+mod characters;
 #[allow(dead_code)]
 mod copy;
 #[allow(dead_code)]

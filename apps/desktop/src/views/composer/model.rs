@@ -193,6 +193,7 @@ mod tests {
             avatar_url: None,
             deactivated: false,
             online: true,
+            character: None,
         }
     }
 

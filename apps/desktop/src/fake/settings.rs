@@ -235,6 +235,7 @@ impl FakeProvider {
             avatar_url: None,
             deactivated: false,
             online: false,
+            character: None,
         };
         self.with(|s| s.members.push(member.clone()));
         self.emit(vec![Change::Members]);

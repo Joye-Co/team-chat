@@ -46,6 +46,7 @@ pub fn member(m: &proto::Member, online: bool) -> Member {
         avatar_url: m.avatar_url().map(str::to_string),
         deactivated: m.is_deactivated(),
         online,
+        character: m.character(),
     }
 }
 
