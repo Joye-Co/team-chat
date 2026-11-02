@@ -126,7 +126,7 @@ but **disabled**, because its runtime is not chosen yet. Step 3.6 chooses it and
    ```
 
    Add `--repo-url <git url>` or `--repo-path <path on the Mac mini>` when Jojo must work in a
-   repository. Then write `@Jojo` in a topic of 全员 (`General`): Jojo's reply streams in.
+   repository. Then write `@Jojo` in a topic of 全员: Jojo's reply streams in.
 7. Change `runner.runtime` in `assets/bots/roster.json` from `null` to the runtime you chose.
 
 ## 4. Connect the other roster bots
@@ -176,8 +176,6 @@ ROSTER.md). Group membership is changed in the app or with `POST /v1/groups/:id/
 
 ## 7. Optional
 
-- **Rename General to 全员**: the server has no route to rename a group. Until it has one, the
-  default group (every member, every new member joins it) is called `General`.
 - **Custom domain**: add a route such as `chat.<your domain>` to `chat-api-prod` in the
   Cloudflare dashboard (Workers, `chat-api-prod`, Settings, Domains and Routes), then change
   `product.json` `servers.production`, the monitor's `TARGETS` `baseUrl` and these docs, and

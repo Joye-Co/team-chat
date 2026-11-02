@@ -112,13 +112,13 @@ below and the monitor, never with `tools/e2e`.
 | --- | --- |
 | Owner | `Joye` (human, owner), `01M6F8FFH2K1FDRF123W1120YH`; signs in with `joye-signin-code` |
 | Bots | the eight bots of [ROSTER.md](ROSTER.md) with their character, 岗位 and level (Jojo is owner); `监测` (monitor); `GitHub Joye-Co/team-chat` (the sender of the GitHub hook, made by `POST /v1/hooks`) |
-| Groups | `General` (`01M6F8FFH2K1FDRF123W1120YK`, the default group: every member; there is no rename route, so it is not called 全员), `开发` (Joye, Forge, Watch, Scout, Ledger, Tata, the GitHub hook sender), `运维` (Joye, Watch, 监测), `监测` (only 监测: the monitor round trip) |
+| Groups | `全员` (`01M6F8FFH2K1FDRF123W1120YK`, the default group: every member; renamed from `General` with `PATCH /v1/groups/:id` on 2026-11-03), `开发` (Joye, Forge, Watch, Scout, Ledger, Tata, the GitHub hook sender), `运维` (Joye, Watch, 监测), `监测` (only 监测: the monitor round trip) |
 | Runner | Jojo: labels `mac-mini`, runtime placeholder `claude`, **disabled** until Joye installs the daemon and runs `admin.ts runner` (see [USER-ACTIONS.md](USER-ACTIONS.md)) |
 | Invites | 实习生1 to 实习生4 (human, member), made 2026-11-02 23:12 UTC, expire 2026-11-09 23:12 UTC |
 | Hook | GitHub hook `01M6F8JV5Z23M3E2AF40J2564Z` into `开发`; the GitHub webhook is not added yet (`scripts/github-webhook.sh`) |
 | Messages | one test alert from 监测 in `运维`, topic 监测告警测试（无需处理）; the monitor's round trips in `监测` |
 
-Staging has the same roster, `开发`, `运维` and `监测` (its default group `General` also holds the
+Staging has the same roster, `开发`, `运维` and `监测` (its default group `全员`, renamed from `General`, also holds the
 test bots `selftest-integrate` and `selftest-final` and the groups 自测 and 自测 final).
 
 Read-only WebSocket check (hello, welcome, a `fetch` of every group, ping; no writes):

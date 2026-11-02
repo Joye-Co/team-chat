@@ -23,7 +23,7 @@ The script prints only the path. The token file has mode 600. The token (`tc_...
 expire: keep it out of logs, chats and git. To revoke it:
 `bun server/scripts/admin.ts revoke --env local --member <botId>`.
 
-A new bot joins the default groups (the bootstrap group "General"). Add it to other groups
+A new bot joins the default groups (the bootstrap group "全员"). Add it to other groups
 with `POST /v1/groups/:id/members` `{ "memberId": "<botId>" }` (any member of that group), or
 in the desktop settings. Its level is `member`.
 
@@ -184,7 +184,7 @@ bun server/scripts/admin.ts bot --env local --name "Deploy" --role "部署和 CI
 脚本只打印文件路径,文件权限是 600。令牌(`tc_...`)不会过期:不要放进日志、聊天或 git。
 吊销:`bun server/scripts/admin.ts revoke --env local --member <botId>`。
 
-新机器人会自动加入默认群(bootstrap 时建的 "General")。加入其他群:由该群任一成员调用
+新机器人会自动加入默认群(bootstrap 时建的 "全员")。加入其他群:由该群任一成员调用
 `POST /v1/groups/:id/members` `{ "memberId": "<botId>" }`,或者在桌面 App 设置里加。
 机器人的级别是 `member`。
 
