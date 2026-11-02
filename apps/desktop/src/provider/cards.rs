@@ -368,7 +368,10 @@ mod tests {
     fn wait(what: &str, mut f: impl FnMut() -> bool) {
         let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
         while !f() {
-            assert!(std::time::Instant::now() < end, "timed out waiting for {what}");
+            assert!(
+                std::time::Instant::now() < end,
+                "timed out waiting for {what}"
+            );
             std::thread::sleep(std::time::Duration::from_millis(100));
         }
     }
@@ -391,7 +394,8 @@ mod tests {
         let url = env("CARDS_LIVE_URL");
         let token = std::fs::read_to_string(env("CARDS_LIVE_TOKEN_FILE")).expect("token file");
         let info: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(env("CARDS_LIVE_INFO")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(env("CARDS_LIVE_INFO")).unwrap())
+                .unwrap();
         let (g, t, m) = (
             info["groupId"].as_str().unwrap(),
             info["topicId"].as_str().unwrap(),
@@ -408,7 +412,9 @@ mod tests {
             credential: Credential::Token(token.trim().to_string()),
             device_name: "cards-live".into(),
         });
-        wait("sign-in", || matches!(p.session(), SessionState::SignedIn { .. }));
+        wait("sign-in", || {
+            matches!(p.session(), SessionState::SignedIn { .. })
+        });
         let SessionState::SignedIn { me, .. } = p.session() else {
             unreachable!()
         };
@@ -422,7 +428,10 @@ mod tests {
         assert_eq!(card.actions.as_ref().map(Vec::len), Some(3));
         assert_eq!(card.blocks.len(), 9);
         assert!(!card.blocks.iter().any(|b| matches!(b, CardBlock::Unknown)));
-        assert!(Arc::ptr_eq(&card, &p.card(g, m).unwrap()), "same Arc while unchanged");
+        assert!(
+            Arc::ptr_eq(&card, &p.card(g, m).unwrap()),
+            "same Arc while unchanged"
+        );
 
         // The image block downloads into the file cache.
         let file_id = card
@@ -434,7 +443,8 @@ mod tests {
             })
             .unwrap();
         wait("the card image", || {
-            p.card_image(g, t, &file_id).is_some_and(|path| path.is_file())
+            p.card_image(g, t, &file_id)
+                .is_some_and(|path| path.is_file())
         });
 
         // A press shows as sending, then the bot's edit replaces the card.

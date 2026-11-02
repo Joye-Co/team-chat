@@ -124,7 +124,7 @@ impl Render for Gallery {
 }
 
 fn scroll(gallery: &Entity<Gallery>, bottom: bool, cx: &mut gpui::AsyncApp) {
-    let _ = gallery.update(cx, |g, cx| {
+    gallery.update(cx, |g, cx| {
         if bottom {
             g.scroll.scroll_to_bottom();
         } else {
@@ -184,7 +184,7 @@ pub fn run(
     let timeout_report = report.clone();
     cx.spawn(async move |cx| {
         cx.background_executor().timer(TIMEOUT).await;
-        let _ = cx.update(|cx| {
+        cx.update(|cx| {
             let json = serde_json::json!({ "ok": false, "error": "timed out" });
             finish(&timeout_report, json, false, cx);
         });
@@ -341,7 +341,7 @@ pub fn run(
             "checks": checks,
             "screenshots": shots_taken,
         });
-        let _ = cx.update(|cx| finish(&report, json, ok, cx));
+        cx.update(|cx| finish(&report, json, ok, cx));
     })
     .detach();
 }
