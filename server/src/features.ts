@@ -6,3 +6,4 @@ import "./ops";
 import "./search";
 import "./integrations";
 import "./bots";
+import "./reactions";
