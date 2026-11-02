@@ -1,33 +1,19 @@
-//! Message search. Cmd+F searches the current 群, Cmd+Shift+F (and the
-//! sidebar field) all of mine. The dialog sends the query to the server
-//! through [`ChatProvider::search`] as the user types, shows each hit with
-//! its 群, 话题, author, time and a snippet with the match highlighted, and
-//! Enter opens the topic at that message (`Navigation::open_message`).
+//! Message search lives in the one switcher (DESIGN.md §7.12, U35): Cmd+F
+//! opens it scoped to the current 群 with a removable `在 qqbot 研发` token,
+//! Cmd+Shift+F opens it over all of mine. The switcher asks the server
+//! through [`crate::data::ChatProvider::search`] and Enter on a hit opens
+//! the topic at that message (`Navigation::open_message`).
 
+pub mod plain;
 pub mod preview;
-mod results;
 
-use std::cell::Cell;
-
-use gpui::{
-    App, AppContext as _, Context, Entity, IntoElement, KeyBinding, ParentElement, Render, Styled,
-    Window, div, px,
-};
-use gpui_component::{
-    Sizable as _, WindowExt as _,
-    list::{List, ListState},
-    tab::{Tab, TabBar},
-};
+use gpui::{App, KeyBinding};
+use gpui_component::WindowExt as _;
 
 use crate::{
     app::{Place, Services},
-    copy::search as s,
     data::GroupId,
-    theme::{self, Type as _, space},
-    ui,
 };
-
-pub use results::SearchDelegate;
 
 gpui::actions!(search, [SearchInGroup, SearchEverywhere]);
 
@@ -44,7 +30,7 @@ pub fn install(cx: &mut App) {
 fn open_deferred(everywhere: bool, cx: &mut App) {
     super::nav::in_main_window(cx, move |window, cx| {
         if !window.has_active_dialog(cx) {
-            open(super::nav::services_of(cx), everywhere, window, cx);
+            open(super::nav::services_of(cx), everywhere, "", window, cx);
         }
     });
 }
@@ -59,125 +45,19 @@ pub fn current_group(services: &Services, cx: &App) -> Option<GroupId> {
     }
 }
 
-/// The dialog body: the scope tabs and the searchable result list.
-pub struct SearchDialog {
-    list: Entity<ListState<SearchDelegate>>,
-}
-
-impl SearchDialog {
-    pub fn new(
-        services: Services,
-        everywhere: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> Self {
-        let group = current_group(&services, cx);
-        let delegate = SearchDelegate::new(services, group, everywhere, cx);
-        let list = cx.new(|cx| ListState::new(delegate, window, cx).searchable(true));
-        Self { list }
-    }
-
-    pub fn list(&self) -> &Entity<ListState<SearchDelegate>> {
-        &self.list
-    }
-
-    fn set_everywhere(&mut self, everywhere: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.list.update(cx, |state, cx| {
-            if state.delegate().everywhere() == everywhere {
-                return;
-            }
-            state.delegate_mut().set_everywhere(everywhere);
-            let query = state.delegate().query().to_string();
-            state.set_query(&query, window, cx);
-        });
-    }
-}
-
-impl Render for SearchDialog {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
-        let delegate = self.list.read(cx).delegate();
-        let has_group = delegate.group().is_some();
-        let everywhere = delegate.everywhere();
-        let footer = delegate.footer_text();
-        let view = cx.entity().downgrade();
-        let tabs = TabBar::new("search-scope")
-            .segmented()
-            .small()
-            .selected_index(if everywhere { 1 } else { 0 })
-            .on_click(move |ix: &usize, window, cx| {
-                let everywhere = *ix == 1;
-                let _ = view.update(cx, |this, cx| this.set_everywhere(everywhere, window, cx));
-            })
-            .child(Tab::new().label(s::SCOPE_GROUP).disabled(!has_group))
-            .child(Tab::new().label(s::SCOPE_ALL));
-        // §7.12 switcher layout: the scope, the query, 60 pt hits, and a
-        // 40 pt footer with kbd hints.
-        div()
-            .flex()
-            .flex_col()
-            .w_full()
-            .child(div().px(space::S12).pt(space::S12).flex().child(tabs))
-            .child(
-                List::new(&self.list)
-                    .search_placeholder(s::PLACEHOLDER)
-                    .large()
-                    .p(space::S4)
-                    .h(px(440.)),
-            )
-            .child(
-                div()
-                    .h(px(40.))
-                    .px(space::S16)
-                    .flex()
-                    .items_center()
-                    .gap(space::S16)
-                    .border_t(theme::HAIRLINE)
-                    .border_color(colors.sep)
-                    .t_meta()
-                    .text_color(colors.text_3)
-                    .child(div().flex_1().tnum().child(footer))
-                    .child(ui::KbdHint::new(&["up", "down"]).label(s::HINT_SELECT))
-                    .child(ui::KbdHint::new(&["enter"]).label(s::HINT_OPEN))
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S6)
-                            .child(ui::Kbd::new("esc"))
-                            .child(s::HINT_CLOSE),
-                    ),
-            )
-    }
-}
-
-/// Opens the search dialog in `window`.
-pub fn open(services: Services, everywhere: bool, window: &mut Window, cx: &mut App) {
-    open_with_query(services, everywhere, "", window, cx);
-}
-
-/// Opens the search dialog with `query` typed in (empty for none).
-pub fn open_with_query(
+/// Opens the switcher with `query` typed: scoped to the current 群 unless
+/// `everywhere` (or no 群 is open).
+pub fn open(
     services: Services,
     everywhere: bool,
     query: &str,
-    window: &mut Window,
+    window: &mut gpui::Window,
     cx: &mut App,
 ) {
-    let dialog = cx.new(|cx| SearchDialog::new(services, everywhere, window, cx));
-    if !query.is_empty() {
-        let list = dialog.read(cx).list().clone();
-        list.update(cx, |state, cx| state.set_query(query, window, cx));
-    }
-    let first = Cell::new(true);
-    window.open_dialog(cx, move |d, window, cx| {
-        if first.replace(false) {
-            let list = dialog.read(cx).list().clone();
-            list.update(cx, |state, cx| state.focus(window, cx));
-        }
-        crate::ui::sheet::switcher(d)
-            .close_button(false)
-            .p_0()
-            .child(dialog.clone())
-    });
+    let scope = if everywhere {
+        None
+    } else {
+        current_group(&services, cx)
+    };
+    super::nav::switcher::open_scoped(services, scope, query, window, cx);
 }

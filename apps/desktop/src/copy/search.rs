@@ -1,26 +1,8 @@
-//! Message search: the search dialog (Cmd+F in the current 群, Cmd+Shift+F in
-//! all of mine) and its results.
+//! Message search inside the switcher: the Cmd+F scope token (DESIGN.md
+//! §7.12).
 
 crate::copy! {
-    SIDEBAR_FIELD = "搜索消息",
-    SIDEBAR_SHORTCUT = "⇧⌘F",
-    PLACEHOLDER = "搜索消息，中文至少输入两个字",
-    SCOPE_GROUP = "当前群",
-    SCOPE_ALL = "全部群",
-    HINT = "输入关键词，在消息和话题标题里搜索",
-    SEARCHING = "正在搜索…",
-    EMPTY = "没有找到相关消息",
-    OFFLINE = "连不上服务器，联网后才能搜索",
-    REFUSED = "没有权限搜索这个群",
-    TIMED_OUT = "搜索超时，请再试一次",
-    UNAVAILABLE = "暂时无法搜索",
-    RESULT_COUNT = "{n} 条结果",
-    UNKNOWN_GROUP = "未知的群",
-    UNKNOWN_TOPIC = "未知的话题",
-    OPEN_HINT = "↑↓ 选择 · 回车打开 · Esc 关闭",
-    HINT_SELECT = "选择",
-    HINT_OPEN = "打开",
-    HINT_CLOSE = "关闭",
-    MENU_SEARCH_GROUP = "在当前群搜索…",
-    MENU_SEARCH_ALL = "在全部群搜索…",
+    SCOPE_IN_GROUP = "在 {name}",
+    SCOPE_REMOVE = "在全部群里搜索",
+    PLACEHOLDER_IN_GROUP = "搜索这个群的话题和消息",
 }

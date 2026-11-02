@@ -3,33 +3,40 @@
 //! text, `esc`), grouped rows (话题, 群, 私聊, 成员, 消息), every match marked
 //! with `hl-bg`, and a 40 pt footer with the keys. With no query it shows 最近
 //! (five topics), then 群 and 私聊. Picking a member opens (or starts) the DM
-//! with them; picking a message opens its topic at that message.
+//! with them; picking a message opens its topic at that message. Cmd+F opens
+//! it scoped to one 群 (a removable `在 qqbot 研发` token): its topics and
+//! messages only. The list shows whole rows and scrolls inside; the keyboard
+//! selection is the one highlight until the pointer moves.
 
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable,
-    InteractiveElement as _, IntoElement, KeyBinding, ParentElement, Render, ScrollHandle,
-    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div,
+    InteractiveElement as _, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render,
+    ScrollHandle, StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    WindowExt as _,
+    Icon, WindowExt as _,
+    button::{Button, ButtonCustomVariant, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
 };
 
 use crate::{
     app::Services,
-    copy::{fill, nav},
+    copy::{fill, nav, search as search_copy},
     data::{
         ChatProvider, GroupId, GroupKind, Member, MemberId, SearchHit, SearchQuery, Topic, TopicId,
     },
     theme::{self, Type as _, size, space, type_scale},
     ui::{self, GroupGlyph, Kbd, KbdHint, Lucide, MemberAvatar, RowSurface, StatusChip},
-    views::{sidebar::topic_line, topic_list::list_time},
+    views::{search::plain::plain_with_ranges, sidebar::topic_line, topic_list::list_time},
 };
 
-gpui::actions!(switcher, [SelectPrevious, SelectNext, OpenSelected]);
+gpui::actions!(
+    switcher,
+    [SelectPrevious, SelectNext, OpenSelected, ScopeToGroup]
+);
 
 pub(super) const CONTEXT: &str = "TeamSwitcher";
 
@@ -39,6 +46,13 @@ const MAX_PER_GROUP: usize = 5;
 const MAX_HITS: usize = 3;
 /// Recent topics with no query.
 const RECENT: usize = 5;
+/// A group label (§7.12).
+const GROUP_LABEL: Pixels = px(32.);
+/// The footer with the keys.
+const SWITCHER_FOOTER: Pixels = px(40.);
+/// Space above the first and below the last child of the list.
+const LIST_PAD_TOP: Pixels = space::S4;
+const LIST_PAD_BOTTOM: Pixels = space::S8;
 
 /// The switcher's keys (call once at start-up).
 pub fn bind_keys(cx: &mut App) {
@@ -48,18 +62,24 @@ pub fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
         KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
+        // Inside the switcher Cmd+F scopes it to the current 群.
+        KeyBinding::new("cmd-f", ScopeToGroup, Some(CONTEXT)),
     ]);
 }
 
 /// What the switcher shows with no query (§7.12): 最近 (five topics), then 群
 /// and 私聊. Indexes of the keyboard selection refer to this list.
 pub fn display(sections: Vec<(Section, Vec<Entry>)>) -> Vec<(&'static str, Vec<Entry>)> {
-    grouped(&sections, "")
+    grouped(&sections, "", None)
 }
 
 /// The groups for `query`: with no query 最近, 群, 私聊; with one, matches in
-/// 话题, 群, 私聊 and 成员 (five each).
-pub fn grouped(sections: &[(Section, Vec<Entry>)], query: &str) -> Vec<(&'static str, Vec<Entry>)> {
+/// 话题, 群, 私聊 and 成员 (five each). Scoped to a 群: only its topics.
+pub fn grouped(
+    sections: &[(Section, Vec<Entry>)],
+    query: &str,
+    scope: Option<&str>,
+) -> Vec<(&'static str, Vec<Entry>)> {
     let get = |section: Section| -> Vec<Entry> {
         sections
             .iter()
@@ -67,6 +87,23 @@ pub fn grouped(sections: &[(Section, Vec<Entry>)], query: &str) -> Vec<(&'static
             .flat_map(|(_, e)| e.iter().filter(|e| matches(e, query)).cloned())
             .collect()
     };
+    if let Some(scope) = scope {
+        let topics: Vec<Entry> = get(Section::Topics)
+            .into_iter()
+            .filter(|e| matches!(&e.target, Target::Topic(g, _) if g == scope))
+            .collect();
+        let (label, take) = if query.trim().is_empty() {
+            (nav::SECTION_RECENT, RECENT)
+        } else {
+            (nav::SECTION_TOPICS, MAX_PER_GROUP)
+        };
+        let topics: Vec<Entry> = topics.into_iter().take(take).collect();
+        return if topics.is_empty() {
+            Vec::new()
+        } else {
+            vec![(label, topics)]
+        };
+    }
     let groups: Vec<(&'static str, Vec<Entry>)> = if query.trim().is_empty() {
         vec![
             (
@@ -287,15 +324,41 @@ fn title_with_mark(label: &str, query: &str, cx: &App) -> gpui::Div {
             let start = pre.chars().count();
             let len = hit.chars().count();
             let full = format!("{pre}{hit}{post}");
-            marked(&full, &[start..start + len], cx)
+            marked(&full, std::slice::from_ref(&(start..start + len)), cx)
         }
         None => div().min_w(px(0.)).one_line().child(label.to_string()),
     }
 }
 
+/// A message hit with its snippet as plain text (no `###`, `-` or `**`) and
+/// the marks moved with the text (§7.12).
+fn plain_hit(mut hit: SearchHit) -> SearchHit {
+    let (snippet, highlights) = plain_with_ranges(&hit.snippet, &hit.highlights);
+    hit.snippet = snippet;
+    hit.highlights = highlights;
+    hit
+}
+
+/// The list height that shows whole rows only: the children's heights
+/// (`label`, `row`) summed until `max`, never ending on a section label.
+pub fn whole_rows_height(heights: &[(Pixels, bool)], max: Pixels) -> Pixels {
+    let mut total = px(0.);
+    let mut fit = px(0.);
+    for &(h, is_row) in heights {
+        if total + h > max {
+            break;
+        }
+        total += h;
+        if is_row {
+            fit = total;
+        }
+    }
+    fit
+}
+
 /// One row of the switcher.
 enum Row {
-    Entry(Entry),
+    Entry(Box<Entry>),
     Hit(SearchHit),
 }
 
@@ -312,6 +375,13 @@ pub struct Switcher {
     members: Rc<Vec<Member>>,
     scroll: ScrollHandle,
     search: Option<Task<()>>,
+    /// Cmd+F: the 群 searched, with its name for the token.
+    scope: Option<(GroupId, String)>,
+    /// The last pointer position seen over the list. The pointer picks a
+    /// row only when it moves, so it never fights the keyboard selection.
+    pointer: Option<Point<Pixels>>,
+    /// Scroll to the active row on the next frame (set by the keyboard).
+    reveal: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -350,6 +420,9 @@ impl Switcher {
             members,
             scroll: ScrollHandle::new(),
             search: None,
+            scope: None,
+            pointer: None,
+            reveal: true,
             _subscriptions: subscriptions,
         };
         this.rebuild();
@@ -364,7 +437,7 @@ impl Switcher {
         self.rows = self
             .groups
             .iter()
-            .flat_map(|(_, e)| e.iter().cloned().map(Row::Entry))
+            .flat_map(|(_, e)| e.iter().cloned().map(|e| Row::Entry(Box::new(e))))
             .chain(self.hits.iter().cloned().map(Row::Hit))
             .collect();
         if self.active >= self.rows.len() {
@@ -372,11 +445,36 @@ impl Switcher {
         }
     }
 
+    /// Scopes the switcher to `group` (Cmd+F) or back to everything.
+    fn set_scope(&mut self, group: Option<GroupId>, window: &mut Window, cx: &mut Context<Self>) {
+        let scope = group.and_then(|g| {
+            self.all
+                .iter()
+                .flat_map(|(_, e)| e)
+                .find(|e| e.target == Target::Group(g.clone()))
+                .map(|e| (g, e.label.clone()))
+        });
+        if scope == self.scope {
+            return;
+        }
+        self.scope = scope;
+        let placeholder = if self.scope.is_some() {
+            search_copy::PLACEHOLDER_IN_GROUP
+        } else {
+            nav::QUICK_SWITCH_PLACEHOLDER
+        };
+        self.query
+            .update(cx, |q, cx| q.set_placeholder(placeholder, window, cx));
+        self.requery(cx);
+    }
+
     fn requery(&mut self, cx: &mut Context<Self>) {
         let text = self.text(cx);
-        self.groups = grouped(&self.all, &text);
+        let scope = self.scope.as_ref().map(|(g, _)| g.clone());
+        self.groups = grouped(&self.all, &text, scope.as_deref());
         self.hits.clear();
         self.active = 0;
+        self.reveal = true;
         self.rebuild();
         self.scroll.set_offset(gpui::point(px(0.), px(0.)));
         cx.notify();
@@ -389,13 +487,14 @@ impl Switcher {
                     .await;
                 let reply = provider.search(SearchQuery {
                     text: text.clone(),
-                    group_id: None,
+                    group_id: scope.clone(),
                     limit: MAX_HITS as u32,
                 });
                 if let Ok(Ok(hits)) = reply.await {
                     let _ = this.update(cx, |this, cx| {
-                        if this.text(cx) == text {
-                            this.hits = hits.into_iter().take(MAX_HITS).collect();
+                        let same_scope = this.scope.as_ref().map(|(g, _)| g) == scope.as_ref();
+                        if this.text(cx) == text && same_scope {
+                            this.hits = hits.into_iter().take(MAX_HITS).map(plain_hit).collect();
                             this.rebuild();
                             cx.notify();
                         }
@@ -411,7 +510,20 @@ impl Switcher {
         }
         let n = self.rows.len() as isize;
         self.active = ((self.active as isize + delta).rem_euclid(n)) as usize;
+        self.reveal = true;
         cx.notify();
+    }
+
+    /// The pointer moved over row `ix`: it becomes the selection, but only
+    /// after a real move (not when the list scrolls under a still pointer
+    /// or the switcher opens under it).
+    fn pointer_moved(&mut self, ix: usize, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let moved = self.pointer.is_some_and(|p| p != at);
+        self.pointer = Some(at);
+        if moved && self.active != ix {
+            self.active = ix;
+            cx.notify();
+        }
     }
 
     fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -443,7 +555,7 @@ impl Switcher {
     fn group_label(label: &'static str, cx: &App) -> gpui::Div {
         div()
             .flex_none()
-            .h(px(32.))
+            .h(GROUP_LABEL)
             .pt(space::S4)
             .px(space::S12)
             .flex()
@@ -497,13 +609,25 @@ impl Switcher {
             .topic
             .as_ref()
             .and_then(|t| StatusChip::for_topic(t, me.as_deref(), &self.members));
-        let detail = e.detail.clone().map(|d| format!(" · {d}"));
+        // Scoped to a 群, its name is in the token, not on every row.
+        let detail = match (&self.scope, &e.target) {
+            (Some(_), Target::Topic(..)) => None,
+            _ => e.detail.clone().map(|d| format!(" · {d}")),
+        };
+        // One highlight: the selection, moved by the keys or a pointer move;
+        // no hover fill (built as a selected row, then its fill set here).
         ui::list_row(
             ElementId::NamedInteger("switcher-row".into(), ix as u64),
             RowSurface::Content,
-            active,
+            true,
             cx,
         )
+        .bg(if active {
+            k.selected
+        } else {
+            gpui::transparent_black()
+        })
+        .active(|s| s.bg(k.pressed))
         .h(size::SWITCHER_ROW)
         .px(space::S12)
         .gap(space::S12)
@@ -536,6 +660,9 @@ impl Switcher {
         .when(active, |el| {
             el.child(ui::icon(Lucide::CornerDownLeft, theme::icon::ROW, k.text_3))
         })
+        .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
+            this.pointer_moved(ix, e.position, cx)
+        }))
         .on_click(cx.listener(move |this, _, window, cx| this.open_row(ix, window, cx)))
         .into_any_element()
     }
@@ -552,17 +679,32 @@ impl Switcher {
             .map(|e| e.label.clone())
             .unwrap_or_default();
         let time = list_time(h.created_at, chrono::Local::now());
+        // A DM is named after its peer: no `小王 · 小王`; scoped: no 群.
+        let author_name = author.map(|a| a.name.as_str()).unwrap_or_default();
+        let group = if self.scope.is_some() || group == author_name {
+            String::new()
+        } else {
+            group
+        };
         let meta = [group, time]
             .into_iter()
             .filter(|s| !s.is_empty())
             .map(|s| format!(" · {s}"))
             .collect::<String>();
+        // One highlight: the selection, moved by the keys or a pointer move;
+        // no hover fill (built as a selected row, then its fill set here).
         ui::list_row(
             ElementId::NamedInteger("switcher-row".into(), ix as u64),
             RowSurface::Content,
-            active,
+            true,
             cx,
         )
+        .bg(if active {
+            k.selected
+        } else {
+            gpui::transparent_black()
+        })
+        .active(|s| s.bg(k.pressed))
         .h(size::SWITCHER_HIT_ROW)
         .px(space::S12)
         .gap(space::S12)
@@ -619,6 +761,9 @@ impl Switcher {
                 k.text_3,
             )))
         })
+        .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
+            this.pointer_moved(ix, e.position, cx)
+        }))
         .on_click(cx.listener(move |this, _, window, cx| this.open_row(ix, window, cx)))
         .into_any_element()
     }
@@ -630,42 +775,104 @@ impl Render for Switcher {
         let query = self.text(cx);
         // Children of the scroll area, with the scroll index of the active row.
         let mut children: Vec<AnyElement> = Vec::new();
+        // Each child's height and whether it is a row (not a label).
+        let mut heights: Vec<(Pixels, bool)> = Vec::new();
         let mut active_child = 0;
         let mut ix = 0;
         let groups = self.groups.clone();
         for (label, items) in &groups {
             children.push(Self::group_label(label, cx).into_any_element());
+            heights.push((GROUP_LABEL, false));
             for e in items {
                 if ix == self.active {
                     active_child = children.len();
                 }
                 children.push(self.entry_row(ix, e, &query, cx));
+                heights.push((size::SWITCHER_ROW, true));
                 ix += 1;
             }
         }
         if !self.hits.is_empty() {
             children.push(Self::group_label(nav::SECTION_MESSAGES, cx).into_any_element());
+            heights.push((GROUP_LABEL, false));
             let hits = self.hits.clone();
             for h in &hits {
                 if ix == self.active {
                     active_child = children.len();
                 }
                 children.push(self.hit_row(ix, h, cx));
+                heights.push((size::SWITCHER_HIT_ROW, true));
                 ix += 1;
             }
         }
-        if !self.rows.is_empty() {
-            self.scroll.scroll_to_item(active_child);
+        if !self.rows.is_empty() && std::mem::take(&mut self.reveal) {
+            // Keep the label above the first row of a group in view too.
+            let target = if active_child > 0 && !heights[active_child - 1].1 {
+                active_child - 1
+            } else {
+                active_child
+            };
+            self.scroll.scroll_to_item(target);
         }
         let empty = self.rows.is_empty();
-        // Up to 70 % of the window, the query row and footer included.
-        let max_list = (window.viewport_size().height * 0.7 - px(96.)).max(px(160.));
+        // Up to 70 % of the window, the query row and footer included, cut
+        // at whole rows (§7.12).
+        let max_rows = window.viewport_size().height * 0.7
+            - size::SWITCHER_QUERY
+            - SWITCHER_FOOTER
+            - LIST_PAD_TOP
+            - LIST_PAD_BOTTOM;
+        let list_h = whole_rows_height(&heights, max_rows.max(size::SWITCHER_HIT_ROW));
+        let scope_token = self.scope.as_ref().map(|(_, name)| {
+            let k = theme::colors(cx);
+            Button::new("switcher-scope")
+                .custom(
+                    ButtonCustomVariant::new(cx)
+                        .color(k.field)
+                        .foreground(k.text_1)
+                        .hover(k.hover)
+                        .active(k.pressed),
+                )
+                .h(px(24.))
+                .pl(space::S8)
+                .pr(space::S4)
+                .gap(space::S4)
+                .rounded(theme::radius::SM)
+                .t_small()
+                .medium()
+                .child(fill(search_copy::SCOPE_IN_GROUP, &[("name", name)]))
+                .child(
+                    Icon::new(Lucide::X)
+                        .size(theme::icon::TAG)
+                        .text_color(k.text_3),
+                )
+                .tooltip(search_copy::SCOPE_REMOVE)
+                .on_click(cx.listener(|this, _, window, cx| {
+                    this.set_scope(None, window, cx);
+                    this.query.update(cx, |q, cx| q.focus(window, cx));
+                }))
+        });
         div()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &OpenSelected, window, cx| this.confirm(window, cx)))
+            .on_action(cx.listener(|this, _: &ScopeToGroup, window, cx| {
+                let group = crate::views::search::current_group(&this.services, cx);
+                this.set_scope(group, window, cx);
+            }))
+            // Backspace in an empty query removes the scope token.
+            .capture_key_down(cx.listener(|this, e: &gpui::KeyDownEvent, window, cx| {
+                if e.keystroke.key == "backspace"
+                    && !e.keystroke.modifiers.modified()
+                    && this.scope.is_some()
+                    && this.query.read(cx).value().is_empty()
+                {
+                    this.set_scope(None, window, cx);
+                    cx.stop_propagation();
+                }
+            }))
             .w_full()
             .flex()
             .flex_col()
@@ -681,6 +888,7 @@ impl Render for Switcher {
                     .border_b(theme::HAIRLINE)
                     .border_color(k.sep)
                     .child(ui::icon(Lucide::Search, px(20.), k.text_2))
+                    .children(scope_token)
                     .child(
                         div().flex_1().min_w(px(0.)).child(
                             Input::new(&self.query)
@@ -697,14 +905,19 @@ impl Render for Switcher {
                 div()
                     .id("switcher-list")
                     .flex_none()
-                    .max_h(max_list)
+                    .when(!empty, |el| el.h(list_h + LIST_PAD_TOP + LIST_PAD_BOTTOM))
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
-                    .pt(space::S4)
+                    .pt(LIST_PAD_TOP)
                     .px(space::S8)
-                    .pb(space::S8)
+                    .pb(LIST_PAD_BOTTOM)
                     .flex()
                     .flex_col()
+                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, _| {
+                        // Over a label or the padding: remember where the
+                        // pointer is, so the next move counts as a move.
+                        this.pointer.get_or_insert(e.position);
+                    }))
                     .children(children)
                     .when(empty, |el| {
                         el.child(div().h(px(160.)).child(ui::EmptyState::new(
@@ -716,7 +929,7 @@ impl Render for Switcher {
             .child(
                 div()
                     .flex_none()
-                    .h(px(40.))
+                    .h(SWITCHER_FOOTER)
                     .px(space::S16)
                     .flex()
                     .items_center()
@@ -734,11 +947,23 @@ impl Render for Switcher {
 
 /// Opens the switcher in `window`.
 pub fn open(services: Services, window: &mut Window, cx: &mut App) {
-    open_with(services, "", window, cx);
+    open_scoped(services, None, "", window, cx);
 }
 
 /// Opens the switcher with `query` typed (the self-test uses it).
 pub fn open_with(services: Services, query: &str, window: &mut Window, cx: &mut App) {
+    open_scoped(services, None, query, window, cx);
+}
+
+/// Opens the switcher scoped to `scope` (Cmd+F) with `query` typed. The
+/// query field has the focus, so the caret shows at once.
+pub fn open_scoped(
+    services: Services,
+    scope: Option<GroupId>,
+    query: &str,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<Switcher> {
     let query = query.to_string();
     let view = cx.new(|cx| {
         let mut s = Switcher::new(services, window, cx);
@@ -746,14 +971,18 @@ pub fn open_with(services: Services, query: &str, window: &mut Window, cx: &mut 
             s.query
                 .update(cx, |q, cx| q.set_value(query.clone(), window, cx));
         }
+        s.set_scope(scope, window, cx);
         s.requery(cx);
         s
     });
+    let focus = view.read(cx).query.read(cx).focus_handle(cx);
     let first = std::cell::Cell::new(true);
+    let dialog_view = view.clone();
     window.open_dialog(cx, move |dialog, window, cx| {
+        let view = &dialog_view;
         if first.replace(false) {
-            let handle = view.read(cx).query.read(cx).focus_handle(cx);
-            handle.focus(window, cx);
+            let input = view.read(cx).query.clone();
+            input.update(cx, |q, cx| q.focus(window, cx));
         }
         crate::ui::sheet::switcher(dialog)
             .close_button(false)
@@ -761,6 +990,31 @@ pub fn open_with(services: Services, query: &str, window: &mut Window, cx: &mut 
             .overflow_hidden()
             .child(view.clone())
     });
+    // The dialog moves the focus to itself when it opens; put it back in
+    // the query field once that has happened.
+    let view2 = view.clone();
+    window.defer(cx, move |window, cx| {
+        if !focus.is_focused(window) {
+            view2
+                .read(cx)
+                .query
+                .clone()
+                .update(cx, |q, cx| q.focus(window, cx));
+        }
+    });
+    view
+}
+
+impl Switcher {
+    /// Whether the query field has the keyboard focus (the self-test).
+    pub fn query_focused(&self, window: &Window, cx: &App) -> bool {
+        self.query.read(cx).focus_handle(cx).is_focused(window)
+    }
+
+    /// The 群 this switcher is scoped to (the self-test).
+    pub fn scope(&self) -> Option<&GroupId> {
+        self.scope.as_ref().map(|(g, _)| g)
+    }
 }
 
 #[cfg(test)]

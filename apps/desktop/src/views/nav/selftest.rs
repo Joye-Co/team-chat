@@ -145,6 +145,43 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
         check("switcher_enter_closes", closed);
         check("switcher_down_enter_opens_second_entry", picked);
 
+        // The query field has the focus (the caret) when the switcher opens,
+        // and Cmd+F opens it scoped to the current 群.
+        let s = services.clone();
+        let view = handle
+            .update(cx, |_, window, cx| {
+                super::switcher::open_scoped(s, None, "", window, cx)
+            })
+            .ok();
+        pause(cx).await;
+        let focused = view.is_some_and(|v| {
+            handle
+                .update(cx, |_, window, cx| v.read(cx).query_focused(window, cx))
+                .unwrap_or(false)
+        });
+        check("switcher_query_has_focus", focused);
+        let _ = handle.update(cx, |_, window, cx| window.close_all_dialogs(cx));
+        pause(cx).await;
+        let s = services.clone();
+        let current = cx.update(|cx| crate::views::search::current_group(&services, cx));
+        let view = handle
+            .update(cx, |_, window, cx| {
+                super::switcher::open_scoped(s, current.clone(), "", window, cx)
+            })
+            .ok();
+        pause(cx).await;
+        let scoped = view.is_some_and(|v| {
+            handle
+                .update(cx, |_, window, cx| {
+                    let v = v.read(cx);
+                    v.scope() == current.as_ref() && v.query_focused(window, cx)
+                })
+                .unwrap_or(false)
+        });
+        check("cmd_f_opens_switcher_scoped", current.is_some() && scoped);
+        let _ = handle.update(cx, |_, window, cx| window.close_all_dialogs(cx));
+        pause(cx).await;
+
         key(handle, "cmd-1", cx);
         pause(cx).await;
         let first = provider

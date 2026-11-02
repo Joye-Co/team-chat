@@ -309,7 +309,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "search",
-        about: "The search dialog with results for a Chinese query in all 群",
+        about: "Cmd+F: the switcher scoped to the current 群 with a Chinese query",
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::search::preview::open_dialog,

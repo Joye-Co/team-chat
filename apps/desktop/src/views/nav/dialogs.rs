@@ -319,12 +319,11 @@ impl DmPicker {
         let subscriptions = vec![cx.subscribe_in(
             &filter,
             window,
-            |this, _, event: &InputEvent, _window, cx| match event {
-                InputEvent::Change => {
+            |this, _, event: &InputEvent, _window, cx| {
+                if let InputEvent::Change = event {
                     this.active = 0;
                     cx.notify();
                 }
-                _ => {}
             },
         )];
         Self {

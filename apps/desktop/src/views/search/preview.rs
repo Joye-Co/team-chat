@@ -1,5 +1,6 @@
-//! Screenshot scenes of search (`selftest/scenes.rs`): the dialog with a
-//! query and its results, and a topic opened at a hit far up in its history.
+//! Screenshot scenes of search (`selftest/scenes.rs`): the switcher scoped
+//! to the current 群 by Cmd+F with a query and its results, and a topic
+//! opened at a hit far up in its history.
 
 use gpui::{AnyWindowHandle, App, Pixels, Size};
 
@@ -8,7 +9,7 @@ use crate::{app::Services, fake, selftest::scenes::open_main};
 /// The query the `search` scenes type.
 pub const QUERY: &str = "登录";
 
-/// Opens the main window with the search dialog showing results for [`QUERY`].
+/// Opens the main window with the Cmd+F switcher showing results for [`QUERY`].
 pub fn open_dialog(
     services: Services,
     content: Size<Pixels>,
@@ -17,7 +18,7 @@ pub fn open_dialog(
     let handle = open_main(services.clone(), content, cx)?;
     handle
         .update(cx, |_, window, cx| {
-            super::open_with_query(services, true, QUERY, window, cx)
+            super::open(services, false, QUERY, window, cx)
         })
         .map_err(|e| e.to_string())?;
     Ok(handle)
