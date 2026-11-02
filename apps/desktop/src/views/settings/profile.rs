@@ -267,8 +267,8 @@ impl Render for ProfilePage {
             .child(div().h(space::S20))
             .child(widgets::group_rows(
                 vec![
-                    widgets::group_field(s::NAME, Input::new(&self.name).small(), cx),
-                    widgets::group_field(s::ROLE, Input::new(&self.role).small(), cx),
+                    widgets::group_field(s::NAME, Input::new(&self.name), cx),
+                    widgets::group_field(s::ROLE, Input::new(&self.role), cx),
                 ],
                 space::S12,
                 cx,

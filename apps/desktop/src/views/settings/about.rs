@@ -150,7 +150,7 @@ impl Render for AboutPage {
                         .flex_col()
                         .items_stretch()
                         .gap(space::S8)
-                        .child(Textarea::new(&self.description).small())
+                        .child(Textarea::new(&self.description))
                         .child(
                             div()
                                 .flex()

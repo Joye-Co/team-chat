@@ -144,6 +144,7 @@ impl Render for UpdateBanner {
             .flex_none()
             .w_full()
             .px(theme::space::S20)
+            .pt(theme::space::S8)
             .pb(theme::space::S8)
             .child(
                 div()
@@ -171,7 +172,8 @@ impl Render for UpdateBanner {
                             ))
                         }
                     })
-                    .child(div().flex_1().min_w(px(0.)).one_line().child(text))
+                    // Wraps: the manual-install text is an instruction and must stay whole.
+                    .child(div().flex_1().min_w(px(0.)).py(theme::space::S4).child(text))
                     .when_some(progress, |el, pct| {
                         el.child(
                             Progress::new("update-progress")

@@ -6,7 +6,7 @@ use gpui::{
     div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _,
+    Disableable as _,
     button::{Button, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
 };
@@ -158,30 +158,31 @@ impl Render for LoginView {
                                     .child(l::LEAD),
                             )
                             .child(label(l::SERVER_LABEL))
-                            .child(Input::new(&self.server))
+                            .child(Input::new(&self.server).h(px(34.)))
                             .child(label(l::CODE_LABEL))
-                            .child(Input::new(&self.code))
-                            .child(
-                                div()
-                                    .pt(space::S8)
-                                    .t_callout()
-                                    .text_color(colors.text_2)
-                                    .child(l::CODE_HINT),
-                            )
+                            .child(Input::new(&self.code).h(px(34.)))
+                            // A field error sits right under the field (§11).
                             .when_some(error, |el, e| {
                                 el.child(
                                     div()
-                                        .pt(space::S8)
+                                        .pt(space::S6)
                                         .t_callout()
                                         .text_color(colors.danger_text)
                                         .child(e),
                                 )
                             })
                             .child(
-                                div().pt(space::S20).child(
+                                div()
+                                    .pt(space::S6)
+                                    .t_callout()
+                                    .text_color(colors.text_2)
+                                    .child(l::CODE_HINT),
+                            )
+                            .child(
+                                div().pt(space::S16).child(
                                     Button::new("login")
                                         .primary()
-                                        .large()
+                                        .h(px(34.))
                                         .w_full()
                                         .label(if signing_in { l::SIGNING_IN } else { l::SUBMIT })
                                         .disabled(signing_in)
