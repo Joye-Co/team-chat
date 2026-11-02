@@ -44,6 +44,8 @@ pub struct Member {
     /// 岗位: the member's job, shown under the name.
     pub role: Option<String>,
     pub level: MemberLevel,
+    /// The avatar image as a local file (a path or a `file://` URL). The real provider gives
+    /// the downloaded copy, since the server route needs the token.
     pub avatar_url: Option<String>,
     pub deactivated: bool,
     /// Presence, from transient `presence` events.

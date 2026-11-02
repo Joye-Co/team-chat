@@ -120,6 +120,8 @@ struct State {
     /// not an outbox row yet), held until its ack: (pending topic id, request). Sends into a
     /// pending topic whose first message is queued go to the chat-core outbox at once.
     deferred: Vec<(String, ClientMsgId, SendRequest)>,
+    /// Avatar URLs whose download started (once per URL and session).
+    avatars_requested: HashSet<String>,
     /// Acks seen: clientMsgId -> message id (self-tests read it).
     acked: HashMap<String, String>,
     /// The place of the main window, kept in `ui-state.json`.
@@ -756,6 +758,29 @@ impl CoreProvider {
         }
     }
 
+    /// The local file of a member's avatar (the server route needs the token, so views draw
+    /// the downloaded copy). Starts the download once per URL and emits `Change::Members` when
+    /// it is on disk; until then the avatar shows the monogram.
+    fn avatar_file(&self, a: &Account, m: &chat_core::proto::Member) -> Option<String> {
+        let url = m.avatar_url()?;
+        if let Some(p) = a.client.cached_avatar(m) {
+            return Some(p.to_string_lossy().into_owned());
+        }
+        if self.state().avatars_requested.insert(url.to_string()) {
+            let handle = a.client.avatar(m);
+            let this = self.clone();
+            chat_core::background().spawn(async move {
+                match handle.await {
+                    Ok(Ok(Some(_))) => this.emit(vec![Change::Members, Change::Groups]),
+                    Ok(Ok(None)) => {}
+                    Ok(Err(e)) => tracing::warn!(error = %e, "avatar download failed"),
+                    Err(e) => tracing::warn!(error = %e, "avatar task failed"),
+                }
+            });
+        }
+        None
+    }
+
     fn group_of_topic(&self, topic_id: &str) -> Option<String> {
         let a = self.account()?;
         a.client.store().topic_group(topic_id).ok().flatten()
@@ -884,17 +909,20 @@ impl ChatProvider for CoreProvider {
             .members()
             .unwrap_or_default()
             .iter()
-            .map(|m| convert::member(m, online.contains(&m.id) || m.id == a.me.id))
+            .map(|m| {
+                let mut out = convert::member(m, online.contains(&m.id) || m.id == a.me.id);
+                out.avatar_url = self.avatar_file(&a, m);
+                out
+            })
             .collect()
     }
 
     fn member(&self, id: &str) -> Option<Member> {
         let a = self.account()?;
         let m = a.client.member(id).ok().flatten()?;
-        Some(convert::member(
-            &m,
-            m.id == a.me.id || a.client.is_online(id),
-        ))
+        let mut out = convert::member(&m, m.id == a.me.id || a.client.is_online(id));
+        out.avatar_url = self.avatar_file(&a, &m);
+        Some(out)
     }
 
     fn groups(&self) -> Vec<GroupSummary> {

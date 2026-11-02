@@ -138,9 +138,7 @@ impl Client {
         let url = member.avatar_url.clone().flatten();
         self.spawn(async move {
             let Some(url) = url else { return Ok(None) };
-            use sha2::Digest;
-            let name = crate::files::hex(&sha2::Sha256::digest(url.as_bytes()));
-            let path = dir.join(&name);
+            let path = avatar_path(&dir, &url);
             if path.is_file() {
                 return Ok(Some(path));
             }
@@ -157,6 +155,14 @@ impl Client {
                 .map_err(ApiError::from)?;
             Ok(Some(path))
         })
+    }
+
+    /// The avatar image of a member when it is on disk already, without network. Download
+    /// it with [`Client::avatar`].
+    pub fn cached_avatar(&self, member: &Member) -> Option<PathBuf> {
+        let url = member.avatar_url()?;
+        let path = avatar_path(&self.config().avatars_dir(), url);
+        path.is_file().then_some(path)
     }
 
     // ------------------------------------------------------------------
@@ -383,4 +389,10 @@ async fn load_artifact(
         topic_id: r.artifact.topic_id.clone(),
     });
     shared.store.artifact(id)?.ok_or(ClientError::NotFound)
+}
+
+/// `avatars/<sha256 of the URL>`: a new avatar has a new URL, so a new file.
+fn avatar_path(dir: &std::path::Path, url: &str) -> PathBuf {
+    use sha2::Digest;
+    dir.join(crate::files::hex(&sha2::Sha256::digest(url.as_bytes())))
 }

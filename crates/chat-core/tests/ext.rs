@@ -793,8 +793,10 @@ async fn members_prefs_avatars_audit_and_hooks() {
         .unwrap();
     assert!(me.avatar_url.clone().flatten().is_some());
     assert_eq!(client.me().unwrap().unwrap().avatar_url, me.avatar_url);
+    assert_eq!(client.cached_avatar(&me), None, "not downloaded yet");
     let p = client.avatar(&me).await.unwrap().unwrap().unwrap();
     assert_eq!(std::fs::read(&p).unwrap(), img);
+    assert_eq!(client.cached_avatar(&me), Some(p.clone()));
     let _ = client.avatar(&me).await.unwrap().unwrap();
     assert_eq!(
         http.with(|s| s.count("GET", &format!("/v1/members/{ME}/avatar"))),

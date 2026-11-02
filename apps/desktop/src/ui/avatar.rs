@@ -170,9 +170,17 @@ impl RenderOnce for MemberAvatar {
             let share = if text.chars().count() > 1 { 0.38 } else { 0.44 };
             ((size * share).round(), size)
         };
-        let face = match self.photo {
-            Some(url) => Avatar::new()
-                .src(url)
+        // The provider gives the downloaded file; a remote URL is not drawn (it needs the
+        // token), so the monogram shows until the file is on disk.
+        let local = self
+            .photo
+            .as_deref()
+            .map(|p| p.strip_prefix("file://").unwrap_or(p))
+            .filter(|p| p.starts_with('/'))
+            .map(str::to_string);
+        let face = match local {
+            Some(path) => Avatar::new()
+                .src(std::path::PathBuf::from(path))
                 .size(size)
                 .border_0()
                 .rounded_full()
