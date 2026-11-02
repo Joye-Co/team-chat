@@ -261,7 +261,17 @@ pub fn tab(
         .text_color(if active { k.text_1 } else { k.text_2 })
         .when(active, |el| el.semibold())
         .when(!active, |el| el.hover(|s| s.text_color(k.text_1)))
-        .child(label.into())
+        .child({
+            // A hidden 600 copy reserves the bold width, so switching tabs
+            // never moves the tabs after this one (§12: tabs never move).
+            let label: SharedString = label.into();
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .child(label.clone())
+                .child(div().h_0().overflow_hidden().semibold().child(label))
+        })
         .when(count > 0, |el| {
             el.child(
                 div()
