@@ -315,6 +315,17 @@ impl RenderOnce for GroupTile {
     }
 }
 
+/// Hebrew, Arabic and the other right-to-left blocks.
+fn is_rtl(c: char) -> bool {
+    matches!(c as u32, 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
+}
+
+/// `I`, `II`, `III`, `IV`, `V`, `Jr`, `Sr` (with or without the dot or a comma).
+fn is_name_suffix(word: &str) -> bool {
+    let w = word.trim_end_matches(['.', ',']).to_ascii_lowercase();
+    matches!(w.as_str(), "i" | "ii" | "iii" | "iv" | "v" | "jr" | "sr")
+}
+
 pub fn is_han(c: char) -> bool {
     matches!(c as u32,
         0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2EBEF)
@@ -339,7 +350,15 @@ pub fn monogram(name: &str, size: Pixels) -> String {
         return first.to_string();
     }
     let upper = |c: char| c.to_uppercase().collect::<String>();
-    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    // Right-to-left scripts (Hebrew, Arabic) join letters: one initial.
+    if is_rtl(first) {
+        return first.to_string();
+    }
+    let mut words: Vec<&str> = trimmed.split_whitespace().collect();
+    // A generational suffix (III, Jr.) is not the family name.
+    while words.len() > 1 && words.last().is_some_and(|w| is_name_suffix(w)) {
+        words.pop();
+    }
     let two = size >= px(32.) && words.len() > 1;
     let last = words
         .last()
@@ -366,5 +385,10 @@ mod tests {
         assert_eq!(monogram("Joye", big), "J");
         assert_eq!(monogram("🧑‍💻 Priya", big), "P");
         assert_eq!(monogram("", big), "");
+        assert_eq!(monogram("Christopher Alexander Montgomery III", big), "CM");
+        assert_eq!(monogram("Martin Luther King Jr.", big), "MK");
+        assert_eq!(monogram("John Smith, Sr", big), "JS");
+        assert_eq!(monogram("محمد عبد الله", big), "م");
+        assert_eq!(monogram("דוד כהן", big), "ד");
     }
 }
