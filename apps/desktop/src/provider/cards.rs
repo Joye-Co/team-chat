@@ -363,4 +363,118 @@ mod tests {
         assert_eq!(inner.labels["m"]["ok"], "好");
         assert!(inner.put_card("m", None).is_none());
     }
+
+    /// Waits up to 30 s for `f` to hold.
+    fn wait(what: &str, mut f: impl FnMut() -> bool) {
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        while !f() {
+            assert!(std::time::Instant::now() < end, "timed out waiting for {what}");
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+    }
+
+    /// The whole card path against a real server, with
+    /// `src/views/cards/live_bot.ts` running as the card's author:
+    /// `CARDS_LIVE_URL=http://127.0.0.1:8803 CARDS_LIVE_TOKEN_FILE=<member token file>
+    /// CARDS_LIVE_INFO=<file the bot wrote> cargo test -p desktop live_cards -- --ignored`
+    #[test]
+    #[ignore = "needs a server and live_bot.ts"]
+    fn live_cards() {
+        use crate::{
+            data::{
+                ChatProvider, Credential, LoginRequest, SessionState,
+                card::{CardBlock, CardTone},
+            },
+            provider::{CoreProvider, ProviderConfig, session::TokenStorage},
+        };
+        let env = |k: &str| std::env::var(k).unwrap_or_else(|_| panic!("set {k}"));
+        let url = env("CARDS_LIVE_URL");
+        let token = std::fs::read_to_string(env("CARDS_LIVE_TOKEN_FILE")).expect("token file");
+        let info: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(env("CARDS_LIVE_INFO")).unwrap()).unwrap();
+        let (g, t, m) = (
+            info["groupId"].as_str().unwrap(),
+            info["topicId"].as_str().unwrap(),
+            info["messageId"].as_str().unwrap(),
+        );
+        let dir = std::env::temp_dir().join(format!("cards-live-{}", std::process::id()));
+        let p = CoreProvider::new(ProviderConfig {
+            data_root: dir.clone(),
+            tokens: TokenStorage::memory(),
+            restore: false,
+        });
+        p.login(LoginRequest {
+            server_url: url,
+            credential: Credential::Token(token.trim().to_string()),
+            device_name: "cards-live".into(),
+        });
+        wait("sign-in", || matches!(p.session(), SessionState::SignedIn { .. }));
+        let SessionState::SignedIn { me, .. } = p.session() else {
+            unreachable!()
+        };
+
+        // The card arrives and every block type parses.
+        wait("the card", || {
+            let _ = p.messages(g, t, 50);
+            p.card(g, m).is_some()
+        });
+        let card = p.card(g, m).unwrap();
+        assert_eq!(card.actions.as_ref().map(Vec::len), Some(3));
+        assert_eq!(card.blocks.len(), 9);
+        assert!(!card.blocks.iter().any(|b| matches!(b, CardBlock::Unknown)));
+        assert!(Arc::ptr_eq(&card, &p.card(g, m).unwrap()), "same Arc while unchanged");
+
+        // The image block downloads into the file cache.
+        let file_id = card
+            .blocks
+            .iter()
+            .find_map(|b| match b {
+                CardBlock::Image { file_id, .. } => Some(file_id.clone()),
+                _ => None,
+            })
+            .unwrap();
+        wait("the card image", || {
+            p.card_image(g, t, &file_id).is_some_and(|path| path.is_file())
+        });
+
+        // A press shows as sending, then the bot's edit replaces the card.
+        p.press_card_action(g, t, m, "approve");
+        assert_eq!(
+            p.card_press_state(g, m).map(|s| s.phase),
+            Some(CardPressPhase::Sending)
+        );
+        wait("the edited card", || {
+            let _ = p.messages(g, t, 50);
+            p.card(g, m).is_some_and(|c| c.actions.is_none())
+                && p.card_press_state(g, m).is_none()
+                && p.card_presses(g, m).len() == 1
+        });
+        let edited = p.card(g, m).unwrap();
+        assert_eq!(edited.tone, Some(CardTone::Success));
+        assert_eq!(edited.status.as_ref().unwrap().label, "已处理");
+        let press = &p.card_presses(g, m)[0];
+        assert_eq!(press.actor_id, me.id);
+        assert_eq!(press.action_id, "approve");
+        assert_eq!(press.label.as_deref(), Some("批准"));
+
+        // The button is gone now: the server refuses, the UI says so, and
+        // the refused row does not stay in the outbox.
+        std::thread::sleep(std::time::Duration::from_millis(1100));
+        p.press_card_action(g, t, m, "approve");
+        wait("the refusal", || {
+            p.card_press_state(g, m).map(|s| s.phase)
+                == Some(CardPressPhase::Failed(CardPressError::Gone))
+        });
+        let client = p.client().unwrap();
+        wait("the outbox to drop the refused press", || {
+            client
+                .store()
+                .outbox_all()
+                .unwrap()
+                .iter()
+                .all(|i| i.op.kind() != "card_action")
+        });
+        p.logout();
+        let _ = std::fs::remove_dir_all(dir);
+    }
 }
