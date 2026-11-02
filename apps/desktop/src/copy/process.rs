@@ -3,6 +3,9 @@
 
 crate::copy! {
     TAB_DETAILS = "详情",
+    TAB_OUTPUTS = "产出 {n}",
+    EMPTY_TITLE = "还没有成员在这个话题里工作",
+    EMPTY_BODY = "@ 一位自动工作的成员，它的步骤会显示在这里。",
     TAB_PROCESS = "过程",
     EMPTY = "这个话题里还没有成员在后台工作",
     RUNS = "工作记录",

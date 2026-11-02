@@ -19,15 +19,18 @@ use crate::{
     data::{ChatProvider, FileAttachment, FileError, RejectedFile},
 };
 
-/// Largest inline preview box.
+/// Largest inline preview box (§12 Images).
 pub const PREVIEW_MAX_W: Pixels = px(360.);
-pub const PREVIEW_MAX_H: Pixels = px(240.);
+pub const PREVIEW_MAX_H: Pixels = px(320.);
 /// Smallest preview side, so a thin image stays clickable.
 pub const PREVIEW_MIN: Pixels = px(48.);
-/// Width of a file row in the timeline.
-pub const FILE_ROW_W: Pixels = px(420.);
-/// Height of a file row (fixed, so progress does not change the row height).
-pub const FILE_ROW_H: Pixels = px(48.);
+/// Width of a file card in the timeline (the card width, §13.9).
+pub const FILE_ROW_W: Pixels = px(460.);
+/// Height of a file card: a 40 pt tile and 10 pt padding (fixed, so progress
+/// does not change the row height).
+pub const FILE_ROW_H: Pixels = px(60.);
+/// Height of a file row in the side panel (§13.7).
+pub const PANEL_ROW_H: Pixels = px(46.);
 /// Images up to this size download by themselves for the inline preview.
 pub const AUTO_DOWNLOAD_MAX_BYTES: u64 = 20_000_000;
 
@@ -202,7 +205,7 @@ mod tests {
     #[test]
     fn previews_keep_the_aspect_ratio() {
         let (w, h) = preview_size(Some(4000), Some(3000));
-        assert_eq!((f32::from(w), f32::from(h)), (320., 240.));
+        assert_eq!((f32::from(w), f32::from(h)), (360., 270.));
         let (w, h) = preview_size(Some(100), Some(50));
         assert_eq!((f32::from(w), f32::from(h)), (100., 50.));
         let (w, h) = preview_size(Some(2000), Some(10));

@@ -3,16 +3,20 @@
 
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, SharedString,
-    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement as _, Styled, Window, div, px,
 };
-use gpui_component::{Icon, IconName, spinner::Spinner};
+use gpui_component::{Sizable as _, button::Button, tooltip::Tooltip};
 
 use super::{CARD_H, CARD_W, window};
 use crate::{
     copy::{artifacts as ca, fill},
     data::{ArtifactKind, Message},
-    theme,
-    views::timeline::extras::{ExtrasContext, MessageExtra},
+    theme::{self, Elevation, Type as _, space},
+    ui,
+    views::{
+        files::extra::{TileKind, tile},
+        timeline::extras::{ExtrasContext, MessageExtra},
+    },
 };
 
 pub struct ArtifactRefsExtra;
@@ -29,7 +33,7 @@ impl MessageExtra for ArtifactRefsExtra {
             return None;
         }
         let colors = theme::colors(cx);
-        let mut list = div().mt(px(4.)).flex().flex_col().gap(px(4.));
+        let mut list = div().mt(space::S6).flex().flex_col().gap(space::S6);
         for (index, r) in message.artifact_refs.iter().enumerate() {
             let detail = ctx.provider.artifact(&r.artifact_id);
             if detail.is_none() {
@@ -37,7 +41,7 @@ impl MessageExtra for ArtifactRefsExtra {
                     .request_artifact(&message.group_id, &message.topic_id, &r.artifact_id);
             }
             let opening = window::is_opening(&r.artifact_id, cx);
-            let (title, meta, icon) = match &detail {
+            let (title, meta, kind) = match &detail {
                 Some(d) => {
                     let author = d
                         .versions
@@ -49,72 +53,95 @@ impl MessageExtra for ArtifactRefsExtra {
                         .member(author)
                         .map(|m| m.name.clone())
                         .unwrap_or_else(|| crate::copy::composer::UNKNOWN_MEMBER.to_string());
-                    let mut meta = fill(ca::CARD_META, &[("name", &name), ("n", &r.version.to_string())]);
+                    let kind = match d.summary.kind {
+                        ArtifactKind::Page => TileKind::Page,
+                        _ => TileKind::Text,
+                    };
+                    let kind_word = match d.summary.kind {
+                        ArtifactKind::Page => ca::KIND_PAGE,
+                        _ => ca::KIND_FILE,
+                    };
+                    let mut meta = format!(
+                        "{kind_word} · {}",
+                        fill(ca::CARD_META, &[("name", &name), ("n", &r.version.to_string())])
+                    );
                     if d.summary.version > r.version {
                         meta.push_str(" · ");
                         meta.push_str(&fill(ca::CARD_LATEST, &[("n", &d.summary.version.to_string())]));
                     }
-                    let icon = match d.summary.kind {
-                        ArtifactKind::Page => IconName::Globe,
-                        _ => IconName::FileText,
-                    };
-                    (d.summary.title.clone(), meta, icon)
+                    (d.summary.title.clone(), meta, kind)
                 }
                 None => (
                     crate::copy::panel::ARTIFACTS.to_string(),
                     ca::CARD_LOADING.to_string(),
-                    IconName::Globe,
+                    TileKind::Page,
                 ),
             };
             let key = if message.id.is_empty() { &message.client_msg_id } else { &message.id };
-            let provider = ctx.provider.clone();
-            let (id, version) = (r.artifact_id.clone(), r.version);
+            let open = {
+                let provider = ctx.provider.clone();
+                let id = r.artifact_id.clone();
+                let version = r.version;
+                move |_: &gpui::ClickEvent, _: &mut Window, cx: &mut App| {
+                    window::open_artifact(&provider, &id, Some(version), cx)
+                }
+            };
+            let title_tip: SharedString = title.clone().into();
+            // §13.5 产出 card: level 1, 10 / 12 padding, a 40 pt tile, the
+            // name 13 / 600, meta 12 pt `text-2` and a small 打开 button.
             list = list.child(
-                div()
+                ui::card(cx)
                     .id(ElementId::Name(SharedString::from(format!("artifact-{key}-{index}"))))
                     .w(CARD_W)
                     .max_w_full()
                     .h(CARD_H)
                     .flex_none()
-                    .px(px(12.))
-                    .rounded(px(8.))
-                    .border_1()
-                    .border_color(colors.border)
-                    .bg(colors.background)
-                    .hover(|s| s.bg(colors.row_hover))
+                    .px(space::S12)
                     .cursor_pointer()
                     .flex()
                     .items_center()
-                    .gap(px(10.))
-                    .child(Icon::new(icon).text_color(colors.accent).flex_none())
+                    .gap(space::S12)
+                    .child(tile(kind, px(40.), cx))
                     .child(
                         div()
                             .flex_1()
                             .min_w(px(0.))
                             .flex()
                             .flex_col()
-                            .gap(px(2.))
                             .child(
                                 div()
-                                    .text_sm()
-                                    .font_weight(gpui::FontWeight::MEDIUM)
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
+                                    .id(ElementId::Name(SharedString::from(format!(
+                                        "artifact-{key}-{index}-title"
+                                    ))))
+                                    .t_ui()
+                                    .semibold()
+                                    .text_color(colors.text_1)
+                                    .one_line()
+                                    .tooltip(move |window, cx| {
+                                        Tooltip::new(title_tip.clone()).build(window, cx)
+                                    })
                                     .child(title),
                             )
                             .child(
                                 div()
-                                    .text_xs()
-                                    .text_color(colors.muted_foreground)
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
+                                    .t_callout()
+                                    .tnum()
+                                    .text_color(colors.text_2)
+                                    .one_line()
                                     .child(if opening { ca::OPENING.to_string() } else { meta }),
                             ),
                     )
-                    .when(opening, |el| el.child(Spinner::new()))
-                    .on_click(move |_, _, cx| window::open_artifact(&provider, &id, Some(version), cx)),
+                    .child(
+                        Button::new(ElementId::Name(SharedString::from(format!(
+                            "artifact-{key}-{index}-open"
+                        ))))
+                        .small()
+                        .label(ca::OPEN)
+                        .loading(opening)
+                        .shadow(colors.shadow(Elevation::Control))
+                        .on_click(open.clone()),
+                    )
+                    .on_click(open),
             );
         }
         Some(list.into_any_element())

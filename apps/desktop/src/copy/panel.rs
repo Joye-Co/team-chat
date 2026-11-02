@@ -16,4 +16,9 @@ crate::copy! {
     PROCESS = "工作过程",
     PROCESS_EMPTY = "还没有工作过程",
     COLLAPSE = "收起",
+    EMPTY_TITLE = "还没有产出",
+    EMPTY_BODY = "成员上传的文件、页面和定下的结论会出现在这里。",
+    WHO = "谁在做什么",
+    OWNER_SHORT = "负责",
+    WAITING_SHORT = "等待",
 }

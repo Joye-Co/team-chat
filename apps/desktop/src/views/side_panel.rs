@@ -1,6 +1,7 @@
-//! The collapsible right panel of the open topic, with two tabs: 详情
-//! (status, owner, who it waits on, its 产出, and in the developer view ids
-//! and seqs) and 过程 (the process view of bot runs, `views/process`).
+//! The collapsible right panel of the open topic, with two tabs (§13.7):
+//! 产出 (its 产出 and files, then 谁在做什么: owner and who it waits on; in the
+//! developer view ids and seqs) and 过程 (the process view of bot runs,
+//! `views/process`).
 
 use gpui::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
@@ -18,7 +19,7 @@ use crate::{
     data::{Change, GroupId, Member, Topic, TopicId},
     theme::{self, Type as _, space},
     ui::{self, MemberAvatar},
-    views::{artifacts::panel::TopicOutputs, process::ProcessView, status_chip},
+    views::{artifacts::panel::TopicOutputs, process::ProcessView},
 };
 
 pub struct SidePanel {
@@ -58,6 +59,9 @@ impl SidePanel {
         ];
         let open = services.nav.read(cx).topic.clone();
         let outputs = cx.new(|cx| TopicOutputs::new(services.clone(), cx));
+        // The 产出 tab label carries the count.
+        let mut subscriptions = subscriptions;
+        subscriptions.push(cx.observe(&outputs, |_, _, cx| cx.notify()));
         let process = cx.new(|cx| ProcessView::new(services.clone(), cx));
         let mut this = Self {
             outputs,
@@ -73,7 +77,7 @@ impl SidePanel {
         this
     }
 
-    /// Switches between 详情 (0) and 过程 (1).
+    /// Switches between 产出 (0) and 过程 (1).
     pub fn set_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
         self.services
             .nav
@@ -114,6 +118,7 @@ impl Render for SidePanel {
         let colors = theme::colors(cx);
         let developer = self.services.nav.read(cx).developer_view;
         let tab = self.services.nav.read(cx).side_panel_tab;
+        let outputs_count = self.outputs.read(cx).count();
         let section = |title: &'static str| {
             div()
                 .pt(space::S16)
@@ -127,7 +132,10 @@ impl Render for SidePanel {
                 .w_full()
                 .selected_index(tab)
                 .on_click(cx.listener(|this, ix: &usize, _, cx| this.set_tab(*ix, cx)))
-                .child(Tab::new().flex_1().label(pc::TAB_DETAILS))
+                .child(Tab::new().flex_1().label(fill(
+                    pc::TAB_OUTPUTS,
+                    &[("n", &outputs_count.to_string())],
+                )))
                 .child(Tab::new().flex_1().label(pc::TAB_PROCESS)),
         );
         let Some(topic) = self.topic.clone() else {
@@ -158,11 +166,14 @@ impl Render for SidePanel {
                 .child(
                     div()
                         .min_w(px(0.))
+                        .t_ui()
+                        .text_color(colors.text_1)
                         .one_line()
                         .child(m.map(|m| m.name.clone()).unwrap_or_default()),
                 )
         };
-        // 谁在做什么: label column 56 pt, then the members (§13.7).
+        // 谁在做什么 (`DescriptionList` layout): a 56 pt label in 12 pt
+        // `text-2`, then the members with 20 pt avatars (§13.7).
         let row = |label: &'static str, value: gpui::AnyElement| {
             div()
                 .min_h(px(28.))
@@ -173,20 +184,19 @@ impl Render for SidePanel {
                     div()
                         .w(px(56.))
                         .flex_none()
+                        .t_callout()
                         .text_color(colors.text_2)
                         .child(label),
                 )
                 .child(div().flex_1().min_w(px(0.)).child(value))
         };
-        let me = self.services.me();
-        let chip = status_chip(&topic, me.as_deref(), &self.members, cx);
         let owner = topic
             .owner_id
             .as_deref()
-            .map(|id| row(p::OWNER, person(self.member(id)).into_any_element()));
+            .map(|id| row(p::OWNER_SHORT, person(self.member(id)).into_any_element()));
         let waiting = (!topic.waiting_on.is_empty()).then(|| {
             row(
-                p::WAITING_ON,
+                p::WAITING_SHORT,
                 div()
                     .py(space::S4)
                     .flex()
@@ -195,6 +205,14 @@ impl Render for SidePanel {
                     .children(topic.waiting_on.iter().map(|id| person(self.member(id))))
                     .into_any_element(),
             )
+        });
+        let who = (owner.is_some() || waiting.is_some()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .child(section(p::WHO))
+                .children(owner)
+                .children(waiting)
         });
 
         div()
@@ -214,18 +232,9 @@ impl Render for SidePanel {
                     .pb(space::S16)
                     .flex()
                     .flex_col()
-                    .child(div().h(space::S12))
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .children(chip.map(|c| {
-                                row(p::STATUS, div().flex().child(c).into_any_element())
-                            }))
-                            .children(owner)
-                            .children(waiting),
-                    )
+                    .child(div().h(space::S10))
                     .child(self.outputs.clone())
+                    .children(who)
                     .when(developer, |el| {
                         el.child(section(dev::TITLE)).child(
                             div()
