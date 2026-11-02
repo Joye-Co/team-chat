@@ -129,8 +129,8 @@ impl MembersPage {
         let page = cx.entity().downgrade();
         let id = member.id.clone();
         let name = member.name.clone();
-        window.open_alert_dialog(cx, move |alert, _, _| {
-            let alert = crate::ui::SheetExt::sheet(alert);
+        window.open_alert_dialog(cx, move |alert, _, cx| {
+            let alert = crate::ui::SheetExt::sheet(alert, cx);
             let page = page.clone();
             let id = id.clone();
             alert
@@ -658,7 +658,7 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
     // The first field takes the focus once, as in the new-群 dialog.
     let first = std::cell::Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog);
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         if first.replace(false) {
             let handle = gpui::Focusable::focus_handle(shown.read(cx).name.read(cx), cx);
             handle.focus(window, cx);
@@ -966,7 +966,7 @@ pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> En
     // The first field takes the focus once, as in the new-群 dialog.
     let first = std::cell::Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog);
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         if first.replace(false) {
             let handle = gpui::Focusable::focus_handle(shown.read(cx).name.read(cx), cx);
             handle.focus(window, cx);

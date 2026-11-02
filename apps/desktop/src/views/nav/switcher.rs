@@ -17,7 +17,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, WindowExt as _,
+    Icon, WindowExt as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
 };
@@ -959,7 +959,7 @@ impl Render for Switcher {
                     // More rows follow below the cut (§7.7 scroll edges),
                     // faded from the dialog surface.
                     .when(edges.1, |el| {
-                        el.child(edge_fade(false, cx.theme().background))
+                        el.child(edge_fade(false, k.overlay))
                     }),
             )
             .child(
@@ -1024,7 +1024,7 @@ pub fn open_scoped(
             let input = view.read(cx).query.clone();
             input.update(cx, |q, cx| q.focus(window, cx));
         }
-        crate::ui::sheet::switcher(dialog)
+        crate::ui::sheet::switcher(dialog, cx)
             .close_button(false)
             .p_0()
             .overflow_hidden()

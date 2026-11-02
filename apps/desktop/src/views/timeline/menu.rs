@@ -95,8 +95,8 @@ fn confirm_delete(
     window: &mut Window,
     cx: &mut App,
 ) {
-    window.open_alert_dialog(cx, move |dialog, _, _| {
-        let dialog = crate::ui::SheetExt::sheet(dialog);
+    window.open_alert_dialog(cx, move |dialog, _, cx| {
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         let (view, message) = (view.clone(), message.clone());
         dialog
             .title(t::DELETE_CONFIRM)

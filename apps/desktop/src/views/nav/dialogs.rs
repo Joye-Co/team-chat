@@ -280,7 +280,7 @@ pub fn open_new_group(services: Services, window: &mut Window, cx: &mut App) {
     let form = cx.new(|cx| NewGroupForm::new(services, window, cx));
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog);
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         if first.replace(false) {
             let handle = form.read(cx).name.read(cx).focus_handle(cx);
             handle.focus(window, cx);
@@ -446,7 +446,7 @@ pub fn open_start_dm(services: Services, window: &mut Window, cx: &mut App) {
     let picker = cx.new(|cx| DmPicker::new(services, window, cx));
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog);
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         if first.replace(false) {
             let handle = picker.read(cx).filter.read(cx).focus_handle(cx);
             handle.focus(window, cx);
@@ -467,8 +467,8 @@ pub fn confirm_leave(
     window: &mut Window,
     cx: &mut App,
 ) {
-    window.open_alert_dialog(cx, move |alert, _, _| {
-        let alert = crate::ui::SheetExt::sheet(alert);
+    window.open_alert_dialog(cx, move |alert, _, cx| {
+        let alert = crate::ui::SheetExt::sheet(alert, cx);
         let services = services.clone();
         let group_id = group_id.clone();
         alert

@@ -748,6 +748,13 @@ impl Colors {
         (self.avatar_bg, self.avatar_fg)
     }
 
+    /// The edge of a level-2 overlay (§5): the ring color of its shadow.
+    /// Dialogs draw it as their 1 pt border, because gpui-component's
+    /// dialog paints its own drop shadow.
+    pub fn overlay_edge(&self) -> Hsla {
+        self.shadows.overlay[0]
+    }
+
     /// The shadow list of an elevation level (§5).
     pub fn shadow(&self, level: Elevation) -> Vec<BoxShadow> {
         let ring = |color, width: Pixels| BoxShadow {

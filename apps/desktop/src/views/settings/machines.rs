@@ -468,7 +468,7 @@ pub fn open_add_machine(
     // The first field takes the focus once, as in the new-群 dialog.
     let first = std::cell::Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog);
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
         if first.replace(false) {
             let handle = gpui::Focusable::focus_handle(shown.read(cx).name.read(cx), cx);
             handle.focus(window, cx);
