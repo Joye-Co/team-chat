@@ -32,8 +32,34 @@ function time(ms: number): string {
 
 /** A 不可用 / 已恢复 card (or 备份过期 / 备份已恢复 for the archive check), mentioning `oncall`. */
 export function alertPost(a: Alert, oncall: string[] = []): Post {
-  const post = a.check === "backup" ? backupPost(a) : servicePost(a);
+  const post = a.kind === "down" && a.test ? testPost(a) : a.check === "backup" ? backupPost(a) : servicePost(a);
   return oncall.length > 0 ? { ...post, mentions: [...new Set(oncall)] } : post;
+}
+
+/** The manual test alert: the 不可用 card's layout, worded as a test so nobody acts on it. */
+function testPost(a: Extract<Alert, { kind: "down" }>): Post {
+  const title = `【测试】${a.target} 告警测试`;
+  return {
+    title,
+    body: `【测试】这是一条手动发送的测试告警，${a.target} 没有故障，不需要处理。（${time(a.at)}）`,
+    card: {
+      v: 1,
+      title,
+      tone: "info",
+      status: { label: "测试" },
+      blocks: [
+        {
+          type: "fields",
+          fields: [
+            { label: "环境", value: a.target },
+            { label: "原因", value: a.error },
+            { label: "时间", value: time(a.at) },
+          ],
+        },
+        { type: "text", text: "这条消息只用来确认告警能送达，不需要处理。说明见 docs/RUNBOOK.md 的监测告警一节。" },
+      ],
+    },
+  };
 }
 
 function backupPost(a: Alert): Post {

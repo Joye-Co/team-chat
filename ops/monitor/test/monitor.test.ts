@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { type CheckResult, INITIAL, step } from "../src/alerts";
 import type { Target } from "../src/config";
 import { BACKUP_MAX_AGE_MS, type ProbeResult, backupCheck, probe } from "../src/probe";
+import { handleFetch } from "../src/index";
 import { runMonitor } from "../src/run";
 
 const T0 = Date.UTC(2026, 10, 3, 0, 0, 0);
@@ -320,5 +321,88 @@ describe("alerts reach people", () => {
     tick();
     await run();
     expect(posts.map((p) => p.body.card.title)).toEqual(["production 备份过期", "production 备份已恢复"]);
+  });
+});
+
+describe("manual test alert", () => {
+  const SECRET = "test-admin-secret-0123456789abcdef";
+  const withSecret = { ...env, MONITOR_ADMIN_SECRET: SECRET } as any;
+  let clock = T0 + 30 * DAY;
+
+  function deps(up: Record<string, boolean>, posts: { url: string; body: any }[]) {
+    const fakeProbe = async (t: Target, _token: string | null, topicId: string | null): Promise<ProbeResult> => {
+      const ok = up[t.name];
+      return {
+        target: t.name,
+        at: clock,
+        ok,
+        healthMs: ok ? 10 : null,
+        rttMs: ok ? 50 : null,
+        error: ok ? null : "health: 503",
+        opsGroupId: ok ? `ops-${t.name}` : null,
+        topicId,
+        oncall: [`oncall-${t.name}`],
+      };
+    };
+    const fetcher = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body));
+      posts.push({ url: String(input), body });
+      return Response.json({ message: { id: crypto.randomUUID(), topicId: body.topicId ?? "alerts" } });
+    }) as typeof fetch;
+    return { probe: fakeProbe, fetcher, now: () => clock, log: () => {} };
+  }
+  const req = (auth: string | null, body?: unknown, method = "POST") =>
+    new Request("https://monitor.test/test-alert", {
+      method,
+      headers: auth ? { authorization: auth } : {},
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+
+  it("is off without the secret and refuses a wrong or missing one", async () => {
+    const posts: any[] = [];
+    const d = deps({ production: true, staging: true }, posts);
+    expect((await handleFetch(req(`Bearer ${SECRET}`), env as any, d)).status).toBe(404);
+    expect((await handleFetch(req(null), withSecret, d)).status).toBe(401);
+    expect((await handleFetch(req("Bearer wrong-secret-wrong-secret-00"), withSecret, d)).status).toBe(401);
+    expect((await handleFetch(req(`Bearer ${SECRET}`, undefined, "GET"), withSecret, d)).status).toBe(405);
+    expect((await handleFetch(req(`Bearer ${SECRET}`, { sink: 5 }), withSecret, d)).status).toBe(400);
+    expect((await handleFetch(req(`Bearer ${SECRET}`, { sink: "nope" }), withSecret, d)).status).toBe(400);
+    expect((await handleFetch(new Request("https://monitor.test/"), withSecret, d)).status).toBe(404);
+    expect(posts).toEqual([]);
+  });
+
+  it("posts one test-worded alert through the real alert path to the chosen env, without changing alert state", async () => {
+    const posts: { url: string; body: any }[] = [];
+    const d = deps({ production: true, staging: true }, posts);
+    const s = env.MONITOR_STATE.get(env.MONITOR_STATE.idFromName("monitor"));
+    const before = await s.pending();
+    const res = await handleFetch(req(`Bearer ${SECRET}`, { sink: "staging" }), withSecret, d);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true, sink: "staging", target: "staging" });
+    expect(posts).toHaveLength(1);
+    const p = posts[0];
+    expect(p.url).toBe("https://staging.test/v1/groups/ops-staging/messages");
+    expect(p.body).toMatchObject({ mentions: ["oncall-staging"], card: { tone: "info", status: { label: "测试" } } });
+    expect(p.body.body).toMatch(/^【测试】/);
+    expect(p.body.body).toContain("不需要处理");
+    expect(p.body.card.title).toBe("【测试】staging 告警测试");
+    expect(p.body.clientMsgId).toMatch(/^test-/);
+    expect(await s.pending()).toEqual(before);
+
+    // A second request within a minute is refused; after it, the default sink is the first healthy target.
+    expect((await handleFetch(req(`Bearer ${SECRET}`), withSecret, d)).status).toBe(429);
+    clock += 2 * MIN;
+    const again = await handleFetch(req(`Bearer ${SECRET}`), withSecret, d);
+    expect(await again.json()).toMatchObject({ ok: true, sink: "production" });
+    expect(posts[1].url).toBe("https://prod.test/v1/groups/ops-production/messages");
+  });
+
+  it("reports when the chosen env cannot take the alert", async () => {
+    clock += 2 * MIN;
+    const posts: any[] = [];
+    const res = await handleFetch(req(`Bearer ${SECRET}`, { sink: "staging" }), withSecret, deps({ production: true, staging: false }, posts));
+    expect(res.status).toBe(503);
+    expect(await res.json()).toMatchObject({ error: { code: "no_sink", message: "health: 503" } });
+    expect(posts).toEqual([]);
   });
 });

@@ -27,7 +27,17 @@ export interface CheckResult {
 }
 
 export type Alert =
-  | { kind: "down"; target: string; check?: "backup"; at: number; since: number; fails: number; error: string }
+  | {
+      kind: "down";
+      target: string;
+      check?: "backup";
+      /** A manual test alert (POST /test-alert): worded as a test, never raised by a check. */
+      test?: true;
+      at: number;
+      since: number;
+      fails: number;
+      error: string;
+    }
   | { kind: "up"; target: string; check?: "backup"; at: number; downSince: number; error: string | null };
 
 export const INITIAL: TargetState = { status: "unknown", fails: 0, since: 0, alerted: false, lastError: null };

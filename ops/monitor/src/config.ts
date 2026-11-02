@@ -28,6 +28,8 @@ export interface Env {
   TARGETS: string;
   FAIL_THRESHOLD?: string;
   SUMMARY_HOUR_UTC?: string;
+  /** Bearer secret of POST /test-alert (Worker secret). Unset: the route is off. */
+  MONITOR_ADMIN_SECRET?: string;
   [secret: string]: unknown;
 }
 

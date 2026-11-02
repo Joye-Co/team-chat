@@ -12,14 +12,18 @@ const HERE = resolve(dirname(new URL(import.meta.url).pathname), "..");
 const ROOT = resolve(HERE, "../..");
 const SERVER = join(ROOT, "server");
 const WORK = join(HERE, ".e2e");
-const API = "http://127.0.0.1:8798";
-const MON = "http://127.0.0.1:18798";
+// Ports: E2E_API_PORT (default 8798) and E2E_MONITOR_PORT (default 18798); inspectors at +1000.
+const API_PORT = Number(process.env.E2E_API_PORT ?? 8798);
+const MON_PORT = Number(process.env.E2E_MONITOR_PORT ?? 18798);
+const API = `http://127.0.0.1:${API_PORT}`;
+const MON = `http://127.0.0.1:${MON_PORT}`;
 const wrangler = (dir: string) =>
   [join(dir, "node_modules/.bin/wrangler"), join(ROOT, "node_modules/.bin/wrangler")].find(existsSync) ?? "wrangler";
 
 rmSync(WORK, { recursive: true, force: true });
 mkdirSync(WORK, { recursive: true, mode: 0o700 });
 const secret = randomBytes(24).toString("base64url");
+const monitorAdmin = randomBytes(24).toString("base64url");
 const apiEnv = join(WORK, "api.env");
 writeFileSync(apiEnv, `ADMIN_SECRET=${secret}\n`, { mode: 0o600 });
 const procs: Bun.Subprocess[] = [];
@@ -46,7 +50,7 @@ async function startApi(): Promise<Bun.Subprocess> {
   });
   if ((await mig.exited) !== 0) throw new Error("migrations failed");
   const p = Bun.spawn(
-    [wrangler(SERVER), "dev", "--ip", "127.0.0.1", "--port", "8798", "--inspector-port", "9798", "--persist-to", persist,
+    [wrangler(SERVER), "dev", "--ip", "127.0.0.1", "--port", String(API_PORT), "--inspector-port", String(API_PORT + 1000), "--persist-to", persist,
       "--env-file", apiEnv, "--show-interactive-dev-session=false"],
     { cwd: SERVER, stdout: fd, stderr: fd, stdin: "ignore", env: { ...process.env, CI: "1" } },
   );
@@ -102,11 +106,12 @@ async function main() {
   const bot = await j<any>(`${API}/v1/bots`, post(boot.token, { name: "monitor", role: "ops" }));
   const ops = await j<any>(`${API}/v1/groups`, post(boot.token, { name: "ops", memberIds: [bot.member.id] }));
   const opsId = ops.group.id as string;
-  writeFileSync(join(HERE, ".dev.vars"), `MONITOR_TOKEN_LOCAL=${bot.token}\n`, { mode: 0o600 });
+  writeFileSync(join(HERE, ".dev.vars"), `MONITOR_TOKEN_LOCAL=${bot.token}\nMONITOR_ADMIN_SECRET=${monitorAdmin}\n`, { mode: 0o600 });
+  const targets = JSON.stringify([{ name: "local", baseUrl: API, opsGroup: "ops", tokenSecret: "MONITOR_TOKEN_LOCAL" }]);
 
   const fd = openSync(join(WORK, "monitor.log"), "a");
   const mon = Bun.spawn(
-    [wrangler(HERE), "dev", "--env", "local", "--ip", "127.0.0.1", "--port", "18798", "--inspector-port", "19798",
+    [wrangler(HERE), "dev", "--env", "local", "--ip", "127.0.0.1", "--port", String(MON_PORT), "--inspector-port", String(MON_PORT + 1000), "--var", `TARGETS:${targets}`,
       "--test-scheduled", "--persist-to", join(WORK, "monitor-state"), "--show-interactive-dev-session=false"],
     { cwd: HERE, stdout: fd, stderr: fd, stdin: "ignore", env: { ...process.env, CI: "1" } },
   );
@@ -127,12 +132,26 @@ async function main() {
   api = await startApi(); // back: posts the queued down alert and the recovery alert
   await cron();
   ev = await opsEvents(boot.token, opsId);
-  const alerts = msgs().filter((m) => m.kind === "card" && !m.card.title.startsWith("每日"));
-  report.alerts = alerts.map((m) => ({ title: m.card.title, tone: m.card.tone, topicId: m.topicId }));
+  // A fresh local stack has no archive pass, so the archive check raises 备份过期 too.
+  const cards = msgs().filter((m) => m.kind === "card" && !m.card.title.startsWith("每日"));
+  const alerts = cards.filter((m) => !m.card.title.includes("备份"));
+  report.alerts = cards.map((m) => ({ title: m.card.title, tone: m.card.tone, topicId: m.topicId }));
   report.roundTrips = msgs().filter((m) => m.body.startsWith("往返检测")).length;
   const topics = new Set(msgs().filter((m) => m.body.startsWith("往返检测")).map((m) => m.topicId));
   report.roundTripTopics = topics.size;
+  // Manual test alert: a wrong secret is refused; the right one posts one 测试 card.
+  const testUrl = `${MON}/test-alert`;
+  const wrong = await fetch(testUrl, { method: "POST", headers: { authorization: "Bearer not-the-secret-0000000000" } });
+  const right = await fetch(testUrl, post(monitorAdmin, { sink: "local" }));
+  const rightBody = (await right.json()) as any;
+  ev = await opsEvents(boot.token, opsId);
+  const tests = msgs().filter((m) => m.kind === "card" && m.card.status?.label === "测试");
+  report.testAlert = { wrongStatus: wrong.status, status: right.status, sink: rightBody?.sink ?? null, cards: tests.map((m) => m.card.title) };
   report.ok =
+    wrong.status === 401 &&
+    right.status === 200 &&
+    tests.length === 1 &&
+    tests[0].body.startsWith("【测试】") &&
     (report.healthy as any).roundTrips === 1 &&
     (report.healthy as any).summary === true &&
     alerts.length === 2 &&

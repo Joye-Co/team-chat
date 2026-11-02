@@ -1,6 +1,6 @@
 // One monitor run (every 5 minutes): check every target, update alert state, post pending
 // alerts through the first healthy target, and post the daily summary once a day.
-import type { CheckResult } from "./alerts";
+import type { Alert, CheckResult } from "./alerts";
 import { type Config, type Env, type Target, fetcherFor, readConfig, tokenFor } from "./config";
 import { type ProbeResult, probe } from "./probe";
 import { type Post, alertPost, sendPost, summaryPost } from "./post";
@@ -62,11 +62,14 @@ async function postVia(state: DurableObjectStub<MonitorState>, deps: Deps, sink:
   return out.ok;
 }
 
-export async function runMonitor(env: Env, partial: Partial<Deps> = {}): Promise<RunReport> {
-  const deps = { ...defaultDeps(), ...partial };
-  const cfg: Config = readConfig(env);
-  const state = stateStub(env);
+interface Collected {
+  probes: ProbeResult[];
+  /** Healthy targets in config order: the alert sinks. */
+  sinks: Sink[];
+}
 
+/** Probes every target and returns the healthy ones as alert sinks, in config order. */
+async function collect(env: Env, deps: Deps, cfg: Config, state: DurableObjectStub<MonitorState>): Promise<Collected> {
   const fetchers = new Map<string, typeof fetch | null>();
   for (const t of cfg.targets) {
     try {
@@ -90,6 +93,33 @@ export async function runMonitor(env: Env, partial: Partial<Deps> = {}): Promise
       return r;
     }),
   );
+  const sinks: Sink[] = [];
+  for (const p of probes) {
+    const target = cfg.targets.find((t) => t.name === p.target) as Target;
+    const token = tokenFor(env, target);
+    const fetcher = fetchers.get(target.name);
+    if (p.ok && p.opsGroupId && token && fetcher) {
+      sinks.push({ target, token, groupId: p.opsGroupId, fetcher, oncall: target.oncall ?? p.oncall ?? [] });
+    }
+  }
+  return { probes, sinks };
+}
+
+/** Posts one alert through the first sink that takes it. The only alert delivery path. */
+async function deliver(state: DurableObjectStub<MonitorState>, deps: Deps, sinks: Sink[], id: string, alert: Alert): Promise<Sink | null> {
+  for (const sink of sinks) {
+    // Member ids differ per env: mention the people on call in the sink env's ops group.
+    if (await postVia(state, deps, sink, id, alertPost(alert, sink.oncall))) return sink;
+  }
+  return null;
+}
+
+export async function runMonitor(env: Env, partial: Partial<Deps> = {}): Promise<RunReport> {
+  const deps = { ...defaultDeps(), ...partial };
+  const cfg: Config = readConfig(env);
+  const state = stateStub(env);
+
+  const { probes, sinks } = await collect(env, deps, cfg, state);
   const results: CheckResult[] = probes.map(({ target, at, ok, healthMs, rttMs, error }) => ({
     target,
     at,
@@ -105,29 +135,10 @@ export async function runMonitor(env: Env, partial: Partial<Deps> = {}): Promise
     deps.log("check", { target: r.target, check: r.check ?? "service", ok: r.ok, healthMs: r.healthMs, rttMs: r.rttMs, error: r.error });
   }
 
-  // Healthy targets in config order are the alert sinks.
-  const sinks: Sink[] = [];
-  for (const p of probes) {
-    const target = cfg.targets.find((t) => t.name === p.target) as Target;
-    const token = tokenFor(env, target);
-    const fetcher = fetchers.get(target.name);
-    if (p.ok && p.opsGroupId && token && fetcher) {
-      sinks.push({ target, token, groupId: p.opsGroupId, fetcher, oncall: target.oncall ?? p.oncall ?? [] });
-    }
-  }
-
   let posted = 0;
   const pending = await state.pending();
   for (const p of pending) {
-    let sent = false;
-    for (const sink of sinks) {
-      // Member ids differ per env: mention the people on call in the sink env's ops group.
-      if (await postVia(state, deps, sink, p.id, alertPost(p.alert, sink.oncall))) {
-        sent = true;
-        break;
-      }
-    }
-    if (sent) {
+    if (await deliver(state, deps, sinks, p.id, p.alert)) {
       await state.markSent(p.id);
       posted++;
     } else {
@@ -155,4 +166,38 @@ export async function runMonitor(env: Env, partial: Partial<Deps> = {}): Promise
   const left = pending.length - posted;
   deps.log("monitor run", { targets: results.length, raised: raised.length, posted, pending: left, summary });
   return { results, raised: raised.length, posted, pending: left, summary };
+}
+
+/** Shortest gap between two manual test alerts. */
+export const TEST_ALERT_MIN_GAP_MS = 60_000;
+
+export type TestAlertOutcome =
+  | { ok: true; sink: string; target: string }
+  | { ok: false; reason: "unknown_target" | "too_soon" | "no_sink" | "post_failed"; detail?: string };
+
+/**
+ * A manual test alert: probes the targets like a cron run (without recording the results, so
+ * alert state does not change), builds a 不可用 alert marked as a test and delivers it through
+ * the same sinks, card builder and post path as a real alert. `sink` picks the env whose ops
+ * group gets it (default: the first healthy target, as for a real alert).
+ */
+export async function sendTestAlert(env: Env, opts: { sink?: string } = {}, partial: Partial<Deps> = {}): Promise<TestAlertOutcome> {
+  const deps = { ...defaultDeps(), ...partial };
+  const cfg: Config = readConfig(env);
+  if (opts.sink && !cfg.targets.some((t) => t.name === opts.sink)) return { ok: false, reason: "unknown_target" };
+  const state = stateStub(env);
+  const now = deps.now();
+  if (!(await state.claim("testAlertAt", now, TEST_ALERT_MIN_GAP_MS))) return { ok: false, reason: "too_soon" };
+
+  const { probes, sinks } = await collect(env, deps, cfg, state);
+  const chosen = opts.sink ? sinks.filter((s) => s.target.name === opts.sink) : sinks;
+  if (chosen.length === 0) {
+    const p = probes.find((x) => x.target === opts.sink);
+    return { ok: false, reason: "no_sink", detail: p?.error ?? undefined };
+  }
+  const about = chosen[0].target.name;
+  const alert: Alert = { kind: "down", test: true, target: about, at: now, since: now, fails: cfg.failThreshold, error: "手动测试" };
+  const sink = await deliver(state, deps, chosen, `test-${crypto.randomUUID()}`, alert);
+  deps.log("test alert", { sink: sink?.target.name ?? null, ok: !!sink });
+  return sink ? { ok: true, sink: sink.target.name, target: about } : { ok: false, reason: "post_failed" };
 }

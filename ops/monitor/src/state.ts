@@ -136,6 +136,14 @@ export class MonitorState extends DurableObject<Record<string, unknown>> {
     else this.sql.exec("INSERT OR REPLACE INTO kv (key, value) VALUES (?, ?)", key, value);
   }
 
+  /** Sets `key` to `now` and returns true unless it was set less than `gapMs` ago (atomic). */
+  async claim(key: string, now: number, gapMs: number): Promise<boolean> {
+    const last = Number((await this.get(key)) ?? Number.NEGATIVE_INFINITY);
+    if (now - last < gapMs) return false;
+    await this.set(key, String(now));
+    return true;
+  }
+
   /** Per-target stats of the checks in [from, to). Round-trip latency percentiles in ms. */
   async summary(targets: string[], from: number, to: number): Promise<TargetSummary[]> {
     return targets.map((target) => {
