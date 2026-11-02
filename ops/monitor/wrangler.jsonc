@@ -1,5 +1,5 @@
 // Monitor Worker. Top level = the deployed monitor `chat-monitor`, which watches staging and
-// production. Each target needs a monitor bot member in that env, in the env's ops group:
+// production. Each target needs a monitor bot member in that env, in the env's ops group (运维):
 //   bun server/scripts/admin.ts bot --env <env> --name monitor   (then add it to the ops group)
 //   wrangler secret put MONITOR_TOKEN_STAGING / MONITOR_TOKEN_PRODUCTION   (in ops/monitor)
 // `opsGroup` is the ops group's id or exact name; alerts mention its human members (or the ids in
@@ -16,7 +16,7 @@
   "observability": { "enabled": true, "logs": { "enabled": true, "invocation_logs": true } },
   "triggers": { "crons": ["*/5 * * * *"] },
   "vars": {
-    "TARGETS": "[{\"name\":\"production\",\"baseUrl\":\"https://chat-api-prod.huangdeshiou.workers.dev\",\"service\":\"API_PRODUCTION\",\"opsGroup\":\"ops\",\"probeGroup\":\"监测\",\"tokenSecret\":\"MONITOR_TOKEN_PRODUCTION\"},{\"name\":\"staging\",\"baseUrl\":\"https://chat-api-staging.huangdeshiou.workers.dev\",\"service\":\"API_STAGING\",\"opsGroup\":\"ops\",\"probeGroup\":\"监测\",\"tokenSecret\":\"MONITOR_TOKEN_STAGING\"}]",
+    "TARGETS": "[{\"name\":\"production\",\"baseUrl\":\"https://chat-api-prod.huangdeshiou.workers.dev\",\"service\":\"API_PRODUCTION\",\"opsGroup\":\"运维\",\"probeGroup\":\"监测\",\"tokenSecret\":\"MONITOR_TOKEN_PRODUCTION\"},{\"name\":\"staging\",\"baseUrl\":\"https://chat-api-staging.huangdeshiou.workers.dev\",\"service\":\"API_STAGING\",\"opsGroup\":\"运维\",\"probeGroup\":\"监测\",\"tokenSecret\":\"MONITOR_TOKEN_STAGING\"}]",
     "FAIL_THRESHOLD": "2",
     "SUMMARY_HOUR_UTC": "1"
   },
