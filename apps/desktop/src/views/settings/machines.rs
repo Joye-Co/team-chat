@@ -4,10 +4,11 @@
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, SharedString,
-    Styled, Task, Window, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement,
+    Render, SharedString, StatefulInteractiveElement as _, Styled, Task, Window, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Disableable as _, Icon, WindowExt as _, input::InputState};
+use gpui_component::{Disableable as _, Icon, WindowExt as _, input::InputState, tooltip::Tooltip};
 
 use super::{
     i_am_owner,
@@ -140,6 +141,9 @@ impl MachinesPage {
             Some(at) => Some(fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))])),
             None => Some(s::MACHINE_NEVER_SEEN.to_string()),
         };
+        let tags: Vec<String> = m.labels.iter().map(|l| tag_text(l)).collect();
+        let (shown, more) = shown_tags(&tags);
+        let shown: Vec<String> = shown.to_vec();
         widgets::table_row()
             .items_center()
             .child(
@@ -152,7 +156,7 @@ impl MachinesPage {
                     .items_center()
                     .justify_center()
                     .child(ui::icon(
-                        Lucide::Monitor,
+                        machine_glyph(m),
                         theme::icon::HEADER,
                         colors.text_2,
                     )),
@@ -169,27 +173,35 @@ impl MachinesPage {
                             .items_center()
                             .gap(space::S6)
                             .min_w_0()
+                            // Host names differ at the end: cut in the
+                            // middle, the full name in a tooltip (§15).
                             .child(
-                                div()
-                                    .min_w_0()
-                                    .t_ui()
-                                    .medium()
-                                    .one_line()
-                                    .child(m.name.clone()),
+                                ui::truncating(
+                                    gpui::ElementId::Name(format!("machine-name-{}", m.id).into()),
+                                    m.name.clone(),
+                                )
+                                .text_ellipsis_middle()
+                                .t_ui()
+                                .medium(),
                             )
-                            .children(m.labels.iter().take(3).map(|l| {
-                                div()
-                                    .flex_none()
-                                    .h(theme::size::CHIP_COMPACT)
-                                    .px(space::S6)
-                                    .rounded(theme::radius::SM)
-                                    .bg(colors.field)
-                                    .flex()
-                                    .items_center()
-                                    .t_meta()
-                                    .text_color(colors.text_2)
-                                    .child(l.clone())
-                            })),
+                            .children(shown.into_iter().map(|t| tag_chip(t, cx)))
+                            .when(more > 0, |el| {
+                                let all: SharedString = tags.join("、").into();
+                                el.child(
+                                    tag_chip(
+                                        fill(s::MACHINE_TAGS_MORE, &[("n", &more.to_string())]),
+                                        cx,
+                                    )
+                                    .id(gpui::ElementId::Name(
+                                        format!("machine-tags-{}", m.id).into(),
+                                    ))
+                                    .tooltip(
+                                        move |window, cx| {
+                                            Tooltip::new(all.clone()).build(window, cx)
+                                        },
+                                    ),
+                                )
+                            }),
                     )
                     .child(
                         div()
@@ -200,12 +212,16 @@ impl MachinesPage {
                             .child(facts.join(" · ")),
                     ),
             )
-            .child(widgets::status_cell(
-                widgets::state_dot(dot, cx),
-                state_text,
-                Some(seen.unwrap_or(activity).into()),
-                cx,
-            ))
+            // Status centered in its column (U43).
+            .child(
+                widgets::status_cell(
+                    widgets::state_dot(dot, cx),
+                    state_text,
+                    Some(seen.unwrap_or(activity).into()),
+                    cx,
+                )
+                .justify_center(),
+            )
     }
 
     /// The page actions: 刷新 (icon button) and 添加机器 (36 pt page primary).
@@ -270,7 +286,14 @@ impl Render for MachinesPage {
                         .tnum()
                         .child(fill(s::MACHINES_HEADER, &[("n", &n.to_string())])),
                 )
-                .child(div().w(widgets::STATUS_COL).flex_none().child(s::STATUS))
+                .child(
+                    div()
+                        .w(widgets::STATUS_COL)
+                        .flex_none()
+                        .flex()
+                        .justify_center()
+                        .child(s::STATUS),
+                )
         };
         let body = match (&self.machines, failed.clone()) {
             // The first load failed: an inline error row with 重试 (§8.5).
@@ -308,6 +331,65 @@ impl Render for MachinesPage {
             })
             .child(body)
     }
+}
+
+/// At most this many tags show on a row; the rest fold into `+N`.
+const TAGS_SHOWN: usize = 3;
+
+/// The tags a row shows and how many fold into `+N` (break-ui: a tag past
+/// the third is never dropped without a sign).
+fn shown_tags(tags: &[String]) -> (&[String], usize) {
+    let n = tags.len().min(TAGS_SHOWN);
+    (&tags[..n], tags.len() - n)
+}
+
+/// A machine tag as people read it: the common routing tags in plain words,
+/// any other tag as its owner typed it.
+fn tag_text(label: &str) -> String {
+    let t = label.trim();
+    match t.to_ascii_lowercase().as_str() {
+        "mac" | "macos" | "darwin" | "osx" => s::MACHINE_TAG_MAC.into(),
+        "linux" => s::MACHINE_TAG_LINUX.into(),
+        "windows" | "win" => s::MACHINE_TAG_WINDOWS.into(),
+        "office" => s::MACHINE_TAG_OFFICE.into(),
+        "home" => s::MACHINE_TAG_HOME.into(),
+        "gpu" => s::MACHINE_TAG_GPU.into(),
+        "ios-simulator" | "ios-sim" | "simulator" => s::MACHINE_TAG_IOS_SIMULATOR.into(),
+        _ => t.to_string(),
+    }
+}
+
+/// The glyph of a machine by its kind, read from its name and tags: a
+/// notebook gets `laptop`, a server `server`, anything else (a Mac mini, a
+/// desktop) `monitor`.
+fn machine_glyph(m: &MachineInfo) -> Lucide {
+    let words: Vec<String> = std::iter::once(m.name.to_lowercase())
+        .chain(m.labels.iter().map(|l| l.to_lowercase()))
+        .collect();
+    let has = |keys: &[&str]| words.iter().any(|w| keys.iter().any(|k| w.contains(k)));
+    if has(&["laptop", "macbook", "notebook", "笔记本"]) {
+        Lucide::Laptop
+    } else if has(&["server", "服务器", "linux", "vps", "cloud", "ubuntu"]) {
+        Lucide::Server
+    } else {
+        Lucide::Monitor
+    }
+}
+
+/// One neutral tag chip.
+fn tag_chip(text: impl Into<SharedString>, cx: &App) -> gpui::Div {
+    let colors = theme::colors(cx);
+    div()
+        .flex_none()
+        .h(theme::size::CHIP_COMPACT)
+        .px(space::S6)
+        .rounded(theme::radius::SM)
+        .bg(colors.field)
+        .flex()
+        .items_center()
+        .t_meta()
+        .text_color(colors.text_2)
+        .child(text.into())
 }
 
 // --- add machine ---
@@ -481,4 +563,68 @@ pub fn open_add_machine(
             .child(shown.clone())
     });
     form
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn machine(name: &str, labels: &[&str]) -> MachineInfo {
+        MachineInfo {
+            id: "m".into(),
+            name: name.into(),
+            labels: labels.iter().map(|l| l.to_string()).collect(),
+            connected: true,
+            healthy: true,
+            last_heartbeat_at: None,
+            version: None,
+            disk_free_bytes: None,
+            disk_total_bytes: None,
+            active_runs: 0,
+            max_parallel_runs: None,
+            runtimes: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn a_machine_gets_the_glyph_of_its_kind() {
+        assert_eq!(
+            machine_glyph(&machine("办公室 Mac mini", &["mac"])),
+            Lucide::Monitor
+        );
+        assert_eq!(
+            machine_glyph(&machine("旧笔记本", &["mac"])),
+            Lucide::Laptop
+        );
+        assert_eq!(
+            machine_glyph(&machine("joye-macbook-pro-m4-max", &[])),
+            Lucide::Laptop
+        );
+        assert_eq!(
+            machine_glyph(&machine("build-01", &["linux"])),
+            Lucide::Server
+        );
+    }
+
+    #[test]
+    fn tags_read_as_words() {
+        assert_eq!(tag_text("mac"), "macOS");
+        assert_eq!(tag_text(" Office "), "办公室");
+        assert_eq!(tag_text("ios-simulator"), "iOS 模拟器");
+        // A tag the owner made up stays as typed.
+        assert_eq!(tag_text("xcode-16"), "xcode-16");
+    }
+
+    #[test]
+    fn tags_past_the_third_fold_into_a_count() {
+        let tags: Vec<String> = ["a", "b", "c", "d", "e", "f", "g"]
+            .iter()
+            .map(|t| t.to_string())
+            .collect();
+        let (shown, more) = shown_tags(&tags);
+        assert_eq!(shown.len(), 3);
+        assert_eq!(more, 4);
+        let (shown, more) = shown_tags(&tags[..2]);
+        assert_eq!((shown.len(), more), (2, 0));
+    }
 }

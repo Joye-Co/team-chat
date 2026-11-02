@@ -202,6 +202,55 @@ impl ChatProvider for WorstCase {
             .map(|(i, m)| member(m, i))
             .collect()
     }
+    /// Host names that differ only at the end, and a machine with seven
+    /// tags (break-ui: twelve tags on one item).
+    fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
+        let tags = [
+            "mac",
+            "office",
+            "gpu",
+            "ios-simulator",
+            "xcode-16",
+            "arm64",
+            "nightly",
+        ];
+        let base = MachineInfo {
+            connected: true,
+            healthy: true,
+            last_heartbeat_at: Some(self.now),
+            version: Some("0.4.0-beta.12+build.20261103".into()),
+            disk_free_bytes: Some(3 * 1024 * 1024 * 1024),
+            disk_total_bytes: Some(8 * 1024 * 1024 * 1024 * 1024),
+            active_runs: 12,
+            max_parallel_runs: Some(16),
+            ..MachineInfo::default()
+        };
+        reply_now(Ok(vec![
+            MachineInfo {
+                id: "wc-m1".into(),
+                name: "joye-macbook-pro-m4-max-16-inch-office-2026-a".into(),
+                labels: tags.iter().map(|t| t.to_string()).collect(),
+                ..base.clone()
+            },
+            MachineInfo {
+                id: "wc-m2".into(),
+                name: "joye-macbook-pro-m4-max-16-inch-office-2026-b".into(),
+                labels: vec!["mac".into()],
+                connected: false,
+                healthy: false,
+                last_heartbeat_at: Some(0),
+                ..base.clone()
+            },
+            MachineInfo {
+                id: "wc-m3".into(),
+                name: "构建服务器".into(),
+                labels: vec!["linux".into(), "gpu".into(), "home".into()],
+                healthy: false,
+                ..base
+            },
+        ]))
+    }
+
     fn groups(&self) -> Vec<GroupSummary> {
         let members = self.members();
         self.inner

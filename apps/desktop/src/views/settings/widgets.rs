@@ -9,7 +9,6 @@ use gpui_component::{
     Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     clipboard::Clipboard,
-    spinner::Spinner,
 };
 
 use crate::{
@@ -147,6 +146,9 @@ pub const COLUMN_MAX: Pixels = px(704.);
 
 /// Column widths of the settings tables (§8.4).
 pub const STATUS_COL: Pixels = px(152.);
+/// 成员 has one status line, `等人回答` at most (8 pt dot, 8 pt gap, four
+/// characters): 96 pt fits it, and the name column takes the rest.
+pub const MEMBER_STATUS_COL: Pixels = px(96.);
 pub const LEVEL_COL: Pixels = px(132.);
 pub const TRAILING_COL: Pixels = px(40.);
 
@@ -319,7 +321,11 @@ pub fn status_line(status: &Status, cx: &App) -> Option<Div> {
                 .flex()
                 .items_center()
                 .gap(space::S6)
-                .child(Spinner::new().with_size(theme::icon::CHIP).color(k.text_3))
+                .child(
+                    crate::ui::spinner()
+                        .with_size(theme::icon::CHIP)
+                        .color(k.text_3),
+                )
                 .child(line(text.clone(), k.text_3)),
         ),
         Status::Done(text) => Some(line(text.clone(), k.text_3)),

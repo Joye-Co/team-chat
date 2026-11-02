@@ -26,6 +26,7 @@ gpui_kit::assets::icon_assets!(
         Circle,
         WifiOff,
         Monitor,
+        Laptop,
         Users,
         UsersRound,
         User,
@@ -219,7 +220,10 @@ mod tests {
         let svg = AppAssets.load(&path).unwrap().unwrap();
         let svg = std::str::from_utf8(&svg).unwrap().to_string();
         // Drawn at 24 pt: the glyph is 18 pt when the viewBox is 32 units.
-        assert!(svg.contains("viewBox=\"-4.000 -4.000 32.000 32.000\""), "{svg}");
+        assert!(
+            svg.contains("viewBox=\"-4.000 -4.000 32.000 32.000\""),
+            "{svg}"
+        );
         assert!(svg.contains("stroke-width=\"1.75\""));
     }
 }

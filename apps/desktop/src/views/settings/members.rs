@@ -332,9 +332,16 @@ impl MembersPage {
                                     .items_baseline()
                                     .gap(space::S4)
                                     .min_w_0()
-                                    .child(div().min_w_0().t_ui().medium().one_line().child(
-                                        m.name.split_whitespace().collect::<Vec<_>>().join(" "),
-                                    ))
+                                    // The full name in a tooltip when it is
+                                    // cut: owners tell similar names apart here.
+                                    .child(
+                                        ui::truncating(
+                                            ElementId::Name(format!("member-name-{id}").into()),
+                                            m.name.split_whitespace().collect::<Vec<_>>().join(" "),
+                                        )
+                                        .t_ui()
+                                        .medium(),
+                                    )
                                     .when(is_me, |el| {
                                         el.child(
                                             div()
@@ -363,15 +370,19 @@ impl MembersPage {
                                                 colors.text_2,
                                             ))
                                         })
-                                        .children(
-                                            role.map(|r| div().min_w_0().one_line().child(r)),
-                                        ),
+                                        .children(role.map(|r| {
+                                            ui::truncating(
+                                                ElementId::Name(format!("member-role-{id}").into()),
+                                                r,
+                                            )
+                                        })),
                                 )
                             }),
                     ),
             )
             .child(
                 widgets::status_cell(widgets::state_dot(dot, cx), status_text, None, cx)
+                    .w(widgets::MEMBER_STATUS_COL)
                     .when(m.deactivated, |el| el.opacity(0.4)),
             )
             .child(
@@ -414,7 +425,12 @@ impl Render for MembersPage {
                 s::MEMBERS_HEADER,
                 &[("n", &self.active_count().to_string())],
             )))
-            .child(div().w(widgets::STATUS_COL).flex_none().child(s::STATUS))
+            .child(
+                div()
+                    .w(widgets::MEMBER_STATUS_COL)
+                    .flex_none()
+                    .child(s::STATUS),
+            )
             .child(div().w(widgets::LEVEL_COL).flex_none().child(s::LEVEL))
             .child(div().w(widgets::TRAILING_COL).flex_none());
         let table = if members.is_empty() {

@@ -686,7 +686,7 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
 `sep` between; a footnote `small` 13/20 `text-3` 12 pt under the table.
 
 - **成员**: columns member (36 avatar, name `ui` 14/500 + `你` 12 `text-3` 4 pt after it, 岗位 `small` `text-2`
-  with the `bot` glyph 12 for bots), status, 152 pt (8 pt dot + `ui` `text-2`: 在线 `online`, 工作中
+  with the `bot` glyph 12 for bots), status, 96 pt (8 pt dot + `ui` `text-2`: 在线 `online`, 工作中
   `accent`, 等人回答 `you-glyph`, 离线 hollow `text-3`; a machine goes on line 2 as 12/16
   `text-3`, `Mac mini`, with the dot on line 1), 权限, 132 pt (select 36 × 120; your own row is
   plain text, §7.4), trailing 32 pt `ellipsis` or an empty slot of the same width. Names are
