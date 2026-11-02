@@ -2,6 +2,10 @@
 
 crate::copy! {
     STATUS_MENU = "状态",
+    RENAME = "重命名…",
+    RENAME_TITLE = "重命名话题",
+    TOPIC_TITLE_LABEL = "标题",
+    TOPIC_TITLE_REQUIRED = "请填写标题",
     WAITING_ON = "在等谁",
     WAITING_ON_CLEAR = "不等任何成员",
     OWNER = "负责人",

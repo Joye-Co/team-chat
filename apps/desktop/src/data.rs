@@ -1195,6 +1195,9 @@ pub trait ChatProvider: Send + Sync + 'static {
         status: TopicStatus,
         waiting_on: Vec<MemberId>,
     );
+    /// Renames a topic (`topic.update` with `title`). The new title arrives as
+    /// `Change::Topics`.
+    fn rename_topic(&self, _group_id: &str, _topic_id: &str, _title: String) {}
     /// Marks a topic read up to `seq` (only moves forward).
     fn mark_read(&self, group_id: &str, topic_id: &str, seq: u64);
     /// Tells others I am typing. The provider limits it to one per 3 s per topic.

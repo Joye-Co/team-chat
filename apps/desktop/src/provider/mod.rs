@@ -1214,6 +1214,23 @@ impl ChatProvider for CoreProvider {
         }
     }
 
+    fn rename_topic(&self, _group_id: &str, topic_id: &str, title: String) {
+        let Some(a) = self.account() else {
+            return;
+        };
+        let real = self.resolve_topic(topic_id);
+        if pending_cid(&real).is_some() {
+            return;
+        }
+        let patch = TopicPatch {
+            title: Some(title),
+            ..Default::default()
+        };
+        if let Err(e) = a.client.update_topic(&real, patch) {
+            tracing::warn!(error = %e, "topic rename refused");
+        }
+    }
+
     fn set_topic_status(
         &self,
         _group_id: &str,

@@ -2,16 +2,145 @@
 //! responsible member (`ownerId`), and follow. The topic header opens it as a
 //! dropdown, and topic rows as a context menu.
 
-use gpui::{App, Context, IntoElement, ParentElement, SharedString, Styled, Window, div, px};
-use gpui_component::menu::{PopupMenu, PopupMenuItem};
+use std::cell::Cell;
+
+use gpui::{
+    App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
+    SharedString, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+};
+use gpui_component::{
+    WindowExt as _,
+    input::{InputEvent, InputState},
+    menu::{PopupMenu, PopupMenuItem},
+};
 
 use crate::{
     app::Services,
     copy::{common, realtime as r},
     data::{Member, MemberId, Topic, TopicStatus},
-    theme,
+    theme::{self, Type as _, space},
+    ui::{self, ButtonSpec as _, FieldKind},
     views::presence_dot,
 };
+
+/// Longest topic title (docs/protocol.md).
+const MAX_TITLE_CHARS: usize = 80;
+
+/// Checks a new topic title: trimmed, not empty, cut to 80 characters.
+pub fn validate_title(title: &str) -> Result<String, &'static str> {
+    let t = title.trim();
+    if t.is_empty() {
+        return Err(r::TOPIC_TITLE_REQUIRED);
+    }
+    Ok(t.chars().take(MAX_TITLE_CHARS).collect())
+}
+
+/// The body of the rename dialog: one field, Enter or 保存 renames.
+struct RenameForm {
+    services: Services,
+    group_id: String,
+    topic_id: String,
+    title: Entity<InputState>,
+    error: Option<&'static str>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl RenameForm {
+    fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        match validate_title(&self.title.read(cx).value()) {
+            Ok(title) => {
+                self.services
+                    .provider
+                    .rename_topic(&self.group_id, &self.topic_id, title);
+                window.close_dialog(cx);
+            }
+            Err(e) => {
+                self.error = Some(e);
+                cx.notify();
+            }
+        }
+    }
+}
+
+impl Render for RenameForm {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let filled = !self.title.read(cx).value().trim().is_empty();
+        div()
+            .flex()
+            .flex_col()
+            .t_ui()
+            .child(ui::field_label(r::TOPIC_TITLE_LABEL, cx))
+            .child(
+                ui::TextField::new("rename-topic-title", &self.title, FieldKind::Form)
+                    .error(self.error.is_some()),
+            )
+            .when_some(self.error, |el, e| el.child(ui::field_help(e, true, cx)))
+            .child(
+                div()
+                    .pt(space::S20)
+                    .flex()
+                    .justify_end()
+                    .gap(space::S8)
+                    .child(
+                        ui::secondary_button("rename-topic-cancel", common::CANCEL, cx)
+                            .on_click(|_, window, cx| window.close_dialog(cx)),
+                    )
+                    .child(
+                        ui::primary_button("rename-topic-save", common::SAVE, cx)
+                            .disabled_fill(!filled, cx)
+                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                    ),
+            )
+    }
+}
+
+/// Opens the dialog that renames a topic, with its title selected.
+pub fn open_rename(
+    services: Services,
+    group_id: &str,
+    topic: &Topic,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let current = topic.title.clone();
+    let (group_id, topic_id) = (group_id.to_string(), topic.id.clone());
+    let form = cx.new(|cx| {
+        let title = cx.new(|cx| InputState::new(window, cx).default_value(current));
+        let subscriptions = vec![cx.subscribe_in(
+            &title,
+            window,
+            |this: &mut RenameForm, _, event: &InputEvent, window, cx| match event {
+                InputEvent::PressEnter { .. } => this.submit(window, cx),
+                InputEvent::Change => {
+                    this.error = None;
+                    cx.notify();
+                }
+                _ => {}
+            },
+        )];
+        RenameForm {
+            services,
+            group_id,
+            topic_id,
+            title,
+            error: None,
+            _subscriptions: subscriptions,
+        }
+    });
+    let first = Cell::new(true);
+    window.open_dialog(cx, move |dialog, window, cx| {
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
+        if first.replace(false) {
+            let handle = form.read(cx).title.read(cx).focus_handle(cx);
+            handle.focus(window, cx);
+        }
+        dialog
+            .close_button(false)
+            .p(space::S20)
+            .title(div().t_title().pb(space::S8).child(r::RENAME_TITLE))
+            .child(form.clone())
+    });
+}
 
 /// The menu label of a status (the chip text without a name).
 pub fn status_label(status: TopicStatus) -> &'static str {
@@ -93,6 +222,14 @@ pub fn build(
     let me = services.me();
     let members = group_members(services, group_id);
     let following = services.provider.topic_following(group_id, &topic.id);
+
+    let (s, g, tp) = (services.clone(), group_id.to_string(), topic.clone());
+    menu = menu
+        .item(
+            PopupMenuItem::new(r::RENAME)
+                .on_click(move |_, window, cx| open_rename(s.clone(), &g, &tp, window, cx)),
+        )
+        .separator();
 
     for status in TopicStatus::ALL {
         let (s, g, t) = (services.clone(), group_id.to_string(), topic.id.clone());
@@ -192,6 +329,19 @@ pub fn header_label(text: impl Into<SharedString>, cx: &App) -> impl IntoElement
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn titles_are_trimmed_and_cut() {
+        assert_eq!(
+            validate_title("  修复登录 500 "),
+            Ok("修复登录 500".to_string())
+        );
+        assert_eq!(validate_title(" \n "), Err(r::TOPIC_TITLE_REQUIRED));
+        assert_eq!(
+            validate_title(&"长".repeat(100)).unwrap().chars().count(),
+            80
+        );
+    }
 
     #[test]
     fn waiting_toggles_and_clears_for_done() {

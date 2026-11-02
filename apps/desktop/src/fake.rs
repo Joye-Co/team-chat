@@ -1221,6 +1221,28 @@ impl ChatProvider for FakeProvider {
         }
     }
 
+    fn rename_topic(&self, group_id: &str, topic_id: &str, title: String) {
+        let found = self.with(|s| {
+            let Some(t) = s
+                .topics
+                .iter_mut()
+                .find(|t| t.id == topic_id && t.group_id == group_id)
+            else {
+                return false;
+            };
+            t.title = title;
+            true
+        });
+        if found {
+            self.emit(vec![
+                Change::Topics {
+                    group_id: group_id.into(),
+                },
+                Change::Todo,
+            ]);
+        }
+    }
+
     fn set_topic_status(
         &self,
         group_id: &str,
