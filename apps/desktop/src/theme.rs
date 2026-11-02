@@ -1029,8 +1029,11 @@ pub enum ChipKind {
 }
 
 /// Background, text and glyph colors of a status mark.
-pub fn chip_colors(kind: ChipKind, status: TopicStatus, cx: &App) -> ChipColors {
-    let k = colors(cx);
+pub fn chip_colors(kind: ChipKind, _status: TopicStatus, cx: &App) -> ChipColors {
+    chip_palette(kind, &colors(cx))
+}
+
+fn chip_palette(kind: ChipKind, k: &Colors) -> ChipColors {
     let clear = c(0x00000000);
     match kind {
         ChipKind::You => ChipColors {
@@ -1055,10 +1058,9 @@ pub fn chip_colors(kind: ChipKind, status: TopicStatus, cx: &App) -> ChipColors 
             bg: clear,
             text: k.text_3,
             ring: clear,
-            glyph: match status {
-                TopicStatus::WaitingAnswer | TopicStatus::WaitingReview => k.you_glyph,
-                _ => k.text_3,
-            },
+            // A label that waits on someone else stays grey (§7.8); only
+            // the quiet 等你… label (kind `You`) draws `you-glyph`.
+            glyph: k.text_3,
         },
     }
 }
@@ -1120,6 +1122,15 @@ mod tests {
             assert!(contrast(k.on_accent, k.accent) >= 4.5);
             assert!(contrast(k.on_accent, k.count_solid) >= 4.5);
             assert!(contrast(k.avatar_fg, k.avatar_bg) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn only_you_marks_are_orange() {
+        // DESIGN.md §7.8: 等{name}… / 等回答 / 等审 labels are grey.
+        for k in [build(false), build(true)] {
+            assert_eq!(chip_palette(ChipKind::Quiet, &k).glyph, k.text_3);
+            assert_eq!(chip_palette(ChipKind::You, &k).glyph, k.you_glyph);
         }
     }
 
