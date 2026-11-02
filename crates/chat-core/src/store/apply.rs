@@ -200,9 +200,11 @@ impl Store {
 
 fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
     tx.execute(
-        "INSERT INTO members (id, kind, name, role, level, avatar_url, deactivated) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+        "INSERT INTO members (id, kind, name, role, level, avatar_url, deactivated, character)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(id) DO UPDATE SET kind = excluded.kind, name = excluded.name, role = excluded.role,
-           level = excluded.level, avatar_url = excluded.avatar_url, deactivated = excluded.deactivated",
+           level = excluded.level, avatar_url = excluded.avatar_url, deactivated = excluded.deactivated,
+           character = excluded.character",
         params![
             m.id,
             enum_str(&m.kind)?,
@@ -210,7 +212,8 @@ fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
             m.role(),
             enum_str(&m.level)?,
             m.avatar_url(),
-            m.is_deactivated()
+            m.is_deactivated(),
+            m.character().map(|c| c.as_str())
         ],
     )?;
     Ok(())

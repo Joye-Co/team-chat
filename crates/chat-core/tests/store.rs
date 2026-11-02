@@ -43,7 +43,7 @@ fn migrations_are_named_and_run_once() {
             st.query_map([], |r| r.get(0))?.collect()
         })
         .unwrap();
-    assert_eq!(names, vec!["core-1", "ext-1"]);
+    assert_eq!(names, vec!["characters-1", "core-1", "ext-1"]);
     let mode: String = s
         .with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
         .unwrap();
@@ -68,6 +68,61 @@ fn a_cache_from_before_ext_1_upgrades_and_keeps_its_rows() {
     assert_eq!(s.member("M1").unwrap().unwrap().name, "old");
     assert!(s.artifacts("T1").unwrap().is_empty());
     assert!(s.runs("T1").unwrap().is_empty());
+}
+
+#[test]
+fn member_characters_are_stored_changed_and_cleared() {
+    let (_d, s) = open();
+    assert_eq!(s.member(ALICE).unwrap().unwrap().character(), None);
+    let bot = Member {
+        kind: MemberKind::Bot,
+        character: Some(Some(CharacterId::O03)),
+        ..member("B1", "Tata")
+    };
+    s.apply_directory(Some(&[bot.clone()]), None, None).unwrap();
+    assert_eq!(
+        s.member("B1").unwrap().unwrap().character(),
+        Some(CharacterId::O03)
+    );
+    assert!(
+        s.members()
+            .unwrap()
+            .iter()
+            .any(|m| m.id == "B1" && m.character() == Some(CharacterId::O03))
+    );
+    // The server omits the field once it is cleared; the directory replaces the row.
+    let cleared = Member {
+        character: None,
+        ..bot
+    };
+    s.apply_directory(Some(&[cleared]), None, None).unwrap();
+    assert_eq!(s.member("B1").unwrap().unwrap().character(), None);
+    // An id this build does not know (written by a newer build) reads as none.
+    s.with_reader(|c| c.execute("UPDATE members SET character = 'zz9' WHERE id = 'B1'", []))
+        .unwrap();
+    assert_eq!(s.member("B1").unwrap().unwrap().character(), None);
+}
+
+#[test]
+fn a_cache_from_before_characters_1_upgrades_and_keeps_its_members() {
+    use chat_core::store::migrations::{MIGRATIONS, run};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("c.sqlite3");
+    {
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        run(&mut conn, &MIGRATIONS[..2]).unwrap();
+        conn.execute(
+            "INSERT INTO members (id, kind, name, role, level) VALUES ('B1', 'bot', 'Jojo', '主助手', 'owner')",
+            [],
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    let m = s.member("B1").unwrap().unwrap();
+    assert_eq!(
+        (m.name.as_str(), m.role(), m.character()),
+        ("Jojo", Some("主助手"), None)
+    );
 }
 
 #[test]

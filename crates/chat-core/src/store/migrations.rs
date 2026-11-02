@@ -152,6 +152,12 @@ CREATE TABLE runs (
 CREATE INDEX runs_by_topic ON runs(topic_id, created_at DESC);
 "#,
     },
+    Migration {
+        name: "characters-1",
+        sql: r#"
+ALTER TABLE members ADD COLUMN character TEXT;
+"#,
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

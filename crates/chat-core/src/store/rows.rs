@@ -5,7 +5,8 @@
 //! queries and the event application need and override `raw` on read.
 
 use crate::proto::{
-    ArtifactRef, Card, FileRef, Group, Member, Message, NotifyLevel, ReplyToRef, Topic, TopicStatus,
+    ArtifactRef, Card, CharacterId, FileRef, Group, Member, Message, NotifyLevel, ReplyToRef,
+    Topic, TopicStatus,
 };
 use rusqlite::Row;
 use rusqlite::types::Value;
@@ -222,12 +223,14 @@ pub(crate) fn enum_from<T: DeserializeOwned>(s: String) -> rusqlite::Result<T> {
     serde_json::from_value(serde_json::Value::String(s)).map_err(json_err)
 }
 
-pub(crate) const MEMBER_COLS: &str = "id, kind, name, role, level, avatar_url, deactivated";
+pub(crate) const MEMBER_COLS: &str =
+    "id, kind, name, role, level, avatar_url, deactivated, character";
 
 pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
     let deactivated: bool = r.get(6)?;
     let role: Option<String> = r.get(3)?;
     let avatar_url: Option<String> = r.get(5)?;
+    let character: Option<String> = r.get(7)?;
     Ok(Member {
         id: r.get(0)?,
         kind: enum_from(r.get(1)?)?,
@@ -236,7 +239,8 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
         level: enum_from(r.get(4)?)?,
         avatar_url: avatar_url.map(Some),
         deactivated: Some(deactivated),
-        character: None,
+        // An id this build does not know reads as no character.
+        character: character.as_deref().and_then(CharacterId::parse).map(Some),
     })
 }
 
