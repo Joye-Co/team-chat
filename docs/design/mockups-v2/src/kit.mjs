@@ -33,7 +33,7 @@ function dropGroupAround(svg, at) {
 }
 
 /**
- * Small-size character art (DESIGN §7.9): at 40 pt and below the status lamp at the top corner
+ * Small-size character art (DESIGN §7.9): up to 64 pt the status lamp at the top corner
  * and the question bubble read as notification badges, so they are removed. The face keeps the
  * expression; the status moves to the bottom-right pip.
  */
@@ -62,7 +62,7 @@ const charCache = new Map();
  */
 export function character(id, status = "idle", size = 32, { fit = false, fill = 1 } = {}) {
   const file = SIZES.find((s) => s >= size) ?? 128;
-  const small = size <= 40;
+  const small = size <= 64;
   const key = `${id}/${status}-${file}-${small}-${fit}-${fill}`;
   if (!charCache.has(key)) {
     let svg = readFileSync(join(REPO, `apps/desktop/assets/characters/${id}/${status}-${file}.svg`), "utf8");
@@ -181,8 +181,8 @@ export const kbd = (k) => `<span class="kbd">${k}</span>`;
 export const badge = (n) => `<span class="badge">${cap(n)}</span>`;
 /** Unread count with no mention (§7.8): a neutral solid pill; red stays for @ and 卡住了. */
 export const nbadge = (n) => `<span class="badge n">${cap(n)}</span>`;
-/** A leading full-width bracket hangs its empty half-width into the margin (§10). */
-export const lead = (html) => html.replace(/^([【（「『〔［])/u, '<span class="lb">$1</span>');
+/** Titles keep their leading full-width bracket in place: the v2.1 hang is removed (§10). */
+export const lead = (html) => html;
 export const count = (n) => `<span class="count">${cap(n)}</span>`;
 
 /** Estimated advance of one character in em (system UI font; Han and full-width = 1). */
@@ -261,7 +261,6 @@ body{font-family:var(--font-ui);font-size:14px;line-height:22px;color:var(--text
 .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--field);color:var(--text-2);font-size:12px;line-height:16px;font-weight:500;flex:none}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--badge);color:#fff;font-size:12px;line-height:16px;font-weight:600;flex:none}
 .badge.n{background:var(--count-solid)}
-.lb{margin-left:-0.5em}
 .lbl-s.who{gap:6px}
 .lbl-s.who .av{margin:0}
 .count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--count-bg);color:var(--count-text);font-size:12px;line-height:16px;font-weight:600;flex:none}

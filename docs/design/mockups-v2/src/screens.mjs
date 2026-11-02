@@ -271,7 +271,7 @@ export function login(mode) {
 <div class="lab">邀请码</div>
 <div class="otp">${otp("K7QM")}<span class="dash"></span>${otp("2X")}<span class="ob cur"><span class="caret"></span></span><span class="ob"></span></div>
 <span class="btn primary lg dis" style="width:100%;margin-top:24px">加入</span>
-<div class="lf">${icon("server", 14)}<span>team.joye.co</span><span class="t3">·</span><span class="lk">更改</span></div></div></div>`;
+<div class="lf"><span class="lk">使用其他服务器</span></div></div></div>`;
 }
 export const LOGIN_CSS = `
 .lg{width:var(--w);height:var(--h);display:flex;align-items:center;justify-content:center;background:var(--content);position:relative}
@@ -285,7 +285,7 @@ export const LOGIN_CSS = `
 .ob.cur{box-shadow:inset 0 0 0 1px var(--focus-border),0 0 0 3px var(--focus-soft)}
 .ob .caret{height:22px;margin:0}
 .dash{width:6px;height:2px;border-radius:1px;background:var(--border-strong);margin:0;flex:none}
-.lf{margin-top:16px;display:flex;align-items:center;gap:6px;font-size:13px;line-height:20px;color:var(--text-3)}
+.lf{margin-top:12px;display:flex;align-items:center;gap:6px;font-size:13px;line-height:20px;color:var(--text-3)}
 .lf .lk{color:var(--accent-text);font-weight:500}
 `;
 export { initials };

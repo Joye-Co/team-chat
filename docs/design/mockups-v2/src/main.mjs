@@ -18,7 +18,7 @@ export const MAIN_CSS = `
 .sb-search{margin:0 12px 8px;height:36px;border-radius:8px;background:var(--field);display:flex;align-items:center;gap:8px;padding:0 8px 0 12px;color:var(--text-3);font-size:14px;line-height:20px}
 .sb-search .ph{flex:1;color:var(--placeholder)}
 .sb-scroll{flex:1;overflow:hidden;padding:0 8px}
-.sec{display:flex;align-items:center;height:28px;padding:0 8px;margin-top:16px;color:var(--text-2);font-size:12px;line-height:16px;font-weight:600;gap:6px}
+.sec{display:flex;align-items:center;height:28px;padding:0 8px;margin-top:16px;color:var(--text-2);font-size:12px;line-height:16px;font-weight:500;gap:6px}
 .sec .chev{color:var(--text-3)}
 .sec .grow{flex:1}
 .sec .n{color:var(--text-3);font-weight:500}
@@ -63,7 +63,6 @@ export const MAIN_CSS = `
 .trow .tm{font-size:12px;line-height:16px;color:var(--text-3);flex:none}
 .trow .pv{flex:1;min-width:0;font-size:13px;line-height:20px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .trow .dot{position:absolute;left:5px;top:16px;width:8px;height:8px;border-radius:50%;background:var(--unread-dot)}
-.trow .tt .lb,.todo .tt .lb,.tv-hdr .ttl .lb{margin-left:-0.5em}
 /* Topic view (§7.5, §8.1) */
 .tv{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;background:var(--content)}
 .tv-hdr{height:92px;flex:none;display:flex;flex-direction:column;padding:0 12px 0 24px;border-bottom:0.5px solid var(--sep)}
