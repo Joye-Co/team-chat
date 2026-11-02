@@ -705,14 +705,37 @@ impl TextLayout {
                     if let Some(max_lines) = text_style.line_clamp
                         && let Some(wrap_width) = wrap_width
                     {
-                        line_wrapper.truncate_wrapped_line(
-                            text.clone(),
-                            wrap_width,
-                            max_lines,
-                            &truncation_affix,
-                            &runs,
-                            truncate_from,
-                        )
+                        // The truncation sums per-character advances, which can
+                        // differ from the shaped width (fallback fonts, kerning).
+                        // Check the result against the shaped text and tighten
+                        // the budget until it fits in `max_lines`.
+                        let mut budget = wrap_width;
+                        let mut attempt = 0;
+                        loop {
+                            let (cut, cut_runs) = line_wrapper.truncate_wrapped_line(
+                                text.clone(),
+                                budget,
+                                max_lines,
+                                &truncation_affix,
+                                &runs,
+                                truncate_from,
+                            );
+                            let fits = window
+                                    .text_system()
+                                    .shape_text(cut.clone(), font_size, &cut_runs, Some(wrap_width), None)
+                                    .map_or(true, |lines| {
+                                        lines
+                                            .iter()
+                                            .map(|line| line.wrap_boundaries().len() + 1)
+                                            .sum::<usize>()
+                                            <= max_lines
+                                    });
+                            attempt += 1;
+                            if fits || attempt >= 6 {
+                                break (cut, Cow::Owned(cut_runs.into_owned()));
+                            }
+                            budget -= font_size;
+                        }
                     } else if let Some(unclipped) = window
                         .text_system()
                         .shape_text(text.clone(), font_size, &runs, None, None)
@@ -729,13 +752,33 @@ impl TextLayout {
                         // already measured untruncated this frame.
                         (text.clone(), Cow::Borrowed(&*runs))
                     } else {
-                        line_wrapper.truncate_line(
-                            text.clone(),
-                            truncate_width,
-                            &truncation_affix,
-                            &runs,
-                            truncate_from,
-                        )
+                        // Same check for one line: the shaped result must fit
+                        // `truncate_width`, or the box clips the ellipsis.
+                        let mut budget = truncate_width;
+                        let mut attempt = 0;
+                        loop {
+                            let (cut, cut_runs) = line_wrapper.truncate_line(
+                                text.clone(),
+                                budget,
+                                &truncation_affix,
+                                &runs,
+                                truncate_from,
+                            );
+                            let shaped_width = window
+                                .text_system()
+                                .shape_text(cut.clone(), font_size, &cut_runs, None, None)
+                                .map_or(Pixels::ZERO, |lines| {
+                                    lines
+                                        .iter()
+                                        .map(|line| line.size(line_height).width)
+                                        .fold(Pixels::ZERO, Pixels::max)
+                                });
+                            attempt += 1;
+                            if shaped_width <= truncate_width || attempt >= 6 {
+                                break (cut, Cow::Owned(cut_runs.into_owned()));
+                            }
+                            budget -= (shaped_width - truncate_width).max(font_size / 4.);
+                        }
                     }
                 } else {
                     (text.clone(), Cow::Borrowed(&*runs))

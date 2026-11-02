@@ -235,7 +235,10 @@ impl LineLayout {
                     last_candidate_x = x;
                 }
             } else {
-                if ch != ' ' && first_non_whitespace_ix.is_some() {
+                if ch != ' '
+                    && first_non_whitespace_ix.is_some()
+                    && LineWrapper::may_break_between(prev_ch, ch)
+                {
                     last_candidate_ix = Some(boundary);
                     last_candidate_x = x;
                 }

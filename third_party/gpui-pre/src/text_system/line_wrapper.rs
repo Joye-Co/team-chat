@@ -85,7 +85,10 @@ impl LineWrapper {
                             }
                         } else {
                             // CJK may not be space separated, e.g.: `Hello world你好世界`
-                            if c != ' ' && first_non_whitespace_ix.is_some() {
+                            if c != ' '
+                                && first_non_whitespace_ix.is_some()
+                                && Self::may_break_between(prev_c, c)
+                            {
                                 last_candidate_ix = ix;
                                 last_candidate_width = width;
                             }
@@ -336,8 +339,7 @@ impl LineWrapper {
                 )),
                 TruncateFrom::End => SharedString::from(format!(
                     "{}{truncation_affix}",
-                    line[..truncate_ix]
-                        .trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
+                    trim_before_affix(&line, truncate_ix)
                 )),
                 TruncateFrom::Middle => unreachable!("Middle truncation is handled above"),
             };
@@ -400,8 +402,7 @@ impl LineWrapper {
                 if line >= max_lines - 1 && !text[ix + 1..].trim().is_empty() {
                     // Newline on the last allowed line with real content
                     // below. Truncate here.
-                    let truncated = text[..truncate_ix]
-                        .trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
+                    let truncated = trim_before_affix(&text, truncate_ix);
                     let result = SharedString::from(format!("{truncated}{truncation_affix}"));
                     let mut runs = runs.to_vec();
                     update_runs_after_truncation(
@@ -433,7 +434,10 @@ impl LineWrapper {
                     last_candidate_ix = ix;
                     last_candidate_width = width;
                 }
-            } else if c != ' ' && first_non_whitespace_ix.is_some() {
+            } else if c != ' '
+                && first_non_whitespace_ix.is_some()
+                && Self::may_break_between(prev_c, c)
+            {
                 last_candidate_ix = ix;
                 last_candidate_width = width;
             }
@@ -475,8 +479,7 @@ impl LineWrapper {
                 }
 
                 if width > wrap_width {
-                    let truncated = text[..truncate_ix]
-                        .trim_end_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation());
+                    let truncated = trim_before_affix(&text, truncate_ix);
                     let result = SharedString::from(format!("{truncated}{truncation_affix}"));
                     let mut runs = runs.to_vec();
                     update_runs_after_truncation(
@@ -494,6 +497,31 @@ impl LineWrapper {
 
         // Text fits within max_lines without truncation.
         (text, Cow::Borrowed(runs))
+    }
+
+    /// CJK line-breaking rule (kinsoku): no line starts with closing
+    /// punctuation and no line ends with opening punctuation.
+    pub(crate) fn may_break_between(prev: char, next: char) -> bool {
+        !Self::is_no_start_char(next) && !Self::is_no_end_char(prev)
+    }
+
+    /// Closing punctuation that must not start a line.
+    pub(crate) fn is_no_start_char(c: char) -> bool {
+        matches!(
+            c,
+            '，' | '。' | '、' | '；' | '：' | '？' | '！' | '）' | '」' | '』' | '】' | '》' | '〉'
+                | '〕' | '〗' | '｝' | '］' | '”' | '’' | '…' | '‥' | '·' | '・' | '～' | '％'
+                | '〃' | '々' | 'ー'
+        )
+    }
+
+    /// Opening punctuation that must not end a line.
+    pub(crate) fn is_no_end_char(c: char) -> bool {
+        matches!(
+            c,
+            '（' | '「' | '『' | '【' | '《' | '〈' | '〔' | '〖' | '｛' | '［' | '“' | '‘' | '(' | '['
+                | '{'
+        )
     }
 
     /// Any character in this list should be treated as a word character,
@@ -562,6 +590,50 @@ impl LineWrapper {
             width
         }
     }
+}
+
+/// The kept part of `text` cut at byte `cut`, ready for an ellipsis after it.
+///
+/// Trims trailing spaces and punctuation (ASCII and CJK, opening brackets
+/// included), and drops a Latin word or number that the cut left shorter than
+/// four characters or a version number the cut split (`Joye Huang…`, never
+/// `Joye Huang（…` or `v0.9.…`). Keeps the plain cut when that would leave
+/// nothing.
+pub(crate) fn trim_before_affix(text: &str, cut: usize) -> &str {
+    fn is_trimmed(c: char) -> bool {
+        c.is_whitespace()
+            || c.is_ascii_punctuation()
+            || LineWrapper::is_no_start_char(c)
+            || LineWrapper::is_no_end_char(c)
+            || matches!(c, '—' | '–' | '－')
+    }
+    fn is_token_char(c: char) -> bool {
+        c.is_ascii_alphanumeric() || c == '.' || c == '_' || c == '-'
+    }
+
+    let cut = text.floor_char_boundary(cut.min(text.len()));
+    let kept = text[..cut].trim_end_matches(is_trimmed);
+    let next = text[cut..].chars().next();
+    let last = text[..cut].chars().next_back();
+    let split_token = matches!((last, next), (Some(a), Some(b)) if is_token_char(a) && is_token_char(b));
+    if split_token {
+        let token_start = text[..cut]
+            .char_indices()
+            .rev()
+            .take_while(|(_, c)| is_token_char(*c))
+            .last()
+            .map_or(cut, |(ix, _)| ix);
+        let token = &text[token_start..cut];
+        let alnum = token.chars().filter(char::is_ascii_alphanumeric).count();
+        let version = token.contains('.') && token.chars().any(|c| c.is_ascii_digit());
+        if alnum < 4 || version {
+            let shorter = text[..token_start].trim_end_matches(is_trimmed);
+            if !shorter.is_empty() {
+                return shorter;
+            }
+        }
+    }
+    if kept.is_empty() { &text[..cut] } else { kept }
 }
 
 fn update_runs_after_truncation(
