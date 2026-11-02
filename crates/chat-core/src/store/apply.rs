@@ -193,9 +193,24 @@ impl Store {
                 insert_topic(tx, t, result.message.created_at, false)?;
             }
             tx.execute("DELETE FROM outbox WHERE id = ?1", [client_msg_id])?;
+            resolve_followups(tx, client_msg_id, &result.message.topic_id)?;
             Ok(())
         })
     }
+}
+
+/// Gives the follow-ups of the send `root` its topic id: they become plain sends into it.
+pub(super) fn resolve_followups(
+    tx: &Transaction<'_>,
+    root: &str,
+    topic_id: &str,
+) -> rusqlite::Result<usize> {
+    tx.execute(
+        "UPDATE outbox SET topic_id = ?2,
+           payload = json_set(json_remove(payload, '$.after_root'), '$.topic_id', ?2)
+         WHERE kind = 'send' AND json_extract(payload, '$.after_root') = ?1",
+        params![root, topic_id],
+    )
 }
 
 fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
@@ -543,10 +558,19 @@ fn apply_one(
             }
             if m.author_id == me {
                 out.my_client_msg_ids.push(m.client_msg_id.clone());
-                tx.execute(
+                let removed = tx.execute(
                     "DELETE FROM outbox WHERE id = ?1 AND kind = 'send'",
                     [&m.client_msg_id],
                 )?;
+                resolve_followups(tx, &m.client_msg_id, &m.topic_id)?;
+                if removed > 0 {
+                    // Applied before its ack: the ack may never come (the socket can drop).
+                    out.sent.push(crate::proto::SendResult {
+                        message: m.clone(),
+                        topic: None,
+                        duplicate: None,
+                    });
+                }
             }
             touch_group(tx, gid, m.created_at)?;
             out.created.push((m.topic_id.clone(), m.author_id.clone()));

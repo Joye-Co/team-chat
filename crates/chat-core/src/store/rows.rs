@@ -93,6 +93,11 @@ pub enum OutboxOp {
         artifact_refs: Option<Vec<ArtifactRef>>,
         #[serde(default)]
         card: Option<Card>,
+        /// A follow-up into a topic that is still being started: the `clientMsgId` of the
+        /// topic's first message. The row waits until that message is acked or applied, and
+        /// then gets the topic id.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_root: Option<String>,
     },
     Edit {
         group_id: String,

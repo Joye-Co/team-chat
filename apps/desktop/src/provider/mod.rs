@@ -116,7 +116,9 @@ struct State {
     loading_older: HashSet<String>,
     /// Pending topic id -> real topic id, after the ack.
     aliases: HashMap<String, String>,
-    /// Sends into a pending topic, held until its ack: (pending topic id, request).
+    /// Sends into a pending topic whose first message still uploads its files (an upload job,
+    /// not an outbox row yet), held until its ack: (pending topic id, request). Sends into a
+    /// pending topic whose first message is queued go to the chat-core outbox at once.
     deferred: Vec<(String, ClientMsgId, SendRequest)>,
     /// Acks seen: clientMsgId -> message id (self-tests read it).
     acked: HashMap<String, String>,
@@ -986,6 +988,12 @@ impl ChatProvider for CoreProvider {
                     .messages
                     .extend(convert::outbox_message(&item, topic_id, me));
             }
+            // Follow-ups queued behind the first message.
+            for item in a.client.pending_followups(cid).unwrap_or_default() {
+                window
+                    .messages
+                    .extend(convert::outbox_message(&item, topic_id, me));
+            }
         } else {
             let n = limit.max(1) + extra;
             let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
@@ -1098,8 +1106,38 @@ impl ChatProvider for CoreProvider {
 
     fn send(&self, request: SendRequest) -> ClientMsgId {
         let real = self.resolve_topic(&request.topic_id);
+        if let Some(root) = pending_cid(&real)
+            && let Some(a) = self.account()
+        {
+            // The topic has no server id yet: queue a follow-up in the outbox. It is stored at
+            // once and goes out after the first message.
+            let queued = a.client.send_after(
+                root,
+                chat_core::SendRequest {
+                    group_id: request.group_id.clone(),
+                    body: request.body.clone(),
+                    mentions: request.mentions.clone(),
+                    reply_to: request.quote_of.clone(),
+                    ..Default::default()
+                },
+            );
+            match queued {
+                Ok(cid) => {
+                    self.emit(vec![Change::Messages {
+                        group_id: request.group_id,
+                        topic_id: request.topic_id,
+                    }]);
+                    return cid;
+                }
+                Err(chat_core::ClientError::NotFound) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "send refused");
+                    return String::new();
+                }
+            }
+        }
         if pending_cid(&real).is_some() {
-            // The topic has no server id yet: hold the message until its ack.
+            // The first message still uploads its files: hold the message until its ack.
             let cid = chat_core::new_id();
             let group_id = request.group_id.clone();
             let topic_id = request.topic_id.clone();

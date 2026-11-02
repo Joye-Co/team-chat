@@ -582,6 +582,36 @@ impl Client {
     /// Queues a message. Without `topic_id` it starts a new topic whose root is this
     /// message; the topic appears when the send is acked. Returns the `clientMsgId`.
     pub fn send(&self, req: SendRequest) -> Result<String, ClientError> {
+        self.send_inner(req, None)
+    }
+
+    /// Queues a follow-up into a topic that I am starting: `root` is the `clientMsgId` of its
+    /// first message and `req.topic_id` is `None`. The row is stored at once (it survives a
+    /// quit) and goes out after the first message is acked. When the first message is already
+    /// in the cache, this is a plain send into its topic.
+    pub fn send_after(&self, root: &str, mut req: SendRequest) -> Result<String, ClientError> {
+        if let Some(topic_id) = self.shared.store.my_topic_of_client_msg(root)? {
+            req.topic_id = Some(topic_id);
+            return self.send_inner(req, None);
+        }
+        let started = self
+            .shared
+            .store
+            .outbox_get(root)?
+            .is_some_and(|i| matches!(i.op, OutboxOp::Send { topic_id: None, .. }));
+        if !started {
+            return Err(ClientError::NotFound);
+        }
+        req.topic_id = None;
+        req.title = None;
+        self.send_inner(req, Some(root.to_string()))
+    }
+
+    fn send_inner(
+        &self,
+        req: SendRequest,
+        after_root: Option<String>,
+    ) -> Result<String, ClientError> {
         Self::check_body(&req.body)?;
         Self::check_title(req.title.as_deref())?;
         if req.body.trim().is_empty()
@@ -607,6 +637,7 @@ impl Client {
                 attachments: req.attachments,
                 artifact_refs: req.artifact_refs,
                 card: req.card,
+                after_root,
             },
         )
     }
@@ -913,8 +944,20 @@ impl Client {
             .outbox_get(id)?
             .ok_or(ClientError::NotFound)?;
         self.shared.store.outbox_remove(id)?;
+        // The follow-ups of a topic that is not started any more have nowhere to go.
+        if matches!(item.op, OutboxOp::Send { topic_id: None, .. }) {
+            for f in self.shared.store.followups_of(id)? {
+                self.shared.store.outbox_remove(&f.id)?;
+            }
+        }
         self.emit_outbox_scope(&item);
         Ok(())
+    }
+
+    /// Queued follow-ups of a topic I am starting (`root` is its first message's
+    /// `clientMsgId`), oldest first.
+    pub fn pending_followups(&self, root: &str) -> Result<Vec<OutboxItem>, ClientError> {
+        Ok(self.shared.store.followups_of(root)?)
     }
 
     fn emit_outbox_scope(&self, item: &OutboxItem) {

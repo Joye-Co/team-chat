@@ -86,6 +86,8 @@ pub struct ApplyOutcome {
     pub message_topics: BTreeSet<String>,
     /// Client message ids of my own messages that this call created.
     pub my_client_msg_ids: Vec<String>,
+    /// My sends whose outbox row this apply removed (their event came before the ack).
+    pub sent: Vec<crate::proto::SendResult>,
     /// (topic id, author id) of every message this call created.
     pub created: Vec<(String, String)>,
     /// Messages whose stored body this call replaced (edited, finished or deleted).
@@ -358,9 +360,39 @@ impl Store {
     pub fn pending_new_topics(&self, group_id: &str) -> StoreResult<Vec<OutboxItem>> {
         self.with_reader(|c| {
             let mut st = c.prepare(&format!(
-                "SELECT {OUTBOX_COLS} FROM outbox WHERE group_id = ?1 AND topic_id IS NULL AND kind = 'send' ORDER BY ord"
+                "SELECT {OUTBOX_COLS} FROM outbox WHERE group_id = ?1 AND topic_id IS NULL AND kind = 'send'
+                   AND json_extract(payload, '$.after_root') IS NULL ORDER BY ord"
             ))?;
             st.query_map([group_id], rows::outbox_from_row)?.collect()
+        })
+    }
+
+    /// Follow-ups that wait for the topic started by the send `root`, oldest first.
+    pub fn followups_of(&self, root: &str) -> StoreResult<Vec<OutboxItem>> {
+        self.with_reader(|c| {
+            let mut st = c.prepare(&format!(
+                "SELECT {OUTBOX_COLS} FROM outbox WHERE kind = 'send'
+                   AND json_extract(payload, '$.after_root') = ?1 ORDER BY ord"
+            ))?;
+            st.query_map([root], rows::outbox_from_row)?.collect()
+        })
+    }
+
+    /// Gives the follow-ups of the send `root` the topic id it started.
+    pub fn resolve_followups(&self, root: &str, topic_id: &str) -> StoreResult<usize> {
+        self.with_writer(|tx| Ok(apply::resolve_followups(tx, root, topic_id)?))
+    }
+
+    /// The topic of my cached message with this `clientMsgId`.
+    pub fn my_topic_of_client_msg(&self, client_msg_id: &str) -> StoreResult<Option<String>> {
+        let me = self.me_id()?.unwrap_or_default();
+        self.with_reader(|c| {
+            c.query_row(
+                "SELECT topic_id FROM messages WHERE client_msg_id = ?1 AND author_id = ?2",
+                params![client_msg_id, me],
+                |r| r.get(0),
+            )
+            .optional()
         })
     }
 

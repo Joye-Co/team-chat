@@ -244,6 +244,7 @@ async fn duplicate_ack_is_handled() {
                 topic_id: Some(tid.clone()),
                 title: None,
                 body: "already there".into(),
+                after_root: None,
                 mentions: vec![],
                 streaming: false,
                 reply_to: None,
@@ -948,4 +949,98 @@ async fn a_card_press_whose_ack_was_lost_is_not_sent_again() {
     assert_eq!(h.server.with(|s| s.frames_of("card.action").len()), 1);
     assert_eq!(h.client.card_actions(&mid).unwrap().len(), 1);
     let _ = tid;
+}
+
+fn followup(body: &str) -> chat_core::SendRequest {
+    chat_core::SendRequest {
+        group_id: G1.into(),
+        body: body.into(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_ups_into_a_new_topic_survive_a_quit_and_go_out_after_the_root() {
+    let server = server_with_group().await;
+    server.with(|s| s.refuse = true);
+    let dir = tempfile::tempdir().unwrap();
+    let (root, f1, f2) = {
+        let client = Client::new(config(&server, dir.path())).unwrap();
+        // Offline: the topic and two follow-ups are only in the outbox. Then the app quits.
+        let root = client.start_topic(G1, None, "root", vec![]).unwrap();
+        let f1 = client.send_after(&root, followup("one")).unwrap();
+        let f2 = client.send_after(&root, followup("two")).unwrap();
+        assert_eq!(client.pending_new_topics(G1).unwrap().len(), 1);
+        assert_eq!(client.pending_followups(&root).unwrap().len(), 2);
+        (root, f1, f2)
+    };
+    server.with(|s| s.refuse = false);
+    let client = Client::new(config(&server, dir.path())).unwrap();
+    client.start();
+    until("all three sent", || {
+        client.store().outbox_all().unwrap().is_empty()
+    })
+    .await;
+    let sends = server.with(|s| s.frames_of("send"));
+    let bodies: Vec<&str> = sends.iter().map(|f| f["body"].as_str().unwrap()).collect();
+    assert_eq!(bodies, vec!["root", "one", "two"]);
+    let topic = sends[0]["topicId"].clone();
+    assert!(topic.is_null());
+    let tid = client
+        .store()
+        .my_topic_of_client_msg(&root)
+        .unwrap()
+        .unwrap();
+    assert!(sends[1..].iter().all(|f| f["topicId"] == json!(tid)));
+    until("cached", || {
+        client.messages(&tid, None, 10).unwrap().len() == 3
+    })
+    .await;
+    let ids: Vec<String> = client
+        .messages(&tid, None, 10)
+        .unwrap()
+        .iter()
+        .map(|m| m.client_msg_id.clone())
+        .collect();
+    assert_eq!(ids, vec![root, f1, f2]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn follow_ups_go_out_when_the_root_applied_but_its_ack_was_lost() {
+    let server = server_with_group().await;
+    let mut h = harness_with(server, |_| {});
+    next_update(&mut h.updates, "caught up", |u| {
+        matches!(u, ClientUpdate::CaughtUp)
+    })
+    .await;
+    // The root's events arrive live, then the socket drops before its ack.
+    h.server.with(|s| s.drop_acks = 1);
+    let root = h.client.start_topic(G1, None, "root", vec![]).unwrap();
+    let f1 = h.client.send_after(&root, followup("one")).unwrap();
+    let u = next_update(&mut h.updates, "sent", |u| {
+        matches!(u, ClientUpdate::Sent { .. })
+    })
+    .await;
+    let ClientUpdate::Sent { client_msg_id, .. } = u else {
+        unreachable!()
+    };
+    assert_eq!(client_msg_id, root);
+    until("follow-up sent", || {
+        h.client.store().outbox_get(&f1).unwrap().is_none()
+    })
+    .await;
+    let sends = h.server.with(|s| s.frames_of("send"));
+    assert_eq!(sends.iter().filter(|f| f["body"] == "one").count(), 1);
+    assert_eq!(h.server.with(|s| s.message_count(G1)), 2);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn discarding_a_new_topic_discards_its_follow_ups() {
+    let server = server_with_group().await;
+    server.with(|s| s.refuse = true);
+    let h = harness_with(server, |_| {});
+    let root = h.client.start_topic(G1, None, "root", vec![]).unwrap();
+    h.client.send_after(&root, followup("one")).unwrap();
+    h.client.discard(&root).unwrap();
+    assert!(h.client.store().outbox_all().unwrap().is_empty());
 }

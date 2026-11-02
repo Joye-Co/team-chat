@@ -314,6 +314,8 @@ struct Session {
     retry_at: HashMap<String, Instant>,
     /// `internal` answers per outbox row on this session.
     internal_failures: HashMap<String, u32>,
+    /// Sends reported as `Sent` when their event applied before the ack.
+    sent_emitted: HashSet<String>,
     /// `internal` error frames on this connection.
     internal_errors: u32,
     groups: HashMap<String, GroupSync>,
@@ -363,6 +365,7 @@ impl Session {
             retry_at: HashMap::new(),
             internal_failures: HashMap::new(),
             internal_errors: 0,
+            sent_emitted: HashSet::new(),
             groups: HashMap::new(),
             history_inflight: HashSet::new(),
             typing_sent: HashMap::new(),
@@ -680,8 +683,32 @@ impl Session {
             if self.inflight_outbox.len() >= MAX_INFLIGHT_WRITES || !self.write_pace.take(now) {
                 return;
             }
+            let mut op = item.op.clone();
+            if let OutboxOp::Send {
+                after_root: Some(root),
+                topic_id,
+                ..
+            } = &mut op
+            {
+                // A follow-up waits until the first message of its topic is acked or applied;
+                // that gives the row its topic id.
+                if !matches!(self.shared.store.outbox_get(root), Ok(None)) {
+                    continue;
+                }
+                match self.shared.store.my_topic_of_client_msg(root) {
+                    Ok(Some(t)) => {
+                        let _ = self.shared.store.resolve_followups(root, &t);
+                        *topic_id = Some(t);
+                    }
+                    _ => {
+                        warn!(id = %item.id, "follow-up of a topic that was not started");
+                        self.fail_row(&item, ErrorCode::NotFound, String::new());
+                        continue;
+                    }
+                }
+            }
             let rid = self.rid();
-            let frame = match item.op.clone() {
+            let frame = match op {
                 OutboxOp::Send {
                     group_id,
                     topic_id,
@@ -693,6 +720,7 @@ impl Session {
                     attachments,
                     artifact_refs,
                     card,
+                    ..
                 } => ClientFrame::Send(SendFrame {
                     rid: rid.clone(),
                     group_id,
@@ -1121,7 +1149,9 @@ impl Session {
                     && r.message.client_msg_id == id
                 {
                     let _ = self.shared.store.ack_send(&id, &r);
-                    self.emit_sent(id, r);
+                    if !self.sent_emitted.remove(&id) {
+                        self.emit_sent(id, r);
+                    }
                 }
                 return None;
             }
@@ -1231,34 +1261,40 @@ impl Session {
             }
             code => {
                 warn!(id = %id, kind = item.op.kind(), ?code, "write refused");
-                self.internal_failures.remove(&id);
-                self.retry_at.remove(&id);
-                let _ = self.shared.store.outbox_set_state(
-                    &id,
-                    OutboxState::Failed,
-                    Some(code_str(code)),
-                );
-                let topic_id = item.op.topic_id().map(str::to_string);
-                match &topic_id {
-                    Some(t) => self.shared.emit(ClientUpdate::MessagesChanged {
-                        group_id: group_id.clone(),
-                        topic_id: t.clone(),
-                    }),
-                    None => self.shared.emit(ClientUpdate::TopicsChanged {
-                        group_id: group_id.clone(),
-                    }),
-                }
-                self.shared.emit(ClientUpdate::SendFailed(SendFailure {
-                    id,
-                    kind: item.op.kind(),
-                    group_id,
-                    topic_id,
-                    code,
-                    message: err.message,
-                }));
+                self.fail_row(&item, code, err.message);
                 None
             }
         }
+    }
+
+    /// Marks an outbox row failed (retry and discard become available) and tells the UI.
+    fn fail_row(&mut self, item: &crate::store::OutboxItem, code: ErrorCode, message: String) {
+        let id = item.id.clone();
+        let group_id = item.op.group_id().to_string();
+        self.internal_failures.remove(&id);
+        self.retry_at.remove(&id);
+        let _ = self
+            .shared
+            .store
+            .outbox_set_state(&id, OutboxState::Failed, Some(code_str(code)));
+        let topic_id = item.op.topic_id().map(str::to_string);
+        match &topic_id {
+            Some(t) => self.shared.emit(ClientUpdate::MessagesChanged {
+                group_id: group_id.clone(),
+                topic_id: t.clone(),
+            }),
+            None => self.shared.emit(ClientUpdate::TopicsChanged {
+                group_id: group_id.clone(),
+            }),
+        }
+        self.shared.emit(ClientUpdate::SendFailed(SendFailure {
+            id,
+            kind: item.op.kind(),
+            group_id,
+            topic_id,
+            code,
+            message,
+        }));
     }
 
     fn emit_sent(&self, client_msg_id: String, r: SendResult) {
@@ -1391,6 +1427,15 @@ impl Session {
         }
         for id in &out.my_client_msg_ids {
             self.retry_at.remove(id);
+        }
+        // My sends applied before their ack: report them now, since the ack can be lost.
+        for r in &out.sent {
+            let id = r.message.client_msg_id.clone();
+            if self.sent_emitted.len() > 1000 {
+                self.sent_emitted.clear();
+            }
+            self.sent_emitted.insert(id.clone());
+            self.emit_sent(id, r.clone());
         }
         for ev in &out.other_events {
             self.shared
