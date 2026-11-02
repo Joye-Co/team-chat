@@ -187,6 +187,8 @@ pub mod size {
     pub const SETTINGS_ROW: Pixels = px(60.);
     pub const OPTION_ROW: Pixels = px(40.);
     pub const PANEL_ROW: Pixels = px(40.);
+    /// Plan and step rows of the side panel's progress (§8.1).
+    pub const PLAN_ROW: Pixels = px(28.);
     pub const BANNER: Pixels = px(52.);
     pub const TOAST: Pixels = px(44.);
     /// Avatars (§4.3).

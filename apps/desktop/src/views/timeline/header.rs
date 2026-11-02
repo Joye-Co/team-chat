@@ -35,7 +35,15 @@ impl TimelineView {
             .into_iter()
             .find(|g| g.id == topic.group_id);
         let group_name = group.as_ref().map(|g| g.name.clone()).unwrap_or_default();
-        let member_count = group.as_ref().map_or(0, |g| g.member_ids.len());
+        // The topic's members, the same list as the side panel's 成员.
+        let member_count = crate::views::side_panel::topic_member_ids(
+            provider.as_ref(),
+            self.me.as_deref(),
+            topic,
+        )
+        .iter()
+        .filter(|id| self.members.iter().any(|m| &m.id == *id))
+        .count();
         let title = crate::views::sidebar::topic_line(&topic.title);
 
         let row1 = ui::toolbar_band("topic-toolbar")

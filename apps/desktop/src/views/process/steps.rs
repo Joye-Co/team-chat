@@ -88,7 +88,7 @@ fn mono_box(text: String, cx: &App) -> impl IntoElement {
 }
 
 /// The 16 pt glyph of a step (§17 U31: steps with icons).
-fn glyph(step: &ProcessStep, cx: &App) -> (Lucide, Hsla) {
+pub fn glyph(step: &ProcessStep, cx: &App) -> (Lucide, Hsla) {
     let k = theme::colors(cx);
     match step {
         ProcessStep::Message { from_bot: true, .. } => (Lucide::Bot, k.text_3),
@@ -117,6 +117,54 @@ fn glyph(step: &ProcessStep, cx: &App) -> (Lucide, Hsla) {
         } => (Lucide::CircleX, k.text_3),
         ProcessStep::Done { .. } => (Lucide::CircleCheck, k.success),
     }
+}
+
+/// One line for a step in the side panel's progress list (§8.1): what the
+/// bot did, in product words. `None` for steps with nothing to show.
+pub fn step_line(step: &ProcessStep, bot_name: &str) -> Option<String> {
+    let first_line = |text: &str| {
+        text.lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(|l| clip(l, 80))
+    };
+    Some(match step {
+        ProcessStep::Message { text, from_bot, .. } => {
+            let line = first_line(text)?;
+            if *from_bot {
+                fill(p::STEP_SAID_LINE, &[("name", bot_name), ("text", &line)])
+            } else {
+                fill(p::STEP_INPUT_LINE, &[("text", &line)])
+            }
+        }
+        ProcessStep::Reasoning { text } => {
+            first_line(text)?;
+            p::STEP_THINKING.to_string()
+        }
+        ProcessStep::Tool { title, .. } => first_line(title)?,
+        ProcessStep::Files { changes } => fill(p::STEP_FILES, &[("n", &changes.len().to_string())]),
+        ProcessStep::Approval { title, .. } => {
+            first_line(title).unwrap_or_else(|| p::STEP_APPROVAL.to_string())
+        }
+        ProcessStep::TurnStarted => p::STEP_TURN_STARTED.to_string(),
+        ProcessStep::TurnCompleted { ok: true, .. } => p::STEP_TURN_DONE.to_string(),
+        ProcessStep::TurnCompleted { .. } => p::STEP_TURN_FAILED.to_string(),
+        ProcessStep::Status { message } => first_line(message)?,
+        ProcessStep::Done { status, .. } => fill(p::STEP_DONE, &[("status", status_text(*status))]),
+    })
+}
+
+/// The error line of a failed run: the last error its steps carry.
+pub fn error_line(steps: &[ProcessStep]) -> Option<String> {
+    steps.iter().rev().find_map(|s| match s {
+        ProcessStep::Done { error: Some(e), .. }
+        | ProcessStep::TurnCompleted { error: Some(e), .. } => e
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .map(|l| clip(l, 200)),
+        _ => None,
+    })
 }
 
 fn render_step(

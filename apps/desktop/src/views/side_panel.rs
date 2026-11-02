@@ -1,35 +1,137 @@
 //! The right panel of the open topic (DESIGN.md §8.1, GrokBot's right pane):
 //! a 92 pt header band (`话题详情` and close, then one context line), then
-//! flat sections: the responsible bot's progress, 产出, 文件 and 成员. The
-//! process view (过程, `views/process`) is a sub-page with a back button.
-//! `Navigation::side_panel_tab` keeps which page shows (0 详情, 1 过程).
+//! flat sections: the bot's progress, 产出, 文件 and 成员. Empty sections are
+//! left out. The process view (过程, `views/process`) is a sub-page with a
+//! back button. `Navigation::side_panel_tab` keeps which page shows (0 详情,
+//! 1 过程).
+//!
+//! The panel is closed by default. It opens by itself once per topic when a
+//! bot starts work in the open topic or the topic gets its first 产出
+//! (`Navigation::auto_open_side_panel`), and never shows with no topic open.
+
+use std::time::Duration;
 
 use gpui::{
     AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
     StatefulInteractiveElement as _, Styled, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
+use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 
 use crate::{
-    app::{Changes, Services},
+    app::{Changes, MentionInComposer, Services},
     copy::{dev, fill, panel as p, process as pc},
-    data::{Change, GroupId, Member, Topic, TopicId},
+    data::{
+        BotRunSummary, Change, ChatProvider, GroupId, Member, Message, Millis, ProcessStep,
+        RunStatus, Topic, TopicId, TransferState,
+        card::{CardBlock, CardListItem, CardListStatus},
+        create_key,
+    },
     theme::{self, Type as _, size, space},
     ui::{self, Lucide, MemberAvatar},
     views::{
         artifacts::panel::TopicOutputs,
-        process::{ProcessView, duration_text, run_duration, status_text},
+        cards::{is_ask, waits_for_viewer},
+        process::{ProcessView, error_line, step_glyph, step_line},
         time_text,
     },
 };
+
+/// Newest messages read for the 成员 list and the bot's state.
+const MESSAGE_SCAN: usize = 200;
+/// Steps of a run listed under the bot (§8.1 progress).
+const PROGRESS_STEPS: usize = 4;
+/// Items of a plan list shown at most.
+const PLAN_ITEMS: usize = 6;
+
+/// The members of a topic (§8.1 成员, and `n 位成员` in the topic header):
+/// the creator, the responsible member, everyone who posted or was
+/// @mentioned, and me when I follow it. In that order, without repeats.
+pub fn topic_member_ids(
+    provider: &dyn ChatProvider,
+    me: Option<&str>,
+    topic: &Topic,
+) -> Vec<String> {
+    let messages = provider
+        .messages(&topic.group_id, &topic.id, MESSAGE_SCAN)
+        .messages;
+    member_ids_of(provider, me, topic, &messages)
+}
+
+fn member_ids_of(
+    provider: &dyn ChatProvider,
+    me: Option<&str>,
+    topic: &Topic,
+    messages: &[Message],
+) -> Vec<String> {
+    let mut ids: Vec<String> = Vec::new();
+    let mut push = |id: &str| {
+        if !id.is_empty() && !ids.iter().any(|x| x == id) {
+            ids.push(id.to_string());
+        }
+    };
+    push(&topic.created_by);
+    if let Some(owner) = &topic.owner_id {
+        push(owner);
+    }
+    for m in messages {
+        if m.deleted_at.is_none() {
+            push(&m.author_id);
+        }
+        for id in &m.mentions {
+            push(id);
+        }
+    }
+    if let Some(me) = me
+        && provider.topic_following(&topic.group_id, &topic.id)
+    {
+        push(me);
+    }
+    ids
+}
+
+/// What the bot of the topic does now, from the same state as the timeline
+/// and the header: a card that waits for me, a run, or its last message.
+enum BotState {
+    /// A card waits for me: its title, and whether it is an ask card.
+    Waits { title: String, ask: bool },
+    /// A run is active: its latest step and when it started.
+    Working {
+        step: Option<String>,
+        since: Option<Millis>,
+    },
+    /// The latest run failed, with its error line.
+    Failed { error: Option<String> },
+    /// When the bot last posted.
+    Last(Millis),
+    /// The bot has not posted or worked in the topic.
+    Idle,
+}
+
+/// One row of the progress list: glyph, color, text, and whether it is the
+/// current step (`text-1` 500).
+struct PlanRow {
+    glyph: Lucide,
+    color: gpui::Hsla,
+    text: String,
+    current: bool,
+}
 
 pub struct SidePanel {
     services: Services,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
     members: Vec<Member>,
-    /// Member ids of the topic's 群, for the 成员 section.
-    group_members: Vec<String>,
+    messages: Vec<Message>,
+    runs: Vec<BotRunSummary>,
+    /// The topic has 产出, files or an upload in progress.
+    has_outputs: bool,
+    /// When the open topic was opened, and whether it had 产出 then: only
+    /// work that starts later opens the panel by itself.
+    opened: Option<(Millis, bool)>,
+    /// The run whose log the panel asked for, and its status then.
+    followed: Option<(String, RunStatus)>,
+    ticking: bool,
     /// The 产出 and files of the topic (views/artifacts/panel.rs).
     outputs: Entity<TopicOutputs>,
     process: Entity<ProcessView>,
@@ -43,19 +145,28 @@ impl SidePanel {
                 let Some((g, t)) = this.open.clone() else {
                     return;
                 };
+                let followed = this.followed.as_ref().map(|f| f.0.clone());
                 if changes.touches_topic(&g, &t)
-                    || changes.any(|c| {
-                        matches!(c, Change::Topics { group_id } if *group_id == g)
-                            || matches!(c, Change::Members)
+                    || changes.any(|c| match c {
+                        Change::Topics { group_id } => *group_id == g,
+                        Change::Members => true,
+                        Change::Runs { group_id, topic_id } => *group_id == g && *topic_id == t,
+                        Change::RunLog { run_id } => followed.as_ref() == Some(run_id),
+                        _ => false,
                     })
                 {
-                    this.refresh();
+                    this.refresh(cx);
                     cx.notify();
                 }
             }),
             cx.observe(&services.nav, |this, nav, cx| {
-                this.open = nav.read(cx).topic.clone();
-                this.refresh();
+                let open = nav.read(cx).topic.clone();
+                if open != this.open {
+                    this.open = open;
+                    this.opened = None;
+                    this.followed = None;
+                }
+                this.refresh(cx);
                 this.sync_process_visibility(cx);
                 cx.notify();
             }),
@@ -70,11 +181,16 @@ impl SidePanel {
             open,
             topic: None,
             members: Vec::new(),
-            group_members: Vec::new(),
+            messages: Vec::new(),
+            runs: Vec::new(),
+            has_outputs: false,
+            opened: None,
+            followed: None,
+            ticking: false,
             process,
             _subscriptions: subscriptions,
         };
-        this.refresh();
+        this.refresh(cx);
         this.sync_process_visibility(cx);
         this
     }
@@ -97,24 +213,91 @@ impl SidePanel {
             .update(cx, |view, cx| view.set_visible(visible, cx));
     }
 
-    fn refresh(&mut self) {
-        let provider = &self.services.provider;
+    fn refresh(&mut self, cx: &mut Context<Self>) {
+        let provider = self.services.provider.clone();
         self.members = provider.members();
-        match &self.open {
-            Some((g, t)) => {
-                self.topic = provider.topic(g, t);
-                self.group_members = provider
-                    .groups()
-                    .into_iter()
-                    .find(|x| &x.id == g)
-                    .map(|x| x.member_ids)
-                    .unwrap_or_default();
-            }
-            None => {
-                self.topic = None;
-                self.group_members.clear();
+        let Some((g, t)) = self.open.clone() else {
+            self.topic = None;
+            self.messages.clear();
+            self.runs.clear();
+            self.has_outputs = false;
+            return;
+        };
+        self.topic = provider.topic(&g, &t);
+        self.messages = provider.messages(&g, &t, MESSAGE_SCAN).messages;
+        self.runs = provider.runs(&g, &t);
+        let artifacts = provider.artifacts(&g, &t);
+        let uploading = matches!(
+            provider.file_transfer(&create_key(&t)),
+            Some(TransferState::Running { .. })
+        );
+        self.has_outputs =
+            !artifacts.is_empty() || uploading || !provider.topic_files(&g, &t).is_empty();
+
+        // Opens by itself when a bot starts work or the first 产出 arrives
+        // after the topic was opened (DESIGN.md §8.1).
+        let now = chrono::Utc::now().timestamp_millis();
+        match self.opened {
+            None => self.opened = Some((now, !artifacts.is_empty())),
+            Some((since, had_artifacts)) => {
+                let started = self.runs.iter().any(|r| {
+                    r.status.is_active()
+                        && r.started_at.unwrap_or(r.created_at) >= since
+                        && self.member(&r.bot_id).is_some_and(Member::is_bot)
+                });
+                let first_output =
+                    !had_artifacts && artifacts.iter().any(|a| a.updated_at >= since);
+                if started || first_output {
+                    self.services
+                        .nav
+                        .update(cx, |nav, cx| nav.auto_open_side_panel(cx));
+                }
             }
         }
+
+        // Ask for the log of the bot's newest run, once per status.
+        if let Some(run) = self.bot().and_then(|bot| self.newest_run(&bot.id).cloned()) {
+            let key = (run.id.clone(), run.status);
+            if self.followed.as_ref() != Some(&key) {
+                provider.follow_run(&run.id);
+                self.followed = Some(key);
+            }
+        }
+        self.keep_ticking(cx);
+    }
+
+    /// Repaints once a second while the bot works, for the elapsed time.
+    fn keep_ticking(&mut self, cx: &mut Context<Self>) {
+        if self.ticking || !self.working() {
+            return;
+        }
+        self.ticking = true;
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                let go_on = this
+                    .update(cx, |this, cx| {
+                        let go_on = this.working();
+                        if go_on {
+                            cx.notify();
+                        } else {
+                            this.ticking = false;
+                        }
+                        go_on
+                    })
+                    .unwrap_or(false);
+                if !go_on {
+                    break;
+                }
+            }
+        })
+        .detach();
+    }
+
+    fn working(&self) -> bool {
+        self.bot()
+            .and_then(|bot| self.newest_run(&bot.id))
+            .is_some_and(|r| r.status.is_active())
     }
 
     fn member(&self, id: &str) -> Option<&Member> {
@@ -125,8 +308,174 @@ impl SidePanel {
         self.member(id).map(|m| m.name.clone()).unwrap_or_default()
     }
 
+    /// The bot the progress section is about: the responsible member when
+    /// it is a bot, otherwise the bot of the newest active run.
+    fn bot(&self) -> Option<&Member> {
+        let topic = self.topic.as_ref()?;
+        if let Some(owner) = topic.owner_id.as_deref().and_then(|id| self.member(id))
+            && owner.is_bot()
+        {
+            return Some(owner);
+        }
+        if let Some(bot) = self
+            .runs
+            .iter()
+            .filter(|r| r.status.is_active())
+            .find_map(|r| self.member(&r.bot_id).filter(|m| m.is_bot()))
+        {
+            return Some(bot);
+        }
+        // The bot that posted the newest plan list.
+        self.messages.iter().rev().find_map(|m| {
+            let bot = self.member(&m.author_id).filter(|b| b.is_bot())?;
+            let card = self.services.provider.card(&topic.group_id, &m.id)?;
+            card.blocks
+                .iter()
+                .any(|b| matches!(b, CardBlock::List { items } if is_plan(items)))
+                .then_some(bot)
+        })
+    }
+
+    /// The newest run of a bot (runs come newest first).
+    fn newest_run(&self, bot_id: &str) -> Option<&BotRunSummary> {
+        self.runs.iter().find(|r| r.bot_id == bot_id)
+    }
+
+    /// The bot's state, by priority: a card that waits for me, an active
+    /// run, a failed run newer than its last message, its last message.
+    fn bot_state(&self, topic: &Topic, bot: &Member) -> BotState {
+        let provider = &self.services.provider;
+        let me = self.services.me();
+        let waits_on_me = me
+            .as_deref()
+            .is_some_and(|me| topic.waiting_on.iter().any(|m| m == me));
+        let last_message = self
+            .messages
+            .iter()
+            .rev()
+            .find(|m| m.author_id == bot.id && m.deleted_at.is_none());
+        if waits_on_me {
+            // The bot's newest card: it waits for me while it has the
+            // `warning` tone and I have not pressed it (the timeline's rule).
+            let card = self
+                .messages
+                .iter()
+                .rev()
+                .filter(|m| m.author_id == bot.id && m.deleted_at.is_none())
+                .find_map(|m| provider.card(&topic.group_id, &m.id).map(|c| (m, c)));
+            if let Some((m, card)) = card
+                && waits_for_viewer(&card)
+                && !provider
+                    .card_presses(&topic.group_id, &m.id)
+                    .iter()
+                    .any(|press| Some(&press.actor_id) == me.as_ref())
+            {
+                return BotState::Waits {
+                    title: card.title.clone(),
+                    ask: is_ask(&card),
+                };
+            }
+        }
+        if let Some(run) = self.newest_run(&bot.id) {
+            if run.status.is_active() {
+                let steps = provider.run_process(&run.id).steps;
+                return BotState::Working {
+                    step: live_step(&steps),
+                    since: run.started_at,
+                };
+            }
+            // A failed run stays the state until the bot works again, even
+            // when it reported the failure in a message.
+            if run.status == RunStatus::Failed {
+                let steps = provider.run_process(&run.id).steps;
+                return BotState::Failed {
+                    error: error_line(&steps).or_else(|| run.summary.clone()),
+                };
+            }
+        }
+        match last_message {
+            Some(m) => BotState::Last(m.created_at),
+            None => BotState::Idle,
+        }
+    }
+
+    /// The progress list: a plan list from a card in the topic when one
+    /// exists (statuses on its items), else the run's latest steps.
+    fn plan_rows(&self, topic: &Topic, bot: &Member, cx: &Context<Self>) -> Vec<PlanRow> {
+        let k = theme::colors(cx);
+        let provider = &self.services.provider;
+        let plan = self.messages.iter().rev().find_map(|m| {
+            let card = provider.card(&topic.group_id, &m.id)?;
+            card.blocks.iter().find_map(|b| match b {
+                CardBlock::List { items } if is_plan(items) => Some(items.clone()),
+                _ => None,
+            })
+        });
+        if let Some(items) = plan {
+            // A long plan shows a window around its current item.
+            let current = items
+                .iter()
+                .position(|i| {
+                    !matches!(
+                        i.status,
+                        Some(CardListStatus::Done | CardListStatus::Skipped)
+                    )
+                })
+                .unwrap_or(items.len());
+            let start = current
+                .saturating_sub(2)
+                .min(items.len().saturating_sub(PLAN_ITEMS));
+            return items[start..]
+                .iter()
+                .take(PLAN_ITEMS)
+                .map(|item| {
+                    let (glyph, color, current) = match item.status {
+                        Some(CardListStatus::Done) => (Lucide::CircleCheck, k.success, false),
+                        Some(CardListStatus::InProgress) => (Lucide::CircleDot, k.text_1, true),
+                        Some(CardListStatus::Failed) => (Lucide::CircleX, k.danger, false),
+                        Some(CardListStatus::Skipped) => (Lucide::Minus, k.text_3, false),
+                        Some(CardListStatus::Todo) | None => {
+                            (Lucide::CircleDashed, k.text_3, false)
+                        }
+                    };
+                    PlanRow {
+                        glyph,
+                        color,
+                        text: item.text.clone(),
+                        current,
+                    }
+                })
+                .collect();
+        }
+        let Some(run) = self.newest_run(&bot.id) else {
+            return Vec::new();
+        };
+        let steps = provider.run_process(&run.id).steps;
+        let mut rows: Vec<PlanRow> = steps
+            .iter()
+            .filter_map(|s| {
+                let text = step_line(s, &bot.name)?;
+                let (glyph, color) = step_glyph(s, cx);
+                Some(PlanRow {
+                    glyph,
+                    color,
+                    text,
+                    current: false,
+                })
+            })
+            .collect();
+        let start = rows.len().saturating_sub(PROGRESS_STEPS);
+        let mut rows = rows.split_off(start);
+        if run.status.is_active()
+            && let Some(last) = rows.last_mut()
+        {
+            last.current = true;
+        }
+        rows
+    }
+
     /// The one context line of the header (§8.1): what the timeline does not
-    /// show. `Taro 负责 · 等 Joye`, or `Taro 负责 · 更新于 14:31`.
+    /// show. `Taro 负责 · 等 Alex Chen`, or `Taro 负责 · 14:31 更新`.
     fn context_line(&self, topic: &Topic) -> String {
         let mut parts = Vec::new();
         match topic.owner_id.as_deref() {
@@ -136,17 +485,28 @@ impl SidePanel {
                 &[("name", &self.name(&topic.created_by))],
             )),
         }
-        if !topic.waiting_on.is_empty() {
-            let names: Vec<String> = topic.waiting_on.iter().map(|id| self.name(id)).collect();
+        let me = self.services.me();
+        let others: Vec<String> = topic
+            .waiting_on
+            .iter()
+            .filter(|id| Some(*id) != me.as_ref())
+            .map(|id| self.name(id))
+            .collect();
+        if !others.is_empty() {
             parts.push(fill(
                 p::CONTEXT_WAITING,
-                &[("names", &names.join(p::NAME_JOIN))],
+                &[("names", &others.join(p::NAME_JOIN))],
             ));
         } else {
-            parts.push(fill(
-                p::CONTEXT_UPDATED,
-                &[("time", &time_text(topic.last_activity_at))],
-            ));
+            // The newest message is the topic's last update; the topic's
+            // activity time is the fallback before messages load.
+            let at = self
+                .messages
+                .iter()
+                .rev()
+                .find(|m| m.created_seq > 0)
+                .map_or(topic.last_activity_at, |m| m.created_at);
+            parts.push(updated_text(at));
         }
         parts.join(" · ")
     }
@@ -183,7 +543,7 @@ impl SidePanel {
                         cx.stop_propagation();
                         this.services
                             .nav
-                            .update(cx, |nav, cx| nav.toggle_side_panel(cx));
+                            .update(cx, |nav, cx| nav.set_side_panel_open(false, cx));
                     })),
             );
         let context = topic.map(|t| self.context_line(t)).unwrap_or_default();
@@ -195,40 +555,50 @@ impl SidePanel {
                 .flex()
                 .items_center()
                 .t_small()
+                .tnum()
                 .text_color(k.text_2)
                 .child(div().min_w(px(0.)).one_line().child(context)),
         )
     }
 
-    /// The responsible bot's live state (§8.1 Progress): flat, a 36 pt tile,
-    /// the name 14/600, the state 13/20 `text-2`, and `查看过程`.
-    fn progress(&self, owner: &Member, cx: &mut Context<Self>) -> gpui::AnyElement {
+    /// The bot's live state (§8.1 Progress): flat, a 36 pt tile, the name
+    /// 14/600, the state 13/20 `text-2`, the plan or latest steps in 28 pt
+    /// rows, and `查看过程`.
+    fn progress(&self, topic: &Topic, bot: &Member, cx: &mut Context<Self>) -> gpui::AnyElement {
         let k = theme::colors(cx);
-        let process = self.process.read(cx);
         let now = chrono::Utc::now().timestamp_millis();
-        let run = process
-            .runs()
-            .iter()
-            .filter(|r| r.bot_id == owner.id)
-            .max_by_key(|r| r.started_at.unwrap_or(r.created_at))
-            .cloned();
-        let state = match &run {
-            Some(r) => {
-                let mut s = status_text(r.status).to_string();
-                if let Some(ms) = run_duration(r, now) {
-                    s.push_str(" · ");
-                    s.push_str(&duration_text(ms));
-                }
-                s
+        let state = self.bot_state(topic, bot);
+        let mut error = None;
+        let mut state_color = k.text_2;
+        let mut trailing = None;
+        let state_text = match state {
+            BotState::Waits { title, ask } => fill(
+                if ask {
+                    p::STATE_ANSWER
+                } else {
+                    p::STATE_REVIEW
+                },
+                &[("title", &title)],
+            ),
+            BotState::Working { step, since } => {
+                trailing = since.map(|at| fill(p::STATE_TIME, &[("time", &elapsed(at, now))]));
+                step.unwrap_or_else(|| p::STATE_WORKING.to_string())
             }
-            None => p::PROGRESS_IDLE.to_string(),
+            BotState::Failed { error: e } => {
+                error = e;
+                state_color = k.danger_text;
+                p::STATE_FAILED.to_string()
+            }
+            BotState::Last(at) => fill(p::STATE_LAST, &[("time", &time_text(at))]),
+            BotState::Idle => p::PROGRESS_IDLE.to_string(),
         };
-        let summary = run.as_ref().and_then(|r| r.summary.clone());
+        let rows = self.plan_rows(topic, bot, cx);
+        let has_run = self.newest_run(&bot.id).is_some();
         div()
             .flex()
             .flex_col()
             .child(ui::panel_label(
-                fill(p::PROGRESS, &[("name", &owner.name)]),
+                fill(p::PROGRESS, &[("name", &bot.name)]),
                 None,
                 cx,
             ))
@@ -238,7 +608,7 @@ impl SidePanel {
                     .flex()
                     .items_center()
                     .gap(space::S12)
-                    .child(MemberAvatar::new(Some(owner), size::AVATAR_MESSAGE).on(k.content))
+                    .child(MemberAvatar::new(Some(bot), size::AVATAR_MESSAGE).on(k.content))
                     .child(
                         div()
                             .flex_1()
@@ -251,31 +621,65 @@ impl SidePanel {
                                     .semibold()
                                     .text_color(k.text_1)
                                     .one_line()
-                                    .child(owner.name.clone()),
+                                    .child(bot.name.clone()),
                             )
                             .child(
                                 div()
+                                    .flex()
+                                    .gap(space::S4)
                                     .t_small()
                                     .tnum()
-                                    .text_color(k.text_2)
-                                    .one_line()
-                                    .child(state),
+                                    .text_color(state_color)
+                                    .child(div().min_w(px(0.)).one_line().child(state_text))
+                                    .when_some(trailing, |el, t| {
+                                        el.child(div().flex_none().child(t))
+                                    }),
                             ),
                     ),
             )
-            .when_some(summary, |el, s| {
+            .when_some(error, |el, e| {
                 el.child(
                     div()
                         .mt(space::S8)
                         .t_small()
                         .text_color(k.text_2)
-                        .line_clamp(3)
-                        .child(s),
+                        .line_clamp(2)
+                        .child(e),
                 )
             })
-            .when(run.is_some(), |el| {
+            .when(!rows.is_empty(), |el| {
                 el.child(
-                    div().mt(space::S6).ml(-space::S6).flex().child(
+                    div()
+                        .mt(space::S8)
+                        .flex()
+                        .flex_col()
+                        .children(rows.into_iter().map(|row| {
+                            div()
+                                .h(size::PLAN_ROW)
+                                .flex()
+                                .items_center()
+                                .gap(space::S10)
+                                .child(div().flex_none().child(ui::icon(
+                                    row.glyph,
+                                    theme::icon::ROW,
+                                    row.color,
+                                )))
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.))
+                                        .t_small()
+                                        .text_color(if row.current { k.text_1 } else { k.text_2 })
+                                        .when(row.current, |el| el.medium())
+                                        .one_line()
+                                        .child(row.text),
+                                )
+                        })),
+                )
+            })
+            .when(has_run, |el| {
+                el.child(
+                    div().mt(space::S4).ml(-space::S6).flex().child(
                         ui::text_button("panel-view-process", p::VIEW_PROCESS, cx)
                             .on_click(cx.listener(|this, _, _, cx| this.set_tab(1, cx))),
                     ),
@@ -286,26 +690,19 @@ impl SidePanel {
 
     /// 成员 · n (§8.1): 40 pt rows, a 24 pt avatar, the name `ui` 14 and the
     /// 岗位 trailing in 13/20 `text-3` (a 12 pt `bot` glyph before it for
-    /// bots); the owner reads `负责人`.
+    /// bots); then `添加成员`, which starts an @ in the composer.
     fn members_section(&self, topic: &Topic, cx: &mut Context<Self>) -> gpui::AnyElement {
         let k = theme::colors(cx);
-        let mut ids: Vec<&str> = self.group_members.iter().map(String::as_str).collect();
-        // The owner first, then people, then bots, each by name.
-        ids.sort_by_key(|id| {
-            let m = self.member(id);
-            (
-                topic.owner_id.as_deref() != Some(*id),
-                m.is_some_and(|m| m.is_bot()),
-                m.map(|m| m.name.clone()).unwrap_or_default(),
-            )
-        });
-        let rows = ids.iter().filter_map(|id| self.member(id)).map(|m| {
-            let owner = topic.owner_id.as_deref() == Some(m.id.as_str());
-            let role = if owner {
-                Some(p::ROLE_OWNER.to_string())
-            } else {
-                m.role.clone()
-            };
+        let me = self.services.me();
+        let ids = member_ids_of(
+            self.services.provider.as_ref(),
+            me.as_deref(),
+            topic,
+            &self.messages,
+        );
+        let list: Vec<&Member> = ids.iter().filter_map(|id| self.member(id)).collect();
+        let count = list.len() as u32;
+        let rows = list.into_iter().map(|m| {
             div()
                 .h(size::PANEL_ROW)
                 .flex()
@@ -325,7 +722,7 @@ impl SidePanel {
                         .one_line()
                         .child(m.name.clone()),
                 )
-                .when_some(role, |el, role| {
+                .when_some(m.role.clone().filter(|r| !r.is_empty()), |el, role| {
                     el.child(
                         div()
                             .flex_none()
@@ -335,24 +732,102 @@ impl SidePanel {
                             .gap(space::S4)
                             .t_small()
                             .text_color(k.text_3)
-                            .when(m.is_bot() && !owner, |el| {
+                            .when(m.is_bot(), |el| {
                                 el.child(ui::icon(Lucide::Bot, theme::icon::TAG, k.text_3))
                             })
                             .child(div().min_w(px(0.)).one_line().child(role)),
                     )
                 })
         });
+        let add = Button::new("panel-add-member")
+            .custom(
+                ButtonCustomVariant::new(cx)
+                    .foreground(k.accent_text)
+                    .hover(k.hover)
+                    .active(k.pressed),
+            )
+            .w_full()
+            .h(size::PANEL_ROW)
+            .mx(-space::S8)
+            .px(space::S8)
+            .rounded(theme::radius::MD)
+            .child(
+                div()
+                    .w_full()
+                    .flex()
+                    .items_center()
+                    .gap(space::S10)
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(size::AVATAR_ROW)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(ui::icon(Lucide::UserPlus, theme::icon::ROW, k.accent_text)),
+                    )
+                    .child(
+                        div()
+                            .t_ui()
+                            .medium()
+                            .text_color(k.accent_text)
+                            .child(p::ADD_MEMBER),
+                    ),
+            )
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(MentionInComposer), cx));
         div()
             .flex()
             .flex_col()
-            .child(div().mb(space::S4).child(ui::panel_label(
-                p::MEMBERS,
-                Some(ids.len() as u32),
-                cx,
-            )))
+            .child(
+                div()
+                    .mb(space::S4)
+                    .child(ui::panel_label(p::MEMBERS, Some(count), cx)),
+            )
             .children(rows)
+            .child(add)
             .into_any_element()
     }
+}
+
+/// A plan list (§8.1): a card list whose items carry statuses.
+fn is_plan(items: &[CardListItem]) -> bool {
+    items.len() >= 2 && items.iter().all(|i| i.status.is_some())
+}
+
+/// The bot's latest step as one phrase: its newest status line (what the
+/// timeline's live line shows).
+fn live_step(steps: &[ProcessStep]) -> Option<String> {
+    steps.iter().rev().find_map(|s| match s {
+        ProcessStep::Status { message } if !message.trim().is_empty() => {
+            Some(message.trim().to_string())
+        }
+        _ => None,
+    })
+}
+
+/// `m:ss` since `since` (the live line's format), `h:mm:ss` from an hour.
+fn elapsed(since: Millis, now: Millis) -> String {
+    let s = ((now - since).max(0) / 1000) as u64;
+    if s >= 3600 {
+        format!("{}:{:02}:{:02}", s / 3600, s / 60 % 60, s % 60)
+    } else {
+        format!("{}:{:02}", s / 60, s % 60)
+    }
+}
+
+/// `14:31 更新`, or `刚刚更新`: a space only after a number.
+fn updated_text(at: Millis) -> String {
+    let now = chrono::Utc::now().timestamp_millis();
+    let time = time_text(at.min(now));
+    let spaced = time.chars().last().is_some_and(|c| c.is_ascii_digit());
+    fill(
+        if spaced {
+            p::CONTEXT_UPDATED
+        } else {
+            p::CONTEXT_UPDATED_WORD
+        },
+        &[("time", &time)],
+    )
 }
 
 impl Render for SidePanel {
@@ -363,20 +838,15 @@ impl Render for SidePanel {
         let topic = self.topic.clone();
         let page = div().size_full().flex().flex_col().bg(k.content).t_ui();
         let Some(topic) = topic else {
-            return page.child(self.header(None, false, cx));
+            return page;
         };
         if tab == 1 {
             return page
                 .child(self.header(Some(&topic), true, cx))
                 .child(div().flex_1().min_h(px(0.)).child(self.process.clone()));
         }
-        let owner_bot = topic
-            .owner_id
-            .as_deref()
-            .and_then(|id| self.member(id))
-            .filter(|m| m.is_bot())
-            .cloned();
-        let progress = owner_bot.map(|m| self.progress(&m, cx));
+        let bot = self.bot().cloned();
+        let progress = bot.map(|m| self.progress(&topic, &m, cx));
         let members = self.members_section(&topic, cx);
         page.child(self.header(Some(&topic), false, cx)).child(
             div()
@@ -391,7 +861,7 @@ impl Render for SidePanel {
                 .flex_col()
                 .gap(space::S16)
                 .children(progress)
-                .child(self.outputs.clone())
+                .when(self.has_outputs, |el| el.child(self.outputs.clone()))
                 .child(members)
                 .when(developer, |el| {
                     el.child(

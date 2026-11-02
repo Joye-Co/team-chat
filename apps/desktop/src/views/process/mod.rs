@@ -8,6 +8,8 @@
 pub mod preview;
 mod steps;
 
+pub use steps::{error_line, glyph as step_glyph, step_line};
+
 use std::{path::PathBuf, time::Duration};
 
 use gpui::{

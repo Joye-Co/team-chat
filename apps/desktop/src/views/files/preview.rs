@@ -299,5 +299,8 @@ pub fn open(services: Services, content: Size<Pixels>, cx: &mut App) -> Result<A
     let provider: Arc<dyn ChatProvider> = FilesPreview::new(services.provider.clone());
     let services = Services::new(provider, cx);
     open_first_topic(&services, cx);
+    services
+        .nav
+        .update(cx, |nav, cx| nav.set_side_panel_open(true, cx));
     open_main(services, content, cx)
 }

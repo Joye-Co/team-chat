@@ -31,7 +31,16 @@ use crate::{
     },
 };
 
-gpui::actions!(desktop, [Quit, OpenSettings, ToggleSidePanel, NewTopic]);
+gpui::actions!(
+    desktop,
+    [
+        Quit,
+        OpenSettings,
+        ToggleSidePanel,
+        NewTopic,
+        MentionInComposer
+    ]
+);
 
 /// A batch of provider changes, emitted by [`ChangeHub`].
 #[derive(Clone, Debug)]
@@ -98,7 +107,12 @@ pub struct Navigation {
     /// The open topic: (group id, topic id). `None` with a group place means
     /// the composer starts a new topic.
     pub topic: Option<(GroupId, TopicId)>,
+    /// Closed by default; opens by hand, or by itself once per topic
+    /// (DESIGN.md §8.1). Never shown with no topic open.
     pub side_panel_open: bool,
+    /// Topics where the side panel no longer opens by itself: it did once,
+    /// or the user closed it there.
+    side_panel_settled: std::collections::HashSet<(GroupId, TopicId)>,
     pub developer_view: bool,
     /// The side panel tab: 0 = 详情, 1 = 过程.
     pub side_panel_tab: usize,
@@ -123,7 +137,8 @@ impl Navigation {
         Self {
             place: None,
             topic: None,
-            side_panel_open: true,
+            side_panel_open: false,
+            side_panel_settled: Default::default(),
             developer_view: false,
             side_panel_tab: 0,
             focus: None,
@@ -189,8 +204,31 @@ impl Navigation {
     }
 
     pub fn toggle_side_panel(&mut self, cx: &mut Context<Self>) {
-        self.side_panel_open = !self.side_panel_open;
-        cx.notify();
+        self.set_side_panel_open(!self.side_panel_open, cx);
+    }
+
+    /// Opens or closes the side panel by hand. A close is remembered for the
+    /// open topic: the panel does not open by itself there again.
+    pub fn set_side_panel_open(&mut self, open: bool, cx: &mut Context<Self>) {
+        if !open && let Some(topic) = self.topic.clone() {
+            self.side_panel_settled.insert(topic);
+        }
+        if self.side_panel_open != open {
+            self.side_panel_open = open;
+            cx.notify();
+        }
+    }
+
+    /// Opens the side panel by itself (a bot started work or the first 产出
+    /// arrived), once per topic and never after the user closed it there.
+    pub fn auto_open_side_panel(&mut self, cx: &mut Context<Self>) {
+        let Some(topic) = self.topic.clone() else {
+            return;
+        };
+        if self.side_panel_settled.insert(topic) && !self.side_panel_open {
+            self.side_panel_open = true;
+            cx.notify();
+        }
     }
 
     pub fn set_side_panel_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
@@ -334,6 +372,10 @@ impl Render for RootView {
             }))
             .on_action(cx.listener(|this, _: &NewTopic, _, cx| {
                 this.services.nav.update(cx, |nav, cx| nav.new_topic(cx));
+            }))
+            .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
+                this.composer
+                    .update(cx, |composer, cx| composer.insert_text("@", window, cx));
             }));
         if !matches!(
             self.services.provider.session(),
@@ -359,7 +401,10 @@ impl Render for RootView {
             ]);
         }
         // The side panel needs a window of at least 1100 pt (§5.1).
-        let panel_open = self.services.nav.read(cx).side_panel_open
+        // It never shows with no topic open (U07).
+        let nav = self.services.nav.read(cx);
+        let panel_open = nav.side_panel_open
+            && nav.topic.is_some()
             && window.viewport_size().width >= theme::SIDE_PANEL_MIN_WINDOW;
         root.flex()
             .flex_row()

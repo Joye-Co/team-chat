@@ -53,4 +53,6 @@ crate::copy! {
     STEP_STATUS = "状态",
     STEP_DONE = "工作结束：{status}",
     MORE_LINES = "还有 {n} 行",
+    STEP_SAID_LINE = "{name} 说：{text}",
+    STEP_INPUT_LINE = "收到：{text}",
 }

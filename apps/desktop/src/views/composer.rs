@@ -800,7 +800,8 @@ impl ComposerView {
         self.on_text_changed(window, cx);
     }
 
-    fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+    /// Types `text` at the caret and focuses the field (`@` opens the @ list).
+    pub fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
         self.input.update(cx, |state, cx| {
             state.focus(window, cx);
             state.replace(text.to_string(), window, cx);

@@ -149,15 +149,6 @@ impl Render for TopicOutputs {
         let provider = self.services.provider.clone();
         let creating = provider.file_transfer(&create_key(&t));
         let busy = matches!(creating, Some(TransferState::Running { .. }));
-        let quiet = |text: &'static str| {
-            div()
-                .h(px(24.))
-                .flex()
-                .items_center()
-                .t_meta()
-                .text_color(k.text_3)
-                .child(text)
-        };
 
         // `产出 · 2` with the upload button at the right (§8.1 sections).
         let header = div()
@@ -298,41 +289,44 @@ impl Render for TopicOutputs {
             .collect();
         let n_files = files.len() as u32;
 
+        // An empty 产出 section is left out (the side panel shows no filler).
+        let show_artifacts = !rows.is_empty() || busy;
         div()
             .flex()
             .flex_col()
             .gap(space::S16)
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .child(header)
-                    .when_some(creating, |el, state| match state {
-                        TransferState::Running { .. } => el.child(
-                            div()
-                                .py(space::S4)
-                                .flex()
-                                .flex_col()
-                                .gap(space::S6)
-                                .child(div().t_meta().tnum().text_color(k.text_2).child(fill(
-                                    ca::CREATING,
-                                    &[("p", &format!("{:.0}", state.percent()))],
-                                )))
-                                .child(
-                                    div().h(px(3.)).rounded(px(1.5)).bg(k.field).child(
-                                        div()
-                                            .h_full()
-                                            .w(relative((state.percent() / 100.).clamp(0., 1.)))
-                                            .rounded(px(1.5))
-                                            .bg(k.accent),
+            .when(show_artifacts, |el| {
+                el.child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(header)
+                        .when_some(creating, |el, state| match state {
+                            TransferState::Running { .. } => el.child(
+                                div()
+                                    .py(space::S4)
+                                    .flex()
+                                    .flex_col()
+                                    .gap(space::S6)
+                                    .child(div().t_meta().tnum().text_color(k.text_2).child(fill(
+                                        ca::CREATING,
+                                        &[("p", &format!("{:.0}", state.percent()))],
+                                    )))
+                                    .child(
+                                        div().h(px(3.)).rounded(px(1.5)).bg(k.field).child(
+                                            div()
+                                                .h_full()
+                                                .w(relative((state.percent() / 100.).clamp(0., 1.)))
+                                                .rounded(px(1.5))
+                                                .bg(k.accent),
+                                        ),
                                     ),
-                                ),
-                        ),
-                        _ => el,
-                    })
-                    .when(rows.is_empty(), |el| el.child(quiet(p::ARTIFACTS_NONE)))
-                    .children(rows),
-            )
+                            ),
+                            _ => el,
+                        })
+                        .children(rows),
+                )
+            })
             .when(n_files > 0, |el| {
                 el.child(
                     div()
