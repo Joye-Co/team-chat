@@ -651,9 +651,14 @@ any time show `2025年11月4日 23:59`.
 app icon 72, drawn bare: the brand SVG cropped to its squircle (viewBox `100 100 824 824`; `icon-dark.svg` in dark mode), its own shadow filter removed and replaced by `drop-shadow(0 4 12 #0F11141F)` on the image; no tile, radius or frame around it (U39); 24 pt; `欢迎加入团队` `display`;
 6 pt; `输入管理员发给你的邀请码` `body` `text-2`; 28 pt; label `邀请码` (§7.4); 8 pt; the invite
 code boxes (§7.4); 24 pt; `加入` `lg` primary, full column width, disabled until complete; 16 pt;
-the server line `server` 14 + `team.joye.co` 13/20 `text-3` + ` · ` + `更改` 13/20 500
-`accent-text`, which reveals a 40 pt server field. Errors: the code boxes take the error state and `邀请码不对，请检查后再试。`
-shows under them.
+for the built-in server, 12 pt then a centered text button `使用其他服务器` 13/20 500
+`accent-text` (the raw host is not shown); for a custom server, the server line `server` 14 +
+`team.joye.co` 13/20 `text-3` + ` · ` + `更改` 13/20 500 `accent-text`. Both reveal a 40 pt
+server field. The first box has focus and the caret when the screen opens; `加入` is enabled
+once 8 characters are in. A pasted `tc_` credential or a 12-character code of the earlier
+format shows as one locked field. Errors: the code boxes take the error border, `邀请码不对，请检查后再试。`
+shows under them, and the typed code stays in the boxes, selected (each character on the
+text-selection color), so the next keystroke replaces it.
 
 ### 8.4 Settings (`settings-members-*`)
 
@@ -670,6 +675,10 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
   `text-3`, `Mac mini`, with the dot on line 1), 权限, 132 pt (select 36 × 120; your own row is
   plain text, §7.4), trailing 32 pt `ellipsis` or an empty slot of the same width. Names are
   trimmed (U41). One primary `添加成员 ▾` (36 pt page primary) with `邀请同事` and `添加 AI 成员`.
+  Order: me, the other owners, the other people, then bot members, then deactivated members; by
+  name inside each part. The 权限 words are `管理员` and `普通成员`, the words of the login and
+  invite copy; the mockup's `所有者` and `成员` are superseded. Select text is regular (400). The
+  page scrolls; its end keeps 32 pt under the footnote.
 - **我的资料**: avatar with `更换头像` and its help `PNG、JPEG 或 WebP，不超过 1 MB`; name and 岗位
   form fields save on blur; sign-out at the bottom; `退出并删除本机记录` in its own danger row
   (U40).
@@ -677,6 +686,8 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
   `content` fill with a level-1 shadow); 群 and 私聊 in separate tables (U42).
 - **机器**: rows with an icon by machine type, Chinese tags, status centered (U43).
 - **成本**: hidden until it exists (U43).
+- **通用** (last in the section list, `settings` gear 16, as in the mockup): the about card
+  (app icon, version, update state, 检查更新, server), 诊断, and the developer-view switch.
 
 ### 8.5 Empty and error states
 
@@ -692,9 +703,13 @@ search field (36 × 320, `content` + 1 pt `border` like the selects); 16 pt; the
 
 ### 8.6 Banners
 
-App-level banners (update ready, offline) sit above the sidebar footer as a 48 pt card (radius 8,
-`raised`, 1 pt `border`), never in the topic column, so header lines stay aligned (U17). Buttons
-`sm`.
+App-level banners (update ready, offline) sit above the sidebar footer as a 52 pt card (radius 8,
+`raised`, 1 pt `border`, padding 8 8 8 12, 12 pt side margins and 8 pt under it), never in the
+topic column, so header lines stay aligned (U17). Anatomy: a 16 pt glyph, gap 10, the title
+(`small` 13/20 500 `text-1`) over the detail (12/16 `text-3`), each one line with `…`, then the
+`sm` actions with a gap of 4. The detail is short enough for a 248 pt sidebar
+(`安装盘已在访达中打开`, `8 秒后重连`, `版本 0.2.0`); a longer sentence goes to the tooltip.
+Both banners use one card helper, so they share size and rhythm.
 
 ## 9. Bots and live work
 
