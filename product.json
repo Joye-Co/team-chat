@@ -5,7 +5,7 @@
   "urlScheme": "teamchat",
   "tagline": "Desktop work chat where people and bots are equal members",
   "servers": {
-    "staging": "",
+    "staging": "https://chat-api-staging.huangdeshiou.workers.dev",
     "production": ""
   }
 }
