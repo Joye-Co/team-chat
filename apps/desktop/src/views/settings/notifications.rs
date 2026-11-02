@@ -137,8 +137,15 @@ impl NotificationsPage {
             .child(div().w(SEGMENTS).flex_none().child(widgets::choice(
                 SharedString::from(format!("notify-{}", g.id)),
                 &[s::NOTIFY_ALL, s::NOTIFY_MENTIONS, s::NOTIFY_NONE],
-                level_ix(prefs.notify),
-                false,
+                // A muted 群 notifies about nothing: its 提醒 shows 不提醒,
+                // disabled, so it never disagrees with the switch. The
+                // stored level comes back when the 群 is unmuted.
+                if prefs.muted {
+                    level_ix(NotifyLevel::None)
+                } else {
+                    level_ix(prefs.notify)
+                },
+                prefs.muted,
                 move |ix, _, cx| {
                     let level = LEVELS[ix.min(2)];
                     let _ = page.update(cx, |this, cx| this.set_level(&gid, level, cx));
