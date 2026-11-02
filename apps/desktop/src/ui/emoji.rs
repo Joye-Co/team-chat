@@ -173,19 +173,29 @@ pub fn reaction_label(names: &[String]) -> String {
 /// A name for a pill or the typing line: an email shows its local part, and
 /// a long name keeps about six CJK characters (twelve Latin ones), then `…`.
 pub fn short_name(name: &str) -> String {
-    const MAX: usize = 12;
     let name = name.split('@').next().unwrap_or(name).trim();
-    let width = |c: char| if c >= '\u{2E80}' { 2 } else { 1 };
-    if name.chars().map(width).sum::<usize>() <= MAX {
-        return name.to_string();
+    clip_units(name, 12)
+}
+
+/// Display width units of a character: 2 for CJK, full-width marks and
+/// emoji, 1 for the rest (a rough stand-in for measuring the text).
+fn width_units(c: char) -> usize {
+    if c >= '\u{2E80}' { 2 } else { 1 }
+}
+
+/// Cuts `text` to `max` width units (CJK counts 2, Latin 1), ending in `…`
+/// when cut. The `…` counts one unit, so the result never passes `max`.
+pub fn clip_units(text: &str, max: usize) -> String {
+    if text.chars().map(width_units).sum::<usize>() <= max {
+        return text.to_string();
     }
     let mut out = String::new();
     let mut used = 0;
-    for c in name.chars() {
-        if used + width(c) > MAX - 1 {
+    for c in text.chars() {
+        if used + width_units(c) > max.saturating_sub(1) {
             break;
         }
-        used += width(c);
+        used += width_units(c);
         out.push(c);
     }
     format!("{}…", out.trim_end())
@@ -215,5 +225,16 @@ mod tests {
         assert_eq!(short_name("Aleksandra Wiśniewska"), "Aleksandra…");
         assert_eq!(short_name("产品设计与前端体验改进"), "产品设计与…");
         assert_eq!(short_name("欧阳慕容"), "欧阳慕容");
+    }
+
+    #[test]
+    fn clips_by_display_width() {
+        assert_eq!(clip_units("产品讨论", 24), "产品讨论");
+        assert_eq!(
+            clip_units("二零二六年第四季度跨部门产品规划讨论群", 24),
+            "二零二六年第四季度跨部…"
+        );
+        assert_eq!(clip_units("abcdefghij", 6), "abcde…");
+        assert_eq!(clip_units("", 6), "");
     }
 }

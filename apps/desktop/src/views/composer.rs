@@ -49,6 +49,36 @@ pub use model::MentionQuery;
 pub const MAX_BODY_CHARS: usize = 32_768;
 /// Messages searched for the one Up edits and for the quoted message.
 const RECENT_MESSAGES: usize = 200;
+/// Display width units (CJK 2, Latin 1) of the title in `回复「title」`.
+/// With the fixed 8 units it fits a 14 pt line in the narrowest field.
+pub(crate) const PLACEHOLDER_TITLE_UNITS: usize = 44;
+/// Display width units of the group name in the new-topic placeholder; with
+/// the fixed 30 units it fits the same line.
+pub(crate) const PLACEHOLDER_GROUP_UNITS: usize = 24;
+
+/// `回复「title」` with the title cut to fit; an empty title is `（无标题）`.
+pub(crate) fn reply_placeholder(title: &str) -> String {
+    let title = crate::views::sidebar::topic_display_title(title).0;
+    fill(
+        c::PLACEHOLDER_REPLY,
+        &[(
+            "title",
+            &crate::ui::emoji::clip_units(&title, PLACEHOLDER_TITLE_UNITS),
+        )],
+    )
+}
+
+/// `在「群」发起新话题，第一行是标题` with the group name cut to fit.
+pub(crate) fn new_topic_placeholder(group: &str) -> String {
+    let group = crate::views::sidebar::topic_line(group);
+    fill(
+        c::PLACEHOLDER_NEW_IN,
+        &[(
+            "group",
+            &crate::ui::emoji::clip_units(&group, PLACEHOLDER_GROUP_UNITS),
+        )],
+    )
+}
 
 /// The message being edited.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -229,7 +259,10 @@ impl ComposerView {
     }
 
     /// The placeholder names the destination (§7.2): `回复「title」`, or
-    /// `在「群」发起新话题，第一行是标题`.
+    /// `在「群」发起新话题，第一行是标题`. The placeholder does not cut
+    /// itself to the field, so the title and the group name are cut by
+    /// display width to fit the narrowest topic view (480 pt, §15): the
+    /// fixed text, `」` and `第一行是标题` always stay whole.
     fn placeholder(&self) -> String {
         let provider = &self.services.provider;
         let Some(key) = &self.key else {
@@ -240,17 +273,11 @@ impl ComposerView {
         }
         match &key.topic_id {
             Some(t) => match provider.topic(&key.group_id, t) {
-                Some(topic) => fill(
-                    c::PLACEHOLDER_REPLY,
-                    &[(
-                        "title",
-                        &model::excerpt(&crate::views::sidebar::topic_line(&topic.title), 30),
-                    )],
-                ),
+                Some(topic) => reply_placeholder(&topic.title),
                 None => c::PLACEHOLDER.to_string(),
             },
             None => match provider.groups().into_iter().find(|g| g.id == key.group_id) {
-                Some(group) => fill(c::PLACEHOLDER_NEW_IN, &[("group", &group.name)]),
+                Some(group) => new_topic_placeholder(&group.name),
                 None => c::PLACEHOLDER_NEW_TOPIC.to_string(),
             },
         }
