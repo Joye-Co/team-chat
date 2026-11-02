@@ -184,6 +184,7 @@ pub fn mime_for(path: &str) -> &'static str {
         .unwrap_or_default();
     match ext.as_str() {
         "html" | "htm" => "text/html; charset=utf-8",
+        "xhtml" | "xht" => "application/xhtml+xml; charset=utf-8",
         "css" => "text/css; charset=utf-8",
         "js" | "mjs" => "text/javascript; charset=utf-8",
         "json" | "map" => "application/json; charset=utf-8",
@@ -232,6 +233,7 @@ fn response(status: u16, host: &str, mime: &str, body: Arc<[u8]>) -> Response {
             ("X-Content-Type-Options", "nosniff".into()),
             ("Cache-Control", "no-store".into()),
             ("Referrer-Policy", "no-referrer".into()),
+            ("X-DNS-Prefetch-Control", "off".into()),
             ("Cross-Origin-Resource-Policy", "same-origin".into()),
         ],
         body,
@@ -426,6 +428,7 @@ mod tests {
     fn mime_types() {
         assert_eq!(mime_for("a.JS"), "text/javascript; charset=utf-8");
         assert_eq!(mime_for("a.svg"), "image/svg+xml");
+        assert_eq!(mime_for("a.XHTML"), "application/xhtml+xml; charset=utf-8");
         assert_eq!(mime_for("noext"), "application/octet-stream");
     }
 }

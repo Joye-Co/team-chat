@@ -33,6 +33,22 @@ use crate::{
 };
 
 const RULE_LIST_ID: &str = "artifact-view-block-network-v1";
+/// Removes the WebRTC constructors in every frame (kept with the private
+/// preference below, which WebKit may drop in a later release).
+const NO_NETWORK_SCRIPT: &str = "(()=>{for(const k of ['RTCPeerConnection','webkitRTCPeerConnection','RTCDataChannel','RTCIceCandidate','RTCSessionDescription','RTCRtpSender','RTCRtpReceiver','RTCRtpTransceiver']){try{delete window[k]}catch(e){}try{Object.defineProperty(window,k,{value:undefined,configurable:false,writable:false})}catch(e){}}})();";
+
+/// Turns a private `WKPreferences` switch off when this WebKit has it. Use
+/// it inside an `unsafe` block: the setter must take one BOOL.
+macro_rules! disable_private_pref {
+    ($prefs:expr, $setter:ident) => {{
+        let prefs: &objc2_web_kit::WKPreferences = $prefs;
+        let responds: bool = msg_send![prefs, respondsToSelector: sel!($setter:)];
+        if responds {
+            let _: () = msg_send![prefs, $setter: false];
+        }
+    }};
+}
+
 const EXTERNAL_LINK_INTERVAL: Duration = Duration::from_millis(800);
 
 struct State {
@@ -488,9 +504,22 @@ impl ArtifactWindow {
                 ProtocolObject::from_ref(&*controller),
                 &NSString::from_str("bridge"),
             );
+            // WebRTC (STUN/TURN) and DNS prefetch go around the CSP and the
+            // content rule list, so a page could reach the network or learn the
+            // viewer's IP. Remove the APIs in every frame as well.
+            let no_rtc = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
+                WKUserScript::alloc(mtm),
+                &NSString::from_str(NO_NETWORK_SCRIPT),
+                WKUserScriptInjectionTime::AtDocumentStart,
+                false,
+            );
+            ucc.addUserScript(&no_rtc);
             config.setUserContentController(&ucc);
             let prefs = config.preferences();
             prefs.setJavaScriptCanOpenWindowsAutomatically(false);
+            disable_private_pref!(&prefs, _setPeerConnectionEnabled);
+            disable_private_pref!(&prefs, _setDNSPrefetchingEnabled);
+            disable_private_pref!(&prefs, _setMediaDevicesEnabled);
             config.setSuppressesIncrementalRendering(false);
         }
 

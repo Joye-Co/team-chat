@@ -74,6 +74,17 @@ mod demo {
           });
         } catch (e) { r.webSocketFails = true; }
         try { await fetch('pixel.png'); r.selfFetchBlocked = false; } catch (e) { r.selfFetchBlocked = true; }
+        r.webRtcGone = typeof RTCPeerConnection === 'undefined' && typeof webkitRTCPeerConnection === 'undefined'
+          && typeof RTCDataChannel === 'undefined';
+        try {
+          var pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+          pc.createDataChannel('x');
+          await pc.setLocalDescription(await pc.createOffer());
+          r.stunGathered = await new Promise(function (res) {
+            pc.onicecandidate = function (e) { if (e.candidate && / srflx /.test(e.candidate.candidate)) res(true); };
+            setTimeout(function () { res(false); }, 3000);
+          });
+        } catch (e) { r.stunGathered = false; }
         r.data = await window.artifact.getData();
         var raw = await new Promise(function (res) {
           function on(e) { if (e.detail && e.detail.id === 'raw-1') { window.removeEventListener('artifactbridgereply', on); res(e.detail); } }
@@ -316,6 +327,10 @@ mod demo {
                                 b("remoteImageFails") && b("webSocketFails"),
                             );
                             r.check("connectSrcNoneBlocksSelfFetch", b("selfFetchBlocked"));
+                            r.check(
+                                "webRtcRemoved",
+                                b("webRtcGone") && payload["stunGathered"] == json!(false),
+                            );
                             r.check(
                                 "cspEnforced",
                                 payload["cspViolations"].as_array().is_some_and(|v| {
