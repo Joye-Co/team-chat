@@ -392,6 +392,23 @@ pub fn run(services: Services, count: usize, report: PathBuf, cx: &mut App) {
             report: hook_report.clone(),
             done: false,
         }));
+        // A fully covered window gets no frames: keep it above other apps'
+        // windows (without focus or activation) while the test runs.
+        let _ = crate::selftest::capture::order_front(window);
+        let handle = window.window_handle();
+        let watch = Rc::downgrade(&driver);
+        cx.spawn(async move |cx| {
+            loop {
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+                if watch.upgrade().is_none_or(|d| d.borrow().done) {
+                    break;
+                }
+                let _ = handle.update(cx, |_, window, _| {
+                    crate::selftest::capture::order_front(window)
+                });
+            }
+        })
+        .detach();
         schedule(driver, window);
     });
     match app::open_main_window(services, false, Some(hook), cx) {
@@ -553,8 +570,11 @@ fn write_and_quit(path: &PathBuf, json: serde_json::Value, ok: bool, cx: &mut Ap
     if !written {
         eprintln!("cannot write {}", path.display());
     }
-    crate::set_exit_code(if ok && written { 0 } else { 1 });
+    let code = if ok && written { 0 } else { 1 };
+    crate::set_exit_code(code);
     cx.quit();
+    // On macOS `run` does not return after `quit`, so exit with the code here.
+    std::process::exit(code);
 }
 
 impl TimelineView {
