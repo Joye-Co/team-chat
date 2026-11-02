@@ -72,7 +72,7 @@
       "triggers": { "crons": ["0 3 * * *"] },
       "vars": { "ENVIRONMENT": "production", "VERSION": "0.0.0" },
       "d1_databases": [
-        { "binding": "DB", "database_name": "chat-prod", "database_id": "REPLACE_WITH_CHAT_PROD_DATABASE_ID", "migrations_dir": "migrations" }
+        { "binding": "DB", "database_name": "chat-prod", "database_id": "6785a4f4-5089-4410-8d30-d38d5cadc413", "migrations_dir": "migrations" }
       ],
       "r2_buckets": [{ "binding": "FILES", "bucket_name": "chat-files-prod" }],
       "durable_objects": {
