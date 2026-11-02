@@ -1510,7 +1510,16 @@ checksum = "d0881ea181b1df73ff77ffaaf9c7544ecc11e82fba9b5f27b262a3c73a332555"
 name = "e2e"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "chat-core",
+ "fastrand",
+ "futures-util",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+ "ulid",
 ]
 
 [[package]]
