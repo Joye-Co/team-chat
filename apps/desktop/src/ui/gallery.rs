@@ -236,7 +236,8 @@ fn forced_states(cx: &App) -> gpui::Div {
     }
     let mut icons = vec![label("icon")];
     for (state, sname) in FORCED {
-        let b = ui::icon_button(SharedString::from(format!("st-icon-{sname}")), Lucide::Bell);
+        let b = ui::icon_button(SharedString::from(format!("st-icon-{sname}")), Lucide::Bell)
+            .named("关注");
         let b = match state {
             Forced::Rest => b.into_any_element(),
             Forced::Hover => b.bg(k.hover).into_any_element(),

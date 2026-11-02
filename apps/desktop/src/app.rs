@@ -20,7 +20,8 @@ use gpui::{
     Animation, AnimationExt as _, App, AppContext, Bounds, Context, ElementId, Entity,
     EventEmitter, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
     MouseMoveEvent, MouseUpEvent, ParentElement, Render, Styled, Subscription, TitlebarOptions,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
+    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point,
+    prelude::FluentBuilder as _, px, size,
 };
 
 use crate::{

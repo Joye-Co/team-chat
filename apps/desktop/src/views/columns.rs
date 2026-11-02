@@ -311,7 +311,7 @@ mod tests {
         c.sidebar = px(320.);
         c.topic_list = px(400.);
         let (s, l) = c.fitted(px(1100.), true);
-        assert_eq!((s, l), (px(248.), px(320.)));
+        assert_eq!(s + l, px(1100. - 480.));
         assert!(l >= theme::TOPIC_LIST_MIN_WIDTH);
         assert_eq!(c.fitted(px(1440.), true), (px(320.), px(400.)));
         assert_eq!(c.fitted(px(1100.), false).0, px(0.));

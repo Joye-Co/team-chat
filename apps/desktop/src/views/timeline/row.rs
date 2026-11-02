@@ -7,9 +7,9 @@
 //! meta line.
 
 use gpui::{
-    AnimationExt as _, AnyElement, App, ClipboardItem, Context, ElementId, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ClipboardItem, Context, ElementId, InteractiveElement as _, IntoElement,
+    ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
@@ -90,14 +90,13 @@ impl TimelineView {
             .get(&key)
             .is_some_and(|at| at.elapsed() < theme::motion::FAST)
         {
-            message_row = div()
-                .child(message_row)
-                .with_animation(
-                    ElementId::Name(format!("arrive-{key}").into()),
-                    gpui::Animation::new(theme::motion::FAST).with_easing(theme::motion::out_fn()),
-                    |el, t| el.opacity(t),
-                )
-                .into_any_element();
+            // Opacity only, so it stays with reduce motion (§12).
+            message_row = ui::motion::fade_in(
+                ElementId::Name(format!("arrive-{key}").into()),
+                theme::motion::FAST,
+                div().child(message_row),
+                cx,
+            );
         }
         item.children(gap.map(|h| div().flex_none().h(h)))
             .child(message_row)
