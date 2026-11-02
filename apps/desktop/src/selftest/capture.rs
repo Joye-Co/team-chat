@@ -159,8 +159,14 @@ pub fn draw_as_key(window: &Window) -> Result<(), String> {
     // `windowDidBecomeKey:`, which takes a notification it does not read.
     unsafe {
         let class: *const AnyClass = objc2::msg_send![ns_window, class];
-        let imp: Imp = std::mem::transmute::<extern "C-unwind" fn(*mut AnyObject, Sel) -> Bool, Imp>(yes);
-        objc2::ffi::class_addMethod(class.cast_mut(), objc2::sel!(isKeyWindow), imp, c"B@:".as_ptr());
+        let imp: Imp =
+            std::mem::transmute::<extern "C-unwind" fn(*mut AnyObject, Sel) -> Bool, Imp>(yes);
+        objc2::ffi::class_addMethod(
+            class.cast_mut(),
+            objc2::sel!(isKeyWindow),
+            imp,
+            c"B@:".as_ptr(),
+        );
         let delegate: *mut AnyObject = objc2::msg_send![ns_window, delegate];
         if !delegate.is_null() {
             let none: *mut AnyObject = std::ptr::null_mut();

@@ -51,8 +51,8 @@ pub use overlay::{
 };
 #[allow(unused_imports)]
 pub use parts::{
-    Band, EmptyState, KbdHint, capsule, card, card_padding, floating, hairline, header_band,
-    toolbar_band, vhairline, column_edge, column_start_edge,
+    Band, EmptyState, KbdHint, capsule, card, card_padding, column_edge, column_start_edge,
+    floating, hairline, header_band, toolbar_band, vhairline,
 };
 #[allow(unused_imports)]
 pub use rows::{

@@ -958,9 +958,7 @@ impl Render for Switcher {
                     )
                     // More rows follow below the cut (§7.7 scroll edges),
                     // faded from the dialog surface.
-                    .when(edges.1, |el| {
-                        el.child(edge_fade(false, k.overlay))
-                    }),
+                    .when(edges.1, |el| el.child(edge_fade(false, k.overlay))),
             )
             .child(
                 div()
