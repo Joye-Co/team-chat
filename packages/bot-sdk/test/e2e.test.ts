@@ -314,6 +314,16 @@ describe("bot sdk e2e", () => {
     expect(v2.version.version).toBe(2);
   });
 
+  test("reacts to a message and removes the reaction", async () => {
+    const r = await human.startTopic(generalId, { body: "react to me" });
+    expect(await bot.react(generalId, r.message.id, "👍")).toBe(true);
+    expect(await bot.react(generalId, r.message.id, "👍")).toBe(false);
+    await waitFor("reaction.changed", () =>
+      events.find((e) => e.type === "reaction.changed" && e.data.messageId === r.message.id && e.data.on),
+    );
+    expect(await bot.react(generalId, r.message.id, "👍", false)).toBe(true);
+  });
+
   test("posts a card when the server supports cards", async () => {
     const card: Card = { v: 1, title: "Deploy?", blocks: [{ type: "text", text: "ship it" }], actions: [{ id: "ok", label: "OK" }] };
     let res: Awaited<ReturnType<Bot["postCard"]>> | ChatError;

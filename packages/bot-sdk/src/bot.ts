@@ -492,6 +492,12 @@ export class Bot {
     await this.request({ t: "card.action", groupId, messageId, actionId });
   }
 
+  /** Adds (`on` true, the default) or removes this bot's reaction; false when nothing changed. */
+  async react(groupId: string, messageId: string, emoji: string, on = true): Promise<boolean> {
+    const r = (await this.request({ t: "react", groupId, messageId, emoji, on })) as { changed: boolean };
+    return r.changed;
+  }
+
   typing(groupId: string, topicId: string): void {
     this.sendRaw({ t: "typing", groupId, topicId });
   }
