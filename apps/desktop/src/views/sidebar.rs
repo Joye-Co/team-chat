@@ -379,8 +379,23 @@ impl Sidebar {
                         }),
                     );
             if g.kind == GroupKind::Group {
+                let add_services = services.clone();
+                let (add_id, add_name) = (g.id.clone(), g.name.clone());
                 // The destructive item in its own group, in `danger-text`.
-                menu.separator()
+                menu.item(
+                    menu_item(Lucide::UserPlus, nav::ADD_MEMBERS, false).on_click(
+                        move |_, window, cx| {
+                            super::nav::dialogs::open_add_members(
+                                add_services.clone(),
+                                add_id.clone(),
+                                add_name.clone(),
+                                window,
+                                cx,
+                            );
+                        },
+                    ),
+                )
+                .separator()
                     .item(menu_item(Lucide::LogOut, nav::LEAVE_GROUP, true).on_click(
                         move |_, window, cx| {
                             super::nav::dialogs::confirm_leave(

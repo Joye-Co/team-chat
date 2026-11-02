@@ -42,8 +42,13 @@ crate::copy! {
     SELECTED_COUNT = "已选 {n} 位成员",
     NO_MEMBERS_MATCH = "没有找到这位成员",
     CREATE = "创建",
+    ADD = "添加",
+    // add members dialog
+    ADD_MEMBERS = "添加成员",
+    ADD_MEMBERS_TITLE = "添加成员到「{name}」",
     // start DM picker
     START_DM_PLACEHOLDER = "搜索成员，按回车开始私聊",
+    DM_FAILED = "没能打开私聊：{reason}",
     // quick switcher
     QUICK_SWITCH_PLACEHOLDER = "搜索群、私聊、话题或成员",
     QUICK_SWITCH_EMPTY = "没有找到匹配的结果",

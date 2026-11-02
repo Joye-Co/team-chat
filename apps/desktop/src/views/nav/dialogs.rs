@@ -21,7 +21,7 @@ use gpui_component::{
 use crate::{
     app::{Place, Services},
     copy::{common, fill, nav},
-    data::{CreateGroupRequest, GroupId, Member, MemberId},
+    data::{AdminError, CreateGroupRequest, GroupId, Member, MemberId},
     theme::{self, Type as _, size, space},
     ui::{self, ButtonSpec as _, FieldKind, Lucide},
     views::sidebar::{edge_fade, scroll_edges, watch_scroll_edges},
@@ -51,9 +51,19 @@ pub fn validate_new_group(
     })
 }
 
-/// The body of the new-group dialog. It keeps the inputs across dialog rebuilds.
+/// What the member form does: start a new 群, or add members to one.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FormMode {
+    NewGroup,
+    AddMembers { group_id: GroupId },
+}
+
+/// The body of the new-group and add-members dialogs. It keeps the inputs across dialog
+/// rebuilds, and stays open until the server accepts the request.
 pub struct NewGroupForm {
     services: Services,
+    mode: FormMode,
+    busy: bool,
     name: Entity<InputState>,
     filter: Entity<InputState>,
     members: Vec<Member>,
@@ -65,13 +75,24 @@ pub struct NewGroupForm {
 }
 
 impl NewGroupForm {
-    fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(services: Services, mode: FormMode, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let name =
             cx.new(|cx| InputState::new(window, cx).placeholder(nav::GROUP_NAME_PLACEHOLDER));
         let filter =
             cx.new(|cx| InputState::new(window, cx).placeholder(nav::MEMBER_FILTER_PLACEHOLDER));
         let me = services.me();
-        let members = pickable_members(&services.provider.members(), me.as_deref());
+        let mut members = pickable_members(&services.provider.members(), me.as_deref());
+        if let FormMode::AddMembers { group_id } = &mode {
+            // Only members who are not in the 群 yet.
+            let inside: Vec<MemberId> = services
+                .provider
+                .groups()
+                .into_iter()
+                .find(|g| &g.id == group_id)
+                .map(|g| g.member_ids)
+                .unwrap_or_default();
+            members.retain(|m| !inside.contains(&m.id));
+        }
         let subscriptions = vec![
             cx.subscribe_in(
                 &name,
@@ -93,6 +114,8 @@ impl NewGroupForm {
         ];
         Self {
             services,
+            mode,
+            busy: false,
             name,
             filter,
             members,
@@ -112,17 +135,60 @@ impl NewGroupForm {
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let name = self.name.read(cx).value().to_string();
-        match validate_new_group(&name, &self.selected) {
-            Ok(request) => {
-                window.close_dialog(cx);
-                super::create_group(request, cx);
-            }
-            Err(error) => {
-                self.error = Some(error);
-                cx.notify();
-            }
+        if self.busy {
+            return;
         }
+        let reply = match &self.mode {
+            FormMode::NewGroup => {
+                let name = self.name.read(cx).value().to_string();
+                match validate_new_group(&name, &self.selected) {
+                    Ok(request) => {
+                        let r = super::create_group(request, cx);
+                        futures::FutureExt::boxed_local(async move {
+                            r.await.unwrap_or(Err(AdminError::Other)).map(|_| ())
+                        })
+                    }
+                    Err(error) => {
+                        self.error = Some(error);
+                        cx.notify();
+                        return;
+                    }
+                }
+            }
+            FormMode::AddMembers { group_id } => {
+                if self.selected.is_empty() {
+                    return;
+                }
+                let r = self
+                    .services
+                    .provider
+                    .add_group_members(group_id, self.selected.clone());
+                futures::FutureExt::boxed_local(async move {
+                    r.await.unwrap_or(Err(AdminError::Other))
+                })
+            }
+        };
+        self.busy = true;
+        self.error = None;
+        cx.notify();
+        // The dialog stays open until the server answers, so a refusal can be shown.
+        cx.spawn_in(window, async move |this, cx| {
+            let result = reply.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.busy = false;
+                match result {
+                    Ok(()) => window.close_dialog(cx),
+                    Err(e) => {
+                        if this.mode == FormMode::NewGroup {
+                            super::clear_pending(cx);
+                        }
+                        this.error = Some(crate::views::settings::widgets::error_text(e));
+                        cx.notify();
+                    }
+                }
+            });
+        })
+        .detach();
     }
 }
 
@@ -132,7 +198,13 @@ impl Render for NewGroupForm {
         let edges = scroll_edges(&self.scroll);
         watch_scroll_edges(&self.scroll, edges, window, cx);
         let query = self.filter.read(cx).value().trim().to_lowercase();
-        let named = !self.name.read(cx).value().trim().is_empty();
+        let new_group = self.mode == FormMode::NewGroup;
+        let ready = !self.busy
+            && if new_group {
+                !self.name.read(cx).value().trim().is_empty()
+            } else {
+                !self.selected.is_empty()
+            };
         let selected: HashSet<&str> = self.selected.iter().map(|s| s.as_str()).collect();
         let rows: Vec<_> =
             self.members
@@ -178,15 +250,18 @@ impl Render for NewGroupForm {
             .flex()
             .flex_col()
             .t_ui()
-            .child(ui::field_label(nav::GROUP_NAME_LABEL, cx))
-            .child(
-                ui::TextField::new("new-group-name", &self.name, FieldKind::Form)
-                    .error(self.error.is_some()),
-            )
-            .when_some(self.error, |el, e| el.child(ui::field_help(e, true, cx)))
+            .when(new_group, |el| {
+                el.child(ui::field_label(nav::GROUP_NAME_LABEL, cx)).child(
+                    ui::TextField::new("new-group-name", &self.name, FieldKind::Form)
+                        .error(self.error.is_some()),
+                )
+            })
+            .when_some(self.error.filter(|_| new_group), |el, e| {
+                el.child(ui::field_help(e, true, cx))
+            })
             .child(
                 div()
-                    .pt(space::S16)
+                    .when(new_group, |el| el.pt(space::S16))
                     .pb(space::S8)
                     .flex()
                     .items_center()
@@ -241,6 +316,9 @@ impl Render for NewGroupForm {
                     .when(edges.0, |el| el.child(edge_fade(true, k.overlay)))
                     .when(edges.1, |el| el.child(edge_fade(false, k.overlay))),
             )
+            .when_some(self.error.filter(|_| !new_group), |el, e| {
+                el.child(div().pt(space::S8).child(ui::field_help(e, true, cx)))
+            })
             .child(
                 div()
                     .pt(space::S20)
@@ -252,8 +330,13 @@ impl Render for NewGroupForm {
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        ui::primary_button("new-group-create", nav::CREATE, cx)
-                            .disabled_fill(!named, cx)
+                        ui::primary_button(
+                            "new-group-create",
+                            if new_group { nav::CREATE } else { nav::ADD },
+                            cx,
+                        )
+                        .loading(self.busy)
+                        .disabled_fill(!ready, cx)
                             .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                     ),
             )
@@ -308,9 +391,30 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
         }))
 }
 
+/// Opens the dialog that adds members to a 群 (from the 群 menu).
+pub fn open_add_members(services: Services, group_id: GroupId, name: String, window: &mut Window, cx: &mut App) {
+    let form = cx.new(|cx| {
+        NewGroupForm::new(services, FormMode::AddMembers { group_id }, window, cx)
+    });
+    let first = Cell::new(true);
+    let title = fill(nav::ADD_MEMBERS_TITLE, &[("name", &name)]);
+    window.open_dialog(cx, move |dialog, window, cx| {
+        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
+        if first.replace(false) {
+            let handle = form.read(cx).filter.read(cx).focus_handle(cx);
+            handle.focus(window, cx);
+        }
+        dialog
+            .close_button(false)
+            .p(space::S20)
+            .title(div().t_title().pb(space::S8).one_line().child(title.clone()))
+            .child(form.clone())
+    });
+}
+
 /// Opens the new-group dialog.
 pub fn open_new_group(services: Services, window: &mut Window, cx: &mut App) {
-    let form = cx.new(|cx| NewGroupForm::new(services, window, cx));
+    let form = cx.new(|cx| NewGroupForm::new(services, FormMode::NewGroup, window, cx));
     let first = Cell::new(true);
     // ⌘⇧N opens it at once; a click on `+` fades it in (§12).
     let keyed = window.last_input_was_keyboard();

@@ -19,7 +19,10 @@ use super::{
 };
 use crate::{
     copy::{fill, notify as n},
-    data::{Change, CreateGroupRequest, DraftKey, SavedNavigation, TodoItem, TodoReason},
+    data::{
+        AdminError, AdminReply, Change, CreateGroupRequest, DraftKey, GroupId, MemberId,
+        SavedNavigation, TodoItem, TodoReason, reply_now,
+    },
 };
 
 /// Longest notification body, in characters.
@@ -163,29 +166,62 @@ impl CoreProvider {
 
     /// Group and DM commands go over HTTP; the server pushes the new group
     /// to every connection as a `directory` frame, which updates the cache.
-    pub(super) fn create_group_inner(&self, request: CreateGroupRequest) {
+    pub(super) fn create_group_inner(&self, request: CreateGroupRequest) -> AdminReply<GroupId> {
         let Some(a) = self.account() else {
-            return;
+            return reply_now(Err(AdminError::Offline));
         };
         let http = a.client.http();
+        let (tx, rx) = futures::channel::oneshot::channel();
         chat_core::background().spawn(async move {
-            if let Err(e) = http.create_group(&request.name, &request.member_ids).await {
+            let r = http.create_group(&request.name, &request.member_ids).await;
+            if let Err(e) = &r {
                 tracing::warn!(error = %e, "create group refused");
             }
+            let _ = tx.send(r.map(|g| g.group.id).map_err(|e| super::settings::api_error(&e)));
         });
+        rx
     }
 
-    pub(super) fn open_dm_inner(&self, member_id: &str) {
+    pub(super) fn open_dm_inner(&self, member_id: &str) -> AdminReply<GroupId> {
         let Some(a) = self.account() else {
-            return;
+            return reply_now(Err(AdminError::Offline));
         };
         let http = a.client.http();
         let member_id = member_id.to_string();
+        let (tx, rx) = futures::channel::oneshot::channel();
         chat_core::background().spawn(async move {
-            if let Err(e) = http.dm(&member_id).await {
+            let r = http.dm(&member_id).await;
+            if let Err(e) = &r {
                 tracing::warn!(error = %e, "open dm refused");
             }
+            let _ = tx.send(r.map(|g| g.group.id).map_err(|e| super::settings::api_error(&e)));
         });
+        rx
+    }
+
+    /// Adds members one by one; stops at the first refusal.
+    pub(super) fn add_group_members_inner(
+        &self,
+        group_id: &str,
+        member_ids: Vec<MemberId>,
+    ) -> AdminReply<()> {
+        let Some(a) = self.account() else {
+            return reply_now(Err(AdminError::Offline));
+        };
+        let http = a.client.http();
+        let group_id = group_id.to_string();
+        let (tx, rx) = futures::channel::oneshot::channel();
+        chat_core::background().spawn(async move {
+            for m in &member_ids {
+                if let Err(e) = http.add_group_member(&group_id, m).await {
+                    tracing::warn!(error = %e, "add group member refused");
+                    let _ = tx.send(Err(super::settings::api_error(&e)));
+                    return;
+                }
+            }
+            let _ = tx.send(Ok(()));
+        });
+        rx
     }
 
     pub(super) fn leave_group_inner(&self, group_id: &str) {

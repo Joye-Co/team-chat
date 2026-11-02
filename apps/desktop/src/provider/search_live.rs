@@ -69,7 +69,7 @@ fn search_live() {
     });
 
     let name = format!("search-{}", chat_core::now_ms());
-    p.create_group(CreateGroupRequest {
+    let _ = p.create_group(CreateGroupRequest {
         name: name.clone(),
         member_ids: vec![bot.clone()],
     });

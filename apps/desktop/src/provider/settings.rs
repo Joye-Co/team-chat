@@ -32,7 +32,7 @@ pub(super) fn admin_error(e: &ClientError) -> AdminError {
     }
 }
 
-fn api_error(e: &ApiError) -> AdminError {
+pub(super) fn api_error(e: &ApiError) -> AdminError {
     match e {
         ApiError::Network(_) | ApiError::NoToken | ApiError::BadUrl => AdminError::Offline,
         ApiError::Invalid(_) => AdminError::Invalid,

@@ -12,7 +12,7 @@ mod members;
 mod notifications;
 mod profile;
 pub mod selftest;
-mod widgets;
+pub(crate) mod widgets;
 
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, Entity, Global, InteractiveElement,

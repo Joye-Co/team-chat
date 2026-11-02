@@ -49,7 +49,7 @@ use crate::{
     data::{
         ArtifactDetail, ArtifactFolder, ArtifactSummary, Change, ChatProvider, ClientMsgId,
         ConnectionState, CreateGroupRequest, CreatedArtifact, Draft, DraftKey, FileAttachment,
-        GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId, MessageWindow,
+        GroupId, GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId, MessageWindow,
         NewArtifactRequest, NewFile, PendingFileId, RejectedFile, Reply, SavedNavigation,
         SendRequest, SessionState, StartTopicRequest, TodoItem, Topic, TopicFile, TopicStatus,
         TransferState,
@@ -1407,12 +1407,16 @@ impl ChatProvider for CoreProvider {
         }
     }
 
-    fn create_group(&self, request: CreateGroupRequest) {
-        self.create_group_inner(request);
+    fn create_group(&self, request: CreateGroupRequest) -> AdminReply<GroupId> {
+        self.create_group_inner(request)
     }
 
-    fn open_dm(&self, member_id: &str) {
-        self.open_dm_inner(member_id);
+    fn open_dm(&self, member_id: &str) -> AdminReply<GroupId> {
+        self.open_dm_inner(member_id)
+    }
+
+    fn add_group_members(&self, group_id: &str, member_ids: Vec<MemberId>) -> AdminReply<()> {
+        self.add_group_members_inner(group_id, member_ids)
     }
 
     fn leave_group(&self, group_id: &str) {

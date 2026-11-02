@@ -298,11 +298,38 @@ pub fn open_dm_with(member_id: MemberId, cx: &mut App) {
         return;
     }
     cx.global_mut::<NavGlobal>().pending = Some(Pending::Dm(member_id.clone()));
-    services.provider.open_dm(&member_id);
+    let reply = services.provider.open_dm(&member_id);
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let result = reply.await.unwrap_or(Err(crate::data::AdminError::Other));
+        if let Err(e) = result {
+            cx.update(|cx| {
+                clear_pending(cx);
+                crate::views::files::notify_error(
+                    crate::copy::fill(
+                        crate::copy::nav::DM_FAILED,
+                        &[("reason", crate::views::settings::widgets::error_text(e))],
+                    ),
+                    cx,
+                );
+            });
+        }
+    })
+    .detach();
 }
 
-/// Creates a group and opens it when it arrives.
-pub fn create_group(request: CreateGroupRequest, cx: &mut App) {
+/// Forgets the group or DM that was to open when it arrives (its request failed).
+pub fn clear_pending(cx: &mut App) {
+    if cx.try_global::<NavGlobal>().is_some() {
+        cx.global_mut::<NavGlobal>().pending = None;
+    }
+}
+
+/// Creates a group and opens it when it arrives. The caller shows a refusal (and then calls
+/// [`clear_pending`]).
+pub fn create_group(
+    request: CreateGroupRequest,
+    cx: &mut App,
+) -> crate::data::AdminReply<crate::data::GroupId> {
     let services = services_of(cx);
     let known = services
         .provider
@@ -314,7 +341,7 @@ pub fn create_group(request: CreateGroupRequest, cx: &mut App) {
         name: request.name.trim().to_string(),
         known,
     });
-    services.provider.create_group(request);
+    services.provider.create_group(request)
 }
 
 fn open_pending(cx: &mut App) {
@@ -558,7 +585,7 @@ mod tests {
     fn fake_group_commands_work() {
         let p = FakeProvider::new();
         let before = p.groups().len();
-        p.create_group(crate::data::CreateGroupRequest {
+        let _ = p.create_group(crate::data::CreateGroupRequest {
             name: "新群".into(),
             member_ids: vec!["m-alex".into()],
         });
@@ -566,6 +593,21 @@ mod tests {
         assert_eq!(groups.len(), before + 1);
         let new = groups.iter().find(|g| g.name == "新群").unwrap();
         assert!(new.member_ids.contains(&crate::fake::ME.to_string()));
+        // A member can be added to an existing 群 later.
+        let other = p
+            .members()
+            .into_iter()
+            .find(|m| !new.member_ids.contains(&m.id) && !m.deactivated)
+            .unwrap();
+        let mut added = p.add_group_members(&new.id, vec![other.id.clone()]);
+        assert_eq!(added.try_recv().unwrap(), Some(Ok(())));
+        let new = p.groups().into_iter().find(|g| g.name == "新群").unwrap();
+        assert!(new.member_ids.contains(&other.id));
+        let mut gone = p.add_group_members("g-gone", vec![other.id.clone()]);
+        assert_eq!(
+            gone.try_recv().unwrap(),
+            Some(Err(crate::data::AdminError::NotFound))
+        );
         p.set_group_muted(&new.id, true);
         assert!(p.group_muted(&new.id));
         p.set_group_muted(&new.id, false);
@@ -584,8 +626,8 @@ mod tests {
                         .any(|g| g.dm_peer.as_deref() == Some(m.id.as_str()))
             })
             .unwrap();
-        p.open_dm(&peer.id);
-        p.open_dm(&peer.id);
+        let _ = p.open_dm(&peer.id);
+        let _ = p.open_dm(&peer.id);
         let dms = p
             .groups()
             .into_iter()

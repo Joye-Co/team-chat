@@ -1317,12 +1317,12 @@ impl ChatProvider for FakeProvider {
         }
     }
 
-    fn create_group(&self, request: CreateGroupRequest) {
+    fn create_group(&self, request: CreateGroupRequest) -> AdminReply<GroupId> {
         let name = request.name.trim().to_string();
         if name.is_empty() {
-            return;
+            return reply_now(Err(AdminError::Invalid));
         }
-        self.with(|s| {
+        let id = self.with(|s| {
             let id = s.id("g");
             let mut member_ids = vec![ME.to_string()];
             for m in request.member_ids {
@@ -1331,7 +1331,7 @@ impl ChatProvider for FakeProvider {
                 }
             }
             s.groups.push(GroupSummary {
-                id,
+                id: id.clone(),
                 kind: GroupKind::Group,
                 name,
                 member_ids,
@@ -1342,25 +1342,52 @@ impl ChatProvider for FakeProvider {
                 mentions: 0,
                 last_activity_at: now_ms(),
             });
+            id
         });
         self.emit(vec![Change::Groups]);
+        reply_now(Ok(id))
     }
 
-    fn open_dm(&self, member_id: &str) {
-        self.with(|s| {
-            if member_id == ME
-                || s.groups
-                    .iter()
-                    .any(|g| g.kind == GroupKind::Dm && g.dm_peer.as_deref() == Some(member_id))
-            {
-                return;
-            }
-            let Some(peer) = s.members.iter().find(|m| m.id == member_id).cloned() else {
-                return;
+    fn add_group_members(&self, group_id: &str, member_ids: Vec<MemberId>) -> AdminReply<()> {
+        let found = self.with(|s| {
+            let known: Vec<String> = s.members.iter().map(|m| m.id.clone()).collect();
+            let Some(g) = s
+                .groups
+                .iter_mut()
+                .find(|g| g.id == group_id && g.kind == GroupKind::Group)
+            else {
+                return false;
             };
+            for m in member_ids {
+                if known.contains(&m) && !g.member_ids.contains(&m) {
+                    g.member_ids.push(m);
+                }
+            }
+            true
+        });
+        if !found {
+            return reply_now(Err(AdminError::NotFound));
+        }
+        self.emit(vec![Change::Groups]);
+        reply_now(Ok(()))
+    }
+
+    fn open_dm(&self, member_id: &str) -> AdminReply<GroupId> {
+        let id = self.with(|s| {
+            if member_id == ME {
+                return None;
+            }
+            if let Some(g) = s
+                .groups
+                .iter()
+                .find(|g| g.kind == GroupKind::Dm && g.dm_peer.as_deref() == Some(member_id))
+            {
+                return Some(g.id.clone());
+            }
+            let peer = s.members.iter().find(|m| m.id == member_id).cloned()?;
             let id = s.id("dm");
             s.groups.push(GroupSummary {
-                id,
+                id: id.clone(),
                 kind: GroupKind::Dm,
                 name: peer.name,
                 member_ids: vec![ME.to_string(), peer.id.clone()],
@@ -1371,9 +1398,11 @@ impl ChatProvider for FakeProvider {
                 mentions: 0,
                 last_activity_at: now_ms(),
             });
+            Some(id)
         });
         // The real provider answers with the group whether it is new or not.
         self.emit(vec![Change::Groups]);
+        reply_now(id.ok_or(AdminError::NotFound))
     }
 
     fn leave_group(&self, group_id: &str) {

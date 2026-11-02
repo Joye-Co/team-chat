@@ -1306,10 +1306,21 @@ pub trait ChatProvider: Send + Sync + 'static {
 
     // --- groups and navigation (all have defaults, so providers can add them later) ---
 
-    /// Creates a 群 (`POST /v1/groups`). The new group arrives as `Change::Groups`.
-    fn create_group(&self, _request: CreateGroupRequest) {}
-    /// Finds or creates the DM with a member (`POST /v1/dms`). Emits `Change::Groups`.
-    fn open_dm(&self, _member_id: &str) {}
+    /// Creates a 群 (`POST /v1/groups`). Answers with its id; the group itself arrives as
+    /// `Change::Groups`.
+    fn create_group(&self, _request: CreateGroupRequest) -> AdminReply<GroupId> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Finds or creates the DM with a member (`POST /v1/dms`). Answers with its id and
+    /// emits `Change::Groups`.
+    fn open_dm(&self, _member_id: &str) -> AdminReply<GroupId> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Adds members to a 群 (`POST /v1/groups/:id/members`, one per member). The new
+    /// members arrive as `Change::Groups`.
+    fn add_group_members(&self, _group_id: &str, _member_ids: Vec<MemberId>) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
     /// Leaves a group (`DELETE /v1/groups/:id/members/<me>`). Emits `Change::Groups`.
     fn leave_group(&self, _group_id: &str) {}
     /// My mute preference of a group (`GroupSummary.muted`).
