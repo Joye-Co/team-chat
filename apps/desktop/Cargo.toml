@@ -20,6 +20,8 @@ tokio = { version = "1", features = ["sync", "time"] }
 tracing = "0.1"
 # Updater: checks the downloaded DMG again before it installs (src/updater/).
 sha2 = "0.10"
+# Thumbnails of image attachments (src/provider/files.rs).
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 
 [dev-dependencies]
 tempfile = "3"
@@ -39,3 +41,6 @@ raw-window-handle = "0.6"
 block2 = "0.6"
 libc = "0.2"
 objc2-user-notifications = "0.3"
+# The 产出 window (src/views/artifacts/window.rs).
+artifact-view = { path = "../../crates/artifact-view" }
+dispatch2 = "0.3"

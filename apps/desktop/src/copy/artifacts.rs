@@ -1,0 +1,28 @@
+//! 产出: cards in the timeline, the 产出 window, and uploads from the app.
+
+crate::copy! {
+    CARD_META = "{name} · 第 {n} 版",
+    CARD_VERSION = "第 {n} 版",
+    CARD_LOADING = "正在读取产出…",
+    CARD_LATEST = "最新是第 {n} 版",
+    KIND_PAGE = "页面",
+    KIND_FILE = "文件",
+    OPEN = "打开",
+    OPENING = "正在打开…",
+    OPEN_FAILED = "无法打开产出：{reason}",
+    VERSION_ITEM = "第 {n} 版",
+    VERSION_ITEM_NOTE = "第 {n} 版 · {note}",
+    LINK_TITLE = "打开外部链接？",
+    LINK_DETAIL = "这个产出想在浏览器中打开：\n{url}",
+    LINK_OPEN = "打开",
+    LINK_CANCEL = "取消",
+    LOAD_FAILED = "产出页面没有加载出来",
+    NEW = "上传产出",
+    NEW_VERSION = "上传新版本",
+    PICK = "选择",
+    CREATING = "正在上传产出 {p}%",
+    CREATED = "已上传「{title}」第 {n} 版",
+    CREATE_FAILED = "上传产出失败：{reason}",
+    NEW_BODY = "新产出：{title}",
+    VERSION_BODY = "「{title}」更新到第 {n} 版",
+}

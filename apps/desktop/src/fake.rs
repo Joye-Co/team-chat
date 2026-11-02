@@ -247,6 +247,8 @@ impl State {
             streaming: false,
             send_state,
             quote_of: None,
+            attachments: Vec::new(),
+            artifact_refs: Vec::new(),
         };
         let topic = self
             .topics

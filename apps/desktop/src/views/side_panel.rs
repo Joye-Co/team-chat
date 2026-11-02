@@ -2,7 +2,7 @@
 //! on, its 产出, the process view, and (in the developer view) ids and seqs.
 
 use gpui::{
-    Context, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
+    AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
@@ -13,17 +13,18 @@ use gpui_component::{
 use crate::{
     app::{Changes, Services},
     copy::{dev, fill, panel as p},
-    data::{ArtifactKind, ArtifactSummary, Change, GroupId, Member, Topic, TopicId},
+    data::{Change, GroupId, Member, Topic, TopicId},
     theme,
-    views::{avatar, status_chip, time_text},
+    views::{artifacts::panel::TopicOutputs, avatar, status_chip},
 };
 
 pub struct SidePanel {
     services: Services,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
-    artifacts: Vec<ArtifactSummary>,
     members: Vec<Member>,
+    /// The 产出 and files of the topic (views/artifacts/panel.rs).
+    outputs: Entity<TopicOutputs>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -51,11 +52,12 @@ impl SidePanel {
             }),
         ];
         let open = services.nav.read(cx).topic.clone();
+        let outputs = cx.new(|cx| TopicOutputs::new(services.clone(), cx));
         let mut this = Self {
+            outputs,
             services,
             open,
             topic: None,
-            artifacts: Vec::new(),
             members: Vec::new(),
             _subscriptions: subscriptions,
         };
@@ -69,11 +71,9 @@ impl SidePanel {
         match &self.open {
             Some((g, t)) => {
                 self.topic = provider.topic(g, t);
-                self.artifacts = provider.artifacts(g, t);
             }
             None => {
                 self.topic = None;
-                self.artifacts.clear();
             }
         }
     }
@@ -144,34 +144,6 @@ impl Render for SidePanel {
             .iter()
             .map(|id| person(self.member(id), cx).into_any_element())
             .collect();
-        let artifacts: Vec<_> = self
-            .artifacts
-            .iter()
-            .map(|a| {
-                let kind = match a.kind {
-                    ArtifactKind::Page => p::KIND_PAGE,
-                    ArtifactKind::File => p::KIND_FILE,
-                    ArtifactKind::Image => p::KIND_IMAGE,
-                    ArtifactKind::Decision => p::KIND_DECISION,
-                };
-                div()
-                    .py(px(4.))
-                    .flex()
-                    .flex_col()
-                    .child(div().text_sm().child(a.title.clone()))
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(6.))
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(kind)
-                            .child(fill(p::VERSION, &[("n", &a.version.to_string())]))
-                            .child(time_text(a.updated_at)),
-                    )
-                    .into_any_element()
-            })
-            .collect();
 
         div()
             .size_full()
@@ -194,15 +166,7 @@ impl Render for SidePanel {
                     .when(!waiting.is_empty(), |el| {
                         el.child(section(p::WAITING_ON)).children(waiting)
                     })
-                    .child(section(p::ARTIFACTS))
-                    .when(artifacts.is_empty(), |el| {
-                        el.child(
-                            div()
-                                .text_color(colors.muted_foreground)
-                                .child(p::ARTIFACTS_EMPTY),
-                        )
-                    })
-                    .children(artifacts)
+                    .child(self.outputs.clone())
                     .child(section(p::PROCESS))
                     .child(
                         div()

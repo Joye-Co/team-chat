@@ -1,8 +1,10 @@
 //! The views. Each view is a GPUI entity built from `app::Services`.
 //! Shared small pieces (avatar, badge, status chip, time text) live here.
 
+pub mod artifacts;
 pub mod composer;
 pub mod connection_banner;
+pub mod files;
 pub mod login;
 pub mod nav;
 pub mod settings;

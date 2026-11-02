@@ -8,10 +8,12 @@
 //! 话题 and 产出; developer words only in [`dev`]. The product name is never
 //! typed here: use `{product}` and fill it with `env!("PRODUCT_NAME")`.
 
+pub mod artifacts;
 pub mod common;
 pub mod composer;
 pub mod connection;
 pub mod dev;
+pub mod files;
 pub mod login;
 pub mod nav;
 pub mod notify;
@@ -98,6 +100,16 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "update",
         entries: update::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "files",
+        entries: files::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "artifacts",
+        entries: artifacts::ENTRIES,
         developer: false,
     },
     Section {

@@ -135,7 +135,47 @@ pub fn message(m: &proto::Message) -> Message {
         streaming: m.is_streaming(),
         send_state: SendState::Sent,
         quote_of: m.reply_to.as_ref().map(|r| r.message_id.clone()),
+        attachments: file_refs(m.attachments.as_deref()),
+        artifact_refs: artifact_refs(m.artifact_refs.as_deref()),
     }
+}
+
+pub fn file_ref(f: &proto::FileRef) -> crate::data::FileAttachment {
+    crate::data::FileAttachment {
+        file_id: f.file_id.clone(),
+        name: f.name.clone(),
+        size: f.size,
+        mime: f.mime.clone(),
+        width: f.width,
+        height: f.height,
+        sha256: f.sha256.clone(),
+    }
+}
+
+pub fn to_file_ref(f: &crate::data::FileAttachment) -> proto::FileRef {
+    proto::FileRef {
+        file_id: f.file_id.clone(),
+        name: f.name.clone(),
+        size: f.size,
+        mime: f.mime.clone(),
+        width: f.width,
+        height: f.height,
+        sha256: f.sha256.clone(),
+    }
+}
+
+fn file_refs(list: Option<&[proto::FileRef]>) -> Vec<crate::data::FileAttachment> {
+    list.unwrap_or_default().iter().map(file_ref).collect()
+}
+
+fn artifact_refs(list: Option<&[proto::ArtifactRef]>) -> Vec<crate::data::ArtifactRef> {
+    list.unwrap_or_default()
+        .iter()
+        .map(|r| crate::data::ArtifactRef {
+            artifact_id: r.artifact_id.clone(),
+            version: r.version,
+        })
+        .collect()
 }
 
 fn send_state(s: OutboxState) -> SendState {
@@ -153,6 +193,8 @@ pub fn outbox_message(item: &OutboxItem, topic_id: &str, me: &str) -> Option<Mes
         body,
         mentions,
         reply_to,
+        attachments,
+        artifact_refs: refs,
         ..
     } = &item.op
     else {
@@ -173,6 +215,8 @@ pub fn outbox_message(item: &OutboxItem, topic_id: &str, me: &str) -> Option<Mes
         streaming: false,
         send_state: send_state(item.state),
         quote_of: reply_to.clone(),
+        attachments: file_refs(attachments.as_deref()),
+        artifact_refs: artifact_refs(refs.as_deref()),
     })
 }
 

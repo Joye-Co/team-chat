@@ -87,6 +87,8 @@ pub struct ComposerView {
     editing: Option<EditTarget>,
     typing: model::TypingThrottle,
     too_long: bool,
+    /// Files the last paste or drop could not add (folders, over 100 MB).
+    rejected: Vec<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -123,6 +125,7 @@ impl ComposerView {
             editing: None,
             typing: model::TypingThrottle::default(),
             too_long: false,
+            rejected: Vec::new(),
             _subscriptions: subscriptions,
         };
         this.sync_key(window, cx);
@@ -171,6 +174,7 @@ impl ComposerView {
         self.key = key;
         self.mention = None;
         self.too_long = false;
+        self.rejected.clear();
         let draft = self
             .key
             .as_ref()
@@ -213,6 +217,10 @@ impl ComposerView {
             return;
         };
         let draft = self.services.provider.draft(&key);
+        let rejected = self.services.provider.take_rejected_files(&key);
+        if !rejected.is_empty() {
+            self.rejected = rejected.iter().map(crate::views::files::rejected_text).collect();
+        }
         self.files = draft.files;
         self.quote = draft.quote_of.map(|id| self.quote_chip(&key, id));
         cx.notify();
@@ -465,12 +473,31 @@ impl ComposerView {
         self.attach(files, cx);
     }
 
-    fn attach(&mut self, files: Vec<NewFile>, _cx: &mut Context<Self>) {
+    fn attach(&mut self, files: Vec<NewFile>, cx: &mut Context<Self>) {
         if let Some(key) = &self.key
             && !files.is_empty()
         {
+            self.rejected.clear();
+            cx.notify();
             self.services.provider.attach_files(key, files);
         }
+    }
+
+    /// The 添加文件 button: picks files with the system dialog.
+    fn pick_files(&mut self, cx: &mut Context<Self>) {
+        let paths = cx.prompt_for_paths(gpui::PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: true,
+            prompt: None,
+        });
+        cx.spawn(async move |this, cx| {
+            if let Ok(Ok(Some(paths))) = paths.await {
+                let files = paths.into_iter().map(NewFile::Path).collect();
+                let _ = this.update(cx, |this, cx| this.attach(files, cx));
+            }
+        })
+        .detach();
     }
 
     fn remove_file(&mut self, file_id: &str, cx: &mut Context<Self>) {
@@ -571,6 +598,7 @@ impl ComposerView {
         self.picked.clear();
         self.quote = None;
         self.files.clear();
+        self.rejected.clear();
         self.mention = None;
         self.set_text("", window, cx);
 
@@ -793,6 +821,11 @@ impl Render for ComposerView {
             .when(self.too_long, |el| {
                 el.child(div().text_xs().text_color(colors.danger).child(c::TOO_LONG))
             })
+            .children(
+                self.rejected
+                    .iter()
+                    .map(|line| div().text_xs().text_color(colors.danger).child(line.clone())),
+            )
             .child(
                 div()
                     .flex()
@@ -810,6 +843,14 @@ impl Render for ComposerView {
                             .capture_action(cx.listener(Self::on_paste))
                             .child(Textarea::new(&self.input).disabled(!enabled))
                             .children(self.render_mentions(cx)),
+                    )
+                    .child(
+                        Button::new("attach")
+                            .ghost()
+                            .icon(gpui_component::IconName::Plus)
+                            .tooltip(c::ATTACH)
+                            .disabled(!enabled || editing)
+                            .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
                     )
                     .child(
                         Button::new("send")

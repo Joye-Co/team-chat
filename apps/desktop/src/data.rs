@@ -168,6 +168,188 @@ pub struct Message {
     pub send_state: SendState,
     /// The message this one quotes, if any.
     pub quote_of: Option<MessageId>,
+    /// Files attached to the message. For my message that still uploads,
+    /// `file_id` is empty and [`ChatProvider::file_transfer`] has the progress.
+    pub attachments: Vec<FileAttachment>,
+    /// 产出 the message points to.
+    pub artifact_refs: Vec<ArtifactRef>,
+}
+
+/// Largest file one message or 产出 can carry (`docs/protocol.md`).
+pub const MAX_FILE_BYTES: u64 = 100_000_000;
+
+/// A file attached to a message (the wire `FileRef`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct FileAttachment {
+    /// Empty while the file still uploads.
+    pub file_id: String,
+    pub name: String,
+    pub size: u64,
+    pub mime: String,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    /// Lowercase hex; empty while the file still uploads.
+    pub sha256: String,
+}
+
+impl FileAttachment {
+    /// An image the timeline can show inline (the server serves these inline too).
+    pub fn is_image(&self) -> bool {
+        matches!(
+            self.mime.as_str(),
+            "image/png" | "image/jpeg" | "image/gif" | "image/webp"
+        )
+    }
+
+    /// True when the file is on the server (not my upload in progress).
+    pub fn is_uploaded(&self) -> bool {
+        !self.file_id.is_empty()
+    }
+}
+
+/// A 产出 version a message points to.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct ArtifactRef {
+    pub artifact_id: String,
+    pub version: u32,
+}
+
+/// Why a file transfer or a 产出 action did not work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileError {
+    /// Larger than [`MAX_FILE_BYTES`].
+    TooLarge,
+    /// A folder, or not a regular file.
+    NotAFile,
+    /// The local file cannot be read (gone, no permission).
+    Unreadable,
+    /// The server cannot be reached, or the transfer broke off.
+    Network,
+    /// The downloaded bytes do not match the file's checksum.
+    Checksum,
+    /// The server refused it (not allowed, not valid).
+    Rejected,
+    /// The file or 产出 does not exist (or I am not in its 群).
+    NotFound,
+    /// No HTML page in the picked folder, or too many files.
+    NoPage,
+    /// Not signed in.
+    SignedOut,
+    Other,
+}
+
+/// State of one upload or download, for progress bars.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TransferState {
+    /// Waiting for its turn.
+    Queued,
+    Running { done: u64, total: u64 },
+    Done,
+    Failed(FileError),
+}
+
+impl TransferState {
+    /// Progress from 0 to 100, for `Progress::value`.
+    pub fn percent(&self) -> f32 {
+        match *self {
+            TransferState::Running { done, total } if total > 0 => {
+                (done as f64 * 100.0 / total as f64).clamp(0.0, 100.0) as f32
+            }
+            TransferState::Done => 100.0,
+            _ => 0.0,
+        }
+    }
+}
+
+/// Key of the upload of file `index` of my unsent message `client_msg_id`.
+pub fn upload_key(client_msg_id: &str, index: usize) -> String {
+    format!("up:{client_msg_id}:{index}")
+}
+
+/// Key of the download of a file.
+pub fn download_key(file: &FileAttachment) -> String {
+    format!("down:{}", file.sha256)
+}
+
+/// Key of the 产出 upload running in a topic (the side panel's progress).
+pub fn create_key(topic_id: &str) -> String {
+    format!("create:{topic_id}")
+}
+
+/// A file attached to a message of a topic, for the side panel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TopicFile {
+    pub file: FileAttachment,
+    pub message_id: MessageId,
+    pub author_id: MemberId,
+    pub created_at: Millis,
+}
+
+/// One version of a 产出.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArtifactVersionInfo {
+    pub version: u32,
+    pub note: Option<String>,
+    pub created_by: MemberId,
+    pub created_at: Millis,
+}
+
+/// A 产出 with its known versions, newest first.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArtifactDetail {
+    pub summary: ArtifactSummary,
+    pub group_id: GroupId,
+    pub versions: Vec<ArtifactVersionInfo>,
+}
+
+/// A 产出 version on disk, ready to show.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactFolder {
+    pub artifact_id: String,
+    pub version: u32,
+    pub dir: PathBuf,
+    /// Path of the entry file relative to `dir`, joined by `/`.
+    pub entry: String,
+    /// An HTML page (open in the 产出 window), or a single file (open with
+    /// the default app).
+    pub is_page: bool,
+}
+
+/// A new 产出, or a new version of one, from a local file or folder.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewArtifactRequest {
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    /// An HTML file, a folder with an HTML page, or any single file.
+    pub path: PathBuf,
+    /// `Some` adds a version to this 产出; `None` makes a new 产出.
+    pub artifact_id: Option<String>,
+}
+
+/// A 产出 the app made: its id and version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CreatedArtifact {
+    pub artifact_id: String,
+    pub version: u32,
+    pub title: String,
+}
+
+/// A file the composer could not take, with the reason.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RejectedFile {
+    pub name: String,
+    pub error: FileError,
+}
+
+/// The answer to a background request; `Err(Canceled)` when the provider
+/// cannot do it.
+pub type Reply<T> = futures::channel::oneshot::Receiver<Result<T, FileError>>;
+
+/// A reply that fails at once with `error`.
+pub fn reply_err<T>(error: FileError) -> Reply<T> {
+    let (tx, rx) = futures::channel::oneshot::channel();
+    let _ = tx.send(Err(error));
+    rx
 }
 
 /// A window of the newest messages of a topic, oldest first.
@@ -583,6 +765,60 @@ pub trait ChatProvider: Send + Sync + 'static {
         _files: Vec<PendingFileId>,
     ) -> ClientMsgId {
         self.start_topic(request)
+    }
+
+    // --- files and 产出 (all have defaults, so providers can add them later) ---
+
+    /// Files the last `attach_files` of `key` could not take (folders, files
+    /// over [`MAX_FILE_BYTES`]). Reading clears them. A provider emits
+    /// `Change::Draft` for `key` when there are some.
+    fn take_rejected_files(&self, _key: &DraftKey) -> Vec<RejectedFile> {
+        Vec::new()
+    }
+    /// The state of an upload ([`upload_key`]) or a download ([`download_key`]).
+    /// Cheap: views call it while they render.
+    fn file_transfer(&self, _key: &str) -> Option<TransferState> {
+        None
+    }
+    /// The local copy of a file when it is in the cache. Cheap and never
+    /// touches the network.
+    fn cached_file(&self, _file: &FileAttachment) -> Option<PathBuf> {
+        None
+    }
+    /// A small image (at most 640 px) of a cached image file, for inline
+    /// previews. `None` while it is not cached or being made; the provider
+    /// emits `Change::Messages` for the topic when it is ready. Cheap.
+    fn thumbnail(&self, _group_id: &str, _topic_id: &str, _file: &FileAttachment) -> Option<PathBuf> {
+        None
+    }
+    /// Downloads a file into the cache (or finds it there). Progress is in
+    /// `file_transfer(download_key(file))`; the provider emits
+    /// `Change::Messages` for the topic while it runs and when it ends.
+    fn fetch_file(&self, _group_id: &str, _topic_id: &str, _file: &FileAttachment) -> Reply<PathBuf> {
+        reply_err(FileError::Other)
+    }
+    /// Files attached to the cached messages of a topic, newest first.
+    fn topic_files(&self, _group_id: &str, _topic_id: &str) -> Vec<TopicFile> {
+        Vec::new()
+    }
+    /// Asks the server for the 产出 list of a topic. Emits `Change::Artifacts`.
+    fn refresh_artifacts(&self, _group_id: &str, _topic_id: &str) {}
+    /// A 产出 with its versions from the cache. `None` when it is not known
+    /// yet: call [`ChatProvider::request_artifact`].
+    fn artifact(&self, _artifact_id: &str) -> Option<ArtifactDetail> {
+        None
+    }
+    /// Loads a 产出 and its versions from the server once. Emits
+    /// `Change::Messages` and `Change::Artifacts` for its topic.
+    fn request_artifact(&self, _group_id: &str, _topic_id: &str, _artifact_id: &str) {}
+    /// Puts a version (`None` = the current one) of a 产出 on disk.
+    fn open_artifact_version(&self, _artifact_id: &str, _version: Option<u32>) -> Reply<ArtifactFolder> {
+        reply_err(FileError::Other)
+    }
+    /// Uploads a file or folder as a new 产出 or a new version, and posts a
+    /// message that points to it in the topic.
+    fn create_artifact(&self, _request: NewArtifactRequest) -> Reply<CreatedArtifact> {
+        reply_err(FileError::Other)
     }
 
     // --- groups and navigation (all have defaults, so providers can add them later) ---

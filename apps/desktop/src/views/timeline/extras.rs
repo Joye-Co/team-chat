@@ -69,7 +69,11 @@ pub trait MessageExtra: Sync {
 }
 
 /// Every extra, in display order within its placement.
-pub static REGISTRY: &[&dyn MessageExtra] = &[&QuoteExtra];
+pub static REGISTRY: &[&dyn MessageExtra] = &[
+    &QuoteExtra,
+    &crate::views::files::extra::AttachmentsExtra,
+    &crate::views::artifacts::extra::ArtifactRefsExtra,
+];
 
 /// The extras of `message` for one placement.
 pub fn render(

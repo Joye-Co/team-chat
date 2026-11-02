@@ -14,6 +14,7 @@
 
 pub mod app_glue;
 pub mod convert;
+pub mod files;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod persist;
@@ -35,10 +36,12 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use crate::{
     data::{
-        ArtifactSummary, Change, ChatProvider, ClientMsgId, ConnectionState, CreateGroupRequest,
-        Draft, DraftKey, GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId,
-        MessageWindow, NewFile, SavedNavigation, SendRequest, SessionState, StartTopicRequest,
-        TodoItem, Topic, TopicStatus,
+        ArtifactDetail, ArtifactFolder, ArtifactSummary, Change, ChatProvider, ClientMsgId,
+        ConnectionState, CreateGroupRequest, CreatedArtifact, Draft, DraftKey, FileAttachment,
+        GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId, MessageWindow,
+        NewArtifactRequest, NewFile, PendingFileId, RejectedFile, Reply, SavedNavigation,
+        SendRequest, SessionState, StartTopicRequest, TodoItem, Topic, TopicFile, TopicStatus,
+        TransferState,
     },
     drafts::DraftStore,
 };
@@ -117,6 +120,7 @@ struct Shared {
     notices: Mutex<Option<UnboundedSender<Notice>>>,
     drafts: DraftStore,
     writer: persist::Writer,
+    files: files::FilesState,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -146,6 +150,7 @@ impl CoreProvider {
                 notices: Mutex::new(None),
                 drafts: DraftStore::new(),
                 writer: persist::Writer::new(),
+                files: files::FilesState::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -167,12 +172,13 @@ impl CoreProvider {
             return;
         }
         // A pending topic id stays open in the views after its ack: name it too.
-        let aliases: Vec<(String, String)> = self
-            .state()
-            .aliases
-            .iter()
-            .map(|(p, r)| (p.clone(), r.clone()))
-            .collect();
+        let aliases: Vec<(String, String)> = {
+            let s = self.state();
+            s.aliases
+                .keys()
+                .map(|p| (p.clone(), resolve_alias(&s.aliases, p)))
+                .collect()
+        };
         if !aliases.is_empty() {
             let mut extra = Vec::new();
             for c in &changes {
@@ -224,11 +230,7 @@ impl CoreProvider {
 
     /// The real topic id of a pending topic id (or the id itself).
     pub fn resolve_topic(&self, topic_id: &str) -> String {
-        self.state()
-            .aliases
-            .get(topic_id)
-            .cloned()
-            .unwrap_or_else(|| topic_id.to_string())
+        resolve_alias(&self.state().aliases, topic_id)
     }
 
     /// The chat-core client of the signed-in account (self-tests).
@@ -309,6 +311,7 @@ impl CoreProvider {
             s.deferred.clear();
             s.generation
         };
+        self.shared.files.reset();
         self.spawn_pump(generation, updates);
         self.emit(vec![
             Change::Session,
@@ -336,6 +339,7 @@ impl CoreProvider {
             s.account.take()
         };
         self.shared.drafts.clear_all();
+        self.shared.files.reset();
         if let Some(a) = &account {
             a.client.stop();
         }
@@ -622,9 +626,12 @@ impl CoreProvider {
                     if is_root {
                         s.aliases.insert(pending.clone(), topic_id.clone());
                     }
-                    let (ready, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.deferred)
-                        .into_iter()
-                        .partition(|(p, _, _)| *p == pending);
+                    let (ready, rest): (Vec<_>, Vec<_>) =
+                        std::mem::take(&mut s.deferred)
+                            .into_iter()
+                            .partition(|(p, _, _)| {
+                                *p == pending || resolve_alias(&s.aliases, p) == topic_id
+                            });
                     s.deferred = rest;
                     ready
                 };
@@ -666,7 +673,14 @@ impl CoreProvider {
                 }
             }
             ClientUpdate::ArtifactsChanged { group_id, topic_id } => {
-                out.push(Change::Artifacts { group_id, topic_id });
+                // Cards in the timeline show the 产出 title and version too.
+                out.extend([
+                    Change::Artifacts {
+                        group_id: group_id.clone(),
+                        topic_id: topic_id.clone(),
+                    },
+                    Change::Messages { group_id, topic_id },
+                ]);
             }
             ClientUpdate::GroupEvent(_)
             | ClientUpdate::RunsChanged { .. }
@@ -708,12 +722,28 @@ impl CoreProvider {
             .filter_map(|item| convert::pending_topic(item, me))
             .collect();
         out.reverse();
+        let mut jobs = self.job_topics(group_id, me);
+        jobs.append(&mut out);
+        let mut out = jobs;
         match a.client.topics(group_id, TOPIC_LIMIT) {
             Ok(rows) => out.extend(rows.iter().map(convert::topic)),
             Err(e) => tracing::warn!(error = %e, "topics read failed"),
         }
         out
     }
+}
+
+/// Follows pending-topic aliases (a job's topic, then the queued send's
+/// topic, then the real topic).
+fn resolve_alias(aliases: &HashMap<String, String>, topic_id: &str) -> String {
+    let mut id = topic_id;
+    for _ in 0..4 {
+        match aliases.get(id) {
+            Some(next) => id = next,
+            None => break,
+        }
+    }
+    id.to_string()
 }
 
 /// Runs blocking work (Keychain, files, SQLite open) off the async threads.
@@ -842,6 +872,9 @@ impl ChatProvider for CoreProvider {
         let a = self.account()?;
         let real = self.resolve_topic(topic_id);
         if let Some(cid) = pending_cid(&real) {
+            if let Some(t) = self.job_topic_of(cid, &a.me.id) {
+                return Some(t);
+            }
             let item = a.client.store().outbox_get(cid).ok().flatten()?;
             return convert::pending_topic(&item, &a.me.id);
         }
@@ -879,7 +912,9 @@ impl ChatProvider for CoreProvider {
         };
         if let Some(cid) = pending_cid(&real) {
             // Only the queued first message exists.
-            if let Some(item) = a.client.store().outbox_get(cid).ok().flatten() {
+            if self.job_topic_of(cid, me).is_some() {
+                // Its files still upload: the message comes from the job below.
+            } else if let Some(item) = a.client.store().outbox_get(cid).ok().flatten() {
                 window
                     .messages
                     .extend(convert::outbox_message(&item, topic_id, me));
@@ -915,6 +950,9 @@ impl ChatProvider for CoreProvider {
                     .extend(convert::outbox_message(&item, topic_id, me));
             }
         }
+        window
+            .messages
+            .extend(self.job_messages(group_id, topic_id, &real, me));
         for (cid, req) in deferred {
             window.messages.push(crate::data::Message {
                 id: String::new(),
@@ -931,6 +969,8 @@ impl ChatProvider for CoreProvider {
                 streaming: false,
                 send_state: crate::data::SendState::Pending,
                 quote_of: req.quote_of,
+                attachments: Vec::new(),
+                artifact_refs: Vec::new(),
             });
         }
         window
@@ -977,9 +1017,8 @@ impl ChatProvider for CoreProvider {
         }
     }
 
-    fn artifacts(&self, _group_id: &str, _topic_id: &str) -> Vec<ArtifactSummary> {
-        // chat-core does not keep 产出 yet; the 产出 track adds them.
-        Vec::new()
+    fn artifacts(&self, _group_id: &str, topic_id: &str) -> Vec<ArtifactSummary> {
+        self.artifacts_inner(topic_id)
     }
 
     fn send(&self, request: SendRequest) -> ClientMsgId {
@@ -1096,6 +1135,9 @@ impl ChatProvider for CoreProvider {
     }
 
     fn retry_send(&self, _group_id: &str, client_msg_id: &str) {
+        if self.retry_job(client_msg_id) {
+            return;
+        }
         if let Some(a) = self.account()
             && let Err(e) = a.client.retry_failed(client_msg_id)
         {
@@ -1104,6 +1146,9 @@ impl ChatProvider for CoreProvider {
     }
 
     fn discard_send(&self, _group_id: &str, client_msg_id: &str) {
+        if self.discard_job(client_msg_id) {
+            return;
+        }
         if let Some(a) = self.account()
             && let Err(e) = a.client.discard(client_msg_id)
         {
@@ -1126,9 +1171,94 @@ impl ChatProvider for CoreProvider {
         }
     }
 
-    fn attach_files(&self, _key: &DraftKey, _files: Vec<NewFile>) {
-        // Uploads are not in chat-core yet; the files track adds them. Not
-        // keeping the files avoids a send that drops them silently.
+    fn attach_files(&self, key: &DraftKey, files: Vec<NewFile>) {
+        self.attach_files_inner(key, files);
+    }
+
+    fn remove_file(&self, key: &DraftKey, file_id: &str) {
+        if self.shared.drafts.remove_file(key, file_id) {
+            self.draft_changed(key, true);
+        }
+    }
+
+    fn send_with_files(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+    ) -> ClientMsgId {
+        let job = self.start_upload_job(
+            key,
+            &files,
+            Some(request.topic_id.clone()),
+            None,
+            request.body.clone(),
+            request.mentions.clone(),
+            request.quote_of.clone(),
+        );
+        job.unwrap_or_else(|| self.send(request))
+    }
+
+    fn start_topic_with_files(
+        &self,
+        request: StartTopicRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+    ) -> ClientMsgId {
+        let job = self.start_upload_job(
+            key,
+            &files,
+            None,
+            request.title.clone(),
+            request.body.clone(),
+            request.mentions.clone(),
+            None,
+        );
+        job.unwrap_or_else(|| self.start_topic(request))
+    }
+
+    fn take_rejected_files(&self, key: &DraftKey) -> Vec<RejectedFile> {
+        self.take_rejected_inner(key)
+    }
+
+    fn file_transfer(&self, key: &str) -> Option<TransferState> {
+        self.file_transfer_inner(key)
+    }
+
+    fn cached_file(&self, file: &FileAttachment) -> Option<PathBuf> {
+        self.cached_file_inner(file)
+    }
+
+    fn thumbnail(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Option<PathBuf> {
+        self.thumbnail_inner(group_id, topic_id, file)
+    }
+
+    fn fetch_file(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Reply<PathBuf> {
+        self.fetch_file_inner(group_id, topic_id, file)
+    }
+
+    fn topic_files(&self, _group_id: &str, topic_id: &str) -> Vec<TopicFile> {
+        self.topic_files_inner(topic_id)
+    }
+
+    fn refresh_artifacts(&self, group_id: &str, topic_id: &str) {
+        self.refresh_artifacts_inner(group_id, topic_id);
+    }
+
+    fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
+        self.artifact_inner(artifact_id)
+    }
+
+    fn request_artifact(&self, group_id: &str, topic_id: &str, artifact_id: &str) {
+        self.request_artifact_inner(group_id, topic_id, artifact_id);
+    }
+
+    fn open_artifact_version(&self, artifact_id: &str, version: Option<u32>) -> Reply<ArtifactFolder> {
+        self.open_artifact_version_inner(artifact_id, version)
+    }
+
+    fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
+        self.create_artifact_inner(request)
     }
 
     fn clear_draft(&self, key: &DraftKey) {

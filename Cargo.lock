@@ -1343,14 +1343,17 @@ dependencies = [
 name = "desktop"
 version = "0.1.0"
 dependencies = [
+ "artifact-view",
  "block2 0.6.2",
  "chat-core",
  "chrono",
+ "dispatch2",
  "futures",
  "gpui-component",
  "gpui-kit",
  "gpui-pre",
  "gpui-pre-platform",
+ "image",
  "libc",
  "objc2 0.6.5",
  "objc2-app-kit 0.3.2",

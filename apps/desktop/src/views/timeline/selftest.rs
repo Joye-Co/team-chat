@@ -202,6 +202,8 @@ fn generate(count: usize, now: Millis) -> Vec<Message> {
                 streaming: false,
                 send_state: SendState::Sent,
                 quote_of: None,
+                attachments: Vec::new(),
+                artifact_refs: Vec::new(),
             }
         })
         .collect()
