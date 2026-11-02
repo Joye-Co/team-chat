@@ -1,7 +1,9 @@
-// Rebuilds the core room tables (topics, messages, mentions) from imported archive events.
+// Rebuilds the core room tables (topics, messages, mentions, follow flags) from imported archive
+// events, exactly as the room's write paths in server/src/core/room.ts build them. Keep in step.
 // Membership is not replayed: on restore the room takes its members from D1, which is restored
 // first. Feature modules register their own importers for their tables and event types.
 import { type ArchivedEvent, registerEventImporter } from "../core/registry";
+import { setFollowing } from "../core/topicstate";
 
 const CORE_MESSAGE_KEYS = new Set([
   "id",
@@ -16,6 +18,7 @@ const CORE_MESSAGE_KEYS = new Set([
   "editedAt",
   "deletedAt",
   "streaming",
+  "kind",
 ]);
 const CORE_UPDATE_KEYS = new Set(["messageId", "body", "editedAt", "streaming"]);
 
@@ -52,8 +55,9 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
     case "topic.created": {
       const t = data.topic as Obj;
       sql.exec(
-        `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0)`,
+        `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count,
+                             waiting_on, owner_id, last_message_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
         t.id as string,
         t.title as string,
         (t.status as string) ?? "open",
@@ -61,21 +65,39 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
         t.createdAt as number,
         t.rootMessageId as string,
         e.seq,
+        JSON.stringify(Array.isArray(t.waitingOn) ? t.waitingOn : []),
+        (t.ownerId as string | null | undefined) ?? (t.createdBy as string),
+        (t.lastMessageAt as number | undefined) ?? null,
       );
       return;
     }
     case "topic.updated": {
+      const topicId = data.topicId as string;
+      const row = sql
+        .exec<{ waiting_on: string; owner_id: string | null }>("SELECT waiting_on, owner_id FROM topics WHERE id = ?", topicId)
+        .toArray()[0];
+      if (!row) return;
       const sets: string[] = ["last_seq = ?"];
       const args: unknown[] = [e.seq];
-      if (typeof data.title === "string") {
-        sets.push("title = ?");
-        args.push(data.title);
+      const set = (col: string, v: unknown) => {
+        sets.push(`${col} = ?`);
+        args.push(v);
+      };
+      if (typeof data.title === "string") set("title", data.title);
+      if (typeof data.status === "string") set("status", data.status);
+      if (Array.isArray(data.waitingOn)) {
+        set("waiting_on", JSON.stringify(data.waitingOn));
+        const before = JSON.parse(row.waiting_on ?? "[]") as string[];
+        for (const id of data.waitingOn as string[]) if (!before.includes(id)) setFollowing(sql, id, topicId, true);
       }
-      if (typeof data.status === "string") {
-        sets.push("status = ?");
-        args.push(data.status);
+      if (data.ownerId !== undefined) {
+        set("owner_id", data.ownerId);
+        if (data.ownerId && data.ownerId !== row.owner_id) setFollowing(sql, data.ownerId as string, topicId, true);
       }
-      sql.exec(`UPDATE topics SET ${sets.join(", ")} WHERE id = ?`, ...args, data.topicId as string);
+      if (typeof data.lastMessageAt === "number") set("last_message_at", data.lastMessageAt);
+      // The room writes a topic.updated with only topicId when a delete leaves no message.
+      if (Object.keys(data).length === 1) set("last_message_at", null);
+      sql.exec(`UPDATE topics SET ${sets.join(", ")} WHERE id = ?`, ...args, topicId);
       return;
     }
     case "message.created": {
@@ -84,8 +106,8 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
       const ext = extOf(m, CORE_MESSAGE_KEYS);
       sql.exec(
         `INSERT INTO messages (id, client_msg_id, topic_id, author_id, body, mentions, created_seq, created_at,
-                               edited_at, deleted_at, streaming, ext)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                               edited_at, deleted_at, streaming, ext, kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         m.id as string,
         m.clientMsgId as string,
         m.topicId as string,
@@ -98,10 +120,18 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
         (m.deletedAt as number | null) ?? null,
         m.streaming === true ? 1 : 0,
         ext ? JSON.stringify(ext) : null,
+        (m.kind as string) ?? "text",
       );
       for (const id of new Set(mentions)) {
         sql.exec("INSERT OR IGNORE INTO mentions (member_id, seq, message_id) VALUES (?, ?, ?)", id, e.seq, m.id as string);
       }
+      for (const id of new Set([m.authorId as string, ...mentions])) setFollowing(sql, id, m.topicId as string, true);
+      sql.exec(
+        "UPDATE topics SET last_message_at = ? WHERE id = ? AND root_message_id != ?",
+        m.createdAt as number,
+        m.topicId as string,
+        m.id as string,
+      );
       touch(sql, m.topicId as string, e.seq, true);
       return;
     }
@@ -125,7 +155,7 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
     case "message.deleted": {
       const id = data.messageId as string;
       sql.exec(
-        "UPDATE messages SET body = '', deleted_at = ?, streaming = 0 WHERE id = ?",
+        "UPDATE messages SET body = '', deleted_at = ?, streaming = 0, ext = json_remove(ext, '$.card') WHERE id = ?",
         (data.deletedAt as number) ?? e.at,
         id,
       );

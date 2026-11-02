@@ -2,6 +2,7 @@
 import { registerScheduled } from "../core/registry";
 import { runArchive } from "./archive";
 import "./replay";
+import "./state";
 import { registerOpsRoutes } from "./routes";
 
 /** Must match `triggers.crons` in server/wrangler.jsonc. */

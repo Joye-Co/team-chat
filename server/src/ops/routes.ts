@@ -3,6 +3,7 @@
 //   GET  /v1/admin/archive?prefix=&cursor=     list archive objects of this env's bucket
 //   GET  /v1/admin/archive/object?key=         one archive object (gzip bytes)
 //   POST /v1/admin/import/groups/:id           gzip NDJSON of archived events -> empty GroupRoom
+//   POST /v1/admin/import/groups/:id/state     gzip JSON room state snapshot, right after the events
 //   GET  /v1/admin/import/d1                   row counts per D1 table (restore pre-check)
 //   POST /v1/admin/import/d1                   { table, columns, rows } -> INSERT OR IGNORE
 //   POST /v1/admin/import/d1/done              records the D1 restore in the audit log
@@ -72,6 +73,15 @@ const D1Chunk = z.object({
   table: z.string().min(1).max(128),
   columns: z.array(z.string().min(1).max(128)).min(1).max(200),
   rows: z.array(z.array(z.unknown())).max(5000),
+});
+
+const StateSnapshot = z.object({
+  version: z.literal(1),
+  lastSeq: z.int().nonnegative(),
+  tables: z.record(
+    z.string(),
+    z.object({ columns: z.array(z.string().max(128)).max(100), rows: z.array(z.array(z.union([z.string(), z.number(), z.null()]))) }),
+  ),
 });
 
 const quote = (id: string) => `"${id.replace(/"/g, '""')}"`;
@@ -167,6 +177,28 @@ export function registerOpsRoutes(): void {
       });
       log.info("group import", { groupId, imported, skipped, lastSeq });
       return { groupId, imported, skipped, lastSeq };
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/admin/import/groups/:id/state",
+    auth: "none",
+    async handler({ request, env, params }) {
+      await requireAdmin(request, env);
+      const bytes = await readBytes(request, MAX_IMPORT_BYTES);
+      let snap: unknown;
+      try {
+        const text = bytes[0] === 0x1f && bytes[1] === 0x8b ? await gunzip(bytes, MAX_IMPORT_TEXT) : new TextDecoder().decode(bytes);
+        snap = JSON.parse(text);
+      } catch {
+        throw new ApiError("invalid", "body is not a gzip JSON state snapshot");
+      }
+      const parsed = StateSnapshot.safeParse(snap);
+      if (!parsed.success) throw new ApiError("invalid", "invalid state snapshot");
+      const r = unwrap(await roomStub(env, params.id).rpc(params.id, "ops.importState", null, parsed.data)) as { rows: number };
+      await audit(env.DB, null, { action: "admin.import.groupState", target: params.id, details: { rows: r.rows } });
+      return { groupId: params.id, rows: r.rows };
     },
   });
 

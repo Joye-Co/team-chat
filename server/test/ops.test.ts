@@ -13,7 +13,16 @@ import { ulid } from "../src/core/ids";
 import type { Actor } from "../src/core/registry";
 import worker from "../src/index";
 import { ARCHIVE_CRON } from "../src/ops";
-import { type D1Dump, D1_PREFIX, GROUP_PREFIX, groupFileKey, parseGroupFileKey, runArchive, utcDate } from "../src/ops/archive";
+import {
+  type D1Dump,
+  D1_PREFIX,
+  GROUP_PREFIX,
+  groupFileKey,
+  groupStateKey,
+  parseGroupFileKey,
+  runArchive,
+  utcDate,
+} from "../src/ops/archive";
 import { gunzip, gzip } from "../src/ops/gzip";
 import { BASE, Client, api, clientMsgId, createGroup, createMember, type TestMember } from "./helpers";
 
@@ -62,14 +71,22 @@ async function roomTables(gid: string) {
       topics: q("SELECT * FROM topics ORDER BY id"),
       messages: q("SELECT * FROM messages ORDER BY id"),
       mentions: q("SELECT * FROM mentions ORDER BY member_id, seq, message_id"),
+      topicStates: q("SELECT * FROM topic_states ORDER BY member_id, topic_id"),
+      prefs: q("SELECT * FROM member_prefs ORDER BY member_id"),
     };
   });
 }
 
+/** Event files (not state snapshots) under a prefix, in seq order. */
 async function archivedKeys(prefix: string): Promise<string[]> {
   const list = await env.FILES.list({ prefix });
-  return list.objects.map((o) => o.key).sort();
+  return list.objects
+    .map((o) => o.key)
+    .filter((k) => k.startsWith(D1_PREFIX) || parseGroupFileKey(k))
+    .sort();
 }
+
+const eventFiles = (keys: string[], gid: string) => keys.filter((k) => parseGroupFileKey(k)?.groupId === gid);
 
 async function readArchive(key: string): Promise<any[]> {
   const obj = await env.FILES.get(key);
@@ -110,7 +127,8 @@ describe("daily archive", () => {
 
     const first = await runArchive(env, { skipD1: true });
     expect(first.complete).toBe(true);
-    const keys = first.files.filter((k) => k.includes(gid));
+    const keys = eventFiles(first.files, gid);
+    expect(first.files).toContain(groupStateKey(gid, utcDate(Date.now())));
     expect(keys).toEqual([groupFileKey(gid, 1, before.events.length)]);
     const lines = await readArchive(keys[0]);
     expect(lines.map((l) => l.seq)).toEqual(before.events.map((e: any) => e.seq));
@@ -120,12 +138,12 @@ describe("daily archive", () => {
 
     // Idempotent: nothing new, nothing written.
     const second = await runArchive(env, { skipD1: true });
-    expect(second.files.filter((k) => k.includes(gid))).toEqual([]);
+    expect(eventFiles(second.files, gid)).toEqual([]);
 
     // Only the new events go into the next file.
     await populate(gid, a, b, 1);
     const third = await runArchive(env, { skipD1: true });
-    const next = third.files.filter((k) => k.includes(gid));
+    const next = eventFiles(third.files, gid);
     expect(next).toHaveLength(1);
     expect(parseGroupFileKey(next[0])).toEqual({ groupId: gid, from: before.events.length + 1, to: expect.any(Number) });
   });
@@ -146,7 +164,8 @@ describe("daily archive", () => {
     for (const g of [g2, g3]) {
       const keys = await archivedKeys(`${GROUP_PREFIX}${g}/`);
       expect(keys).toHaveLength(1);
-      expect((await readArchive(keys[0])).map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+      const seqs = (await roomTables(g)).events.map((e: any) => e.seq);
+      expect((await readArchive(keys[0])).map((e) => e.seq)).toEqual(seqs);
     }
   });
 
@@ -189,8 +208,14 @@ describe("restore", () => {
     await populate(gid, a, b, 2);
     await runArchive(env, { skipD1: true });
     await populate(gid, a, b, 1);
+    // State outside the log: a mute preference and a read position.
+    await runInDurableObject(env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(gid)), (_o, state) => {
+      state.storage.sql.exec("INSERT INTO member_prefs (member_id, muted, notify) VALUES (?, 1, 'none')", b.id);
+      state.storage.sql.exec("UPDATE topic_states SET read_seq = 5 WHERE member_id = ?", b.id);
+    });
     await runArchive(env, { skipD1: true });
     const original = await roomTables(gid);
+    expect(original.prefs).toHaveLength(1);
     const keys = await archivedKeys(`${GROUP_PREFIX}${gid}/`);
     expect(keys).toHaveLength(2);
 
@@ -203,6 +228,9 @@ describe("restore", () => {
       total += r.body.imported;
     }
     expect(total).toBe(original.events.length);
+    const stateBytes = new Uint8Array(await (await env.FILES.get(groupStateKey(gid, utcDate(Date.now()))))!.arrayBuffer());
+    const st = await api(`/v1/admin/import/groups/${target}/state`, { method: "POST", headers: ADMIN, raw: stateBytes as unknown as string });
+    expect(st.status, JSON.stringify(st.body)).toBe(200);
     const restored = await roomTables(target);
     expect(restored).toEqual(original);
 
@@ -249,10 +277,12 @@ describe("restore", () => {
     await runArchive(env, { skipD1: true });
     const list = await api(`/v1/admin/archive?prefix=${encodeURIComponent(`${GROUP_PREFIX}${gid}/`)}`, { headers: ADMIN });
     expect(list.status).toBe(200);
-    expect(list.body.objects).toHaveLength(1);
-    const res = await fetchObject(list.body.objects[0].key);
+    const keys = list.body.objects.map((o: any) => o.key);
+    const n = (await roomTables(gid)).events.length;
+    expect(keys).toEqual([groupFileKey(gid, 1, n), groupStateKey(gid, utcDate(Date.now()))]);
+    const res = await fetchObject(keys[0]);
     expect(res.status).toBe(200);
-    expect((await gunzip(await res.arrayBuffer())).split("\n").filter(Boolean)).toHaveLength(7);
+    expect((await gunzip(await res.arrayBuffer())).split("\n").filter(Boolean)).toHaveLength(n);
     expect((await api("/v1/admin/archive", {})).status).toBe(401);
     expect((await api("/v1/admin/archive?prefix=uploads/", { headers: ADMIN })).status).toBe(400);
   });

@@ -1,5 +1,6 @@
 // Daily archive to R2 (the env's FILES bucket):
 //   archive/groups/<groupId>/<from>-<to>.ndjson.gz   stored events with from <= seq <= to
+//   archive/groups/<groupId>/state/<YYYY-MM-DD>.json.gz   per-member room state (reads, follows, prefs)
 //   archive/d1/<YYYY-MM-DD>.json.gz                 every D1 table (hashes only, no secrets)
 // Resumable and idempotent: D1 table ops_archive keeps the last archived seq per group and is
 // moved forward after each file is written. A run stops at its budget and the next run goes on.
@@ -33,6 +34,10 @@ export function groupFileKey(groupId: string, from: number, to: number): string 
 export function parseGroupFileKey(key: string): { groupId: string; from: number; to: number } | null {
   const m = /^archive\/groups\/([^/]+)\/(\d+)-(\d+)\.ndjson\.gz$/.exec(key);
   return m ? { groupId: m[1], from: Number(m[2]), to: Number(m[3]) } : null;
+}
+
+export function groupStateKey(groupId: string, date: string): string {
+  return `${GROUP_PREFIX}${groupId}/state/${date}.json.gz`;
 }
 
 export function utcDate(ms: number): string {
@@ -117,6 +122,10 @@ export async function runArchive(env: Env, opts: ArchiveOptions = {}): Promise<A
       }
     }
     await flush();
+    const state = unwrap(await roomStub(env, g.id).rpc(g.id, "ops.exportState", null, {}));
+    const stateKey = groupStateKey(g.id, utcDate(now));
+    await env.FILES.put(stateKey, await gzip(JSON.stringify(state)), { httpMetadata: { contentType: "application/gzip" } });
+    report.files.push(stateKey);
   }
   opts.log?.info("archive run", {
     groups: report.groups,
