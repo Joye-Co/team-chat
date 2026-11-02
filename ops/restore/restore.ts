@@ -7,9 +7,13 @@
 // Target: --to <env> [--to-url <base>] [--to-secret-file <path>]
 // Admin secrets default to ~/.config/team-chat/<env>/admin-secret (mode 600).
 //
-//   bun ops/restore/restore.ts d1    <source> <target> [--date YYYY-MM-DD] [--resume]
+//   bun ops/restore/restore.ts d1    <source> <target> [--date YYYY-MM-DD] [--resume] [--revocations <file>]
 //   bun ops/restore/restore.ts group <source> <target> --group <id> [--date YYYY-MM-DD]
-//   bun ops/restore/restore.ts env   <source> <target> [--date YYYY-MM-DD] [--resume]
+//   bun ops/restore/restore.ts env   <source> <target> [--date YYYY-MM-DD] [--resume] [--revocations <file>]
+//
+// --revocations: a file from `bun server/scripts/admin.ts revocations-save` taken from the source
+// before the restore. A D1 dump is older than revocations made after it; they are applied again
+// right after the D1 rows, so a revoked token or deactivated member never works again.
 //   bun ops/restore/restore.ts fetch <source> --out <folder>      copy the archive to a folder
 //
 // Order for a whole environment: D1 first (members, tokens, groups), then every group's events,
@@ -30,6 +34,7 @@ import {
   parseD1Key,
   parseGroupFileKey,
   parseStateKey,
+  readSecretFile,
 } from "./lib";
 
 const D1_CHUNK_ROWS = 500;
@@ -50,8 +55,8 @@ async function pickD1(source: ArchiveSource, date?: string): Promise<{ key: stri
 export async function restoreD1(
   source: ArchiveSource,
   target: AdminApi,
-  opts: { date?: string; resume?: boolean } = {},
-): Promise<{ key: string; dump: D1Dump; rows: number; inserted: number; skippedTables: string[] }> {
+  opts: { date?: string; resume?: boolean; revocations?: string } = {},
+): Promise<{ key: string; dump: D1Dump; rows: number; inserted: number; skippedTables: string[]; reapplied: number }> {
   const { key, dump } = await pickD1(source, opts.date);
   const status = await target.json<{ tables: Record<string, number> }>("/v1/admin/import/d1");
   if ((status.tables.members ?? 0) > 0 && !opts.resume) {
@@ -86,12 +91,21 @@ export async function restoreD1(
       inserted += r.inserted;
     }
   }
+  let reapplied = 0;
+  if (opts.revocations) {
+    const r = await target.json<{ applied: number }>("/v1/admin/revocations", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: readSecretFile(opts.revocations, "revocations file"),
+    });
+    reapplied = r.applied;
+  }
   await target.json("/v1/admin/import/d1/done", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ source: `${dump.environment}:${key}`, tables: dump.tables.length }),
   });
-  return { key, dump, rows, inserted, skippedTables };
+  return { key, dump, rows, inserted, skippedTables, reapplied };
 }
 
 export async function restoreGroup(
@@ -143,7 +157,7 @@ export async function restoreGroup(
 export async function restoreEnv(
   source: ArchiveSource,
   target: AdminApi,
-  opts: { date?: string; resume?: boolean } = {},
+  opts: { date?: string; resume?: boolean; revocations?: string } = {},
 ) {
   const d1 = await restoreD1(source, target, opts);
   const groupsTable = d1.dump.tables.find((t) => t.name === "groups");
@@ -151,7 +165,7 @@ export async function restoreEnv(
   const groupIds = groupsTable && idCol >= 0 ? groupsTable.rows.map((r) => r[idCol] as string) : [];
   const groups = [];
   for (const id of groupIds) groups.push(await restoreGroup(source, target, id, opts));
-  return { d1: { key: d1.key, rows: d1.rows, inserted: d1.inserted, skippedTables: d1.skippedTables }, groups };
+  return { d1: { key: d1.key, rows: d1.rows, inserted: d1.inserted, skippedTables: d1.skippedTables, reapplied: d1.reapplied }, groups };
 }
 
 export async function fetchArchive(source: ArchiveSource, out: string): Promise<number> {
@@ -168,18 +182,19 @@ if (import.meta.main) {
   const { command, flags } = parseArgs(process.argv.slice(2));
   const date = flag(flags, "date");
   const resume = flags.resume === true;
+  const revocations = flag(flags, "revocations");
   const run = async () => {
     switch (command) {
       case "d1": {
-        const r = await restoreD1(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), { date, resume });
-        return { key: r.key, rows: r.rows, inserted: r.inserted, skippedTables: r.skippedTables };
+        const r = await restoreD1(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), { date, resume, revocations });
+        return { key: r.key, rows: r.rows, inserted: r.inserted, skippedTables: r.skippedTables, reapplied: r.reapplied };
       }
       case "group": {
         const id = flag(flags, "group") ?? fail("--group <id> is required");
         return restoreGroup(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), id, { date });
       }
       case "env":
-        return restoreEnv(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), { date, resume });
+        return restoreEnv(sourceFrom(flags), AdminApi.fromFlags(flags, "to"), { date, resume, revocations });
       case "fetch": {
         const out = flag(flags, "out") ?? fail("--out <folder> is required");
         return { objects: await fetchArchive(sourceFrom(flags), out), out };

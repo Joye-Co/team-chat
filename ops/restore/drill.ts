@@ -1,16 +1,19 @@
 #!/usr/bin/env bun
 // Local restore drill. Starts a fresh local stack A, fills it with real data through the public
-// API, runs the archive, copies the archive to a folder and stops A. Then starts a fresh stack B,
+// API, runs the archive, copies the archive to a folder and stops A. Then starts a stack B with
+// empty D1 and Durable Objects (A's R2 bucket, which holds the file bytes, stays),
 // restores the whole env from that folder, and compares what members see in B with what they
-// saw in A. Exits 0 when they match. Report: ops/restore/.drill/report.json (no secrets).
+// saw in A (messages, topics, 产出 and their files). A message deleted after the first archive
+// run must be gone from every archive file and from B. Exits 0 when all match.
+// Report: ops/restore/.drill/report.json (no secrets).
 //
 //   bun ops/restore/drill.ts [--port 8798]
 //
 // It runs `wrangler dev` itself (persisting under ops/restore/.drill/) and stops it by PID.
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdirSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, openSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AdminApi, ROOT, dirSource, flag, httpSource, parseArgs } from "./lib";
+import { AdminApi, ROOT, dirSource, flag, gunzipText, httpSource, parseArgs } from "./lib";
 import { fetchArchive, restoreEnv } from "./restore";
 
 const { flags } = parseArgs(["drill", ...process.argv.slice(2)]);
@@ -133,7 +136,33 @@ class Ws {
   }
 }
 
+interface FileRef {
+  fileId: string;
+  name: string;
+  size: number;
+  mime: string;
+  sha256: string;
+}
+
+async function upload(token: string, groupId: string, text: string, name: string, mime: string): Promise<FileRef> {
+  const bytes = new TextEncoder().encode(text);
+  const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+  const f = await http<any>("/v1/files", { token, body: { groupId, name, size: bytes.length, mime, sha256 } });
+  const res = await fetch(`${BASE}/v1/files/${f.file.id}/content`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${token}` },
+    body: bytes,
+  });
+  if (!res.ok) throw new Error(`upload ${name}: ${res.status}`);
+  return { fileId: f.file.id as string, name, size: bytes.length, mime, sha256 };
+}
+
+/** Deleted after the first archive run: no archive file and no restored event may keep it. */
+const LATE_DELETE = "DRILL-DELETED-AFTER-ARCHIVE";
+
 interface Seeded {
+  note: FileRef;
+  late: { groupId: string; messageId: string };
   ownerToken: string;
   memberToken: string;
   botToken: string;
@@ -169,10 +198,26 @@ async function seed(): Promise<Seeded> {
     await m.ok({ t: "delete", groupId: gid, messageId: oops.message.id });
     await o.ok({ t: "topic.update", groupId: gid, topicId, status: t % 2 ? "done" : "in_progress", title: `话题 ${t} (改)` });
   }
+  // A file attachment and a 产出 with two versions: their room records have no event of their own
+  // (files) or are rebuilt from artifact events (产出).
+  const topicId = (await o.ok({ t: "send", groupId: gid, clientMsgId: id(), body: "产出话题" })).topic.id;
+  const page1 = await upload(ownerToken, gid, "<h1>v1</h1>", "index.html", "text/html");
+  const page2 = await upload(ownerToken, gid, "<h1>v2</h1>", "index.html", "text/html");
+  const note = await upload(ownerToken, gid, "附件内容", "note.txt", "text/plain");
+  await o.ok({ t: "send", groupId: gid, topicId, clientMsgId: id(), body: "附件", attachments: [note] });
+  const art = await http<any>("/v1/artifacts", {
+    token: ownerToken,
+    body: { groupId: gid, topicId, title: "页面", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: page1.fileId }] },
+  });
+  await http<any>(`/v1/artifacts/${art.artifact.id}/versions`, {
+    token: ownerToken,
+    body: { entry: "index.html", files: [{ path: "index.html", fileId: page2.fileId }], note: "第二版" },
+  });
+  const late = await m.ok({ t: "send", groupId: gid, topicId, clientMsgId: id(), body: LATE_DELETE });
   await o.ok({ t: "send", groupId: dm.group.id, clientMsgId: id(), body: "私聊" });
   await m.ok({ t: "send", groupId: dm.group.id, clientMsgId: id(), body: "收到" });
   for (const ws of [o, m, b]) ws.close();
-  return { ownerToken, memberToken: member.token, botToken: bot.token };
+  return { note, late: { groupId: gid, messageId: late.message.id }, ownerToken, memberToken: member.token, botToken: bot.token };
 }
 
 /** Everything one member sees: members, groups, every event and every topic's history. */
@@ -199,12 +244,30 @@ async function view(token: string): Promise<any> {
     }
   }
   ws.close();
+  // 产出 of every group: list, versions and the entry file of each version.
+  const artifacts: Record<string, any[]> = {};
+  for (const g of groups) {
+    const gid = g.group.id;
+    const list = await http<any[]>(`/v1/artifacts?groupId=${encodeURIComponent(gid)}`, { token });
+    artifacts[gid] = [];
+    for (const a of list) {
+      const full = await http<any>(`/v1/artifacts/${a.id}`, { token });
+      const entries: string[] = [];
+      for (const v of full.versions) {
+        const res = await fetch(`${BASE}/v1/artifacts/${a.id}/versions/${v.version}/files/${v.entry}`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        entries.push(`${res.status} ${await res.text()}`);
+      }
+      artifacts[gid].push({ ...full, entries });
+    }
+  }
   // Group read cursors live in each member's gateway and are not archived; compare the rest.
   const strip = (g: any) => {
     const { readSeq, unread, mentions, ...rest } = g;
     return rest;
   };
-  return { members, groups: groups.map(strip), events, history };
+  return { members, groups: groups.map(strip), events, history, artifacts };
 }
 
 function diff(a: unknown, b: unknown, path = "$", out: string[] = []): string[] {
@@ -228,13 +291,32 @@ async function main() {
   try {
     seeded = await seed();
     const run = await admin.json<any>("/v1/admin/archive/run", { method: "POST" });
-    report.archive = { files: run.files.length, events: run.events, complete: run.complete };
+    const { ws: lw } = await Ws.open(seeded.memberToken);
+    await lw.ok({ t: "delete", groupId: seeded.late.groupId, messageId: seeded.late.messageId });
+    lw.close();
+    const run2 = await admin.json<any>("/v1/admin/archive/run", { method: "POST" });
+    report.archive = {
+      files: run.files.length + run2.files.length,
+      events: run.events + run2.events,
+      complete: run.complete && run2.complete,
+      scrubbed: run2.scrubbed.length,
+    };
     before = { owner: await view(seeded.ownerToken), member: await view(seeded.memberToken) };
     report.archivedObjects = await fetchArchive(httpSource(admin), join(WORK, "archive"));
+    const archive = dirSource(join(WORK, "archive"));
+    let leaks = 0;
+    for (const k of await archive.list("archive/groups/")) {
+      if (gunzipText(await archive.get(k)).includes(LATE_DELETE)) leaks++;
+    }
+    report.deletedTextInArchive = leaks;
   } finally {
     await stopStack(proc);
   }
 
+  // Stack B gets empty D1 and Durable Objects but keeps A's R2 bucket: uploaded file bytes and
+  // 产出 files are not in the archive, they stay in the env's bucket (docs/RUNBOOK.md).
+  mkdirSync(join(WORK, "b", "v3"), { recursive: true });
+  symlinkSync(join(WORK, "a", "v3", "r2"), join(WORK, "b", "v3", "r2"));
   proc = await startStack("b");
   try {
     const health = await http<any>("/v1/health");
@@ -256,6 +338,7 @@ async function main() {
       events: eventCount,
       topics: Object.keys(before.owner.history).length,
       members: before.owner.members.length,
+      artifacts: Object.values(before.owner.artifacts as Record<string, any[]>).reduce((n, l) => n + l.length, 0),
     };
     report.differences = differences;
     // Writes keep working after the restore and continue the seq.
@@ -263,9 +346,44 @@ async function main() {
     const g = welcome.groups.find((x: any) => x.group.kind === "group" && x.group.name === "Drill");
     const sent = await ws.ok({ t: "send", groupId: g.group.id, clientMsgId: crypto.randomUUID(), body: "恢复后" });
     ws.close();
+    // An attachment uploaded before the archive is still a ready file of the group, and the
+    // 产出 takes a new version from it.
+    const { ws: ow } = await Ws.open(seeded.ownerToken);
+    const restoredArtifacts = after.owner.artifacts[g.group.id] as any[];
+    const art = restoredArtifacts[0];
+    const oldFile = art?.versions.at(-1)?.files[0]?.fileId;
+    const again = await ow.ok({
+      t: "send",
+      groupId: g.group.id,
+      topicId: art?.artifact.topicId,
+      clientMsgId: crypto.randomUUID(),
+      body: "旧附件",
+      attachments: [seeded.note],
+    });
+    ow.close();
+    const v3 = await http<any>(`/v1/artifacts/${art.artifact.id}/versions`, {
+      token: seeded.ownerToken,
+      body: { entry: "index.html", files: [{ path: "index.html", fileId: oldFile }] },
+    });
+    report.artifactsAfterRestore = {
+      artifacts: restoredArtifacts.length,
+      versions: art?.versions.length ?? 0,
+      reattached: again.message.attachments?.length ?? 0,
+      newVersion: v3.version.version,
+    };
     // A send without topicId writes topic.created and then message.created.
     report.writeAfterRestore = { seq: sent.message.createdSeq, expected: g.lastSeq + 2 };
-    report.ok = differences.length === 0 && sent.message.createdSeq === g.lastSeq + 2 && eventCount > 0;
+    report.ok =
+      differences.length === 0 &&
+      sent.message.createdSeq === g.lastSeq + 2 &&
+      eventCount > 0 &&
+      restoredArtifacts.length === 1 &&
+      art.versions.length === 2 &&
+      v3.version.version === 3 &&
+      report.deletedTextInArchive === 0 &&
+      (report.archive as { scrubbed: number }).scrubbed > 0 &&
+      !JSON.stringify(after).includes(LATE_DELETE) &&
+      again.message.attachments?.length === 1;
   } finally {
     await stopStack(proc);
   }
