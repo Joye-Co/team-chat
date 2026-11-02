@@ -4,8 +4,8 @@
 use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::machine::{FileChange, RunEvent, RunLogEntry};
 use crate::proto::{
-    BotRun, BotRunner, CreateMachineRequest, CreateMachineResponse, Machine, RunEventsResponse,
-    SetBotRunnerRequest,
+    BotRun, BotRunner, CreateMachineRequest, CreateMachineResponse, EndRunRequest, Machine,
+    RunEventsResponse, SetBotRunnerRequest, SetRunPlanRequest, StartRunRequest,
 };
 use reqwest::Method;
 use std::collections::HashMap;
@@ -36,6 +36,40 @@ impl HttpClient {
                 limit.clamp(1, 500)
             ),
             None,
+            true,
+        )
+        .await
+    }
+
+    /// Bot (not runner-backed): starts a run of this bot in a topic, or returns its active
+    /// run there (docs/protocol.md, "Run plans").
+    pub async fn start_run(&self, req: &StartRunRequest) -> ApiResult<BotRun> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(Method::POST, "/v1/runs", Some(req), true).await
+    }
+
+    /// The run's bot: replaces the whole plan of an active run; an empty list clears it.
+    pub async fn set_run_plan(&self, run_id: &str, req: &SetRunPlanRequest) -> ApiResult<BotRun> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::PUT,
+            &format!("/v1/runs/{}/plan", enc(run_id)),
+            Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// The run's bot: ends a run it started with [`HttpClient::start_run`].
+    pub async fn end_run(&self, run_id: &str, req: &EndRunRequest) -> ApiResult<BotRun> {
+        req.validate()
+            .map_err(|e| ApiError::Invalid(e.to_string()))?;
+        self.call(
+            Method::POST,
+            &format!("/v1/runs/{}/end", enc(run_id)),
+            Some(req),
             true,
         )
         .await

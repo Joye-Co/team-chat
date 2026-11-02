@@ -1122,3 +1122,83 @@ async fn bot_runs_from_events_and_the_process_view_from_the_run_log() {
     let (more, last2) = client.run_log("R1", last).await.unwrap().unwrap();
     assert_eq!((more.len(), last2), (0, 607));
 }
+
+fn plan_item(text: &str, state: RunPlanState) -> RunPlanItem {
+    RunPlanItem {
+        text: text.into(),
+        state,
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn run_plans_sync_with_the_run_and_stay_in_the_cache() {
+    use RunPlanState::*;
+    let dir = tempfile::tempdir().unwrap();
+    let plan1 = vec![
+        plan_item("写标题和正文", Done),
+        plan_item("生成 3 张配图", Current),
+        plan_item("周四 20:00 发出", Pending),
+    ];
+    let plan2 = vec![
+        plan_item("写标题和正文", Done),
+        plan_item("生成 3 张配图", Done),
+        plan_item("等 Joye 确认", Waiting),
+        plan_item("周四 20:00 发出", Pending),
+    ];
+    let with_plan = |updated: u64, plan: Option<Vec<RunPlanItem>>| BotRun {
+        plan,
+        ..bot_run("R1", "T1", RunStatus::Running, updated)
+    };
+    {
+        let store = store_with_group(dir.path());
+        let ran = |seq: u64, run: BotRun| ev(seq, G1, ALICE, EventData::RunUpdated(RunUpdatedData { run }));
+        let out = store
+            .apply_events(
+                G1,
+                &[
+                    topic_created(1, G1, topic("T1", G1, "M1", 1)),
+                    ran(2, with_plan(5, Some(plan1.clone()))),
+                ],
+            )
+            .unwrap();
+        assert!(out.run_topics.contains("T1"));
+        assert_eq!(store.runs("T1").unwrap()[0].plan.as_ref(), Some(&plan1));
+        // An update replaces the whole plan.
+        store
+            .apply_events(G1, &[ran(3, with_plan(6, Some(plan2.clone())))])
+            .unwrap();
+        assert_eq!(store.runs("T1").unwrap()[0].plan.as_ref(), Some(&plan2));
+        // An older copy (a replayed event) never brings the old plan back.
+        store.store_run(&with_plan(5, Some(plan1.clone()))).unwrap();
+        assert_eq!(store.run("R1").unwrap().unwrap().plan.as_ref(), Some(&plan2));
+    }
+    // The cache keeps the plan across a restart.
+    let store = Store::open(&dir.path().join("cache.sqlite3")).unwrap();
+    assert_eq!(store.runs("T1").unwrap()[0].plan.as_ref(), Some(&plan2));
+    // A cleared plan (no `plan` field) clears the cached one.
+    store.store_run(&with_plan(7, None)).unwrap();
+    assert_eq!(store.runs("T1").unwrap()[0].plan, None);
+    drop(store);
+
+    // A bot sets the plan over HTTP; the client validates before it sends.
+    let http = MockHttp::start().await;
+    http.with(|s| s.runs.insert("R1".into(), (with_plan(7, None), vec![])));
+    let client = http_client(&http, dir.path(), |_| {});
+    let run = client
+        .http()
+        .set_run_plan("R1", &SetRunPlanRequest { plan: plan2.clone() })
+        .await
+        .unwrap();
+    assert_eq!(run.plan.as_ref(), Some(&plan2));
+    let too_long = SetRunPlanRequest {
+        plan: vec![plan_item(&"字".repeat(201), Current)],
+    };
+    assert!(matches!(
+        client.http().set_run_plan("R1", &too_long).await,
+        Err(ApiError::Invalid(_))
+    ));
+    assert_eq!(http.with(|s| s.count("PUT", "/v1/runs/R1/plan")), 1);
+    // Reading the run log refreshes the cached run with its plan.
+    client.run_log("R1", 0).await.unwrap();
+    assert_eq!(client.runs("T1").unwrap()[0].plan.as_ref(), Some(&plan2));
+}

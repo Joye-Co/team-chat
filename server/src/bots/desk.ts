@@ -294,7 +294,8 @@ export class BotDesk extends DurableObject<BotsEnv> {
 
   /** Writes the run's new status and stores a `run.updated` event in the group log. */
   private async setStatus(r: RunRow, status: RunStatus, change: Partial<RunRow> = {}): Promise<void> {
-    const now = Date.now();
+    // Strictly newer than the last copy: clients keep the copy with the highest `updatedAt`.
+    const now = Math.max(Date.now(), r.updated_at + 1);
     Object.assign(r, change, { status, updated_at: now });
     this.sql.exec(
       "UPDATE runs SET status = ?, updated_at = ?, machine_id = ?, started_at = ?, ended_at = ?, summary = ? WHERE id = ?",
