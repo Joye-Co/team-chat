@@ -40,6 +40,20 @@ pub struct Scene {
 /// Every scene, in the default order.
 pub const SCENES: &[Scene] = &[
     Scene {
+        name: "components",
+        about: "The component gallery: every shared component of DESIGN.md §7 in its states",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| open_gallery(s, c, 0, cx),
+    },
+    Scene {
+        name: "components-2",
+        about: "The component gallery: the composer, overlays and surfaces",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| open_gallery(s, c, 1, cx),
+    },
+    Scene {
         name: "main",
         about: "First 群 of the sidebar with its newest ordinary 话题 open",
         start: Start::SignedIn,
@@ -311,6 +325,23 @@ pub fn open_main(
     options.window_min_size = None;
     gpui_kit::open_window(options, cx, move |window, cx| {
         cx.new(|cx| RootView::new(services, None, window, cx))
+    })
+    .map(|(handle, _)| handle)
+    .map_err(|e| e.to_string())
+}
+
+/// The component gallery (DESIGN.md §16) at 1440 x 900.
+pub fn open_gallery(
+    _services: Services,
+    content: Size<Pixels>,
+    page: u8,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let mut options = main_window_options(false, cx);
+    options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(None, content, cx)));
+    options.window_min_size = None;
+    gpui_kit::open_window(options, cx, move |window, cx| {
+        cx.new(|cx| crate::ui::gallery::Gallery::new(page, window, cx))
     })
     .map(|(handle, _)| handle)
     .map_err(|e| e.to_string())
