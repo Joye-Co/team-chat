@@ -21,6 +21,8 @@ pub mod persist;
 mod realtime;
 #[cfg(test)]
 mod realtime_live;
+#[cfg(test)]
+mod files_live;
 pub mod selftest_live;
 pub mod session;
 
