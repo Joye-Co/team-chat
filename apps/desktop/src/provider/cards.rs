@@ -474,7 +474,7 @@ mod tests {
                 .iter()
                 .all(|i| i.op.kind() != "card_action")
         });
-        p.logout();
+        // No logout: it would revoke the token, which the next run needs.
         let _ = std::fs::remove_dir_all(dir);
     }
 }
