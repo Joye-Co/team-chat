@@ -172,6 +172,8 @@ impl RenderOnce for GroupTile {
             .chars()
             .find(|c| c.is_alphanumeric())
             .map(|c| c.to_uppercase().collect::<String>())
+            // Emoji-only names show their first character.
+            .or_else(|| self.name.trim().chars().next().map(String::from))
             .unwrap_or_default();
         div()
             .flex_none()

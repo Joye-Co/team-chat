@@ -214,13 +214,13 @@ impl MembersPage {
                                 el.child(ui::StatusChip::quiet(s::KIND_BOT))
                             }),
                     )
-                    .child(
+                    .children(m.role.clone().filter(|r| !r.is_empty()).map(|role| {
                         div()
                             .t_callout()
                             .truncate()
                             .text_color(colors.text_2)
-                            .child(m.role.clone().unwrap_or_default()),
-                    ),
+                            .child(role)
+                    })),
             )
             .child(
                 div()
