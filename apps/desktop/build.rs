@@ -1,5 +1,6 @@
-//! Exports product.json fields as compile-time constants (PRODUCT_NAME, PRODUCT_SLUG,
-//! PRODUCT_BUNDLE_ID, PRODUCT_URL_SCHEME) so the product name lives in one place.
+//! Exports product.json fields as compile-time constants so the product name lives in one place:
+//! PRODUCT_NAME, PRODUCT_SLUG, PRODUCT_BUNDLE_ID, PRODUCT_URL_SCHEME, and the server URLs
+//! PRODUCT_STAGING_URL and PRODUCT_PRODUCTION_URL (empty when not set yet).
 
 use std::{env, fs, path::PathBuf};
 
@@ -15,7 +16,16 @@ fn main() {
         ("bundleId", "PRODUCT_BUNDLE_ID"),
         ("urlScheme", "PRODUCT_URL_SCHEME"),
     ] {
-        let value = json[key].as_str().unwrap_or_else(|| panic!("product.json is missing {key}"));
+        let value = json[key]
+            .as_str()
+            .unwrap_or_else(|| panic!("product.json is missing {key}"));
+        println!("cargo:rustc-env={var}={value}");
+    }
+    for (key, var) in [
+        ("staging", "PRODUCT_STAGING_URL"),
+        ("production", "PRODUCT_PRODUCTION_URL"),
+    ] {
+        let value = json["servers"][key].as_str().unwrap_or("");
         println!("cargo:rustc-env={var}={value}");
     }
 }

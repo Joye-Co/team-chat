@@ -1,0 +1,434 @@
+//! The provider trait and the plain data types that views render.
+//!
+//! Views never talk to the network or the cache directly. They hold an
+//! `Arc<dyn ChatProvider>`, read snapshots with the synchronous getters, start
+//! work with the command methods (which return at once), and learn about new
+//! state from [`Change`] batches (see [`ChatProvider::subscribe`] and
+//! `app::ChangeHub`). No method blocks the UI thread and none is async.
+//!
+//! The types follow `docs/protocol.md` but stay independent of the protocol
+//! crates, so the UI builds without them. A real provider (chat-core) maps the
+//! wire types to these.
+
+use std::fmt;
+
+use futures::channel::mpsc::UnboundedReceiver;
+
+pub type MemberId = String;
+pub type GroupId = String;
+pub type TopicId = String;
+pub type MessageId = String;
+/// Made by the client for every send; the server deduplicates on it.
+pub type ClientMsgId = String;
+/// Milliseconds since the Unix epoch, UTC.
+pub type Millis = i64;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MemberKind {
+    Human,
+    Bot,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MemberLevel {
+    Owner,
+    Member,
+}
+
+/// A person or a bot. Both are equal members.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Member {
+    pub id: MemberId,
+    pub kind: MemberKind,
+    pub name: String,
+    /// 岗位: the member's job, shown under the name.
+    pub role: Option<String>,
+    pub level: MemberLevel,
+    pub avatar_url: Option<String>,
+    pub deactivated: bool,
+    /// Presence, from transient `presence` events.
+    pub online: bool,
+}
+
+impl Member {
+    pub fn is_bot(&self) -> bool {
+        self.kind == MemberKind::Bot
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GroupKind {
+    Group,
+    /// A group of exactly two members.
+    Dm,
+}
+
+/// One row of the sidebar.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GroupSummary {
+    pub id: GroupId,
+    pub kind: GroupKind,
+    /// For a DM, the other member's name.
+    pub name: String,
+    pub member_ids: Vec<MemberId>,
+    /// For a DM, the other member (avatar and presence dot).
+    pub dm_peer: Option<MemberId>,
+    pub last_seq: u64,
+    pub read_seq: u64,
+    pub unread: u32,
+    pub mentions: u32,
+    /// Sort key of the sidebar: newest first.
+    pub last_activity_at: Millis,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum TopicStatus {
+    Open,
+    InProgress,
+    WaitingAnswer,
+    WaitingReview,
+    Blocked,
+    Done,
+}
+
+impl TopicStatus {
+    pub const ALL: [TopicStatus; 6] = [
+        TopicStatus::Open,
+        TopicStatus::InProgress,
+        TopicStatus::WaitingAnswer,
+        TopicStatus::WaitingReview,
+        TopicStatus::Blocked,
+        TopicStatus::Done,
+    ];
+
+    /// The wire name (`docs/protocol.md`).
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            TopicStatus::Open => "open",
+            TopicStatus::InProgress => "in_progress",
+            TopicStatus::WaitingAnswer => "waiting_answer",
+            TopicStatus::WaitingReview => "waiting_review",
+            TopicStatus::Blocked => "blocked",
+            TopicStatus::Done => "done",
+        }
+    }
+}
+
+/// One row of the topic list.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Topic {
+    pub id: TopicId,
+    pub group_id: GroupId,
+    pub title: String,
+    pub status: TopicStatus,
+    /// Who the topic waits on (drives the status chip and 待办).
+    pub waiting_on: Vec<MemberId>,
+    /// The one responsible member, when set.
+    pub owner_id: Option<MemberId>,
+    pub created_by: MemberId,
+    pub created_at: Millis,
+    pub root_message_id: MessageId,
+    pub last_seq: u64,
+    pub last_activity_at: Millis,
+    pub message_count: u32,
+    /// Unread messages in this topic for me (read positions are per topic).
+    pub unread: u32,
+    pub mentions: u32,
+}
+
+/// Delivery state of a message I wrote.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SendState {
+    /// Acknowledged by the server (or written by someone else).
+    Sent,
+    /// Waiting for the ack; resent with the same `client_msg_id` after a reconnect.
+    Pending,
+    /// Rejected by the server; the user can retry or discard.
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Message {
+    /// Empty while the message is pending (no server id yet).
+    pub id: MessageId,
+    pub client_msg_id: ClientMsgId,
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    pub author_id: MemberId,
+    /// Markdown. Empty when deleted.
+    pub body: String,
+    pub mentions: Vec<MemberId>,
+    /// 0 while pending.
+    pub created_seq: u64,
+    pub created_at: Millis,
+    pub edited_at: Option<Millis>,
+    pub deleted_at: Option<Millis>,
+    /// True while a bot is still writing it.
+    pub streaming: bool,
+    pub send_state: SendState,
+    /// The message this one quotes, if any.
+    pub quote_of: Option<MessageId>,
+}
+
+/// A window of the newest messages of a topic, oldest first.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct MessageWindow {
+    pub messages: Vec<Message>,
+    /// More messages exist before `messages[0]`; call `load_older` to get them.
+    pub has_older: bool,
+    /// A `load_older` request is running.
+    pub loading_older: bool,
+}
+
+/// A 待办 entry: a topic that waits on me, or one with unread mentions of me.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TodoItem {
+    pub group_id: GroupId,
+    pub group_name: String,
+    pub topic: Topic,
+    pub reason: TodoReason,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TodoReason {
+    WaitingOnMe,
+    Mentioned,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ArtifactKind {
+    Page,
+    File,
+    Image,
+    Decision,
+}
+
+/// One 产出 of a topic, shown in the side panel.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ArtifactSummary {
+    pub id: String,
+    pub topic_id: TopicId,
+    pub kind: ArtifactKind,
+    pub title: String,
+    pub version: u32,
+    pub size_bytes: Option<u64>,
+    pub created_by: MemberId,
+    pub updated_at: Millis,
+}
+
+/// A secret the user types or pastes. `Debug` never prints it.
+#[derive(Clone, PartialEq, Eq)]
+pub enum Credential {
+    /// `XXXX-XXXX-XXXX`, single use; the server turns it into a token.
+    InviteCode(String),
+    /// A pasted `tc_...` token.
+    Token(String),
+}
+
+impl Credential {
+    /// Reads what the user pasted: a token starts with `tc_`, anything else is an invite code.
+    pub fn from_input(text: &str) -> Option<Credential> {
+        let text = text.trim();
+        if text.is_empty() {
+            None
+        } else if text.starts_with("tc_") {
+            Some(Credential::Token(text.to_string()))
+        } else {
+            Some(Credential::InviteCode(text.to_string()))
+        }
+    }
+}
+
+impl fmt::Debug for Credential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Credential::InviteCode(_) => f.write_str("InviteCode(<redacted>)"),
+            Credential::Token(_) => f.write_str("Token(<redacted>)"),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LoginRequest {
+    /// Base URL such as `https://chat-api-staging.example.workers.dev`.
+    pub server_url: String,
+    pub credential: Credential,
+    /// Shown in the member's device list.
+    pub device_name: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LoginError {
+    /// The invite code or token is wrong, used or revoked.
+    BadCredential,
+    /// The server URL is not valid or the server cannot be reached.
+    ServerUnreachable,
+    /// The server speaks a protocol this app does not support.
+    Unsupported,
+    Other,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SessionState {
+    /// No stored token; show the login view.
+    SignedOut {
+        last_error: Option<LoginError>,
+    },
+    /// `login` is running.
+    SigningIn,
+    SignedIn {
+        me: Member,
+        server_url: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ConnectionState {
+    /// Not signed in, or stopped on purpose.
+    Offline,
+    Connecting,
+    Online,
+    /// Lost the connection; the next try is in `retry_in_ms`.
+    Reconnecting {
+        attempt: u32,
+        retry_in_ms: u64,
+    },
+}
+
+/// A new message from the composer.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SendRequest {
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    pub body: String,
+    pub mentions: Vec<MemberId>,
+    pub quote_of: Option<MessageId>,
+}
+
+/// The first message of a new topic.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StartTopicRequest {
+    pub group_id: GroupId,
+    /// `None` uses the first line of `body`, cut to 80 characters.
+    pub title: Option<String>,
+    pub body: String,
+    pub mentions: Vec<MemberId>,
+}
+
+/// What changed. Views re-read only the snapshots that a change names.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum Change {
+    Session,
+    Connection,
+    /// The member directory or someone's presence.
+    Members,
+    /// The group list, its order, names or unread and mention counts.
+    Groups,
+    /// The topics of one group (new topic, title, status, unread).
+    Topics {
+        group_id: GroupId,
+    },
+    /// Messages of one topic (new, edited, deleted, streamed, ack, older page loaded).
+    Messages {
+        group_id: GroupId,
+        topic_id: TopicId,
+    },
+    /// Who is typing in one topic.
+    Typing {
+        group_id: GroupId,
+        topic_id: TopicId,
+    },
+    /// The 产出 of one topic.
+    Artifacts {
+        group_id: GroupId,
+        topic_id: TopicId,
+    },
+    /// The 待办 list.
+    Todo,
+}
+
+/// The source of all chat state for the views.
+///
+/// Rules for implementations:
+/// - Getters return a snapshot from memory or the local cache at once. They
+///   never wait for the network. Unknown ids give empty results.
+/// - Commands return at once and do their work in the background. Their effect
+///   arrives as [`Change`] batches. `send` and `start_topic` show the message
+///   as [`SendState::Pending`] right away.
+/// - Changes are coalesced into batches; a batch may name the same change
+///   twice. Order inside a batch has no meaning.
+/// - Never log or expose credentials or tokens.
+pub trait ChatProvider: Send + Sync + 'static {
+    // --- session ---
+
+    /// Current session. `SignedOut` means the login view shows.
+    fn session(&self) -> SessionState;
+    /// Signs in with an invite code or a pasted token. Emits `Change::Session`
+    /// (SigningIn, then SignedIn or SignedOut with an error). A real provider
+    /// stores the token in the macOS Keychain.
+    fn login(&self, request: LoginRequest);
+    /// Forgets the token and closes the connection.
+    fn logout(&self);
+    /// State of the live connection, for the status line.
+    fn connection(&self) -> ConnectionState;
+
+    // --- directory ---
+
+    /// Every member I can see, including bots and deactivated members.
+    fn members(&self) -> Vec<Member>;
+    fn member(&self, id: &str) -> Option<Member> {
+        self.members().into_iter().find(|m| m.id == id)
+    }
+    /// My groups and DMs, newest activity first, with unread and mention counts.
+    fn groups(&self) -> Vec<GroupSummary>;
+    /// The topics of one group, newest activity first.
+    fn topics(&self, group_id: &str) -> Vec<Topic>;
+    fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
+        self.topics(group_id).into_iter().find(|t| t.id == topic_id)
+    }
+    /// Topics that wait on me and topics with unread mentions of me.
+    fn todo(&self) -> Vec<TodoItem>;
+
+    // --- messages ---
+
+    /// The newest `limit` messages of a topic (more if older pages were
+    /// loaded), oldest first, including my pending messages.
+    fn messages(&self, group_id: &str, topic_id: &str, limit: usize) -> MessageWindow;
+    /// Starts loading the page before the oldest message in the window.
+    /// Emits `Change::Messages` when it arrives.
+    fn load_older(&self, group_id: &str, topic_id: &str);
+    /// Members typing in a topic now (not me).
+    fn typing(&self, group_id: &str, topic_id: &str) -> Vec<MemberId>;
+    /// The 产出 of a topic, newest first.
+    fn artifacts(&self, group_id: &str, topic_id: &str) -> Vec<ArtifactSummary>;
+
+    // --- commands ---
+
+    /// Sends a message into an existing topic.
+    fn send(&self, request: SendRequest) -> ClientMsgId;
+    /// Starts a topic whose root is this message.
+    fn start_topic(&self, request: StartTopicRequest) -> ClientMsgId;
+    /// Replaces the body of my message.
+    fn edit(&self, group_id: &str, message_id: &str, body: String);
+    /// Deletes my message (or any message, for an owner).
+    fn delete(&self, group_id: &str, message_id: &str);
+    /// Sets the status and who the topic waits on.
+    fn set_topic_status(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        status: TopicStatus,
+        waiting_on: Vec<MemberId>,
+    );
+    /// Marks a topic read up to `seq` (only moves forward).
+    fn mark_read(&self, group_id: &str, topic_id: &str, seq: u64);
+    /// Tells others I am typing. The provider limits it to one per 3 s per topic.
+    fn set_typing(&self, group_id: &str, topic_id: &str);
+
+    // --- changes ---
+
+    /// A new stream of change batches. Each call gives a new receiver; all
+    /// receivers get every batch. The app drains it on the main thread through
+    /// `app::ChangeHub`, so views do not call this themselves.
+    fn subscribe(&self) -> UnboundedReceiver<Vec<Change>>;
+}
