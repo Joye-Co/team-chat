@@ -15,6 +15,7 @@ use gpui_component::{
     Sizable as _,
     menu::ContextMenuExt as _,
     tab::{Tab, TabBar},
+    tooltip::Tooltip,
 };
 
 use crate::{
@@ -29,44 +30,85 @@ use crate::{
 /// Height of one topic row: 9 + 18 + 4 + 18 + 10 (§5.3) plus the 2 pt inset.
 const TOPIC_ROW_HEIGHT: gpui::Pixels = px(61.);
 
-/// The status filter above the topics of a group.
+/// The filter above the topics of a group (DESIGN.md §5.3): 全部, 未读, 待办.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TopicFilter {
     #[default]
     All,
-    /// `waitingOn` includes me and the topic is not done.
-    WaitingOnMe,
-    InProgress,
-    Done,
+    /// Topics with unread messages for me.
+    Unread,
+    /// The 待办 of this group: `waitingOn` includes me and the topic is not
+    /// done, or it has unread mentions of me.
+    Todo,
 }
 
 impl TopicFilter {
-    pub const ALL: [TopicFilter; 4] = [
-        TopicFilter::All,
-        TopicFilter::WaitingOnMe,
-        TopicFilter::InProgress,
-        TopicFilter::Done,
-    ];
+    pub const ALL: [TopicFilter; 3] = [TopicFilter::All, TopicFilter::Unread, TopicFilter::Todo];
 
     fn label(self) -> &'static str {
         match self {
             TopicFilter::All => nav::FILTER_ALL,
-            TopicFilter::WaitingOnMe => nav::FILTER_WAITING_ME,
-            TopicFilter::InProgress => nav::FILTER_IN_PROGRESS,
-            TopicFilter::Done => nav::FILTER_DONE,
+            TopicFilter::Unread => nav::FILTER_UNREAD,
+            TopicFilter::Todo => nav::FILTER_TODO,
         }
     }
 
     pub fn keeps(self, topic: &Topic, me: Option<&str>) -> bool {
         match self {
             TopicFilter::All => true,
-            TopicFilter::WaitingOnMe => {
-                topic.status != TopicStatus::Done
-                    && me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me))
+            TopicFilter::Unread => topic.unread > 0 || topic.mentions > 0,
+            TopicFilter::Todo => {
+                topic.mentions > 0
+                    || (topic.status != TopicStatus::Done
+                        && me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me)))
             }
-            TopicFilter::InProgress => topic.status == TopicStatus::InProgress,
-            TopicFilter::Done => topic.status == TopicStatus::Done,
         }
+    }
+}
+
+/// The time of a topic row (DESIGN.md §12): today `14:32`, yesterday `昨天`,
+/// this week `周一`, this year `11月2日`, older `2025年12月31日`.
+pub fn list_time(at: Millis, now: DateTime<Local>) -> String {
+    // A missing (zero) timestamp shows nothing, never 1970年1月1日.
+    if at <= 0 {
+        return String::new();
+    }
+    let Some(then) = Local.timestamp_millis_opt(at).single() else {
+        return String::new();
+    };
+    let days = (now.date_naive() - then.date_naive()).num_days();
+    if days <= 0 {
+        then.format("%H:%M").to_string()
+    } else if days == 1 {
+        common::YESTERDAY.to_string()
+    } else if days < 7 {
+        let names = [
+            nav::WEEKDAY_MON,
+            nav::WEEKDAY_TUE,
+            nav::WEEKDAY_WED,
+            nav::WEEKDAY_THU,
+            nav::WEEKDAY_FRI,
+            nav::WEEKDAY_SAT,
+            nav::WEEKDAY_SUN,
+        ];
+        names[then.weekday().num_days_from_monday() as usize].to_string()
+    } else if then.year() == now.year() {
+        fill(
+            common::MONTH_DAY,
+            &[
+                ("m", &then.month().to_string()),
+                ("d", &then.day().to_string()),
+            ],
+        )
+    } else {
+        fill(
+            nav::YEAR_MONTH_DAY,
+            &[
+                ("y", &then.year().to_string()),
+                ("m", &then.month().to_string()),
+                ("d", &then.day().to_string()),
+            ],
+        )
     }
 }
 
@@ -130,6 +172,8 @@ pub struct TopicListView {
     /// Who is typing, per topic of the shown rows.
     typing: HashMap<TopicId, Vec<MemberId>>,
     filter: TopicFilter,
+    /// The filter of each 群, remembered while the app runs (§13.3).
+    filters: HashMap<GroupId, TopicFilter>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -180,6 +224,7 @@ impl TopicListView {
             members: Vec::new(),
             typing: HashMap::new(),
             filter: TopicFilter::All,
+            filters: HashMap::new(),
             _subscriptions: subscriptions,
         };
         this.refresh(cx);
@@ -190,7 +235,10 @@ impl TopicListView {
         let p = self.services.provider.clone();
         let place = self.services.nav.read(cx).place.clone();
         if place != self.place {
-            self.filter = TopicFilter::All;
+            self.filter = match &place {
+                Some(Place::Group(g)) => self.filters.get(g).copied().unwrap_or_default(),
+                _ => TopicFilter::All,
+            };
         }
         self.place = place;
         self.members = p.members();
@@ -291,6 +339,9 @@ impl TopicListView {
 
     fn set_filter(&mut self, filter: TopicFilter, cx: &mut Context<Self>) {
         self.filter = filter;
+        if let Some(Place::Group(g)) = &self.place {
+            self.filters.insert(g.clone(), filter);
+        }
         self.apply_filter();
         cx.notify();
     }
@@ -349,10 +400,14 @@ impl Render for TopicListView {
         let colors = theme::colors(cx);
         let is_group = matches!(self.place, Some(Place::Group(_)));
         let empty_text = match &self.place {
-            None => Some(nav::SELECT_GROUP),
-            Some(Place::Todo) if self.rows.is_empty() => Some(nav::TODO_EMPTY),
-            Some(Place::Group(_)) if self.all.is_empty() => Some(nav::TOPICS_EMPTY),
-            Some(Place::Group(_)) if self.rows.is_empty() => Some(nav::FILTER_EMPTY),
+            None => Some((nav::SELECT_GROUP, None)),
+            Some(Place::Todo) if self.rows.is_empty() => {
+                Some((nav::TODO_EMPTY, Some(nav::TODO_EMPTY_HINT)))
+            }
+            Some(Place::Group(_)) if self.all.is_empty() => {
+                Some((nav::TOPICS_EMPTY, Some(nav::TOPICS_EMPTY_HINT)))
+            }
+            Some(Place::Group(_)) if self.rows.is_empty() => Some((nav::FILTER_EMPTY, None)),
             _ => None,
         };
         let sub = if is_group {
@@ -416,9 +471,12 @@ impl Render for TopicListView {
             None => Lucide::UsersRound,
         };
         let body = match empty_text {
-            Some(text) => div()
+            Some((text, hint)) => div()
                 .flex_1()
-                .child(ui::EmptyState::new(empty_icon, text))
+                .child(
+                    ui::EmptyState::new(empty_icon, text)
+                        .when_some(hint, |el, hint| el.description(hint)),
+                )
                 .into_any_element(),
             None => uniform_list(
                 "topic-rows",
@@ -454,6 +512,7 @@ impl Render for TopicListView {
                             } else {
                                 (title, false)
                             };
+                            let tip = SharedString::from(title.clone());
                             let typing = this.typing_text(&row.topic.id);
                             let menu_services = this.services.clone();
                             let menu_topic = row.topic.clone();
@@ -515,7 +574,7 @@ impl Render for TopicListView {
                                                         .t_callout()
                                                         .tnum()
                                                         .text_color(colors.text_2)
-                                                        .child(relative_time(
+                                                        .child(list_time(
                                                             row.topic.last_activity_at,
                                                             now,
                                                         )),
@@ -556,6 +615,9 @@ impl Render for TopicListView {
                                             )
                                         }),
                                 )
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(tip.clone()).build(window, cx)
+                                })
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let (g, t) = (g.clone(), t.clone());
                                     this.services
@@ -618,38 +680,48 @@ mod tests {
     }
 
     #[test]
-    fn filters_follow_status_and_waiting_on() {
+    fn list_time_follows_design_dates() {
+        // A Wednesday.
+        let now = Local.with_ymd_and_hms(2026, 6, 17, 12, 0, 0).unwrap();
+        let at = |d: D| (now - d).timestamp_millis();
+        assert_eq!(list_time(at(D::minutes(5)), now), "11:55");
+        assert_eq!(list_time(at(D::hours(13)), now), "昨天");
+        assert_eq!(list_time(at(D::days(2)), now), "周一");
+        assert_eq!(list_time(at(D::days(6)), now), "周四");
+        assert_eq!(list_time(at(D::days(30)), now), "5月18日");
+        assert_eq!(list_time(at(D::days(400)), now), "2025年5月13日");
+        assert_eq!(list_time(0, now), "");
+    }
+
+    #[test]
+    fn filters_follow_unread_and_todo() {
         let p = FakeProvider::new();
         let topics: Vec<Topic> = p.groups().iter().flat_map(|g| p.topics(&g.id)).collect();
         let me = Some(ME);
         assert!(topics.iter().all(|t| TopicFilter::All.keeps(t, me)));
-        let waiting: Vec<_> = topics
+        let unread: Vec<_> = topics
             .iter()
-            .filter(|t| TopicFilter::WaitingOnMe.keeps(t, me))
+            .filter(|t| TopicFilter::Unread.keeps(t, me))
             .collect();
-        assert!(!waiting.is_empty());
-        assert!(
-            waiting
-                .iter()
-                .all(|t| t.waiting_on.iter().any(|m| m == ME) && t.status != TopicStatus::Done)
-        );
+        assert!(!unread.is_empty());
+        assert!(unread.iter().all(|t| t.unread > 0 || t.mentions > 0));
+        let todo: Vec<_> = topics
+            .iter()
+            .filter(|t| TopicFilter::Todo.keeps(t, me))
+            .collect();
+        assert!(!todo.is_empty());
+        assert!(todo.iter().all(|t| t.mentions > 0
+            || (t.waiting_on.iter().any(|m| m == ME) && t.status != TopicStatus::Done)));
+        // Every 待办 entry of the sidebar is in the 待办 filter of its 群.
+        for item in p.todo() {
+            assert!(TopicFilter::Todo.keeps(&item.topic, me), "{}", item.topic.title);
+        }
+        // Signed out: nothing waits on me, mentions still count.
         assert!(
             topics
                 .iter()
-                .filter(|t| TopicFilter::Done.keeps(t, me))
-                .all(|t| t.status == TopicStatus::Done)
-        );
-        assert!(
-            topics
-                .iter()
-                .filter(|t| TopicFilter::InProgress.keeps(t, me))
-                .all(|t| t.status == TopicStatus::InProgress)
-        );
-        // Signed out: nothing waits on me.
-        assert!(
-            !topics
-                .iter()
-                .any(|t| TopicFilter::WaitingOnMe.keeps(t, None))
+                .filter(|t| TopicFilter::Todo.keeps(t, None))
+                .all(|t| t.mentions > 0)
         );
     }
 }

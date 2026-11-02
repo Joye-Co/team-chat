@@ -32,6 +32,23 @@ use crate::{
 /// At most this many 待办 rows show in the sidebar (§5.2).
 const TODO_ROWS: usize = 5;
 
+/// Width of a context menu (DESIGN.md §13.14).
+const MENU_WIDTH: gpui::Pixels = px(220.);
+
+/// A destructive menu item: icon and label in `danger-text`.
+fn destructive_item(glyph: Lucide, label: &'static str) -> PopupMenuItem {
+    PopupMenuItem::element(move |_, cx| {
+        let danger = theme::colors(cx).danger_text;
+        div()
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .text_color(danger)
+            .child(ui::icon(glyph, theme::icon::MENU, danger))
+            .child(label)
+    })
+}
+
 pub struct Sidebar {
     services: Services,
     groups: Vec<GroupSummary>,
@@ -168,15 +185,25 @@ impl Sidebar {
             .context_menu(move |menu, _, _| {
                 let services = menu_services.clone();
                 let g = menu_group.clone();
-                let mute_label = if muted { nav::UNMUTE } else { nav::MUTE };
+                let (mute_label, mute_icon) = if muted {
+                    (nav::UNMUTE, Lucide::Bell)
+                } else {
+                    (nav::MUTE, Lucide::BellOff)
+                };
                 let mute_services = services.clone();
                 let mute_id = g.id.clone();
-                let menu = menu.item(PopupMenuItem::new(mute_label).on_click(move |_, _, _| {
-                    mute_services.provider.set_group_muted(&mute_id, !muted);
-                }));
+                let menu = menu.min_w(MENU_WIDTH).item(
+                    PopupMenuItem::new(mute_label)
+                        .icon(gpui_component::Icon::new(mute_icon))
+                        .on_click(move |_, _, _| {
+                            mute_services.provider.set_group_muted(&mute_id, !muted);
+                        }),
+                );
                 if g.kind == GroupKind::Group {
+                    // A hairline before the destructive item, its text in
+                    // `danger-text` (DESIGN.md §13.14).
                     menu.separator()
-                        .item(PopupMenuItem::new(nav::LEAVE_GROUP).on_click(
+                        .item(destructive_item(Lucide::LogOut, nav::LEAVE_GROUP).on_click(
                             move |_, window, cx| {
                                 dialogs::confirm_leave(
                                     services.clone(),
@@ -214,6 +241,9 @@ impl Sidebar {
         let (g, t) = (item.group_id.clone(), item.topic.id.clone());
         let selected = self.services.nav.read(cx).topic.as_ref() == Some(&(g.clone(), t.clone()));
         let title = topic_line(&item.topic.title);
+        let untitled = title.is_empty();
+        let title = if untitled { nav::UNTITLED.to_string() } else { title };
+        let tip = title.clone();
         div()
             .id(ElementId::NamedInteger("todo-row".into(), ix as u64))
             .flex_none()
@@ -228,8 +258,8 @@ impl Sidebar {
             .child(
                 div()
                     .w(px(20.))
-                    .ml(space::S6)
-                    .mr(space::S6)
+                    .ml(space::S8)
+                    .mr(space::S8)
                     .flex_none()
                     .flex()
                     .justify_center()
@@ -241,7 +271,14 @@ impl Sidebar {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .child(div().t_ui().medium().one_line().child(title))
+                    .child(
+                        div()
+                            .t_ui()
+                            .medium()
+                            .one_line()
+                            .when(untitled, |el| el.text_color(colors.text_2))
+                            .child(title),
+                    )
                     .child(
                         div()
                             .type_role(theme::type_scale::CAPTION)
@@ -250,6 +287,7 @@ impl Sidebar {
                             .child(context),
                     ),
             )
+            .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
             .on_click(cx.listener(move |this, _, _, cx| {
                 let (g, t) = (g.clone(), t.clone());
                 this.services
@@ -321,8 +359,17 @@ impl Render for Sidebar {
                     .icon(gpui_component::Icon::new(Lucide::Plus))
                     .tooltip(nav::NEW_MENU)
                     .dropdown_menu(|menu, _, _| {
-                        menu.menu(nav::NEW_GROUP, Box::new(NewGroup))
-                            .menu(nav::START_DM, Box::new(StartDm))
+                        menu.min_w(MENU_WIDTH)
+                            .menu_with_icon(
+                                nav::MENU_NEW_GROUP,
+                                gpui_component::Icon::new(Lucide::UsersRound),
+                                Box::new(NewGroup),
+                            )
+                            .menu_with_icon(
+                                nav::MENU_START_DM,
+                                gpui_component::Icon::new(Lucide::UserPlus),
+                                Box::new(StartDm),
+                            )
                     }),
             ),
         );
@@ -363,10 +410,11 @@ impl Render for Sidebar {
             div()
                 .flex_none()
                 .h(theme::TOOLBAR_HEIGHT)
-                .px(space::S16)
+                .mx(space::S10)
+                .px(space::S8)
                 .flex()
                 .items_center()
-                .gap(space::S10)
+                .gap(space::S8)
                 .child(MemberAvatar::new(Some(&me), px(26.)).presence(Some(&me)).on(colors.sidebar))
                 .child(
                     div()
@@ -470,7 +518,10 @@ impl Render for Sidebar {
                                 .flex_none()
                                 .h(px(22.))
                                 .mx(space::S10)
-                                .pl(px(40.))
+                                .rounded(theme::radius::MD)
+                                // Under the titles: the 8 + 20 + 8 pt glyph column.
+                                .pl(space::S8 + px(20.) + space::S8)
+                                .active(|el| el.bg(colors.fill_pressed))
                                 .flex()
                                 .items_center()
                                 .t_callout()

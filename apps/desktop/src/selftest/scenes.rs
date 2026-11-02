@@ -174,6 +174,27 @@ pub const SCENES: &[Scene] = &[
         open: open_switcher,
     },
     Scene {
+        name: "new-group",
+        about: "The new-群 sheet: name, member picker and buttons",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::new_group,
+    },
+    Scene {
+        name: "start-dm",
+        about: "The member picker that starts a DM",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::start_dm,
+    },
+    Scene {
+        name: "leave-group",
+        about: "The alert before leaving a 群",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::leave_group,
+    },
+    Scene {
         name: "search",
         about: "The search dialog with results for a Chinese query in all 群",
         start: Start::SignedIn,

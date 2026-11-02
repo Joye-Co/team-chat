@@ -4,7 +4,7 @@
 
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{App, AppContext as _, ParentElement, Styled, Window, div, px};
+use gpui::{App, AppContext as _, ParentElement, Styled, Window, div, prelude::FluentBuilder as _, px};
 use gpui_component::{
     WindowExt as _,
     command::{Command, CommandGroup, CommandItem, CommandState},
@@ -13,10 +13,28 @@ use gpui_component::{
 use crate::{
     app::Services,
     copy::nav,
-    data::{ChatProvider, GroupId, GroupKind, Member, MemberId, TopicId},
+    data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic, TopicId},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, KbdHint, Lucide, StatusChip},
+    views::{sidebar::topic_line, topic_list::list_time},
 };
+
+/// What the palette shows (DESIGN.md §13.12): 话题 first, then 群, DMs and
+/// members together under 群和成员. Confirm indexes refer to this list.
+pub fn display(sections: Vec<(Section, Vec<Entry>)>) -> Vec<(&'static str, Vec<Entry>)> {
+    let mut topics = Vec::new();
+    let mut others = Vec::new();
+    for (section, items) in sections {
+        match section {
+            Section::Topics => topics.extend(items),
+            _ => others.extend(items),
+        }
+    }
+    [(nav::SECTION_TOPICS, topics), (nav::SECTION_GROUPS_MEMBERS, others)]
+        .into_iter()
+        .filter(|(_, e)| !e.is_empty())
+        .collect()
+}
 
 /// What an entry opens.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -36,6 +54,8 @@ pub struct Entry {
     pub detail: Option<String>,
     /// For DMs and members: the avatar.
     pub member: Option<Member>,
+    /// For topics: the topic, for its status chip and time.
+    pub topic: Option<Topic>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -46,16 +66,6 @@ pub enum Section {
     Members,
 }
 
-impl Section {
-    fn heading(self) -> &'static str {
-        match self {
-            Section::Groups => nav::GROUPS,
-            Section::Dms => nav::DMS,
-            Section::Topics => nav::SECTION_TOPICS,
-            Section::Members => nav::SECTION_MEMBERS,
-        }
-    }
-}
 
 /// The switcher's entries in display order; empty sections are left out.
 pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, Vec<Entry>)> {
@@ -71,6 +81,7 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
             label: g.name.clone(),
             detail: None,
             member: g.dm_peer.as_deref().and_then(find),
+            topic: None,
         };
         match g.kind {
             GroupKind::Group => group_entries.push(entry),
@@ -82,9 +93,14 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
                 label: t.title.clone(),
                 detail: Some(g.name.clone()),
                 member: None,
+                topic: Some(t),
             });
         }
     }
+    // Recent topics first (DESIGN.md §13.12).
+    topic_entries.sort_by_key(|e: &Entry| {
+        std::cmp::Reverse(e.topic.as_ref().map(|t| t.last_activity_at).unwrap_or(0))
+    });
     let has_dm = |id: &str| {
         groups
             .iter()
@@ -98,6 +114,7 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
             label: m.name.clone(),
             detail: m.role.clone(),
             member: Some(m.clone()),
+            topic: None,
         })
         .collect();
     [
@@ -136,7 +153,14 @@ pub fn go(services: &Services, target: &Target, cx: &mut App) {
     }
 }
 
-fn row(entry: &Entry) -> impl Fn(&mut Window, &mut App) -> gpui::Div + 'static {
+/// The widest a row's title gets before it truncates.
+const LABEL_MAX: gpui::Pixels = px(320.);
+
+fn row(
+    entry: &Entry,
+    me: Option<String>,
+    members: Rc<Vec<Member>>,
+) -> impl Fn(&mut Window, &mut App) -> gpui::Div + 'static {
     let entry = entry.clone();
     move |_, cx| {
         let colors = theme::colors(cx);
@@ -161,6 +185,33 @@ fn row(entry: &Entry) -> impl Fn(&mut Window, &mut App) -> gpui::Div + 'static {
                 .child(ui::GroupTile::new(g.clone(), entry.label.clone(), px(24.))),
             _ => tile(Lucide::Hash),
         };
+        let (label, untitled) = match &entry.topic {
+            Some(_) => {
+                let line = topic_line(&entry.label);
+                if line.is_empty() {
+                    (nav::UNTITLED.to_string(), true)
+                } else {
+                    (line, false)
+                }
+            }
+            None => (entry.label.clone(), false),
+        };
+        let chip = entry
+            .topic
+            .as_ref()
+            .and_then(|t| StatusChip::for_topic(t, me.as_deref(), &members));
+        // `开发 · 14:32` for topics, the 岗位 for members.
+        let detail = match (&entry.topic, &entry.detail) {
+            (Some(t), Some(group)) => {
+                let time = list_time(t.last_activity_at, chrono::Local::now());
+                Some(if time.is_empty() {
+                    group.clone()
+                } else {
+                    format!("{group} · {time}")
+                })
+            }
+            (_, detail) => detail.clone(),
+        };
         // CommandItem adds 6 pt above and below: 28 + 12 = the 40 pt row (§13.12).
         div()
             .h(px(28.))
@@ -171,13 +222,25 @@ fn row(entry: &Entry) -> impl Fn(&mut Window, &mut App) -> gpui::Div + 'static {
             .overflow_hidden()
             .t_ui()
             .child(lead)
-            .child(div().flex_1().min_w(px(0.)).one_line().child(entry.label.clone()))
-            .children(entry.detail.clone().map(|d| {
+            .child(
+                // A definite cap so the ellipsis shows and the chip and the
+                // detail keep room (DESIGN.md §12).
                 div()
                     .flex_none()
+                    .max_w(LABEL_MAX)
+                    .one_line()
+                    .when(untitled, |el| el.text_color(colors.text_2))
+                    .child(label),
+            )
+            .children(chip.map(|c| div().flex_none().child(c)))
+            .children(detail.map(|d| {
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
                     .t_callout()
                     .tnum()
                     .text_color(colors.text_2)
+                    .one_line()
                     .child(d)
             }))
     }
@@ -186,7 +249,8 @@ fn row(entry: &Entry) -> impl Fn(&mut Window, &mut App) -> gpui::Div + 'static {
 /// Opens the switcher in `window`.
 pub fn open(services: Services, window: &mut Window, cx: &mut App) {
     let me = services.me();
-    let sections = Rc::new(entries(services.provider.as_ref(), me.as_deref()));
+    let members = Rc::new(services.provider.members());
+    let sections = Rc::new(display(entries(services.provider.as_ref(), me.as_deref())));
     let state = cx.new(|cx| CommandState::new(window, cx));
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
@@ -201,14 +265,27 @@ pub fn open(services: Services, window: &mut Window, cx: &mut App) {
                 div()
                     .h(px(160.))
                     .child(ui::EmptyState::new(Lucide::SearchX, nav::QUICK_SWITCH_EMPTY))
+            })
+            .footer(|_, _, cx| {
+                let colors = theme::colors(cx);
+                div()
+                    .h(px(36.))
+                    .px(space::S16)
+                    .flex()
+                    .items_center()
+                    .gap(space::S16)
+                    .border_t_1()
+                    .border_color(colors.sep)
+                    .child(KbdHint::new(&["up", "down"]).label(nav::SWITCHER_SELECT))
+                    .child(KbdHint::new(&["enter"]).label(nav::SWITCHER_OPEN))
             });
-        for (section, items) in sections.iter() {
+        for (heading, items) in sections.iter() {
             command = command.group(
-                CommandGroup::new().label(section.heading()).items(
-                    items
-                        .iter()
-                        .map(|e| CommandItem::new().label(e.label.clone()).child(row(e))),
-                ),
+                CommandGroup::new().label(*heading).items(items.iter().map(|e| {
+                    CommandItem::new()
+                        .label(e.label.clone())
+                        .child(row(e, me.clone(), members.clone()))
+                })),
             );
         }
         let sections = sections.clone();

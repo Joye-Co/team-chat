@@ -284,3 +284,60 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
     })
     .detach();
 }
+
+/// Screenshot scenes of the navigation dialogs over the main window
+/// (`desktop --screenshot`, see `selftest/scenes.rs`).
+pub mod scenes {
+    use gpui::{AnyWindowHandle, App, Pixels, Size, Window};
+
+    use crate::{app::Services, selftest::scenes::open_main};
+
+    fn over_main(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+        open: fn(Services, &mut Window, &mut App),
+    ) -> Result<AnyWindowHandle, String> {
+        let handle = open_main(services.clone(), content, cx)?;
+        handle
+            .update(cx, |_, window, cx| open(services, window, cx))
+            .map_err(|e| e.to_string())?;
+        Ok(handle)
+    }
+
+    /// The new-group sheet.
+    pub fn new_group(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, super::super::dialogs::open_new_group)
+    }
+
+    /// The member picker that starts a DM.
+    pub fn start_dm(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, super::super::dialogs::open_start_dm)
+    }
+
+    /// The alert before leaving the first 群.
+    pub fn leave_group(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let group = services
+                .provider
+                .groups()
+                .into_iter()
+                .find(|g| g.kind == crate::data::GroupKind::Group);
+            if let Some(g) = group {
+                super::super::dialogs::confirm_leave(services, g.id, g.name, window, cx);
+            }
+        })
+    }
+}
