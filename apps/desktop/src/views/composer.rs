@@ -19,10 +19,10 @@ mod tests;
 use std::time::Instant;
 
 use gpui::{
-    AppContext, ClipboardEntry, Context, ElementId, Entity, EntityInputHandler, ExternalPaths,
-    Focusable as _, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
-    relative,
+    AnimationExt as _, AppContext, ClipboardEntry, Context, ElementId, Entity, EntityInputHandler,
+    ExternalPaths, Focusable as _, InteractiveElement, IntoElement, ParentElement, Render,
+    SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::{
     Disableable as _, Selectable as _, Sizable as _,
@@ -953,6 +953,7 @@ impl ComposerView {
             return None;
         }
         let colors = theme::colors(cx);
+        let reduce = cx.reduce_motion();
         Some(
             ui::menu_surface(cx)
                 .id("emoji-picker")
@@ -984,7 +985,21 @@ impl ComposerView {
                             this.emoji_open = false;
                             this.insert_text(e, window, cx);
                         }))
-                })),
+                }))
+                .with_animation(
+                    "emoji-picker-in",
+                    // Popovers: 150 ms opacity + 4 pt travel from the
+                    // trigger; opacity only with reduce motion (§12).
+                    gpui::Animation::new(theme::motion::MENU).with_easing(theme::motion::out_fn()),
+                    move |el, t| {
+                        let el = el.opacity(t);
+                        if reduce {
+                            el
+                        } else {
+                            el.mb(space::S8 - theme::motion::TRAVEL * (1. - t))
+                        }
+                    },
+                ),
         )
     }
 }

@@ -281,8 +281,10 @@ impl TimelineView {
                 .w(theme::AVATAR_SIZE)
                 .flex_none()
                 .child(
+                    // People show presence; bot tiles carry no pip in the
+                    // timeline (§7.5: no status dot on every bot avatar).
                     ui::MemberAvatar::new(author.as_ref(), theme::AVATAR_SIZE)
-                        .presence(author.as_ref()),
+                        .presence(author.as_ref().filter(|a| !a.is_bot())),
                 )
                 .into_any_element()
         };

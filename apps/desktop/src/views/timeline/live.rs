@@ -12,8 +12,9 @@ use std::time::Duration;
 
 use chrono::Utc;
 use gpui::{
-    AnyElement, Context, ElementId, InteractiveElement as _, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
+    AnimationExt as _, AnyElement, Context, ElementId, InteractiveElement as _, IntoElement,
+    ParentElement, SharedString, StatefulInteractiveElement as _, Styled, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::TimelineView;
@@ -341,12 +342,15 @@ impl TimelineView {
                                 .gap(space::S4)
                                 .child(
                                     div()
-                                        .flex_none()
+                                        .flex_shrink(1.)
+                                        .min_w(px(0.))
+                                        .max_w(px(160.))
                                         .semibold()
                                         .text_color(colors.text_1)
+                                        .one_line()
                                         .child(name),
                                 )
-                                .child(div().min_w(px(0.)).one_line().child(label)),
+                                .child(div().flex_1().min_w(px(80.)).one_line().child(label)),
                         )
                         .child(pulse_dots(colors.text_3, reduce))
                         .when_some(run.started_at, |el, at| {
@@ -369,6 +373,20 @@ impl TimelineView {
                             .ml(-space::S6)
                             .on_click(cx.listener(|this, _, _, cx| this.open_process(cx))),
                         ),
+                )
+                .with_animation(
+                    ElementId::Name(format!("live-enter-{}", run.id).into()),
+                    // Enter: 200 ms opacity + a 6 pt rise; opacity only
+                    // with reduce motion (§12).
+                    gpui::Animation::new(theme::motion::SLOW).with_easing(theme::motion::out_fn()),
+                    move |el, t| {
+                        let el = el.opacity(t);
+                        if reduce {
+                            el
+                        } else {
+                            el.relative().top(theme::motion::RISE * (1. - t))
+                        }
+                    },
                 )
                 .into_any_element()
         });
