@@ -1,7 +1,7 @@
-//! The settings window (Cmd+,): 个人, 成员, 机器, 通知, 成本 and 通用 (the
+//! The settings window (Cmd+,): 我的资料, 成员, 机器, 通知 and 通用 (the
 //! about card with the version and update, diagnostics and the
-//! developer-view switch). One window at a time: opening
-//! it again brings the open one to the front.
+//! developer-view switch); 成本 has no page until it exists (U43). One
+//! window at a time: opening it again brings the open one to the front.
 //!
 //! Pages read snapshots from the provider and start requests that answer
 //! through a [`crate::data::AdminReply`], awaited off the UI thread.

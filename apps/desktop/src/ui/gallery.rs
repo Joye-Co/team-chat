@@ -831,6 +831,8 @@ impl Render for Gallery {
             .child(if self.page == 0 {
                 div()
                     .p(space::S32)
+                    // Clear the traffic lights: the title bar is transparent.
+                    .pt(theme::TOOLBAR_HEIGHT)
                     .flex()
                     .gap(space::S44)
                     .child(
@@ -861,6 +863,8 @@ impl Render for Gallery {
             } else {
                 div()
                     .p(space::S32)
+                    // Clear the traffic lights: the title bar is transparent.
+                    .pt(theme::TOOLBAR_HEIGHT)
                     .flex()
                     .gap(space::S44)
                     .child(
