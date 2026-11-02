@@ -154,6 +154,13 @@ RunEvent =
   discards its frames.
 - A run is forgotten by the daemon once `run.session` (or `run.done` when there is no upload)
   is produced and acked. A later `run.assign` with the same `runId` is rejected (`invalid`).
+- **Daemon restart.** `run.json` records the CLI's process group. A daemon that starts after
+  a crash stops the process groups of unfinished runs (when the group leader still runs the
+  recorded CLI), then rebuilds those runs from `events.jsonl` and appends `run.done`
+  (`failed`, error `daemon restarted`) and a failed `run.session`. Their frames, and those of
+  runs that finished in the last hour, are offered in `hello` and replayed after `welcome` as
+  above. On a graceful stop the daemon cancels its runs and waits up to 10 s for the server to
+  ack their last frames.
 - `run.assign` is idempotent: when the daemon already holds the run it answers `run.accept`
   again. When the server gets neither `run.accept` nor `run.reject` within 30 s, or the link
   drops first, it sends the same `run.assign` again on the next link.
@@ -238,14 +245,18 @@ later audits have the complete record:
   `events.jsonl` (the sequenced frames), `stream.jsonl` (raw CLI stdout), `stderr.log`, and
   `session.jsonl` (the copied raw session). `runId` must match `[A-Za-z0-9_-]{1,64}`.
 - `repo.path`: a local repository (inside `repo_roots` when configured). `repo.url`: a bare
-  mirror under `<work_root>/repos/` is cloned once and fetched before each run. Either way
-  the daemon runs `git worktree add -b bot/<runId> work <start>`, where `<start>` is
-  `origin/<baseBranch>` when it exists, else `<baseBranch>`, else `HEAD`. Without `repo` the
-  run gets an empty scratch folder.
+  mirror under `<work_root>/repos/` is cloned once and fetched before each run with
+  `+refs/heads/*:refs/remotes/origin/*`, so remote branches never touch the local
+  `bot/<runId>` branches of other runs. Either way the daemon runs
+  `git worktree add --no-track -b bot/<runId> work <start>`, where `<start>` is
+  `origin/<branch>` when it exists, else `<branch>`, else `HEAD`; `<branch>` is `baseBranch`,
+  or the branch HEAD names. Without `repo` the run gets an empty scratch folder.
 - Cleanup at start and every 30 minutes: finished runs older than `keep_runs_hours`
-  (default 72) are removed with `git worktree remove` and `git branch -D bot/<runId>`; while
-  free disk is below `min_free_gb` (default 10) the oldest finished runs go first. Below half
-  of `min_free_gb` new runs are rejected with `disk_low`.
+  (default 72) are removed with `git worktree remove`; while free disk is below `min_free_gb`
+  (default 10) the oldest finished runs go first. `bot/<runId>` is deleted only when all its
+  commits are on a remote-tracking branch or another local branch; a branch with unpushed
+  commits is kept, and the daemon log names it. Below half of `min_free_gb` new runs are
+  rejected with `disk_low`.
 
 ## Environment
 
@@ -255,6 +266,14 @@ name in `run.assign.envAllowlist` that the machine's config also lists in `env_p
 (so the server can choose per bot among the variables the machine owner allowed, never more);
 the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
 `CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`.
+
+Group members read run events, so the daemon redacts every frame before it sends or stores
+it, and the session file before upload: the exact values of the `env_passthrough` variables
+and the machine token, known token formats (`tc_`, `whk_`, `tm_`, GitHub, OpenAI, Anthropic,
+AWS, Slack, Google keys, bearer values, private key blocks, URL passwords, secret query
+parameters, invite codes) and secret-named `key=value` pairs become `<redacted>`.
+`message.delta` text is released per line (or after 1 s, all but its last two words), so a
+secret split over two deltas is redacted whole.
 
 ## Runtimes
 
