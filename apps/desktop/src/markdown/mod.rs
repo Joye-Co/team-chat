@@ -124,7 +124,7 @@ struct Mention {
 
 /// Renders mention links (`[@name](<mention:id>)`, made by
 /// [`link_mentions`]) as pills: `mention-bg` with `accent-text`, or `me-bg`
-/// with `me-text` for the viewer; radius 4, padding 0 2 (the mark padding of §8.6), weight 500 (§2.4,
+/// with `me-text` for the viewer; radius 4, padding 0 3 (the mockup's `.mn`), weight 500 (§2.4,
 /// §4.3). Clicking one opens the member.
 struct MentionPlugin;
 
@@ -212,7 +212,7 @@ impl MarkdownPlugin for MentionPlugin {
         let pill = div()
             .id(ElementId::Name(format!("mention-{member}-{at}").into()))
             .ml(gap)
-            .px(theme::space::S2)
+            .px(theme::space::S3)
             .rounded(theme::radius::MARK)
             .bg(bg)
             .text_color(fg)

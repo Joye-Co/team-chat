@@ -68,6 +68,8 @@ pub const BORDER: Pixels = px(1.);
 pub mod space {
     use gpui::{Pixels, px};
     pub const S2: Pixels = px(2.);
+    /// Off the scale: the side padding of a mention pill only (mockup `.mn`).
+    pub const S3: Pixels = px(3.);
     pub const S4: Pixels = px(4.);
     pub const S6: Pixels = px(6.);
     pub const S8: Pixels = px(8.);
