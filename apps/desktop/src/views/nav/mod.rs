@@ -168,13 +168,13 @@ pub fn attach_window(window: &Window, cx: &mut App) {
     }
 }
 
-fn services_of(cx: &App) -> Services {
+pub(crate) fn services_of(cx: &App) -> Services {
     cx.global::<NavGlobal>().services.clone()
 }
 
 /// Runs `f` in the main window soon. Actions arrive while a window is being
 /// updated, and a window cannot be updated again from inside, so this defers.
-fn in_main_window(cx: &mut App, f: impl FnOnce(&mut Window, &mut App) + 'static) {
+pub(crate) fn in_main_window(cx: &mut App, f: impl FnOnce(&mut Window, &mut App) + 'static) {
     cx.defer(move |cx| {
         with_main_window(cx, f);
     });

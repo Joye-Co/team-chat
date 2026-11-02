@@ -7,6 +7,8 @@ pub mod connection_banner;
 pub mod files;
 pub mod login;
 pub mod nav;
+pub mod process;
+pub mod search;
 pub mod settings;
 pub mod side_panel;
 pub mod sidebar;

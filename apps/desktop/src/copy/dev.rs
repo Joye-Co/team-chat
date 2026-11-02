@@ -16,4 +16,21 @@ crate::copy! {
     STATE_CONNECTING = "connecting",
     STATE_ONLINE = "online",
     STATE_RECONNECTING = "reconnecting (attempt {attempt}, retry in {ms} ms)",
+    // process view (bot runs)
+    RUN_ID = "run id: {id}",
+    RUN_BOT = "bot: {id}",
+    RUN_MACHINE = "machine: {id}",
+    RUN_STATUS = "status: {status}",
+    RUN_TIMES = "created {created} · started {started} · ended {ended} · updated {updated}",
+    RUN_SUMMARY = "summary: {text}",
+    RUN_SESSION = "CLI session: {id} ({runtime})",
+    RUN_LAST_SEQ = "log lastSeq: {seq}",
+    RUN_RAW = "Raw run events ({n}, newest last)",
+    RUN_TOOL_INPUT = "input: {json}",
+    RUN_DOWNLOAD_SESSION = "Download raw session (.jsonl.gz)",
+    RUN_DOWNLOADING = "Downloading session…",
+    RUN_DOWNLOADED = "Saved to {path}",
+    RUN_DOWNLOAD_FAILED = "Session download failed: {error}",
+    // search
+    SEARCH_HIT = "message {id} · seq {seq}",
 }

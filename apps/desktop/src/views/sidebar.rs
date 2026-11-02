@@ -1,4 +1,4 @@
-//! The left sidebar: the search field (opens the quick switcher), 待办, then
+//! The left sidebar: the message search field with a quick switcher button, 待办, then
 //! one list of 群 (groups and DMs together) sorted by last activity, with
 //! unread and mention badges, a menu to start a group or a DM, a context menu
 //! per row (mute, leave), and the connection line at the bottom.
@@ -17,13 +17,14 @@ use gpui_component::{
 
 use crate::{
     app::{Changes, Place, Services},
-    copy::{common, nav},
+    copy::{common, nav, search as search_copy},
     data::{Change, ConnectionState, GroupId, GroupKind, GroupSummary, Member},
     theme,
     views::{
         avatar, count_badge,
         nav::{NewGroup, QuickSwitch, StartDm, dialogs},
         presence_dot,
+        search::SearchEverywhere,
     },
 };
 
@@ -291,21 +292,40 @@ impl Render for Sidebar {
             .text_sm()
             .child(
                 div()
-                    .id("sidebar-search")
                     .m(px(8.))
                     .mt(px(12.))
-                    .px(px(8.))
-                    .h(px(28.))
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(colors.border)
                     .flex()
                     .items_center()
-                    .text_color(colors.muted_foreground)
-                    .hover(|el| el.bg(colors.row_hover))
-                    .child(div().flex_1().child(common::SEARCH_PLACEHOLDER))
-                    .child(div().text_xs().child(nav::QUICK_SWITCH_SHORTCUT))
-                    .on_click(|_, window, cx| window.dispatch_action(Box::new(QuickSwitch), cx)),
+                    .gap(px(4.))
+                    .child(
+                        div()
+                            .id("sidebar-search")
+                            .flex_1()
+                            .px(px(8.))
+                            .h(px(28.))
+                            .rounded(px(6.))
+                            .border_1()
+                            .border_color(colors.border)
+                            .flex()
+                            .items_center()
+                            .text_color(colors.muted_foreground)
+                            .hover(|el| el.bg(colors.row_hover))
+                            .child(div().flex_1().child(search_copy::SIDEBAR_FIELD))
+                            .child(div().text_xs().child(search_copy::SIDEBAR_SHORTCUT))
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(SearchEverywhere), cx)
+                            }),
+                    )
+                    .child(
+                        Button::new("sidebar-quick-switch")
+                            .ghost()
+                            .small()
+                            .label(nav::QUICK_SWITCH_SHORTCUT)
+                            .tooltip(nav::QUICK_SWITCH)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(QuickSwitch), cx)
+                            }),
+                    ),
             )
             .child(
                 div()

@@ -33,6 +33,7 @@ mod data;
 mod drafts;
 #[allow(dead_code)]
 mod fake;
+mod fake_extra;
 mod markdown;
 mod provider;
 mod selftest;
@@ -180,6 +181,7 @@ fn main() {
             !args.selftest_smoke && args.selftest_timeline.is_none(),
             cx,
         );
+        views::search::install(cx);
         if let Some(core) = core {
             let source = core.clone();
             updater::install(

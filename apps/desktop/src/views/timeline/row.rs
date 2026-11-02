@@ -178,6 +178,9 @@ impl TimelineView {
             .gap(px(10.))
             .hover(|s| s.bg(colors.row_hover))
             .when(failed, |el| el.bg(colors.danger.opacity(0.06)))
+            .when(self.is_highlighted(&key), |el| {
+                el.bg(colors.search_highlight)
+            })
             .child(gutter)
             .child(
                 div()

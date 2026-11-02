@@ -23,6 +23,7 @@ mod realtime;
 mod realtime_live;
 #[cfg(test)]
 mod files_live;
+mod process;
 pub mod selftest_live;
 pub mod session;
 
@@ -123,6 +124,8 @@ struct Shared {
     drafts: DraftStore,
     writer: persist::Writer,
     files: files::FilesState,
+    /// Run logs and machine names for the process view (`process.rs`).
+    runs: process::RunCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -153,6 +156,7 @@ impl CoreProvider {
                 drafts: DraftStore::new(),
                 writer: persist::Writer::new(),
                 files: files::FilesState::default(),
+                runs: process::RunCache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -684,8 +688,10 @@ impl CoreProvider {
                     Change::Messages { group_id, topic_id },
                 ]);
             }
+            ClientUpdate::RunsChanged { group_id, topic_id } => {
+                out.push(Change::Runs { group_id, topic_id });
+            }
             ClientUpdate::GroupEvent(_)
-            | ClientUpdate::RunsChanged { .. }
             | ClientUpdate::SearchResults { .. }
             | ClientUpdate::SearchFailed { .. } => {}
         }
@@ -1311,6 +1317,30 @@ impl ChatProvider for CoreProvider {
 
     fn set_topic_owner(&self, _group_id: &str, topic_id: &str, owner: Option<MemberId>) {
         self.set_topic_owner_inner(topic_id, owner);
+    }
+
+    fn search(&self, query: crate::data::SearchQuery) -> crate::data::SearchReply {
+        self.search_inner(query)
+    }
+
+    fn runs(&self, group_id: &str, topic_id: &str) -> Vec<crate::data::BotRunSummary> {
+        self.runs_inner(group_id, topic_id)
+    }
+
+    fn run_process(&self, run_id: &str) -> crate::data::RunProcess {
+        self.run_process_inner(run_id)
+    }
+
+    fn follow_run(&self, run_id: &str) {
+        self.follow_run_inner(run_id)
+    }
+
+    fn download_run_session(
+        &self,
+        run_id: &str,
+        dir: std::path::PathBuf,
+    ) -> crate::data::SessionDownload {
+        self.download_session_inner(run_id, dir)
     }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {

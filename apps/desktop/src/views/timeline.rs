@@ -19,6 +19,7 @@
 //! [`TimelineEvent::Quote`] for the composer.
 
 pub mod extras;
+mod focus;
 mod menu;
 mod model;
 mod row;
@@ -130,6 +131,8 @@ pub struct TimelineView {
     editing: Option<Editing>,
     probe: Option<Rc<FrameProbe>>,
     activation: Option<Subscription>,
+    /// Search: scroll to a message and highlight it (`timeline/focus.rs`).
+    focus: focus::FocusState,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -154,6 +157,8 @@ impl TimelineView {
                 if open != this.open {
                     this.open_topic(open, cx);
                 }
+                let request = nav.read(cx).focus.clone();
+                this.on_focus_request(request, cx);
                 cx.notify();
             }),
         ];
@@ -189,10 +194,13 @@ impl TimelineView {
             editing: None,
             probe: None,
             activation: None,
+            focus: focus::FocusState::default(),
             _subscriptions: subscriptions,
         };
         let open = this.services.nav.read(cx).topic.clone();
         this.open_topic(open, cx);
+        let request = this.services.nav.read(cx).focus.clone();
+        this.on_focus_request(request, cx);
         this
     }
 
@@ -222,6 +230,7 @@ impl TimelineView {
         self.new_below = 0;
         self.marked_seq = 0;
         self.editing = None;
+        self.focus.clear();
         self.refresh(cx);
         let me = self.me.clone();
         let read_seq = self
@@ -369,6 +378,7 @@ impl TimelineView {
         {
             self.editing = None;
         }
+        self.continue_focus(_cx);
     }
 
     fn apply(&self, ops: &[ListOp]) {

@@ -515,6 +515,197 @@ pub struct SavedNavigation {
     pub topic_id: Option<TopicId>,
 }
 
+/// A message search (`search` frame). Without `group_id` it covers all my groups.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchQuery {
+    /// 1..200 characters.
+    pub text: String,
+    pub group_id: Option<GroupId>,
+    /// 1..50.
+    pub limit: u32,
+}
+
+/// One search result, newest first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SearchHit {
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    pub message_id: MessageId,
+    pub author_id: MemberId,
+    /// Plain text around the match.
+    pub snippet: String,
+    /// Matched parts of `snippet`, as ranges of code points (chars).
+    pub highlights: Vec<std::ops::Range<usize>>,
+    pub created_at: Millis,
+    /// The message's `created_seq`.
+    pub seq: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SearchError {
+    /// Not connected (search runs on the server).
+    Offline,
+    /// The server refused it (for example a group I left).
+    Refused,
+    TimedOut,
+    /// This provider has no search.
+    Unavailable,
+}
+
+/// The answer to [`ChatProvider::search`]; await it on the UI executor.
+pub type SearchReply = futures::channel::oneshot::Receiver<Result<Vec<SearchHit>, SearchError>>;
+
+/// Status of a bot run (`RunStatus` in docs/protocol.md).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RunStatus {
+    Created,
+    Running,
+    Waiting,
+    Blocked,
+    Done,
+    Failed,
+    Cancelled,
+}
+
+impl RunStatus {
+    /// Still running (the process view follows its log).
+    pub fn is_active(self) -> bool {
+        matches!(
+            self,
+            RunStatus::Created | RunStatus::Running | RunStatus::Waiting | RunStatus::Blocked
+        )
+    }
+
+    /// The wire name, for the developer view.
+    pub fn wire_name(self) -> &'static str {
+        match self {
+            RunStatus::Created => "created",
+            RunStatus::Running => "running",
+            RunStatus::Waiting => "waiting",
+            RunStatus::Blocked => "blocked",
+            RunStatus::Done => "done",
+            RunStatus::Failed => "failed",
+            RunStatus::Cancelled => "cancelled",
+        }
+    }
+}
+
+/// One run of a bot member in a topic, from `run.updated` events.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BotRunSummary {
+    pub id: String,
+    pub bot_id: MemberId,
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    pub machine_id: Option<String>,
+    /// The machine's name, when known.
+    pub machine_name: Option<String>,
+    pub status: RunStatus,
+    pub requested_by: Option<MemberId>,
+    pub created_at: Millis,
+    pub started_at: Option<Millis>,
+    pub ended_at: Option<Millis>,
+    pub updated_at: Millis,
+    pub summary: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FileChangeKind {
+    Added,
+    Modified,
+    Deleted,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FileChangeView {
+    pub path: String,
+    pub kind: FileChangeKind,
+}
+
+/// One normalized step of a run, in log order.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProcessStep {
+    /// Text the bot wrote (`from_bot`), or input it received.
+    Message {
+        text: String,
+        from_bot: bool,
+        streaming: bool,
+    },
+    Reasoning {
+        text: String,
+    },
+    /// A command or tool call, with its result once it came.
+    Tool {
+        title: String,
+        /// The call's input, as compact JSON (developer view).
+        input: Option<String>,
+        ok: Option<bool>,
+        output: Option<String>,
+        exit_code: Option<i64>,
+    },
+    Files {
+        changes: Vec<FileChangeView>,
+    },
+    Approval {
+        title: String,
+        detail: Option<String>,
+        /// `None` while waiting; `Some(true)` approved.
+        approved: Option<bool>,
+    },
+    TurnStarted,
+    TurnCompleted {
+        ok: bool,
+        error: Option<String>,
+    },
+    Status {
+        message: String,
+    },
+    Done {
+        status: RunStatus,
+        summary: Option<String>,
+        error: Option<String>,
+        duration_ms: u64,
+    },
+}
+
+/// One stored run log entry as JSON, for the developer view.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawRunEntry {
+    pub seq: u64,
+    pub json: String,
+}
+
+/// Why a run log, or its raw session, could not be loaded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RunLoadError {
+    Offline,
+    /// Not allowed (the raw session is for owners only).
+    Forbidden,
+    /// Not there (yet).
+    NotFound,
+    Failed,
+    Unavailable,
+}
+
+/// What the process view shows for one run.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct RunProcess {
+    pub steps: Vec<ProcessStep>,
+    /// The newest stored entries (at most a few hundred), oldest first.
+    pub raw: Vec<RawRunEntry>,
+    pub last_seq: u64,
+    /// (session id, runtime) from the log, for the developer view.
+    pub session: Option<(String, String)>,
+    /// A fetch is running.
+    pub loading: bool,
+    /// At least one fetch finished.
+    pub loaded: bool,
+    pub error: Option<RunLoadError>,
+}
+
+/// The answer to [`ChatProvider::download_run_session`]: where the file was saved.
+pub type SessionDownload = futures::channel::oneshot::Receiver<Result<PathBuf, RunLoadError>>;
+
 /// What changed. Views re-read only the snapshots that a change names.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Change {
@@ -545,6 +736,15 @@ pub enum Change {
     },
     /// The 待办 list.
     Todo,
+    /// The bot runs of one topic (a run started or changed status).
+    Runs {
+        group_id: GroupId,
+        topic_id: TopicId,
+    },
+    /// New steps in the log of one run (see [`ChatProvider::follow_run`]).
+    RunLog {
+        run_id: String,
+    },
     /// The quote or pending files of one composer draft (not its text, which
     /// only the composer writes).
     Draft {
@@ -858,6 +1058,32 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn set_topic_following(&self, _group_id: &str, _topic_id: &str, _follow: bool) {}
     /// Sets or clears the one responsible member. Emits `Change::Topics`.
     fn set_topic_owner(&self, _group_id: &str, _topic_id: &str, _owner: Option<MemberId>) {}
+
+    // --- search and bot runs (all have defaults) ---
+
+    /// Searches messages on the server. Returns at once; the reply comes later.
+    fn search(&self, _query: SearchQuery) -> SearchReply {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(Err(SearchError::Unavailable));
+        rx
+    }
+    /// The bot runs of a topic, newest first, from the cache.
+    fn runs(&self, _group_id: &str, _topic_id: &str) -> Vec<BotRunSummary> {
+        Vec::new()
+    }
+    /// The steps of a run loaded so far. Empty until [`ChatProvider::follow_run`].
+    fn run_process(&self, _run_id: &str) -> RunProcess {
+        RunProcess::default()
+    }
+    /// Fetches the log entries of a run that are newer than the ones loaded.
+    /// Emits `Change::RunLog`. Does nothing while a fetch of that run runs.
+    fn follow_run(&self, _run_id: &str) {}
+    /// Saves the raw session of a run (owners only) into `dir`.
+    fn download_run_session(&self, _run_id: &str, _dir: PathBuf) -> SessionDownload {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(Err(RunLoadError::Unavailable));
+        rx
+    }
 
     // --- changes ---
 

@@ -1352,6 +1352,40 @@ impl ChatProvider for FakeProvider {
         self.with(|s| s.saved_navigation = Some(navigation));
     }
 
+    fn search(&self, query: SearchQuery) -> SearchReply {
+        let hits = self.with(|s| {
+            let messages: Vec<&Message> = s.messages.values().flatten().collect();
+            crate::fake_extra::search(
+                &s.topics,
+                &messages,
+                &query.text,
+                query.group_id.as_deref(),
+                query.limit as usize,
+            )
+        });
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(Ok(hits));
+        rx
+    }
+
+    fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
+        let now = self.with(|s| s.now);
+        crate::fake_extra::sample_runs(now)
+            .into_iter()
+            .filter(|r| r.group_id == group_id && r.topic_id == topic_id)
+            .collect()
+    }
+
+    fn run_process(&self, run_id: &str) -> RunProcess {
+        crate::fake_extra::sample_process(run_id)
+    }
+
+    fn follow_run(&self, run_id: &str) {
+        self.emit(vec![Change::RunLog {
+            run_id: run_id.to_string(),
+        }]);
+    }
+
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();
         self.subscribers.lock().unwrap().push(tx);

@@ -54,6 +54,8 @@ pub struct Colors {
     pub danger: Hsla,
     pub panel: Hsla,
     pub code_background: Hsla,
+    /// A message opened from search, and matched words in search results.
+    pub search_highlight: Hsla,
 }
 
 pub fn colors(cx: &App) -> Colors {
@@ -78,6 +80,11 @@ pub fn colors(cx: &App) -> Colors {
         danger: t.danger,
         panel: t.sidebar,
         code_background: t.muted,
+        search_highlight: if t.mode == ThemeMode::Dark {
+            t.yellow.opacity(0.22)
+        } else {
+            t.yellow_light
+        },
     }
 }
 

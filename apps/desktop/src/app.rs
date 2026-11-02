@@ -101,6 +101,20 @@ pub struct Navigation {
     pub topic: Option<(GroupId, TopicId)>,
     pub side_panel_open: bool,
     pub developer_view: bool,
+    /// A message to scroll to and highlight (from search).
+    pub focus: Option<FocusRequest>,
+}
+
+/// Scroll the open topic to this message and highlight it. `serial` grows
+/// with every request, so the same message can be asked for again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FocusRequest {
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    pub message_id: String,
+    /// The message's `created_seq` (0 when unknown).
+    pub seq: u64,
+    pub serial: u64,
 }
 
 impl Navigation {
@@ -110,6 +124,7 @@ impl Navigation {
             topic: None,
             side_panel_open: true,
             developer_view: false,
+            focus: None,
         }
     }
 
@@ -131,6 +146,28 @@ impl Navigation {
             self.place = Some(Place::Group(group_id.clone()));
         }
         self.topic = Some((group_id, topic_id));
+        cx.notify();
+    }
+
+    /// Opens a topic in its group and asks the timeline to show one message.
+    pub fn open_message(
+        &mut self,
+        group_id: GroupId,
+        topic_id: TopicId,
+        message_id: String,
+        seq: u64,
+        cx: &mut Context<Self>,
+    ) {
+        let serial = self.focus.as_ref().map_or(0, |f| f.serial) + 1;
+        self.place = Some(Place::Group(group_id.clone()));
+        self.topic = Some((group_id.clone(), topic_id.clone()));
+        self.focus = Some(FocusRequest {
+            group_id,
+            topic_id,
+            message_id,
+            seq,
+            serial,
+        });
         cx.notify();
     }
 

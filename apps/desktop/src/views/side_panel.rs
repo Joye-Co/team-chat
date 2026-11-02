@@ -1,21 +1,23 @@
-//! The collapsible right panel of the open topic: status, owner, who it waits
-//! on, its 产出, the process view, and (in the developer view) ids and seqs.
+//! The collapsible right panel of the open topic, with two tabs: 详情
+//! (status, owner, who it waits on, its 产出, and in the developer view ids
+//! and seqs) and 过程 (the process view of bot runs, `views/process`).
 
 use gpui::{
-    AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
     button::{Button, ButtonVariants as _},
+    tab::{Tab, TabBar},
 };
 
 use crate::{
     app::{Changes, Services},
-    copy::{dev, fill, panel as p},
+    copy::{dev, fill, panel as p, process as pc},
     data::{Change, GroupId, Member, Topic, TopicId},
     theme,
-    views::{artifacts::panel::TopicOutputs, avatar, status_chip},
+    views::{artifacts::panel::TopicOutputs, avatar, process::ProcessView, status_chip},
 };
 
 pub struct SidePanel {
@@ -25,6 +27,9 @@ pub struct SidePanel {
     members: Vec<Member>,
     /// The 产出 and files of the topic (views/artifacts/panel.rs).
     outputs: Entity<TopicOutputs>,
+    /// 0 = 详情, 1 = 过程.
+    tab: usize,
+    process: Entity<ProcessView>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -48,21 +53,42 @@ impl SidePanel {
             cx.observe(&services.nav, |this, nav, cx| {
                 this.open = nav.read(cx).topic.clone();
                 this.refresh();
+                this.sync_process_visibility(cx);
                 cx.notify();
             }),
         ];
         let open = services.nav.read(cx).topic.clone();
         let outputs = cx.new(|cx| TopicOutputs::new(services.clone(), cx));
+        let process = cx.new(|cx| ProcessView::new(services.clone(), cx));
         let mut this = Self {
             outputs,
             services,
             open,
             topic: None,
             members: Vec::new(),
+            tab: 0,
+            process,
             _subscriptions: subscriptions,
         };
         this.refresh();
         this
+    }
+
+    /// Switches between 详情 (0) and 过程 (1).
+    pub fn set_tab(&mut self, tab: usize, cx: &mut Context<Self>) {
+        self.tab = tab.min(1);
+        self.sync_process_visibility(cx);
+        cx.notify();
+    }
+
+    pub fn process(&self) -> &Entity<ProcessView> {
+        &self.process
+    }
+
+    fn sync_process_visibility(&mut self, cx: &mut Context<Self>) {
+        let visible = self.tab == 1 && self.services.nav.read(cx).side_panel_open;
+        self.process
+            .update(cx, |view, cx| view.set_visible(visible, cx));
     }
 
     fn refresh(&mut self) {
@@ -103,7 +129,17 @@ impl Render for SidePanel {
             .items_center()
             .border_b_1()
             .border_color(colors.border)
-            .child(div().flex_1().child(p::TITLE))
+            .child(
+                div().flex_1().child(
+                    TabBar::new("side-panel-tabs")
+                        .segmented()
+                        .small()
+                        .selected_index(self.tab)
+                        .on_click(cx.listener(|this, ix: &usize, _, cx| this.set_tab(*ix, cx)))
+                        .child(Tab::new().label(pc::TAB_DETAILS))
+                        .child(Tab::new().label(pc::TAB_PROCESS)),
+                ),
+            )
             .child(
                 Button::new("collapse-panel")
                     .small()
@@ -118,6 +154,16 @@ impl Render for SidePanel {
         let Some(topic) = self.topic.clone() else {
             return div().size_full().bg(colors.panel).child(header);
         };
+        if self.tab == 1 {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .bg(colors.panel)
+                .text_sm()
+                .child(header)
+                .child(div().flex_1().min_h(px(0.)).child(self.process.clone()));
+        }
         let person = |m: Option<&Member>, cx: &mut Context<Self>| {
             div()
                 .flex()
@@ -167,12 +213,6 @@ impl Render for SidePanel {
                         el.child(section(p::WAITING_ON)).children(waiting)
                     })
                     .child(self.outputs.clone())
-                    .child(section(p::PROCESS))
-                    .child(
-                        div()
-                            .text_color(colors.muted_foreground)
-                            .child(p::PROCESS_EMPTY),
-                    )
                     .when(developer, |el| {
                         el.child(
                             div()

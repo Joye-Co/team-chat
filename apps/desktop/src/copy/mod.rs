@@ -19,6 +19,8 @@ pub mod nav;
 pub mod notify;
 pub mod panel;
 pub mod realtime;
+pub mod process;
+pub mod search;
 pub mod settings;
 pub mod timeline;
 pub mod update;
@@ -110,6 +112,16 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "artifacts",
         entries: artifacts::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "search",
+        entries: search::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "process",
+        entries: process::ENTRIES,
         developer: false,
     },
     Section {
