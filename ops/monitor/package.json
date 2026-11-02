@@ -1,0 +1,17 @@
+{
+  "name": "@chat/monitor",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --env local --port 18798 --inspector-port 19798 --test-scheduled",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.12",
+    "@cloudflare/workers-types": "^5.20261102.1",
+    "typescript": "^7.0.2",
+    "vitest": "~4.1.12",
+    "wrangler": "^4.156.1"
+  }
+}
