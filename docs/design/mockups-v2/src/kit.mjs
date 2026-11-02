@@ -33,7 +33,7 @@ function dropGroupAround(svg, at) {
 }
 
 /**
- * Small-size character art (DESIGN §9.3): at 40 pt and below the status lamp at the top corner
+ * Small-size character art (DESIGN §7.9): at 40 pt and below the status lamp at the top corner
  * and the question bubble read as notification badges, so they are removed. The face keeps the
  * expression; the status moves to the bottom-right pip.
  */
@@ -67,7 +67,7 @@ export function character(id, status = "idle", size = 32) {
   return `<img class="char" width="${size}" height="${size}" src="${charCache.get(key)}" alt="">`;
 }
 
-/** Initials: one character for a CJK name, two letters for a Latin name (DESIGN §9.3). */
+/** Initials: one character for a CJK name, two letters for a Latin name (DESIGN §7.9). */
 export function initials(name) {
   const n = name.trim().replace(/^\p{Extended_Pictographic}(‍\p{Extended_Pictographic})*\s*/u, "");
   const chars = [...n];
@@ -103,7 +103,7 @@ export function groupTile(name, size = 24) {
   return `<span class="gtile" style="width:${size}px;height:${size}px;font-size:${Math.round(size * 0.5)}px">${esc(ch)}</span>`;
 }
 
-/** Latin next to Han gets one space (DESIGN §7.2). */
+/** Latin next to Han gets one space (DESIGN §10). */
 const spaced = (name) => (/^[A-Za-z0-9]/.test(name) ? ` ${name} ` : name);
 
 const STATUS = {
@@ -114,7 +114,7 @@ const STATUS = {
   done: ["circle-check", "success", "完成"],
 };
 /**
- * Status chip (DESIGN §8.6). Filled chip only for 等你… (tone `you`) and 进行中 in the header;
+ * Status chip and label (DESIGN §7.8). Filled chip only for 等你… (tone `you`) and 进行中 in the header;
  * every other status is a quiet label (glyph + word, no fill). Topic rows pass `row: true`:
  * 进行中 shows nothing there and names are dropped.
  */
@@ -137,7 +137,7 @@ export const kbd = (k) => `<span class="kbd">${k}</span>`;
 export const badge = (n) => `<span class="badge">${n}</span>`;
 export const count = (n) => `<span class="count">${n}</span>`;
 
-/** Middle ellipsis that keeps the end of a file name (DESIGN §12). */
+/** Middle ellipsis that keeps the end of a file name (DESIGN §15). */
 export function midEll(s, max = 44, keep = 12) {
   const c = [...s];
   if (c.length <= max) return s;

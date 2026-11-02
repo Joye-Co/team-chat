@@ -1,4 +1,4 @@
-// The main window: sidebar, topic list, topic view, optional side panel (DESIGN §6, §8).
+// The main window: sidebar, topic list, topic view, optional side panel (DESIGN §4.4, §7, §8.1).
 import { M, sidebar as SB, topics as TOPICS } from "./data.mjs";
 import { avatar, badge, character, chip, count, esc, icon, kbd } from "./kit.mjs";
 
@@ -7,7 +7,7 @@ export const MAIN_CSS = `
 .lights{position:absolute;left:20px;top:20px;display:flex;gap:8px;z-index:5}
 .lights span{width:12px;height:12px;border-radius:50%;background:#FF5F57;box-shadow:inset 0 0 0 0.5px rgba(0,0,0,.15)}
 .lights span:nth-child(2){background:#FEBC2E}.lights span:nth-child(3){background:#28C840}
-/* Sidebar (§6.2) */
+/* Sidebar (§7.7) */
 .sb{width:var(--sbw);flex:none;background:var(--sidebar);display:flex;flex-direction:column;border-right:0.5px solid var(--sep)}
 .sb-top{height:52px;flex:none}
 .sb-search{margin:0 12px 8px;height:36px;border-radius:8px;background:var(--field);display:flex;align-items:center;gap:8px;padding:0 8px 0 12px;color:var(--text-3);font-size:14px;line-height:20px}
@@ -37,7 +37,7 @@ export const MAIN_CSS = `
 .sb-foot .who{flex:1;min-width:0}
 .sb-foot .n{font-size:14px;line-height:20px;font-weight:500}
 .sb-foot .s{font-size:12px;line-height:16px;color:var(--text-2)}
-/* Topic list (§6.3) */
+/* Topic list (§7.6, §8.1) */
 .tl{width:var(--tlw);flex:none;display:flex;flex-direction:column;border-right:0.5px solid var(--sep);background:var(--content)}
 .hdr{height:52px;flex:none;display:flex;align-items:center;gap:8px;padding:0 10px 0 16px}
 .hdr .ttl{flex:1;font-size:17px;line-height:24px;font-weight:600}
@@ -57,7 +57,7 @@ export const MAIN_CSS = `
 .trow .tm{font-size:12px;line-height:16px;color:var(--text-3);flex:none}
 .trow .pv{flex:1;font-size:13px;line-height:20px;color:var(--text-2)}
 .trow .dot{position:absolute;left:4px;top:19px;width:6px;height:6px;border-radius:50%;background:var(--unread-dot)}
-/* Topic view (§6.4) */
+/* Topic view (§7.5, §8.1) */
 .tv{flex:1;min-width:0;display:flex;flex-direction:column;position:relative;background:var(--content)}
 .tv-hdr{height:52px;flex:none;display:flex;align-items:center;gap:8px;padding:0 12px 0 24px}
 .tv-hdr.edge{box-shadow:0 0.5px 0 var(--sep)}
@@ -102,7 +102,7 @@ export const MAIN_CSS = `
 .pulse i{width:4px;height:4px;border-radius:50%;background:var(--text-3)}
 .pulse i:nth-child(2){opacity:.6}.pulse i:nth-child(3){opacity:.3}
 .linkbtn{font-size:13px;line-height:20px;color:var(--accent-text);display:inline-flex;gap:6px;align-items:center}
-/* Cards (§8.7) */
+/* Cards (§7.10) */
 .card{margin-top:6px;width:min(560px,100%);border-radius:12px;background:var(--raised);box-shadow:inset 0 0 0 1px var(--border);padding:14px 16px 16px}
 .card.you{box-shadow:inset 0 0 0 1px var(--you-border)}
 .card .ct{font-size:14px;line-height:22px;font-weight:600}
@@ -123,7 +123,7 @@ export const MAIN_CSS = `
 .file .grow{flex:1;min-width:0}
 .file .bar{position:absolute;left:0;bottom:0;height:2px;background:var(--accent)}
 .sendst{font-size:12px;color:var(--danger-text);display:inline-flex;gap:4px;align-items:center;margin-left:8px;vertical-align:-1px}
-/* Composer (§8.1) */
+/* Composer (§7.2) */
 .cmp-wrap{flex:none;padding-bottom:16px}
 .typing{height:20px;font-size:12px;line-height:20px;color:var(--text-3);padding-left:2px}
 .cmp{border-radius:12px;box-shadow:inset 0 0 0 1px var(--border);background:var(--content);display:flex;flex-direction:column;position:relative;min-height:96px}
@@ -142,7 +142,7 @@ export const MAIN_CSS = `
 .pop .pr .grow{flex:1}
 .pop .pr .role{font-size:13px;color:var(--text-3)}
 .pop .ph{display:flex;align-items:center;height:28px;padding:0 10px;font-size:12px;line-height:16px;color:var(--text-3);font-weight:500}
-/* Side panel (§6.5) */
+/* Side panel (§8.1) */
 .sp{width:var(--spw);flex:none;border-left:0.5px solid var(--sep);display:flex;flex-direction:column;background:var(--content)}
 .sp-hdr{height:52px;display:flex;align-items:center;padding:0 10px 0 16px;gap:6px;flex:none}
 .sp-hdr .t{flex:1;font-size:17px;line-height:24px;font-weight:600}
@@ -204,7 +204,7 @@ function topicListHtml(mode, opt = {}) {
   const list = opt.topics ?? TOPICS;
   const rows = list.map((t) => {
     const unread = t.unread || t.mention;
-    // One trailing element per row (§8.6): 等你… chip > @ badge > 卡住了 > other label > unread count.
+    // One trailing element per row (§9.1): 等你… chip > @ badge > 卡住了 > other label > unread count.
     const c = chip(t.status, { you: t.you, name: t.name, row: true });
     const n = (v) => (typeof v === "number" && v > 999 ? "999+" : v);
     const trail = t.you && c ? c : t.mention ? badge(`@${t.mention}`) : c ? c : t.unread ? count(n(t.unread)) : "";
@@ -243,7 +243,7 @@ function composerHtml(mode, opt = {}) {
 }
 
 function headerHtml(mode, t) {
-  // While the topic start block is on screen the header shows no title or chip (§6.4).
+  // While the topic start block is on screen the header shows no title or chip (§8.1).
   const left = t.start ? "" : `<span class="ttl ell">${esc(t.title)}</span>${chip(t.status, { you: t.you, name: t.name })}`;
   return `<div class="tv-hdr ${t.edge ? "edge" : ""}">${left}<span class="grow"></span>
 <div class="acts"><span class="btn ghost" style="padding:0 10px;gap:6px">${icon("users", 18)}${t.people.length}</span>

@@ -1,6 +1,6 @@
 # Design checklist (GPUI)
 
-> Design v2: the UI basics checklist in [DESIGN.md §15](../DESIGN.md#15-ui-basics-checklist) wins where this file differs. Values here that cite v1 tokens are out of date.
+> Design v2.1: the checklist in [DESIGN.md §17](../DESIGN.md#17-checklist) wins where this file differs. Values here that cite v1 tokens are out of date.
 
 Check every UI change against this list before merging. It distills the vendored skills in
 [skills/emilkowalski](skills/emilkowalski/) (written for the web) into checks for this native

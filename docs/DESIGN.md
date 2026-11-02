@@ -1,73 +1,85 @@
-# Design v2
+# Design v2.1
 
-**v2 replaces v1 ("Native calm").** v1 was invented without looking at real work chats, and Joye
-found the result ugly, with too many basic UI and UX faults. v2 copies proven patterns from four
-reference products and gives each section the reference it follows. v1 stays in git history and
-in [design/mockups/](design/mockups/) only as a record. Do not build from it.
+**v2.1 is the production revision of v2.** v2 replaced v1 ("Native calm"), which Joye found ugly
+with too many basic UI and UX faults. Joye then judged the v2 mockups too small and cramped
+("为什么这些输入框都那么的矮？"). v2.1 keeps every v2 decision about structure and behavior and
+changes the sizes: a 96 pt composer, 36 to 40 pt fields, 32 pt buttons, 14 pt list titles, no
+reader text under 12 pt, fewer colors. The structure of this file follows
+[design/DESIGN-MD-GUIDE.md](design/DESIGN-MD-GUIDE.md) (tokens with roles, components with all
+states, accessibility, motion, dark mode, density, checklist).
+
+**The bar.** The app must look as good as Slack, Feishu 话题群 and GrokBot when the three are side
+by side at the same scale. "Acceptable" is not the bar.
 
 Implementers follow this file exactly. When a value is not here, ask before you invent one.
 AGENTS.md and docs/PRODUCT.md win for product rules and interface words. This file wins for how
 things look and move.
 
-- Mockups: [design/mockups-v2/](design/mockups-v2/) (PNG at device scale 1, HTML beside each PNG).
-  Rebuild: `bun docs/design/mockups-v2/src/build.mjs [name] [--scale=2]`.
-- Tokens in code form: [design/mockups-v2/src/tokens.mjs](design/mockups-v2/src/tokens.mjs). Keep it
-  in step with §2.
-- App icon: [design/brand/](design/brand/) (unchanged; the dark variant `icon-dark.svg` is used
-  on the dark login, §11.6).
-- GPUI limits: [design/GPUI-CAPABILITIES.md](design/GPUI-CAPABILITIES.md). Per-change checklist:
-  §15 of this file (it replaces design/CHECKLIST.md where they differ).
+| What | Where |
+| --- | --- |
+| Mockups (PNG at device scale 1 and `@2x`, HTML beside each) | [design/mockups-v2/](design/mockups-v2/) |
+| Rebuild the mockups | `bun docs/design/mockups-v2/src/build.mjs [name ...] [--scale=1\|2]` (both scales by default) |
+| Tokens in code form (the one source for the mockups) | [design/mockups-v2/src/tokens.mjs](design/mockups-v2/src/tokens.mjs) |
+| Component CSS for the mockups | [kit.mjs](design/mockups-v2/src/kit.mjs) (shared), [main.mjs](design/mockups-v2/src/main.mjs) (main window), [screens.mjs](design/mockups-v2/src/screens.mjs) |
+| App icon (`icon-dark.svg` on the dark login) | [design/brand/](design/brand/) |
+| GPUI limits | [design/GPUI-CAPABILITIES.md](design/GPUI-CAPABILITIES.md) |
+| Per-change checklist | §17 of this file (it replaces design/CHECKLIST.md where they differ) |
 
-References, in this file by short name:
+Units: pt. A web px at device scale 1 equals one macOS pt.
 
-| Name | What we used | Where the evidence is (not in git) |
+### References
+
+| Name | What we used | Evidence (not in git) |
 | --- | --- | --- |
-| **Slack** | 2023 desktop layout: message rows, date pill, hover toolbar, reactions, thread summary and thread pane, sidebar sections, unread by weight, Block Kit task cards, agent sessions | `~/.cache/team-chat/design/refs/slack/` (crop-stanford-main.png, crop-thread-pane.png) |
-| **Feishu** | 话题群 and 话题回复: topic list, topic pane with the root repeated, 同时发送到群, 全部 / 我订阅的 tabs, card spec (width caps, spacing presets, text scale), neutral color ramp, read and reaction behavior | `~/.cache/team-chat/design/refs/feishu/` (hc_360049067735_*.png, hc_423295624296_*.png, open_cards_*.png) |
-| **GrokBot** | Bots as characters, one pending row instead of a stream, work cards with a status badge, the ask card with lettered options, draft-before-send card, the right pane with the bot's live state, quiet composer | `~/.cache/team-chat/design/refs/grokbot/` (guide-images/, native/, demo-*.png, baby-grok-bot-rules.css) |
-| **OpenBot** | Measurements only (PolyForm Noncommercial: no code, styles or assets copied): one header height for every pane, a small enforced type and spacing scale, neutral selection, one status spot per row with a priority, collapsed tool steps, live line with elapsed time, 400 ms delay before busy indicators | `/Users/joye/Documents/code/openbot` (read only), `~/.cache/team-chat/design/refs/openbot/` |
+| **Slack** | 2023 desktop layout: message rows, hover toolbar, reactions, thread pane, sidebar sections, unread by weight, the composer with a toolbar row, Block Kit task cards | `~/.cache/team-chat/design/refs/slack/` (crop-stanford-main.png, crop-thread-pane.png) |
+| **Feishu** | 话题群 and 话题回复: topic list, topic pane, tabs, card spec, neutral grey ramp, 36 to 40 pt fields | `~/.cache/team-chat/design/refs/feishu/` (hc_360049067735_*.png, hc_423295624296_*.png, open_cards_*.png) |
+| **GrokBot** | Bots as characters, one pending row, work cards, the ask card with lettered options, the draft card, the right pane with the bot's live state | `~/.cache/team-chat/design/refs/grokbot/` |
+| **OpenBot** | Measurements only (PolyForm Noncommercial: no code, styles or assets copied): one header height, an enforced type scale, neutral selection, one status per row, collapsed tool steps, 400 ms delay before busy indicators | `~/.cache/team-chat/design/refs/openbot/` |
+| **Open-source chat** | Mattermost, Zulip, Rocket.Chat Fuselage, Element Compound, Zed (measured from source; see the guide §4): 98 pt empty composer, 32 to 40 pt controls, 40 to 48 pt fields | `~/.cache/team-chat/design/refs/oss/` |
 
 ## 0. Decisions per screen
 
 | Screen | We follow | Why | Rejected |
 | --- | --- | --- | --- |
-| Shell | **Slack / Feishu**: tinted sidebar, white content, one hairline between columns, one 52 pt header row for every pane (**OpenBot**: all header lines meet) | Proven desktop layout; the tint separates navigation from content without boxes | Slack's icon rail and purple chrome; Feishu's app-suite nav; GrokBot's glass sidebar (60 fps budget) |
-| Sidebar | **Slack** sections (待办, 群, 私聊) with collapse, unread told by weight, number badges only for what is for you; **GrokBot** bot rows show the character's live status | Scanning bold names is faster than scanning dots; one place answers "who waits for me" | Slack's 6-item filter menu; GrokBot's single flat list (it mixes groups and DMs, U18) |
-| 群 → topic list | **Feishu** 话题群 (topics are the unit, 全部 / 等我 tabs) drawn as **Slack/OpenBot** two-line list rows with a preview | Feishu's model is ours; dense rows triage faster than Feishu's large cards at 5 to 30 topics | Feishu's floating "+" button (we use a labeled 新话题 button); full topic cards |
-| Topic view | **Feishu** topic pane order (topic start, then replies, then composer) + **Slack** message rows (avatar, name and time on one line, grouping, date pill, hover toolbar) | No bubbles in a team topic: Feishu drops them in topics, Slack never had them | GrokBot / OpenBot bubbles (they suit 1:1 bot chat, not 5 to 10 people) |
-| Bots and live work | **GrokBot** pending row and character avatar; **OpenBot** elapsed time and collapsed steps; **Slack** agent session states and a visible stop | "Acknowledges once, works quietly" (PRODUCT.md) needs one living line, not a token stream | A tool log in the timeline; shimmer text (GPUI cannot clip gradients to text cheaply) |
-| Cards | **Feishu** card spec (width cap, fixed spacing and text sizes) + **GrokBot** work card, ask card and draft card + **Slack** Block Kit task/plan list | Every bot card looks native whoever wrote the JSON | Saturated Feishu header gradients |
-| Composer | **GrokBot / Feishu**: one box, destination in the placeholder, `+` menu at the left, `@` and emoji at the right, send is the only colored control | Fewer controls; the destination is named so nobody posts into the wrong place | Slack's always-on format toolbar; v1's permanent key hints (U09) |
-| Side panel | **GrokBot** right pane: the responsible bot's live state, then 产出, then members; closed by default | Context is one glance away but takes no width when there is nothing to show (U07) | v1's always-open empty panel |
-| Search and switcher | **Feishu** `搜索 ⌘K` field that opens one switcher; **Slack** grouped results and ⌘F inside the current 群 | One search entry, shortcut taught in the field | A separate fixed-height search dialog (U35) |
-| Settings | **Slack** preferences: left section list, content right, grouped table | Flat, no nested pages | Solid accent selection |
-| Empty and error | **Slack** inline next action, **Feishu** one quiet line; errors say what failed and what to do | Quiet, never three empty states at once (U06) | Big illustrations |
-| Login | macOS native form; server address behind a disclosure | Interns never need the server address (U39) | |
+| Shell | **Slack / Feishu**: tinted sidebar, white content, one hairline between columns, one 52 pt header row in every pane (**OpenBot**) | Proven layout; the tint separates navigation from content without boxes | Slack's icon rail and purple chrome; Feishu's app-suite nav; GrokBot's glass sidebar |
+| Sidebar | **Slack** sections (待办, 群, 私聊), a monochrome `#` glyph for each 群, unread by weight, red badges only for what is for you; **GrokBot** bot rows show the character | Scanning bold names is faster than scanning colored tiles | Colored letter tiles per 群 (v2: a rainbow of five hues looked like a template) |
+| 群 → topic list | **Feishu** 话题群 model (topics, 全部 / 未读 / 等我 tabs) drawn as **Slack / Element** two-line rows | Dense rows triage faster than Feishu's large cards at 5 to 30 topics | Full topic cards; Feishu's floating `+` |
+| Topic view | **Feishu** pane order (topic start, replies, composer) + **Slack** message rows | No bubbles in a team topic | GrokBot / OpenBot bubbles (1:1 bot chat only) |
+| Bots and live work | **GrokBot** pending row and character; **OpenBot** elapsed time and collapsed steps; **Slack** agent states with a visible stop | "Acknowledges once, works quietly" (PRODUCT.md) | A tool log in the timeline; shimmer text |
+| Cards | **Feishu** card spec + **GrokBot** work, ask and draft cards + **Slack** Block Kit plan list | Every bot card looks native | Saturated Feishu header gradients |
+| Composer | **Slack / Feishu / Mattermost**: a writing area of at least two lines and a toolbar row (attach, @, emoji, format at the left; send at the right); the destination in the placeholder (**Feishu**) | Joye's requirement; topic replies are long; the toolbar teaches the actions | v2's single 40 pt row (Joye: "丑死了"); Slack's always-on format bar (it opens from `Aa`) |
+| Side panel | **GrokBot** right pane: the responsible bot's live state, 产出, members; closed by default | Context one glance away, no width when empty (U07) | v1's always-open empty panel |
+| Search | **Feishu** `搜索 ⌘K` field that opens one switcher; **Slack** grouped results | One search entry (U35) | A separate search dialog |
+| Settings | **Slack** preferences: section list at the left, a centered content column, grouped tables | Flat, no nested pages | Solid accent selection; a raised table header |
+| Login | A centered form in a full window, label above the field, invite code as boxes | Interns never need the server address (U39) | A small fixed window with the form at the top |
 
 ## 1. Principles
 
-1. **Copy what works.** Every pattern below names its reference. A new pattern needs a reason
-   that the references cannot cover (our 话题 status and `waitingOn` are the main one).
-2. **Subtract.** One search entry, one header height, one chip shape, one modal component, one
-   avatar rule, one date format. When two controls say the same thing, remove one.
-3. **Color means you.** Accent blue: links, mentions of others, the active tab underline, send,
-   primary buttons, the unread dot, focus. Orange: 等你… chips and mentions of you. Red: number
-   badges (things for you) and errors. Everything else is neutral.
-4. **No void, no crowding.** Short content starts at the top; long content anchors at the
-   bottom. Nothing is shown empty "in case".
-5. **Every interactive thing answers.** Hover, pressed, focus and cursor on every row and button
-   (§7). This is the most common fault of v1 (U03, U04).
+Ranked: when two conflict, the higher one wins.
+
+1. **Readable first.** Body 14/22, list titles 14, nothing a reader must read under 12, controls
+   32 to 40 pt. When density and readability conflict, readability wins. (Joye's feedback.)
+2. **Copy what works.** Every pattern names its reference. A new pattern needs a reason that the
+   references cannot cover (our 话题 status and `waitingOn` are the main one).
+3. **Color means you.** Accent blue: links, mentions of others, the active field, send, primary
+   buttons, the unread dot. Orange: 等你… and mentions of you, **at most once per pane**. Red:
+   number badges for you and errors. Everything else is neutral, including 群 glyphs, avatars of
+   people, 完成 and 等{name}… labels.
+4. **Subtract.** One search entry, one header height, one chip shape, one overlay, one avatar
+   rule, one date format. When two controls say the same thing, remove one. A state shows once
+   per pane.
+5. **Every interactive thing answers.** Hover, pressed, focus-visible, disabled and cursor on
+   every row and control (§7.1). This was the most common v1 fault (U03, U04).
 6. **Members are equal.** People and bots use the same rows and sizes. Bots look like their
-   jojo-friends character, which also shows what they are doing.
-7. **Quiet motion.** Short, ease-out, never on keyboard navigation (§8).
+   jojo-friends character.
+7. **Quiet motion.** Short, ease-out, never on keyboard navigation (§12).
 
 ## 2. Color tokens
 
 Values are sRGB `#RRGGBBAA` (the gpui-component theme JSON format). An alpha color is drawn over
-the surface named in its role. `L` light, `D` dark. Contrast ratios were computed (WCAG) over the
-named surface. The neutral ramp is calibrated on Feishu's documented grey ramp (text #1F2329,
-secondary #646A73) and Slack's light mode (near-black text, very light hairlines); the dark ramp
-uses OpenBot's lesson of at least 4 % lightness between elevation steps (U46).
+the surface named in its role. `L` light, `D` dark. Contrast is WCAG 2.2, computed over the named
+surface (`content` unless stated). Views never write a color literal; text tiers are tokens,
+never opacity.
 
 ### 2.1 Surfaces
 
@@ -75,257 +87,502 @@ uses OpenBot's lesson of at least 4 % lightness between elevation steps (U46).
 | --- | --- | --- | --- |
 | `sidebar` | `#F2F3F5FF` | `#18181BFF` | Sidebar, settings section list |
 | `content` | `#FFFFFFFF` | `#1F1F23FF` | Topic list, topic view, side panel, login, settings content |
-| `raised` | `#F6F7F9FF` | `#28282DFF` | Cards, live card, table header, code blocks in dark (`code-bg` in light is `#F4F5F7FF`, dark `#26262BFF`) |
+| `raised` | `#F6F7F9FF` | `#28282DFF` | Cards |
 | `overlay` | `#FFFFFFFF` | `#2F2F35FF` | Popovers, menus, @mention popup, switcher, dialogs, hover toolbar, toasts |
-| `scrim` | `#0F111433` | `#00000073` | Behind every overlay that takes focus (switcher, dialogs, sheets, alerts) |
+| `scrim` | `#0F111452` | `#0000008C` | Behind every overlay that takes focus (switcher, dialogs, sheets, alerts) |
+| `code-bg` | `#F4F5F7FF` | `#26262BFF` | Inline code, code blocks, logs |
 
 ### 2.2 Text
 
 | Token | L | D | Contrast L / D | Role |
 | --- | --- | --- | --- | --- |
 | `text-1` | `#1F2329FF` | `#EDEDF0FF` | 15.8 / 14.1 | Body, names, titles |
-| `text-2` | `#5F6670FF` | `#A5A9B1FF` | 5.8 (5.2 on sidebar) / 7.0 | Previews, 岗位, secondary labels, icons at rest |
-| `text-3` | `#80868FFF` | `#7E838CFF` | 3.7 / 4.3 | Times, counts in tabs, hints. Never content |
-| `placeholder` | `#9AA0A8FF` | `#6C7079FF` | 2.6 / 3.3 | Field placeholders only |
+| `text-2` | `#5F6670FF` | `#A5A9B1FF` | 5.8 (5.2 on `sidebar`) / 7.0 | Previews, 岗位, secondary labels, icons at rest |
+| `text-3` | `#70767FFF` | `#8A8F98FF` | 4.6 (4.1 on `sidebar`) / 5.1 | Times, counts in tabs, section labels, hints |
+| `placeholder` | `#9AA0A8FF` | `#6C7079FF` | 2.6 / 3.3 | Field placeholders only (the field label or the destination says the same thing) |
 
 ### 2.3 Lines and fills
 
 | Token | L | D | Role |
 | --- | --- | --- | --- |
-| `sep` | `#1F232917` | `#FFFFFF14` | 0.5 pt hairlines: column edges, header edge on scroll, table rows |
-| `border` | `#1F232924` | `#FFFFFF21` | Cards, files, date pill, popover edge, option rows |
-| `border-strong` | `#1F23293D` | `#FFFFFF38` | Composer, inputs, secondary buttons, selects |
-| `hover` | `#1F23290B` | `#FFFFFF0A` | Hover on content rows, messages, ghost buttons |
-| `selected` | `#1F232914` | `#FFFFFF16` | Selected topic row |
+| `sep` | `#1F232917` | `#FFFFFF14` | 0.5 pt hairlines: column edges, header edge on scroll, table rows, date divider |
+| `border` | `#1F232924` | `#FFFFFF21` | 1 pt: composer and fields at rest, cards, files, option rows, selects |
+| `border-strong` | `#1F23293D` | `#FFFFFF38` | 1 pt: hover on composer and fields, secondary buttons, hovered option |
+| `hover` | `#1F23290A` | `#FFFFFF0A` | Hover on content rows, messages, ghost buttons |
+| `selected` | `#1F232914` | `#FFFFFF16` | Selected topic row; keyboard-active row in popups, menus and the switcher |
 | `sidebar-hover` / `sidebar-selected` | `#1F23290D` / `#1F232917` | `#FFFFFF0B` / `#FFFFFF17` | Sidebar and settings list rows |
 | `pressed` | `#1F23291F` | `#FFFFFF1F` | Pressed rows and ghost buttons |
-| `field` | `#1F23290E` | `#FFFFFF11` | Search fields, kbd, neutral chips, reaction pills, empty send button |
-| `active-row` | `#1F6BFF1A` | `#4C8DFF33` | Keyboard-active row in popups, menus, the switcher |
+| `field` | `#1F23290E` | `#FFFFFF11` | Search fields, kbd, role tag, reactions, empty send button, disabled select |
+| `count-bg` | `#1F232914` | `#FFFFFF1A` | Grey count pill (unread without a mention) |
+| `tile` | `#EBEDF0FF` | `#34343BFF` | Group tile in the switcher and dialogs |
 
-### 2.4 Accent and mentions
+### 2.4 Accent, focus and mentions
 
 | Token | L | D | Role |
 | --- | --- | --- | --- |
-| `accent` | `#1F6BFFFF` | `#3D7EFFFF` | Send, primary buttons, caret, focus ring base, selected option border |
-| `accent-hover` | `#165EEBFF` | `#5590FFFF` | Primary hover |
-| `accent-text` | `#175CD9FF` (5.9) | `#7AA8FFFF` (6.9) | Links, @mentions of others, text buttons, topic unread count |
-| `accent-soft` | `#1F6BFF1A` | `#4C8DFF29` | File tiles, my reaction, hovered option |
-| `on-accent` | `#FFFFFFFF` | `#FFFFFFFF` | Text on accent (4.6 / 3.7: labels at 13 pt weight 500 or larger only) |
-| `focus` | `#1F6BFF8C` | `#4C8DFFA6` | 2 pt keyboard focus ring with a 2 pt gap in the surface color |
+| `accent` | `#1F6BFFFF` | `#2F6FEBFF` | Send, primary buttons, caret, my reaction ring, progress bars. White on it: 4.6 / 4.6 |
+| `accent-hover` | `#165EEBFF` | `#3D7EFFFF` | Primary hover |
+| `accent-text` | `#175CD9FF` (5.9) | `#7AA8FFFF` (6.9) | Links, @mentions of others, text buttons |
+| `accent-soft` | `#1F6BFF1A` | `#4C8DFF29` | File tiles, my reaction |
+| `focus` | `#1F6BFF8C` | `#4C8DFFA6` | 2 pt keyboard focus ring with a 2 pt gap (§11) |
+| `focus-border` | `#1F6BFFFF` (4.6) | `#4C8DFFFF` (5.1) | 1 pt border of the focused composer and fields |
+| `focus-soft` | `#1F6BFF29` | `#4C8DFF3D` | 3 pt outer ring of the focused composer and fields |
+| `choice-bg` | `#1F6BFF0F` | `#4C8DFF1F` | The chosen option of an ask card (with a 1 pt `accent` border) |
 | `mention-bg` | `#1F6BFF1A` | `#4C8DFF2E` | @mention of someone else (text `accent-text`) |
 | `me-bg` / `me-text` | `#FF8A002E` / `#9A4A00FF` | `#FF9F0A38` / `#FFB547FF` | @mention of me |
 | `unread-dot` | `#1F6BFFFF` | `#4C8DFFFF` | 6 pt dot left of an unread topic row |
 
-The accent is our own blue, calibrated between Slack's link blue and Feishu's blue-500; it does
-not follow the macOS accent color (one fewer variable to test).
+The accent is our own blue; it does not follow the macOS accent color.
 
-### 2.5 Status tones (chips and badges)
-
-One chip shape (Feishu tag, GrokBot badge): 20 pt high, radius 6, padding 6 left / 7 right,
-gap 4, a 12 pt Lucide glyph, 12/16 text weight 500, no border, max width 168 pt.
-
-| Tone | L fill / text | D fill / text | Used for |
-| --- | --- | --- | --- |
-| `info` | `#1F6BFF1A` / `#175CD9FF` | `#4C8DFF2E` / `#7AA8FFFF` | 进行中 (header only, §9.1) |
-| `you` | `#FF8A0029` / `#9A4A00FF` (5.4), weight 600, glyph `#E07800FF` | `#FF9F0A2E` / `#FFB547FF` (7.2), glyph `#FF9F0AFF` | 等你回答, 等你审 |
-| `danger` | `#E5484D1F` / `#C2272DFF` (4.8) | `#F2555A2E` / `#FF7B7FFF` (5.6) | 卡住了, failed run |
-| `success` | `#1E9E5A1F` / `#137042FF` | `#3CCB7F29` / `#5BD893FF` (6.8) | 完成, 已处理 (never red, U25) |
-| `neutral` | `field` / `text-2` | `field` / `text-2` | 等{name}回答, 等{name}审, 等回答, 等审 |
-
-| Status | Glyph | Tone (viewer in `waitingOn` / not) |
-| --- | --- | --- |
-| `open` | none | none |
-| `in_progress` | `circle-dot` | info (hidden in rows, §9.1) |
-| `waiting_answer` | `circle-question-mark` | you / neutral |
-| `waiting_review` | `eye` | you / neutral |
-| `blocked` | `circle-alert` | danger |
-| `done` | `circle-check` | success |
-
-In 等{name}…, the name truncates at 96 pt and 等 and the verb stay. In topic rows the name is
-dropped (`等审`), because the row is narrow and the header shows it.
-
-### 2.6 Badges, presence
+### 2.5 Status tones
 
 | Token | L | D | Role |
 | --- | --- | --- | --- |
-| `badge` | `#E5484DFF` | `#F2555AFF` | Number badge: 18 pt capsule, min width 18, padding 5, 11/14 weight 600 white, tabular. Only for things for you: mentions (`@n` in topic rows, `n` on a 群), DMs, 待办. Cap `99+` |
-| `online` | `#1FB25AFF` | `#34C76AFF` | Presence dot, 28 % of the avatar (min 7 pt), 2 pt ring in the surface color |
-| offline dot | ring of `text-3` 1.5 pt, surface fill | same | Offline is a hollow dot, never nothing (U41) |
+| `you-bg` / `you-text` / `you-glyph` | `#FF8A0029` / `#9A4A00FF` (5.4) / `#E07800FF` | `#FF9F0A2E` / `#FFB547FF` (6.6) / `#FF9F0AFF` | 等你回答, 等你审 chip; bot pip "waits for someone" |
+| `you-border` | `#E0780073` | `#FF9F0A73` | 1 pt border of a card that waits for the viewer |
+| `info-bg` / `info-text` | `#1F6BFF1A` / `#175CD9FF` | `#4C8DFF2E` / `#7AA8FFFF` | 进行中 chip (topic header only) |
+| `danger` / `danger-bg` / `danger-text` | `#E5484DFF` / `#E5484D1F` / `#C2272DFF` (5.8) | `#F2555AFF` / `#F2555A2E` / `#FF7B7FFF` (6.6) | 卡住了, failed send, field errors, danger buttons |
+| `success` / `success-text` | `#1E9E5AFF` / `#137042FF` | `#3CCB7FFF` / `#5BD893FF` | Done steps in plans, 已处理 in alert cards |
+| `badge` | `#D93A40FF` | `#D93A40FF` | Number badges. White 12/600 on it: 4.5 |
+| `online` | `#1FB25AFF` | `#34C76AFF` | Presence dot |
 
-Unread without a mention is told by weight, not by a number (Slack): 群 name 600 + `text-1`;
-topic title 600 + the unread dot + a 12 pt `accent-text` count.
+### 2.6 People without a photo
 
-### 2.7 Avatar palettes (people)
+One neutral pair for every person: `avatar-bg` `#E3E8EFFF` / `#3A4352FF`, `avatar-fg`
+`#46566CFF` / `#C3CFDFFF` (6.1 / 6.3). v2's eight hashed palettes are removed: with the bot
+characters and status colors they made more than ten hues on one sidebar. The initial and the
+name tell people apart.
 
-A stable hash of the member id picks one of 8 palettes (unchanged from v1 plus `violet`, which
-replaces `graphite`). Values in [tokens.mjs](design/mockups-v2/src/tokens.mjs) `palettes`.
+### 2.7 Elevation colors
 
-### 2.8 Content and syntax
+See §5. Syntax colors stay the Xcode defaults through `HighlightTheme`.
 
-`code-bg` §2.1; syntax colors as in v1 (Xcode defaults) through `HighlightTheme`. Danger fills
-`#E5484DFF` / `#F2555AFF`; success icons `#1E9E5AFF` / `#3CCB7FFF`; warning icons `#E07800FF` /
-`#FF9F0AFF`.
-
-## 3. gpui-component theme mapping
+### 2.8 gpui-component theme mapping
 
 One JSON theme set (`apps/desktop/assets/theme.json`, `light` and `dark`). App-owned roles (tones,
-palettes, mentions, presence, `active-row`, shadows) live in `theme::Colors`. Views never write a
-color literal.
+mentions, presence, `count-bg`, `tile`, `focus-*`, `choice-bg`, `you-border`, avatar colors,
+shadows) live in `theme::Colors`.
 
 | Slot(s) | L | D |
 | --- | --- | --- |
-| `background` | `#FFFFFFFF` | `#1F1F23FF` |
-| `foreground` | `#1F2329FF` | `#EDEDF0FF` |
+| `background` / `foreground` | `#FFFFFFFF` / `#1F2329FF` | `#1F1F23FF` / `#EDEDF0FF` |
 | `muted` / `muted_foreground` | `#1F23290E` / `#5F6670FF` | `#FFFFFF11` / `#A5A9B1FF` |
-| `border` | `#1F232924` | `#FFFFFF21` |
-| `input` | `#1F23293D` | `#FFFFFF38` |
+| `border` / `input` | `#1F232924` / `#1F232924` | `#FFFFFF21` / `#FFFFFF21` |
 | `ring` | `#1F6BFF8C` | `#4C8DFFA6` |
-| `selection` | `#1F6BFF33` | `#4C8DFF5C` |
-| `caret` | `#1F6BFFFF` | `#3D7EFFFF` |
-| `overlay` | `#0F111433` | `#00000073` |
-| `accent` / `accent_foreground` (component hover, highlighted row) | `#1F6BFF1A` / `#1F2329FF` | `#4C8DFF33` / `#EDEDF0FF` |
-| `primary` / `_hover` / `_active` / `_foreground` | `#1F6BFFFF` / `#165EEBFF` / `#1252CCFF` / `#FFFFFFFF` | `#3D7EFFFF` / `#5590FFFF` / `#2F6BE0FF` / `#FFFFFFFF` |
+| `selection` / `caret` | `#1F6BFF33` / `#1F6BFFFF` | `#4C8DFF5C` / `#2F6FEBFF` |
+| `overlay` | `#0F111452` | `#0000008C` |
+| `accent` / `accent_foreground` (highlighted row) | `#1F232914` / `#1F2329FF` | `#FFFFFF16` / `#EDEDF0FF` |
+| `primary` / `_hover` / `_active` / `_foreground` | `#1F6BFFFF` / `#165EEBFF` / `#1252CCFF` / `#FFFFFFFF` | `#2F6FEBFF` / `#3D7EFFFF` / `#2A63D4FF` / `#FFFFFFFF` |
 | `secondary` / `_hover` / `_active` / `_foreground` | `#FFFFFFFF` / `#F6F7F9FF` / `#ECEDF0FF` / `#1F2329FF` | `#FFFFFF14` / `#FFFFFF1F` / `#FFFFFF29` / `#EDEDF0FF` |
-| `button*` | as `secondary*` | as `secondary*` |
-| `button_primary*` | as `primary*` | as `primary*` |
+| `button*` / `button_primary*` | as `secondary*` / as `primary*` | same |
 | `danger` / `_hover` / `_active` / `_foreground` | `#E5484DFF` / `#D93F44FF` / `#C2272DFF` / `#FFFFFFFF` | `#F2555AFF` / `#F66A6EFF` / `#D9474CFF` / `#FFFFFFFF` |
-| `success`, `warning`, `info` | `#1E9E5AFF`, `#E07800FF`, `#1F6BFFFF` | `#3CCB7FFF`, `#FF9F0AFF`, `#3D7EFFFF` |
-| `list` / `list_hover` / `list_active` / `list_active_border` / `list_even` / `list_head` | `#FFFFFFFF` / `#1F23290B` / `#1F232914` / `#00000000` / `#FFFFFFFF` / `#FFFFFFFF` | `#1F1F23FF` / `#FFFFFF0A` / `#FFFFFF16` / `#00000000` / `#1F1F23FF` / `#1F1F23FF` |
-| `table` / `table_hover` / `table_active` / `table_row_border` / `table_head` / `table_head_foreground` | `#FFFFFFFF` / `#1F23290B` / `#1F232914` / `#1F232917` / `#F6F7F9FF` / `#5F6670FF` | `#1F1F23FF` / `#FFFFFF0A` / `#FFFFFF16` / `#FFFFFF14` / `#28282DFF` / `#A5A9B1FF` |
+| `success`, `warning`, `info` | `#1E9E5AFF`, `#E07800FF`, `#1F6BFFFF` | `#3CCB7FFF`, `#FF9F0AFF`, `#2F6FEBFF` |
+| `list` / `list_hover` / `list_active` / `list_active_border` | `#FFFFFFFF` / `#1F23290A` / `#1F232914` / `#00000000` | `#1F1F23FF` / `#FFFFFF0A` / `#FFFFFF16` / `#00000000` |
+| `table` / `table_hover` / `table_active` / `table_row_border` / `table_head` / `table_head_foreground` | `#FFFFFFFF` / `#1F23290A` / `#1F232914` / `#1F232917` / `#FFFFFFFF` / `#70767FFF` | `#1F1F23FF` / `#FFFFFF0A` / `#FFFFFF16` / `#FFFFFF14` / `#1F1F23FF` / `#8A8F98FF` |
 | `popover` / `popover_foreground` | `#FFFFFFFF` / `#1F2329FF` | `#2F2F35FF` / `#EDEDF0FF` |
-| `sidebar` / `sidebar_foreground` / `sidebar_border` / `sidebar_accent` / `sidebar_accent_foreground` | `#F2F3F5FF` / `#5F6670FF` / `#1F232917` / `#1F232917` / `#1F2329FF` | `#18181BFF` / `#A5A9B1FF` / `#FFFFFF14` / `#FFFFFF17` / `#EDEDF0FF` |
+| `sidebar` / `_foreground` / `_border` / `_accent` / `_accent_foreground` | `#F2F3F5FF` / `#5F6670FF` / `#1F232917` / `#1F232917` / `#1F2329FF` | `#18181BFF` / `#A5A9B1FF` / `#FFFFFF14` / `#FFFFFF17` / `#EDEDF0FF` |
 | `tab` / `tab_active` / `tab_active_foreground` / `tab_foreground` / `tab_bar` | `#00000000` / `#00000000` / `#1F2329FF` / `#5F6670FF` / `#00000000` | same with dark text tokens |
 | `switch` / `switch_thumb` | `#1F23293D` (off), `accent` on / `#FFFFFFFF` | `#FFFFFF38` / `#FFFFFFFF` |
-| `slider_bar`, `progress_bar` | `#1F6BFFFF` | `#3D7EFFFF` |
+| `slider_bar`, `progress_bar` | `#1F6BFFFF` | `#2F6FEBFF` |
 | `skeleton` | `#1F23290E` | `#FFFFFF11` |
-| `scrollbar` / `scrollbar_thumb` / `scrollbar_thumb_hover` | `#00000000` / `#1F232940` / `#1F232966` | `#00000000` / `#FFFFFF40` / `#FFFFFF66` |
-| `link` / `link_hover` / `link_active` | `#175CD9FF` / `#1250BFFF` / `#0E449FFF` | `#7AA8FFFF` / `#94BAFFFF` / `#AECBFFFF` |
-| `blue` / `blue_light` | `#1F6BFFFF` / `#1F6BFF1A` | `#3D7EFFFF` / `#4C8DFF2E` |
+| `scrollbar` / `_thumb` / `_thumb_hover` | `#00000000` / `#1F232940` / `#1F232966` | `#00000000` / `#FFFFFF40` / `#FFFFFF66` |
+| `link` / `_hover` / `_active` | `#175CD9FF` / `#1250BFFF` / `#0E449FFF` | `#7AA8FFFF` / `#94BAFFFF` / `#AECBFFFF` |
+| `blue` / `blue_light` | `#1F6BFFFF` / `#1F6BFF1A` | `#2F6FEBFF` / `#4C8DFF2E` |
 | `yellow` / `yellow_light` (the `you` tone) | `#9A4A00FF` / `#FF8A0029` | `#FFB547FF` / `#FF9F0A2E` |
 | `red` / `red_light` | `#C2272DFF` / `#E5484D1F` | `#FF7B7FFF` / `#F2555A2E` |
 | `green` / `green_light` | `#137042FF` / `#1E9E5A1F` | `#5BD893FF` / `#3CCB7F29` |
 | `magenta`, `cyan` (+ `_light`) | not used; `blue` values | same |
-| `window_border`, `drag_border`, `drop_target` | `#1F232924`, `#1F6BFFFF`, `#1F6BFF1A` | `#FFFFFF21`, `#3D7EFFFF`, `#4C8DFF2E` |
+| `window_border`, `drag_border`, `drop_target` | `#1F232924`, `#1F6BFFFF`, `#1F6BFF1A` | `#FFFFFF21`, `#2F6FEBFF`, `#4C8DFF2E` |
 
-Theme fields: `font.family` `.SystemUIFont`, `font.size` 13, `mono_font.family` `Menlo`,
-`mono_font.size` 12, `radius` 8, `radius.lg` 12, `shadow` true, `focus_ring` true,
-`scrollbar_mode` `Scrolling`. `MotionTokens`: `duration_fast` 120 ms, `duration_normal` 160 ms,
-`duration_slow` 200 ms, `easing_enter` and `easing_exit` `cubic_bezier(0.23, 1, 0.32, 1)`.
+Theme fields: `font.family` `.SystemUIFont`, `font.size` 14, `mono_font.family` `Menlo`,
+`mono_font.size` 13, `radius` 8, `radius.lg` 12, `shadow` true, `focus_ring` true,
+`scrollbar_mode` `Scrolling`. `MotionTokens`: §12.
 
-## 4. Typography
+## 3. Typography
 
-System font (`.SystemUIFont`, SF Pro); Core Text falls back to **PingFang SC** for Han. Mono:
-Menlo. Weights 400, 500, 600 only. `tnum` on every number.
+System font (`.SystemUIFont`, SF Pro); Core Text falls back to **PingFang SC** for Han and to
+**Apple Color Emoji** for emoji. Mono: Menlo. Weights 400, 500, 600 only. Tabular numerals on
+every number.
 
-The scale has **six sizes** (OpenBot's enforced scale, Feishu's card text sizes). Nothing else is
-allowed (U27). 11 pt exists only for number badges and kbd.
+**Closed scale.** Eight styles. Each style is size, line height and weight together. Nothing else
+is allowed (U27). There is no 11 pt text.
 
-| Token | Size / line | Weight | Where |
+| Token | Size / line | Weights | Where |
 | --- | --- | --- | --- |
-| `display` | 20 / 28 | 600 | Topic start title (2 lines max), settings page title, login title, empty-state title |
-| `title` | 16 / 22 | 600 | Topic view header title, topic list header (群 name), dialog title |
-| `body` | 14 / 22 | 400 (600 for bold lead-ins) | Message text, composer text, card body. Measure 620 pt (about 44 Han characters). Paragraph gap 6; list item gap 4 (U13) |
-| `ui` | 13 / 18 | 400; 500 row titles; 600 names in messages and unread rows | Sidebar, topic rows, buttons, menus, fields, card titles in lists, previews |
-| `meta` | 12 / 16 | 400; 500 chips and section headers in panels; 600 sidebar section headers | Times, 待办 context, chips, tabs counts, file metadata, typing line, field help and errors |
-| `badge` | 11 / 14 | 500 (kbd), 600 (badges) | Number badges, kbd, role tag |
-| `code` | 12 / 18 | 400 Menlo | Code blocks, logs |
+| `display` | 22 / 30 | 600 | Topic start title (2 lines max), settings page title, login title, empty-state title |
+| `title` | 17 / 24 | 600 | Pane header titles (topic list, topic view, side panel), dialog title |
+| `body` | 14 / 22 | 400; 600 lead-ins and sender names | Message text, composer text, card text, option rows, names in messages |
+| `ui` | 14 / 20 | 400; 500 list titles; 600 unread and selected | Sidebar rows, topic row titles, tabs, buttons, menus, fields, popup rows, settings rows |
+| `small` | 13 / 20 | 400; 500 field labels | Topic row previews, live line, steps row, plan steps, card subtitles in panels, inline buttons, role text in popups, footnotes, switcher snippets |
+| `meta` | 12 / 16 | 400; 500 chips, badges' neighbors, section labels; 600 badges and sidebar section headers | Times, chips, badges, kbd, role tag, 待办 context, file metadata, typing line, field help and errors |
+| `code` | 13 / 20 | 400 Menlo | Inline code (12.5 is not allowed), code blocks, logs |
+| `code-lg` | 20 / 28 | 500 Menlo | Invite code boxes only |
 
-Line height 22 for 14 pt body is Feishu's and Slack's; it is enough for Han because PingFang's
-ascent fits in 22.
+Rules:
+- List titles are at least `ui` 14. Meta is at least 12. A reader never meets text under 12.
+- A name in a message has the body size (14) at 600, not a caption size (Slack).
+- Title to body step: 17 over 14; display 22 over 14.
+- Line height 22 for 14 pt body is Feishu's and Slack's; PingFang's ascent fits in 22.
 
-Punctuation (U47): full-width punctuation in Chinese text (`：` `，` `（）`) with **no space after**
-`：`. A Latin word next to Han gets one space (`staging 上`). Ellipsis is always U+2026 `…`, drawn
-by one truncation helper (U26).
+## 4. Spacing, layout and sizes
 
-## 5. Spacing, radii, sizes
+### 4.1 Spacing
 
-- **Spacing** (pt): 2, 4, 6, 8, 10, 12, 16, 20, 24, 32. (10 stays only for row inner padding
-  and avatar gutters; remove 14 and 28, U27.)
-- **Radii**: 4 (inline code, kbd, mention), 6 (chips, icon buttons in toolbars, role tag), 8
-  (rows, buttons, fields, option rows, file tiles), 12 (cards, composer, popovers, dialogs),
-  full (badges, pills, reactions, avatars). Concentric rule (OpenBot): outer = inner + padding.
-  Remove 5, 5.5, 7, 10, 14.
-- **Controls**: 28 pt standard (buttons, icon buttons, selects), 24 pt compact (inside rows and
-  cards), 36 pt large (login, primary empty-state action), 30 pt fields in the sidebar and
-  settings, 32 pt rows in menus.
-- **Icons**: 16 pt in toolbars and the composer; 14 pt in buttons, fields and rows; 12 pt in
-  chips and steps. Hit area at least 28 × 28 for every icon button (U48).
-- **Avatars**: 32 messages and topic rows; 28 sidebar footer; 24 side panel, switcher, live row;
-  20 sidebar rows and popups; 40 live card. People: circle with **one** initial for a CJK name
-  (the surname, `王一鸣` → 王) and two letters for a Latin name (`Alex Chen` → AC); a leading
-  emoji is ignored (`🧑‍💻 Priya` → P) (U18, U37). Bots: their character at its status
-  (§9.3); no circle clip, no ring.
+4 pt base. Steps: 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 44. Group related things with 4 to 8;
+separate groups with 12 to 16; separate sections with 24 or more. 10 and 14 are only for row and
+card insets. No other values.
 
-## 6. Layout
+### 4.2 Control sizes
 
-### 6.1 Main window
+| Control | Height | Text | Horizontal padding | Radius | Icon |
+| --- | --- | --- | --- | --- | --- |
+| Button `sm` (inline in a message or card row: 重试) | 28 | `small` 13/500 | 10 | 6 | 14 |
+| Button `md` (default: card actions, 添加成员, dialogs) | 32 | `ui` 14/500 | 14 | 8 | 16 |
+| Button `lg` (login, empty-state primary, full-width form submit) | 40 | 15/20 500 (the one size outside the scale, buttons only) | 18 | 10 | 16 |
+| Icon button | 32 × 32 | — | — | 8 | 18 |
+| Icon button `sm` (section `+`, inside rows) | 28 × 28 | — | — | 6 | 16 |
+| Search and filter field | 36 | `ui` 14 | 12 left, 8 right | 8 | 16 |
+| Form field (login, settings, dialogs) | 40 | `ui` 14 | 12 | 10 | 16 |
+| Select in a table row | 32 | `ui` 14 | 12 left, 8 right | 8 | chevrons 14 |
+| Invite code box | 40 × 48 | `code-lg` | — | 10 | — |
+| Composer | 96 minimum | `body` | 14 | 12 | 18 |
+
+Hit area is at least 28 × 28 for anything clickable; 32 where space allows.
+
+### 4.3 Icons and avatars
+
+- Icons (Lucide, the gpui-kit set plus `type`): 18 in headers, toolbars and the composer; 16 in
+  buttons, fields, rows and menus; 14 in chips and labels; 12 in the role tag and section
+  chevrons. Stroke 1.75.
+- Avatars: 36 in messages and topic rows; 32 in the sidebar footer; 24 in sidebar rows, popups,
+  the switcher, the side panel and the live line; 36 in settings rows; 40 in the live card.
+
+### 4.4 Main window
 
 | Metric | Value |
 | --- | --- |
 | Window | Min 1100 × 680, default 1440 × 900, transparent title bar, traffic lights at (20, 20) |
-| Header row | **52 pt in every pane** (sidebar top, topic list, topic view, side panel). No border; a 0.5 pt `sep` line appears under a header only while content scrolls under it (U11) |
-| Columns | Sidebar 248 (200–320, drag to resize, ⌘⇧S hides it) · topic list 320 (280–400, resizable) · topic view flexible, min 480 · side panel 300 (260–380), closed by default. Each column edge is one 0.5 pt `sep` line |
-| Narrow window | When the window is too narrow for all columns, shrink in this order: side panel closes, topic list to 280, sidebar to 200, then the sidebar hides. The topic view never clips (U44) |
-| Reading measure | Messages, cards and the composer share one left edge and one max width: text 620 pt, composer and topic column 760 pt from the left padding (U45) |
+| Header row | **52 pt in every pane** (sidebar top band, topic list, topic view, side panel). No border; a 0.5 pt `sep` line under a header only while content scrolls under it (U11) |
+| Columns | Sidebar 248 (200–320, resizable, ⌘⇧S hides it) · topic list 320 (280–400) · topic view flexible, min 480 · side panel 300 (260–380), closed by default. Each column edge is a 0.5 pt `sep` line |
+| Narrow window | Shrink in this order: side panel closes, topic list to 280, sidebar to 200, then the sidebar hides. The topic view never clips (U44) |
+| Content box | Timeline and composer share one box: max width 808 including 24 pt side padding (760 of content), left-aligned. Text measure 620. Cards and files `min(560, box)`. Hover fills and the date divider span the box (U45) |
+| Settings window | 960 × 720 default; section list 200; content column max 784 including 32 pt side padding |
+| Login window | 960 × 640 default; one centered 390 pt column |
 
-### 6.2 Sidebar (Slack sections, GrokBot bot rows)
+### 4.5 Test sizes
+
+Every screen is checked at 1100 × 680, 1440 × 900 and 1920 × 1080, in both themes, with
+`--worst-case` data.
+
+## 5. Elevation
+
+| Level | Shadow L | Shadow D | Used by |
+| --- | --- | --- | --- |
+| 0 | none | none | Everything in the window, including cards (they use a 1 pt `border`) |
+| 1 float | `0 0 0 0.5px #1F23291F, 0 2px 8px #0F111414` | `0 0 0 0.5px #FFFFFF1F, 0 2px 8px #00000059` | Hover toolbar, jump pill, selected segment |
+| 2 overlay | `0 0 0 0.5px #1F232924, 0 8px 28px -6px #0F111438, 0 2px 6px #0F11140F` | `0 0 0 0.5px #FFFFFF24, 0 12px 36px -6px #00000099, 0 2px 6px #0000004D` | Popovers, menus, mention popup, switcher, dialogs, toasts |
+
+Shadows only on floating layers. Never a shadow on a card, a row or a header.
+
+## 6. Shape
+
+- **Radii**: 4 inline marks in text (mention, inline code); 6 chips, labels, kbd, role tag,
+  `sm` buttons, popup rows, hover-toolbar buttons; 8 buttons, 32 to 36 pt fields, selects, rows,
+  option rows, file tiles; 10 40 pt fields, `lg` buttons, invite boxes; 12 cards, the composer,
+  popovers, dialogs, the switcher, settings tables; full for badges, count pills, reactions and
+  avatars. Concentric rule: outer = inner + padding.
+- **Edges**: 1 pt `border` on cards, files, fields, the composer, selects and option rows; 0.5 pt
+  `sep` for hairlines between rows and columns. No 0.5 pt borders on controls.
+
+## 7. Components
+
+Each component lists anatomy, sizes, states and do and don't. A state that is not listed does not
+exist for that component. All states use the tokens of §2; one row helper and one control helper
+in `ui/parts.rs` apply them, and a view never builds a clickable element without them.
+
+### 7.1 Shared states
+
+| State | Rows (sidebar, topic, menu, popup, settings) | Buttons and icon buttons | Fields and composer |
+| --- | --- | --- | --- |
+| Rest | No fill | Primary `accent`; secondary `content` + 1 pt `border-strong`; ghost no fill, `text-2` | 1 pt `border` (search: `field` fill, no border) |
+| Hover | `hover` (`sidebar-hover` in the sidebar), at once | Primary `accent-hover`; others `hover` fill, icon `text-1` | 1 pt `border-strong` |
+| Pressed | `pressed` | Primary `primary_active`; others `pressed` | — |
+| Focus-visible (keyboard) | 2 pt `focus` ring inset 1 pt | 2 pt `focus` ring outside, 2 pt gap | 1 pt `focus-border` + 3 pt `focus-soft` outer ring (also on click focus) |
+| Selected | `selected` / `sidebar-selected` + weight 600 | Toggles show state by icon, not fill (U16) | — |
+| Disabled | Content at 40 % | Primary: `accent` at 40 % opacity, white label; others: label `text-3`; no pointer, no hover | `field` fill, text `text-3`, no border |
+| Loading | Skeleton rows in `field` after 400 ms | Label stays, a 14 pt spinner replaces the icon (or sits before the label) after 400 ms, min 500 ms shown; input blocked | Spinner 16 at the trailing edge |
+| Error | — | — | 1 pt `danger` border + 3 pt `danger-bg` ring; message 12/16 `danger-text` 6 pt under the field |
+| Read only | — | — | No border, `field` fill, text `text-1`, I-beam for selection |
+| Cursor | Pointer on every clickable row, button, chip, link, tab, avatar | same | I-beam |
+
+### 7.2 Composer
+
+The most-used control. Joye's hard requirement: a real writing area like Slack's and Feishu's.
+
+**Anatomy** (top to bottom): optional blocking slab · optional format bar · text area · toolbar
+row (`+` attach, `@`, emoji, `Aa` format at the left; send at the right).
 
 | Part | Value |
 | --- | --- |
-| Top | 52 pt band for the traffic lights only |
-| Search | 30 pt field, 12 pt side margin, radius 8, `field`, `search` 14 + "搜索" placeholder + `⌘K` kbd. Clicking opens the switcher (§11.4). No other control beside it (U19) |
-| Section header | 28 pt, 12 pt top gap (4 for the first), padding 8: chevron 12 `text-3` (rotates when collapsed), title 12/16 600 `text-2`, trailing: the 待办 badge, or a 22 pt `+` icon button (新建群 / 发起私聊) |
-| Sections | **待办**, **群**, **私聊** (PRODUCT.md "待办, 群, 私聊"; a DM is a 群 of two but listed apart, U18). Each section collapses |
-| 待办 row | Two lines, padding 6/8, radius 8: 20 pt glyph column (`circle-question-mark` or `eye` in the `you` glyph color, `at-sign` in accent), title 13/18 500, context 12/16 `text-2` (`qqbot 研发 · Watch 等你回答`). Max 5 rows, then "全部 n 项" |
-| 群 row | 30 pt, radius 8, gap 8, padding 0/8: 20 pt group tile (radius 6, first character, Latin uppercased, palette by hash), name 13. Unread: name 600 `text-1`. Mention: red badge `n`. Muted: row at 60 % and a `bell-off` 13 |
-| 私聊 row | Same; leading 20 pt avatar (person with presence, or the bot's character at its status). Unread DM: name 600 + red count badge |
-| Selection | `sidebar-selected`, name 600. Only one row is ever selected (U19) |
-| Footer | 52 pt, top hairline inset 8: 28 pt avatar with presence, name 13/500 and presence word 12 `text-2` (在线 / 离开 / 勿扰), a 28 pt settings icon button. The whole name area opens the account menu (我的资料, 设置, 退出登录) (U21) |
-| Scroll edges | When the list scrolls, a 24 pt fade from `sidebar` at the top and bottom (a gradient overlay div; GPUI has no mask) |
+| Box | In the content box, 16 pt from the window bottom; radius 12; `content` fill; 1 pt `border` |
+| Text area | Padding 12 top, 14 left and right; `body` 14/22; min height 44 (two lines); grows with the text to 40 % of the topic view height, then scrolls inside; the box grows upward |
+| Toolbar row | 40 pt (32 pt buttons + 8 pt bottom padding), padding 0 8; icon buttons 32 × 32, radius 8, 18 pt glyphs in `text-2`, gap 2: `plus` (添加附件: file, image, 产出 from disk, and the `同时发到群` option), `at-sign` (提及), `face-slightly-smiling` (表情), `type` (格式: toggles the format bar) |
+| Send | 32 × 32, radius 8, `arrow-up` 18. Empty: `field` fill, `placeholder` arrow, disabled. With text: `accent` fill, white arrow |
+| Empty height | 12 + 44 + 40 = **96 pt** |
+| Format bar | Off by default. When on: a 36 pt row at the top of the box (bold, italic, strike, link, numbered list, bulleted list, quote, code), 32 pt icon buttons, a 0.5 pt `sep` under it |
+| Placeholder | Names the destination (Feishu): `回复「夜间告警降噪：合并重复的 5xx」`; in a 群 with no topic open `在「qqbot 研发」发起新话题，第一行是标题`. One line, `…` |
+| Typing line | A fixed 20 pt slot above the box: 12 `text-3` (`Forge 正在输入…`) (U32) |
 
-### 6.3 Topic list (Feishu topics, Slack/OpenBot rows)
+States:
+
+| State | Treatment |
+| --- | --- |
+| Rest | 1 pt `border` |
+| Hover | 1 pt `border-strong` |
+| Focus | 1 pt `focus-border` + 3 pt `focus-soft` outer ring. Visible at a glance in both themes |
+| Has text | Send turns `accent` |
+| Sending | The text clears at once; the message shows its sending state (§7.5) |
+| Disabled (no permission) | `field` fill, no border, placeholder `你没有在这个群发言的权限`, toolbar hidden |
+| Blocked (offline, quota) | A slab attached to the top of the box (radius 12 at the top, `raised`, 1 pt `border`, 12/16 text and one `sm` action), the box stays usable for drafts; send disabled |
+| Error (send failed) | Shown on the message, not in the composer |
+
+Keyboard: ↵ sends, ⇧↵ new line, ⌘B / ⌘I / ⌘⇧X format, ↑ in an empty composer edits my last
+message, Esc closes the popup or blurs. Hints are in the send tooltip and the `+` menu footer only
+(U09).
+
+@mention popup: anchored above the caret, bottom edge 8 pt above the composer, 280 pt wide,
+radius 12, `overlay`, level-2 shadow, padding 4, max height 240 then scrolls. Section label 28 pt
+(12/16 500 `text-3`). Rows 36 pt, radius 6, padding 0 10, gap 10: 24 avatar, name `ui` 14, 岗位 13
+`text-3`; active row `selected` + a trailing `corner-down-left` 14. ↑↓ moves, ↵ or Tab picks, Esc
+closes. It filters as you type, so it is usually short; it must not cover the ask card the user is
+answering (scroll the timeline first).
+
+Do: keep the composer at least 96 pt in every topic, DM and new-topic state. Don't: put actions in
+the text row, show permanent key hints, or tint the box when it is not focused.
+
+### 7.3 Buttons and icon buttons
+
+Anatomy: optional leading icon (16, gap 6) · label · optional trailing chevron (16) for a menu.
+Sizes: §4.2. Variants: **primary** (one per view or card, the main action), **secondary**
+(alternatives), **ghost** (low-emphasis actions, toolbars), **danger** (destructive, in its own
+row or dialog). Labels are verbs from PRODUCT.md (`发布`, `修改`, `放弃`, `重试`, `加入`). States:
+§7.1.
+
+Do: 32 pt by default; one primary. Don't: use a 24 pt button anywhere; use a filled grey button
+as "disabled" (it reads as another field); put two primaries side by side.
+
+### 7.4 Fields, search and selects
+
+| Part | Search and filter | Form field | Select in a table row |
+| --- | --- | --- | --- |
+| Height | 36 | 40 | 32 |
+| Fill and edge | `field`, no border | `content`, 1 pt `border` | `content`, 1 pt `border` |
+| Radius | 8 | 10 | 8 |
+| Text | `ui` 14, placeholder `placeholder` | `ui` 14 | `ui` 14 |
+| Leading | `search` 16 `text-3`, gap 8 | — | — |
+| Trailing | kbd hint (sidebar `⌘K`), or a clear `x` 16 when it has text | — | `chevrons-up-down` 14 `text-3` |
+| Label | None (the placeholder names it) | Above the field: `small` 13/20 500 `text-2`, 8 pt gap | Column header |
+| Help | — | Under the field: 12/16 `text-3`, 6 pt gap | — |
+
+Widths: sidebar search fills the sidebar (12 pt margins); settings search 320; form fields fill
+their column. States: §7.1 (error and read-only apply to form fields). A select for yourself (you
+cannot change your own role) is the disabled select, the same shape, not plain text (U41).
+
+Invite code (login): 8 boxes grouped 3-3-2, each 40 × 48, radius 10, 1 pt `border`, `code-lg`;
+6 pt gaps and an 8 × 1.5 `text-3` dash between groups; total 390. The focused box uses the field
+focus state. Paste fills all boxes; Backspace moves back.
+
+### 7.5 Message row
+
+Anatomy: gutter (36 avatar or, for a continuation, the hover time) · meta line (name, bot role
+tag, time) · optional steps row · body · attachments (cards, files, images) · reactions.
 
 | Part | Value |
 | --- | --- |
-| Header | 52 pt, padding 0/12/0/16: 群 name 16/22 600 (truncates), then a 28 pt secondary button `square-pen` 14 + "新话题" (tooltip `新话题 ⌘N`). The member count lives in the topic view header, not here (U22) |
-| Tabs | 34 pt text tabs, gap 20, 16 pt left: 全部 · 未读 n · 等我 n. Count in `text-3`, hidden when 0. Active tab: `text-1` 600 with a 2 pt `text-1` underline on the bottom hairline (Feishu) |
-| Rows | Inset 8, radius 8, padding 10, 62 pt tall. Leading 32 pt avatar of the **responsible member** (a bot shows its live character, so the list shows who is working). Line 1: title 13/18 500 (600 when unread) + time 12 `text-3`. Line 2: preview 13/18 `text-2` as `作者：内容` (one line, Markdown stripped) + **one** trailing element by priority: `you` chip > `@n` red badge > other chip (卡住了, 完成, 等审, 等回答) > unread count 12/600 `accent-text`. 进行中 shows nothing (it is the default, U02) |
-| Unread dot | 6 pt `unread-dot` at x 2, centered on line 1, inside the row padding (U24) |
-| Separation | No hairlines between rows; spacing and hover/selection fills only (U24) |
-| States | Hover `hover`; selected `selected`; pressed `pressed`; focus ring §7 |
-| Times | §6.6 |
+| Row | Padding 6 / 8 inside a −8 margin, so hover fills reach 8 pt past the text; radius 8. Author groups 12 pt apart; a continuation sits 2 pt below the line above |
+| Gutter | 36 pt, 12 pt gap to the text |
+| Meta line | 22 pt: name `body` 14/22 600 (max 160, `…`), bot role tag (§7.9), time 12 `text-3` (never truncated) |
+| Body | `body` 14/22, measure 620, paragraph gap 8, list item gap 4; URLs break anywhere |
+| Grouping | Same author within 5 minutes with nothing between: no avatar or meta line; the time shows in the gutter on hover 12 `text-3` (Slack, U13) |
+| Date divider | Text only: 12/16 500 `text-3` centered between two 0.5 pt `sep` lines that span the content box; 16 pt above, 4 below. `今天`, `昨天`, `11月2日 周日`. Sticky while its day scrolls; click jumps to a date |
+| New-messages divider | A `danger` hairline with `新消息` 12/500 `danger-text` at the right |
+| Reactions | 6 pt under the body, gap 6: 24 pt pills, radius 12, `field`, emoji + names for up to 2 (`👍 Joye、Tata`), else emoji + count; mine `accent-soft` + 1 pt `accent` ring + `accent-text` |
+| Edited | `（已编辑）` 12 `text-3` after the last line (U12) |
+| First message | 16 pt below the header (or the topic start block) |
 
-### 6.4 Topic view (Feishu topic pane order, Slack rows)
+States: rest (no fill) · hover (`hover` fill + hover toolbar) · focused by keyboard (ring) ·
+sending (body at 60 % and a 14 pt spinner after the last line after 400 ms) · failed
+(`circle-alert` 14 + `没有发出` 12 `danger-text` after the body, then a `sm` secondary `重试`) ·
+highlighted from search (2 s `me-bg` fill that fades out).
+
+Hover toolbar (Slack): a capsule 18 pt above the row top, 8 pt from the content box's right edge;
+`overlay`, level-1 shadow, radius 8, padding 2, four 32 × 32 icon buttons (radius 6, glyph 18):
+add reaction (`face-slightly-smiling-plus`), reply (`reply`, quotes into the composer), copy as
+quote (`text-quote`), more (`ellipsis`: edit, delete, copy link, mark unread). It appears and
+hides at once.
+
+Do: keep names and body the same size. Don't: show the 岗位 of people in the timeline (it is in
+the hover card, U12); put a status dot on every bot avatar.
+
+### 7.6 Topic row
+
+Anatomy: unread dot · 36 avatar of the responsible member · line 1 (title, time) · line 2
+(preview `作者：内容`, one trailing element).
 
 | Part | Value |
 | --- | --- |
-| Header | 52 pt, padding 0/12/0/24: title 16/22 600 (truncates) + its chip (name truncates at 96), then trailing: ghost button `users` 15 + member count (opens members in the side panel), then 28 pt icon buttons `bell` (follow), `panel-right` (side panel; its state is the icon, no fill, U16), `ellipsis`. No capsule, no shadow, no facepile |
-| Topic start | When the content is shorter than the viewport, the list starts at the top with a start block (U01): 28 pt top padding, title 20/28 600 (clamp 2 lines), then one line: chip + `Joye 发起 · Taro 负责 · 今天 14:05` 12 `text-2`, 12 pt below. Long topics anchor to the bottom and show the start block when scrolled to the top |
-| Rows | Padding 6/8 in a −8 margin so hover fills reach 8 pt past the text, radius 8. Gutter: 32 pt avatar, 10 gap. Meta line 20 pt: name 13/600, then for bots a role tag (§9.3), then time 12 `text-3`. Body 14/22. No 岗位 for people in the timeline (it is in the hover card, U12) |
-| Grouping | Same author within 5 minutes with nothing between: no avatar or meta line, 1 pt top; the time shows in the gutter on hover (12 pt `text-3`) (Slack, U13) |
-| Date divider | Centered pill on a full-width hairline: 22 pt, radius 11, 0.5 pt `border`, `content` fill, 12/500 `text-2`: 今天, 昨天, 11月2日 周日. 16 pt above, 8 below. Sticky at the top while its day scrolls. Click: jump to date (Slack) |
-| New-messages divider | Red hairline with "新消息" 12/500 `danger-text` on the right |
-| Jump pill | Only when the first unread message is above the viewport (U14): `n 条新消息 ↑` 28 pt pill, `overlay`, level-1 shadow, centered 12 pt under the header |
-| Edited | `（已编辑）` 12 `text-3` after the last line of the body (U12) |
-| Reactions | Under the body, gap 6: 24 pt pills, radius 12, `field`, emoji + names for up to 2 (`👍 Joye、Tata`), else emoji + count; mine: `accent-soft` + 1 pt `accent` ring + `accent-text` (Slack color, Feishu names) |
-| Typing line | A fixed 20 pt slot above the composer: 12 `text-3` `Forge 正在输入…`, `A、B 和另外 3 人正在输入…` (U32) |
-| Composer | §10 |
+| Row | 68 pt, inset 8 in the list, radius 8, padding 12 10 12 14, gap 12; line 1 and line 2 are 20 pt each, 4 pt apart |
+| Title | `ui` 14/20 500; unread 600 |
+| Time | 12/16 `text-3` (§6.6 formats) |
+| Preview | `small` 13/20 `text-2`, Markdown stripped, one line `…`; `生成中…` while a bot streams |
+| Trailing element | Exactly one, by priority (§9.1): `等你…` chip > `@n` red badge > `卡住了` label > other label (`等审`, `等回答`, `完成`) > grey count pill for unread without a mention. 进行中 shows nothing (U02) |
+| Unread dot | 6 pt `unread-dot` at x 4, centered on line 1, inside the row (U24) |
 
-### 6.5 Side panel (GrokBot right pane)
+States: §7.1. No hairlines between rows (U24).
 
-Closed by default. Opens when the user clicks `panel-right` or the member count, and opens by
-itself once per topic when a bot starts working in it or the first 产出 arrives (the user's
-close is remembered per topic). Never shown with no topic open (U07).
+### 7.7 Sidebar rows
+
+| Row | Value |
+| --- | --- |
+| Search | §7.4, 36 pt, margins 0 12 8 |
+| Section header | 28 pt, 16 pt above (4 for the first), padding 0 8: chevron 12 `text-3` (rotates when collapsed), title 12/16 600 `text-2`, then for 待办 the count in `text-3` (`待办 3`), for 群 and 私聊 a `sm` icon button `plus` (新建群 / 发起私聊) |
+| 待办 row | Two lines, padding 6 8, radius 8, gap 10: 24 pt glyph slot (`circle-question-mark`, `eye` or `at-sign` 16 in `text-3`), title `ui` 14/20 500, context 12/16 `text-2` (`qqbot 研发 · Watch 等你回答`). Max 5 rows, then `全部 n 项`. The section itself says "for you", so the glyphs stay grey |
+| 群 row | 32 pt, radius 8, padding 0 8, gap 10: 24 pt slot with `hash` 16 `text-3` (`text-1` when unread or selected), name `ui` 14. Unread: name 600 `text-1`. Mention: red badge `n`. Muted: row at 60 % + `bell-off` 14 |
+| 私聊 row | Same; the slot holds a 24 avatar (person with presence, or the bot's character with its pip). Unread DM: name 600 + red count badge |
+| Footer | 56 pt, top hairline inset 8: 32 avatar with presence, name `ui` 14/500, presence word 12 `text-2` (在线 / 离开 / 勿扰), a 32 pt settings icon button. The name area opens the account menu (U21) |
+| Scroll edges | A 24 pt fade from `sidebar` at the top and bottom while the list scrolls |
+
+### 7.8 Status chip, label, badge, count pill, kbd
+
+| Component | Shape | Use |
+| --- | --- | --- |
+| Chip | 22 pt, radius 6, padding 0 8 0 6, gap 4, glyph 14, 12/16 500, filled, max width 184 | Only `you` (等你回答, 等你审; text 600) and `info` (进行中, topic header only) |
+| Label | Same metrics with no fill | 卡住了 (`danger-text`), 完成 (`text-3`), 等{name}回答 / 等{name}审 / 等回答 / 等审 (`text-3`) |
+| Badge | 20 pt, min width 20, padding 0 6, radius 10, 12/16 600 white on `badge` | Things for you only: mentions (`@n` in topic rows, `n` on a 群), DMs. Cap `99+` |
+| Count pill | Same shape, `count-bg`, 12/16 600 `text-2` | Unread topics without a mention. Cap `999+` |
+| kbd | 20 pt, min width 20, padding 0 5, radius 6, `field`, 12/16 500 `text-2` | `⌘K`, option letters, switcher footer |
+
+| Status | Glyph | Viewer in `waitingOn` / not |
+| --- | --- | --- |
+| `open` | none | none |
+| `in_progress` | `circle-dot` | info chip in the topic header; nothing in rows |
+| `waiting_answer` | `circle-question-mark` | you chip / label |
+| `waiting_review` | `eye` | you chip / label |
+| `blocked` | `circle-alert` | danger label |
+| `done` | `circle-check` | grey label |
+
+In 等{name}…, a Latin name gets a space on each side (`等 Aleksandra… 回答`) and truncates at
+96 pt; 等 and the verb stay. In topic rows the name is dropped (`等审`). Rule: the `you` chip
+appears at most once per pane. In the topic view it is in the header (or in the start block while
+that is visible); the card that waits for you carries it with a 1 pt `you-border` instead of a
+second chip.
+
+### 7.9 Avatars and bot identity
+
+- People: a circle in `avatar-bg` with `avatar-fg` 600 initials: one character for a CJK name
+  (`王一鸣` → 王), two letters for a Latin name (`Alex Chen` → AC); a leading emoji is skipped
+  (`🧑‍💻 Priya` → P) (U18, U37). Presence dot at the bottom right: 8 pt (10 pt on avatars of 32
+  and more), 2 pt ring in the surface color; online `online`, offline a hollow `text-3` ring
+  (U41).
+- Bots: the jojo-friends character at its live status (rules in docs/ROSTER.md); no circle clip.
+  **At 40 pt and below** the app draws the small variant: the status lamp at the top corner, the
+  question bubble, the working ring and the sleep marks are removed, because at list sizes they
+  read as notification badges. The face keeps the expression. The status then shows as a pip in
+  the presence position, only for `working` (`accent`), `needs-input` (`you-glyph`) and `error`
+  (`danger`). From 48 pt the full art is drawn.
+- Role tag after a bot's name (messages, side panel, settings): 20 pt, radius 6, `field`, padding
+  0 6, `bot` glyph 12 + 岗位 12/16 500 `text-2`. Confirmed by Joye on 2026-11-03: the character is
+  the mark, plus this tag. People show 岗位 as plain `small` text where a list needs it.
+- Group tile (switcher, dialogs only): 24, radius 6, `tile` fill, first character 12/600 `text-2`.
+  The sidebar uses the `hash` glyph, not a tile.
+
+### 7.10 Cards
+
+All cards: in the message column, width `min(560, content box)` (one width for cards, files and
+images, U29); `raised` fill, 1 pt `border`, radius 12, padding 14 16 16. Title `body` 14/22 600;
+one sentence `body` 14/22 `text-2`; blocks with 4/8/12/16 spacing; text 12, 13 or 14 only.
+Actions: `md` buttons, gap 8, 14 pt above, at most 3 then `ellipsis`; exactly one primary.
+
+| Card | Content |
+| --- | --- |
+| Work card | Title, chip or label, one sentence, optional image (radius 8) or plan list, actions |
+| Ask card (等你回答) | Question as title; promise line (`你选之前我不会改任何环境。`); options as 40 pt rows (radius 8, `content`, 1 pt `border`, gap 6, padding 0 12 0 10) with a kbd letter A, B, C and `body` text. Hover: 1 pt `border-strong`, kbd `selected`. Keyboard focus: §7.1 ring. Chosen: 1 pt `accent` + `choice-bg`. Keys A to C work while the card has focus. When it waits for the viewer: 1 pt `you-border` and no chip. After the answer: the card shrinks to `✓ 你选了：现在在 staging 打开` and `waitingOn` clears |
+| Draft card (before anything irreversible) | Title `发布预览`; the real object as a table (`content`, radius 8, 1 pt `border`, rows padding 9 12, `ui` 14/20, key column 48 `text-3`, 0.5 `sep` between rows), body preview `body` clamped to 3 lines; actions primary `发布`, secondary `修改`, ghost `放弃`. `you-border` while it waits for the viewer |
+| Alert card (integrations) | Title + label, fields (label 12 `text-3`, value 14 `text-1`), actions. Resolved: `已处理` success label |
+
+### 7.11 File row
+
+12 pt padding (8 at the right), radius 12, 1 pt `border`, `content`: 40 pt tile (radius 8,
+`accent-soft`, type glyph 20), name `ui` 14/500 (middle ellipsis keeps the last 12 characters
+and the extension, U26), meta 12/16 `text-2` (`网页产出 · v2 · 18 KB`), trailing 32 pt icon
+buttons (open, show in Finder, download; shown on hover, always on while downloading).
+Downloading: `正在下载 64%` in the meta and a 2 pt `accent` bar on the bottom edge; cancel `x`.
+Images: max 360 × 320, radius 8, 1 pt `border`; while loading a `field` skeleton of the final
+size with `file-image` and the name (U30). 产出 rows in the side panel use the same parts at 48
+pt with a 32 tile.
+
+### 7.12 Overlays
+
+One overlay component (U05, U36 to U38): `scrim`, `overlay` surface, radius 12, level-2 shadow.
+Command-style panels sit 96 pt from the window top; dialogs and alerts are centered.
+
+- **Switcher (⌘K)**: 640 wide. Query row 56: `search` 20, 18/24 query text, `esc` kbd. Groups
+  (话题, 群, 私聊, 成员, 消息): label 32 pt (12/16 500 `text-3`). Rows 44 (60 for message hits),
+  radius 8, padding 0 12, gap 12: 24 group tile or avatar, title `ui` 14/500, ` · 群名` 13
+  `text-3`, snippet 13/20 `text-2` with the hit in `you-bg`, trailing chip or label. Active row
+  `selected` + `corner-down-left`. Footer 40: 12/16 `text-3` with 20 pt kbd. With no query:
+  最近 (5 topics), then 群 and 私聊 (U34). Height follows the content up to 70 % of the window,
+  whole rows only. ⌘F opens it scoped to the 群 with a removable `在 qqbot 研发` token.
+- **Dialog**: width 440 (forms) or 560; padding 20; title `title` 17/24 with 16 below; body
+  `body`; form fields 40 pt with labels above; footer right-aligned `md` buttons (secondary then
+  primary), 20 pt above. Primary is disabled until the form is valid. No close `x` when a cancel
+  button exists. Checkbox lists: 16 pt checkbox, 40 pt rows.
+- **Alert**: centered, 320 wide, title `title`, buttons `md`.
+- **Menu / popover**: padding 4, rows 32 (radius 6, `ui` 14, icon 16), separators 0.5 `sep` with
+  4 pt margins.
+
+## 8. Screens
+
+### 8.1 Main window
+
+Sidebar (§7.7) · topic list · topic view · side panel. Screens: `main-*`, `short-topic-*`,
+`worst-case-*`, `switcher-*`.
+
+**Topic list header**: 52 pt, padding 0 10 0 16: 群 name `title` 17/24 (truncates), then a 32 pt
+icon button `square-pen` 18 with the tooltip `新话题 ⌘N` (icon only, so the 群 name keeps the
+width; Slack's compose button). The member count lives in the topic view header (U22).
+
+**Tabs**: 40 pt band, gap 24, 16 pt left: 全部 · 未读 n · 等我 n, `ui` 14/20 `text-2`, count 13
+`text-3` (hidden at 0, `999+` cap); active `text-1` 600 with a 2 pt `text-1` underline on the
+bottom hairline.
+
+**Topic view header**: 52 pt, padding 0 12 0 24: title `title` 17/24 (truncates) + its chip or
+label, then trailing (gap 4): ghost button `users` 18 + member count (opens members in the side
+panel), 32 pt icon buttons `bell` (follow), `panel-right` (state shown by the icon, U16),
+`ellipsis`. While the topic start block is on screen, the header shows no title and no chip
+(they are in the block); they appear once the block scrolls away.
+
+**Topic start block**: when the content is shorter than the viewport, the list starts at the top
+with this block (U01): title `display` 22/30 (2 lines max), then one line 8 pt below: chip +
+`Joye 发起 · Taro 负责` (`small` `text-2`, truncates) + ` · 今天 14:05` (never truncated). Long
+topics anchor to the bottom and show the block when scrolled to the top.
+
+**Jump pill**: only when the first unread message is above the viewport (U14): `n 条新消息 ↑`,
+28 pt, `overlay`, level-1 shadow, centered 12 pt under the header.
+
+**Side panel**: closed by default. Opens on `panel-right` or the member count, and by itself once
+per topic when a bot starts working in it or the first 产出 arrives (the user's close is
+remembered per topic). Never shown with no topic open (U07).
 
 | Part | Value |
 | --- | --- |
-| Header | 52 pt: `话题详情` 13/600, close `x` 28. Sub-pages (a 产出's versions, the process view, a member) replace the content with a `chevron-left` back button and a centered 13/600 title |
-| Sections | 16 pt side padding, 20 pt between sections. Section header 24 pt: 12/600 `text-2` + count `text-3` |
-| Live state | When a bot is responsible: the **live card** (`raised`, radius 12, 0.5 `border`, padding 12): 40 pt character at its status, name 13/600, state 12 `text-2` (`正在 staging 上验收`, `等你审发布预览`); then the plan list (Slack plan block): 24 pt rows, 14 pt glyph (`circle-check` success, current step glyph in accent, `circle-dashed` `text-3` for later), 12/16 text, current step `text-1` 500. A "查看过程" text button opens the process view |
-| 产出 | 40 pt rows: 28 pt tile (radius 8, `accent-soft`, file-type glyph 15), name 13/500, `网页 · v3 · 今天 14:31` 12 `text-2`. Files and 产出 use the same row (U30). One quiet line when empty: `还没有产出` 12 `text-3` (one line for both, U07) |
-| 成员 | 32 pt rows: 24 avatar, name 13, role tag at the trailing edge; then `user-plus` + `添加成员` text button |
+| Header | 52 pt: `话题详情` `title` 17/24, close `x` 32. Sub-pages (a 产出's versions, the process view, a member) replace the content with a `chevron-left` back button and the sub-page title |
+| Sections | 16 pt side padding, 16 pt between sections (8 for the first). Label 12/16 600 `text-3` with the count inline (`产出 · 2`), 8 pt below |
+| Live card | When a bot is responsible: radius 12, 1 pt `border`, no fill, padding 14: 40 pt character, name `ui` 14/600, state `small` `text-2` (`等你审发布预览`); plan list: 28 pt rows, 16 glyph (`circle-check` `success`, current step glyph in its status color, `circle-dashed` `text-3` for later), `small` 13/20 text, current step `text-1` 500. `查看过程` text button opens the process view |
+| 产出 | 48 pt rows (§7.11). One quiet line when empty: `还没有产出` 12 `text-3` |
+| 成员 | 40 pt rows: 24 avatar, name `ui` 14, trailing: role tag for bots, 岗位 13 `text-3` for people; then `user-plus` 16 + `添加成员` text button |
 
-### 6.6 Dates and times (one format everywhere, U23)
+### 8.2 Dates and times (one format everywhere, U23)
 
 | Age | Lists, switcher, 待办 | Message meta |
 | --- | --- | --- |
@@ -335,303 +592,281 @@ close is remembered per topic). Never shown with no topic open (U07).
 | This year | `10/28` | `14:32` |
 | Older | `24/12/31` | `14:32` |
 
-Date dividers spell the day: `今天`, `昨天`, `周一`, `10月28日 周二`, `2024年12月31日`.
-Tooltips on any time show the full `2025年11月4日 23:59`.
+Date dividers spell the day: `今天`, `昨天`, `周一`, `10月28日 周二`, `2024年12月31日`. Tooltips on
+any time show `2025年11月4日 23:59`.
 
-## 7. States (every interactive element, U03 and U04)
+### 8.3 Login (`login-*`)
 
-One row helper and one icon-button helper in `ui/parts.rs` apply all of these. A view never
-builds a clickable element without them.
+960 × 640 window, `content`. One column, 390 wide, centered (24 pt above the optical center):
+app icon 64 (`icon-dark.svg` in dark mode, no extra frame, U39); 20 pt; `欢迎加入团队` `display`;
+6 pt; `输入管理员发给你的邀请码` `body` `text-2`; 28 pt; label `邀请码` (§7.4); 8 pt; the invite
+code boxes (§7.4); 24 pt; `加入` `lg` primary, full column width, disabled until complete; 16 pt;
+`更改服务器` disclosure (`chevron-right` 14 + 13/20 `text-2`) that reveals a 40 pt server field
+(developers only). Errors: the code boxes take the error state and `邀请码不对，请检查后再试。`
+shows under them.
 
-| State | Rows (sidebar, topic, menu, popup, settings) | Buttons and icon buttons | Messages |
-| --- | --- | --- | --- |
-| Rest | No fill | Ghost: no fill, `text-2` icon; secondary: `content` + `border-strong` ring | No fill |
-| Hover | `hover` (`sidebar-hover` in the sidebar), at once | `hover` fill, icon `text-1`; primary `accent-hover` | `hover` fill + hover toolbar |
-| Pressed | `pressed` | `pressed`; primary `primary_active` | — |
-| Selected | `selected` / `sidebar-selected`; popups and switcher `active-row` | Toggle buttons show state by icon, not fill | — |
-| Focus (keyboard) | 2 pt `focus` ring inset 1 pt | 2 pt `focus` ring outside with a 2 pt gap | Ring on the focused row |
-| Disabled | 40 % content | Primary disabled: `field` fill + `text-3` label; no pointer | — |
-| Cursor | `cursor_pointer` on every clickable row, button, chip, link, tab, avatar | same | Text: I-beam |
+### 8.4 Settings (`settings-members-*`)
 
-Hover toolbar (Slack): a capsule at the row's top right, 14 pt above the row top, `overlay`,
-level-1 shadow, radius 8, padding 2, four 28 × 26 icon buttons (radius 6): add reaction
-(`face-slightly-smiling-plus`), reply (quote into the composer, `reply`), `text-quote` (copy as
-quote), `ellipsis` (edit, delete, copy link, mark unread). It appears and hides at once.
+960 × 720. Section list 200 pt on `sidebar`, padding 0 8: 36 pt rows (`ui` 14/20, icon 16, gap
+10), selected `sidebar-selected` + 600. Content on `content`, column max 784 with 32 pt side
+padding: page title `display`, 36 pt from the top, the primary action at its right; 20 pt; the
+search field (36 × 320); 16 pt; the grouped table: radius 12, 1 pt `border`; header row 36 pt
+**inside** the table, no fill, 12/16 500 `text-3`, a 0.5 `sep` under it (U41); rows 60 with 0.5
+`sep` between; a footnote `small` `text-3` 12 pt under the table.
 
-Send states (U33): 发送中 = body at 60 % opacity and a 12 pt spinner after the last line, no
-extra line. Failed = `circle-alert` 13 + `没有发出` 12 `danger-text` after the body, then a 24 pt
-secondary button `重试`.
+- **成员**: columns member (36 avatar, name `ui` 14/500 + `（你）` `text-3`, 岗位 `small` `text-2`
+  with the `bot` glyph 12 for bots), status (8 pt dot + `ui` `text-2`: 在线 `online`, 工作中
+  `accent`, 等人回答 `you-glyph`, 离线 hollow `text-3`), 权限 (select 32 × 112; your own row is
+  the disabled select), trailing 32 pt `ellipsis` or an empty slot of the same width. Names are
+  trimmed (U41). One primary `添加成员 ▾` (`md`) with `邀请同事` and `添加 AI 成员`.
+- **我的资料**: avatar with `更换头像` and its help `PNG、JPEG 或 WebP，不超过 1 MB`; name and 岗位
+  form fields save on blur; sign-out at the bottom; `退出并删除本机记录` in its own danger row
+  (U40).
+- **通知**: per 群 one segmented control `所有消息 / 仅 @我 / 不提醒` (32 pt, selected segment a
+  `content` fill with a level-1 shadow); 群 and 私聊 in separate tables (U42).
+- **机器**: rows with an icon by machine type, Chinese tags, status centered (U43).
+- **成本**: hidden until it exists (U43).
 
-## 8. Motion
+### 8.5 Empty and error states
 
-Curve **out** `cubic-bezier(0.23, 1, 0.32, 1)` for all enter and exit. Nothing over 240 ms
-except loops (checked against review-animations STANDARDS.md: UI under 300 ms, ease-out, no
-ease-in). Every row has a reduced-motion rule.
+| Case | Treatment |
+| --- | --- |
+| No 群 at all | One centered welcome in the content area: character `jojo` 64, `display` `还没有群`, one `body` `text-2` sentence, `lg` buttons `新建群` primary and `发起私聊` secondary. Topic list, composer and side panel hidden (U06) |
+| 群 with no topics | Topic list: one 12 `text-3` line `还没有话题` under the tabs; topic view: the composer with the new-topic placeholder |
+| No topic selected | Topic view: centered `body` `text-2` `选一个话题，或写下第一行开始新话题` |
+| Empty filter | `没有未读话题` / `没有等你的话题`, 12 `text-3`, top of the list |
+| Search, no result | `没有找到「词」` + `在所有群里搜索` text button |
+| Load error | Inline row at the top of the timeline: `circle-alert` `danger` + `没能加载更早的消息。` + `sm` `重试` |
+| Field error | §7.1 error state; submit stays disabled (U40) |
 
-| What | Animation | Reduce motion |
-| --- | --- | --- |
-| Hover fills, hover toolbar | Instant (OpenBot `--duration-hover 0`, Slack) | same |
-| Press | Pressed fill at once; release 120 ms | same |
-| Menus, popovers, select | 150 ms opacity + 4 pt travel from the trigger | opacity only |
-| @mention popup, switcher | None: appear and filter at once | same |
-| Dialogs and sheets (with scrim) | 200 ms opacity + scale 0.98 → 1; exit 150 ms | opacity only |
-| New message from others while visible | 200 ms opacity + 6 pt rise (GrokBot entry, shortened from 280 ms to fit our cap) | opacity only |
-| My sent message | None | — |
-| Bot pending row enter / exit | Enter 200 ms opacity + 6 pt rise; exit 160 ms opacity after a 400 ms hold | opacity only |
-| Busy indicators (pending row dots, spinners, skeletons) | Wait **400 ms** before showing (OpenBot), so fast answers never flash | same |
-| Pending dots | Three 4 pt dots, opacity 0.3 → 0.9, 1.2 s loop, 150 ms apart | static stepped opacities 0.9 / 0.6 / 0.3 |
-| Streaming bot text | Text appears as it arrives; no per-word fade (paint cost at 10,000 messages); caret solid while text arrives | same |
-| Character status change | Crossfade 160 ms between the two status SVGs | instant |
-| Chip change | 160 ms crossfade | instant |
-| Ask card after answer | Options collapse to the chosen line: height snaps, content fades 160 ms; the check scales 0.6 → 1 over 200 ms | no scale |
-| Side panel | Width snaps; content fades 120 ms | instant |
-| New sidebar row | 200 ms opacity + 6 pt from the left | opacity only |
-| Never animated | Selection, keyboard navigation, switching 群 or topics, counts, tab switches, theme change, resize, composer growth | |
+### 8.6 Banners
 
-## 9. Members, bots and live work
+App-level banners (update ready, offline) sit above the sidebar footer as a 48 pt card (radius 8,
+`raised`, 1 pt `border`), never in the topic column, so header lines stay aligned (U17). Buttons
+`sm`.
+
+## 9. Bots and live work
 
 ### 9.1 Status in lists
 
 One status per row, by priority (OpenBot): 等你… chip > @ badge > 卡住了 > 完成 / 等审 / 等回答 >
-unread count. 进行中 is the default state of work and shows no chip in rows; the topic header
-still shows it.
+unread count. 进行中 is the default state of work and shows nothing in rows; the topic header
+shows it.
 
 ### 9.2 Bot replies (GrokBot, Slack agent sessions)
 
-- **Acknowledge once**: the bot's first reply is one short line (`收到，先查告警来源。`).
-- **Pending row**: while a bot works and has not posted, one row at the bottom of the timeline,
-  aligned with message text: 24 pt character in its `working` status in the 32 pt gutter, then
-  `**Scout** 正在 staging 上验收` 13 `text-2` (name `text-1` 600), three pulsing dots, the elapsed
-  time 12 `text-3` tabular (`2:14`), `·`, and a 12 pt `查看过程` text button. The person who
-  asked also sees a `停止` text button. The label comes from the bot's latest step, one phrase,
-  never a log line. Several bots: one row each, at most 3, then `另外 n 位成员在工作`.
-- **Steps row**: above a reply that used tools, one collapsed 24 pt row (OpenBot): `chevron-right`
-  12 + `看了 6 个文件，运行 3 条命令` 12 `text-2` + `· 4 分 12 秒` `text-3`; failures add
-  `1 次失败` in `danger-text`. Opening it shows the step list inline (1 pt left rule, 12/16 rows,
-  max 220 pt then scroll); the full process view is in the side panel.
-- **Streaming**: the reply streams in place in one message (Feishu). The topic row preview shows
-  `生成中…` while it streams.
-- **Lead with the result**: bot prompts ask for a bold lead-in (`**改好了**：…`, `**3 个例外**：…`)
-  and two or three short paragraphs, with long content in a 产出. This is a prompt rule, not UI.
+- **Acknowledge once**: the first reply is one short line (`收到，先查告警来源。`).
+- **Pending row**: while a bot works and has not posted, one 28 pt row at the bottom of the
+  timeline, 12 pt below the last message: the 24 pt working character centered in the 36 pt
+  gutter, then `**Scout** 正在 staging 上验收` `small` `text-2` (name `text-1` 600), three
+  pulsing dots, elapsed time 12 `text-3` (`2:14`), `·`, and a `查看过程` text button (`small`
+  `accent-text`). The person who asked also sees `停止`. The label is the bot's latest step, one
+  phrase. Several bots: one row each, at most 3, then `另外 n 位成员在工作`.
+- **Steps row**: above a reply that used tools, one collapsed 24 pt row: `chevron-right` 12 +
+  `看了 6 个文件，运行 3 条命令` `small` `text-2` + `· 4 分 12 秒` `text-3`; failures add
+  `1 次失败` in `danger-text`. Opening it shows the steps inline (1 pt left rule, 12/16 rows, max
+  220 then scroll); the full process view is in the side panel.
+- **Streaming**: the reply streams in place in one message. The topic row preview shows `生成中…`.
+- **Lead with the result**: bot prompts ask for a bold lead-in (`**改好了**：…`) and two or three
+  short paragraphs, with long content in a 产出. This is a prompt rule.
 
-### 9.3 Bot identity
+## 10. Content
 
-- Avatar: the jojo-friends character (`apps/desktop/src/characters/`) at its live status
-  (offline, working, needs-input, error, success, idle; rules in docs/ROSTER.md). The character
-  shape is the bot mark; there is no extra graphite badge (v1) and no presence dot.
-- Role tag after a bot's name in messages, the side panel and settings: 18 pt, radius 4,
-  `field`, `bot` glyph 11 + 岗位 11/14 500 `text-2`. People show 岗位 only in hover cards,
-  settings and the side panel (U12, U47).
-- Characters appear only as avatars, in the pending row, in the live card and in empty states,
-  never as decoration (GrokBot avoids it too).
+- Interface words come only from PRODUCT.md (话题, 群, 私聊, 待办, 产出, 成员, 岗位). Bots are
+  marked by the role tag, not by a word.
+- Buttons are verbs. Errors say what failed and what to do (`没能加载更早的消息。` + `重试`).
+- Placeholders name the destination; they are the only instruction in the composer (U08).
+- Punctuation (U47): full-width punctuation in Chinese (`：` `，` `（）`) with no space after `：`.
+  A Latin word next to Han gets one space (`staging 上`, `等 Aleksandra 回答`). Ellipsis is
+  U+2026 `…`, drawn by one truncation helper that trims trailing punctuation and spaces before
+  it (U26).
 
-## 10. Composer (GrokBot / Feishu single box)
+## 11. Accessibility
 
-| Part | Value |
-| --- | --- |
-| Box | 24 pt side margin (aligned with message text), 16 pt bottom, radius 12, 0.5 pt `border-strong`, `content` fill, padding 9/8/8/12. Focus: 1 pt `border-strong` + a 3 pt `field` soft ring; no blue |
-| Row | `+` icon button (attach file, image, 产出 from disk; quote is in the message toolbar) · the field (14/22, 1 to 8 lines, then scrolls inside; the box grows upward) · `at-sign` and `face-slightly-smiling` icon buttons · send |
-| Placeholder | Names the destination (Feishu): `回复「夜间告警降噪：合并重复的 5xx」`; in a 群 with no topic open `在「qqbot 研发」发起新话题，第一行是标题`. One line, ellipsis. It is the only instruction; no extra label or empty-state sentence (U08) |
-| Send | 28 pt circle: empty = `field` + `text-3` arrow (disabled); text = `accent` + white arrow (U09) |
-| Hints | No permanent key hints. `↵ 发送 · ⇧↵ 换行` appears only in the `+` menu footer and in the tooltip of send |
-| @mention popup | Above the caret, 260 pt wide (190–280), radius 12, `overlay`, overlay shadow, padding 4. Section label 12/500 `text-3` (成员), rows 32 pt radius 6: 20 pt avatar, name 13, 岗位 13 `text-3`; active row `active-row` with a trailing `corner-down-left` 13. ↑↓ moves, ↵ or Tab picks, Esc closes |
-| Mentions in text | Others: `mention-bg` + `accent-text` 500, radius 4, padding 0/3. Me: `me-bg` + `me-text` |
-| Blocking states | Offline, read-only, quota: a tinted slab attached to the top of the box (radius 12, tucked 12 pt under it), 12/16 text and one action. No toast |
-| Topic reply option | In a reply whose result matters to everyone: a `同时发到群` checkbox in the `+` menu (Feishu) |
+- Floor: WCAG 2.2 AA. Content text ≥ 4.5:1 and icons, borders of focused controls and large text
+  ≥ 3:1 over their surface, in both themes (values in §2). Known exceptions: `placeholder` (2.6 /
+  3.3; the label or destination repeats it) and `text-3` on `sidebar` in light (4.1; used only for
+  the 待办 count and chevrons).
+- Focus: every control and row is reachable by keyboard. Focus-visible ring 2 pt `focus` with a
+  2 pt gap in the surface color (inset 1 pt on rows). Fields and the composer use the
+  `focus-border` + `focus-soft` ring on any focus.
+- Keyboard map: ⌘K switcher · ⌘F search in the 群 · ⌘N new topic · ⌘⇧S sidebar · ↑↓ in lists ·
+  ↵ opens · Esc closes the top overlay · A to C answer a focused ask card · ↑ in an empty composer
+  edits my last message · Tab moves through header, list, timeline, composer.
+- No meaning by color alone: every status has a glyph and a word; unread has weight and a dot;
+  badges have numbers.
+- Hit areas ≥ 28 × 28 (32 where space allows).
+- Reduce motion (§12) and Increase contrast: with Increase contrast on, `border` and `sep` use the
+  `border-strong` value and `text-3` uses `text-2`.
+- Text size: the app follows the system text size setting through the density tokens (§14).
+- Every icon button has a tooltip and an accessible name (the tooltip text).
 
-## 11. Other screens
+## 12. Motion
 
-### 11.1 Cards (Feishu card spec + GrokBot + Block Kit)
+Curve **out** `cubic-bezier(0.23, 1, 0.32, 1)` for every enter and exit; never ease-in. Tiers:
+`instant` 0 · `fast` 120 ms · `normal` 160 ms · `slow` 200 ms. Nothing over 240 ms except loops.
+The more often a control is used, the less it moves.
 
-All cards: in the message text column, width `min(520, column)` (one width for cards, files and
-images, U29), `raised` fill, 0.5 pt `border`, radius 12, padding 12/14. Title 14/20 600 + an
-optional trailing status chip; one sentence 13/18 `text-2`; then blocks with 4/8/12/16 spacing
-only; text 12, 13 or 14 only. Fields: label 12 `text-3`, value 13 `text-1` (U28).
+| What | Animation | Reduce motion |
+| --- | --- | --- |
+| Hover fills, hover toolbar, focus rings | Instant | same |
+| Press | Pressed fill at once; release 120 ms | same |
+| Menus, popovers, select | 150 ms opacity + 4 pt travel from the trigger | opacity only |
+| @mention popup, switcher | None: appear and filter at once | same |
+| Dialogs and sheets | 200 ms opacity + scale 0.98 → 1; exit 150 ms | opacity only |
+| New message from others while visible | 200 ms opacity + 6 pt rise | opacity only |
+| My sent message | None | — |
+| Pending row enter / exit | Enter 200 ms opacity + 6 pt rise; exit 160 ms opacity after a 400 ms hold | opacity only |
+| Busy indicators (dots, spinners, skeletons) | Wait **400 ms** before showing; once shown, stay at least 500 ms | same |
+| Pending dots | Three 4 pt dots, opacity 0.3 → 0.9, 1.2 s loop, 150 ms apart | static 0.9 / 0.6 / 0.3 |
+| Streaming bot text | Appears as it arrives; no per-word fade | same |
+| Character status change | Crossfade 160 ms | instant |
+| Chip change | 160 ms crossfade | instant |
+| Ask card after answer | Height snaps, content fades 160 ms; check scales 0.6 → 1 over 200 ms | no scale |
+| Composer focus ring | 120 ms opacity | instant |
+| Side panel | Width snaps; content fades 120 ms | instant |
+| New sidebar row | 200 ms opacity + 6 pt from the left | opacity only |
+| Never animated | Selection, keyboard navigation, switching 群 or topics, counts, tabs, theme change, resize, composer growth | |
 
-| Card | Content |
-| --- | --- |
-| Work card | Title, chip (进行中 info / 完成 success / 卡住了 danger / 等你… you), one sentence, optional image (radius 8) or plan list, actions |
-| Ask card (等你回答) | Question as title + `等你回答` chip; promise line (`你选之前我不会改任何环境。`); options as 36 pt rows (radius 8, `content`, 0.5 `border`, gap 6) with a kbd letter A, B, C; hover: 1 pt `accent` ring + `accent-soft`; keys A–C work while the card has focus; optional free-text row `其他…`. After the answer: the card shrinks to `✓ 你选了：现在在 staging 打开` and the topic's `waitingOn` clears |
-| Draft card (before anything irreversible) | Title `发布预览` + `等你审`; the real object as a table (`content`, radius 8, rows 7/10 padding with 0.5 `sep` between, key 40 pt `text-3`), body preview clamped to 3 lines; actions primary `发布`, secondary `修改`, ghost `放弃`. Taro's posts and Watch's production steps use it |
-| Alert card (integrations) | Title + tone chip, fields, actions. A resolved alert uses the success chip `已处理` |
-| Actions | 28 pt buttons, radius 8, gap 8, at most 3 then `ellipsis`; exactly one primary; same style in both themes (U28) |
+## 13. Dark mode
 
-### 11.2 Files and images
+- Every token in §2 has a dark value; product code never writes a light or dark literal.
+- Elevation steps differ by at least 4 % lightness: `sidebar` #18181B < `content` #1F1F23 <
+  `raised` #28282D < `overlay` #2F2F35 (U46). Selection (`selected` 0.085) is stronger than hover
+  (0.04).
+- Filled primary controls use the darker dark `accent` #2F6FEB so white labels keep 4.5:1; focus
+  uses the lighter `focus-border` #4C8DFF so the ring reads on dark surfaces.
+- The dark login uses `icon-dark.svg`.
+- Check on a real display before release (§18).
 
-File row: 36 pt tile (radius 8, `accent-soft`, glyph by type 18), name 13/500 (middle ellipsis
-keeps the extension), `网页产出 · v2 · 18 KB` 12 `text-2`, trailing 28 pt icon buttons shown on
-hover (open, show in Finder, download). Downloading: `正在下载 64%` in the meta line and a 2 pt
-progress bar on the bottom edge; cancel `x`. Images: max 360 × 320 pt, radius 8, inner 0.5
-`border`; while loading a `field` skeleton of the final size with `file-image` and the name (U30).
+## 14. Density
 
-### 11.3 Empty and error states
+One density ships: **comfortable** (the values in this file). Density is a token-level setting:
+a later compact mode changes only the tokens (control heights −4, row heights −8, `body` stays
+14/22, nothing under 12), never view code (Zed derives densities from one spacing table). Compact
+mode is out of scope for v1.
 
-| Case | Treatment |
-| --- | --- |
-| No 群 at all | One centered welcome in the content area (character `jojo` 64, `display` title `还没有群`, 13 `text-2` sentence, buttons `新建群` primary and `发起私聊` secondary). Topic list, composer and side panel hidden (U06) |
-| 群 with no topics | Topic list: one 12 `text-3` line `还没有话题` under the tabs; topic view: the composer with the new-topic placeholder |
-| No topic selected | Topic view: centered 13 `text-2` `选一个话题，或写下第一行开始新话题` |
-| Empty filter | `没有未读话题` / `没有等你的话题`, 12 `text-3`, top of the list |
-| Search, no result | `没有找到「词」` + `在所有群里搜索` text button |
-| Load error | Inline row at the top of the timeline: `circle-alert` danger + `没能加载更早的消息。` + 24 pt `重试` |
-| Field error | Red 1 pt border on the field + 12 `danger-text` directly under it; submit stays disabled (U40) |
+## 15. Worst-case data (break-ui CATALOG)
 
-### 11.4 Quick switcher and search (Feishu ⌘K, Slack grouped results)
-
-Overlay with `scrim`, panel 640 pt wide, 96 pt from the window top, radius 12, `overlay`,
-overlay shadow. Query row 52 pt: `search` 18, 16 pt text, `esc` kbd. Results grouped (话题, 群,
-私聊, 成员, 消息), group label 12/500 `text-3`, rows 40 pt (52 for message hits with a snippet
-line), radius 8: 24 pt group tile or avatar, title 13/500 + ` · 群名` `text-3`, trailing chip.
-Snippets are plain text with Markdown stripped and the hit in `you-bg` (U35). With no query:
-最近 (5 topics), then 群 and 私聊 (U34). The panel height follows the content up to 70 % of the
-window, whole rows only. Footer 36 pt: `↑↓ 选择`, `↵ 打开`, `⌘F 在当前群里搜索`. ⌘F opens the
-same panel scoped to the 群 with a removable `在 qqbot 研发` token in the query row.
-
-### 11.5 Overlays: one component (U05, U36 to U38)
-
-Switcher, dialogs, sheets, alerts and pickers (new 群, start DM) share one overlay: `scrim`,
-`overlay` surface (one step lighter than `content` in dark), radius 12, overlay shadow, 96 pt from
-the top for command-style panels and centered for dialogs and alerts. Dialog: title `title`
-16/600 with 16 pt below; body 13; footer right-aligned 28 pt buttons (secondary then primary);
-no close `x` when a cancel button exists. Primary is disabled until the form is valid. Checkbox
-lists: 16 pt checkbox at the leading edge, 40 pt rows. Alerts: centered, 320 pt wide, title
-`title` 16/600, buttons 28 pt.
-
-### 11.6 Login
-
-440 × 520, `content`. App icon 80 pt (`icon-dark.svg` in dark mode, U39), 72 pt from the top;
-`欢迎加入团队` `display`; `输入管理员发给你的邀请码` 13 `text-2`; the invite code as 8 boxes in
-groups of 3-3-2 (32 × 36, radius 8, `border-strong`, 16/500 Menlo; focused box: 1 pt accent +
-3 pt `accent-soft` ring); `加入` 36 pt primary, 296 wide, disabled until complete. The server
-address is behind a `更改服务器` disclosure at the bottom (12 `text-2`), developers only.
-
-### 11.7 Settings (Slack preferences)
-
-900 × 640. Left list 200 pt on `sidebar`: 32 pt rows, 16 pt monochrome icons, selected
-`sidebar-selected` + 600. Content on `content`, 28 pt side padding: page title `display` at 16 pt
-from the top, primary action at its right. Grouped tables: radius 12, 0.5 `border`; header row
-34 pt `raised` 12/500 `text-2` **inside** the card (U41); rows 56 pt with 0.5 `sep`.
-
-- **成员**: columns member (32 avatar, name 13/500 + `（你）` `text-3`, 岗位 12 `text-2` with the
-  `bot` glyph for bots), status (7 pt dot: `online` or hollow grey, + word: 在线, 离线, 工作中,
-  等人回答), 权限 (`所有者` / `成员` select, 26 pt; plain text for yourself), trailing 28 pt
-  `ellipsis` or an empty slot of the same width. Names are trimmed and inner whitespace collapsed
-  (U41). One primary button `添加成员 ▾` with two menu items: `邀请同事` and `添加 AI 成员`
-  (wording to confirm with Joye).
-- **我的资料**: avatar with `更换头像` and its help text `PNG、JPEG 或 WebP，不超过 1 MB` under the
-  button; name and 岗位 fields save on blur; sign-out at the bottom; `退出并删除本机记录` in its
-  own danger row (U40).
-- **通知**: per 群 one segmented control `所有消息 / 仅 @我 / 不提醒` whose selected segment is a
-  raised `content` fill with a level-1 shadow (macOS); no separate 静音 toggle; 群 and 私聊 in
-  separate groups; same avatars as the sidebar (U42).
-- **机器**: rows with an icon by machine type, Chinese tags, status centered vertically (U43).
-- **成本**: hidden until it exists (U43). **关于**: no repeated labels.
-
-### 11.8 Banners
-
-App-level banners (update ready, offline) sit in the sidebar footer area as a 44 pt card above
-the user row, never inside the topic column, so header lines stay aligned (U17). Buttons 24 pt.
-
-## 12. Elevation
-
-| Level | Shadow L | Shadow D | Used by |
-| --- | --- | --- | --- |
-| 0 | none | none | Everything in the window |
-| 1 float | `0 0 0 0.5px #1F23291F, 0 2px 8px #0F111414` | `0 0 0 0.5px #FFFFFF1F, 0 2px 8px #00000059` | Hover toolbar, jump pill, selected segment |
-| 2 overlay | `0 0 0 0.5px #1F232924, 0 8px 28px -6px #0F111438, 0 2px 6px #0F11140F` | `0 0 0 0.5px #FFFFFF24, 0 12px 36px -6px #00000099, 0 2px 6px #0000004D` | Popovers, menus, mention popup, switcher, dialogs, toasts |
-
-## 13. Worst-case data rules (break-ui CATALOG)
-
-Every text slot has one rule. Checked in [worst-case-light.png](design/mockups-v2/worst-case-light.png)
-at the 1100 × 680 minimum window.
+Checked in `worst-case-*` at the 1100 × 680 minimum window.
 
 | Slot | Rule |
 | --- | --- |
-| Names, titles, file names in rows, chips | One line, `…` at the end, full text in a tooltip; file names middle-ellipsis keeping the extension |
+| Names, titles, chips | One line, `…` at the end, full text in a tooltip |
+| Sender name in the meta line | Max 160, `…`; the time is never truncated |
+| File names | Middle ellipsis, keeps the last 12 characters and the extension |
 | Topic start title | Two lines, then `…` |
+| Start block meta | The people part truncates; ` · date` stays whole |
 | Previews, 待办 context, typing line, placeholder | One line, `…` |
-| Counts | Badges `99+`; topic unread `999+`; tabs `999+` |
-| Message body | Wraps anywhere a word does not fit (URLs break); code scrolls horizontally |
-| Missing title | `（无标题）` in `text-2` (full-width parentheses) |
-| Emoji-first names | Monogram skips the emoji; the name keeps it |
+| Counts | Badges `99+`; count pills and tabs `999+` |
+| Message body | Wraps; URLs break anywhere; code scrolls horizontally |
+| Missing title | `（无标题）` in `text-2` |
+| Emoji-first names | The initial skips the emoji; the name keeps it |
 | Long reactions | `✅ Joye、李雪 和另外 12 人` |
-| Times | §6.6 |
+| 等{name}… | Name max 96 with spaces around a Latin name |
 
-## 14. Mockups
+## 16. Examples and keeping in sync
 
-| File | Shows |
+| Mockup | Shows |
 | --- | --- |
-| `main-light.png`, `main-dark.png` | Sidebar with 待办, 群, 私聊; topic list; an open long topic with people and bots, hover toolbar, steps row, file, ask card, Scout's pending row, composer with the @mention popup |
-| `short-topic-light.png`, `-dark` | A short topic that starts at the top (no void), the draft card, the side panel with Taro's live card, 产出 and 成员 |
-| `worst-case-light.png`, `-dark` | 1100 × 680, long names and titles, 99+ and 999 counts, emoji names, a huge file downloading, a failed send, a long typing line |
-| `switcher-light.png`, `-dark` | ⌘K over a scrim with grouped results and a message hit |
-| `settings-members-light.png`, `-dark` | Settings window, 成员 page |
-| `login-light.png`, `-dark` | Invite-code login, dark icon variant |
+| `main-light`, `main-dark` | Sidebar with 待办, 群, 私聊; topic list; a long topic with people and bots, steps row, file, ask card waiting for the viewer (one option hovered), Scout's pending row, the focused composer with a draft and the @mention popup |
+| `short-topic-*` | A short topic with the start block (header without title), the hover toolbar, the draft card, the side panel with Taro's live card, 产出 and 成员 |
+| `worst-case-*` | 1100 × 680, long names and titles, 99+ and 999 counts, emoji names, a huge file downloading, a failed send, a long typing line |
+| `switcher-*` | ⌘K over the scrim with grouped results and a message hit |
+| `settings-members-*` | Settings window, 成员 page |
+| `login-*` | Invite-code login with the label, the focused box and the disabled `加入` |
 
-## 15. UI basics checklist
+Every mockup is rendered as `<name>.png` (scale 1) and `<name>@2x.png` (scale 2, the scale of the
+reference captures). Compare at 2x next to the Slack and Feishu captures.
 
-Before merging UI work, check each line in both themes, at 1100 × 680 and 1920 × 1080, and with
-`--worst-case`. The audit item it covers is in brackets.
+Sync rules:
+- One token source: `tokens.mjs` for the mockups; `theme.json` + `theme::Colors` for the app.
+  Each value change updates this file, `tokens.mjs`, the mockups and `theme.json` in one commit.
+- Sizes are Rust enums or constants in `ui/` (`TextStyle`, `ControlSize`, `Radius`, `Space`), so
+  an off-scale value does not compile (Zed pattern). Views never write a color, size or duration
+  literal.
+- A component preview screen in the app shows every component of §7 in all its states in both
+  themes. Each visual pull request adds before and after captures at 2x (Zulip rule).
 
-- [ ] Short content starts at the top with the topic start block; long content anchors at the
-      bottom. No empty area above content. [U01]
-- [ ] Topic rows: two lines, preview `作者：内容`, one trailing element, no 进行中 chip. [U02]
-- [ ] Every clickable element has hover, pressed, focus ring and a pointer cursor (§7). [U03, U04]
-- [ ] Every overlay uses the one overlay component with a scrim and `overlay` surface. [U05, U36, U37, U38]
-- [ ] Never more than one empty state on a screen; no 群 → one welcome. [U06]
+## 17. Checklist
+
+Run screen by screen, in both themes, at 1100 × 680 and 1440 × 900, with `--worst-case`, next to
+the reference captures at 2x. The audit item is in brackets.
+
+Sizes and type
+- [ ] Composer: empty height ≥ 96 pt, two text lines, toolbar row (attach, @, emoji, format left;
+      send right), radius 12, grows to 40 % of the topic view; focus ring visible at a glance.
+- [ ] Search and filter fields 36 pt, form fields 40 pt, table selects 32 pt; 14 pt text; labels
+      above form fields.
+- [ ] Buttons 32 (`md`), 28 only inline (`sm`), 40 on login and empty states; icon buttons 32.
+- [ ] Only the eight type styles of §3; body 14/22; list titles ≥ 14; nothing a reader reads
+      under 12. [U27]
+- [ ] Only the spacing, radius and size steps of §4 and §6. [U27, U48]
+
+Color
+- [ ] The `you` chip appears at most once per pane; cards that wait for you use `you-border`.
+- [ ] Red only for badges for you and errors; unread without a mention is a grey count pill;
+      完成 and 等{name}… are grey labels. [U20, U25]
+- [ ] No per-群 or per-person hues: `hash` glyphs in the sidebar, neutral avatars.
+- [ ] Bot avatars at ≤ 40 pt use the small art; pips only for working, needs-input and error.
+- [ ] Contrast per §2 and §11 in both themes.
+
+Structure and behavior
+- [ ] Short content starts at the top with the start block; the header hides title and chip while
+      the block shows; long content anchors at the bottom. [U01]
+- [ ] Topic rows: 68 pt, two lines, `作者：内容`, one trailing element, no 进行中. [U02]
+- [ ] Every clickable element has hover, pressed, focus-visible, disabled and a pointer (§7.1).
+      [U03, U04]
+- [ ] Every overlay uses the one overlay component with the scrim. [U05, U36, U37, U38]
+- [ ] Never more than one empty state on a screen. [U06]
 - [ ] Side panel closed by default, opens on bot work or 产出, never empty. [U07]
 - [ ] One instruction per place; placeholders name the destination; no permanent key hints;
       send is accent only with text. [U08, U09]
 - [ ] Markdown fences after text on the same line parse; never an empty code block. [U10]
-- [ ] Header hairline appears only while content scrolls under it. [U11]
-- [ ] Meta line = name 600 + (bot role tag) + time `text-3`; `（已编辑）` after the body. [U12]
-- [ ] Same-author grouping within 5 minutes; list items 4 pt apart. [U13]
+- [ ] Header hairline only while content scrolls under it; all header rows 52 pt. [U11, U17]
+- [ ] Meta line = name 14/600 + bot role tag + time; `（已编辑）` after the body. [U12]
+- [ ] Same-author grouping within 5 minutes; groups 12 pt apart. [U13]
 - [ ] Jump pill only when the first unread is above the viewport. [U14]
-- [ ] Message hover is a soft fill in both themes plus the hover toolbar. [U15]
-- [ ] Header icon buttons are plain 28 pt; toggle state shown by icon; no shadows; `：` with no
-      space. [U16]
-- [ ] App banners never push the topic header; all header lines meet at 52 pt. [U17]
+- [ ] Message hover is a soft fill plus the hover toolbar, which never covers the content box
+      edge. [U15]
+- [ ] Toggle state shown by icon; no shadows except floating layers. [U16]
 - [ ] 群 and 私聊 are separate sections; one avatar rule; one initial for CJK. [U18, U37]
 - [ ] Sidebar search opens ⌘K; nothing beside it; one selection at a time. [U19]
-- [ ] Number badges only for mentions, DMs and 待办, red, `99+`; unread is weight. [U20]
 - [ ] Footer shows name + presence and opens the account menu. [U21]
-- [ ] Topic list header is 52 pt with text tabs below; counts `text-3`, hidden at 0. [U22]
-- [ ] One date format (§6.6) in every list, header and switcher. [U23]
+- [ ] Topic list header 52 pt with the icon-only 新话题 button; tabs 40 pt; counts hidden at 0.
+      [U22]
+- [ ] One date format (§8.2). [U23]
 - [ ] No hairlines between topic rows; unread dot inside the row. [U24]
-- [ ] One chip component, five tones, 已处理 and 完成 are success. [U25]
-- [ ] Every truncation uses `…` (U+2026) from one helper. [U26]
-- [ ] Only the six type sizes, the spacing and the radius scales of §4 and §5. [U27, U48]
-- [ ] Cards: title 14/600, body 13–14, labels 12; 28 pt buttons, one primary, same in both
-      themes; one width for cards, files and images. [U28, U29]
-- [ ] File rows: skeleton with name while loading; actions on hover; 产出 and files share a
-      row style. [U30]
-- [ ] Process view: steps with icons, output in mono 12 on `code-bg`, one state word shared
-      with the header, no repeated summary; opens as a side-panel sub-page. [U31]
-- [ ] Typing line in its own 20 pt slot, `…`. [U32]
-- [ ] Sending dims the body; failure shows inline `没有发出` + 24 pt `重试`. [U33]
-- [ ] Switcher: group tile per row, 16 pt query, grouped sections, whole rows, recent items
-      with no query, chips show only the state word. [U34]
-- [ ] Search panel height follows content; snippets without Markdown; no `#` prefix. [U35]
-- [ ] Login: server field behind a disclosure; equal 36 pt heights; dark icon. [U39]
-- [ ] Settings: help text under its control, inline field errors, danger action in its own
-      row, column headers inside the card, offline dot, trimmed names, segmented controls with a
-      raised selected segment, no 成本 page. [U40, U41, U42, U43]
-- [ ] Columns resize and collapse; the topic view never clips; composer and messages share one
-      edge and max width. [U44, U45]
-- [ ] Dark: sidebar, content, raised and overlay are distinct steps; selection stronger than
-      hover. [U46]
-- [ ] Copy: full-width CJK punctuation, PRODUCT.md words only, bots marked by the role tag. [U47]
-- [ ] Motion per §8, with reduce motion checked. Run review-animations, break-ui, apple-design
-      and emil-design-eng (docs/design/skills/emilkowalski).
+- [ ] Every truncation uses `…` from one helper; file names keep the extension. [U26]
+- [ ] Cards: title 14/600, body 14, one primary, `md` buttons; one width for cards, files and
+      images. [U28, U29]
+- [ ] File rows: skeleton while loading; actions on hover; 产出 and files share a row. [U30]
+- [ ] Process view: steps with icons, output in mono on `code-bg`, opens as a side-panel
+      sub-page. [U31]
+- [ ] Typing line in its own 20 pt slot. [U32]
+- [ ] Sending dims the body; failure shows `没有发出` + `sm` `重试`. [U33]
+- [ ] Switcher: grouped, whole rows, recent items with no query. [U34, U35]
+- [ ] Login: centered column, label above the code, server behind a disclosure, dark icon. [U39]
+- [ ] Settings: help under its control, inline errors, danger row apart, headers inside the
+      table, status dots by state, disabled select for yourself, no 成本 page. [U40 to U43]
+- [ ] Columns resize and collapse; the topic view never clips; one content box. [U44, U45]
+- [ ] Dark: elevation steps distinct; selection stronger than hover. [U46]
+- [ ] Copy: PRODUCT.md words, full-width punctuation, Latin spacing. [U47]
+- [ ] Motion per §12 with reduce motion checked. Run review-animations, break-ui, apple-design and
+      emil-design-eng (docs/design/skills/emilkowalski).
 
-## 16. Open items
+## 18. Open items
 
-- Bot identity, confirmed by Joye on 2026-11-03: the character is the mark, plus the role tag
-  with a `bot` glyph. No other bot mark. PRODUCT.md says the same.
-- Wording `添加 AI 成员` for adding a bot (PRODUCT.md has no word for it yet).
-- The 280 ms GrokBot entry and 450 ms sidebar-row animations were cut to 200 ms to keep the
-  240 ms cap; check the feel in the app.
-- Feishu and Slack dark modes were not seen; the dark ramp is ours and needs a check in the app
-  on a real display.
-- GPUI: the sidebar fade masks, the sticky date divider and container-width rules (hide the time
-  when a row is narrow) need custom elements; see GPUI-CAPABILITIES.md before building.
+- Dark values were computed, not seen: Feishu and Slack dark modes were not captured. Check the
+  dark theme on a real display before release.
+- `添加 AI 成员` wording for adding a bot (PRODUCT.md has no word for it yet).
+- The small bot art (§7.9) is generated in the mockups by removing SVG layers; the app needs the
+  same small variant from the character generator in `apps/desktop/src/characters/`.
+- The `type` (format) icon is not in the gpui-kit icon set yet; add Lucide `type`.
+- The 200 ms entry animations were cut from GrokBot's 280 ms; check the feel in the app.
+- GPUI: the sidebar fade, the sticky date divider, the caret-anchored popup and the composer's
+  growth to 40 % need custom elements; see GPUI-CAPABILITIES.md.
+- The CSS ellipsis in the mockups cannot trim trailing punctuation before `…` (§10); the app's
+  truncation helper must.
+- A check that diffs this file's token tables against `tokens.mjs` and `theme.json` does not exist
+  yet (DESIGN-MD-GUIDE §3).
