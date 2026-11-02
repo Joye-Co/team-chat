@@ -112,17 +112,20 @@ pub const SCENES: &[Scene] = &[
         open: |services, content, cx| open_login(services, content, "", true, cx),
     },
     Scene {
-        name: "login-error",
-        about: "The login view after a wrong invite code",
+        name: "login-custom-server",
+        about: "The login view on a custom server: host · 更改",
         start: Start::SignedOut,
-        setup: |services, _| {
-            services.provider.login(crate::data::LoginRequest {
-                server_url: "https://team.example".into(),
-                credential: crate::data::Credential::InviteCode("WRONG-CODE-0000".into()),
-                device_name: "selftest".into(),
-            })
+        setup: |_, _| {},
+        open: |services, content, cx| {
+            open_login(services, content, "~https://team.joye.co", false, cx)
         },
-        open: open_main,
+    },
+    Scene {
+        name: "login-error",
+        about: "The login view after a wrong invite code: kept, selected, error ring",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "!0000-0000", false, cx),
     },
     Scene {
         name: "offline",
@@ -196,10 +199,17 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-about",
-        about: "Settings: 关于, diagnostics and the developer view",
+        about: "Settings: 通用 (about card, diagnostics, developer view)",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_about,
+    },
+    Scene {
+        name: "settings-members-end",
+        about: "Settings: 成员 scrolled to the end, with the footnote under the table",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_members_end,
     },
     Scene {
         name: "settings-profile-error",
@@ -210,7 +220,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-about-dev",
-        about: "Settings: 关于 with the developer view on",
+        about: "Settings: 通用 with the developer view on",
         start: Start::SignedIn,
         setup: |services, cx| {
             services
@@ -463,7 +473,18 @@ pub fn open_login(
     gpui_kit::open_window(options, cx, move |window, cx| {
         let root = cx.new(|cx| RootView::new(services, None, window, cx));
         let login = root.read(cx).login().clone();
-        login.update(cx, |l, cx| l.preview(code, server_open, window, cx));
+        // A leading `!` submits the code, for the error scene.
+        // A leading `!` submits the code, for the error scene; a leading `~`
+        // sets a custom server instead.
+        login.update(cx, |l, cx| {
+            if let Some(code) = code.strip_prefix('!') {
+                l.preview_submit(code, window, cx)
+            } else if let Some(server) = code.strip_prefix('~') {
+                l.preview_server(server, window, cx)
+            } else {
+                l.preview(code, server_open, window, cx)
+            }
+        });
         root
     })
     .map(|(handle, _)| handle)

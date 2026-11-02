@@ -75,7 +75,7 @@ impl FakeProvider {
     }
 
     /// Starts at the login view; any server URL and non-empty code signs in,
-    /// except the code `WRONG-CODE-0000`.
+    /// except the codes `0000-0000` and `WRONG-CODE-0000`.
     /// Sets the connection state, for self-test scenes of the offline states.
     pub fn set_connection(&self, state: ConnectionState) {
         self.with(|s| s.connection = state);
@@ -387,7 +387,7 @@ impl State {
             &[],
             Some(CODER),
             &[
-                (ME, "@Forge 登录页需要支持两种方式：\n\n1. 邀请码 `XXXX-XXXX-XXXX`\n2. 粘贴已有的登录凭证\n\n服务器地址默认填 staging。", 3 * HOUR),
+                (ME, "@Forge 登录页需要支持两种方式：\n\n1. 邀请码 `XXXX-XXXX`\n2. 粘贴已有的登录凭证\n\n服务器地址默认填 staging。", 3 * HOUR),
                 (CODER, "收到，我来做。预计 30 分钟内给出第一版。", 3 * HOUR - MIN),
                 (CODER, "进展：表单和校验已完成，正在接 Keychain。\n\n```rust\nlet entry = keyring::Entry::new(service, account)?;\nentry.set_password(&token)?;\n```", 2 * HOUR),
                 (XIAOWANG, "错误提示要区分「邀请码无效」和「连不上服务器」吗？", 90 * MIN),
@@ -887,7 +887,7 @@ impl ChatProvider for FakeProvider {
 
     fn login(&self, request: LoginRequest) {
         let ok = match &request.credential {
-            Credential::InviteCode(code) => code != "WRONG-CODE-0000",
+            Credential::InviteCode(code) => code != "WRONG-CODE-0000" && code != "0000-0000",
             Credential::Token(token) => token.len() > 3,
         };
         self.with(|s| {

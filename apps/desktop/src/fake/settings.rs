@@ -59,12 +59,12 @@ fn sample_machines() -> Vec<MachineInfo> {
     ]
 }
 
-/// A made-up `XXXX-XXXX-XXXX` code (never a real one).
+/// A made-up `XXXX-XXXX` code (never a real one).
 fn fake_code(n: u64) -> String {
     const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
     let mut x = n.wrapping_mul(0x9E37_79B9_7F4A_7C15) ^ 0x5DEE_CE66;
     let mut out = String::new();
-    for i in 0..12 {
+    for i in 0..8 {
         if i > 0 && i % 4 == 0 {
             out.push('-');
         }
@@ -397,8 +397,8 @@ mod tests {
     #[test]
     fn fake_codes_look_like_invites() {
         let c = fake_code(7);
-        assert_eq!(c.len(), 14);
-        assert_eq!(c.matches('-').count(), 2);
+        assert_eq!(c.len(), 9);
+        assert_eq!(c.matches('-').count(), 1);
         assert_ne!(fake_code(7), fake_code(8));
     }
 

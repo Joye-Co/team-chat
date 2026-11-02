@@ -403,7 +403,8 @@ pub struct ArtifactSummary {
 /// A secret the user types or pastes. `Debug` never prints it.
 #[derive(Clone, PartialEq, Eq)]
 pub enum Credential {
-    /// `XXXX-XXXX-XXXX`, single use; the server turns it into a token.
+    /// `XXXX-XXXX` (or a legacy `XXXX-XXXX-XXXX`), single use; the server
+    /// turns it into a token.
     InviteCode(String),
     /// A pasted `tc_...` token.
     Token(String),

@@ -1,15 +1,19 @@
 //! The login view (DESIGN.md §8.3): one centered column with the app icon,
-//! the welcome, the invite code as boxes and `加入`. The server sits behind a
-//! `更改` disclosure (U39); a pasted login credential (`tc_…`) is accepted in
-//! the same place. The server URL defaults to the production URL from
-//! product.json, then staging.
+//! the welcome, the invite code as eight boxes and `加入`. The built-in server
+//! sits behind `使用其他服务器`; a custom one shows as `host · 更改` (U39). A
+//! pasted login credential (`tc_…`) or a legacy 12-character code is accepted
+//! in the same place and shows as one locked field. The server URL defaults to
+//! the production URL from product.json, then staging.
 
 use gpui::{
     AppContext, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
     Window, div, img, prelude::FluentBuilder as _, px,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::{
+    ActiveTheme as _,
+    input::{Input, InputEvent, InputState},
+};
 
 use crate::{
     app::{Changes, Services},
@@ -28,55 +32,80 @@ pub fn default_server_url() -> &'static str {
     }
 }
 
-/// Characters in an invite code (`XXXX-XXXX-XXXX`, server `newInviteCode`).
-pub const CODE_LEN: usize = 12;
+/// Characters in an invite code (`XXXX-XXXX`, server `newInviteCode`).
+pub const CODE_LEN: usize = 8;
+/// Characters of a code made before the 8-character format
+/// (`XXXX-XXXX-XXXX`); the server still redeems them.
+pub const LEGACY_CODE_LEN: usize = 12;
 /// Characters per group of boxes.
 const GROUP: usize = 4;
-/// One code box (§7.4, widened to 12 characters: 30 x 48).
-const BOX: (gpui::Pixels, gpui::Pixels) = (px(30.), px(48.));
-/// The column: 12 boxes, 9 gaps of 6 and two 18 pt dash slots = 450.
-const COLUMN: gpui::Pixels = px(450.);
+/// One code box (§7.4): 42 x 48.
+const BOX: (gpui::Pixels, gpui::Pixels) = (px(42.), px(48.));
+/// The column (§8.3): 8 boxes, 6 gaps of 6 and one 18 pt dash slot = 390.
+const COLUMN: gpui::Pixels = px(390.);
 
 /// What the code field holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CodeInput {
-    /// The invite code characters typed so far, upper case, at most 12.
+    /// The invite code characters typed so far, upper case, at most 8.
     Code(String),
+    /// A pasted 12-character code of the earlier format, upper case.
+    Legacy(String),
     /// A pasted login credential.
     Token(String),
 }
 
+/// The letters and digits of a code, upper case (dashes and spaces dropped).
+fn code_chars(text: &str) -> String {
+    text.chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .map(|c| c.to_ascii_uppercase())
+        .collect()
+}
+
 impl CodeInput {
-    /// Reads the field: a `tc_` credential, or the letters and digits of an
-    /// invite code (dashes and spaces dropped, upper case, at most 12).
+    /// Reads the field: a `tc_` credential, a pasted legacy code of exactly
+    /// 12 characters, or the first 8 letters and digits of an invite code.
     pub fn parse(text: &str) -> Self {
         let text = text.trim();
         if text.starts_with("tc_") {
             return CodeInput::Token(text.to_string());
         }
-        CodeInput::Code(
-            text.chars()
-                .filter(|c| c.is_ascii_alphanumeric())
-                .map(|c| c.to_ascii_uppercase())
-                .take(CODE_LEN)
-                .collect(),
-        )
+        let chars = code_chars(text);
+        if chars.len() == LEGACY_CODE_LEN {
+            return CodeInput::Legacy(chars);
+        }
+        CodeInput::Code(chars.chars().take(CODE_LEN).collect())
     }
 
     /// The credential to send, once the field is complete.
     pub fn credential(&self) -> Option<Credential> {
+        let grouped = |c: &str| {
+            let groups: Vec<String> = c
+                .as_bytes()
+                .chunks(GROUP)
+                .map(|g| String::from_utf8_lossy(g).into_owned())
+                .collect();
+            Credential::InviteCode(groups.join("-"))
+        };
         match self {
             CodeInput::Token(t) => Credential::from_input(t),
-            CodeInput::Code(c) if c.chars().count() == CODE_LEN => {
-                let groups: Vec<String> = c
-                    .as_bytes()
-                    .chunks(GROUP)
-                    .map(|g| String::from_utf8_lossy(g).into_owned())
-                    .collect();
-                Some(Credential::InviteCode(groups.join("-")))
-            }
+            CodeInput::Legacy(c) => Some(grouped(c)),
+            CodeInput::Code(c) if c.chars().count() == CODE_LEN => Some(grouped(c)),
             CodeInput::Code(_) => None,
         }
+    }
+
+    /// The field text to keep when typing went past 8 characters: typing
+    /// stops at the eighth box, so only a paste reaches a legacy code.
+    fn clamped(text: &str) -> Option<String> {
+        let trimmed = text.trim();
+        if trimmed.starts_with("tc_") {
+            return None;
+        }
+        let chars = code_chars(trimmed);
+        (chars.len() > CODE_LEN && chars.len() != LEGACY_CODE_LEN)
+            .then(|| chars.chars().take(CODE_LEN).collect())
     }
 }
 
@@ -109,6 +138,8 @@ impl LoginView {
                 .default_value(default_server_url())
         });
         let code = cx.new(|cx| InputState::new(window, cx));
+        // The first box has the caret when the view opens.
+        code.read(cx).focus_handle(cx).focus(window, cx);
         let subscriptions = vec![
             cx.subscribe_in(
                 &code,
@@ -116,6 +147,11 @@ impl LoginView {
                 |this, _, event: &InputEvent, window, cx| match event {
                     InputEvent::PressEnter { .. } => this.submit(window, cx),
                     InputEvent::Change => {
+                        let value = this.code.read(cx).value().to_string();
+                        if let Some(kept) = CodeInput::clamped(&value) {
+                            this.code
+                                .update(cx, |st, cx| st.set_value(kept, window, cx));
+                        }
                         this.show_error = false;
                         this.local_error = None;
                         cx.notify();
@@ -132,20 +168,31 @@ impl LoginView {
                     }
                 },
             ),
-            cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
-                if changes.any(|c| matches!(c, Change::Session)) {
+            cx.subscribe_in(
+                &services.hub,
+                window,
+                |this, _, changes: &Changes, window, cx| {
+                    if !changes.any(|c| matches!(c, Change::Session)) {
+                        return;
+                    }
                     this.show_error = true;
-                    if matches!(
-                        this.services.provider.session(),
+                    match this.services.provider.session() {
                         SessionState::SignedOut {
-                            last_error: Some(LoginError::ServerUnreachable)
+                            last_error: Some(LoginError::ServerUnreachable),
+                        } => this.server_open = true,
+                        // A wrong code stays in the boxes, selected, so the
+                        // next keystroke replaces it.
+                        SessionState::SignedOut {
+                            last_error: Some(LoginError::BadCredential),
+                        } => {
+                            this.code.read(cx).focus_handle(cx).focus(window, cx);
+                            this.code.update(cx, |st, cx| st.select_all(window, cx));
                         }
-                    ) {
-                        this.server_open = true;
+                        _ => {}
                     }
                     cx.notify();
-                }
-            }),
+                },
+            ),
         ];
         Self {
             services,
@@ -193,18 +240,32 @@ impl LoginView {
             return;
         }
         self.local_error = None;
+        self.show_error = false;
         self.services.provider.login(LoginRequest {
             server_url,
             credential,
             device_name: crate::provider::session::device_name(),
         });
-        // The secret is not kept in the field after a try.
-        self.code
-            .update(cx, |state, cx| state.set_value("", window, cx));
+        // A wrong code stays in the boxes so it can be checked (§8.3); the
+        // field lives only in this view and is never logged.
+        let _ = window;
         cx.notify();
     }
 
-    /// The invite code boxes, 4-4-4 with a dash between the groups, over the
+    /// Sets a custom server, for a screenshot scene.
+    pub fn preview_server(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.server
+            .update(cx, |st, cx| st.set_value(url.to_string(), window, cx));
+        cx.notify();
+    }
+
+    /// Fills the code and submits it, for the error screenshot scene.
+    pub fn preview_submit(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.preview(code, false, window, cx);
+        self.submit(window, cx);
+    }
+
+    /// The invite code boxes, 4-4 with a dash between the groups, over the
     /// real input (transparent), so typing, paste, IME and Backspace work.
     fn render_boxes(
         &self,
@@ -214,8 +275,21 @@ impl LoginView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let k = theme::colors(cx);
-        let row = match input {
-            CodeInput::Token(_) => div()
+        // The whole code is selected after a wrong try: typing replaces it.
+        let selected = focused && {
+            let st = self.code.read(cx);
+            let range = st.selected_range();
+            !st.value().is_empty() && range.start == 0 && range.end >= st.value().len()
+        };
+        // The text-selection color of the theme (§2.8 maps it).
+        let selection = cx.theme().selection;
+        let locked = match input {
+            CodeInput::Token(_) => Some(l::CODE_TOKEN),
+            CodeInput::Legacy(_) => Some(l::CODE_LEGACY),
+            CodeInput::Code(_) => None,
+        };
+        let row = match (input, locked) {
+            (_, Some(locked)) => div()
                 .w_full()
                 .h(BOX.1)
                 .px(space::S12)
@@ -231,12 +305,13 @@ impl LoginView {
                 })
                 .when(focused && !error, |el| el.shadow(k.focus_halo()))
                 .when(error, |el| el.shadow(k.error_halo()))
+                .when(selected, |el| el.bg(selection))
                 .flex()
                 .items_center()
                 .gap(space::S8)
                 .child(ui::icon(Lucide::Lock, theme::icon::ROW, k.text_3))
-                .child(div().t_ui().text_color(k.text_2).child(l::CODE_TOKEN)),
-            CodeInput::Code(chars) => {
+                .child(div().t_ui().text_color(k.text_2).child(locked)),
+            (CodeInput::Code(chars), None) => {
                 let chars: Vec<char> = chars.chars().collect();
                 let cursor = chars.len().min(CODE_LEN - 1);
                 let mut row = div().w_full().flex().items_center().gap(space::S6);
@@ -251,14 +326,14 @@ impl LoginView {
                                 .bg(k.border_strong),
                         );
                     }
-                    let active = focused && ix == cursor;
+                    let active = focused && !selected && ix == cursor;
                     let ch = chars.get(ix).copied();
                     row = row.child(
                         div()
                             .flex_none()
                             .w(BOX.0)
                             .h(BOX.1)
-                            .rounded(theme::radius::MD)
+                            .rounded(theme::radius::FIELD)
                             .bg(k.content)
                             .border_1()
                             .border_color(if error {
@@ -274,7 +349,15 @@ impl LoginView {
                             .justify_center()
                             .t_code_entry()
                             .text_color(k.text_1)
-                            .children(ch.map(|c| c.to_string()))
+                            // Selected characters sit on a text-selection
+                            // chip, as selected text does in a field.
+                            .children(ch.map(|c| {
+                                div()
+                                    .px(space::S6)
+                                    .rounded(theme::radius::MARK)
+                                    .when(selected, |el| el.bg(selection))
+                                    .child(c.to_string())
+                            }))
                             // The caret sits in the next empty box.
                             .when(active && ch.is_none(), |el| {
                                 el.child(div().w(px(2.)).h(px(22.)).rounded(px(1.)).bg(k.accent))
@@ -283,6 +366,7 @@ impl LoginView {
                 }
                 row
             }
+            (_, None) => div(),
         };
         let code = self.code.clone();
         div()
@@ -336,26 +420,36 @@ impl Render for LoginView {
         };
         let server_url = self.server.read(cx).value().to_string();
         let host: SharedString = server_host(&server_url).to_string().into();
-        let server_line = div()
-            .pt(space::S16)
-            .flex()
-            .items_center()
-            .justify_center()
-            .gap(space::S6)
-            .t_small()
-            .text_color(k.text_3)
-            .child(ui::icon(Lucide::Server, theme::icon::CHIP, k.text_3))
-            .child(div().one_line().child(host))
-            .child("·")
-            .child(
-                ui::text_button("login-server-change", l::CHANGE_SERVER, cx).on_click(cx.listener(
-                    |this, _, window, cx| {
-                        this.server_open = true;
-                        this.server.read(cx).focus_handle(cx).focus(window, cx);
-                        cx.notify();
-                    },
-                )),
-            );
+        let open_server = cx.listener(|this, _, window, cx| {
+            this.server_open = true;
+            this.server.read(cx).focus_handle(cx).focus(window, cx);
+            cx.notify();
+        });
+        // The built-in server is not worth a line of its own (U39): a quiet
+        // `使用其他服务器` opens the field. A custom server shows its host.
+        let custom =
+            server_url.trim().trim_end_matches('/') != default_server_url().trim_end_matches('/');
+        let server_line = if custom {
+            div()
+                .pt(space::S16)
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(space::S6)
+                .t_small()
+                .text_color(k.text_3)
+                .child(ui::icon(Lucide::Server, theme::icon::CHIP, k.text_3))
+                .child(div().min_w_0().one_line().child(host))
+                .child("·")
+                .child(
+                    ui::text_button("login-server-change", l::CHANGE_SERVER, cx)
+                        .on_click(open_server),
+                )
+        } else {
+            div().pt(space::S12).flex().justify_center().child(
+                ui::text_button("login-server-other", l::OTHER_SERVER, cx).on_click(open_server),
+            )
+        };
         let server_field = div()
             .pt(space::S16)
             .w_full()
@@ -465,23 +559,39 @@ mod tests {
 
     #[test]
     fn code_input_reads_codes_and_tokens() {
+        for pasted in ["K7QM-2X9A", "K7QM2X9A", "k7qm-2x9a", " k7qm 2x9a "] {
+            assert_eq!(CodeInput::parse(pasted), CodeInput::Code("K7QM2X9A".into()));
+            assert_eq!(
+                CodeInput::parse(pasted).credential(),
+                Some(Credential::InviteCode("K7QM-2X9A".into()))
+            );
+        }
+        assert_eq!(CodeInput::parse("K7QM-2X").credential(), None);
+        assert_eq!(
+            CodeInput::parse("K7QM2X9AB"),
+            CodeInput::Code("K7QM2X9A".into())
+        );
+        // A legacy 12-character code is one locked field and still signs in.
         assert_eq!(
             CodeInput::parse(" k7qm-2x9a bc3d "),
-            CodeInput::Code("K7QM2X9ABC3D".into())
-        );
-        assert_eq!(
-            CodeInput::parse("K7QM2X9ABC3DEXTRA"),
-            CodeInput::Code("K7QM2X9ABC3D".into())
+            CodeInput::Legacy("K7QM2X9ABC3D".into())
         );
         assert_eq!(
             CodeInput::parse("k7qm2x9abc3d").credential(),
             Some(Credential::InviteCode("K7QM-2X9A-BC3D".into()))
         );
-        assert_eq!(CodeInput::parse("K7QM-2X").credential(), None);
         assert!(matches!(
             CodeInput::parse(" tc_abc ").credential(),
             Some(Credential::Token(_))
         ));
+    }
+
+    #[test]
+    fn typing_stops_at_the_eighth_box() {
+        assert_eq!(CodeInput::clamped("K7QM2X9A"), None);
+        assert_eq!(CodeInput::clamped("K7QM2X9AB"), Some("K7QM2X9A".into()));
+        assert_eq!(CodeInput::clamped("K7QM-2X9A-BC3D"), None);
+        assert_eq!(CodeInput::clamped("tc_abcdefghijklmnop"), None);
     }
 
     #[test]

@@ -23,7 +23,7 @@ Build: `. "$HOME/.cargo/env"; export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6; c
 | Command | What it does |
 | --- | --- |
 | `desktop` | Opens the app with the fake provider (until the chat-core provider lands). |
-| `desktop --signed-out` | Starts at the login view. Any code signs in except `WRONG-CODE-0000`. |
+| `desktop --signed-out` | Starts at the login view. Any code signs in except `0000-0000` (and the legacy `WRONG-CODE-0000`). |
 | `desktop --screenshot <dir> [--theme light\|dark\|both] [--scenes a,b] [--worst-case] [--size WxH]` | Captures each scene window in each theme to `<dir>/<scene>-<theme>[-worst].png` plus `screenshots.json`, without focus, and exits. `desktop --list-scenes` lists scenes; add one in `src/selftest/scenes.rs`. |
 | `desktop --selftest-smoke --report <path> [--hold-ms <n>]` | Opens the window on the 10,000-message topic without focus or a Dock icon, writes JSON (`ok`, `first_frame_ms`, counts) and exits (0 = ok). |
 
