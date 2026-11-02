@@ -693,11 +693,10 @@ impl Switcher {
         } else {
             group
         };
-        let meta = [group, time]
-            .into_iter()
-            .filter(|s| !s.is_empty())
-            .map(|s| format!(" · {s}"))
-            .collect::<String>();
+        // §15: the sender name is max 160 and the time is never cut; the
+        // 群 name takes what is left.
+        let group = (!group.is_empty()).then(|| format!(" · {group}"));
+        let time = (!time.is_empty()).then(|| format!(" · {time}"));
         // One highlight: the selection, moved by the keys or a pointer move;
         // no hover fill (built as a selected row, then its fill set here).
         ui::list_row(
@@ -740,19 +739,30 @@ impl Switcher {
                         .min_w(px(0.))
                         .child(
                             div()
-                                .flex_none()
+                                .flex_shrink(1.)
+                                .min_w(px(0.))
+                                .max_w(px(160.))
                                 .medium()
+                                .one_line()
                                 .child(author.map(|a| a.name.clone()).unwrap_or_default()),
                         )
-                        .child(
+                        .children(group.map(|g| {
                             div()
-                                .flex_1()
+                                .flex_shrink(1.)
                                 .min_w(px(0.))
                                 .t_small()
                                 .text_color(k.text_3)
                                 .one_line()
-                                .child(meta),
-                        ),
+                                .child(g)
+                        }))
+                        .children(time.map(|t| {
+                            div()
+                                .flex_none()
+                                .t_small()
+                                .tnum()
+                                .text_color(k.text_3)
+                                .child(t)
+                        })),
                 )
                 .child(
                     marked(&h.snippet, &h.highlights, cx)
