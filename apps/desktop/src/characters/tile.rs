@@ -21,10 +21,14 @@ use super::{CharacterId, CharacterStatus, assets, bundled_size};
 pub const FILL: f32 = 0.62;
 /// The art's center sits 2 % of the side above the middle: `y = cy - side * 0.48`.
 const CENTER_Y: f32 = 0.48;
-/// Tiles at or under this size use the small art.
-pub const SMALL_MAX: f32 = 40.;
+/// Art drawn from bundled files up to this size (64 pt) has no lamp, bubble,
+/// working ring or sleep marks: at avatar and empty-state sizes they read as
+/// notification badges; the status shows as a pip instead (§7.9).
+pub const SMALL_MAX: f32 = 64.;
 
 const PREFIX: &str = "characters-tile/";
+/// The unfitted art without the marks (`characters::image`).
+const CLEAN_PREFIX: &str = "characters-clean/";
 
 static BOXES_JSON: &str = include_str!("../../assets/characters/boxes.json");
 
@@ -62,9 +66,25 @@ pub fn tile_image(character: CharacterId, status: CharacterStatus, size: Pixels)
         .flex_none()
 }
 
-/// Makes the fitted SVG for a `characters-tile/…` path.
+/// The asset path of the art of `character` at `status` and `size`, without
+/// the marks up to 64 pt.
+pub fn clean_path(character: CharacterId, status: CharacterStatus, size: Pixels) -> SharedString {
+    format!(
+        "{CLEAN_PREFIX}{}/{}-{}.svg",
+        character.as_str(),
+        status.as_str(),
+        bundled_size(size)
+    )
+    .into()
+}
+
+/// Makes the SVG for a `characters-tile/…` (fitted) or `characters-clean/…`
+/// path.
 pub fn load(path: &str) -> Option<Vec<u8>> {
-    let rest = path.strip_prefix(PREFIX)?;
+    let (rest, fit) = match path.strip_prefix(PREFIX) {
+        Some(rest) => (rest, true),
+        None => (path.strip_prefix(CLEAN_PREFIX)?, false),
+    };
     let (id, file) = rest.split_once('/')?;
     let source = assets::load(&format!("characters/{id}/{file}"))?;
     let size: f32 = file
@@ -76,6 +96,9 @@ pub fn load(path: &str) -> Option<Vec<u8>> {
     let mut svg = std::str::from_utf8(source).ok()?.to_string();
     if size <= SMALL_MAX {
         svg = small_art(&svg);
+    }
+    if !fit {
+        return Some(svg.into_bytes());
     }
     if let Some(b) = boxes().get(&format!("{id}__idle")) {
         let side = b[2].max(b[3]) / FILL;
@@ -197,6 +220,57 @@ mod tests {
     use gpui::px;
 
     use super::*;
+
+    #[test]
+    fn no_marks_up_to_64_pt() {
+        for &c in CharacterId::ALL {
+            for s in CharacterStatus::ALL {
+                for size in [16., 20., 24., 32., 36., 48., 64.] {
+                    for path in [tile_path(c, s, px(size)), clean_path(c, s, px(size))] {
+                        let svg = String::from_utf8(load(&path).expect("loads")).unwrap();
+                        assert!(!svg.contains("-g-glow)\""), "glow in {path}");
+                        assert!(!svg.contains("-g-dot)\""), "lamp in {path}");
+                        assert!(find_bubble(&svg).is_none(), "bubble in {path}");
+                        assert!(
+                            !svg.contains("<g opacity=\"1\" fill=\"none\" stroke-linecap"),
+                            "ring in {path}"
+                        );
+                        assert!(!svg.contains("M-13,-13 H13"), "sleep mark in {path}");
+                        assert_eq!(svg.matches("<g").count(), svg.matches("</g>").count());
+                    }
+                }
+            }
+        }
+        // 128 pt keeps the full art.
+        let big = load(&tile_path(
+            CharacterId::Jojo,
+            CharacterStatus::Idle,
+            px(128.),
+        ))
+        .unwrap();
+        assert!(String::from_utf8(big).unwrap().contains("-g-dot)\""));
+    }
+
+    /// Writes every tile at 36 pt (the 48 pt art) and 64 pt to
+    /// `$TILE_DUMP` for a visual check: `TILE_DUMP=<dir> cargo test -p desktop
+    /// dump_tiles -- --ignored`.
+    #[test]
+    #[ignore]
+    fn dump_tiles() {
+        let Some(dir) = std::env::var_os("TILE_DUMP") else {
+            return;
+        };
+        std::fs::create_dir_all(&dir).unwrap();
+        for &c in CharacterId::ALL {
+            for s in CharacterStatus::ALL {
+                for size in [24., 32., 36., 64.] {
+                    let svg = load(&tile_path(c, s, px(size))).unwrap();
+                    let name = format!("{}-{}-{size}.svg", c.as_str(), s.as_str());
+                    std::fs::write(std::path::Path::new(&dir).join(name), svg).unwrap();
+                }
+            }
+        }
+    }
 
     #[test]
     fn every_character_has_an_idle_box_and_a_tile() {
