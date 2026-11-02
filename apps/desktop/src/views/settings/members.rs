@@ -24,7 +24,9 @@ use crate::{
         RunnerSetup,
     },
     theme,
-    views::{avatar, presence_dot},
+    theme::{Type as _, space},
+    ui,
+    views::presence_dot,
 };
 
 /// Members in list order: active people first, then active bot members, then
@@ -175,7 +177,7 @@ impl MembersPage {
                     Button::new(ElementId::Name(format!("deactivate-{id}").into()))
                         .ghost()
                         .small()
-                        .danger()
+                        .text_color(colors.danger_text)
                         .label(s::DEACTIVATE)
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.confirm_deactivate(&member, window, cx)
@@ -186,12 +188,12 @@ impl MembersPage {
         div()
             .flex()
             .items_center()
-            .gap(px(10.))
-            .py(px(6.))
+            .gap(space::S10)
+            .h(px(52.))
             .border_b_1()
-            .border_color(colors.border)
-            .when(m.deactivated, |el| el.opacity(0.6))
-            .child(avatar(Some(m), px(32.), cx))
+            .border_color(colors.sep)
+            .when(m.deactivated, |el| el.opacity(0.5))
+            .child(ui::MemberAvatar::new(Some(m), px(28.)))
             .child(
                 div()
                     .flex_1()
@@ -203,27 +205,28 @@ impl MembersPage {
                             .flex()
                             .items_center()
                             .gap(px(6.))
-                            .child(div().truncate().child(m.name.clone()))
+                            .child(div().t_ui().medium().truncate().child(m.name.clone()))
                             .when(is_me, |el| {
                                 el.child(Tag::secondary().small().child(s::MEMBER_ME))
                             })
                             .when(m.kind == MemberKind::Bot, |el| {
-                                el.child(Tag::info().small().child(s::KIND_BOT))
+                                el.child(ui::StatusChip::quiet(s::KIND_BOT))
                             }),
                     )
                     .child(
                         div()
-                            .text_xs()
+                            .t_callout()
                             .truncate()
-                            .text_color(colors.muted_foreground)
+                            .text_color(colors.text_2)
                             .child(m.role.clone().unwrap_or_default()),
                     ),
             )
             .child(
                 div()
-                    .w(px(64.))
+                    .w(px(92.))
                     .flex_none()
-                    .text_xs()
+                    .t_callout()
+                    .text_color(colors.text_2)
                     .child(widgets::level_text(m.level)),
             )
             .child(
@@ -232,9 +235,9 @@ impl MembersPage {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .gap(px(4.))
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
+                    .gap(space::S4)
+                    .t_callout()
+                    .text_color(colors.text_2)
                     .when(!m.deactivated, |el| el.child(presence_dot(m.online, cx)))
                     .child(status_text),
             )

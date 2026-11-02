@@ -14,7 +14,7 @@ use gpui_component::{
 use crate::{
     copy::{fill, settings as s},
     data::{AdminError, AdminReply, MemberLevel, Millis},
-    theme,
+    theme::{self, Type as _, space},
 };
 
 /// Waits for a reply off the UI thread. A dropped sender is [`AdminError::Other`].
@@ -95,19 +95,19 @@ pub fn check_len(text: &str, max: usize) -> Result<(), String> {
 pub fn page_title(text: &'static str, cx: &App) -> Div {
     let colors = theme::colors(cx);
     div()
-        .pb(px(12.))
-        .text_xl()
-        .text_color(colors.foreground)
+        .pb(space::S12)
+        .t_title()
+        .text_color(colors.text_1)
         .child(text)
 }
 
 /// A group of rows with a small heading.
 pub fn section(title: impl Into<SharedString>, cx: &App) -> Div {
     let colors = theme::colors(cx);
-    div().flex().flex_col().gap(px(8.)).pt(px(16.)).child(
+    div().flex().flex_col().gap(space::S8).pt(space::S20).child(
         div()
-            .text_sm()
-            .text_color(colors.muted_foreground)
+            .t_section()
+            .text_color(colors.text_3)
             .child(title.into()),
     )
 }
@@ -123,7 +123,7 @@ pub fn field(label: &'static str, control: impl IntoElement, cx: &App) -> Div {
             div()
                 .w(px(88.))
                 .flex_none()
-                .text_color(colors.muted_foreground)
+                .text_color(colors.text_2)
                 .child(label),
         )
         .child(div().flex_1().min_w_0().child(control))
@@ -133,8 +133,8 @@ pub fn field(label: &'static str, control: impl IntoElement, cx: &App) -> Div {
 pub fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
     let colors = theme::colors(cx);
     div()
-        .text_xs()
-        .text_color(colors.muted_foreground)
+        .t_callout()
+        .text_color(colors.text_2)
         .child(text.into())
 }
 
@@ -145,14 +145,14 @@ pub fn status_line(status: &Status, cx: &App) -> Option<Div> {
         Status::Idle => None,
         Status::Busy(text) | Status::Done(text) => Some(
             div()
-                .text_xs()
-                .text_color(colors.muted_foreground)
+                .t_callout()
+                .text_color(colors.text_2)
                 .child(text.clone()),
         ),
         Status::Failed(text) => Some(
             div()
-                .text_xs()
-                .text_color(colors.danger)
+                .t_callout()
+                .text_color(colors.danger_text)
                 .child(text.clone()),
         ),
     }
@@ -187,21 +187,20 @@ pub fn secret_block(id: impl Into<ElementId>, label: &'static str, value: &str, 
         .flex()
         .flex_col()
         .gap(px(4.))
-        .child(div().text_sm().child(label))
+        .child(div().t_ui().medium().child(label))
         .child(
             div()
                 .flex()
                 .items_start()
                 .gap(px(8.))
-                .p(px(8.))
-                .rounded(px(6.))
-                .bg(colors.code_background)
+                .p(space::S10)
+                .rounded(theme::radius::LG)
+                .bg(colors.fill_field)
                 .child(
                     div()
                         .flex_1()
                         .min_w_0()
-                        .font_family("Menlo")
-                        .text_xs()
+                        .t_code()
                         .child(value.clone()),
                 )
                 .child(Clipboard::new(id).tooltip(s::COPY).value(value)),

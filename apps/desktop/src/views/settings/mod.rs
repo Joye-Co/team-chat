@@ -24,7 +24,8 @@ use crate::{
     app::Services,
     copy::settings as s,
     data::{MemberLevel, SessionState},
-    theme,
+    theme::{self, Type as _, space},
+    ui,
 };
 
 pub use about::AboutPage;
@@ -211,33 +212,48 @@ impl Render for SettingsView {
         div()
             .size_full()
             .flex()
-            .bg(colors.background)
-            .text_color(colors.foreground)
-            .text_sm()
+            .bg(colors.content)
+            .text_color(colors.text_1)
+            .t_ui()
             .child(
                 div()
-                    .w(px(168.))
+                    .w(px(220.))
                     .flex_none()
                     .h_full()
-                    .border_r_1()
-                    .border_color(colors.border)
+                    .flex()
+                    .flex_col()
+                    .bg(colors.sidebar)
+                    // The traffic lights sit in this band (§5.5).
+                    .child(ui::toolbar_band("settings-pane-toolbar"))
                     .child(
                         Sidebar::new("settings-pages")
                             .collapsible(false)
                             .w_full()
+                            .flex_1()
+                            .bg(colors.sidebar)
+                            .border_0()
                             .child(menu),
                     ),
             )
+            .child(ui::vhairline(cx))
             .child(
                 div()
-                    .id("settings-page")
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .overflow_y_scroll()
-                    .px(px(24.))
-                    .py(px(20.))
-                    .child(self.render_page(cx)),
+                    .flex()
+                    .flex_col()
+                    .child(ui::toolbar_band("settings-page-toolbar"))
+                    .child(
+                        div()
+                            .id("settings-page")
+                            .flex_1()
+                            .min_h(px(0.))
+                            .overflow_y_scroll()
+                            .px(space::S24)
+                            .pb(space::S24)
+                            .child(self.render_page(cx)),
+                    ),
             )
     }
 }
@@ -272,14 +288,19 @@ pub fn open_window(
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(760.), px(600.)),
+            size(px(900.), px(640.)),
             cx,
         ))),
-        window_min_size: Some(size(px(620.), px(440.))),
+        window_min_size: Some(size(px(640.), px(480.))),
         titlebar: Some(TitlebarOptions {
             title: Some(s::TITLE.into()),
-            ..Default::default()
+            appears_transparent: true,
+            traffic_light_position: Some(gpui::point(
+                theme::TRAFFIC_LIGHTS.0,
+                theme::TRAFFIC_LIGHTS.1,
+            )),
         }),
+        window_background: gpui::WindowBackgroundAppearance::Opaque,
         focus,
         show: true,
         ..Default::default()
