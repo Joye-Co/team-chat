@@ -29,6 +29,8 @@ pub const MAIN: &str = "t-v21-alerts";
 pub const SHORT: &str = "t-v21-launch";
 pub const WORST: &str = "t-v21-worst";
 const ARTIFACT: &str = "art-v21-rules";
+const SHORT_DRAFT: &str = "art-v21-note";
+const SHORT_IMAGES: &str = "art-v21-images";
 const RUN_DONE: &str = "run-v21-forge";
 const RUN_LIVE: &str = "run-v21-scout";
 const BIG_FILE_SHA: &str = "v21worstcasetrace";
@@ -56,6 +58,8 @@ struct Topics {
     drafts: Mutex<HashMap<DraftKey, Draft>>,
     runs: Vec<BotRunSummary>,
     cards: HashMap<String, Arc<card::Card>>,
+    /// The 产出 of short-topic-* (the side panel's `产出 · 2`).
+    artifacts: Vec<ArtifactSummary>,
 }
 
 /// The scene provider: the wrapped one plus the sample topics.
@@ -131,6 +135,24 @@ fn ask_card() -> card::Card {
             { "id": "a", "label": "现在在 staging 打开" },
             { "id": "b", "label": "等 Scout 验收完再开" },
             { "id": "c", "label": "先不改，回到讨论" }
+        ]
+    }))
+    .expect("sample card parses")
+}
+
+/// Taro's plan on its first reply, updated in place as it works: the side
+/// panel reads it as Taro's progress (short-topic-*).
+fn plan_card() -> card::Card {
+    serde_json::from_value(serde_json::json!({
+        "v": 1,
+        "title": "小红书发布计划",
+        "blocks": [
+            { "type": "list", "items": [
+                { "text": "写标题和正文", "status": "done" },
+                { "text": "生成 3 张配图", "status": "done" },
+                { "text": "等 Joye 确认", "status": "in_progress" },
+                { "text": "周四 20:00 发出", "status": "todo" }
+            ]}
         ]
     }))
     .expect("sample card parses")
@@ -242,7 +264,7 @@ impl TopicSamples {
 
         // short-topic-*: 周四小红书
         let t = SHORT;
-        let short = vec![
+        let mut short = vec![
             message(
                 t,
                 1,
@@ -265,6 +287,9 @@ impl TopicSamples {
                 "**草稿好了**，按你上次喜欢的口吻写的。确认后我才会发出。",
             ),
         ];
+        // 李雪 is cc'd on the brief: the third member of the topic.
+        short[0].mentions = vec!["m-taro".into(), "m-lixue".into()];
+        cards.insert(short[1].id.clone(), Arc::new(plan_card()));
         cards.insert(short[2].id.clone(), Arc::new(draft_card()));
         let mut short_topic = topic(
             SHORT,
@@ -368,6 +393,29 @@ impl TopicSamples {
             },
         ];
 
+        let artifacts = vec![
+            ArtifactSummary {
+                id: SHORT_DRAFT.into(),
+                topic_id: SHORT.into(),
+                kind: ArtifactKind::Page,
+                title: "小红书草稿".into(),
+                version: 3,
+                size_bytes: None,
+                created_by: "m-taro".into(),
+                updated_at: short[2].created_at,
+            },
+            ArtifactSummary {
+                id: SHORT_IMAGES.into(),
+                topic_id: SHORT.into(),
+                kind: ArtifactKind::Image,
+                title: "配图 3 张".into(),
+                version: 1,
+                size_bytes: Some(2_400_000),
+                created_by: "m-taro".into(),
+                updated_at: short[2].created_at - MIN,
+            },
+        ];
+
         let mut drafts = HashMap::new();
         // short-topic-* shows the empty composer (the mockup); the compose
         // scene shows the quote chip and a draft.
@@ -401,6 +449,7 @@ impl TopicSamples {
                 drafts: Mutex::new(drafts),
                 runs,
                 cards,
+                artifacts,
             },
             now,
         })
@@ -476,6 +525,15 @@ impl ChatProvider for TopicSamples {
         self.inner.typing(group_id, topic_id)
     }
     fn artifacts(&self, group_id: &str, topic_id: &str) -> Vec<ArtifactSummary> {
+        if self.mine(group_id, topic_id) {
+            return self
+                .data
+                .artifacts
+                .iter()
+                .filter(|a| a.topic_id == topic_id)
+                .cloned()
+                .collect();
+        }
         self.inner.artifacts(group_id, topic_id)
     }
     fn send(&self, request: SendRequest) -> ClientMsgId {
@@ -554,6 +612,13 @@ impl ChatProvider for TopicSamples {
         self.inner.topic_files(group_id, topic_id)
     }
     fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
+        if let Some(a) = self.data.artifacts.iter().find(|a| a.id == artifact_id) {
+            return Some(ArtifactDetail {
+                summary: a.clone(),
+                group_id: GROUP.into(),
+                versions: Vec::new(),
+            });
+        }
         if artifact_id == ARTIFACT {
             return Some(ArtifactDetail {
                 summary: ArtifactSummary {
