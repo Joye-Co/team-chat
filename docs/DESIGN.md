@@ -670,6 +670,15 @@ One app component, used everywhere a member appears. It wraps gpui-component `Av
   surface the avatar sits on (pass it in).
 - Sizes: 32 (timeline), 28 (settings, panel header, member cards), 26 (sidebar footer), 24
   (popups, switcher, version list), 22 (toolbar stack), 20 (sidebar, ack line, panel rows).
+- Character avatars (decided by Joye after these mockups were made): a member with a
+  `character` (a jojo-friends id; see docs/PRODUCT.md and docs/BOTS.md) shows that character's
+  art instead of a monogram. The character's silhouette is the bot shape (no radius override,
+  no extra bot mark), and its status signal replaces the presence dot: idle, working,
+  needs-input, success, error or offline, from the mapping in `apps/desktop/src/characters/`.
+  Below 32 pt use the small-size renders. People keep photos or monograms with the presence dot;
+  a bot without a character keeps the monogram and the bot mark. Wherever a mockup shows
+  monogram bots (设计助手, 构建助手, 周报助手), the app shows the roster bots (Jojo, Tata, Forge
+  and the others) with their characters.
 
 ## 15. App icon [icon, design/brand/]
 
