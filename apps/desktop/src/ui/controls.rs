@@ -119,11 +119,39 @@ pub fn button(
     let b = Button::new(id).label(label);
     let b = match kind {
         ButtonKind::Primary => b.primary(),
-        ButtonKind::Secondary => b.border_1().border_color(k.border_strong),
+        ButtonKind::Secondary => b
+            .custom(secondary_variant(cx))
+            .outline()
+            .bg(gpui::transparent_black())
+            .border_color(k.border_strong),
         ButtonKind::Ghost => b.ghost(),
         ButtonKind::Danger => b.danger(),
     };
     b.spec(size)
+}
+
+/// The secondary look (§7.1): no fill, so it sits on `content`, `raised`
+/// and `overlay` alike; a 1 pt `border-strong`; `hover` and `pressed` fills.
+/// gpui-component's own secondary keeps a grey fill (`#FFFFFF14` in dark),
+/// which reads as a second primary.
+///
+/// An outlined custom variant paints its border in `color` mixed 40 % with
+/// transparent (gpui-component 0.8.1 `border_color`) in every state, and its
+/// hover and pressed fills from `hover` and `active`. So `color` is
+/// `border-strong` at 2.5 times its alpha: the border stays `border-strong`
+/// on hover and press. The rest fill and border are also set on the button,
+/// which wins over the variant at rest.
+fn secondary_variant(cx: &App) -> ButtonCustomVariant {
+    let k = theme::colors(cx);
+    let border = k.border_strong;
+    ButtonCustomVariant::new(cx)
+        .color(Hsla {
+            a: (border.a / 0.4).min(1.),
+            ..border
+        })
+        .foreground(k.text_1)
+        .hover(k.hover)
+        .active(k.pressed)
 }
 
 /// The primary `md` button.
