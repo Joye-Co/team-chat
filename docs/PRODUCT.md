@@ -110,6 +110,10 @@ V1 is not an MVP. The team works in it every day, stably. Done when all of these
    and onboarding guides for interns.
 9. **Security**: hashed tokens and invite codes, authorization on every frame and route,
    sandboxed 产出, rate limits, audited admin actions, webhook signatures checked.
+10. **Design**: first-class visual design, on par with the best macOS apps, in light and dark
+    mode: every control from gpui-component, styled per docs/DESIGN.md, and checked with Emil
+    Kowalski's skills (docs/design/skills/emilkowalski): emil-design-eng, review-animations,
+    break-ui and apple-design.
 
 Later, not V1: decisions as first-class objects and typed backlinks, catch-up summaries, task
 graphs, semantic search, cost tracking (the 成本 page may say 即将推出), Cloudflare Containers

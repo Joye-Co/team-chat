@@ -11,6 +11,18 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Interface text**: Simplified Chinese, only from the desktop copy catalog, only the four
   product nouns 成员, 群, 话题, 产出 (see PRODUCT.md). Developer words stay in the developer view
   and in logs. The catalog test enforces this.
+- **Design bar**: first-class visual design is a V1 requirement, not polish for later. Build
+  every UI element from gpui-component (the first-class GPUI component library: button, input,
+  list, popover, menu, dialog, tooltip, badge, avatar, tabs, switch, notification and the rest),
+  styled through the theme; never hand-roll a control that gpui-component has. Follow
+  [docs/DESIGN.md](docs/DESIGN.md) once it is on main; until then keep every color, size and
+  duration in theme tokens so the design pass can restyle them. Look at your screens: capture
+  only the app's own window (`screencapture -l <window id> -o -x <png>`, or the app's
+  screenshot self-test when it exists), never the full screen, in light and dark mode, and read
+  the PNGs. Before merging UI work, check it with the vendored skills in
+  `docs/design/skills/emilkowalski/`: `emil-design-eng` (polish), `review-animations` (motion),
+  `break-ui` (worst-case data) and `apple-design` (macOS feel). Web pages, if any, use the
+  libraries in `pick-ui-library`.
 - **Protocol changes**: update `docs/protocol.md`, `packages/protocol`, `crates/chat-protocol`
   and `protocol/fixtures` in one commit. Both fixture tests must pass. Additive changes only:
   new optional fields, new frame and event types. Never change the meaning of a released field.
