@@ -209,6 +209,14 @@ impl Sidebar {
             Lucide::ChevronDown
         };
         let open_todo = section == Section::Todo;
+        // While the 待办 list fills the middle column, its header is the
+        // selection: the fill and text of a selected 群 row.
+        let selected = open_todo && self.services.nav.read(cx).place.as_ref() == Some(&Place::Todo);
+        let selected_fill = if self.emphasized {
+            k.sidebar_selected
+        } else {
+            k.pressed
+        };
         div()
             .flex_none()
             .w_full()
@@ -216,6 +224,8 @@ impl Sidebar {
             .h(size::SECTION_HEADER)
             .flex()
             .items_center()
+            .rounded(theme::radius::MD)
+            .when(selected, |el| el.bg(selected_fill))
             .child(
                 div()
                     .id(ElementId::Name(SharedString::from(format!(
@@ -249,7 +259,8 @@ impl Sidebar {
                     // Quieter than the rows under it (the mockup): GPUI draws
                     // 600 heavier than the browser, so the label takes 500.
                     .t_meta_medium()
-                    .text_color(k.text_2)
+                    .text_color(if selected { k.text_1 } else { k.text_2 })
+                    .when(selected, |el| el.semibold())
                     .child(label)
                     .when_some(count.filter(|&n| n > 0), |el, n| {
                         el.child(
@@ -326,7 +337,8 @@ impl Sidebar {
         } else {
             None
         };
-        let name = group.name.clone();
+        let name = SharedString::from(group.name.clone());
+        let (name_text, name_line) = ui::cut_line(name.clone());
         ui::list_row(
             ElementId::Name(SharedString::from(format!("group-{}", group.id))),
             RowSurface::Sidebar,
@@ -351,10 +363,13 @@ impl Sidebar {
                 .min_w(px(0.))
                 .one_line()
                 .when(unread || selected, |el| el.semibold())
-                .child(name.clone()),
+                .child(name_text),
         )
         .children(trailing)
-        .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
+        // The full name only when the row cuts it (§15).
+        .tooltip(ui::tip_when_cut(vec![name_line], move || {
+            Tooltip::new(name.clone())
+        }))
         .on_click(cx.listener(move |this, _, _, cx| {
             let id = id.clone();
             this.services
@@ -430,6 +445,8 @@ impl Sidebar {
         // Title and context are both cut to one line; the tooltip has both.
         let tip_title = SharedString::from(title.clone());
         let tip_detail = SharedString::from(context.clone());
+        let (title_text, title_line) = ui::cut_line(title);
+        let (context_text, context_line) = ui::cut_line(context);
         ui::list_row(
             ElementId::NamedInteger("todo-row".into(), ix as u64),
             RowSurface::Sidebar,
@@ -464,7 +481,7 @@ impl Sidebar {
                         .one_line()
                         .text_color(if untitled { k.text_2 } else { k.text_1 })
                         .when(selected, |el| el.semibold())
-                        .child(title),
+                        .child(title_text),
                 )
                 .child(
                     div()
@@ -472,12 +489,13 @@ impl Sidebar {
                         .t_meta()
                         .text_color(k.text_2)
                         .one_line()
-                        .child(context),
+                        .child(context_text),
                 ),
         )
-        .tooltip(move |window, cx| {
-            ui::row_tip(tip_title.clone(), tip_detail.clone()).build(window, cx)
-        })
+        .tooltip(ui::tip_when_cut(
+            vec![title_line, context_line],
+            move || ui::row_tip(tip_title.clone(), tip_detail.clone()),
+        ))
         .on_click(cx.listener(move |this, _, _, cx| {
             let (g, t) = (g.clone(), t.clone());
             this.services

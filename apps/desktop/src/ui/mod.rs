@@ -64,4 +64,4 @@ pub use rows::{
     unread_dot,
 };
 pub use sheet::SheetExt;
-pub use truncate::{row_tip, truncating};
+pub use truncate::{cut_line, row_tip, tip_when_cut, truncating};

@@ -568,6 +568,8 @@ impl TopicListView {
         };
         // Title and preview are both cut to one line; the tooltip has both.
         let tip_detail = SharedString::from(preview.to_string());
+        let (title_text, title_line) = ui::cut_line(title);
+        let (preview_text, preview_line) = ui::cut_line(preview);
         let (g, t) = (row.group_id.clone(), topic.id.clone());
         let menu_services = self.services.clone();
         let menu_topic = topic.clone();
@@ -626,7 +628,7 @@ impl TopicListView {
                                         .one_line()
                                         .when(unread || selected, |el| el.semibold())
                                         .text_color(if untitled { k.text_2 } else { k.text_1 })
-                                        .child(title),
+                                        .child(title_text),
                                 )
                                 .child({
                                     let full =
@@ -658,14 +660,15 @@ impl TopicListView {
                                         .t_small()
                                         .text_color(k.text_2)
                                         .one_line()
-                                        .child(preview),
+                                        .child(preview_text),
                                 )
                                 .children(trailing),
                         ),
                 )
-                .tooltip(move |window, cx| {
-                    ui::row_tip(tip_title.clone(), tip_detail.clone()).build(window, cx)
-                })
+                .tooltip(ui::tip_when_cut(
+                    vec![title_line, preview_line],
+                    move || ui::row_tip(tip_title.clone(), tip_detail.clone()),
+                ))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let (g, t) = (g.clone(), t.clone());
                     this.services

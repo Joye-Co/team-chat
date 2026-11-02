@@ -626,6 +626,8 @@ struct TextLayoutInner {
     line_height: Pixels,
     wrap_width: Option<Pixels>,
     truncate_width: Option<Pixels>,
+    /// True when the text overflow style cut the text to fit.
+    truncated: bool,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
 }
@@ -701,6 +703,7 @@ impl TextLayout {
                 }
 
                 let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
+                let full_text = text.clone();
                 let (text, runs) = if let Some(truncate_width) = truncate_width {
                     if let Some(max_lines) = text_style.line_clamp
                         && let Some(wrap_width) = wrap_width
@@ -784,6 +787,7 @@ impl TextLayout {
                     (text.clone(), Cow::Borrowed(&*runs))
                 };
                 let len = text.len();
+                let truncated = text != full_text;
 
                 let Some(lines) = window
                     .text_system()
@@ -802,6 +806,7 @@ impl TextLayout {
                         line_height,
                         wrap_width,
                         truncate_width,
+                        truncated,
                         size: Some(Size::default()),
                         bounds: None,
                     });
@@ -821,6 +826,7 @@ impl TextLayout {
                     line_height,
                     wrap_width,
                     truncate_width,
+                    truncated,
                     size: Some(size),
                     bounds: None,
                 });
@@ -1015,6 +1021,12 @@ impl TextLayout {
     /// The UTF-8 length of the underlying text.
     pub fn len(&self) -> usize {
         self.0.borrow().as_ref().unwrap().len
+    }
+
+    /// True when the last layout cut the text with its overflow style (an ellipsis or other
+    /// affix); false when it fits or has not been laid out yet.
+    pub fn truncated(&self) -> bool {
+        self.0.borrow().as_ref().is_some_and(|inner| inner.truncated)
     }
 
     /// The text for this layout.

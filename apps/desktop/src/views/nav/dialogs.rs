@@ -229,11 +229,12 @@ impl Render for NewGroupForm {
                     .h(size::POPUP_ROW)
                     .px(space::S8)
                     .gap(space::S10)
-                    .tooltip({
+                    .map(|row| {
+                        let (child, lines) = member_row(m, k.overlay, cx);
                         let tip = member_tip(m);
-                        move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+                        row.child(child)
+                            .tooltip(ui::tip_when_cut(lines, move || Tooltip::new(tip.clone())))
                     })
-                    .child(member_row(m, k.overlay, cx))
                     .child(
                         div().flex_none().child(
                             Checkbox::new(gpui::SharedString::from(format!("pick-{}", m.id)))
@@ -361,10 +362,15 @@ fn member_tip(m: &Member) -> gpui::SharedString {
 }
 
 /// One member in a picker: a 24 avatar, the name `ui` 14 and the 岗位 13
-/// `text-3`. The 岗位 shrinks first; `surface` is what the avatar sits on.
-fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
+/// `text-3`. The 岗位 shrinks first; `surface` is what the avatar sits on. The layouts tell
+/// the row's tooltip whether the name or the 岗位 was cut.
+fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> (gpui::Div, Vec<gpui::TextLayout>) {
     let k = theme::colors(cx);
-    div()
+    let (name, name_line) = ui::cut_line(m.name.clone());
+    let role = m.role.clone().map(ui::cut_line);
+    let mut lines = vec![name_line];
+    lines.extend(role.as_ref().map(|(_, l)| l.clone()));
+    let row = div()
         .flex_1()
         .min_w(px(0.))
         .flex()
@@ -386,9 +392,9 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
                 .t_ui()
                 .text_color(k.text_1)
                 .one_line()
-                .child(m.name.clone()),
+                .child(name),
         )
-        .children(m.role.clone().map(|r| {
+        .children(role.map(|(r, _)| {
             div()
                 .flex_1()
                 .min_w(px(0.))
@@ -397,7 +403,8 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
                 .text_color(k.text_3)
                 .one_line()
                 .child(r)
-        }))
+        }));
+    (row, lines)
 }
 
 /// Opens the dialog that adds members to a 群 (from the 群 menu).
@@ -548,15 +555,13 @@ impl Render for DmPicker {
                 .h(size::POPUP_ROW)
                 .px(space::S10)
                 .gap(space::S10)
-                .tooltip({
+                .map(|row| {
+                    let surface = if active { k.selected } else { k.overlay };
+                    let (child, lines) = member_row(m, surface, cx);
                     let tip = member_tip(m);
-                    move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+                    row.child(child)
+                        .tooltip(ui::tip_when_cut(lines, move || Tooltip::new(tip.clone())))
                 })
-                .child(member_row(
-                    m,
-                    if active { k.selected } else { k.overlay },
-                    cx,
-                ))
                 .when(active, |el| el.child(ui::return_hint(cx)))
                 .on_click(cx.listener(move |this, _, window, cx| {
                     this.active = ix;
