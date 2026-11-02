@@ -122,6 +122,10 @@ pub struct Sidebar {
     todo: Vec<TodoItem>,
     collapsed: HashSet<Section>,
     _subscriptions: Vec<Subscription>,
+    /// Re-renders when the window becomes key or stops being key.
+    activation: Option<Subscription>,
+    /// The selection uses the accent tint (the window is key).
+    emphasized: bool,
 }
 
 impl Sidebar {
@@ -153,6 +157,8 @@ impl Sidebar {
             todo: Vec::new(),
             collapsed: HashSet::new(),
             _subscriptions: subscriptions,
+            activation: None,
+            emphasized: true,
         };
         this.refresh();
         this
@@ -281,10 +287,10 @@ impl Sidebar {
         let unread = (group.unread > 0 || group.mentions > 0) && !muted;
         let menu_services = self.services.clone();
         let menu_group = group.clone();
-        let surface = if selected {
-            k.sidebar_selected
-        } else {
-            k.sidebar
+        let surface = match (selected, self.emphasized) {
+            (true, true) => k.sidebar_selected,
+            (true, false) => k.pressed,
+            _ => k.sidebar,
         };
         let leading = match group.kind {
             GroupKind::Dm => div()
@@ -298,8 +304,8 @@ impl Sidebar {
                 )
                 .into_any_element(),
             GroupKind::Group => GroupGlyph::new()
-                .unread(unread)
-                .selected(selected)
+                .unread(unread || selected && !self.emphasized)
+                .selected(selected && self.emphasized)
                 .into_any_element(),
         };
         // One trailing element, one rule with the topic rows (§7.6, §7.8):
@@ -326,6 +332,7 @@ impl Sidebar {
             selected,
             cx,
         )
+        .when(selected && !self.emphasized, |el| el.bg(k.pressed))
         .h(size::SIDEBAR_ROW)
         .px(space::S8)
         .gap(space::S10)
@@ -417,6 +424,7 @@ impl Sidebar {
             selected,
             cx,
         )
+        .when(selected && !self.emphasized, |el| el.bg(k.pressed))
         .items_start()
         .py(space::S6)
         .px(space::S8)
@@ -496,6 +504,10 @@ pub fn topic_line(title: &str) -> String {
 
 impl Render for Sidebar {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if self.activation.is_none() {
+            self.activation = Some(cx.observe_window_activation(window, |_, _, cx| cx.notify()));
+        }
+        self.emphasized = ui::rows::selection_emphasized(window);
         let k = theme::colors(cx);
         let edges = scroll_edges(&self.scroll);
         watch_scroll_edges(&self.scroll, edges, window, cx);
