@@ -400,7 +400,32 @@ impl FileCache {
         }
     }
 
-    /// The cached path of a file when it is complete on disk. Marks it used.
+    /// The cached copy of a file under its own name (`<dir>/<sha256>/<name>`), when the
+    /// content is on disk. The same bytes sent under another name get a hard link (or a copy)
+    /// with this name, so the path that opens always carries the name the member clicked:
+    /// a safe name never opens a copy whose first name was dangerous (`.terminal`, `.app`).
+    pub fn get_named(&self, sha256: &str, name: &str) -> Option<PathBuf> {
+        let any = self.get(sha256)?;
+        let want = self.dir.join(sha256).join(safe_file_name(name));
+        if any == want || want.is_file() {
+            return Some(want);
+        }
+        if std::fs::hard_link(&any, &want).is_err() {
+            let part = self
+                .dir
+                .join(sha256)
+                .join(format!(".part-{}", crate::new_id()));
+            let guard = PartFile(Some(part.clone()));
+            std::fs::copy(&any, &part).ok()?;
+            quarantine(&part);
+            std::fs::rename(&part, &want).ok()?;
+            guard.keep();
+        }
+        Some(want)
+    }
+
+    /// A cached path of the content (under any name it was stored with). Marks it used.
+    /// To open a file, use [`FileCache::get_named`].
     pub fn get(&self, sha256: &str) -> Option<PathBuf> {
         if !is_sha256(sha256) {
             return None;
@@ -425,7 +450,7 @@ impl FileCache {
         if !is_sha256(&file.sha256) {
             return Err(ApiError::Invalid("bad sha256".into()));
         }
-        if let Some(p) = self.get(&file.sha256) {
+        if let Some(p) = self.get_named(&file.sha256, &file.name) {
             return Ok(p);
         }
         let url = http.url(&format!(
@@ -435,10 +460,10 @@ impl FileCache {
         let resp = http
             .send_checked(http.authed(Method::GET, &url)?.timeout(TRANSFER_TIMEOUT))
             .await?;
-        let path = self
-            .store_response(resp, &file.sha256, file.size, &file.name, progress)
+        self.store_response(resp, &file.sha256, file.size, &file.name, progress)
             .await?;
-        Ok(path)
+        self.get_named(&file.sha256, &file.name)
+            .ok_or_else(|| ApiError::Io("cached file is gone".into()))
     }
 
     /// Adds a local file (for example one I just uploaded) to the cache by copying it.
@@ -484,7 +509,10 @@ impl FileCache {
     ) -> ApiResult<PathBuf> {
         let dir = self.dir.join(sha256);
         let dest = dir.join(safe_file_name(name));
-        // Same content under another name: keep the first file.
+        // Downloaded content: Gatekeeper still checks it when it opens (an app, a script, a
+        // Terminal settings file), as for a file from a browser.
+        quarantine(&part);
+        // Same content under another name: keep the first file; `get_named` links the name.
         let existing = first_complete_file(&dir).await;
         let dest = match existing {
             Some(p) => {
@@ -514,6 +542,37 @@ impl FileCache {
             }
         }
     }
+}
+
+/// Sets `com.apple.quarantine` on a downloaded file, so macOS treats it like a file from a
+/// browser. Errors are ignored (the file system may not support extended attributes).
+fn quarantine(path: &Path) {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::unix::ffi::OsStrExt;
+        let Ok(p) = std::ffi::CString::new(path.as_os_str().as_bytes()) else {
+            return;
+        };
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let value = format!("0081;{secs:08x};;");
+        // SAFETY: both pointers are valid NUL-terminated strings or a buffer of `len` bytes
+        // for the duration of the call.
+        unsafe {
+            libc::setxattr(
+                p.as_ptr(),
+                c"com.apple.quarantine".as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+                0,
+            );
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = path;
 }
 
 /// A partial download that is removed on drop unless kept.

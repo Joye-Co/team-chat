@@ -171,6 +171,37 @@ pub fn is_html(name: &str) -> bool {
         .any(|ext| l.ends_with(ext))
 }
 
+/// How an attachment opens.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenKind {
+    /// In the isolated 产出 window.
+    Page,
+    /// With the default macOS app.
+    System,
+    /// Shown in Finder only.
+    Reveal,
+}
+
+/// Decides from both the attachment's name and the name of the path that opens (macOS
+/// picks the app by the path), so a safe name can never open a file with a risky name.
+pub fn open_kind(name: &str, path: &Path) -> OpenKind {
+    let on_disk = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if is_html(name) && is_html(&on_disk) {
+        OpenKind::Page
+    } else if opens_unsafely(name)
+        || opens_unsafely(&on_disk)
+        || is_html(name)
+        || is_html(&on_disk)
+    {
+        OpenKind::Reveal
+    } else {
+        OpenKind::System
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenAction {
     /// The default app (HTML in the 产出 window; risky files in Finder).
@@ -192,13 +223,14 @@ pub fn open_file(
     cx.spawn(async move |cx: &mut AsyncApp| {
         let result = rx.await.unwrap_or(Err(FileError::Other));
         cx.update(|cx| match result {
-            Ok(path) => match action {
-                OpenAction::RevealInFinder => cx.reveal_path(&path),
-                OpenAction::Open if is_html(&file.name) => {
+            Ok(path) => match (action, open_kind(&file.name, &path)) {
+                (OpenAction::RevealInFinder, _) | (OpenAction::Open, OpenKind::Reveal) => {
+                    cx.reveal_path(&path)
+                }
+                (OpenAction::Open, OpenKind::Page) => {
                     crate::views::artifacts::window::open_html_file(&file, &path, cx)
                 }
-                OpenAction::Open if opens_unsafely(&file.name) => cx.reveal_path(&path),
-                OpenAction::Open => cx.open_with_system(&path),
+                (OpenAction::Open, OpenKind::System) => cx.open_with_system(&path),
             },
             Err(error) => notify_error(
                 fill(
@@ -256,6 +288,18 @@ mod tests {
         assert_eq!(size_text(112_400_000), "112.4 MB");
         assert_eq!(size_text(25_600_000), "25.6 MB");
         assert_eq!(size_text(2_400_000_000), "2.4 GB");
+    }
+
+    #[test]
+    fn the_open_decision_reads_both_names() {
+        let p = |n: &str| std::path::PathBuf::from(format!("/cache/abc/{n}"));
+        assert_eq!(open_kind("notes.txt", &p("notes.txt")), OpenKind::System);
+        // A safe name that would open a cached copy with a risky name is only revealed.
+        assert_eq!(open_kind("notes.txt", &p("a.terminal")), OpenKind::Reveal);
+        assert_eq!(open_kind("a.terminal", &p("notes.txt")), OpenKind::Reveal);
+        assert_eq!(open_kind("page.html", &p("page.html")), OpenKind::Page);
+        assert_eq!(open_kind("notes.txt", &p("page.html")), OpenKind::Reveal);
+        assert_eq!(open_kind("page.html", &p("notes.txt")), OpenKind::Reveal);
     }
 
     #[test]

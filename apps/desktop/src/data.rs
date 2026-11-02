@@ -235,12 +235,19 @@ pub struct FileAttachment {
 }
 
 impl FileAttachment {
-    /// An image the timeline can show inline (the server serves these inline too).
+    /// An image the timeline can show inline (the server serves these inline too). The name
+    /// must also end in an image extension: the server does not check the bytes of a file, and
+    /// an image preview downloads without a click.
     pub fn is_image(&self) -> bool {
+        let ext = self
+            .name
+            .rsplit_once('.')
+            .map(|(_, e)| e.to_ascii_lowercase())
+            .unwrap_or_default();
         matches!(
             self.mime.as_str(),
             "image/png" | "image/jpeg" | "image/gif" | "image/webp"
-        )
+        ) && matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp")
     }
 
     /// True when the file is on the server (not my upload in progress).

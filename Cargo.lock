@@ -878,6 +878,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "imagesize 0.14.0",
+ "libc",
  "regex",
  "reqwest",
  "rusqlite",

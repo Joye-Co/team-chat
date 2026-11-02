@@ -60,9 +60,9 @@ impl Client {
         Ok(self.store().card_actions(message_id)?)
     }
 
-    /// The cached copy of a file, without network.
+    /// The cached copy of a file under its own name, without network.
     pub fn cached_file(&self, file: &FileRef) -> Option<PathBuf> {
-        self.file_cache().get(&file.sha256)
+        self.file_cache().get_named(&file.sha256, &file.name)
     }
 
     /// The folder of a 产出 version when it is on disk, without network.

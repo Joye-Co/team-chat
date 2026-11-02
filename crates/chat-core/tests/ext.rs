@@ -435,6 +435,30 @@ async fn upload_streams_with_hash_and_download_is_verified_and_cached() {
         http.with(|s| s.count("GET", &format!("/v1/files/{fid}/content"))),
         1
     );
+    // The same bytes sent again under another name open under that name, never under the
+    // first one (a safe name must not open a copy named `a.terminal`).
+    let renamed = FileRef {
+        name: "notes.txt".into(),
+        ..fref.clone()
+    };
+    let p3 = client
+        .download_file(renamed.clone(), no_progress())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(p3.file_name().unwrap(), "notes.txt");
+    assert_eq!(std::fs::read(&p3).unwrap(), data);
+    assert_eq!(client.cached_file(&renamed), Some(p3.clone()));
+    assert_eq!(client.cached_file(&fref), Some(p.clone()));
+    #[cfg(target_os = "macos")]
+    {
+        let out = std::process::Command::new("xattr")
+            .args(["-p", "com.apple.quarantine"])
+            .arg(&p3)
+            .output()
+            .unwrap();
+        assert!(out.status.success(), "downloaded files are quarantined");
+    }
 
     // Corrupt bytes are refused and leave nothing behind.
     let data2 = noise(50_000, 9);
