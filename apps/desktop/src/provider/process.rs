@@ -453,6 +453,19 @@ impl CoreProvider {
     }
 }
 
+/// A run plan item of the protocol, as the views read it.
+fn plan_item(i: chat_core::proto::RunPlanItem) -> crate::data::PlanItem {
+    use crate::data::PlanState;
+    use chat_core::proto::RunPlanState as S;
+    let state = match i.state {
+        S::Done => PlanState::Done,
+        S::Current => PlanState::Current,
+        S::Waiting => PlanState::Waiting,
+        S::Pending => PlanState::Pending,
+    };
+    crate::data::PlanItem::new(i.text, state)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -517,15 +530,3 @@ mod tests {
     }
 }
 
-/// A run plan item of the protocol, as the views read it.
-fn plan_item(i: chat_core::proto::RunPlanItem) -> crate::data::PlanItem {
-    use crate::data::PlanState;
-    use chat_core::proto::RunPlanState as S;
-    let state = match i.state {
-        S::Done => PlanState::Done,
-        S::Current => PlanState::Current,
-        S::Waiting => PlanState::Waiting,
-        S::Pending => PlanState::Pending,
-    };
-    crate::data::PlanItem::new(i.text, state)
-}

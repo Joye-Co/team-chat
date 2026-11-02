@@ -1199,6 +1199,6 @@ async fn run_plans_sync_with_the_run_and_stay_in_the_cache() {
     ));
     assert_eq!(http.with(|s| s.count("PUT", "/v1/runs/R1/plan")), 1);
     // Reading the run log refreshes the cached run with its plan.
-    client.run_log("R1", 0).await.unwrap();
+    client.run_log("R1", 0).await.unwrap().unwrap();
     assert_eq!(client.runs("T1").unwrap()[0].plan.as_ref(), Some(&plan2));
 }
