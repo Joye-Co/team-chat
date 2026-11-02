@@ -192,7 +192,7 @@ impl TimelineView {
                         .gap(space::S6)
                         .child(
                             div()
-                                .flex_1()
+                                .flex_shrink(1.)
                                 .min_w_0()
                                 .when(shown, |el| el.opacity(0.6))
                                 .child(b),
