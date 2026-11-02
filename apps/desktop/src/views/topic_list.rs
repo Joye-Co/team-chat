@@ -9,7 +9,7 @@ use std::{collections::HashMap, time::Duration};
 
 use chrono::{DateTime, Datelike, Local, TimeZone};
 use gpui::{
-    Context, ElementId, IntoElement, ParentElement, Render, SharedString,
+    Context, ElementId, InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
     uniform_list,
 };
@@ -64,7 +64,8 @@ impl TopicFilter {
 }
 
 /// The time of a topic row (DESIGN.md §8.2): today `14:32`, yesterday `昨天`,
-/// within 7 days `周一`, this year `10/28`, older `24/12/31`.
+/// within 7 days `周一`, this year `10/28`, older `2024/12/31` (a 4-digit
+/// year, so `23/11/04` cannot read as day/month).
 pub fn list_time(at: Millis, now: DateTime<Local>) -> String {
     // A missing (zero) timestamp shows nothing, never 1970年1月1日.
     if at <= 0 {
@@ -92,8 +93,27 @@ pub fn list_time(at: Millis, now: DateTime<Local>) -> String {
     } else if then.year() == now.year() {
         format!("{}/{}", then.month(), then.day())
     } else {
-        then.format("%y/%m/%d").to_string()
+        format!("{}/{}/{}", then.year(), then.month(), then.day())
     }
+}
+
+/// The full time for a tooltip on any time (§8.2): `2025年11月4日 23:59`.
+pub fn full_time(at: Millis) -> String {
+    if at <= 0 {
+        return String::new();
+    }
+    let Some(then) = Local.timestamp_millis_opt(at).single() else {
+        return String::new();
+    };
+    let date = fill(
+        nav::YEAR_MONTH_DAY,
+        &[
+            ("y", &then.year().to_string()),
+            ("m", &then.month().to_string()),
+            ("d", &then.day().to_string()),
+        ],
+    );
+    format!("{date} {}", then.format("%H:%M"))
 }
 
 /// Relative time for the topic list: 刚刚, N 分钟前, N 小时前, 昨天, N 天前,
@@ -302,7 +322,8 @@ impl TopicListView {
                     .find(|m| &m.id == one)
                     .map(|m| m.name.clone())
                     .unwrap_or_default();
-                Some(fill(r::TOPIC_TYPING, &[("name", &name)]))
+                let name = crate::copy::isolate(&name);
+                Some(crate::copy::ltr(fill(r::TOPIC_TYPING, &[("name", &name)])))
             }
             many => Some(fill(
                 r::TOPIC_TYPING_MANY,
@@ -362,9 +383,10 @@ impl TopicListView {
                     .unwrap_or_default();
                 let body = plain_preview(&m.body);
                 if who.is_empty() {
-                    body
+                    crate::copy::ltr(body)
                 } else {
-                    format!("{who}{}{body}", nav::PREVIEW_SEP)
+                    let who = crate::copy::isolate(&who);
+                    crate::copy::ltr(format!("{who}{}{body}", nav::PREVIEW_SEP))
                 }
             })
             .unwrap_or_default();
@@ -525,14 +547,22 @@ impl TopicListView {
                                         .text_color(if untitled { k.text_2 } else { k.text_1 })
                                         .child(title),
                                 )
-                                .child(
+                                .child({
+                                    let full =
+                                        SharedString::from(full_time(topic.last_activity_at));
                                     div()
+                                        .id("time")
                                         .flex_none()
                                         .t_meta()
                                         .tnum()
                                         .text_color(k.text_3)
-                                        .child(list_time(topic.last_activity_at, now)),
-                                ),
+                                        .when(!full.is_empty(), |el| {
+                                            el.tooltip(move |window, cx| {
+                                                Tooltip::new(full.clone()).build(window, cx)
+                                            })
+                                        })
+                                        .child(list_time(topic.last_activity_at, now))
+                                }),
                         )
                         .child(
                             div()
@@ -572,10 +602,29 @@ impl TopicListView {
 }
 
 /// A one-line preview of a message body: Markdown marks and line breaks
-/// removed.
+/// removed, and a table row `| a | b |` read as `a · b` (its `| --- |`
+/// separator row dropped).
 pub fn plain_preview(body: &str) -> String {
     let head: String = body.chars().take(400).collect();
-    crate::views::search::plain::plain(&head)
+    let lines: Vec<String> = head.lines().filter_map(table_row).collect();
+    crate::views::search::plain::plain(&lines.join("\n"))
+}
+
+/// A body line with Markdown table syntax replaced; `None` for a separator.
+fn table_row(line: &str) -> Option<String> {
+    let t = line.trim();
+    if !t.starts_with('|') {
+        return Some(line.to_string());
+    }
+    if t.chars().all(|c| matches!(c, '|' | '-' | ':' | ' ')) {
+        return None;
+    }
+    let cells: Vec<&str> = t
+        .split('|')
+        .map(str::trim)
+        .filter(|c| !c.is_empty())
+        .collect();
+    Some(cells.join(" · "))
 }
 
 impl Render for TopicListView {
@@ -730,8 +779,17 @@ mod tests {
         assert_eq!(list_time(at(D::days(2)), now), "周一");
         assert_eq!(list_time(at(D::days(6)), now), "周四");
         assert_eq!(list_time(at(D::days(30)), now), "5/18");
-        assert_eq!(list_time(at(D::days(400)), now), "25/05/13");
+        assert_eq!(list_time(at(D::days(400)), now), "2025/5/13");
+        assert!(full_time(at(D::days(400))).starts_with("2025年5月13日 "));
+        assert_eq!(full_time(0), "");
         assert_eq!(list_time(0, now), "");
+    }
+
+    #[test]
+    fn previews_read_tables_as_text() {
+        let body = "| 名称 | 状态 |\n| --- | :-: |\n| 登录 | 卡住了 |";
+        assert_eq!(plain_preview(body), "名称 · 状态 登录 · 卡住了");
+        assert_eq!(plain_preview("a | b"), "a | b");
     }
 
     #[test]

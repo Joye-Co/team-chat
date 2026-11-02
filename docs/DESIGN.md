@@ -655,7 +655,7 @@ remembered per topic). Never shown with no topic open (U07).
 | Yesterday | `昨天` | `14:32` (under the 昨天 divider) |
 | Within 7 days | `周一` | `14:32` |
 | This year | `10/28` | `14:32` |
-| Older | `24/12/31` | `14:32` |
+| Older | `2024/12/31` | `14:32` |
 
 Date dividers spell the day: `今天`, `昨天`, `周一`, `10月28日 周二`, `2024年12月31日`. Tooltips on
 any time show `2025年11月4日 23:59`.
