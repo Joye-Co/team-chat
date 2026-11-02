@@ -1,15 +1,21 @@
 //! Opening a topic at one message (from search): grow the window until the
 //! message is in it, scroll to it and highlight it for a moment.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::{Context, FollowMode, ListOffset, px};
 
 use super::{PAGE, TimelineView, model};
-use crate::app::FocusRequest;
+use crate::{app::FocusRequest, theme::motion};
 
-/// How long the opened message stays highlighted.
-const HIGHLIGHT: Duration = Duration::from_millis(2400);
+/// How long the opened message stays fully highlighted (§7.5: a 2 s
+/// `me-bg` fill that fades out).
+const HIGHLIGHT: Duration = Duration::from_millis(2000);
+/// The fade out after it, on the out curve. Opacity, so it also runs with
+/// reduce motion (§12).
+const HIGHLIGHT_FADE: Duration = motion::SLOW;
+/// One fade frame.
+const FADE_FRAME: Duration = Duration::from_millis(16);
 /// Window grows to look for the message before giving up (x PAGE messages).
 const MAX_GROWS: u32 = 200;
 
@@ -24,6 +30,8 @@ pub(super) struct FocusState {
     busy: bool,
     /// Key of the highlighted row, and the serial that set it.
     highlight: Option<(String, u64)>,
+    /// Strength of the highlight fill, 1 until it fades to 0.
+    highlight_alpha: f32,
 }
 
 impl FocusState {
@@ -60,8 +68,12 @@ impl TimelineView {
         cx.notify();
     }
 
-    pub(super) fn is_highlighted(&self, key: &str) -> bool {
-        self.focus.highlight.as_ref().is_some_and(|(k, _)| k == key)
+    /// The strength of the search highlight on row `key` (0 when none).
+    pub(super) fn highlight_alpha(&self, key: &str) -> f32 {
+        match &self.focus.highlight {
+            Some((k, _)) if k == key => self.focus.highlight_alpha,
+            _ => 0.,
+        }
     }
 
     /// Looks for the target in the window, growing it page by page (from the
@@ -112,6 +124,7 @@ impl TimelineView {
         let key = model::key(&self.messages[ix]).to_string();
         let serial = self.focus.serial;
         self.focus.highlight = Some((key, serial));
+        self.focus.highlight_alpha = 1.;
         self.list.set_follow_mode(FollowMode::Normal);
         self.list.scroll_to(ListOffset {
             item_ix: ix.saturating_sub(1),
@@ -119,18 +132,65 @@ impl TimelineView {
         });
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HIGHLIGHT).await;
-            let _ = this.update(cx, |this, cx| {
-                if this
-                    .focus
-                    .highlight
-                    .as_ref()
-                    .is_some_and(|(_, s)| *s == serial)
-                {
-                    this.focus.highlight = None;
-                    cx.notify();
+            let ease = motion::out_fn();
+            let start = Instant::now();
+            loop {
+                let t = (start.elapsed().as_secs_f32() / HIGHLIGHT_FADE.as_secs_f32()).min(1.);
+                let alpha = highlight_alpha_at(t, &ease);
+                let current = this.update(cx, |this, cx| {
+                    let current = this
+                        .focus
+                        .highlight
+                        .as_ref()
+                        .is_some_and(|(_, s)| *s == serial);
+                    if current {
+                        if alpha <= 0. {
+                            this.focus.highlight = None;
+                        }
+                        this.focus.highlight_alpha = alpha;
+                        cx.notify();
+                    }
+                    current
+                });
+                // A newer highlight took over, the view is gone, or done.
+                if !matches!(current, Ok(true)) || alpha <= 0. {
+                    break;
                 }
-            });
+                cx.background_executor().timer(FADE_FRAME).await;
+            }
         })
         .detach();
+    }
+}
+
+/// The highlight's strength at `t` (0 to 1) of the fade: 1 - out(t), and
+/// exactly 0 at the end.
+fn highlight_alpha_at(t: f32, ease: &impl Fn(f32) -> f32) -> f32 {
+    if t >= 1. {
+        0.
+    } else {
+        (1. - ease(t)).clamp(0., 1.)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn highlight_holds_two_seconds_then_fades_out_on_the_out_curve() {
+        assert_eq!(HIGHLIGHT, Duration::from_millis(2000));
+        assert_eq!(HIGHLIGHT_FADE, motion::SLOW);
+        let ease = motion::out_fn();
+        assert_eq!(highlight_alpha_at(0., &ease), 1.);
+        assert_eq!(highlight_alpha_at(1., &ease), 0.);
+        // The out curve drops fast first: past half way after a quarter.
+        assert!(highlight_alpha_at(0.25, &ease) < 0.5);
+        let mut last = 1.;
+        for i in 1..=20 {
+            let a = highlight_alpha_at(i as f32 / 20., &ease);
+            assert!(a <= last, "the fade never comes back");
+            last = a;
+        }
     }
 }

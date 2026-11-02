@@ -323,7 +323,10 @@ impl TimelineView {
             .flex()
             .gap(space::S12)
             .when(hovered, |el| el.bg(colors.hover))
-            .when(self.is_highlighted(key), |el| el.bg(colors.me_bg))
+            // The search highlight, fading out (§7.5).
+            .when(self.highlight_alpha(key) > 0., |el| {
+                el.bg(colors.me_bg.opacity(self.highlight_alpha(key)))
+            })
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 let key = hover_key.to_string();
                 if *hovering {
@@ -626,6 +629,12 @@ impl TimelineView {
         let lead_id = topic.owner_id.as_deref().unwrap_or(&topic.created_by);
         let lead = self.members.iter().find(|m| m.id == lead_id);
         let title = crate::views::sidebar::topic_line(&topic.title);
+        // How far the top of row 0 is scrolled out of view: each part of
+        // the block fades as it reaches the top edge, so no half-cut title
+        // or meta line shows under the header (§4.4).
+        let cut = self.start_cut;
+        let title_h = self.start_title_h.clone();
+        let fade = StartFade::at(cut, title_h.get());
         div()
             .mx(ROW_INSET)
             .pt(space::S8)
@@ -637,18 +646,32 @@ impl TimelineView {
             .child(
                 div()
                     .mb(space::S12)
+                    .opacity(fade.avatar)
                     .child(ui::MemberAvatar::new(lead, theme::size::AVATAR_START)),
             )
             .child(
                 div()
+                    .relative()
                     .t_display()
                     .text_color(colors.text_1)
                     .line_clamp(2)
-                    .child(title),
+                    .opacity(fade.title)
+                    .child(title)
+                    .child(
+                        gpui::canvas(
+                            move |bounds, _, _| title_h.set(bounds.size.height),
+                            |_, _, _, _| {},
+                        )
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full(),
+                    ),
             )
             .child(
                 div()
                     .mt(space::S8)
+                    .opacity(fade.meta)
                     .min_w(px(0.))
                     .flex()
                     .t_small()
@@ -819,5 +842,68 @@ mod tests {
     #[test]
     fn quotes_every_line() {
         assert_eq!(quote_markdown("a\n\nb"), "> a\n>\n> b");
+    }
+}
+
+/// Opacity of the start block's parts while row 0 scrolls out at the top.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct StartFade {
+    pub avatar: f32,
+    pub title: f32,
+    pub meta: f32,
+}
+
+impl StartFade {
+    /// Row 0's top 16 pt, then the block's 8 pt padding.
+    const AVATAR_TOP: f32 = 24.;
+    /// A part starts to fade this far before it reaches the top edge, and
+    /// is gone when it gets there: the top fade already covers this band,
+    /// and a part at the edge would show as a ghost line under the header.
+    const LEAD: f32 = 20.;
+    /// Cut of a part at which it is gone.
+    const GONE: f32 = 0.;
+
+    /// `cut`: how much of row 0 is above the viewport; `title_h`: the
+    /// title's height (30 per line).
+    pub(super) fn at(cut: Pixels, title_h: Pixels) -> Self {
+        let cut = f32::from(cut);
+        let part = |top: f32| ((top + Self::GONE - cut) / (Self::LEAD + Self::GONE)).clamp(0., 1.);
+        let avatar_top = Self::AVATAR_TOP;
+        let title_top = avatar_top + f32::from(theme::size::AVATAR_START) + f32::from(space::S12);
+        let meta_top = title_top + f32::from(title_h) + f32::from(space::S8);
+        Self {
+            avatar: part(avatar_top),
+            title: part(title_top),
+            meta: part(meta_top),
+        }
+    }
+}
+
+#[cfg(test)]
+mod start_fade_tests {
+    use super::*;
+
+    #[test]
+    fn whole_block_shows_at_the_top() {
+        let f = StartFade::at(px(0.), px(30.));
+        assert_eq!((f.avatar, f.title, f.meta), (1., 1., 1.));
+    }
+
+    #[test]
+    fn a_half_cut_title_is_hidden_and_the_meta_line_stays() {
+        // Title top is at 84; half of a one-line title (15 pt) is cut.
+        let f = StartFade::at(px(99.), px(30.));
+        assert_eq!(f.avatar, 0.);
+        assert_eq!(f.title, 0.);
+        assert_eq!(f.meta, 1.);
+    }
+
+    #[test]
+    fn a_half_cut_meta_line_is_hidden() {
+        // Meta top is at 84 + 60 + 8 = 152 under a two-line title.
+        let f = StartFade::at(px(162.), px(60.));
+        assert_eq!(f.meta, 0.);
+        let f = StartFade::at(px(130.), px(60.));
+        assert!(f.meta > 0.9);
     }
 }

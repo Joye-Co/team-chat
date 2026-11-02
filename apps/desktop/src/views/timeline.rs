@@ -63,6 +63,9 @@ const LOAD_AHEAD: usize = 30;
 pub const EST_ROW_HEIGHT: Pixels = px(56.);
 /// While a message streams, the timeline refreshes at most this often.
 const STREAM_REFRESH: Duration = Duration::from_millis(100);
+/// The eased top fade (§4.4): `content` alpha at each 8 pt step.
+const FADE: [f32; 5] = [1., 0.9, 0.6, 0.25, 0.];
+const FADE_STEP: Pixels = px(8.);
 
 /// Events for other views.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -122,6 +125,12 @@ pub struct TimelineView {
     list: ListState,
     /// End of the visible range from the last user scroll.
     visible_end: Rc<Cell<usize>>,
+    /// Height of the start block's title last frame (one or two lines).
+    start_title_h: Rc<Cell<Pixels>>,
+    /// How much of row 0 is above the viewport, read before the list lays
+    /// out (the list's state is borrowed while it renders rows). Only used
+    /// while row 0 is the first row of the topic (the start block).
+    start_cut: Pixels,
     /// Highest seq this view already marked read.
     marked_seq: u64,
     last_refresh: Option<Instant>,
@@ -214,6 +223,8 @@ impl TimelineView {
             new_below: 0,
             list,
             visible_end,
+            start_title_h: Rc::new(Cell::new(theme::type_scale::DISPLAY.1)),
+            start_cut: px(0.),
             marked_seq: 0,
             last_refresh: None,
             refresh_scheduled: false,
@@ -593,6 +604,9 @@ impl Render for TimelineView {
             cx.defer_in(window, |_, _, cx| cx.notify());
         }
 
+        // The content's scroll offset in pixels (also right while the list
+        // follows the tail, when its logical top is past the last row).
+        self.start_cut = -self.list.scroll_px_offset_for_scrollbar().y;
         let view: Entity<Self> = cx.entity();
         let timeline = list(self.list.clone(), move |ix, window, cx| {
             view.update(cx, |this, cx| this.render_row(ix, window, cx))
@@ -655,30 +669,31 @@ impl Render for TimelineView {
                 .text_color(colors.text_3)
                 .child(t::LOADING_OLDER)
         });
-        // The top 24 pt fade so a row scrolled under the header never shows
-        // as a hard sliver (§4.4). A second, 16 pt layer eases it: a linear
-        // fade alone leaves half a title line under the header at half
-        // strength, which still reads as a cut line.
-        let layer = |h: gpui::Pixels| {
-            div()
-                .absolute()
-                .top_0()
-                .left_0()
-                .right_0()
-                .h(h)
-                .bg(gpui::linear_gradient(
-                    180.,
-                    gpui::linear_color_stop(colors.content, 0.),
-                    gpui::linear_color_stop(colors.content.opacity(0.), 1.),
-                ))
-        };
+        // The top fade so a row scrolled under the header never shows as a
+        // hard sliver (§4.4). A linear fade leaves a half-cut title at 30 to
+        // 40 % ink, which still reads as a cut line; this one is eased over
+        // 32 pt (content at 1, 0.9, 0.6, 0.25, 0 every 8 pt), so the top
+        // half of the band hides what it covers. GPUI gradients take two
+        // stops, so each 8 pt step is its own layer.
         let fade = div()
             .absolute()
             .top_0()
             .left_0()
             .right_0()
-            .child(layer(space::S24))
-            .child(layer(space::S16));
+            .h(FADE_STEP * (FADE.len() - 1) as f32)
+            .children(FADE.windows(2).enumerate().map(|(i, pair)| {
+                div()
+                    .absolute()
+                    .top(FADE_STEP * i as f32)
+                    .left_0()
+                    .right_0()
+                    .h(FADE_STEP)
+                    .bg(gpui::linear_gradient(
+                        180.,
+                        gpui::linear_color_stop(colors.content.opacity(pair[0]), 0.),
+                        gpui::linear_color_stop(colors.content.opacity(pair[1]), 1.),
+                    ))
+            }));
 
         div()
             .id("timeline")
