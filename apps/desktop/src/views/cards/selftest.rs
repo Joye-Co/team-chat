@@ -134,16 +134,23 @@ fn scroll(gallery: &Entity<Gallery>, bottom: bool, cx: &mut gpui::AsyncApp) {
     });
 }
 
-/// Waits up to 10 s for the drawn cards to satisfy `done`, asking for a
-/// redraw meanwhile (frames can be late while the window is covered).
+/// Waits up to 10 s for the drawn cards to satisfy `done`. Frames stop while
+/// the window is covered or on another Space, so after half a second without
+/// progress it draws a frame itself (`Window::draw`; nothing is presented).
 async fn wait_for(
     handle: &AnyWindowHandle,
     cx: &mut gpui::AsyncApp,
     done: impl Fn(&RenderStats) -> bool,
 ) {
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while !done(&stats()) && std::time::Instant::now() < deadline {
-        let _ = handle.update(cx, |_, window, _| window.refresh());
+    let start = std::time::Instant::now();
+    while !done(&stats()) && start.elapsed() < Duration::from_secs(10) {
+        let force = start.elapsed() > Duration::from_millis(500);
+        let _ = handle.update(cx, |_, window, cx| {
+            window.refresh();
+            if force {
+                window.draw(cx).clear(cx);
+            }
+        });
         cx.background_executor()
             .timer(Duration::from_millis(100))
             .await;
