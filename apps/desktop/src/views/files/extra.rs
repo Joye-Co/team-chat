@@ -122,9 +122,12 @@ fn image_preview(
         .child(file.name.clone())
         .into_any_element();
     let inner = match (&thumb, state) {
+        // GPUI's `overflow_hidden` clips to the box, not to its corner
+        // radius: round the picture itself, inside the 1 pt border.
         (Some(path), _) => img(path.clone())
             .size_full()
             .object_fit(ObjectFit::Cover)
+            .rounded(theme::radius::MD - px(1.))
             .into_any_element(),
         (None, Some(TransferState::Failed(e))) => skeleton(
             div()
