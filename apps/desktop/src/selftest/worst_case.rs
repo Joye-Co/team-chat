@@ -526,10 +526,10 @@ impl ChatProvider for WorstCase {
     fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
         self.inner.create_artifact(request)
     }
-    fn create_group(&self, request: CreateGroupRequest) {
+    fn create_group(&self, request: CreateGroupRequest) -> AdminReply<GroupId> {
         self.inner.create_group(request)
     }
-    fn open_dm(&self, member_id: &str) {
+    fn open_dm(&self, member_id: &str) -> AdminReply<GroupId> {
         self.inner.open_dm(member_id)
     }
     fn leave_group(&self, group_id: &str) {
@@ -709,10 +709,10 @@ impl ChatProvider for Empty {
     fn reconnect_now(&self) {
         self.inner.reconnect_now()
     }
-    fn create_group(&self, request: CreateGroupRequest) {
+    fn create_group(&self, request: CreateGroupRequest) -> AdminReply<GroupId> {
         self.inner.create_group(request)
     }
-    fn open_dm(&self, member_id: &str) {
+    fn open_dm(&self, member_id: &str) -> AdminReply<GroupId> {
         self.inner.open_dm(member_id)
     }
     fn update_profile(&self, name: String, role: Option<String>) -> AdminReply<Member> {
