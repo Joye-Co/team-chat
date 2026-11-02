@@ -39,6 +39,10 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Rust builds**: every worktree uses its own `CARGO_TARGET_DIR` and shares compiled
   dependencies through sccache: `export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6`. Run
   `. "$HOME/.cargo/env"` first.
+- **Local processes**: keep PID files, logs and scratch files inside your own worktree under
+  `.tmp/` (git ignores it), never in a shared folder such as a scratchpad: other agents run at
+  the same time. Stop only processes you started, after checking that `ps -p <pid> -o command=`
+  shows your worktree path.
 - **Tooling**: bun for JS packages (`bun install`, `bun run`), cargo for Rust, and wrangler from
   the server package (`bunx wrangler` inside `server/`).
 - **Tests**: server with vitest and `@cloudflare/vitest-pool-workers` (`bun run test` in
