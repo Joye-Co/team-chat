@@ -16,7 +16,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 
 | UI word | Code name | Means | Merges these developer words |
 | --- | --- | --- | --- |
-| 成员 | `Member` | A person or a bot. Shows name, avatar and 岗位 (role). A bot's avatar has a small mark. | agent, bot, teammate |
+| 成员 | `Member` | A person or a bot. Shows name, avatar and 岗位 (role). A bot's avatar is its jojo-friends character with its live status signal, and its 岗位 tag carries a small bot glyph; no other mark (Joye, 2026-11-03). | agent, bot, teammate |
 | 群 | `Group` | Where members talk. A DM is a 群 of two people. | chat, channel, DM |
 | 话题 | `Topic` | One piece of work: discussion, progress, questions and 产出 hang under it. | thread, task, ticket, session |
 | 产出 | `Artifact`, `File` | What a topic produces: pages (HTML), files, decisions. | artifact, attachment |

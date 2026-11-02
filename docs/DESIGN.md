@@ -626,8 +626,8 @@ Before merging UI work, check each line in both themes, at 1100 × 680 and 1920 
 
 ## 16. Open items
 
-- PRODUCT.md says a bot's avatar has "a small mark". v2 uses the character as the mark plus the
-  role tag with a `bot` glyph. Joye to confirm, then PRODUCT.md can say so.
+- Bot identity, confirmed by Joye on 2026-11-03: the character is the mark, plus the role tag
+  with a `bot` glyph. No other bot mark. PRODUCT.md says the same.
 - Wording `添加 AI 成员` for adding a bot (PRODUCT.md has no word for it yet).
 - The 280 ms GrokBot entry and 450 ms sidebar-row animations were cut to 200 ms to keep the
   240 ms cap; check the feel in the app.
