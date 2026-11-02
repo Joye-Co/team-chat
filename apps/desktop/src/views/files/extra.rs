@@ -243,14 +243,16 @@ pub fn file_row(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    file_row_in(&message.group_id, &message.topic_id, file, provider, id, cx)
+    file_row_in(&message.group_id, &message.topic_id, file, provider, false, id, cx)
 }
 
+/// A file row; `compact` (the side panel) shows icon buttons with tooltips.
 pub fn file_row_in(
     group_id: &str,
     topic_id: &str,
     file: &FileAttachment,
     provider: &Arc<dyn ChatProvider>,
+    compact: bool,
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
@@ -289,10 +291,18 @@ pub fn file_row_in(
     let action = |part: &str, label: &'static str, what: OpenAction| {
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
-        Button::new(id(part))
-            .xsmall()
-            .ghost()
-            .label(label)
+        let icon = match (part, what) {
+            ("retry", _) => IconName::RefreshCw,
+            (_, OpenAction::RevealInFinder) => IconName::FolderOpen,
+            _ => IconName::ExternalLink,
+        };
+        let button = Button::new(id(part)).xsmall().ghost();
+        let button = if compact {
+            button.icon(icon).tooltip(label)
+        } else {
+            button.label(label)
+        };
+        button
             .disabled(running)
             .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
             .into_any_element()

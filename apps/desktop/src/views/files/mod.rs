@@ -7,6 +7,7 @@
 //! path it gets back on the main thread.
 
 pub mod extra;
+pub mod preview;
 
 use std::{path::Path, sync::Arc};
 

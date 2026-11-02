@@ -112,6 +112,13 @@ pub const SCENES: &[Scene] = &[
         setup: open_first_topic,
         open: crate::updater::preview::open_manual,
     },
+    Scene {
+        name: "files",
+        about: "A 话题 with an image, files (downloading, uploading), a 产出 card and the side panel lists",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::files::preview::open,
+    },
 ];
 
 pub fn find(name: &str) -> Option<&'static Scene> {

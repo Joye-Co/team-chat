@@ -258,6 +258,7 @@ impl Render for TopicOutputs {
                         &t,
                         &tf.file,
                         &provider,
+                        true,
                         |part| ElementId::Name(SharedString::from(format!("{key}-{part}"))),
                         cx,
                     ))
