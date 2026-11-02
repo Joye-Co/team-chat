@@ -54,7 +54,7 @@ pub fn picker_cell(
 }
 
 /// A reaction pill (§7.5): 26 pt, radius 13, padding 0 8 0 6, gap 4,
-/// `field`; a 16 pt emoji and a 12/16 500 label. Mine: `accent-soft`, a
+/// `field`; a 16 pt emoji and a 12/16 400 label. Mine: `accent-soft`, a
 /// 1 pt `accent` ring and `accent-text`.
 pub fn reaction_pill(
     id: impl Into<ElementId>,
@@ -64,18 +64,26 @@ pub fn reaction_pill(
     cx: &App,
 ) -> Button {
     let k = theme::colors(cx);
-    let variant = if mine {
-        ButtonCustomVariant::new(cx)
-            .color(k.accent_soft)
-            .foreground(k.accent_text)
-            .hover(k.focus_soft)
-            .active(k.focus_soft)
+    // gpui-component draws a custom variant's rest fill at 20 %, so the
+    // spec fill is set on the button itself; hover and pressed stay full.
+    let (fill, variant) = if mine {
+        (
+            k.accent_soft,
+            ButtonCustomVariant::new(cx)
+                .color(k.accent_soft)
+                .foreground(k.accent_text)
+                .hover(k.focus_soft)
+                .active(k.focus_soft),
+        )
     } else {
-        ButtonCustomVariant::new(cx)
-            .color(k.field)
-            .foreground(k.text_2)
-            .hover(k.pressed)
-            .active(k.pressed)
+        (
+            k.field,
+            ButtonCustomVariant::new(cx)
+                .color(k.field)
+                .foreground(k.text_2)
+                .hover(k.pressed)
+                .active(k.border),
+        )
     };
     let button = Button::new(id)
         .custom(variant)
@@ -84,13 +92,14 @@ pub fn reaction_pill(
         .pl(space::S6)
         .pr(space::S8)
         .rounded(size::REACTION / 2.)
+        .bg(fill)
         .child(
             div()
                 .flex()
                 .items_center()
                 .gap(space::S4)
                 .child(div().type_role(type_scale::REACTION_EMOJI).child(emoji))
-                .child(div().t_meta_medium().tnum().one_line().child(label)),
+                .child(div().t_meta().tnum().one_line().child(label)),
         );
     if mine {
         button.border_1().border_color(k.accent)
@@ -109,12 +118,13 @@ pub fn reaction_add(id: impl Into<ElementId>, cx: &App) -> Button {
                 .color(k.field)
                 .foreground(k.text_2)
                 .hover(k.pressed)
-                .active(k.pressed),
+                .active(k.border),
         )
         .with_size(gpui_component::Size::Small)
         .h(size::REACTION)
         .w(px(34.))
         .rounded(size::REACTION / 2.)
+        .bg(k.field)
         .child(icon(
             Lucide::FaceSlightlySmilingPlus,
             theme::icon::ROW,

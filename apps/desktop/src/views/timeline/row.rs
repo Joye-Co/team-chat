@@ -438,7 +438,7 @@ impl TimelineView {
     }
 
     /// The reactions under the body and attachments (§7.5): 26 pt pills 6 pt
-    /// apart, then the add pill. A click toggles my reaction; the tooltip
+    /// apart, then the add pill while the message is hovered. A click toggles my reaction; the tooltip
     /// names everyone who reacted.
     fn render_reactions(&self, message: &Message, key: &str, cx: &mut Context<Self>) -> AnyElement {
         let me = self.me.clone().unwrap_or_default();
@@ -482,6 +482,10 @@ impl TimelineView {
                 .into_any_element()
             })
             .collect::<Vec<_>>();
+        // Like Slack, the add pill shows on the hovered message (or while its
+        // picker is open); it keeps its place so the row never reflows.
+        let show_add = self.hovered.as_deref() == Some(key)
+            || self.reacting.as_ref() == Some(&(key.to_string(), true));
         let add = self.reaction_picker(
             message,
             key,
@@ -496,7 +500,7 @@ impl TimelineView {
             .flex_wrap()
             .gap(space::S6)
             .children(pills)
-            .child(add)
+            .child(div().when(!show_add, |el| el.invisible()).child(add))
             .into_any_element()
     }
 
