@@ -146,10 +146,49 @@ pub fn fill(template: &str, values: &[(&str, &str)]) -> String {
     out
 }
 
+/// Whether `text` has a right-to-left letter (Hebrew, Arabic, Syriac,
+/// Thaana, N'Ko and their presentation forms).
+fn has_rtl(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c as u32,
+            0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF | 0x10800..=0x10FFF | 0x1E800..=0x1EFFF)
+    })
+}
+
+/// A name for joining into a line (previews, context and typing lines):
+/// an RTL name is wrapped in Unicode isolates (FSI … PDI), so it cannot turn
+/// the line around (break-ui CATALOG, RTL names).
+pub fn isolate(name: &str) -> String {
+    if has_rtl(name) {
+        format!("\u{2068}{name}\u{2069}")
+    } else {
+        name.to_string()
+    }
+}
+
+/// A line with the interface direction (LTR) as its base: a line with RTL
+/// text starts with a left-to-right mark, so its `…` stays at the right end.
+pub fn ltr(line: String) -> String {
+    if has_rtl(&line) {
+        format!("\u{200E}{line}")
+    } else {
+        line
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::HashSet;
+
+    #[test]
+    fn rtl_names_are_isolated() {
+        assert_eq!(isolate("Alex"), "Alex");
+        assert_eq!(isolate("نور"), "\u{2068}نور\u{2069}");
+        let line = ltr(format!("{}：好", isolate("نور")));
+        assert!(line.starts_with('\u{200E}'));
+        assert_eq!(ltr("中文".into()), "中文");
+    }
 
     /// Developer words from docs/PRODUCT.md: the bullet that starts with
     /// "Developer words appear only". "model names" stands for a list of model

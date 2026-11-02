@@ -529,10 +529,13 @@ impl SidePanel {
     fn context_line(&self, topic: &Topic) -> String {
         let mut parts = Vec::new();
         match topic.owner_id.as_deref() {
-            Some(owner) => parts.push(fill(p::CONTEXT_OWNER, &[("name", &self.name(owner))])),
+            Some(owner) => parts.push(fill(
+                p::CONTEXT_OWNER,
+                &[("name", &crate::copy::isolate(&self.name(owner)))],
+            )),
             None => parts.push(fill(
                 p::CONTEXT_STARTED,
-                &[("name", &self.name(&topic.created_by))],
+                &[("name", &crate::copy::isolate(&self.name(&topic.created_by)))],
             )),
         }
         let me = self.services.me();
@@ -540,7 +543,7 @@ impl SidePanel {
             .waiting_on
             .iter()
             .filter(|id| Some(*id) != me.as_ref())
-            .map(|id| self.name(id))
+            .map(|id| crate::copy::isolate(&self.name(id)))
             .collect();
         if !others.is_empty() {
             parts.push(fill(
@@ -558,7 +561,7 @@ impl SidePanel {
                 .map_or(topic.last_activity_at, |m| m.created_at);
             parts.push(updated_text(at));
         }
-        parts.join(" · ")
+        crate::copy::ltr(parts.join(" · "))
     }
 
     fn header(&self, topic: Option<&Topic>, sub: bool, cx: &mut Context<Self>) -> gpui::Div {
