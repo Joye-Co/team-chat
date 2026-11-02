@@ -3,15 +3,15 @@
 //! and a button to show the rest, so a 200-row card stays cheap to draw.
 
 use gpui::{
-    AnyElement, App, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement, ObjectFit,
-    ParentElement, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
-    prelude::FluentBuilder as _, px, relative,
+    AnyElement, App, Div, ElementId, InteractiveElement as _, IntoElement, ObjectFit,
+    ParentElement, SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window,
+    div, img, prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _,
+    Disableable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
     progress::Progress,
-    separator::Separator,
+    tooltip::Tooltip,
 };
 
 use super::{is_expanded, part_id, toggle_expanded};
@@ -21,16 +21,22 @@ use crate::{
         Message,
         card::{CardBlock, CardField, CardListItem, CardListStatus, LinkTarget},
     },
-    markdown, theme,
+    markdown,
+    theme::{self, Elevation, Type as _, space},
+    ui::{self, Lucide},
     views::timeline::extras::ExtrasContext,
 };
 
-/// Rows of a table, and items of a list, shown before "show the rest".
-pub const COLLAPSED_ROWS: usize = 10;
-/// Fixed box of an image block, so the row height does not jump when the
-/// file arrives.
-pub const IMAGE_WIDTH: f32 = 320.;
+/// Rows of a table, and items of a list, shown before "查看全部" (§13.9).
+pub const COLLAPSED_ROWS: usize = 8;
+/// Fixed height of an image block, so the row height does not jump when the
+/// file arrives. The width is the card's.
+pub const IMAGE_WIDTH: f32 = 432.;
 pub const IMAGE_HEIGHT: f32 = 200.;
+/// Width of a field label (§13.9).
+const FIELD_LABEL_W: f32 = 56.;
+/// A value longer than this many columns gets a tooltip with the full text.
+const TOOLTIP_AFTER: f32 = 14.;
 
 /// The wire name of a block type.
 pub fn type_name(block: &CardBlock) -> &'static str {
@@ -48,6 +54,18 @@ pub fn type_name(block: &CardBlock) -> &'static str {
     }
 }
 
+/// The header glyph that a block type suggests, for a card without a tone.
+pub fn type_glyph(block: &CardBlock) -> Option<Lucide> {
+    match block {
+        CardBlock::Table { .. } => Some(Lucide::Table),
+        CardBlock::List { .. } => Some(Lucide::ListChecks),
+        CardBlock::Progress { .. } => Some(Lucide::Loader),
+        CardBlock::Code { .. } => Some(Lucide::Terminal),
+        CardBlock::Image { .. } => Some(Lucide::Image),
+        _ => None,
+    }
+}
+
 pub fn render(
     block: &CardBlock,
     ix: usize,
@@ -57,13 +75,19 @@ pub fn render(
     cx: &mut App,
 ) -> AnyElement {
     let key = part_id(message, ix);
+    let colors = theme::colors(cx);
     match block {
-        CardBlock::Text { text } => {
-            markdown::message_body(ElementId::Name(key.into()), text.clone())
-                .w_full()
-                .into_any_element()
-        }
-        CardBlock::Fields { fields } => render_fields(fields, cx),
+        // A summary under the header: 12 / 17 `text-2` (§13.9).
+        CardBlock::Text { text } => div()
+            .w_full()
+            .text_color(colors.text_2)
+            .child(
+                markdown::message_body(ElementId::Name(key.into()), text.clone())
+                    .text_size(theme::type_scale::CALLOUT.0)
+                    .line_height(px(17.)),
+            )
+            .into_any_element(),
+        CardBlock::Fields { fields } => render_fields(&key, fields, cx),
         CardBlock::Table { columns, rows } => render_table(&key, columns, rows, cx),
         CardBlock::List { items } => render_list(&key, items, cx),
         CardBlock::Progress { label, .. } => {
@@ -76,39 +100,82 @@ pub fn render(
         .w_full()
         .into_any_element(),
         CardBlock::Image { file_id, alt } => {
-            render_image(message, ctx, file_id, alt.as_deref(), cx)
+            render_image(&key, message, ctx, file_id, alt.as_deref(), cx)
         }
-        CardBlock::Divider => Separator::horizontal().into_any_element(),
+        CardBlock::Divider => ui::hairline(cx).into_any_element(),
         CardBlock::Link { label, target } => render_link(&key, message, label, target),
         CardBlock::Unknown => div().into_any_element(),
     }
 }
 
-fn render_fields(fields: &[CardField], cx: &App) -> AnyElement {
+/// Display columns of a text: Han and other wide characters count two.
+fn columns_of(text: &str) -> f32 {
+    text.chars()
+        .map(|ch| if ch.is_ascii() { 1.0 } else { 2.0 })
+        .sum()
+}
+
+/// One line of text with an ellipsis, and the full text in a tooltip when it
+/// may not fit (§12).
+fn one_line_text(id: String, text: &str, max_columns: f32) -> AnyElement {
+    let base = div().min_w(px(0.)).one_line();
+    if columns_of(text) > max_columns {
+        let full: SharedString = text.to_string().into();
+        base.id(ElementId::Name(id.into()))
+            .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
+            .child(text.to_string())
+            .into_any_element()
+    } else {
+        base.child(text.to_string()).into_any_element()
+    }
+}
+
+/// `DescriptionList` layout of §13.9: two pairs per row, a 56 pt label in
+/// `text-2` and a 13 pt value on one line.
+fn render_fields(key: &str, fields: &[CardField], cx: &App) -> AnyElement {
     let colors = theme::colors(cx);
+    let pair = |ix: usize, f: &CardField| {
+        div()
+            .w(relative(0.5))
+            .min_w(px(0.))
+            .pr(space::S10)
+            .flex()
+            .items_center()
+            .gap(space::S10)
+            .child(
+                div()
+                    .w(px(FIELD_LABEL_W))
+                    .flex_none()
+                    .text_color(colors.text_2)
+                    .one_line()
+                    .child(f.label.clone()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .text_color(colors.text_1)
+                    .tnum()
+                    .child(one_line_text(
+                        format!("{key}-f{ix}"),
+                        &f.value,
+                        TOOLTIP_AFTER,
+                    )),
+            )
+    };
     div()
         .flex()
-        .flex_wrap()
-        .gap_y(px(8.))
-        .children(fields.iter().map(|f| {
+        .flex_col()
+        .gap(space::S6)
+        .t_ui()
+        .children(fields.chunks(2).enumerate().map(|(row, chunk)| {
             div()
-                .w(relative(0.5))
-                .min_w(px(160.))
-                .pr(px(12.))
                 .flex()
-                .flex_col()
-                .gap(px(2.))
-                .child(
-                    div()
-                        .text_xs()
-                        .text_color(colors.muted_foreground)
-                        .child(f.label.clone()),
-                )
-                .child(
-                    div()
-                        .text_sm()
-                        .text_color(colors.foreground)
-                        .child(f.value.clone()),
+                .children(
+                    chunk
+                        .iter()
+                        .enumerate()
+                        .map(|(i, f)| pair(row * 2 + i, f)),
                 )
         }))
         .into_any_element()
@@ -127,20 +194,31 @@ fn column_width(columns: &[String], rows: &[Vec<String>], col: usize) -> f32 {
                 .sum::<f32>()
         })
         .fold(0.0_f32, f32::max);
-    (longest * 7.0 + 20.0).clamp(72.0, 240.0)
+    (longest * 7.0 + 20.0).clamp(48.0, 240.0)
 }
 
-fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
-    let label = if expanded {
-        c::TABLE_LESS.to_string()
-    } else {
-        fill(c::TABLE_MORE, &[("n", &hidden.to_string())])
-    };
+/// A column of numbers (counts, durations, sizes): every filled cell starts
+/// with a digit or a dash. Numbers are right aligned (§13.9).
+fn is_numeric_column(rows: &[Vec<String>], col: usize) -> bool {
+    let mut any = false;
+    for row in rows {
+        let cell = row.get(col).map(|s| s.trim()).unwrap_or("");
+        if cell.is_empty() {
+            continue;
+        }
+        let first = cell.chars().next().unwrap_or(' ');
+        if !(first.is_ascii_digit() || matches!(first, '—' | '-' | '+' | '−')) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+/// "查看全部 n 行" or "收起" under a long table or list.
+fn more_button(key: &str, label: String) -> Button {
     let toggle_key = key.to_string();
-    Button::new(ElementId::Name(format!("{key}-more").into()))
-        .xsmall()
-        .ghost()
-        .label(label)
+    ui::text_button(ElementId::Name(format!("{key}-more").into()), label)
         .on_click(move |_, window, cx| toggle_expanded(toggle_key.clone(), window, cx))
 }
 
@@ -149,94 +227,187 @@ fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -
     let widths: Vec<f32> = (0..columns.len())
         .map(|i| column_width(columns, rows, i))
         .collect();
+    let numeric: Vec<bool> = (0..columns.len())
+        .map(|i| is_numeric_column(rows, i))
+        .collect();
     let expanded = is_expanded(key, cx);
     let shown = if expanded {
         rows.len()
     } else {
         rows.len().min(COLLAPSED_ROWS)
     };
-    let hidden = rows.len() - rows.len().min(COLLAPSED_ROWS);
+    let last = columns.len().saturating_sub(1);
 
-    let cell = |text: String, width: f32| -> Div {
-        div()
-            .w(px(width))
-            .flex_none()
-            .px(px(8.))
-            .py(px(4.))
-            .child(text)
+    // The first column takes the spare width; numbers align right.
+    let cell = |col: usize, text: String| -> Div {
+        // The first column shrinks to 120 pt (with an ellipsis) before the
+        // table scrolls sideways.
+        let el = div()
+            .when(col > 0, |el| el.w(px(widths[col])).flex_none())
+            .when(col == 0, |el| el.flex_1().min_w(px(widths[0].min(120.))))
+            .when(col < last, |el| el.pr(space::S8))
+            .one_line();
+        if numeric[col] {
+            el.flex().justify_end().tnum().child(text)
+        } else {
+            el.child(text)
+        }
     };
     let header = div()
         .flex()
-        .bg(colors.code_background)
-        .text_xs()
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(colors.foreground)
+        .pb(space::S6)
+        .t_section()
+        .text_color(colors.text_2)
         .children(
             columns
                 .iter()
-                .zip(&widths)
-                .map(|(name, w)| cell(name.clone(), *w)),
+                .enumerate()
+                .map(|(i, name)| cell(i, name.clone())),
         );
     let body = rows[..shown].iter().map(|row| {
         div()
             .flex()
-            .border_t_1()
-            .border_color(colors.border)
-            .text_xs()
-            .text_color(colors.foreground)
+            .py(space::S6)
+            .border_t(theme::HAIRLINE)
+            .border_color(colors.sep)
+            .text_size(px(12.5))
+            .line_height(px(17.))
+            .text_color(colors.text_1)
             .children(
-                widths
-                    .iter()
-                    .enumerate()
-                    .map(|(i, w)| cell(row.get(i).cloned().unwrap_or_default(), *w)),
+                (0..columns.len()).map(|i| cell(i, row.get(i).cloned().unwrap_or_default())),
             )
     });
     div()
         .flex()
         .flex_col()
-        .gap(px(4.))
+        .gap(space::S4)
         .child(
             div()
                 .id(ElementId::Name(format!("{key}-scroll").into()))
                 .w_full()
                 .overflow_x_scroll()
-                .rounded(cx.theme().radius)
-                .border_1()
-                .border_color(colors.border)
-                .child(div().flex().flex_col().child(header).children(body)),
+                .child(
+                    div()
+                        .min_w_full()
+                        .flex()
+                        .flex_col()
+                        .child(header)
+                        .children(body),
+                ),
         )
-        .when(hidden > 0, |el| {
-            el.child(div().flex().child(more_button(key, hidden, expanded)))
+        .when(rows.len() > COLLAPSED_ROWS, |el| {
+            let label = if expanded {
+                c::TABLE_LESS.to_string()
+            } else {
+                fill(c::TABLE_ALL, &[("n", &thousands(rows.len()))])
+            };
+            el.child(div().flex().child(more_button(key, label)))
         })
         .into_any_element()
 }
 
+/// "1,284" (§12).
+pub fn thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    out
+}
+
+/// The 15 pt glyph of a list item (§13.9).
 fn list_icon(status: Option<CardListStatus>, cx: &App) -> AnyElement {
-    let t = cx.theme();
-    let (icon, color) = match status {
+    let k = theme::colors(cx);
+    let size = px(15.);
+    let (glyph, color) = match status {
         None => {
             return div()
-                .size(px(6.))
-                .mx(px(4.))
+                .size(px(5.))
                 .rounded_full()
-                .bg(t.muted_foreground)
+                .bg(k.text_3)
                 .into_any_element();
         }
-        Some(CardListStatus::Todo) => {
-            return div()
-                .size(px(12.))
-                .mx(px(1.))
-                .rounded_full()
-                .border_1()
-                .border_color(t.muted_foreground)
-                .into_any_element();
-        }
-        Some(CardListStatus::InProgress) => (IconName::LoaderCircle, t.blue),
-        Some(CardListStatus::Done) => (IconName::CircleCheck, t.green),
-        Some(CardListStatus::Failed) => (IconName::CircleX, t.red),
-        Some(CardListStatus::Skipped) => (IconName::Minus, t.muted_foreground),
+        Some(CardListStatus::Todo) => (Lucide::Circle, k.text_3),
+        Some(CardListStatus::InProgress) => (Lucide::Loader, k.accent),
+        Some(CardListStatus::Done) => (Lucide::CircleCheck, k.success),
+        Some(CardListStatus::Failed) => (Lucide::CircleAlert, k.danger),
+        Some(CardListStatus::Skipped) => (Lucide::CircleDashed, k.text_3),
     };
-    Icon::new(icon).small().text_color(color).into_any_element()
+    ui::icon(glyph, size, color).into_any_element()
+}
+
+fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
+    let colors = theme::colors(cx);
+    let expanded = is_expanded(key, cx);
+    let shown = if expanded {
+        items.len()
+    } else {
+        items.len().min(COLLAPSED_ROWS)
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S6)
+        .t_ui()
+        .children(items[..shown].iter().map(|item| {
+            let quiet = matches!(
+                item.status,
+                Some(CardListStatus::Done | CardListStatus::Skipped)
+            );
+            div()
+                .flex()
+                .items_start()
+                .gap(space::S8)
+                .child(
+                    div()
+                        .h(theme::type_scale::UI.1)
+                        .w(px(15.))
+                        .flex_none()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(list_icon(item.status, cx)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .text_color(if quiet { colors.text_2 } else { colors.text_1 })
+                        .when(item.status == Some(CardListStatus::Skipped), |el| {
+                            el.line_through()
+                        })
+                        .child(item.text.clone()),
+                )
+                // Failed and skipped also say it in words, not only by glyph.
+                .children(
+                    item.status
+                        .filter(|s| matches!(s, CardListStatus::Failed | CardListStatus::Skipped))
+                        .map(|s| {
+                            div()
+                                .flex_none()
+                                .t_callout()
+                                .text_color(if s == CardListStatus::Failed {
+                                    colors.danger_text
+                                } else {
+                                    colors.text_3
+                                })
+                                .child(list_status_text(s))
+                        }),
+                )
+        }))
+        .when(items.len() > COLLAPSED_ROWS, |el| {
+            let label = if expanded {
+                c::TABLE_LESS.to_string()
+            } else {
+                fill(c::LIST_ALL, &[("n", &thousands(items.len()))])
+            };
+            el.child(div().flex().child(more_button(key, label)))
+        })
+        .into_any_element()
 }
 
 fn list_status_text(status: CardListStatus) -> &'static str {
@@ -249,83 +420,44 @@ fn list_status_text(status: CardListStatus) -> &'static str {
     }
 }
 
-fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
-    let colors = theme::colors(cx);
-    let expanded = is_expanded(key, cx);
-    let shown = if expanded {
-        items.len()
-    } else {
-        items.len().min(COLLAPSED_ROWS)
-    };
-    let hidden = items.len() - items.len().min(COLLAPSED_ROWS);
-    div()
-        .flex()
-        .flex_col()
-        .gap(px(4.))
-        .children(items[..shown].iter().map(|item| {
-            let skipped = item.status == Some(CardListStatus::Skipped);
-            div()
-                .flex()
-                .items_start()
-                .gap(px(6.))
-                .text_sm()
-                .child(
-                    div()
-                        .h(px(20.))
-                        .w(px(14.))
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(list_icon(item.status, cx)),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .text_color(if skipped {
-                            colors.muted_foreground
-                        } else {
-                            colors.foreground
-                        })
-                        .when(skipped, |el| el.line_through())
-                        .child(item.text.clone()),
-                )
-                .children(item.status.map(|s| {
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.muted_foreground)
-                        .child(list_status_text(s))
-                }))
-        }))
-        .when(hidden > 0, |el| {
-            el.child(div().flex().child(more_button(key, hidden, expanded)))
-        })
-        .into_any_element()
-}
-
+/// Label 13 pt and the value 12 pt `text-2` on one line, then a 6 pt
+/// `Progress` in `accent` (§13.9).
 fn render_progress(key: &str, value: f64, label: Option<&str>, cx: &App) -> AnyElement {
     let colors = theme::colors(cx);
     let percent = (value * 100.0).round();
     div()
         .flex()
         .flex_col()
-        .gap(px(4.))
+        .gap(space::S8)
         .child(
             div()
                 .flex()
-                .text_xs()
-                .text_color(colors.muted_foreground)
+                .items_baseline()
+                .gap(space::S8)
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.))
+                        .t_ui()
+                        .text_color(colors.text_1)
+                        .one_line()
                         .children(label.map(str::to_string)),
                 )
-                .child(div().flex_none().child(format!("{percent}%"))),
+                .child(
+                    div()
+                        .flex_none()
+                        .t_callout()
+                        .tnum()
+                        .text_color(colors.text_2)
+                        .child(format!("{percent}%")),
+                ),
         )
-        .child(Progress::new(ElementId::Name(format!("{key}-bar").into())).value(percent as f32))
+        .child(
+            Progress::new(ElementId::Name(format!("{key}-bar").into()))
+                .small()
+                .color(colors.accent)
+                .value(percent as f32),
+        )
         .into_any_element()
 }
 
@@ -354,6 +486,7 @@ pub fn code_fence(lang: Option<&str>, text: &str) -> String {
 }
 
 fn render_image(
+    key: &str,
     message: &Message,
     ctx: &ExtrasContext,
     file_id: &str,
@@ -361,54 +494,68 @@ fn render_image(
     cx: &App,
 ) -> AnyElement {
     let colors = theme::colors(cx);
+    // §13.5 images: radius 8 and an `image-border` ring.
     let frame = div()
-        .w(px(IMAGE_WIDTH))
-        .max_w_full()
+        .w_full()
+        .max_w(px(IMAGE_WIDTH))
         .h(px(IMAGE_HEIGHT))
-        .rounded(cx.theme().radius)
-        .border_1()
-        .border_color(colors.border)
-        .bg(colors.code_background)
+        .rounded(theme::radius::ROW)
+        .shadow(colors.shadow(Elevation::Image))
+        .bg(colors.fill_field)
         .overflow_hidden()
         .flex()
         .items_center()
         .justify_center();
-    let placeholder = |text: String| {
-        div()
-            .flex()
-            .flex_col()
-            .items_center()
-            .gap(px(6.))
-            .px(px(12.))
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(Icon::new(IconName::Frame).text_color(colors.muted_foreground))
-            .child(text)
-    };
-    match ctx
+    let image = match ctx
         .provider
         .card_image(&message.group_id, &message.topic_id, file_id)
     {
         Some(path) => {
             let fallback = alt.unwrap_or(c::IMAGE).to_string();
-            frame
-                .child(
-                    img(path)
-                        .size_full()
-                        .object_fit(ObjectFit::Contain)
-                        .with_fallback(move || {
-                            div().text_xs().child(fallback.clone()).into_any_element()
-                        }),
-                )
-                .into_any_element()
+            let text_3 = colors.text_3;
+            frame.child(
+                img(path)
+                    .size_full()
+                    .object_fit(ObjectFit::Contain)
+                    .with_fallback(move || {
+                        div()
+                            .size_full()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .t_callout()
+                            .text_color(text_3)
+                            .child(fallback.clone())
+                            .into_any_element()
+                    }),
+            )
         }
-        None => frame
-            .child(placeholder(
-                alt.map(str::to_string)
-                    .unwrap_or_else(|| c::IMAGE_LOADING.to_string()),
-            ))
-            .into_any_element(),
-    }
+        None => frame.child(
+            div()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(space::S6)
+                .t_callout()
+                .text_color(colors.text_3)
+                .child(ui::icon(Lucide::Image, theme::icon::EMPTY, colors.text_3))
+                .child(c::IMAGE_LOADING),
+        ),
+    };
+    div()
+        .id(ElementId::Name(format!("{key}-image").into()))
+        .flex()
+        .flex_col()
+        .gap(space::S6)
+        .child(image)
+        .children(alt.map(|alt| {
+            div()
+                .t_callout()
+                .text_color(colors.text_2)
+                .one_line()
+                .child(alt.to_string())
+        }))
+        .into_any_element()
 }
 
 fn render_link(key: &str, message: &Message, label: &str, target: &LinkTarget) -> AnyElement {
@@ -418,6 +565,7 @@ fn render_link(key: &str, message: &Message, label: &str, target: &LinkTarget) -
         .into_any_element()
 }
 
+/// A text button in `accent-text` with a 13 pt glyph.
 fn link_button(key: &str, message: &Message, label: &str, target: &LinkTarget) -> AnyElement {
     let id = ElementId::Name(format!("{key}-link").into());
     let button = Button::new(id).small().link().label(label.to_string());
@@ -426,7 +574,7 @@ fn link_button(key: &str, message: &Message, label: &str, target: &LinkTarget) -
             Some(safe) if safe.starts_with("http") || safe.starts_with("HTTP") => {
                 let url = safe.to_string();
                 button
-                    .icon(IconName::ExternalLink)
+                    .icon(Lucide::ExternalLink)
                     .tooltip(url.clone())
                     .on_click(move |_, _, cx| cx.open_url(&url))
                     .into_any_element()
@@ -437,13 +585,13 @@ fn link_button(key: &str, message: &Message, label: &str, target: &LinkTarget) -
             let (g, t) = (group_id.clone(), topic_id.clone());
             let _ = message;
             button
-                .icon(IconName::ArrowRight)
+                .icon(Lucide::ChevronRight)
                 .tooltip(c::OPEN_TOPIC)
                 .on_click(move |_, _, cx| crate::views::nav::open_topic(g.clone(), t.clone(), cx))
                 .into_any_element()
         }
         LinkTarget::Artifact { .. } => button
-            .icon(IconName::FileText)
+            .icon(Lucide::FileText)
             .tooltip(c::ARTIFACT_LATER)
             .disabled(true)
             .into_any_element(),
@@ -468,8 +616,26 @@ mod tests {
     fn column_width_is_clamped() {
         let cols = vec!["名称".to_string(), "x".repeat(500)];
         let rows = vec![vec!["a".to_string()]];
-        assert_eq!(column_width(&cols, &rows, 0), 72.0);
+        assert_eq!(column_width(&cols, &rows, 0), 48.0);
         assert_eq!(column_width(&cols, &rows, 1), 240.0);
-        assert_eq!(column_width(&cols, &rows, 5), 72.0);
+        assert_eq!(column_width(&cols, &rows, 5), 48.0);
+    }
+
+    #[test]
+    fn counts_have_thousands_separators() {
+        assert_eq!(thousands(8), "8");
+        assert_eq!(thousands(1284), "1,284");
+        assert_eq!(thousands(1_000_000), "1,000,000");
+    }
+
+    #[test]
+    fn number_columns_are_found() {
+        let rows = vec![
+            vec!["main".to_string(), "2:41".to_string(), "—".to_string()],
+            vec!["fix".to_string(), "3:05".to_string(), String::new()],
+        ];
+        assert!(!is_numeric_column(&rows, 0));
+        assert!(is_numeric_column(&rows, 1));
+        assert!(is_numeric_column(&rows, 2));
     }
 }

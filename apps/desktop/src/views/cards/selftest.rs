@@ -11,18 +11,18 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use gpui::{
     ActivationPolicy, AnyWindowHandle, App, AppContext as _, Bounds, Context, ElementId, Entity,
-    FontWeight, InteractiveElement as _, IntoElement, ParentElement, Render, ScrollHandle,
+    InteractiveElement as _, IntoElement, ParentElement, Render, ScrollHandle,
     StatefulInteractiveElement as _, Styled as _, Window, WindowBounds, WindowOptions, div, px,
     size,
 };
-use gpui_component::{Theme, ThemeMode};
+use gpui_component::ThemeMode;
 
 use super::{CardExtra, RenderStats, STATS, samples};
 use crate::{
     app::{Changes, Services},
     data::{ChatProvider, Member, Message, SessionState},
     selftest::capture,
-    theme,
+    theme::{self, Type as _},
     views::{
         nav::selftest::Finish,
         timeline::extras::{ExtrasContext, MessageExtra},
@@ -84,28 +84,30 @@ impl Render for Gallery {
             window_messages: &self.messages,
             me: self.me.as_deref(),
         };
-        let mut rows = Vec::new();
-        for message in &self.messages {
+        // Three columns of 460 pt cards, like docs/design/mockups/cards.
+        let mut columns: [Vec<gpui::AnyElement>; 3] = Default::default();
+        for (ix, message) in self.messages.iter().enumerate() {
             let name = ctx
                 .member(&message.author_id)
                 .map(|m| m.name.clone())
                 .unwrap_or_default();
             let hidden = CardExtra.hides_body(message, &ctx);
             let card = CardExtra.render(message, &ctx, window, cx);
-            rows.push(
+            columns[ix % 3].push(
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(2.))
                     .child(
                         div()
-                            .text_xs()
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(colors.foreground)
+                            .t_caption()
+                            .semibold()
+                            .text_color(colors.text_2)
                             .child(name),
                     )
-                    .children((!hidden).then(|| div().text_sm().child(message.body.clone())))
-                    .children(card),
+                    .children((!hidden).then(|| div().t_ui().child(message.body.clone())))
+                    .children(card)
+                    .into_any_element(),
             );
         }
         div()
@@ -113,13 +115,20 @@ impl Render for Gallery {
             .size_full()
             .overflow_y_scroll()
             .track_scroll(&self.scroll)
-            .bg(colors.background)
-            .text_color(colors.foreground)
-            .p(px(20.))
+            .bg(colors.content)
+            .text_color(colors.text_1)
+            .p(px(28.))
             .flex()
-            .flex_col()
-            .gap(px(16.))
-            .children(rows)
+            .gap(px(28.))
+            .children(columns.into_iter().map(|col| {
+                div()
+                    .w(px(super::CARD_MAX_WIDTH))
+                    .flex_none()
+                    .flex()
+                    .flex_col()
+                    .gap(px(14.))
+                    .children(col)
+            }))
     }
 }
 
@@ -175,12 +184,12 @@ pub fn run(
 ) {
     cx.set_activation_policy(ActivationPolicy::Accessory);
     STATS.with(|s| *s.borrow_mut() = Some(RenderStats::default()));
-    Theme::change(ThemeMode::Light, None, cx);
+    theme::set_mode(ThemeMode::Light, cx);
 
     let options = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(720.), px(900.)),
+            size(px(1500.), px(900.)),
             cx,
         ))),
         focus: false,
@@ -299,7 +308,7 @@ pub fn run(
 
         // 2. Dark mode.
         let _ = handle.update(cx, |_, window, cx| {
-            Theme::change(ThemeMode::Dark, Some(window), cx);
+            theme::set_mode(ThemeMode::Dark, cx);
             window.refresh();
         });
         let before = light.renders;

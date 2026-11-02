@@ -24,10 +24,10 @@ use std::{
 };
 
 use gpui::{
-    AnyElement, App, FontWeight, Global, Hsla, IntoElement, ParentElement, Styled, Window, div,
-    px,
+    AnyElement, App, ElementId, FontWeight, Global, Hsla, InteractiveElement as _, IntoElement,
+    ParentElement, StatefulInteractiveElement as _, Styled, Window, div, px,
 };
-use gpui_component::ActiveTheme as _;
+use gpui_component::tooltip::Tooltip;
 
 use crate::{
     data::{
@@ -85,18 +85,6 @@ pub(crate) fn toggle_expanded(key: String, window: &mut Window, cx: &mut App) {
     window.refresh();
 }
 
-/// The accent color of a card tone, from the theme.
-pub(crate) fn tone_color(tone: CardTone, cx: &App) -> Option<Hsla> {
-    let t = cx.theme();
-    match tone {
-        CardTone::Neutral => None,
-        CardTone::Info => Some(t.blue),
-        CardTone::Success => Some(t.green),
-        CardTone::Warning => Some(t.yellow),
-        CardTone::Danger => Some(t.red),
-    }
-}
-
 /// The chip of a card status: three weights only (§2.5). A warning is
 /// something that waits on the viewer.
 fn status_chip(tone: CardTone, label: impl Into<String>) -> ui::StatusChip {
@@ -116,7 +104,23 @@ pub(crate) fn part_id(message: &Message, part: impl std::fmt::Display) -> String
     format!("card-{}-{part}", message.id)
 }
 
-/// Draws one card: tone stripe, title and status, blocks, buttons, presses.
+/// The 16 pt header glyph of a card (§13.9): `text-2`, `danger` for
+/// failures and `success` for done. A card without a tone takes the glyph of
+/// its first table, list, progress, code or image block.
+fn header_glyph(card: &Card, cx: &App) -> Option<(Lucide, Hsla)> {
+    let k = theme::colors(cx);
+    let from_blocks = || card.blocks.iter().find_map(blocks::type_glyph);
+    match card.tone.unwrap_or_default() {
+        CardTone::Danger => Some((Lucide::CircleAlert, k.danger)),
+        CardTone::Success => Some((Lucide::CircleCheck, k.success)),
+        CardTone::Warning => Some((Lucide::CircleQuestionMark, k.text_2)),
+        CardTone::Info => Some((from_blocks().unwrap_or(Lucide::CircleDot), k.text_2)),
+        CardTone::Neutral => from_blocks().map(|g| (g, k.text_2)),
+    }
+}
+
+/// Draws one card: a level-1 surface, radius 10, max 460 pt, 14 pt side
+/// padding, blocks 10 pt apart (§13.9).
 pub fn render_card(
     card: &Arc<Card>,
     message: &Message,
@@ -126,32 +130,27 @@ pub fn render_card(
 ) -> AnyElement {
     let colors = theme::colors(cx);
     let tone = card.tone.unwrap_or_default();
-    let stripe = tone_color(tone, cx);
-    let radius = cx.theme().radius_lg;
 
-    // §13.9: a status glyph, the title (one line) and the chip at the end.
-    let k = theme::colors(cx);
-    let glyph = match tone {
-        CardTone::Danger => Some((Lucide::CircleAlert, k.danger)),
-        CardTone::Success => Some((Lucide::CircleCheck, k.success)),
-        CardTone::Warning => Some((Lucide::CircleQuestionMark, k.glyph_wait)),
-        CardTone::Info => Some((Lucide::CircleDot, k.glyph_progress)),
-        CardTone::Neutral => None,
-    };
+    // A status glyph, the title (one line, full text in a tooltip) and the
+    // chip at the trailing edge.
+    let title: gpui::SharedString = card.title.clone().into();
+    let tip = title.clone();
     let header = div()
         .flex()
         .items_center()
         .gap(space::S8)
-        .children(glyph.map(|(g, c)| ui::icon(g, theme::icon::TOOLBAR, c)))
+        .children(header_glyph(card, cx).map(|(g, c)| ui::icon(g, theme::icon::TOOLBAR, c)))
         .child(
             div()
+                .id(ElementId::Name(part_id(message, "title").into()))
                 .flex_1()
                 .min_w(px(0.))
                 .t_ui()
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(colors.text_1)
                 .one_line()
-                .child(card.title.clone()),
+                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .child(title),
         )
         .children(card.status.as_ref().map(|s| status_chip(tone, s.label.clone())));
 
@@ -166,7 +165,6 @@ pub fn render_card(
 
     let actions = actions::render(card, message, ctx, window, cx);
 
-    let _ = (stripe, radius);
     ui::card(cx)
         .mt(space::S4)
         .w_full()
@@ -178,10 +176,12 @@ pub fn render_card(
                 .flex_1()
                 .min_w(px(0.))
                 .px(space::S14)
-                .py(space::S12)
+                .py(space::S10)
                 .flex()
                 .flex_col()
                 .gap(space::S10)
+                .t_ui()
+                .text_color(colors.text_1)
                 .child(header)
                 .children(blocks)
                 .children(actions),

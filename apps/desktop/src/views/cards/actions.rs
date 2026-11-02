@@ -9,12 +9,13 @@
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, ElementId, IntoElement, ParentElement, Styled, Window, div,
+    AnyElement, App, ElementId, Hsla, IntoElement, ParentElement, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _, WindowExt as _,
-    button::{Button, ButtonVariant, ButtonVariants as _},
+    ActiveTheme as _, Disableable as _, Sizable as _, WindowExt as _,
+    button::{Button, ButtonCustomVariant, ButtonVariant, ButtonVariants as _},
+    menu::{DropdownMenu as _, PopupMenuItem},
 };
 
 use super::part_id;
@@ -24,12 +25,15 @@ use crate::{
         CardPress, CardPressError, CardPressPhase, ChatProvider, Message,
         card::{ActionStyle, Card, CardAction},
     },
-    theme,
+    theme::{self, Elevation, Type as _, space},
+    ui::{self, Lucide},
     views::{time_text, timeline::extras::ExtrasContext},
 };
 
 /// Press lines shown under a card; older presses are summed up in one line.
 pub const SHOWN_PRESSES: usize = 3;
+/// Buttons shown in a row; the rest go into an `ellipsis` menu (§12).
+pub const SHOWN_ACTIONS: usize = 3;
 
 /// The buttons, the press state line and the press lines, or nothing.
 pub fn render(
@@ -50,16 +54,21 @@ pub fn render(
     let mut out = Vec::new();
 
     if !actions.is_empty() {
+        let (shown, more) = actions.split_at(actions.len().min(SHOWN_ACTIONS));
         out.push(
             div()
                 .flex()
                 .flex_wrap()
-                .gap(px(8.))
+                .items_center()
+                .gap(space::S8)
                 .children(
-                    actions
+                    shown
                         .iter()
                         .map(|action| button(action, message, provider, sending, cx)),
                 )
+                .when(!more.is_empty(), |el| {
+                    el.child(more_menu(more, message, provider, sending))
+                })
                 .into_any_element(),
         );
     }
@@ -74,11 +83,13 @@ pub fn render(
             CardPressError::Other => c::PRESS_FAILED,
         };
         out.push(
-            div()
-                .text_xs()
-                .text_color(colors.danger)
-                .child(fill(template, &[("action", &label)]))
-                .into_any_element(),
+            result_line(
+                Lucide::CircleAlert,
+                colors.danger,
+                colors.danger_text,
+                fill(template, &[("action", &label)]),
+            )
+            .into_any_element(),
         );
     }
 
@@ -103,16 +114,71 @@ fn button(
     message: &Message,
     provider: &Arc<dyn ChatProvider>,
     sending: Option<&str>,
-    _cx: &App,
+    cx: &App,
 ) -> Button {
     let id = ElementId::Name(part_id(message, format_args!("action-{}", action.id)).into());
+    // A destructive action is a secondary button with `danger-text`; the
+    // filled red is kept for the confirm alert (§13.13).
+    let k = theme::colors(cx);
     let variant = match action.style.unwrap_or_default() {
         ActionStyle::Primary => ButtonVariant::Primary,
         ActionStyle::Default => ButtonVariant::Secondary,
-        ActionStyle::Danger => ButtonVariant::Danger,
+        ActionStyle::Danger => ButtonVariant::Custom(
+            ButtonCustomVariant::new(cx)
+                .color(k.control)
+                .foreground(k.danger_text)
+                .hover(cx.theme().secondary_hover)
+                .active(cx.theme().secondary_active)
+        ),
     };
     let loading = sending == Some(action.id.as_str());
-    let press = Press {
+    let press = Press::new(action, message, provider);
+    let primary = matches!(variant, ButtonVariant::Primary);
+    Button::new(id)
+        .small()
+        .with_variant(variant)
+        // Secondary buttons carry the control ring and shadow (§7).
+        .when(!primary, |b| b.shadow(k.shadow(Elevation::Control)))
+        .label(action.label.clone())
+        .loading(loading)
+        .disabled(sending.is_some() && !loading)
+        .on_click(move |_, window, cx| press.run(window, cx))
+}
+
+/// The `ellipsis` button with the actions after the third.
+fn more_menu(
+    more: &[CardAction],
+    message: &Message,
+    provider: &Arc<dyn ChatProvider>,
+    sending: Option<&str>,
+) -> AnyElement {
+    let presses: Vec<Press> = more
+        .iter()
+        .map(|a| Press::new(a, message, provider))
+        .collect();
+    let busy = sending.is_some();
+    Button::new(ElementId::Name(part_id(message, "actions-more").into()))
+        .small()
+        .ghost()
+        .icon(Lucide::Ellipsis)
+        .tooltip(c::MORE_ACTIONS)
+        .disabled(busy)
+        .dropdown_menu(move |mut menu, _, _| {
+            for press in &presses {
+                let press = press.clone();
+                menu = menu.item(
+                    PopupMenuItem::new(press.label.clone())
+                        .on_click(move |_, window, cx| press.run(window, cx)),
+                );
+            }
+            menu
+        })
+        .into_any_element()
+}
+
+impl Press {
+    fn new(action: &CardAction, message: &Message, provider: &Arc<dyn ChatProvider>) -> Self {
+        Self {
         provider: provider.clone(),
         group_id: message.group_id.clone(),
         topic_id: message.topic_id.clone(),
@@ -121,14 +187,8 @@ fn button(
         label: action.label.clone(),
         confirm: action.confirm.clone(),
         danger: action.style == Some(ActionStyle::Danger),
-    };
-    Button::new(id)
-        .small()
-        .with_variant(variant)
-        .label(action.label.clone())
-        .loading(loading)
-        .disabled(sending.is_some() && !loading)
-        .on_click(move |_, window, cx| press.run(window, cx))
+        }
+    }
 }
 
 /// Everything a button needs to send its action.
@@ -202,18 +262,35 @@ fn action_label(card: &Card, action_id: &str, press_label: Option<&str>) -> Stri
     known_label(card, action_id, press_label).unwrap_or_else(|| c::PRESS_REMOVED_ACTION.to_string())
 }
 
-/// "张三 点了「批准」 · 3 分钟前" for the newest presses, oldest first.
+/// A 12 pt line with a 13 pt glyph: a press result or a refused press.
+fn result_line(glyph: Lucide, glyph_color: Hsla, text_color: Hsla, text: String) -> gpui::Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(space::S6)
+        .t_callout()
+        .text_color(text_color)
+        .child(ui::icon(glyph, theme::icon::SMALL, glyph_color).flex_none())
+        .child(div().flex_1().min_w(px(0.)).one_line().child(text))
+}
+
+/// "张三 点了「批准」 · 3 分钟前" for the newest presses, oldest first, each
+/// with a `circle-check` (§13.9).
 fn press_lines(card: &Card, presses: &[CardPress], ctx: &ExtrasContext, cx: &App) -> AnyElement {
     let colors = theme::colors(cx);
     let earlier = presses.len().saturating_sub(SHOWN_PRESSES);
     div()
         .flex()
         .flex_col()
-        .gap(px(2.))
-        .text_xs()
-        .text_color(colors.muted_foreground)
+        .gap(space::S4)
         .when(earlier > 0, |el| {
-            el.child(fill(c::PRESSED_EARLIER, &[("n", &earlier.to_string())]))
+            el.child(
+                div()
+                    .pl(px(19.))
+                    .t_callout()
+                    .text_color(colors.text_3)
+                    .child(fill(c::PRESSED_EARLIER, &[("n", &earlier.to_string())])),
+            )
         })
         .children(presses[earlier..].iter().map(|p| {
             let name = ctx
@@ -221,14 +298,19 @@ fn press_lines(card: &Card, presses: &[CardPress], ctx: &ExtrasContext, cx: &App
                 .map(|m| m.name.clone())
                 .unwrap_or_else(|| c::SOMEONE.to_string());
             let label = action_label(card, &p.action_id, p.label.as_deref());
-            div().child(fill(
-                c::PRESSED,
-                &[
-                    ("name", &name),
-                    ("action", &label),
-                    ("time", &time_text(p.at)),
-                ],
-            ))
+            result_line(
+                Lucide::CircleCheck,
+                colors.success,
+                colors.text_2,
+                fill(
+                    c::PRESSED,
+                    &[
+                        ("name", &name),
+                        ("action", &label),
+                        ("time", &time_text(p.at)),
+                    ],
+                ),
+            )
         }))
         .into_any_element()
 }
