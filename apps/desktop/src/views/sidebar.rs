@@ -8,8 +8,9 @@
 use std::collections::HashSet;
 
 use gpui::{
-    Context, ElementId, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    Context, Div, ElementId, Hsla, InteractiveElement, IntoElement, ParentElement, Render,
+    ScrollHandle, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     menu::{ContextMenuExt as _, PopupMenuItem},
@@ -61,8 +62,46 @@ pub fn menu_item(glyph: Lucide, label: &'static str, danger: bool) -> PopupMenuI
     })
 }
 
+/// Which edges of a scroll area have content beyond them: (top, bottom).
+pub fn scroll_edges(handle: &ScrollHandle) -> (bool, bool) {
+    let y = handle.offset().y;
+    let max = handle.max_offset().y;
+    (y < px(-0.5), max > px(0.5) && y > -max + px(0.5))
+}
+
+/// A 24 pt fade from `color` at the top or bottom edge of a scroll area
+/// (§7.7 scroll edges), so a row cut by the edge never shows as a hard
+/// sliver. Place it in a relative parent over the scroll area.
+pub fn edge_fade(top: bool, color: Hsla) -> Div {
+    let el = div().absolute().left_0().right_0().h(space::S24);
+    let el = if top { el.top_0() } else { el.bottom_0() };
+    el.bg(gpui::linear_gradient(
+        if top { 180. } else { 0. },
+        gpui::linear_color_stop(color, 0.),
+        gpui::linear_color_stop(color.opacity(0.), 1.),
+    ))
+}
+
+/// Re-renders `view` on the next frame when the scroll edges in `seen` are
+/// out of date (the handle learns its sizes only at layout).
+pub fn watch_scroll_edges<V: 'static>(
+    handle: &ScrollHandle,
+    seen: (bool, bool),
+    window: &mut Window,
+    cx: &mut Context<V>,
+) {
+    let handle = handle.clone();
+    let view = cx.entity().downgrade();
+    window.on_next_frame(move |_, cx| {
+        if scroll_edges(&handle) != seen {
+            view.update(cx, |_, cx| cx.notify()).ok();
+        }
+    });
+}
+
 pub struct Sidebar {
     services: Services,
+    scroll: ScrollHandle,
     groups: Vec<GroupSummary>,
     members: Vec<Member>,
     muted: HashSet<GroupId>,
@@ -93,6 +132,7 @@ impl Sidebar {
         ];
         let mut this = Self {
             services,
+            scroll: ScrollHandle::new(),
             groups: Vec::new(),
             members: Vec::new(),
             muted: HashSet::new(),
@@ -441,8 +481,10 @@ pub fn topic_line(title: &str) -> String {
 }
 
 impl Render for Sidebar {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        let edges = scroll_edges(&self.scroll);
+        watch_scroll_edges(&self.scroll, edges, window, cx);
         let place = self.services.nav.read(cx).place.clone();
         let row_of = |this: &Self, g: &GroupSummary, cx: &mut Context<Self>| {
             this.group_row(g, place == Some(Place::Group(g.id.clone())), cx)
@@ -496,8 +538,11 @@ impl Render for Sidebar {
         };
         let more_todo = todo_open && self.todo.len() > TODO_ROWS;
 
-        let todo_header =
-            self.section_header(Section::Todo, nav::TODO, Some(todo_count), None, true, cx);
+        // 待办 shows only while something waits for me.
+        let has_todo = !self.todo.is_empty();
+        let todo_header = has_todo.then(|| {
+            self.section_header(Section::Todo, nav::TODO, Some(todo_count), None, true, cx)
+        });
         let groups_header = self.section_header(
             Section::Groups,
             nav::GROUPS,
@@ -508,7 +553,7 @@ impl Render for Sidebar {
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewGroup), cx))
                     .into_any_element(),
             ),
-            false,
+            !has_todo,
             cx,
         );
         let dms_header = self.section_header(
@@ -624,41 +669,56 @@ impl Render for Sidebar {
             .child(search)
             .child(
                 div()
-                    .id("sidebar-groups")
+                    .relative()
                     .flex_1()
                     .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .px(space::S8)
-                    .flex()
-                    .flex_col()
-                    .child(todo_header)
-                    .children(todo_rows)
-                    .when(more_todo, |el| {
-                        el.child(
-                            div()
-                                .id("todo-all")
-                                .flex_none()
-                                .h(px(28.))
-                                .rounded(theme::radius::MD)
-                                // Under the titles: 8 + 24 + 10 pt.
-                                .pl(px(42.))
-                                .cursor_pointer()
-                                .hover(|s| s.bg(k.sidebar_hover))
-                                .active(|s| s.bg(k.pressed))
-                                .flex()
-                                .items_center()
-                                .t_meta_medium()
-                                .text_color(k.text_2)
-                                .child(fill(nav::TODO_ALL, &[("n", &CountBadge::cap(todo_count))]))
-                                .on_click(cx.listener(|this, _, _, cx| {
-                                    this.services.nav.update(cx, |nav, cx| nav.open_todo(cx))
-                                })),
-                        )
-                    })
-                    .child(groups_header)
-                    .children(group_rows)
-                    .when(!dms.is_empty(), |el| el.child(dms_header).children(dm_rows))
-                    .child(div().h(space::S8).flex_none()),
+                    .child(
+                        div()
+                            .id("sidebar-groups")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .px(space::S8)
+                            .flex()
+                            .flex_col()
+                            .children(todo_header)
+                            .children(todo_rows)
+                            .when(more_todo, |el| {
+                                el.child(
+                                    div()
+                                        .id("todo-all")
+                                        .flex_none()
+                                        .h(px(28.))
+                                        .rounded(theme::radius::MD)
+                                        // Under the titles: 8 + 24 + 10 pt.
+                                        .pl(px(42.))
+                                        .cursor_pointer()
+                                        .hover(|s| s.bg(k.sidebar_hover))
+                                        .active(|s| s.bg(k.pressed))
+                                        .flex()
+                                        .items_center()
+                                        .t_meta_medium()
+                                        .text_color(k.text_2)
+                                        .child(fill(
+                                            nav::TODO_ALL,
+                                            &[("n", &CountBadge::cap(todo_count))],
+                                        ))
+                                        .on_click(cx.listener(|this, _, _, cx| {
+                                            this.services
+                                                .nav
+                                                .update(cx, |nav, cx| nav.open_todo(cx))
+                                        })),
+                                )
+                            })
+                            .child(groups_header)
+                            .children(group_rows)
+                            // 私聊 shows with its + even with no DM yet (§8.5).
+                            .child(dms_header)
+                            .children(dm_rows)
+                            .child(div().h(space::S8).flex_none()),
+                    )
+                    .when(edges.0, |el| el.child(edge_fade(true, k.sidebar)))
+                    .when(edges.1, |el| el.child(edge_fade(false, k.sidebar))),
             )
             // App-level banners (update, connection) above the footer (§8.6).
             .children(crate::views::banners::slot(cx))
