@@ -1,5 +1,27 @@
 {
   "name": "@chat/server",
   "private": true,
-  "type": "module"
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8789 --inspector-port 9789",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "admin": "bun scripts/admin.ts",
+    "db:migrate:local": "wrangler d1 migrations apply DB --local",
+    "deploy:e2e": "wrangler d1 migrations apply DB --env e2e --remote && wrangler deploy --env e2e",
+    "deploy:staging": "wrangler d1 migrations apply DB --env staging --remote && wrangler deploy --env staging",
+    "deploy:production": "wrangler d1 migrations apply DB --env production --remote && wrangler deploy --env production"
+  },
+  "dependencies": {
+    "@chat/protocol": "workspace:*",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.4.12",
+    "@cloudflare/workers-types": "^5.20261102.1",
+    "@types/bun": "^1.4.4",
+    "typescript": "^7.0.2",
+    "vitest": "~4.1.12",
+    "wrangler": "^4.156.1"
+  }
 }

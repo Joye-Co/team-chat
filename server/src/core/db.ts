@@ -1,0 +1,106 @@
+// D1 access for the core directory: members, groups and membership.
+import type { Group, Member } from "@chat/protocol";
+
+export interface MemberRow {
+  id: string;
+  kind: "human" | "bot";
+  name: string;
+  role: string | null;
+  level: "owner" | "member";
+  avatar_url: string | null;
+  deactivated: number;
+  created_at: number;
+}
+
+export interface GroupRow {
+  id: string;
+  kind: "group" | "dm";
+  name: string;
+  dm_key: string | null;
+  is_default: number;
+  created_by: string;
+  created_at: number;
+}
+
+export function toMember(row: MemberRow): Member {
+  const m: Member = {
+    id: row.id,
+    kind: row.kind,
+    name: row.name,
+    role: row.role,
+    level: row.level,
+    avatarUrl: row.avatar_url,
+  };
+  if (row.deactivated) m.deactivated = true;
+  return m;
+}
+
+export async function getMember(db: D1Database, id: string): Promise<MemberRow | null> {
+  return db.prepare("SELECT * FROM members WHERE id = ?").bind(id).first<MemberRow>();
+}
+
+export async function listMembers(db: D1Database): Promise<MemberRow[]> {
+  const r = await db.prepare("SELECT * FROM members ORDER BY created_at, id").all<MemberRow>();
+  return r.results;
+}
+
+export async function getGroup(db: D1Database, id: string): Promise<GroupRow | null> {
+  return db.prepare("SELECT * FROM groups WHERE id = ?").bind(id).first<GroupRow>();
+}
+
+export async function groupMemberIds(db: D1Database, groupId: string): Promise<string[]> {
+  const r = await db
+    .prepare("SELECT member_id FROM group_members WHERE group_id = ? ORDER BY added_at, member_id")
+    .bind(groupId)
+    .all<{ member_id: string }>();
+  return r.results.map((x) => x.member_id);
+}
+
+export async function isGroupMember(db: D1Database, groupId: string, memberId: string): Promise<boolean> {
+  const r = await db
+    .prepare("SELECT 1 AS x FROM group_members WHERE group_id = ? AND member_id = ?")
+    .bind(groupId, memberId)
+    .first();
+  return r !== null;
+}
+
+/** Groups of one member with their member ids, in one query. */
+export async function groupsOfMember(
+  db: D1Database,
+  memberId: string,
+): Promise<{ row: GroupRow; memberIds: string[] }[]> {
+  const r = await db
+    .prepare(
+      `SELECT g.*, (SELECT json_group_array(member_id) FROM
+         (SELECT member_id FROM group_members WHERE group_id = g.id ORDER BY added_at, member_id)) AS member_ids
+       FROM groups g JOIN group_members gm ON gm.group_id = g.id
+       WHERE gm.member_id = ? ORDER BY g.created_at, g.id`,
+    )
+    .bind(memberId)
+    .all<GroupRow & { member_ids: string }>();
+  return r.results.map(({ member_ids, ...row }) => ({ row, memberIds: JSON.parse(member_ids) as string[] }));
+}
+
+/**
+ * The Group as one viewer sees it. A DM is named after the other member.
+ */
+export function viewGroup(
+  row: GroupRow,
+  memberIds: string[],
+  viewerId: string,
+  names: Map<string, string>,
+): Group {
+  let name = row.name;
+  if (row.kind === "dm") {
+    const other = memberIds.find((id) => id !== viewerId) ?? viewerId;
+    name = names.get(other) ?? name;
+  }
+  return {
+    id: row.id,
+    kind: row.kind,
+    name,
+    memberIds,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+}

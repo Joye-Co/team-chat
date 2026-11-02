@@ -1,0 +1,67 @@
+// Worker config. Top level = local dev (`wrangler dev`). Deploy agents fill the D1
+// database_id placeholders of each env. ADMIN_SECRET is a secret:
+// `wrangler secret put ADMIN_SECRET --env <env>`; for local dev it comes from .dev.vars.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chat-api",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-15",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "vars": { "ENVIRONMENT": "local", "VERSION": "0.0.0-dev" },
+  "d1_databases": [
+    { "binding": "DB", "database_name": "chat-local", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+  ],
+  "r2_buckets": [{ "binding": "FILES", "bucket_name": "chat-files-local" }],
+  "durable_objects": {
+    "bindings": [
+      { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
+      { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+    ]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MemberGateway", "GroupRoom"] }],
+  "env": {
+    "e2e": {
+      "name": "chat-api-e2e",
+      "vars": { "ENVIRONMENT": "e2e", "VERSION": "0.0.0-e2e" },
+      "d1_databases": [
+        { "binding": "DB", "database_name": "chat-e2e", "database_id": "REPLACE_WITH_CHAT_E2E_DATABASE_ID", "migrations_dir": "migrations" }
+      ],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "chat-files-e2e" }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
+          { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+        ]
+      }
+    },
+    "staging": {
+      "name": "chat-api-staging",
+      "vars": { "ENVIRONMENT": "staging", "VERSION": "0.0.0-staging" },
+      "d1_databases": [
+        { "binding": "DB", "database_name": "chat-staging", "database_id": "REPLACE_WITH_CHAT_STAGING_DATABASE_ID", "migrations_dir": "migrations" }
+      ],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "chat-files-staging" }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
+          { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+        ]
+      }
+    },
+    "production": {
+      "name": "chat-api-prod",
+      "vars": { "ENVIRONMENT": "production", "VERSION": "0.0.0" },
+      "d1_databases": [
+        { "binding": "DB", "database_name": "chat-prod", "database_id": "REPLACE_WITH_CHAT_PROD_DATABASE_ID", "migrations_dir": "migrations" }
+      ],
+      "r2_buckets": [{ "binding": "FILES", "bucket_name": "chat-files-prod" }],
+      "durable_objects": {
+        "bindings": [
+          { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
+          { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+        ]
+      }
+    }
+  }
+}
