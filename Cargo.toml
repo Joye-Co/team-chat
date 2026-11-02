@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/chat-protocol",
     "crates/chat-core",
+    "crates/artifact-view",
     "apps/desktop",
     "apps/daemon",
     "tools/e2e",
