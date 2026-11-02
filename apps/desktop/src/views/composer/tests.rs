@@ -372,7 +372,10 @@ fn placeholders_name_untitled_topics_and_keep_their_fixed_text() {
     assert_eq!(reply_placeholder("  \n "), "回复「（无标题）」");
     assert_eq!(reply_placeholder("周五 demo"), "回复「周五 demo」");
     let long = reply_placeholder(&"很长的话题标题".repeat(10));
-    assert!(long.starts_with("回复「") && long.ends_with("…」"), "{long}");
+    assert!(
+        long.starts_with("回复「") && long.ends_with("…」"),
+        "{long}"
+    );
     let new = new_topic_placeholder(&"二零二六年第四季度跨部门产品规划讨论群".repeat(2));
     assert!(new.ends_with("…」发起新话题，第一行是标题"), "{new}");
     assert_eq!(
