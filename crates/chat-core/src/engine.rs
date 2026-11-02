@@ -973,6 +973,18 @@ impl Session {
                         group_id: group_id.clone(),
                     });
                 }
+                OutboxOp::CardAction {
+                    group_id,
+                    topic_id: Some(topic_id),
+                    ..
+                } => {
+                    // The UI shows a press as sending until its row is gone.
+                    let _ = self.shared.store.outbox_remove(&id);
+                    self.shared.emit(ClientUpdate::MessagesChanged {
+                        group_id: group_id.clone(),
+                        topic_id: topic_id.clone(),
+                    });
+                }
                 _ => {
                     let _ = self.shared.store.outbox_remove(&id);
                 }
