@@ -731,6 +731,25 @@ pub fn open_bot_dialog(
     )
 }
 
+/// 成员 with the character dialog of the first bot open.
+pub fn open_character_dialog(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_with_dialog(
+        services,
+        Page::Members,
+        |s, w, cx| {
+            let bot = s.provider.members().into_iter().find(|m| m.is_bot());
+            if let Some(bot) = bot {
+                super::members::open_character(s, &bot, w, cx);
+            }
+        },
+        cx,
+    )
+}
+
 /// 机器 with the add-machine dialog open.
 pub fn open_machine_dialog(
     services: Services,

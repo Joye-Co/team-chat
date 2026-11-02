@@ -46,6 +46,7 @@ crate::copy! {
     // add members dialog
     ADD_MEMBERS = "添加成员",
     ADD_MEMBERS_TITLE = "添加成员到「{name}」",
+    ALL_MEMBERS_IN = "所有成员都已在这个群里",
     // start DM picker
     START_DM_PLACEHOLDER = "搜索成员，按回车开始私聊",
     DM_FAILED = "没能打开私聊：{reason}",

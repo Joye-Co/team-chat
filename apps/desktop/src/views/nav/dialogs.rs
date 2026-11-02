@@ -309,7 +309,11 @@ impl Render for NewGroupForm {
                                         .items_center()
                                         .t_small()
                                         .text_color(k.text_2)
-                                        .child(nav::NO_MEMBERS_MATCH),
+                                        .child(if self.members.is_empty() {
+                                            nav::ALL_MEMBERS_IN
+                                        } else {
+                                            nav::NO_MEMBERS_MATCH
+                                        }),
                                 )
                             }),
                     )

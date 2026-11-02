@@ -370,6 +370,46 @@ pub mod scenes {
         over_main(services, content, cx, super::super::dialogs::open_new_group)
     }
 
+    /// The sheet that adds members to the first 群.
+    pub fn add_members(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            // The 群 with the fewest members, so the list has people to add.
+            let group = services
+                .provider
+                .groups()
+                .into_iter()
+                .filter(|g| g.kind == crate::data::GroupKind::Group)
+                .min_by_key(|g| g.member_ids.len());
+            if let Some(g) = group {
+                super::super::dialogs::open_add_members(services, g.id, g.name, window, cx);
+            }
+        })
+    }
+
+    /// The rename dialog of the first 群's newest 话题.
+    pub fn rename_topic(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let group = services
+                .provider
+                .groups()
+                .into_iter()
+                .find(|g| g.kind == crate::data::GroupKind::Group);
+            if let Some(g) = group
+                && let Some(t) = services.provider.topics(&g.id).into_iter().next()
+            {
+                crate::views::topic_menu::open_rename(services, &g.id, &t, window, cx);
+            }
+        })
+    }
+
     /// The member picker that starts a DM.
     pub fn start_dm(
         services: Services,

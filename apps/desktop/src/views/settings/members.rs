@@ -1119,7 +1119,7 @@ impl Render for CharacterForm {
     }
 }
 
-fn open_character(services: Services, member: &Member, window: &mut Window, cx: &mut App) {
+pub fn open_character(services: Services, member: &Member, window: &mut Window, cx: &mut App) {
     let form = cx.new(|_| CharacterForm {
         services,
         member_id: member.id.clone(),
@@ -1130,6 +1130,7 @@ fn open_character(services: Services, member: &Member, window: &mut Window, cx: 
     window.open_dialog(cx, move |dialog, _, cx| {
         crate::ui::SheetExt::sheet(dialog, cx)
             .w(theme::size::DIALOG_WIDTH)
+            .close_button(false)
             .title(title.clone())
             .child(form.clone())
     });

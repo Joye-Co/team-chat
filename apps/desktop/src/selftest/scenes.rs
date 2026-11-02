@@ -156,6 +156,13 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_bot_dialog,
     },
     Scene {
+        name: "settings-character",
+        about: "Settings: the dialog that changes a bot's character, over 成员",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_character_dialog,
+    },
+    Scene {
         name: "settings-add-machine",
         about: "Settings: the add-machine dialog over 机器",
         start: Start::SignedIn,
@@ -292,6 +299,20 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::new_group,
+    },
+    Scene {
+        name: "add-members",
+        about: "The sheet that adds members to a 群 (from the 群 menu)",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::add_members,
+    },
+    Scene {
+        name: "rename-topic",
+        about: "The dialog that renames a 话题 (from the topic menu)",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::rename_topic,
     },
     Scene {
         name: "start-dm",
