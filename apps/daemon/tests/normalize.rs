@@ -330,3 +330,129 @@ fn ansi_is_stripped() {
         "ok\nx"
     );
 }
+
+fn plans(evs: &[RunEvent]) -> Vec<Vec<(String, &'static str)>> {
+    evs.iter()
+        .filter_map(|e| match e {
+            RunEvent::Plan { items } => Some(
+                items
+                    .iter()
+                    .map(|i| {
+                        let state = match i.state {
+                            daemon::proto::RunPlanState::Done => "done",
+                            daemon::proto::RunPlanState::Current => "current",
+                            daemon::proto::RunPlanState::Waiting => "waiting",
+                            daemon::proto::RunPlanState::Pending => "pending",
+                        };
+                        (i.text.clone(), state)
+                    })
+                    .collect(),
+            ),
+            _ => None,
+        })
+        .collect()
+}
+
+fn owned(items: &[(&str, &'static str)]) -> Vec<(String, &'static str)> {
+    items.iter().map(|(t, s)| (t.to_string(), *s)).collect()
+}
+
+#[test]
+fn claude_todowrite_and_task_tools_become_the_run_plan() {
+    let mut n = ClaudeNormalizer::default();
+    let mut evs = n.queue_turn();
+    for v in lines("claude-synthetic-plan.jsonl") {
+        evs.extend(n.on_line(&v));
+    }
+    let got = plans(&evs);
+    let long: String = "长".repeat(200);
+    assert_eq!(
+        got,
+        vec![
+            owned(&[
+                ("写标题和正文", "current"),
+                ("生成 3 张配图", "pending"),
+                ("周四 20:00 发出", "pending"),
+            ]),
+            owned(&[
+                ("写标题和正文", "done"),
+                ("生成 3 张配图", "current"),
+                ("周四 20:00 发出", "pending"),
+            ]),
+            // The unchanged third TodoWrite sends nothing; blank texts are dropped and long
+            // ones cut to 200 characters.
+            vec![
+                ("写标题和正文".to_string(), "done"),
+                ("生成 3 张配图".to_string(), "done"),
+                (long, "current"),
+            ],
+            // TaskCreate adds a pending task; TaskUpdate (by the id from its result) starts it.
+            owned(&[("读失败的测试", "pending")]),
+            owned(&[("读失败的测试", "current")]),
+        ]
+    );
+    // The tool calls are still reported, each followed by its plan.
+    let t = types(&evs);
+    let first_plan = t.iter().position(|x| x == "plan").unwrap();
+    assert_eq!(t[first_plan - 1], "tool.call");
+    assert_eq!(t.iter().filter(|x| *x == "tool.call").count(), 6);
+    assert_eq!(n.last_result.as_deref(), Some("计划好了。"));
+}
+
+#[test]
+fn codex_plan_updates_become_the_run_plan() {
+    let (evs, n) = codex("codex-synthetic-plan.jsonl");
+    assert_eq!(
+        plans(&evs),
+        vec![
+            owned(&[
+                ("Read the failing test", "current"),
+                ("Fix the reconnect in sync", "pending"),
+                ("Run cargo test", "pending"),
+            ]),
+            owned(&[
+                ("Read the failing test", "done"),
+                ("Fix the reconnect in sync", "current"),
+                ("Run cargo test", "pending"),
+            ]),
+            // A new explanation with the same steps sends nothing.
+            owned(&[
+                ("Read the failing test", "done"),
+                ("Fix the reconnect in sync", "done"),
+                ("Run cargo test", "done"),
+            ]),
+        ]
+    );
+    assert_eq!(
+        types(&evs),
+        [
+            "turn.started",
+            "plan",
+            "tool.call",
+            "tool.result",
+            "plan",
+            "plan",
+            "message",
+            "turn.completed"
+        ]
+    );
+    assert_eq!(n.last_message.as_deref(), Some("Fixed the reconnect."));
+}
+
+#[test]
+fn plans_keep_at_most_30_items_and_every_plan_round_trips() {
+    let mut t = daemon::runtime::PlanTracker::default();
+    let many: Vec<String> = (0..40).map(|i| format!("step {i}")).collect();
+    let ev = t
+        .update(many.iter().map(|s| (s.as_str(), "pending")))
+        .unwrap();
+    let RunEvent::Plan { items } = &ev else {
+        panic!("{ev:?}")
+    };
+    assert_eq!(items.len(), 30);
+    // Unknown states are dropped; the frame passes the protocol's own checks.
+    assert!(t.update([("x", "blocked")]).is_some());
+    let back: RunEvent = serde_json::from_value(serde_json::to_value(&ev).unwrap()).unwrap();
+    assert_eq!(back, ev);
+    chat_protocol::check_plan("plan", items).unwrap();
+}

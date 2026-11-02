@@ -18,6 +18,7 @@ pub struct CodexNormalizer {
     pub last_turn_status: Option<String>,
     pub last_error: Option<String>,
     pub usage: Option<Usage>,
+    plan: PlanTracker,
 }
 
 fn s(v: &Value, k: &str) -> Option<String> {
@@ -49,6 +50,21 @@ impl CodexNormalizer {
                     status: status.into(),
                     error,
                 }]
+            }
+            // The plan tool (`update_plan`): the whole list, `plan[]` with `step` and `status`.
+            "turn/plan/updated" => {
+                let Some(steps) = p["plan"].as_array() else {
+                    return vec![];
+                };
+                self.plan
+                    .update(steps.iter().map(|x| {
+                        (
+                            x["step"].as_str().unwrap_or_default(),
+                            x["status"].as_str().unwrap_or_default(),
+                        )
+                    }))
+                    .into_iter()
+                    .collect()
             }
             "item/agentMessage/delta" => vec![RunEvent::MessageDelta {
                 item_id: s(p, "itemId").unwrap_or_default(),

@@ -349,3 +349,40 @@ pub fn uuid_v4() -> String {
         &h[20..32]
     )
 }
+
+/// Maps a CLI's own to-do list to the run plan (docs/machine-protocol.md, `plan`): each text
+/// trimmed and cut to 200 characters, empty texts and unknown states dropped, at most 30 items.
+/// Remembers the last plan sent, so an unchanged list sends nothing.
+#[derive(Debug, Default)]
+pub struct PlanTracker {
+    last: Option<Vec<crate::proto::RunPlanItem>>,
+}
+
+impl PlanTracker {
+    /// `items`: (text, provider status). Returns the `plan` event when the plan changed.
+    pub fn update<'a>(
+        &mut self,
+        items: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Option<RunEvent> {
+        use crate::proto::{MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS, RunPlanItem, RunPlanState};
+        let plan: Vec<RunPlanItem> = items
+            .into_iter()
+            .filter_map(|(text, status)| {
+                let state = match status {
+                    "completed" | "done" => RunPlanState::Done,
+                    "in_progress" | "inProgress" | "in-progress" => RunPlanState::Current,
+                    "pending" => RunPlanState::Pending,
+                    _ => return None,
+                };
+                let text: String = text.trim().chars().take(MAX_PLAN_TEXT_CHARS).collect();
+                (!text.is_empty()).then_some(RunPlanItem { text, state })
+            })
+            .take(MAX_PLAN_ITEMS)
+            .collect();
+        if self.last.as_ref() == Some(&plan) {
+            return None;
+        }
+        self.last = Some(plan.clone());
+        Some(RunEvent::Plan { items: plan })
+    }
+}

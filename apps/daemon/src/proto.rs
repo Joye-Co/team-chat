@@ -2,6 +2,7 @@
 //! side through `chat_protocol::machine`; this module adds daemon helpers.
 
 pub use chat_protocol::ProtocolV1;
+pub use chat_protocol::bots::{MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS, RunPlanItem, RunPlanState};
 pub use chat_protocol::machine::MachineErrorBody as ErrorBody;
 pub use chat_protocol::machine::*;
 

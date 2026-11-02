@@ -25,6 +25,9 @@ pub struct ClaudeNormalizer {
     current_msg: Option<String>,
     consumed: HashMap<String, usize>,
     tools: HashMap<String, (String, Value)>,
+    plan: PlanTracker,
+    /// Claude Code's task tools: (task id once known, subject, status), in creation order.
+    tasks: Vec<(Option<String>, String, String)>,
 }
 
 impl ClaudeNormalizer {
@@ -116,6 +119,7 @@ impl ClaudeNormalizer {
                             let name = b["name"].as_str().unwrap_or("tool").to_string();
                             let input = b["input"].clone();
                             self.tools.insert(id.clone(), (name.clone(), input.clone()));
+                            let plan = self.plan_from_tool(&name, &input);
                             out.push(RunEvent::ToolCall {
                                 item_id: id,
                                 turn_id: self.turn(),
@@ -123,6 +127,7 @@ impl ClaudeNormalizer {
                                 tool: name,
                                 input: Some(input),
                             });
+                            out.extend(plan);
                         }
                         _ => {}
                     }
@@ -140,6 +145,9 @@ impl ClaudeNormalizer {
                     }
                     let id = b["tool_use_id"].as_str().unwrap_or_default().to_string();
                     let ok = b["is_error"].as_bool() != Some(true);
+                    if ok {
+                        self.task_created(&id, &value_text(&b["content"]));
+                    }
                     out.push(RunEvent::ToolResult {
                         item_id: id.clone(),
                         turn_id: self.turn(),
@@ -208,6 +216,77 @@ impl ClaudeNormalizer {
             }
             _ => vec![],
         }
+    }
+}
+
+impl ClaudeNormalizer {
+    /// The run plan from Claude Code's to-do tools: `TodoWrite` (the whole list, `todos[]`
+    /// with `content` and `status`) and the task tools (`TaskCreate` adds one task,
+    /// `TaskUpdate` changes one by `taskId`).
+    fn plan_from_tool(&mut self, name: &str, input: &Value) -> Option<RunEvent> {
+        match name {
+            "TodoWrite" => {
+                let todos = input["todos"].as_array()?;
+                self.plan.update(todos.iter().map(|t| {
+                    (
+                        t["content"].as_str().unwrap_or_default(),
+                        t["status"].as_str().unwrap_or_default(),
+                    )
+                }))
+            }
+            "TaskCreate" => {
+                let subject = input["subject"].as_str()?.to_string();
+                self.tasks.push((None, subject, "pending".into()));
+                self.task_plan()
+            }
+            "TaskUpdate" => {
+                let id = input["taskId"].as_str()?;
+                let task = self.tasks.iter_mut().find(|t| t.0.as_deref() == Some(id))?;
+                if let Some(s) = input["status"].as_str() {
+                    task.2 = s.to_string();
+                }
+                if let Some(s) = input["subject"].as_str() {
+                    task.1 = s.to_string();
+                }
+                self.tasks.retain(|t| t.2 != "deleted");
+                self.task_plan()
+            }
+            _ => None,
+        }
+    }
+
+    /// A `TaskCreate` result names the new task's id: `Task #3 created successfully`.
+    fn task_created(&mut self, tool_use_id: &str, result: &str) {
+        let Some((name, input)) = self.tools.get(tool_use_id) else {
+            return;
+        };
+        if name != "TaskCreate" {
+            return;
+        }
+        let Some(id) = result
+            .split("Task #")
+            .nth(1)
+            .and_then(|r| r.split_whitespace().next())
+        else {
+            return;
+        };
+        let subject = input["subject"].as_str().unwrap_or_default();
+        if let Some(t) = self
+            .tasks
+            .iter_mut()
+            .find(|t| t.0.is_none() && t.1 == subject)
+        {
+            t.0 = Some(id.to_string());
+        }
+    }
+
+    fn task_plan(&mut self) -> Option<RunEvent> {
+        let tasks = std::mem::take(&mut self.tasks);
+        let ev = self
+            .plan
+            .update(tasks.iter().map(|t| (t.1.as_str(), t.2.as_str())));
+        self.tasks = tasks;
+        ev
     }
 }
 
