@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
-# Builds the desktop app in release mode, wraps it in <name>.app, ad-hoc signs it and makes
+# Builds the desktop app in release mode, wraps it in <name>.app, signs it and makes
 # dist/<name>-<version>.dmg plus its .sha256.
 #
 # Usage: scripts/build-dmg.sh [--skip-build]
 #   --skip-build   reuse the release binary already in CARGO_TARGET_DIR
 # Env: CARGO_TARGET_DIR, DIST (default dist/), MACOS_MIN (default 13.0),
-#      DESKTOP_PACKAGE (default desktop)
+#      DESKTOP_PACKAGE (default desktop),
+#      SIGN_IDENTITY (default "-", ad-hoc): a code-signing identity in the keychain. Use the
+#      same identity for every release: the designated requirement of an ad-hoc signature
+#      is its cdhash, so each ad-hoc build asks again for the saved sign-in in the Keychain.
 #
 # Files in apps/desktop/resources/ (if it exists) are copied into Contents/Resources;
 # an AppIcon.icns there replaces assets/brand/AppIcon.icns. The DMG window uses
@@ -18,7 +21,7 @@ skip_build=0
 for arg in "$@"; do
   case "$arg" in
     --skip-build) skip_build=1 ;;
-    -h | --help) sed -n '2,13p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
@@ -101,9 +104,14 @@ if [ -d "$ROOT/apps/desktop/resources" ]; then
   cp -R "$ROOT/apps/desktop/resources/." "$APP/Contents/Resources/"
 fi
 
-log "ad-hoc signing"
+SIGN_IDENTITY="${SIGN_IDENTITY:--}"
+if [ "$SIGN_IDENTITY" = - ]; then
+  log "ad-hoc signing (set SIGN_IDENTITY to keep Keychain access across updates)"
+else
+  log "signing with a stable identity"
+fi
 xattr -cr "$APP"
-codesign --force --deep --sign - --identifier "$BUNDLE_ID" "$APP"
+codesign --force --deep --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP"
 codesign --verify --deep --strict "$APP"
 
 log "making the DMG"

@@ -51,6 +51,10 @@ check "LSMinimumSystemVersion" test -n "$(pl LSMinimumSystemVersion)"
 check "NSHighResolutionCapable" test "$(pl NSHighResolutionCapable)" = true
 check "URL scheme" test "$(pl CFBundleURLTypes.0.CFBundleURLSchemes.0)" = "$SCHEME"
 check "codesign --verify" codesign --verify --deep --strict "$APP"
-check "ad-hoc signature" bash -c "codesign -dv '$APP' 2>&1 | grep -q 'Signature=adhoc'"
+if [ "${SIGN_IDENTITY:--}" = - ]; then
+  check "ad-hoc signature" bash -c "codesign -dv '$APP' 2>&1 | grep -q 'Signature=adhoc'"
+else
+  check "stable designated requirement" bash -c "codesign -d -r- '$APP' 2>&1 | grep -q 'designated => identifier'"
+fi
 
 if [ "$fail" = 0 ]; then log "DMG checks passed: $DMG"; else die "DMG checks failed: $DMG"; fi
