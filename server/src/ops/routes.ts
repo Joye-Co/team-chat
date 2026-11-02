@@ -287,7 +287,7 @@ export function registerOpsRoutes(): void {
       for (;;) {
         const page = await env.DB.prepare(
           `SELECT id, topic_id, name, size, mime, sha256, width, height, created_by, created_at FROM files
-           WHERE group_id = ? AND status = 'ready' AND id > ? ORDER BY id LIMIT ?`,
+           WHERE group_id = ? AND status = 'ready' AND deleted_at IS NULL AND id > ? ORDER BY id LIMIT ?`,
         )
           .bind(params.id, after, FILES_PAGE)
           .all<FileRecordD1>();

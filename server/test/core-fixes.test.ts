@@ -3,6 +3,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import { roomStub } from "../src/core/env";
+import { scrubArchivedEvent } from "../src/ops/archive";
 import { Client, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
 
 afterAll(async () => {
@@ -206,5 +207,30 @@ describe("core review fixes", () => {
     expect(inv3.status).toBe(400);
     const member = await createMember();
     expect((await api("/v1/invites", { token: member.token, body: { name: "x", kind: "human", level: "member", memberId: x.id } })).status).toBe(403);
+  });
+
+  it("scrub archived events of a deleted message like a live delete, quotes included", () => {
+    const ids = new Set(["m1"]);
+    const created = {
+      seq: 1,
+      type: "message.created",
+      at: 1,
+      actorId: "a",
+      messageId: "m1",
+      data: { message: { id: "m1", body: "secret", attachments: [{ fileId: "f" }], replyTo: { messageId: "m0", excerpt: "x" }, reactions: [] } },
+    };
+    const quote = {
+      seq: 2,
+      type: "message.created",
+      at: 2,
+      actorId: "b",
+      messageId: "m2",
+      data: { message: { id: "m2", body: "看", replyTo: { messageId: "m1", authorId: "a", excerpt: "secret" } } },
+    };
+    expect(scrubArchivedEvent(created, ids)).toBe(true);
+    expect(created.data.message).toEqual({ id: "m1", body: "" });
+    expect(scrubArchivedEvent(quote, ids)).toBe(true);
+    expect(quote.data.message.replyTo.excerpt).toBe("");
+    expect(scrubArchivedEvent(quote, ids)).toBe(false);
   });
 });
