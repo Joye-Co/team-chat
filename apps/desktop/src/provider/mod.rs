@@ -644,20 +644,21 @@ impl CoreProvider {
                 }
             }
             ClientUpdate::CaughtUp => out.extend([Change::Groups, Change::Todo]),
-            ClientUpdate::Notify {
-                reason,
-                group_id,
-                topic_id,
-                message_id,
-            } => {
-                if let Some(notice) =
-                    self.notice(reason, &group_id, topic_id.as_deref(), message_id.as_deref())
+            ClientUpdate::Notify(n) => {
+                if let Some(notice) = self.notice(
+                    n.reason,
+                    &n.group_id,
+                    n.topic_id.as_deref(),
+                    n.message_id.as_deref(),
+                )
                     && let Some(tx) = lock(&self.shared.notices).as_ref()
                 {
                     let _ = tx.unbounded_send(notice);
                 }
             }
             ClientUpdate::GroupEvent(_)
+            | ClientUpdate::ArtifactsChanged { .. }
+            | ClientUpdate::RunsChanged { .. }
             | ClientUpdate::SearchResults { .. }
             | ClientUpdate::SearchFailed { .. } => {}
         }

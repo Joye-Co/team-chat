@@ -182,7 +182,9 @@ pub fn login_error(e: &ApiError) -> LoginError {
         ApiError::Unexpected { status: 401 } => LoginError::BadCredential,
         // Not our server (a web page, a proxy error).
         ApiError::Unexpected { .. } | ApiError::Decode(_) => LoginError::ServerUnreachable,
-        ApiError::NoToken => LoginError::Other,
+        ApiError::NoToken | ApiError::Invalid(_) | ApiError::Io(_) | ApiError::Checksum => {
+            LoginError::Other
+        }
     }
 }
 
