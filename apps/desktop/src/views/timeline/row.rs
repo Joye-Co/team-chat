@@ -17,6 +17,7 @@ use gpui_component::{
     input::Textarea,
     menu::{ContextMenuExt as _, DropdownMenu as _},
     popover::Popover,
+    spinner::Spinner,
 };
 
 use super::{TimelineView, extras, model};
@@ -174,15 +175,41 @@ impl TimelineView {
                 .into_any_element(),
             )
         };
-        // Sending dims the body (§7.5).
+        // Sending (§7.5, §12): after 400 ms the body dims to 60 % with a
+        // 14 pt spinner after it, for at least 500 ms. A normal ack is
+        // faster, so my sent message does not change at all.
         let body = body.map(|b| {
-            div()
-                .w_full()
-                .when(message.send_state == SendState::Pending, |el| {
-                    el.opacity(0.6)
-                })
-                .child(b)
-                .into_any_element()
+            let pending = message.send_state == SendState::Pending;
+            let spinner_color = colors.text_3;
+            ui::motion::busy_gate(
+                ElementId::Name(format!("sending-{key}").into()),
+                pending,
+                move |shown| {
+                    div()
+                        .w_full()
+                        .flex()
+                        .items_end()
+                        .gap(space::S6)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .when(shown, |el| el.opacity(0.6))
+                                .child(b),
+                        )
+                        .when(shown, |el| {
+                            el.child(
+                                div().flex_none().pb(px(3.)).child(
+                                    Spinner::new()
+                                        .with_size(theme::icon::CHIP)
+                                        .color(spinner_color),
+                                ),
+                            )
+                        })
+                        .into_any_element()
+                },
+            )
+            .into_any_element()
         });
 
         let marks = (message.edited_at.is_some() && !deleted).then(|| {
