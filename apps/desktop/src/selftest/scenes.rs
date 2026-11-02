@@ -332,6 +332,34 @@ pub const SCENES: &[Scene] = &[
         setup: crate::views::process::preview::open_running_developer,
         open: open_main,
     },
+    Scene {
+        name: "topic",
+        about: "main-*: a long 话题 with a date divider, a steps row, a 产出, an ask card, a bot at work and the @ list",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_main,
+    },
+    Scene {
+        name: "topic-short",
+        about: "short-topic-*: the start block, a draft card and the hover toolbar",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_short,
+    },
+    Scene {
+        name: "topic-worst",
+        about: "worst-case-*: a long title, a URL, jumbo emoji, a big download, a failed send, many typing",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_worst,
+    },
+    Scene {
+        name: "topic-compose",
+        about: "The composer while reconnecting: the slab, a quote chip, the format bar and the emoji picker",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_compose,
+    },
 ];
 
 pub fn find(name: &str) -> Option<&'static Scene> {
