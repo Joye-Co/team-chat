@@ -182,15 +182,13 @@ fn run(options: Options) -> i32 {
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             crate::render_text_like_the_mockups(cx);
-            // No Dock icon. The app activates while it captures, so the
-            // windows draw as key windows (traffic lights in color), then
-            // hands the focus back to the app that had it.
+            // No Dock icon and never an activation: the person who uses
+            // this Mac keeps the focus. The windows draw as inactive
+            // windows (grey traffic lights).
             cx.set_activation_policy(ActivationPolicy::Accessory);
-            let frontmost = capture::Frontmost::now();
             let started = Instant::now();
             cx.spawn(async move |cx| {
                 let ok = run_all(&options, cx).await;
-                frontmost.restore();
                 eprintln!(
                     "screenshots done in {:.1} s",
                     started.elapsed().as_secs_f32()
@@ -282,7 +280,6 @@ async fn shoot(
     };
     let result = async {
         cx.update(|cx| {
-            cx.activate(true);
             handle.update(cx, |_, window, cx| {
                 crate::theme::set_mode(theme_mode, cx);
                 // The settings window keeps its own 960 x 720; the main and
@@ -303,7 +300,6 @@ async fn shoot(
                 }
                 window.refresh();
                 capture::order_front(window)?;
-                window.activate_window();
                 Ok::<_, String>(())
             })
         })

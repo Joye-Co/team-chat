@@ -123,35 +123,6 @@ pub fn frame_size(_window: &Window) -> Result<(f64, f64), String> {
     Ok((0., 0.))
 }
 
-/// The app that had the focus before the self-test activated itself.
-pub struct Frontmost(
-    #[cfg(target_os = "macos")] Option<objc2::rc::Retained<objc2_app_kit::NSRunningApplication>>,
-);
-
-impl Frontmost {
-    #[cfg(target_os = "macos")]
-    pub fn now() -> Self {
-        Self(objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication())
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub fn now() -> Self {
-        Self()
-    }
-
-    /// Gives the focus back to that app.
-    #[cfg(target_os = "macos")]
-    pub fn restore(&self) {
-        if let Some(app) = &self.0 {
-            #[allow(deprecated)] // `activate` needs macOS 14
-            app.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::empty());
-        }
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    pub fn restore(&self) {}
-}
-
 /// The window server number of this window (`-[NSWindow windowNumber]`).
 #[cfg(target_os = "macos")]
 pub fn window_number(window: &Window) -> Result<isize, String> {
