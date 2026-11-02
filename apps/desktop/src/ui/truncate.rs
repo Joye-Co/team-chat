@@ -86,10 +86,7 @@ pub fn truncating(
 
 #[cfg(test)]
 mod tests {
-    use gpui::{
-        Context, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext, Window, div,
-        prelude::FluentBuilder as _, px, size,
-    };
+    use gpui::{Context, IntoElement, Render, TestAppContext, Window, div, px, size};
 
     use super::*;
 
