@@ -1,6 +1,12 @@
 import { env } from "cloudflare:test";
 import { beforeAll, describe, expect, it } from "vitest";
 import { Client, api } from "./helpers";
+import { protocolViolations } from "./helpers";
+import { afterAll as afterAllCheck } from "vitest";
+
+afterAllCheck(() => {
+  expect(protocolViolations).toEqual([]);
+});
 
 describe("bootstrap", () => {
   beforeAll(async () => {

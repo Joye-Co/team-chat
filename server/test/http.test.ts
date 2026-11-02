@@ -1,6 +1,12 @@
 import { SELF, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { Client, api, createGroup, createMember } from "./helpers";
+import { protocolViolations } from "./helpers";
+import { afterAll as afterAllCheck } from "vitest";
+
+afterAllCheck(() => {
+  expect(protocolViolations).toEqual([]);
+});
 
 describe("http auth", () => {
   it("rejects requests without a token with 401 and the error shape", async () => {

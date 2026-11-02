@@ -1,4 +1,5 @@
 import { SELF, env } from "cloudflare:test";
+import { ServerFrame } from "@chat/protocol";
 import { expect } from "vitest";
 import { newToken, sha256Hex } from "../src/core/crypto";
 import { ulid } from "../src/core/ids";
@@ -77,6 +78,9 @@ export async function waitUntil<T>(fn: () => T | undefined | false, ms = 5000, w
   }
 }
 
+/** Every server frame a test client got that does not parse with the protocol schema. */
+export const protocolViolations: unknown[] = [];
+
 export class Client {
   frames: any[] = [];
   private seen = 0;
@@ -84,7 +88,10 @@ export class Client {
   private n = 0;
   constructor(readonly ws: WebSocket) {
     ws.addEventListener("message", (e) => {
-      this.frames.push(JSON.parse(e.data as string));
+      const f = JSON.parse(e.data as string);
+      const check = ServerFrame.safeParse(f);
+      if (!check.success) protocolViolations.push({ frame: f, issues: check.error.issues });
+      this.frames.push(f);
     });
     ws.addEventListener("close", (e) => {
       this.closed = { code: e.code };

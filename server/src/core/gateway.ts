@@ -72,8 +72,8 @@ const CORE_RATE: Record<string, RateClass> = {
   delete: "write",
   "topic.update": "write",
   delta: "delta",
-  typing: "none",
-  read: "none",
+  typing: "read",
+  read: "read",
   fetch: "read",
   history: "read",
 };

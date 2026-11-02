@@ -1,5 +1,11 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { Client, api, clientMsgId, createGroup, createMember, waitUntil } from "./helpers";
+import { protocolViolations } from "./helpers";
+import { afterAll as afterAllCheck } from "vitest";
+
+afterAllCheck(() => {
+  expect(protocolViolations).toEqual([]);
+});
 
 async function setup(n = 2) {
   const members = await Promise.all(Array.from({ length: n }, (_, i) => createMember({ name: `U${i}` })));
