@@ -1,0 +1,17 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "description": "removed",
+  "value": {
+    "seq": 42,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0ALICE0000000000000AB",
+    "type": "reaction.changed",
+    "data": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "emoji": "✅",
+      "on": false
+    }
+  }
+}

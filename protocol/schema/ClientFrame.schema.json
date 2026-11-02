@@ -1398,6 +1398,42 @@
         "rid",
         "query"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "string",
+          "const": "react"
+        },
+        "rid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "messageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "emoji": {
+          "type": "string",
+          "minLength": 1
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "t",
+        "rid",
+        "groupId",
+        "messageId",
+        "emoji",
+        "on"
+      ]
     }
   ],
   "$defs": {

@@ -242,6 +242,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "hello",
             "history",
             "ping",
+            "react",
             "read",
             "search",
             "send",
@@ -267,7 +268,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 12);
+    assert_eq!(valid("Event", "type").len(), 13);
     assert_eq!(valid("TransientEvent", "type").len(), 3);
 }
 

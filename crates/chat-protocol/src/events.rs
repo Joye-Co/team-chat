@@ -10,6 +10,7 @@ use crate::card::Card;
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
 use crate::files::ArtifactEventData;
 use crate::message::{ArtifactRef, FileRef};
+use crate::reactions::ReactionChangedData;
 use crate::serde_util::{any_value, non_null, nullable};
 
 /// One stored event. The shared fields sit next to `type` and `data` on the wire.
@@ -59,6 +60,8 @@ pub enum EventData {
     ArtifactVersionAdded(ArtifactEventData),
     #[serde(rename = "run.updated")]
     RunUpdated(RunUpdatedData),
+    #[serde(rename = "reaction.changed")]
+    ReactionChanged(ReactionChangedData),
 }
 
 impl EventData {
@@ -76,6 +79,7 @@ impl EventData {
             Self::ArtifactCreated(_) => "artifact.created",
             Self::ArtifactVersionAdded(_) => "artifact.versionAdded",
             Self::RunUpdated(_) => "run.updated",
+            Self::ReactionChanged(_) => "reaction.changed",
         }
     }
 }

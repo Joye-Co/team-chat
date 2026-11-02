@@ -9,6 +9,7 @@ use crate::card::{Card, check_action_id};
 use crate::entities::{Seq, TopicStatus};
 use crate::limits::*;
 use crate::message::{ArtifactRef, FileRef, ReplyToRef, check_refs};
+use crate::reactions::ReactFrame;
 use crate::search::SearchFrame;
 use crate::serde_util::{any_value, non_null, nullable};
 use crate::topic::{TopicFollowFrame, check_waiting_on};
@@ -44,6 +45,8 @@ pub enum ClientFrame {
     CardAction(CardActionFrame),
     #[serde(rename = "search")]
     Search(SearchFrame),
+    #[serde(rename = "react")]
+    React(ReactFrame),
 }
 
 impl ClientFrame {
@@ -64,6 +67,7 @@ impl ClientFrame {
             Self::TopicFollow(_) => "topic.follow",
             Self::CardAction(_) => "card.action",
             Self::Search(_) => "search",
+            Self::React(_) => "react",
         }
     }
 
@@ -79,6 +83,7 @@ impl ClientFrame {
             Self::TopicFollow(f) => Some(&f.rid),
             Self::CardAction(f) => Some(&f.rid),
             Self::Search(f) => Some(&f.rid),
+            Self::React(f) => Some(&f.rid),
             Self::Hello(_) | Self::Delta(_) | Self::Typing(_) | Self::Read(_) | Self::Ping => None,
         }
     }
@@ -179,6 +184,7 @@ impl ClientFrame {
                 check_action_id("actionId", &f.action_id)
             }
             Self::Search(f) => f.validate(),
+            Self::React(f) => f.validate(),
         }
     }
 }

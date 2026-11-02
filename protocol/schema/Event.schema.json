@@ -798,6 +798,31 @@
                     "title",
                     "blocks"
                   ]
+                },
+                "reactions": {
+                  "maxItems": 50,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "emoji": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "memberIds": {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      }
+                    },
+                    "required": [
+                      "emoji",
+                      "memberIds"
+                    ]
+                  }
                 }
               },
               "required": [
@@ -2053,6 +2078,62 @@
           },
           "required": [
             "run"
+          ]
+        }
+      },
+      "required": [
+        "seq",
+        "groupId",
+        "at",
+        "actorId",
+        "type",
+        "data"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "seq": {
+          "type": "integer",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "actorId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "reaction.changed"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "messageId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "emoji": {
+              "type": "string",
+              "minLength": 1
+            },
+            "on": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "messageId",
+            "emoji",
+            "on"
           ]
         }
       },

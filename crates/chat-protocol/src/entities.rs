@@ -6,6 +6,7 @@ use crate::card::Card;
 use crate::characters::CharacterId;
 use crate::members::NotifyLevel;
 use crate::message::{ArtifactRef, FileRef, MessageKind, ReplyTo};
+use crate::reactions::Reaction;
 use crate::reads::TopicState;
 use crate::serde_util::{non_null, nullable};
 
@@ -267,9 +268,19 @@ pub struct Message {
         skip_serializing_if = "Option::is_none"
     )]
     pub card: Option<Card>,
+    /// Who reacted with which emoji; absent = none.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reactions: Option<Vec<Reaction>>,
 }
 
 impl Message {
+    pub fn reactions(&self) -> &[Reaction] {
+        self.reactions.as_deref().unwrap_or(&[])
+    }
     pub fn kind(&self) -> MessageKind {
         self.kind.unwrap_or(MessageKind::Text)
     }

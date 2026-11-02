@@ -43,6 +43,7 @@ import { editFields, messageFields, messageUpdatedFields, sendFields, FileRef } 
 import { Card } from "./card.ts";
 import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, UpdateMemberRequest } from "./members.ts";
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
+import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
 import { TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
 import { UpdateInfo } from "./updates.ts";
@@ -70,6 +71,7 @@ export * from "./message.ts";
 export * from "./files.ts";
 export * from "./members.ts";
 export * from "./search.ts";
+export * from "./reactions.ts";
 export * from "./updates.ts";
 export * from "./diagnostics.ts";
 export * from "./hooks.ts";
@@ -160,6 +162,7 @@ export const Message = z.object({
   deletedAt: Millis.nullable().optional(),
   streaming: z.boolean().optional(),
   ...messageFields,
+  ...messageReactionFields,
 });
 export type Message = z.infer<typeof Message>;
 
@@ -249,6 +252,7 @@ export const Event = z.discriminatedUnion("type", [
   ArtifactCreatedEvent,
   ArtifactVersionAddedEvent,
   RunUpdatedEvent,
+  ReactionChangedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -379,6 +383,7 @@ export const ClientFrame = z.discriminatedUnion("t", [
   TopicFollowFrame,
   CardActionFrame,
   SearchFrame,
+  ReactFrame,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 export type ClientFrameType = ClientFrame["t"];

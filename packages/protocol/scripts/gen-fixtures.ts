@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { MAX_BODY_CHARS, MAX_NAME_CHARS, MAX_PAGE_LIMIT, MAX_TITLE_CHARS } from "../src/index.ts";
 import { addV1Fixtures } from "./fixtures-v1.ts";
 import { addBotsFixtures } from "./fixtures-bots.ts";
+import { addReactionsFixtures } from "./fixtures-reactions.ts";
 
 type Fixture = {
   kind: string;
@@ -338,6 +339,7 @@ bad("http/error-response-missing-message.json", "ErrorResponse", { error: { code
 
 addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSummary, dmSummary, ownerFull, aliceMinimal, base });
 addBotsFixtures({ ok, bad, T0, ID, base });
+addReactionsFixtures({ ok, bad, ID, base, message });
 
 // ---------------------------------------------------------------------------
 

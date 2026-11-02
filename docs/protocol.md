@@ -383,6 +383,31 @@ Rules:
 - The card's author (usually a bot) gets the `card.actioned` event like every member and reacts,
   usually by an `edit` with a new card (for example without the actions, or with a new status).
 
+## Reactions
+
+Module: `reactions.ts` / `reactions.rs`.
+
+```ts
+Emoji = string                  // 1..16 code points, no whitespace (one emoji with its modifiers)
+Reaction = { emoji: Emoji, memberIds: string[] }   // memberIds oldest first, at least one
+Message += { reactions?: Reaction[] }              // at most 50 emoji; absent = []
+{ t: "react", rid, groupId, messageId, emoji, on: boolean }   // ack.result = { changed: boolean }
+reaction.changed (stored event) data: { messageId, emoji, on }   // actorId = who reacted
+```
+
+Rules:
+
+- Any group member may react to a message of the group that is not deleted (`not_found`
+  otherwise). A member has at most one reaction per emoji per message: `on: true` adds it,
+  `on: false` removes it. When nothing changes the ack has `changed: false` and no event is stored.
+- A new emoji is appended to `reactions`; a member is appended to the emoji's `memberIds`. An
+  emoji whose last member leaves is removed. A message has at most 50 emoji (`invalid` for the
+  51st).
+- `Message.reactions` is the current state in `history`, `send` results and archives; the
+  `message.created` event carries the state at creation (none). Clients apply
+  `reaction.changed` events in `seq` order to keep the list current. A client that does not know
+  the event skips it.
+
 ## Files
 
 Module: `files.ts` / `files.rs`. All endpoints need a member token; the member must be in the
