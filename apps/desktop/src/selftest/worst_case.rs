@@ -97,16 +97,6 @@ const MACHINE_NAMES: &[&str] = &[
     "构建机 · 北京机房 · 第三排",
 ];
 
-const MACHINE_LABELS: &[&str] = &[
-    "gpu",
-    "macos",
-    "arm64",
-    "xcode-16",
-    "ios-simulator",
-    "long-running",
-    "customer-feedback-from-enterprise-onboarding",
-];
-
 /// Eight reactions: every member, one, a ZWJ emoji, and counts past 99.
 fn worst_reactions(ids: &[MemberId]) -> Vec<Reaction> {
     let take = |n: usize| ids.iter().take(n).cloned().collect::<Vec<_>>();
@@ -449,24 +439,6 @@ impl ChatProvider for WorstCase {
                 r
             })
             .collect()
-    }
-    fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
-        let mut rx = self.inner.machines();
-        match rx.try_recv() {
-            Ok(Some(Ok(list))) => reply_now(Ok(list
-                .into_iter()
-                .enumerate()
-                .map(|(i, mut m)| {
-                    m.name = pick(MACHINE_NAMES, i).to_string();
-                    if i == 0 {
-                        m.labels = MACHINE_LABELS.iter().map(|s| s.to_string()).collect();
-                    }
-                    m
-                })
-                .collect())),
-            Ok(Some(Err(e))) => reply_now(Err(e)),
-            _ => rx,
-        }
     }
     fn sign_out(&self, wipe_cache: bool) {
         self.inner.sign_out(wipe_cache)
