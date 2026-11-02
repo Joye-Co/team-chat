@@ -661,14 +661,15 @@ impl Session {
             Incoming::Event(entry, notify) => {
                 if self.welcomed {
                     let gid = entry.group_id().to_string();
-                    let note = notify.map(|reason| notify_update(reason, &entry));
+                    let note = notify.map(|reason| (reason, entry.clone()));
                     self.groups
                         .entry(gid.clone())
                         .or_default()
                         .buffer
                         .insert(entry.seq(), entry);
                     self.drain(&gid);
-                    if let Some(n) = note {
+                    // After the drain, so the cache knows the topic when the event applied.
+                    if let Some(n) = note.and_then(|(r, e)| notify_update(&self.shared, r, &e)) {
                         self.shared.emit(n);
                     }
                 }
@@ -1157,6 +1158,18 @@ impl Session {
             self.shared
                 .emit(ClientUpdate::GroupEvent(Box::new(ev.clone())));
         }
+        for t in &out.run_topics {
+            self.shared.emit(ClientUpdate::RunsChanged {
+                group_id: group_id.into(),
+                topic_id: t.clone(),
+            });
+        }
+        for t in &out.artifact_topics {
+            self.shared.emit(ClientUpdate::ArtifactsChanged {
+                group_id: group_id.into(),
+                topic_id: t.clone(),
+            });
+        }
         if out.group_changed {
             self.shared.emit(ClientUpdate::GroupChanged {
                 group_id: group_id.into(),
@@ -1288,28 +1301,56 @@ fn fail_search(shared: &Shared, rid: String) {
     });
 }
 
-fn notify_update(reason: NotifyReason, entry: &LogEntry) -> ClientUpdate {
+/// Builds the notification for a server-marked event, or `None` for my own event or
+/// a muted group (the server should not mark those; this guards stale decisions).
+fn notify_update(shared: &Shared, reason: NotifyReason, entry: &LogEntry) -> Option<ClientUpdate> {
     use crate::proto::EventData;
-    let (topic_id, message_id) = match entry {
-        LogEntry::Known(e) => match &e.data {
-            EventData::MessageCreated(d) => {
-                (Some(d.message.topic_id.clone()), Some(d.message.id.clone()))
-            }
-            EventData::TopicUpdated(d) => (Some(d.topic_id.clone()), None),
-            EventData::TopicCreated(d) => (Some(d.topic.id.clone()), None),
-            EventData::ArtifactCreated(d) | EventData::ArtifactVersionAdded(d) => {
-                (Some(d.artifact.topic_id.clone()), None)
-            }
-            _ => (None, None),
-        },
-        LogEntry::Unknown { .. } => (None, None),
+    let LogEntry::Known(e) = entry else {
+        return None;
     };
-    ClientUpdate::Notify {
-        reason,
-        group_id: entry.group_id().to_string(),
-        topic_id,
-        message_id,
+    let store = &shared.store;
+    let me = store.me_id().ok().flatten();
+    if me.as_deref() == Some(e.actor_id.as_str()) {
+        return None;
     }
+    let group = store.group(&e.group_id).ok().flatten();
+    if group.as_ref().is_some_and(|g| g.muted) {
+        return None;
+    }
+    let (topic_id, message_id, body) = match &e.data {
+        EventData::MessageCreated(d) => (
+            Some(d.message.topic_id.clone()),
+            Some(d.message.id.clone()),
+            d.message.body.chars().take(200).collect(),
+        ),
+        EventData::TopicUpdated(d) => (Some(d.topic_id.clone()), None, String::new()),
+        EventData::TopicCreated(d) => (Some(d.topic.id.clone()), None, String::new()),
+        EventData::ArtifactCreated(d) | EventData::ArtifactVersionAdded(d) => (
+            Some(d.artifact.topic_id.clone()),
+            None,
+            d.artifact.title.clone(),
+        ),
+        _ => (None, None, String::new()),
+    };
+    let subtitle = match (&e.data, &topic_id) {
+        (EventData::TopicCreated(d), _) => Some(d.topic.title.clone()),
+        (_, Some(t)) => store.topic(t).ok().flatten().map(|r| r.topic.title),
+        _ => None,
+    };
+    let actor_name = store.member(&e.actor_id).ok().flatten().map(|m| m.name);
+    Some(ClientUpdate::Notify(Box::new(
+        crate::client::Notification {
+            reason,
+            group_id: e.group_id.clone(),
+            topic_id,
+            message_id,
+            title: group.map(|g| g.group.name).unwrap_or_default(),
+            subtitle,
+            body,
+            actor_id: e.actor_id.clone(),
+            actor_name,
+        },
+    )))
 }
 
 fn code_str(c: ErrorCode) -> &'static str {

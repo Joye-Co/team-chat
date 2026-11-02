@@ -601,10 +601,18 @@ fn apply_one(
             }
             out.group_changed = true;
         }
-        EventData::CardActioned(_)
-        | EventData::ArtifactCreated(_)
-        | EventData::ArtifactVersionAdded(_)
-        | EventData::RunUpdated(_) => {
+        EventData::CardActioned(d) => {
+            super::ext::insert_card_action(tx, ev, d)?;
+            out.other_events.push(ev.clone());
+        }
+        EventData::RunUpdated(d) => {
+            super::ext::upsert_run(tx, &d.run)?;
+            out.run_topics.insert(d.run.topic_id.clone());
+            out.other_events.push(ev.clone());
+        }
+        EventData::ArtifactCreated(d) | EventData::ArtifactVersionAdded(d) => {
+            super::ext::upsert_artifact(tx, &d.artifact, std::slice::from_ref(&d.version))?;
+            out.artifact_topics.insert(d.artifact.topic_id.clone());
             out.other_events.push(ev.clone());
         }
     }

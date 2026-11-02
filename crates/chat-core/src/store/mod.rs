@@ -7,6 +7,7 @@
 //! [`Store::with_reader`].
 
 mod apply;
+mod ext;
 pub mod migrations;
 mod rows;
 
@@ -16,6 +17,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::{Arc, Mutex, MutexGuard};
 
+pub use ext::{ArtifactRow, CardActionRow, TodoReason, TodoRow};
 pub use migrations::Migration;
 pub use rows::*;
 
@@ -91,6 +93,10 @@ pub struct ApplyOutcome {
     /// Applied events the core cache does not model (`card.actioned`, `artifact.*`),
     /// for feature modules and the UI.
     pub other_events: Vec<Event>,
+    /// Topics whose 产出 list changed (`artifact.created`, `artifact.versionAdded`).
+    pub artifact_topics: BTreeSet<String>,
+    /// Topics whose bot runs changed (`run.updated`).
+    pub run_topics: BTreeSet<String>,
 }
 
 /// What a welcome, directory or reads frame changed.

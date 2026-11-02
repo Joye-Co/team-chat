@@ -32,8 +32,24 @@ pub enum ApiError {
     /// The call needs a token and the client has none.
     #[error("no token")]
     NoToken,
+    /// A URL that is not on the server origin, or not http(s).
     #[error("invalid base url")]
     BadUrl,
+    /// The client refused the input before sending it.
+    #[error("invalid input: {0}")]
+    Invalid(String),
+    /// A local file could not be read or written.
+    #[error("io: {0}")]
+    Io(String),
+    /// Downloaded or uploaded bytes do not match the expected size or SHA-256.
+    #[error("content does not match its checksum")]
+    Checksum,
+}
+
+impl From<std::io::Error> for ApiError {
+    fn from(e: std::io::Error) -> Self {
+        ApiError::Io(e.to_string())
+    }
 }
 
 impl ApiError {
@@ -69,7 +85,25 @@ impl std::fmt::Debug for HttpClient {
     }
 }
 
-fn redact(e: reqwest::Error) -> ApiError {
+fn error_from(status: StatusCode, bytes: &[u8]) -> ApiError {
+    match serde_json::from_slice::<ErrorResponse>(bytes) {
+        Ok(er) => ApiError::Server {
+            status: status.as_u16(),
+            code: er.error.code,
+            message: er.error.message,
+        },
+        Err(_) if status == StatusCode::UNAUTHORIZED => ApiError::Server {
+            status: 401,
+            code: ErrorCode::Unauthorized,
+            message: String::new(),
+        },
+        Err(_) => ApiError::Unexpected {
+            status: status.as_u16(),
+        },
+    }
+}
+
+pub(crate) fn redact(e: reqwest::Error) -> ApiError {
     // reqwest errors may carry the URL; ours carry no secrets, but drop it anyway.
     ApiError::Network(e.without_url().to_string())
 }
@@ -101,42 +135,60 @@ impl HttpClient {
         &self.base
     }
 
-    async fn call<B: Serialize, T: DeserializeOwned>(
+    /// Absolute URL of an API path.
+    pub(crate) fn url(&self, path: &str) -> String {
+        format!("{}{}", self.base, path)
+    }
+
+    /// True when `url` is on this client's server origin, so it may carry the token.
+    pub fn same_origin(&self, url: &str) -> bool {
+        url.strip_prefix(self.base.as_str())
+            .is_some_and(|rest| rest.starts_with('/'))
+    }
+
+    /// A request with the bearer token.
+    pub(crate) fn authed(&self, method: Method, url: &str) -> ApiResult<reqwest::RequestBuilder> {
+        let token = self.token.as_deref().ok_or(ApiError::NoToken)?;
+        Ok(self.http.request(method, url).bearer_auth(token))
+    }
+
+    /// Sends a request and turns a non-success status into an [`ApiError`].
+    pub(crate) async fn send_checked(
+        &self,
+        req: reqwest::RequestBuilder,
+    ) -> ApiResult<reqwest::Response> {
+        let resp = req.send().await.map_err(redact)?;
+        if resp.status().is_success() {
+            return Ok(resp);
+        }
+        let status = resp.status();
+        let bytes = resp.bytes().await.map_err(redact)?;
+        Err(error_from(status, &bytes))
+    }
+
+    /// Decodes a JSON success body.
+    pub(crate) async fn json<T: DeserializeOwned>(resp: reqwest::Response) -> ApiResult<T> {
+        let bytes = resp.bytes().await.map_err(redact)?;
+        serde_json::from_slice(&bytes).map_err(|e| ApiError::Decode(e.to_string()))
+    }
+
+    pub(crate) async fn call<B: Serialize, T: DeserializeOwned>(
         &self,
         method: Method,
         path: &str,
         body: Option<&B>,
         auth: bool,
     ) -> ApiResult<T> {
-        let mut req = self.http.request(method, format!("{}{}", self.base, path));
-        if auth {
-            let token = self.token.as_deref().ok_or(ApiError::NoToken)?;
-            req = req.bearer_auth(token);
-        }
+        let mut req = if auth {
+            self.authed(method, &self.url(path))?
+        } else {
+            self.http.request(method, self.url(path))
+        };
         if let Some(b) = body {
             req = req.json(b);
         }
-        let resp = req.send().await.map_err(redact)?;
-        let status = resp.status();
-        let bytes = resp.bytes().await.map_err(redact)?;
-        if status.is_success() {
-            return serde_json::from_slice(&bytes).map_err(|e| ApiError::Decode(e.to_string()));
-        }
-        match serde_json::from_slice::<ErrorResponse>(&bytes) {
-            Ok(er) => Err(ApiError::Server {
-                status: status.as_u16(),
-                code: er.error.code,
-                message: er.error.message,
-            }),
-            Err(_) if status == StatusCode::UNAUTHORIZED => Err(ApiError::Server {
-                status: 401,
-                code: ErrorCode::Unauthorized,
-                message: String::new(),
-            }),
-            Err(_) => Err(ApiError::Unexpected {
-                status: status.as_u16(),
-            }),
-        }
+        let resp = self.send_checked(req).await?;
+        Self::json(resp).await
     }
 
     pub async fn health(&self) -> ApiResult<HealthResponse> {
@@ -256,7 +308,7 @@ impl HttpClient {
     }
 }
 
-fn enc(s: &str) -> String {
+pub(crate) fn enc(s: &str) -> String {
     // Ids are ULIDs; escape anything else so a path cannot be changed.
     s.bytes()
         .map(|b| {

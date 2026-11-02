@@ -9,9 +9,10 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-pub const MIGRATIONS: &[Migration] = &[Migration {
-    name: "core-1",
-    sql: r#"
+pub const MIGRATIONS: &[Migration] = &[
+    Migration {
+        name: "core-1",
+        sql: r#"
 CREATE TABLE meta (
   key TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -104,7 +105,54 @@ CREATE TABLE outbox (
 );
 CREATE INDEX outbox_by_topic ON outbox(topic_id, ord);
 "#,
-}];
+    },
+    Migration {
+        name: "ext-1",
+        sql: r#"
+CREATE TABLE artifacts (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  current_version INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  raw TEXT NOT NULL
+);
+CREATE INDEX artifacts_by_topic ON artifacts(topic_id, updated_at DESC);
+CREATE TABLE artifact_versions (
+  artifact_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  raw TEXT NOT NULL,
+  PRIMARY KEY (artifact_id, version)
+);
+CREATE TABLE card_actions (
+  group_id TEXT NOT NULL,
+  seq INTEGER NOT NULL,
+  message_id TEXT NOT NULL,
+  actor_id TEXT NOT NULL,
+  action_id TEXT NOT NULL,
+  at INTEGER NOT NULL,
+  PRIMARY KEY (group_id, seq)
+);
+CREATE INDEX card_actions_by_message ON card_actions(message_id, seq);
+CREATE TABLE file_cache (
+  sha256 TEXT PRIMARY KEY,
+  path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  last_used INTEGER NOT NULL
+);
+CREATE INDEX file_cache_by_use ON file_cache(last_used);
+CREATE TABLE runs (
+  id TEXT PRIMARY KEY,
+  group_id TEXT NOT NULL,
+  topic_id TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  raw TEXT NOT NULL
+);
+CREATE INDEX runs_by_topic ON runs(topic_id, created_at DESC);
+"#,
+    },
+];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {
     conn.execute_batch(

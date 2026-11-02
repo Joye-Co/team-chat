@@ -720,16 +720,17 @@ async fn unknown_events_notify_flags_and_search() {
         matches!(u, ClientUpdate::Notify { .. })
     })
     .await;
-    let ClientUpdate::Notify {
-        reason, topic_id, ..
-    } = u
-    else {
+    let ClientUpdate::Notify(n) = u else {
         unreachable!()
     };
     assert_eq!(
-        (reason, topic_id.as_deref()),
+        (n.reason, n.topic_id.as_deref()),
         (NotifyReason::Mention, Some(tid.as_str()))
     );
+    assert_eq!(n.body, "@me look");
+    assert_eq!(n.actor_name.as_deref(), Some("alice"));
+    assert_eq!(n.title, format!("group {G1}"));
+    assert_eq!(n.subtitle.as_deref(), Some("root"));
     until("applied past the unknown event", || {
         h.client.store().last_applied(G1).unwrap() == 4
     })

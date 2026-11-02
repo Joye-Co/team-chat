@@ -14,25 +14,37 @@
 //! [`Client::reconnect_now`]. Before a client exists (sign-in), run
 //! [`HttpClient::redeem`] on [`background`] and keep the token in a [`TokenStore`].
 
+pub mod artifacts;
 pub mod backoff;
 pub mod client;
+mod client_ext;
+pub mod diagnostics;
 mod engine;
+pub mod files;
 pub mod http;
+mod http_ext;
 pub mod logging;
 pub mod proto;
+pub mod runs;
 pub mod search;
 pub mod store;
 pub mod token;
 pub mod transient;
+pub mod updates;
 
+pub use artifacts::{LocalArtifactFile, NewVersion};
 pub use client::{
-    Client, ClientConfig, ClientError, ClientUpdate, ConnectionState, EditRequest, SearchRequest,
-    SendFailure, SendRequest, TopicPatch, background,
+    Client, ClientConfig, ClientError, ClientUpdate, ConnectionState, EditRequest, Notification,
+    SearchRequest, SendFailure, SendRequest, TopicPatch, background,
 };
+pub use client_ext::ArtifactFolder;
+pub use files::{Phase, Progress, ProgressFn, UploadRequest, no_progress};
 pub use http::{ApiError, HttpClient};
+pub use runs::{ProcessItem, ProcessView};
 pub use search::SearchError;
 pub use store::{
-    GroupRow, LogEntry, Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Store, TopicRow,
+    ArtifactRow, CardActionRow, GroupRow, LogEntry, Migration, OutboxItem, OutboxOp, OutboxState,
+    PendingRead, Store, TodoReason, TodoRow, TopicRow,
 };
 #[cfg(target_os = "macos")]
 pub use token::KeychainTokenStore;

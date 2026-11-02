@@ -39,6 +39,9 @@ pub struct ClientConfig {
     pub fetch_limit: u32,
     /// `limit` of `history` requests.
     pub history_limit: u32,
+    /// Size limit of the downloaded-file cache (`data_dir/files`); least recently used
+    /// files are removed past it. Default 2 GiB.
+    pub file_cache_max_bytes: u64,
 }
 
 impl ClientConfig {
@@ -61,12 +64,28 @@ impl ClientConfig {
             backoff_max: Duration::from_secs(30),
             fetch_limit: 500,
             history_limit: 100,
+            file_cache_max_bytes: 2 * 1024 * 1024 * 1024,
         }
     }
 
     /// The cache database file inside `data_dir`.
     pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("cache.sqlite3")
+    }
+
+    /// Downloaded files: `files/<sha256>/<name>`.
+    pub fn files_dir(&self) -> PathBuf {
+        self.data_dir.join("files")
+    }
+
+    /// 产出 versions: `artifacts/<artifactId>/<version>/`.
+    pub fn artifacts_dir(&self) -> PathBuf {
+        self.data_dir.join("artifacts")
+    }
+
+    /// Avatar images by URL.
+    pub fn avatars_dir(&self) -> PathBuf {
+        self.data_dir.join("avatars")
     }
 }
 
@@ -153,12 +172,19 @@ pub enum ClientUpdate {
     SendFailed(SendFailure),
     /// Every group that was behind after the last `welcome` is caught up.
     CaughtUp,
-    /// The server marked a live event for a notification.
-    Notify {
-        reason: NotifyReason,
+    /// The server marked a live event for a notification (docs/protocol.md,
+    /// Notifications). Sent only for events the server marked, never for my own
+    /// events or a muted group. The UI may skip it while the topic is open and focused.
+    Notify(Box<Notification>),
+    /// The 产出 of a topic changed (event or HTTP answer). Re-read `artifacts(topic)`.
+    ArtifactsChanged {
         group_id: String,
-        topic_id: Option<String>,
-        message_id: Option<String>,
+        topic_id: String,
+    },
+    /// Bot runs of a topic changed (`run.updated`). Re-read `runs(topic)`.
+    RunsChanged {
+        group_id: String,
+        topic_id: String,
     },
     /// An applied event that the core cache does not model (`card.actioned`,
     /// `artifact.created`, `artifact.versionAdded`).
@@ -173,6 +199,26 @@ pub enum ClientUpdate {
         code: Option<ErrorCode>,
         message: String,
     },
+}
+
+/// The content of a notification. Texts are data from the cache (names, titles, the
+/// message text); the UI adds the words for `reason` from its copy catalog.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Notification {
+    pub reason: NotifyReason,
+    pub group_id: String,
+    pub topic_id: Option<String>,
+    pub message_id: Option<String>,
+    /// The group name (for a DM the other member's name).
+    pub title: String,
+    /// The topic title, when known.
+    pub subtitle: Option<String>,
+    /// Plain text: the message text (at most 200 characters; Markdown left as is),
+    /// or the 产出 title; empty for a topic change.
+    pub body: String,
+    /// Who did it, and the name to show.
+    pub actor_id: String,
+    pub actor_name: Option<String>,
 }
 
 /// A message to queue. `topic_id = None` starts a new topic (`title` optional).
@@ -350,6 +396,10 @@ impl Client {
             .unwrap_or_else(|e| e.into_inner())
             .clone();
         self.http.with_token(Some(token))
+    }
+
+    pub(crate) fn shared(&self) -> &Arc<Shared> {
+        &self.shared
     }
 
     pub fn store(&self) -> &Store {

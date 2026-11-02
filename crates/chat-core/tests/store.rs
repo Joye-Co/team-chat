@@ -43,11 +43,31 @@ fn migrations_are_named_and_run_once() {
             st.query_map([], |r| r.get(0))?.collect()
         })
         .unwrap();
-    assert_eq!(names, vec!["core-1"]);
+    assert_eq!(names, vec!["core-1", "ext-1"]);
     let mode: String = s
         .with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
         .unwrap();
     assert_eq!(mode, "wal");
+}
+
+#[test]
+fn a_cache_from_before_ext_1_upgrades_and_keeps_its_rows() {
+    use chat_core::store::migrations::{MIGRATIONS, run};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("c.sqlite3");
+    {
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        run(&mut conn, &MIGRATIONS[..1]).unwrap();
+        conn.execute(
+            "INSERT INTO members (id, kind, name, level) VALUES ('M1', 'human', 'old', 'member')",
+            [],
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    assert_eq!(s.member("M1").unwrap().unwrap().name, "old");
+    assert!(s.artifacts("T1").unwrap().is_empty());
+    assert!(s.runs("T1").unwrap().is_empty());
 }
 
 #[test]
