@@ -30,6 +30,28 @@ function safeOffset(text: string, i: number): number {
   return i
 }
 
+/** Characters a snippet start may move to find a word boundary. */
+const BOUNDARY_REACH = 12
+
+const BOUNDARY = /[\s\p{P}～]/u
+
+/** Whether a snippet may start at `i` without cutting a word: after a space or punctuation. */
+function startsWord(text: string, i: number): boolean {
+  if (i === 0) return true
+  return BOUNDARY.test(text[i - 1] ?? "") && !/\s/u.test(text[i] ?? "")
+}
+
+/**
+ * Moves a snippet start to the nearest word or punctuation boundary within BOUNDARY_REACH
+ * (forward first, never past the match at `match`), else to 8 characters before the match.
+ */
+function wordStart(text: string, start: number, match: number): number {
+  if (start === 0) return 0
+  for (let i = start; i <= Math.min(start + BOUNDARY_REACH, match); i++) if (startsWord(text, i)) return i
+  for (let i = start - 1; i >= Math.max(0, start - BOUNDARY_REACH); i--) if (startsWord(text, i)) return i
+  return Math.max(0, match - 8)
+}
+
 /**
  * The part of `text` that matches `userQuery`, with highlight ranges. When nothing matches
  * literally (for example after Unicode normalization), it returns the start of the text.
@@ -50,6 +72,10 @@ export function makeSnippet(text: string, userQuery: string, options: SnippetOpt
   let start = first ? Math.max(0, first[0] - before) : 0
   let end = Math.min(flat.length, start + maxLength)
   if (end - start < maxLength) start = Math.max(0, end - maxLength)
+  if (first) {
+    start = wordStart(flat, start, first[0])
+    end = Math.min(flat.length, start + maxLength)
+  }
   start = safeOffset(flat, start)
   end = safeOffset(flat, end)
 

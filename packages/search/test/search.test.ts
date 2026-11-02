@@ -216,6 +216,16 @@ describe("makeSnippet", () => {
     expect(s.text).toBe("Call parseJSONData() then JSON again")
     expect(s.highlights.map(([a, b]) => s.text.slice(a, b))).toEqual(["parseJSONData", "JSON"])
   })
+  test("the start does not cut a word", () => {
+    const text = `这是一段比较长的产品说明（草稿）新功能的话题会在这里讨论，请大家看话题列表${"后面还有内容".repeat(10)}`
+    const s = makeSnippet(text, "列表", { maxLength: 40, before: 24 })
+    // NFKC folds the full-width bracket.
+    expect(s.text.startsWith("…草稿)")).toBe(true)
+    const [a, b] = s.highlights[0] as [number, number]
+    expect(s.text.slice(a, b)).toBe("列表")
+    const latin = makeSnippet(`${"word ".repeat(10)} release notes for the parser`, "parser", { maxLength: 40, before: 24 })
+    expect(latin.text).toMatch(/^…(word|release) /)
+  })
   test("no match returns the start; emoji are not cut", () => {
     expect(makeSnippet("short text", "zzz")).toEqual({ text: "short text", highlights: [] })
     const s = makeSnippet(`${"🎉".repeat(30)}部署`, "部署", { maxLength: 20, before: 5 })

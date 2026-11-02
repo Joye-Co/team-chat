@@ -71,7 +71,7 @@ fn snippet(text: &str, at: usize, len: usize) -> (String, usize) {
         .chars()
         .map(|c| if c == '\n' { ' ' } else { c })
         .collect();
-    let start = at.saturating_sub(CONTEXT);
+    let start = snippet_start(&chars, at);
     let end = (at + len + CONTEXT).min(chars.len());
     let rest: String = chars[start..].iter().collect();
     let mut out = crate::markdown::clip(&rest, end - start);
@@ -81,6 +81,36 @@ fn snippet(text: &str, at: usize, len: usize) -> (String, usize) {
         offset += 1;
     }
     (out, offset)
+}
+
+/// Characters a snippet start may move to find a word boundary.
+const BOUNDARY_REACH: usize = 12;
+
+/// Whether a snippet may start right after `c` without cutting a word
+/// (DESIGN.md §15): a space, or ASCII or CJK punctuation.
+fn is_boundary(c: char) -> bool {
+    c.is_whitespace()
+        || c.is_ascii_punctuation()
+        || "，。！？；：、（）【】「」『』《》〈〉“”‘’…—·～".contains(c)
+}
+
+/// Where a snippet of `chars` around a match at `at` starts: `CONTEXT`
+/// characters before it, moved to the nearest word or punctuation boundary
+/// within `BOUNDARY_REACH` (forward first, never past the match), else 8
+/// characters before the match.
+fn snippet_start(chars: &[char], at: usize) -> usize {
+    let ideal = at.saturating_sub(CONTEXT);
+    if ideal == 0 {
+        return 0;
+    }
+    let ok = |i: usize| i == 0 || is_boundary(chars[i - 1]) && !chars[i].is_whitespace();
+    let forward = (ideal..=(ideal + BOUNDARY_REACH).min(at)).find(|&i| ok(i));
+    let back = || {
+        (ideal.saturating_sub(BOUNDARY_REACH)..ideal)
+            .rev()
+            .find(|&i| ok(i))
+    };
+    forward.or_else(back).unwrap_or(at.saturating_sub(8))
 }
 
 /// Sample runs: a running run in `t-login` and a failed one in `t-blocked`.
@@ -229,5 +259,23 @@ mod tests {
         let (s, at) = snippet(&long, 40, 3);
         assert!(s.starts_with('…') && s.ends_with('…'));
         assert_eq!(s.chars().skip(at).take(3).collect::<String>(), "关键词");
+    }
+
+    #[test]
+    fn snippet_starts_at_a_boundary() {
+        // DESIGN.md §15: no '…明（草稿）', the cut moves past the bracket.
+        let text = "这是一段比较长的产品说明（草稿）新功能的话题会在这里讨论，请大家看话题列表";
+        let at = text.chars().position(|c| c == '列').unwrap() - 2;
+        let (s, i) = snippet(text, at, 2);
+        assert!(s.starts_with("…草稿）"), "{s}");
+        assert_eq!(s.chars().skip(i).take(2).collect::<String>(), "话题");
+        let latin = format!("{} release notes for the parser", "word ".repeat(10));
+        let at = latin.find("parser").unwrap();
+        let (s, _) = snippet(&latin, at, 6);
+        let first = s.trim_start_matches('…').split(' ').next().unwrap();
+        assert!(
+            ["word", "release", "notes", "for", "the"].contains(&first),
+            "{s}"
+        );
     }
 }
