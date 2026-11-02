@@ -43,7 +43,8 @@ pub fn safe_link(url: &str) -> Option<&str> {
 pub fn message_body(id: impl Into<ElementId>, text: impl Into<SharedString>) -> TextView {
     TextView::markdown(id, text)
         .selectable(true)
-        .text_sm()
+        .text_size(crate::theme::type_scale::MESSAGE.0)
+        .line_height(crate::theme::type_scale::MESSAGE.1)
         .code_block_actions(|code, _window, _cx| {
             let text = code.code();
             let mut hasher = std::collections::hash_map::DefaultHasher::new();

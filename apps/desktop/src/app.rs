@@ -19,12 +19,12 @@ use futures::StreamExt;
 use gpui::{
     App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
     KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window, WindowBounds,
-    WindowOptions, div, px, size,
+    WindowBackgroundAppearance, WindowOptions, div, point, px, size,
 };
 
 use crate::{
     data::{Change, ChatProvider, GroupId, SessionState, TopicId},
-    theme,
+    theme, ui,
     views::{
         composer::ComposerView, connection_banner::ConnectionBanner, login::LoginView,
         side_panel::SidePanel, sidebar::Sidebar, timeline::TimelineView, topic_list::TopicListView,
@@ -320,7 +320,9 @@ impl Render for RootView {
         ) {
             return root.child(self.login.clone());
         }
-        let panel_open = self.services.nav.read(cx).side_panel_open;
+        // The side panel needs a window of at least 1100 pt (§5.1).
+        let panel_open = self.services.nav.read(cx).side_panel_open
+            && window.viewport_size().width >= theme::SIDE_PANEL_MIN_WINDOW;
         root.flex()
             .flex_row()
             .children([
@@ -330,34 +332,33 @@ impl Render for RootView {
                     .flex_none()
                     .child(self.sidebar.clone())
                     .into_any_element(),
+                ui::vhairline(cx).into_any_element(),
                 div()
                     .w(theme::TOPIC_LIST_WIDTH)
                     .h_full()
                     .flex_none()
-                    .border_r_1()
-                    .border_color(colors.border)
                     .child(self.topic_list.clone())
                     .into_any_element(),
+                ui::vhairline(cx).into_any_element(),
                 div()
                     .flex_1()
-                    .min_w(px(360.))
+                    .min_w(theme::TOPIC_VIEW_MIN_WIDTH)
                     .h_full()
                     .flex()
                     .flex_col()
-                    .child(self.banner.clone())
                     .child(self.update_banner.clone())
                     .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))
+                    .child(self.banner.clone())
                     .child(self.composer.clone())
                     .into_any_element(),
             ])
             .when_some(panel_open.then(|| self.side_panel.clone()), |el, panel| {
-                el.child(
+                el.child(ui::vhairline(cx)).child(
                     div()
                         .w(theme::SIDE_PANEL_WIDTH)
                         .h_full()
                         .flex_none()
-                        .border_l_1()
-                        .border_color(colors.border)
+                        .bg(colors.panel)
                         .child(panel),
                 )
             })
@@ -371,14 +372,18 @@ pub fn main_window_options(focus: bool, cx: &App) -> WindowOptions {
     WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
             None,
-            size(px(1200.), px(780.)),
+            size(theme::WINDOW_DEFAULT_WIDTH, theme::WINDOW_DEFAULT_HEIGHT),
             cx,
         ))),
         titlebar: Some(TitlebarOptions {
             title: Some(env!("PRODUCT_NAME").into()),
-            ..Default::default()
+            // Each column draws its own 52 pt toolbar band; the traffic
+            // lights sit in the sidebar's band (§5.1).
+            appears_transparent: true,
+            traffic_light_position: Some(point(theme::TRAFFIC_LIGHTS.0, theme::TRAFFIC_LIGHTS.1)),
         }),
-        window_min_size: Some(size(px(900.), px(560.))),
+        window_background: WindowBackgroundAppearance::Opaque,
+        window_min_size: Some(size(theme::WINDOW_MIN_WIDTH, theme::WINDOW_MIN_HEIGHT)),
         focus,
         show: true,
         ..Default::default()

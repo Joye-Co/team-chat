@@ -34,14 +34,9 @@ use std::{
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FollowMode, InteractiveElement, IntoElement,
     ListAlignment, ListOffset, ListState, ParentElement, Pixels, Render, Styled, Subscription,
-    Window, div, list, prelude::FluentBuilder as _, px,
+    Window, div, list, prelude::FluentBuilder as _, px, StatefulInteractiveElement as _,
 };
-use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonVariants as _},
-    input::TextareaState,
-    menu::DropdownMenu as _,
-};
+use gpui_component::{input::TextareaState, menu::DropdownMenu as _};
 
 use crate::{
     app::{Changes, Services},
@@ -49,9 +44,33 @@ use crate::{
     data::{
         Change, GroupId, Member, MemberLevel, Message, MessageId, SessionState, Topic, TopicId,
     },
-    theme,
-    views::{status_chip, topic_menu},
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
+    views::{status_chip, time_text, topic_menu},
 };
+
+/// Three 4 pt dots that pulse 150 ms apart (1.2 s loop); static with reduce
+/// motion (§10).
+fn typing_dots(color: gpui::Hsla, reduce_motion: bool) -> impl IntoElement {
+    use gpui::{Animation, AnimationExt as _};
+    div().flex_none().flex().gap(px(3.)).children((0..3).map(move |i| {
+        let dot = div().size(px(4.)).rounded_full().bg(color);
+        if reduce_motion {
+            return dot.into_any_element();
+        }
+        dot.with_animation(
+            gpui::ElementId::NamedInteger("typing-dot".into(), i as u64),
+            Animation::new(theme::motion::TYPING_PULSE).repeat(),
+            move |el, t| {
+                // Each dot peaks 150 ms after the one before it.
+                let phase = (t - i as f32 * 0.125).rem_euclid(1.0);
+                let wave = (phase * std::f32::consts::TAU).cos() * 0.5 + 0.5;
+                el.opacity(0.35 + 0.65 * wave)
+            },
+        )
+        .into_any_element()
+    }))
+}
 
 use model::ListOp;
 
@@ -503,70 +522,119 @@ impl TimelineView {
             .services
             .provider
             .topic_following(&topic.group_id, &topic.id);
-        div()
-            .h(px(48.))
-            .flex_none()
-            .px(px(16.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .border_b_1()
-            .border_color(colors.border)
+        let name = |id: &str| {
+            self.members
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| m.name.clone())
+        };
+        let mut sub: Vec<String> = Vec::new();
+        if let Some(n) = name(&topic.created_by) {
+            sub.push(fill(t::STARTED_BY, &[("name", &n)]));
+        }
+        if let Some(owner) = topic_menu::owner_text(topic, &self.members) {
+            sub.push(owner);
+        }
+        sub.push(time_text(topic.created_at));
+        if following {
+            sub.push(r::FOLLOWING.to_string());
+        }
+        // Up to three recent participants, newest first.
+        let mut participants: Vec<&Member> = Vec::new();
+        for m in self.messages.iter().rev() {
+            if participants.len() == 3 {
+                break;
+            }
+            if participants.iter().any(|p| p.id == m.author_id) {
+                continue;
+            }
+            if let Some(member) = self.members.iter().find(|x| x.id == m.author_id) {
+                participants.push(member);
+            }
+        }
+        let panel_open = self.services.nav.read(cx).side_panel_open;
+        let title = crate::views::sidebar::topic_line(&topic.title);
+        ui::toolbar_band("topic-toolbar")
+            .pl(space::S20)
+            .pr(space::S12)
+            .gap(space::S12)
             .child(
                 div()
-                    .text_base()
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(topic.title.clone()),
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .min_w(px(0.))
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .child(div().min_w(px(0.)).t_topic_title().one_line().child(title))
+                            .children(status_chip(
+                                topic,
+                                self.me.as_deref(),
+                                &self.members,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .type_role(theme::type_scale::CAPTION)
+                            .tnum()
+                            .text_color(colors.text_2)
+                            .one_line()
+                            .child(sub.join(" · ")),
+                    ),
             )
-            .when_some(
-                status_chip(topic, self.me.as_deref(), &self.members, cx),
-                |el, chip| el.child(chip),
-            )
-            .when_some(topic_menu::owner_text(topic, &self.members), |el, text| {
-                el.child(topic_menu::header_label(text, cx))
-            })
             .child(
                 div()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(fill(
-                        t::MESSAGE_COUNT,
-                        &[("n", &topic.message_count.to_string())],
-                    )),
-            )
-            .child(div().flex_1())
-            .when(following, |el| {
-                el.child(topic_menu::header_label(r::FOLLOWING, cx))
-            })
-            .child({
-                let services = self.services.clone();
-                let (g, tid) = (topic.group_id.clone(), topic.id.clone());
-                Button::new("topic-status")
-                    .small()
-                    .ghost()
-                    .label(r::STATUS_MENU)
-                    .dropdown_menu(move |menu, window, cx| {
-                        // Read the topic again: the menu shows the newest state.
-                        match services.provider.topic(&g, &tid) {
-                            Some(topic) => {
-                                topic_menu::build(menu, &services, &g, &topic, window, cx)
-                            }
-                            None => menu,
-                        }
-                    })
-            })
-            .child(
-                Button::new("toggle-panel")
-                    .small()
-                    .ghost()
-                    .label(t::TOGGLE_PANEL)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.services
-                            .nav
-                            .update(cx, |nav, cx| nav.toggle_side_panel(cx))
+                    .flex_none()
+                    .flex()
+                    .flex_row_reverse()
+                    .pl(px(6.))
+                    .children(participants.into_iter().rev().map(|m| {
+                        div()
+                            .ml(px(-6.))
+                            .rounded_full()
+                            .border(px(1.5))
+                            .border_color(colors.content)
+                            .child(ui::MemberAvatar::new(Some(m), px(22.)))
                     })),
+            )
+            .child(
+                ui::capsule(cx)
+                    .child({
+                        let services = self.services.clone();
+                        let (g, tid) = (topic.group_id.clone(), topic.id.clone());
+                        ui::icon_button("topic-status", Lucide::Ellipsis)
+                            .w(px(32.))
+                            .h(px(28.))
+                            .rounded_full()
+                            .tooltip(r::STATUS_MENU)
+                            .dropdown_menu(move |menu, window, cx| {
+                                // Read the topic again: the menu shows the newest state.
+                                match services.provider.topic(&g, &tid) {
+                                    Some(topic) => {
+                                        topic_menu::build(menu, &services, &g, &topic, window, cx)
+                                    }
+                                    None => menu,
+                                }
+                            })
+                    })
+                    .child(
+                    ui::icon_button("toggle-panel", Lucide::PanelRight)
+                        .w(px(32.))
+                        .h(px(28.))
+                        .rounded_full()
+                        .when(panel_open, |b| b.bg(colors.fill_selected))
+                        .tooltip(t::TOGGLE_PANEL)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.services
+                                .nav
+                                .update(cx, |nav, cx| nav.toggle_side_panel(cx))
+                        })),
+                ),
             )
     }
 
@@ -608,10 +676,14 @@ impl Render for TimelineView {
             return div()
                 .size_full()
                 .flex()
-                .items_center()
-                .justify_center()
-                .text_color(colors.muted_foreground)
-                .child(hint)
+                .flex_col()
+                .bg(colors.content)
+                .child(ui::toolbar_band("topic-toolbar-empty"))
+                .child(
+                    div()
+                        .flex_1()
+                        .child(ui::EmptyState::new(Lucide::MessageSquarePlus, hint)),
+                )
                 .children(self.probe_element())
                 .into_any_element();
         };
@@ -630,33 +702,65 @@ impl Render for TimelineView {
             } else {
                 t::JUMP_LATEST.to_string()
             };
-            div().absolute().bottom(px(12.)).right(px(16.)).child(
-                Button::new("jump-latest")
-                    .small()
-                    .primary()
-                    .label(label)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.jump_to_latest();
-                        cx.notify();
-                    })),
-            )
-        });
-        let jump_unread = self.first_unread_above().then(|| {
+            let has_new = self.new_below > 0;
             div()
                 .absolute()
-                .top(px(8.))
+                .bottom(space::S16)
                 .left_0()
                 .right_0()
                 .flex()
                 .justify_center()
                 .child(
-                    Button::new("jump-unread")
-                        .small()
-                        .primary()
-                        .label(fill(
+                    ui::floating(cx)
+                        .id("jump-latest")
+                        .h(px(30.))
+                        .px(space::S12)
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .t_callout()
+                        .medium()
+                        .tnum()
+                        .active(|el| el.bg(colors.fill_pressed))
+                        .when(has_new, |el| {
+                            el.child(div().size(px(6.)).rounded_full().bg(colors.accent))
+                        })
+                        .child(label)
+                        .child(ui::icon(Lucide::ArrowDown, theme::icon::SMALL, colors.text_2))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.jump_to_latest();
+                            cx.notify();
+                        })),
+                )
+        });
+        let jump_unread = self.first_unread_above().then(|| {
+            div()
+                .absolute()
+                .top(space::S12)
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(
+                    ui::floating(cx)
+                        .id("jump-unread")
+                        .h(px(30.))
+                        .px(space::S12)
+                        .rounded_full()
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .t_callout()
+                        .medium()
+                        .tnum()
+                        .active(|el| el.bg(colors.fill_pressed))
+                        .child(div().size(px(6.)).rounded_full().bg(colors.accent))
+                        .child(fill(
                             r::JUMP_UNREAD,
                             &[("n", &self.unread_at_open.to_string())],
                         ))
+                        .child(ui::icon(Lucide::ArrowUp, theme::icon::SMALL, colors.text_2))
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.jump_to_first_unread();
                             cx.notify();
@@ -671,8 +775,8 @@ impl Render for TimelineView {
                 .right_0()
                 .flex()
                 .justify_center()
-                .text_xs()
-                .text_color(colors.muted_foreground)
+                .t_caption()
+                .text_color(colors.text_3)
                 .child(t::LOADING_OLDER)
         });
 
@@ -681,6 +785,7 @@ impl Render for TimelineView {
             .size_full()
             .flex()
             .flex_col()
+            .bg(colors.content)
             .child(self.render_header(&topic, cx))
             .child(
                 div()
@@ -694,12 +799,19 @@ impl Render for TimelineView {
             )
             .child(
                 div()
-                    .h(px(18.))
+                    .h(px(22.))
                     .flex_none()
-                    .px(px(16.))
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .when_some(self.typing_text(), |el, text| el.child(text)),
+                    .pl(space::S20)
+                    .pr(space::S24)
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .t_callout()
+                    .text_color(colors.text_2)
+                    .when_some(self.typing_text(), |el, text| {
+                        el.child(typing_dots(colors.text_3, cx.reduce_motion()))
+                            .child(div().min_w(px(0.)).one_line().child(text))
+                    }),
             )
             .children(self.probe_element())
             .into_any_element()

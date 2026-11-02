@@ -15,6 +15,8 @@ crate::copy! {
     TYPING_ONE = "{name} 正在输入…",
     TYPING_MANY = "{n} 人正在输入…",
     MESSAGE_COUNT = "{n} 条消息",
+    STARTED_BY = "{name} 发起",
+    OWNED_BY = "{name} 负责",
     QUOTE = "引用",
     EDIT = "编辑",
     DELETE = "删除",

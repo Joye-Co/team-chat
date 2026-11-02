@@ -13,17 +13,21 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonVariants as _},
     menu::ContextMenuExt as _,
+    tab::{Tab, TabBar},
 };
 
 use crate::{
     app::{Changes, Place, Services},
     copy::{common, fill, nav, realtime as r},
     data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
-    theme,
-    views::{count_badge, status_chip, topic_menu},
+    theme::{self, Type as _, space},
+    ui::{self, BadgeKind, CountBadge, Lucide, StatusChip},
+    views::{sidebar::topic_line, topic_menu},
 };
+
+/// Height of one topic row: 9 + 18 + 4 + 18 + 10 (§5.3) plus the 2 pt inset.
+const TOPIC_ROW_HEIGHT: gpui::Pixels = px(61.);
 
 /// The status filter above the topics of a group.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -297,31 +301,40 @@ impl TopicListView {
 
     fn filter_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
-        div()
-            .px(px(8.))
-            .py(px(6.))
-            .flex()
-            .gap(px(4.))
-            .border_b_1()
-            .border_color(colors.border)
-            .children(TopicFilter::ALL.into_iter().map(|f| {
-                let active = f == self.filter;
-                div()
-                    .id(ElementId::Name(SharedString::from(format!("filter-{f:?}"))))
-                    .px(px(8.))
-                    .py(px(2.))
-                    .rounded(px(10.))
-                    .text_xs()
-                    .when(active, |el| {
-                        el.bg(colors.row_selected).text_color(colors.foreground)
-                    })
-                    .when(!active, |el| {
-                        el.text_color(colors.muted_foreground)
-                            .hover(|el| el.bg(colors.row_hover))
-                    })
-                    .child(f.label())
-                    .on_click(cx.listener(move |this, _, _, cx| this.set_filter(f, cx)))
-            }))
+        let me = self.services.me();
+        let selected = TopicFilter::ALL
+            .iter()
+            .position(|f| *f == self.filter)
+            .unwrap_or(0);
+        let view = cx.entity().downgrade();
+        div().flex_none().px(space::S12).pb(space::S8).child(
+            TabBar::new("topic-filter")
+                .segmented()
+                .small()
+                .w_full()
+                .selected_index(selected)
+                .children(TopicFilter::ALL.into_iter().map(|f| {
+                    let n = self
+                        .all
+                        .iter()
+                        .filter(|r| f.keeps(&r.topic, me.as_deref()))
+                        .count() as u32;
+                    Tab::new().flex_1().label(f.label()).suffix(
+                        div()
+                            .ml(space::S4)
+                            .t_caption()
+                            .font_weight(gpui::FontWeight::NORMAL)
+                            .tnum()
+                            .text_color(colors.text_3)
+                            .child(CountBadge::text(n, BadgeKind::Unread)),
+                    )
+                }))
+                .on_click(move |ix, _, cx| {
+                    if let Some(f) = TopicFilter::ALL.get(*ix).copied() {
+                        let _ = view.update(cx, |this, cx| this.set_filter(f, cx));
+                    }
+                }),
+        )
     }
 }
 
@@ -336,72 +349,105 @@ impl Render for TopicListView {
             Some(Place::Group(_)) if self.rows.is_empty() => Some(nav::FILTER_EMPTY),
             _ => None,
         };
-        let header =
-            div()
-                .h(px(48.))
-                .px(px(12.))
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .border_b_1()
-                .border_color(colors.border)
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w(px(0.))
-                        .flex()
-                        .flex_col()
-                        .child(
+        let sub = if is_group {
+            let members = match &self.place {
+                Some(Place::Group(g)) => self
+                    .services
+                    .provider
+                    .groups()
+                    .into_iter()
+                    .find(|x| &x.id == g)
+                    .map(|x| x.member_ids.len())
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            Some(format!(
+                "{} · {}",
+                fill(nav::MEMBER_COUNT, &[("n", &members.to_string())]),
+                fill(nav::TOPIC_COUNT, &[("n", &self.all.len().to_string())])
+            ))
+        } else {
+            None
+        };
+        let header = ui::toolbar_band("topic-list-toolbar")
+            .px(space::S16)
+            .gap(space::S8)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .child(div().t_title().one_line().child(self.title.clone()))
+                    .when_some(sub, |el, sub| {
+                        el.child(
                             div()
-                                .text_base()
-                                .overflow_hidden()
-                                .whitespace_nowrap()
-                                .text_ellipsis()
-                                .child(self.title.clone()),
+                                .type_role(theme::type_scale::CAPTION)
+                                .tnum()
+                                .text_color(colors.text_2)
+                                .one_line()
+                                .child(sub),
                         )
-                        .when(is_group, |el| {
-                            el.child(div().text_xs().text_color(colors.muted_foreground).child(
-                                fill(nav::TOPIC_COUNT, &[("n", &self.all.len().to_string())]),
-                            ))
-                        }),
+                    }),
+            )
+            .when(is_group, |el| {
+                el.child(
+                    ui::icon_button("new-topic", Lucide::SquarePen)
+                        .tooltip(nav::NEW_TOPIC)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))
+                        })),
                 )
-                .when(is_group, |el| {
-                    el.child(
-                        Button::new("new-topic")
-                            .small()
-                            .primary()
-                            .label(nav::NEW_TOPIC)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))
-                            })),
-                    )
-                });
+            });
 
         let selected = self.services.nav.read(cx).topic.clone();
         let me = self.services.me();
         let now = Local::now();
+        let empty_icon = match &self.place {
+            Some(Place::Todo) => Lucide::CircleCheck,
+            Some(Place::Group(_)) if !self.all.is_empty() => Lucide::SearchX,
+            Some(Place::Group(_)) => Lucide::MessageSquarePlus,
+            None => Lucide::UsersRound,
+        };
         let body = match empty_text {
             Some(text) => div()
                 .flex_1()
-                .p(px(16.))
-                .text_sm()
-                .text_color(colors.muted_foreground)
-                .child(text)
+                .child(ui::EmptyState::new(empty_icon, text))
                 .into_any_element(),
             None => uniform_list(
                 "topic-rows",
                 self.rows.len(),
                 cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
                     let colors = theme::colors(cx);
+                    let is_sel = |ix: usize| {
+                        this.rows.get(ix).is_some_and(|row| {
+                            selected.as_ref() == Some(&(row.group_id.clone(), row.topic.id.clone()))
+                        })
+                    };
                     range
                         .filter_map(|ix| this.rows.get(ix).cloned().map(|row| (ix, row)))
                         .map(|(ix, row)| {
-                            let is_selected = selected.as_ref()
-                                == Some(&(row.group_id.clone(), row.topic.id.clone()));
-                            let chip = status_chip(&row.topic, me.as_deref(), &this.members, cx);
+                            let is_selected = is_sel(ix);
+                            // The hairline under a row hides next to the selected row.
+                            let separator = !is_selected
+                                && !is_sel(ix + 1)
+                                && ix + 1 < this.rows.len();
+                            let chip = StatusChip::for_topic(&row.topic, me.as_deref(), &this.members);
                             let (g, t) = (row.group_id.clone(), row.topic.id.clone());
-                            let unread = count_badge(row.topic.unread, false, cx);
-                            let mentioned = row.topic.mentions > 0;
+                            let unread = row.topic.unread > 0;
+                            let badge = if row.topic.mentions > 0 {
+                                Some(CountBadge::new(row.topic.mentions, BadgeKind::Mention))
+                            } else if unread {
+                                Some(CountBadge::new(row.topic.unread, BadgeKind::Unread))
+                            } else {
+                                None
+                            };
+                            let title = topic_line(&row.topic.title);
+                            let (title, untitled) = if title.is_empty() {
+                                (nav::UNTITLED.to_string(), true)
+                            } else {
+                                (title, false)
+                            };
                             let typing = this.typing_text(&row.topic.id);
                             let menu_services = this.services.clone();
                             let menu_topic = row.topic.clone();
@@ -412,76 +458,98 @@ impl Render for TopicListView {
                                     ix as u64,
                                 ))
                                 .w_full()
-                                .h(px(56.))
-                                .px(px(12.))
-                                .flex()
-                                .flex_col()
-                                .justify_center()
-                                .gap(px(2.))
-                                .border_b_1()
-                                .border_color(colors.border)
-                                .when(is_selected, |el| el.bg(colors.row_selected))
-                                .hover(|el| el.bg(colors.row_hover))
+                                .h(TOPIC_ROW_HEIGHT)
+                                .px(space::S8)
+                                .pt(px(2.))
                                 .child(
                                     div()
+                                        .relative()
+                                        .size_full()
+                                        .rounded(theme::radius::ROW)
+                                        .pt(px(9.))
+                                        .pb(space::S10)
+                                        .pl(space::S20)
+                                        .pr(space::S10)
                                         .flex()
-                                        .items_center()
-                                        .gap(px(6.))
+                                        .flex_col()
+                                        .gap(space::S4)
+                                        .when(is_selected, |el| el.bg(colors.fill_selected))
+                                        .when(unread, |el| {
+                                            el.child(
+                                                div()
+                                                    .absolute()
+                                                    .left(space::S6)
+                                                    .top(px(14.))
+                                                    .size(space::S8)
+                                                    .rounded_full()
+                                                    .bg(colors.accent),
+                                            )
+                                        })
                                         .child(
                                             div()
-                                                .flex_1()
-                                                .min_w(px(0.))
-                                                .text_sm()
-                                                .overflow_hidden()
-                                                .whitespace_nowrap()
-                                                .text_ellipsis()
-                                                .when(row.topic.unread > 0, |el| {
-                                                    el.font_weight(gpui::FontWeight::SEMIBOLD)
-                                                })
-                                                .child(row.topic.title.clone()),
+                                                .flex()
+                                                .items_center()
+                                                .gap(space::S8)
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w(px(0.))
+                                                        .t_ui()
+                                                        .medium()
+                                                        .one_line()
+                                                        .when(unread, |el| el.semibold())
+                                                        .when(untitled, |el| {
+                                                            el.text_color(colors.text_2)
+                                                        })
+                                                        .child(title),
+                                                )
+                                                .child(
+                                                    div()
+                                                        .flex_none()
+                                                        .t_callout()
+                                                        .tnum()
+                                                        .text_color(colors.text_2)
+                                                        .child(relative_time(
+                                                            row.topic.last_activity_at,
+                                                            now,
+                                                        )),
+                                                ),
                                         )
-                                        .when(mentioned, |el| {
+                                        .child(
+                                            div()
+                                                .h(px(18.))
+                                                .flex()
+                                                .items_center()
+                                                .gap(space::S6)
+                                                .t_callout()
+                                                .text_color(colors.text_2)
+                                                .children(chip)
+                                                .child(
+                                                    div()
+                                                        .flex_1()
+                                                        .min_w(px(0.))
+                                                        .one_line()
+                                                        .map(|el| match typing {
+                                                            Some(text) => el
+                                                                .text_color(colors.accent_text)
+                                                                .child(text),
+                                                            None => el.children(
+                                                                row.group_name.clone(),
+                                                            ),
+                                                        }),
+                                                )
+                                                .children(badge),
+                                        )
+                                        .when(separator, |el| {
                                             el.child(
                                                 div()
-                                                    .flex_none()
-                                                    .px(px(5.))
-                                                    .rounded_full()
-                                                    .bg(colors.mention)
-                                                    .text_color(colors.mention_foreground)
-                                                    .text_xs()
-                                                    .child(nav::MENTION_MARK),
+                                                    .absolute()
+                                                    .bottom(px(0.))
+                                                    .left(space::S20)
+                                                    .right(space::S10)
+                                                    .h(theme::HAIRLINE)
+                                                    .bg(colors.sep),
                                             )
-                                        })
-                                        .when_some(unread, |el, b| el.child(b)),
-                                )
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(6.))
-                                        .text_xs()
-                                        .text_color(colors.muted_foreground)
-                                        .when_some(chip, |el, chip| el.child(chip))
-                                        .when_some(row.group_name.clone(), |el, name| {
-                                            el.child(
-                                                div()
-                                                    .min_w(px(0.))
-                                                    .overflow_hidden()
-                                                    .whitespace_nowrap()
-                                                    .text_ellipsis()
-                                                    .child(name),
-                                            )
-                                        })
-                                        .child(div().flex_1())
-                                        .child(match typing {
-                                            Some(text) => div()
-                                                .flex_none()
-                                                .text_color(colors.accent)
-                                                .child(text),
-                                            None => div().flex_none().child(relative_time(
-                                                row.topic.last_activity_at,
-                                                now,
-                                            )),
                                         }),
                                 )
                                 .on_click(cx.listener(move |this, _, _, cx| {
@@ -516,6 +584,7 @@ impl Render for TopicListView {
             .size_full()
             .flex()
             .flex_col()
+            .bg(colors.content)
             .child(header)
             .when(is_group && !self.all.is_empty(), |el| {
                 el.child(self.filter_bar(cx))

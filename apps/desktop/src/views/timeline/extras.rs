@@ -21,7 +21,7 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, div, px}
 use crate::{
     copy::timeline as t,
     data::{ChatProvider, Member, Message},
-    theme,
+    theme::{self, Type as _},
 };
 
 /// What an extra can read while it renders.
@@ -138,22 +138,27 @@ impl MessageExtra for QuoteExtra {
         };
         Some(
             div()
-                .mb(px(2.))
-                .pl(px(8.))
+                .mb(px(4.))
+                .pl(px(10.))
                 .border_l_2()
-                .border_color(colors.border)
-                .text_xs()
-                .text_color(colors.muted_foreground)
+                .border_color(colors.quote_bar)
                 .flex()
-                .gap(px(4.))
+                .flex_col()
                 .min_w(px(0.))
-                .children(name.map(|n| div().flex_none().child(n)))
+                .children(name.map(|n| {
+                    div()
+                        .t_callout()
+                        .semibold()
+                        .text_color(colors.text_1)
+                        .one_line()
+                        .child(n)
+                }))
                 .child(
                     div()
                         .min_w(px(0.))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
+                        .type_role(theme::type_scale::QUOTE)
+                        .text_color(colors.text_2)
+                        .line_clamp(2)
                         .child(text),
                 )
                 .into_any_element(),

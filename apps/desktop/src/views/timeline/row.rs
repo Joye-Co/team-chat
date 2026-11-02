@@ -17,7 +17,9 @@ use super::{TimelineView, extras, model};
 use crate::{
     copy::{common, timeline as t},
     data::{Member, Message, SendState},
-    markdown, theme,
+    markdown,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
     views::time_text,
 };
 
@@ -60,9 +62,8 @@ impl TimelineView {
 
         let body: AnyElement = if deleted {
             div()
-                .text_sm()
-                .italic()
-                .text_color(colors.muted_foreground)
+                .t_ui()
+                .text_color(colors.text_3)
                 .child(t::DELETED)
                 .into_any_element()
         } else if let Some(input) = editing {
@@ -71,8 +72,8 @@ impl TimelineView {
             div().into_any_element()
         } else if message.body.is_empty() && message.streaming {
             div()
-                .text_sm()
-                .text_color(colors.muted_foreground)
+                .t_callout()
+                .text_color(colors.text_3)
                 .child(t::STREAMING)
                 .into_any_element()
         } else {
@@ -81,13 +82,16 @@ impl TimelineView {
                 .into_any_element()
         };
 
-        let failed = message.send_state == SendState::Failed;
         let state_line = match message.send_state {
             SendState::Sent => None,
             SendState::Pending => Some(
                 div()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
+                    .flex()
+                    .items_center()
+                    .gap(space::S4)
+                    .t_caption()
+                    .text_color(colors.text_3)
+                    .child(ui::icon(Lucide::Clock, theme::icon::CHIP, colors.text_3))
                     .child(t::PENDING)
                     .into_any_element(),
             ),
@@ -95,15 +99,13 @@ impl TimelineView {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.))
-                    .text_xs()
-                    .text_color(colors.danger)
+                    .gap(space::S6)
+                    .t_callout()
+                    .text_color(colors.danger_text)
+                    .child(ui::icon(Lucide::CircleAlert, theme::icon::SMALL, colors.danger_text))
                     .child(t::FAILED)
                     .child(
-                        Button::new("retry")
-                            .xsmall()
-                            .ghost()
-                            .label(t::RETRY)
+                        ui::text_button("retry", t::RETRY)
                             .on_click(cx.listener({
                                 let message = message.clone();
                                 move |this, _, _, _| this.retry(&message)
@@ -115,33 +117,57 @@ impl TimelineView {
 
         let header = (!grouped).then(|| {
             div()
+                .h(px(18.))
+                .min_w(px(0.))
                 .flex()
                 .items_center()
-                .gap(px(6.))
-                .text_xs()
+                .gap(space::S6)
                 .child(
                     div()
-                        .text_sm()
+                        .flex_shrink(1.)
+                        .min_w(px(0.))
+                        .t_ui()
                         .font_weight(FontWeight::SEMIBOLD)
+                        .one_line()
                         .child(author.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
                 )
                 .when_some(author.as_ref().and_then(|a| a.role.clone()), |el, role| {
-                    el.child(div().text_color(colors.muted_foreground).child(role))
+                    el.child(
+                        div()
+                            .flex_shrink_0()
+                            .max_w(px(160.))
+                            .t_callout()
+                            .text_color(colors.text_2)
+                            .one_line()
+                            .child(role),
+                    )
                 })
                 .child(
                     div()
-                        .text_color(colors.muted_foreground)
+                        .flex_none()
+                        .t_caption()
+                        .font_weight(FontWeight::NORMAL)
+                        .tnum()
+                        .text_color(colors.text_3)
                         .child(time_text(message.created_at)),
                 )
                 .when(message.edited_at.is_some() && !deleted, |el| {
-                    el.child(div().text_color(colors.muted_foreground).child(t::EDITED))
+                    el.child(
+                        div()
+                            .flex_none()
+                            .t_caption()
+                            .font_weight(FontWeight::NORMAL)
+                            .text_color(colors.text_3)
+                            .child(t::EDITED),
+                    )
                 })
         });
         // A grouped row shows only its marks (edited) next to the body.
         let grouped_marks = (grouped && message.edited_at.is_some() && !deleted).then(|| {
             div()
-                .text_xs()
-                .text_color(colors.muted_foreground)
+                .t_caption()
+                .font_weight(FontWeight::NORMAL)
+                .text_color(colors.text_3)
                 .child(t::EDITED)
         });
 
@@ -174,13 +200,13 @@ impl TimelineView {
         let row = div()
             .id(ElementId::Name(key.clone().into()))
             .w_full()
-            .px(px(16.))
-            .pt(if grouped { px(2.) } else { px(8.) })
-            .pb(px(2.))
+            .pl(space::S20)
+            .pr(space::S24)
+            .pt(if grouped { space::S2 } else { space::S12 })
+            .pb(space::S2)
             .flex()
-            .gap(px(10.))
-            .hover(|s| s.bg(colors.row_hover))
-            .when(failed, |el| el.bg(colors.danger.opacity(0.06)))
+            .gap(space::S12)
+            .hover(|s| s.bg(colors.fill_hover))
             .when(self.is_highlighted(&key), |el| {
                 el.bg(colors.search_highlight)
             })
@@ -189,9 +215,10 @@ impl TimelineView {
                 div()
                     .flex_1()
                     .min_w(px(0.))
+                    .max_w(theme::MEASURE)
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
+                    .gap(space::S2)
                     .children(header)
                     .children(above)
                     .child(body)
@@ -199,8 +226,12 @@ impl TimelineView {
                     .when(message.streaming && !message.body.is_empty(), |el| {
                         el.child(
                             div()
-                                .text_xs()
-                                .text_color(colors.muted_foreground)
+                                .flex()
+                                .items_center()
+                                .gap(space::S6)
+                                .t_callout()
+                                .text_color(colors.text_3)
+                                .child(ui::icon(Lucide::Loader, theme::icon::SMALL, colors.text_3))
                                 .child(t::STREAMING),
                         )
                     })
@@ -224,7 +255,7 @@ impl TimelineView {
                 .w_full()
                 .flex()
                 .flex_col()
-                .child(new_messages_divider(colors.danger))
+                .child(new_messages_divider(colors.new_divider, colors.danger_text))
                 .child(row)
                 .into_any_element()
         } else {
@@ -291,18 +322,18 @@ impl TimelineView {
 }
 
 /// The line above the first unread message.
-fn new_messages_divider(color: Hsla) -> impl IntoElement {
+fn new_messages_divider(line: Hsla, label: Hsla) -> impl IntoElement {
     div()
-        .px(px(16.))
-        .py(px(4.))
+        .pl(space::S20)
+        .pr(space::S24)
+        .pt(space::S14)
         .flex()
         .items_center()
-        .gap(px(8.))
-        .text_xs()
-        .text_color(color)
-        .child(div().flex_1().h(px(1.)).bg(color))
+        .gap(space::S8)
+        .t_section()
+        .text_color(label)
+        .child(div().flex_1().h(theme::HAIRLINE * 2.).bg(line))
         .child(t::NEW_MESSAGES)
-        .child(div().flex_1().h(px(1.)).bg(color))
 }
 
 /// The timeline avatar (`ui::MemberAvatar`).

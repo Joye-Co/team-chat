@@ -10,23 +10,27 @@ use gpui::{
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    IconName, Sizable as _,
+    Sizable as _,
     button::{Button, ButtonVariants as _},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
+    tooltip::Tooltip,
 };
 
 use crate::{
     app::{Changes, Place, Services},
-    copy::{common, nav, search as search_copy},
-    data::{Change, ConnectionState, GroupId, GroupKind, GroupSummary, Member},
-    theme,
+    copy::{common, fill, nav, search as search_copy},
+    data::{Change, ConnectionState, GroupId, GroupKind, GroupSummary, Member, TodoItem, TodoReason},
+    theme::{self, Type as _, space},
+    ui::{self, BadgeKind, CountBadge, GroupTile, KbdHint, Lucide, MemberAvatar, SectionHeader},
     views::{
-        avatar, count_badge,
         nav::{NewGroup, QuickSwitch, StartDm, dialogs},
-        presence_dot,
         search::SearchEverywhere,
+        status_chip_text,
     },
 };
+
+/// At most this many 待办 rows show in the sidebar (§5.2).
+const TODO_ROWS: usize = 5;
 
 pub struct Sidebar {
     services: Services,
@@ -34,6 +38,7 @@ pub struct Sidebar {
     members: Vec<Member>,
     muted: HashSet<GroupId>,
     todo_count: usize,
+    todo: Vec<TodoItem>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -63,6 +68,7 @@ impl Sidebar {
             members: Vec::new(),
             muted: HashSet::new(),
             todo_count: 0,
+            todo: Vec::new(),
             _subscriptions: subscriptions,
         };
         this.refresh();
@@ -79,7 +85,8 @@ impl Sidebar {
             .filter(|g| p.group_muted(&g.id))
             .map(|g| g.id.clone())
             .collect();
-        self.todo_count = p.todo().len();
+        self.todo = p.todo();
+        self.todo_count = self.todo.len();
     }
 
     pub fn group_count(&self) -> usize {
@@ -102,70 +109,56 @@ impl Sidebar {
         let bold = group.unread > 0 && !muted;
         let menu_services = self.services.clone();
         let menu_group = group.clone();
+        let leading = match group.kind {
+            GroupKind::Dm => div()
+                .flex_none()
+                .child(
+                    MemberAvatar::new(peer, px(20.))
+                        .presence(peer)
+                        .on(if selected { colors.sidebar } else { colors.sidebar }),
+                )
+                .into_any_element(),
+            GroupKind::Group => GroupTile::new(group.id.clone(), group.name.clone(), px(20.))
+                .into_any_element(),
+        };
+        let trailing = if group.mentions > 0 {
+            Some(CountBadge::new(group.mentions, BadgeKind::Mention).into_any_element())
+        } else if muted {
+            Some(ui::icon(Lucide::BellOff, theme::icon::SMALL, colors.text_3).into_any_element())
+        } else if group.unread > 0 {
+            Some(CountBadge::new(group.unread, BadgeKind::Unread).into_any_element())
+        } else {
+            None
+        };
+        let name = group.name.clone();
         div()
             .id(ElementId::Name(SharedString::from(format!(
                 "group-{}",
                 group.id
             ))))
+            .flex_none()
             .h(theme::ROW_HEIGHT)
-            .mx(px(8.))
-            .px(px(8.))
-            .rounded(px(6.))
+            .mx(space::S10)
+            .px(space::S8)
+            .rounded(theme::radius::MD)
             .flex()
             .items_center()
-            .gap(px(8.))
-            .when(selected, |el| el.bg(colors.row_selected))
-            .hover(|el| el.bg(colors.row_hover))
-            .when(group.kind == GroupKind::Dm, |el| {
-                el.child(
-                    div()
-                        .relative()
-                        .flex_none()
-                        .child(avatar(peer, px(20.), cx))
-                        .when_some(peer, |el, p| {
-                            el.child(
-                                div()
-                                    .absolute()
-                                    .bottom(px(-1.))
-                                    .left(px(-1.))
-                                    .child(presence_dot(p.online, cx)),
-                            )
-                        }),
-                )
-            })
-            .when(group.kind == GroupKind::Group, |el| {
-                el.child(
-                    div()
-                        .w(px(20.))
-                        .flex_none()
-                        .text_color(colors.muted_foreground)
-                        .child(nav::GROUP_MARK),
-                )
-            })
+            .gap(space::S8)
+            .when(selected, |el| el.bg(colors.sidebar_selected))
+            .active(|el| el.bg(colors.fill_pressed))
+            .child(leading)
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .overflow_hidden()
-                    .text_ellipsis()
-                    .whitespace_nowrap()
-                    .when(bold, |el| el.font_weight(gpui::FontWeight::SEMIBOLD))
-                    .when(muted, |el| el.text_color(colors.muted_foreground))
-                    .child(group.name.clone()),
+                    .t_ui()
+                    .one_line()
+                    .when(bold, |el| el.semibold())
+                    .when(muted, |el| el.text_color(colors.text_2))
+                    .child(name.clone()),
             )
-            .when(muted, |el| {
-                el.child(
-                    div()
-                        .flex_none()
-                        .text_xs()
-                        .text_color(colors.muted_foreground)
-                        .child(nav::MUTED),
-                )
-            })
-            .when_some(count_badge(group.mentions, true, cx), |el, b| el.child(b))
-            .when(!muted, |el| {
-                el.when_some(count_badge(group.unread, false, cx), |el, b| el.child(b))
-            })
+            .children(trailing)
+            .tooltip(move |window, cx| Tooltip::new(name.clone()).build(window, cx))
             .on_click(cx.listener(move |this, _, _, cx| {
                 let id = id.clone();
                 this.services
@@ -201,6 +194,76 @@ impl Sidebar {
     }
 }
 
+impl Sidebar {
+    fn todo_row(&self, ix: usize, item: &TodoItem, cx: &mut Context<Self>) -> impl IntoElement {
+        let colors = theme::colors(cx);
+        let me = self.services.me();
+        let (glyph, glyph_color) = match (item.reason, item.topic.status) {
+            (TodoReason::Mentioned, _) => (Lucide::AtSign, colors.accent),
+            (_, crate::data::TopicStatus::WaitingReview) => (Lucide::Eye, colors.glyph_wait),
+            _ => (Lucide::CircleQuestionMark, colors.glyph_wait),
+        };
+        let reason = match item.reason {
+            TodoReason::Mentioned => nav::TODO_REASON_MENTIONED.to_string(),
+            TodoReason::WaitingOnMe => {
+                status_chip_text(&item.topic, me.as_deref(), &self.members)
+                    .unwrap_or_else(|| nav::TODO_REASON_WAITING.to_string())
+            }
+        };
+        let context = format!("{} · {}", item.group_name, reason);
+        let (g, t) = (item.group_id.clone(), item.topic.id.clone());
+        let selected = self.services.nav.read(cx).topic.as_ref() == Some(&(g.clone(), t.clone()));
+        let title = topic_line(&item.topic.title);
+        div()
+            .id(ElementId::NamedInteger("todo-row".into(), ix as u64))
+            .flex_none()
+            .h(px(40.))
+            .mx(space::S10)
+            .pr(space::S8)
+            .rounded(theme::radius::MD)
+            .flex()
+            .items_center()
+            .when(selected, |el| el.bg(colors.sidebar_selected))
+            .active(|el| el.bg(colors.fill_pressed))
+            .child(
+                div()
+                    .w(px(20.))
+                    .ml(space::S6)
+                    .mr(space::S6)
+                    .flex_none()
+                    .flex()
+                    .justify_center()
+                    .child(ui::icon(glyph, theme::icon::TODO, glyph_color)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .child(div().t_ui().medium().one_line().child(title))
+                    .child(
+                        div()
+                            .type_role(theme::type_scale::CAPTION)
+                            .text_color(colors.text_2)
+                            .one_line()
+                            .child(context),
+                    ),
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let (g, t) = (g.clone(), t.clone());
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.open_topic(g, t, cx));
+            }))
+    }
+}
+
+/// The first line of a title; newlines become spaces (§12).
+pub fn topic_line(title: &str) -> String {
+    title.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 impl Render for Sidebar {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
@@ -221,106 +284,169 @@ impl Render for Sidebar {
         };
         let todo_count = self.todo_count as u32;
         let empty = rows.is_empty();
+        let todo_rows: Vec<_> = self
+            .todo
+            .iter()
+            .take(TODO_ROWS)
+            .enumerate()
+            .map(|(ix, item)| self.todo_row(ix, item, cx).into_any_element())
+            .collect();
+        let more_todo = self.todo.len() > TODO_ROWS;
 
-        let header = div()
-            .px(px(16.))
-            .pt(px(12.))
-            .pb(px(4.))
-            .flex()
-            .items_center()
+        let todo_header = div()
+            .id("todo")
+            .mx(space::S10)
+            .px(space::S8)
+            .pt(space::S6)
+            .pb(space::S6)
+            .rounded(theme::radius::MD)
+            .when(place == Some(Place::Todo), |el| el.bg(colors.sidebar_selected))
             .child(
-                div()
-                    .flex_1()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(nav::GROUPS),
+                SectionHeader::new(nav::TODO).trailing(
+                    div()
+                        .when(todo_count > 0, |el| {
+                            el.child(CountBadge::new(todo_count, BadgeKind::Todo))
+                        }),
+                ),
             )
-            .child(
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.services.nav.update(cx, |nav, cx| nav.open_todo(cx))
+            }));
+
+        let groups_header = div().mx(space::S10).px(space::S8).pt(space::S14).pb(space::S6).child(
+            SectionHeader::new(nav::GROUPS).trailing(
                 Button::new("sidebar-new")
                     .ghost()
                     .xsmall()
-                    .icon(IconName::Plus)
+                    .icon(gpui_component::Icon::new(Lucide::Plus))
                     .tooltip(nav::NEW_MENU)
                     .dropdown_menu(|menu, _, _| {
                         menu.menu(nav::NEW_GROUP, Box::new(NewGroup))
                             .menu(nav::START_DM, Box::new(StartDm))
                     }),
-            );
+            ),
+        );
 
-        let empty_state = div()
-            .px(px(16.))
-            .py(px(8.))
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .child(div().child(nav::NO_GROUPS))
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(nav::NO_GROUPS_HINT),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(8.))
-                    .child(
-                        Button::new("empty-new-group")
-                            .small()
-                            .primary()
-                            .label(nav::NEW_GROUP)
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(NewGroup), cx)
-                            }),
-                    )
-                    .child(
-                        Button::new("empty-start-dm")
-                            .small()
-                            .label(nav::START_DM)
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(StartDm), cx)
-                            }),
-                    ),
-            );
+        let empty_state = div().h(px(240.)).child(
+            ui::EmptyState::new(Lucide::UsersRound, nav::NO_GROUPS)
+                .description(nav::NO_GROUPS_HINT)
+                .action(
+                    div()
+                        .flex()
+                        .gap(space::S8)
+                        .child(
+                            Button::new("empty-new-group")
+                                .small()
+                                .primary()
+                                .label(nav::NEW_GROUP)
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(NewGroup), cx)
+                                }),
+                        )
+                        .child(
+                            Button::new("empty-start-dm")
+                                .small()
+                                .label(nav::START_DM)
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(StartDm), cx)
+                                }),
+                        ),
+                ),
+        );
+
+        let me_id = self.services.me();
+        let me = me_id
+            .as_ref()
+            .and_then(|id| self.members.iter().find(|m| &m.id == id))
+            .cloned();
+        let footer = me.map(|me| {
+            div()
+                .flex_none()
+                .h(theme::TOOLBAR_HEIGHT)
+                .px(space::S16)
+                .flex()
+                .items_center()
+                .gap(space::S10)
+                .child(MemberAvatar::new(Some(&me), px(26.)).presence(Some(&me)).on(colors.sidebar))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .flex()
+                        .flex_col()
+                        .child(div().t_ui().medium().one_line().child(me.name.clone()))
+                        .when_some(me.role.clone(), |el, role| {
+                            el.child(
+                                div()
+                                    .type_role(theme::type_scale::CAPTION)
+                                    .text_color(colors.text_2)
+                                    .one_line()
+                                    .child(role),
+                            )
+                        }),
+                )
+                .child(
+                    ui::icon_button("sidebar-settings", Lucide::Settings)
+                        .tooltip(crate::copy::settings::TITLE)
+                        .on_click(|_, window, cx| {
+                            window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
+                        }),
+                )
+        });
 
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(colors.sidebar)
-            .text_color(colors.sidebar_foreground)
-            .text_sm()
+            .text_color(colors.text_1)
+            .t_ui()
+            // The traffic lights sit in this band.
+            .child(ui::toolbar_band("sidebar-toolbar"))
+            .when_some(connection, |el, text| {
+                el.child(
+                    div().mx(space::S10).mb(space::S8).child(
+                        ui::Band::new(Lucide::WifiOff, text).compact(),
+                    ),
+                )
+            })
             .child(
                 div()
-                    .m(px(8.))
-                    .mt(px(12.))
+                    .flex_none()
+                    .mx(space::S10)
+                    .mb(space::S10)
                     .flex()
                     .items_center()
-                    .gap(px(4.))
+                    .gap(space::S4)
                     .child(
                         div()
                             .id("sidebar-search")
                             .flex_1()
-                            .px(px(8.))
+                            .min_w(px(0.))
+                            .px(space::S8)
                             .h(px(28.))
-                            .rounded(px(6.))
-                            .border_1()
-                            .border_color(colors.border)
+                            .rounded(theme::radius::MD)
+                            .bg(colors.fill_field)
                             .flex()
                             .items_center()
-                            .text_color(colors.muted_foreground)
-                            .hover(|el| el.bg(colors.row_hover))
-                            .child(div().flex_1().child(search_copy::SIDEBAR_FIELD))
-                            .child(div().text_xs().child(search_copy::SIDEBAR_SHORTCUT))
+                            .gap(space::S6)
+                            .active(|el| el.bg(colors.fill_pressed))
+                            .child(ui::icon(Lucide::Search, theme::icon::BUTTON, colors.text_2))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .one_line()
+                                    .text_color(colors.placeholder)
+                                    .child(search_copy::SIDEBAR_FIELD),
+                            )
+                            .child(KbdHint::new(&["shift-cmd-f"]))
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(SearchEverywhere), cx)
                             }),
                     )
                     .child(
-                        Button::new("sidebar-quick-switch")
-                            .ghost()
-                            .small()
-                            .label(nav::QUICK_SWITCH_SHORTCUT)
+                        ui::icon_button("sidebar-quick-switch", Lucide::ChevronsUpDown)
                             .tooltip(nav::QUICK_SWITCH)
                             .on_click(|_, window, cx| {
                                 window.dispatch_action(Box::new(QuickSwitch), cx)
@@ -329,39 +455,40 @@ impl Render for Sidebar {
             )
             .child(
                 div()
-                    .id("todo")
-                    .h(theme::ROW_HEIGHT)
-                    .mx(px(8.))
-                    .px(px(8.))
-                    .rounded(px(6.))
-                    .flex()
-                    .items_center()
-                    .when(place == Some(Place::Todo), |el| el.bg(colors.row_selected))
-                    .hover(|el| el.bg(colors.row_hover))
-                    .child(div().flex_1().child(nav::TODO))
-                    .when_some(count_badge(todo_count, false, cx), |el, b| el.child(b))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.services.nav.update(cx, |nav, cx| nav.open_todo(cx))
-                    })),
-            )
-            .child(
-                div()
                     .id("sidebar-groups")
                     .flex_1()
+                    .min_h(px(0.))
                     .overflow_y_scroll()
-                    .child(header)
+                    .flex()
+                    .flex_col()
+                    .child(todo_header)
+                    .children(todo_rows)
+                    .when(more_todo, |el| {
+                        el.child(
+                            div()
+                                .id("todo-all")
+                                .flex_none()
+                                .h(px(22.))
+                                .mx(space::S10)
+                                .pl(px(40.))
+                                .flex()
+                                .items_center()
+                                .t_callout()
+                                .text_color(colors.text_2)
+                                .child(fill(
+                                    nav::TODO_ALL,
+                                    &[("n", &self.todo.len().to_string())],
+                                ))
+                                .on_click(cx.listener(|this, _, _, cx| {
+                                    this.services.nav.update(cx, |nav, cx| nav.open_todo(cx))
+                                })),
+                        )
+                    })
+                    .child(groups_header)
                     .when(empty, |el| el.child(empty_state))
-                    .children(rows),
+                    .children(rows)
+                    .child(div().h(space::S8).flex_none()),
             )
-            .when_some(connection, |el, text| {
-                el.child(
-                    div()
-                        .px(px(16.))
-                        .py(px(8.))
-                        .text_xs()
-                        .text_color(colors.danger)
-                        .child(text),
-                )
-            })
+            .children(footer)
     }
 }
