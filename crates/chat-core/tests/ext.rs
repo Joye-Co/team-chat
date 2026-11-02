@@ -850,6 +850,7 @@ fn redaction_removes_tokens_codes_and_secret_urls() {
         "token {token} used\n\
          Authorization: Bearer abc.def\n\
          invite ABCD-EFGH-JKMN redeemed\n\
+         invite WXYZ-2345 redeemed\n\
          GET https://x.dev/download?code=ABCDEFGHJKMN&v=2 200\n\
          {{\"secret\":\"whk_{s}\",\"seq\":5}}\n\
          X-Admin-Secret: hunter2\n\
@@ -863,6 +864,7 @@ fn redaction_removes_tokens_codes_and_secret_urls() {
         "abc.def",
         "ABCD-EFGH-JKMN",
         "ABCDEFGHJKMN",
+        "WXYZ-2345",
         "whk_",
         "hunter2",
         "user:pw",

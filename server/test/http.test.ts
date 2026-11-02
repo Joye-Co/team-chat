@@ -1,5 +1,6 @@
 import { SELF, env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { sha256Hex } from "../src/core/crypto";
 import { Client, api, createGroup, createMember } from "./helpers";
 import { protocolViolations } from "./helpers";
 import { afterAll as afterAllCheck } from "vitest";
@@ -90,7 +91,7 @@ describe("invites", () => {
       body: { name: "Intern", kind: "human", level: "member", role: "dev" },
     });
     expect(inv.status).toBe(200);
-    expect(inv.body.code).toMatch(/^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
+    expect(inv.body.code).toMatch(/^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
     expect(inv.body.expiresAt).toBeGreaterThan(Date.now() + 6 * 24 * 3600 * 1000);
     const stored = await env.DB.prepare("SELECT code_hash FROM invites WHERE created_by = ?").bind(owner.id).first<any>();
     expect(stored.code_hash).toMatch(/^[0-9a-f]{64}$/);
@@ -111,6 +112,52 @@ describe("invites", () => {
     await env.DB.prepare("UPDATE invites SET expires_at = ? WHERE name = 'Late'").bind(Date.now() - 1).run();
     const expired = await api("/v1/auth/redeem", { body: { inviteCode: inv2.body.code, deviceName: "mac" } });
     expect(expired.status).toBe(401);
+  });
+
+  it("still redeem a 12-character code made before the 8-character format", async () => {
+    const owner = await createMember({ level: "owner" });
+    const now = Date.now();
+    await env.DB.prepare(
+      `INSERT INTO invites (id, code_hash, name, kind, level, role, created_by, created_at, expires_at)
+       VALUES (?, ?, 'Legacy', 'human', 'member', NULL, ?, ?, ?)`,
+    )
+      .bind(`legacy-${now}`, await sha256Hex("K7QM2X9ABC3D"), owner.id, now, now + 3600_000)
+      .run();
+    const red = await api("/v1/auth/redeem", { body: { inviteCode: "k7qm-2x9a-bc3d", deviceName: "mac" } });
+    expect(red.status).toBe(200);
+    expect(red.body.member).toMatchObject({ name: "Legacy" });
+  });
+
+  it("limit wrong codes to 10 a minute per IP, and right codes do not use up the limit", async () => {
+    const owner = await createMember({ level: "owner" });
+    const ip = { "cf-connecting-ip": "198.51.100.23" };
+    // Right codes are given back: 12 redeems in a row from one IP all pass.
+    for (let i = 0; i < 12; i++) {
+      const inv = await api("/v1/invites", { token: owner.token, body: { name: `ok${i}`, kind: "human", level: "member" } });
+      const r = await api("/v1/auth/redeem", { headers: ip, body: { inviteCode: inv.body.code, deviceName: "mac" } });
+      expect(r.status).toBe(200);
+    }
+    const statuses: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      const r = await api("/v1/auth/redeem", { headers: ip, body: { inviteCode: "0000-0000", deviceName: "mac" } });
+      statuses.push(r.status);
+    }
+    expect(statuses.slice(0, 10)).toEqual(Array(10).fill(401));
+    expect(statuses.slice(10)).toEqual([429, 429]);
+    // Once limited, even a right code waits for the next window.
+    const inv = await api("/v1/invites", { token: owner.token, body: { name: "late", kind: "human", level: "member" } });
+    const blocked = await api("/v1/auth/redeem", { headers: ip, body: { inviteCode: inv.body.code, deviceName: "mac" } });
+    expect(blocked.status).toBe(429);
+    expect(blocked.body.error.code).toBe("rate_limited");
+    // Another IP is not affected.
+    const other = await api("/v1/auth/redeem", {
+      headers: { "cf-connecting-ip": "198.51.100.24" },
+      body: { inviteCode: inv.body.code, deviceName: "mac" },
+    });
+    expect(other.status).toBe(200);
+    // The IP is stored only as a hash.
+    const keys = await env.DB.prepare("SELECT key FROM auth_rate_hits").all<{ key: string }>();
+    expect(keys.results.some((k) => k.key.includes("198.51.100"))).toBe(false);
   });
 
   it("creates bots with a token (owner only)", async () => {

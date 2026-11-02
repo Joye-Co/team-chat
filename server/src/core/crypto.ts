@@ -20,12 +20,19 @@ export function newToken(): string {
 
 export const TOKEN_PATTERN = /^tc_[A-Za-z0-9_-]{43}$/;
 
-/** 12 Crockford characters shown as XXXX-XXXX-XXXX. */
+/**
+ * 8 Crockford characters shown as XXXX-XXXX (40 bits), like a device code: single use, they
+ * expire, and redeem attempts are rate limited per IP. Codes made earlier have 12 characters
+ * (XXXX-XXXX-XXXX) and still redeem: the stored hash is of the normalized code either way.
+ */
+export const INVITE_CODE_LENGTH = 8;
+export const LEGACY_INVITE_CODE_LENGTH = 12;
+
 export function newInviteCode(): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(12));
+  const bytes = crypto.getRandomValues(new Uint8Array(INVITE_CODE_LENGTH));
   let raw = "";
   for (const b of bytes) raw += CROCKFORD[b & 31];
-  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}-${raw.slice(8, 12)}`;
+  return `${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
 }
 
 /** Crockford decoding rules: case-insensitive, I/L -> 1, O -> 0, dashes and spaces ignored. */

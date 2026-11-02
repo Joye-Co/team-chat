@@ -174,7 +174,8 @@ async function main() {
       const path = join(dir, `invite-${slug(name)}-${Date.now()}.txt`);
       writeSecret(path, r.code);
       console.log(`invite for ${name}, expires ${new Date(r.expiresAt).toISOString()}`);
-      console.log(`invite code: ${path}`);
+      // The code (XXXX-XXXX, single use) is a secret: only its file path is printed.
+      console.log(`invite code (XXXX-XXXX, single use): ${path}`);
       return;
     }
     case "bot": {

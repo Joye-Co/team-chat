@@ -9,7 +9,8 @@ const SENSITIVE_KEY =
   /token|secret|password|passwd|authorization|cookie|invite_?code|^body$|^append$|^text$|^content$|^title$|api_?key|signature/i;
 const TOKEN_VALUE = /tc_[A-Za-z0-9_-]{20,}/g;
 const BEARER_VALUE = /Bearer\s+\S+/gi;
-const INVITE_VALUE = /\b[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}\b/gi;
+// Invite codes: XXXX-XXXX, and the earlier XXXX-XXXX-XXXX.
+const INVITE_VALUE = /\b[0-9A-Z]{4}-[0-9A-Z]{4}(?:-[0-9A-Z]{4})?\b/gi;
 
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > 6) return "[depth]";

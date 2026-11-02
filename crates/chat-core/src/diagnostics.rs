@@ -42,9 +42,10 @@ fn rules() -> &'static Rules {
                     r(r#"(?i)("?(?:token|secret|password|passwd|invite_?code|inviteCode|api_?key|admin_?secret|private_?key)"?\s*[:=]\s*"?)[^"\s,;&}]+"#),
                     "${1}<redacted>",
                 ),
-                // Invite codes: XXXX-XXXX-XXXX in the Crockford alphabet.
+                // Invite codes: XXXX-XXXX (and the earlier XXXX-XXXX-XXXX) in
+                // the Crockford alphabet.
                 (
-                    r(r"(?i)\b[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}\b"),
+                    r(r"(?i)\b[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}(?:-[0-9A-HJKMNP-TV-Z]{4})?\b"),
                     R,
                 ),
                 // URL user info (https://user:pass@host).

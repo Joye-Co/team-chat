@@ -3,7 +3,7 @@
   "valid": true,
   "description": "code is a fake placeholder",
   "value": {
-    "code": "WXYZ-2345-6789",
+    "code": "WXYZ-2345",
     "expiresAt": 1762732800000
   }
 }

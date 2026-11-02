@@ -12,6 +12,7 @@ describe("logger", () => {
       headers: { "x-admin-secret": "s3cret", Authorization: "Bearer abc" },
       inviteCode: "ABCD-EFGH-JKMN",
       note: "code is ABCD-EFGH-JKMN and token tc_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      hint: "new code K7QM-2X9A sent",
       frame: { t: "send", body: "private text", append: "more private" },
       err: new Error(`bad token ${token}`),
       groupId: "01GROUP",
@@ -19,7 +20,7 @@ describe("logger", () => {
     });
     expect(lines).toHaveLength(1);
     const out = lines[0];
-    for (const s of [token, "s3cret", "ABCD-EFGH-JKMN", "private text", "more private", "XYZW-1234-5678", "tc_bbbb", "abc"]) {
+    for (const s of [token, "s3cret", "ABCD-EFGH-JKMN", "private text", "more private", "XYZW-1234-5678", "K7QM-2X9A", "tc_bbbb", "abc"]) {
       expect(out).not.toContain(s);
     }
     const parsed = JSON.parse(out);

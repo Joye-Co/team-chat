@@ -13,6 +13,7 @@ import {
 import { auditStatement } from "./audit";
 import type { AuthContext } from "./auth";
 import { newInviteCode, newToken, normalizeInviteCode, sha256Hex, timingSafeEqualString } from "./crypto";
+import { REDEEM_RATE, refundAttempt, takeAttempt } from "./ratelimit";
 import { type MemberRow, getGroup, getMember, groupMemberIds, isGroupMember, listMembers, toMember } from "./db";
 import { type Env, gatewayStub, roomStub } from "./env";
 import { ApiError, unwrap } from "./errors";
@@ -204,7 +205,11 @@ export function registerCoreRoutes(): void {
     method: "POST",
     path: "/v1/auth/redeem",
     auth: "none",
-    async handler({ env, body, ctx }) {
+    async handler({ env, body, ctx, request }) {
+      // Codes are 8 characters (about 40 bits): limit guesses per client IP. The IP is hashed,
+      // never stored or logged.
+      const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+      const attempt = await takeAttempt(env.DB, `redeem:${await sha256Hex(ip)}`, REDEEM_RATE);
       const { inviteCode, deviceName } = await body(RedeemRequest);
       const codeHash = await sha256Hex(normalizeInviteCode(inviteCode));
       const now = Date.now();
@@ -230,6 +235,7 @@ export function registerCoreRoutes(): void {
         ).bind(memberId, tokenId, now, codeHash, memberId),
       ]);
       if (!results[0].meta.changes) throw new ApiError("unauthorized", "invite code is invalid, used or expired");
+      await refundAttempt(env.DB, attempt);
       const row = (await getMember(env.DB, memberId)) as MemberRow;
       const waitUntil = (p: Promise<unknown>) => ctx.waitUntil(p);
       const auth: AuthContext = { memberId, tokenId, member: toMember(row), row };

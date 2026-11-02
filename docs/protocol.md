@@ -202,8 +202,12 @@ log records `group.memberAdded` / `group.memberRemoved`.
 
 - Token: `tc_` + 43 characters of base64url (32 random bytes). The server stores only the
   SHA-256 hex digest. Tokens do not expire; owners and members can revoke them.
-- Invite code: 12 characters from the Crockford alphabet, shown as `XXXX-XXXX-XXXX`. Stored as a
-  SHA-256 digest, single use, expires after 7 days.
+- Invite code: 8 characters from the Crockford alphabet (40 bits), shown as `XXXX-XXXX`, like a
+  device code. Stored as a SHA-256 digest of the normalized code (upper case, dashes and spaces
+  dropped, I/L read as 1 and O as 0), single use, expires after 7 days. Codes made before this
+  format have 12 characters (`XXXX-XXXX-XXXX`) and still redeem. `POST /v1/auth/redeem` allows 10
+  attempts per minute per client IP; a right code does not use one up. Over the limit it answers
+  429 with the `rate_limited` error.
 - Bootstrap: the first owner is made with `POST /v1/admin/bootstrap`, protected by the
   `ADMIN_SECRET` Worker secret. It also makes a group called "General".
 

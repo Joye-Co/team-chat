@@ -3,7 +3,13 @@ import { MAX_DIAGNOSTICS_BYTES, MAX_FILE_BYTES, ReleaseVersion, type UpdateInfo 
 import product from "../../../product.json";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
-import { normalizeInviteCode, sha256Hex, timingSafeEqualString } from "../core/crypto";
+import {
+  INVITE_CODE_LENGTH,
+  LEGACY_INVITE_CODE_LENGTH,
+  normalizeInviteCode,
+  sha256Hex,
+  timingSafeEqualString,
+} from "../core/crypto";
 import type { Env } from "../core/env";
 import { ApiError } from "../core/errors";
 import { ulid } from "../core/ids";
@@ -255,7 +261,9 @@ export function registerOpsRoutes(): void {
         return plain(429, "Too many requests. Try again later.\n");
       }
       const code = normalizeInviteCode(url.searchParams.get("code") ?? "");
-      if (code.length !== 12) return plain(404, "Invite code not found or expired.\n");
+      if (code.length !== INVITE_CODE_LENGTH && code.length !== LEGACY_INVITE_CODE_LENGTH) {
+        return plain(404, "Invite code not found or expired.\n");
+      }
       const invite = await env.DB.prepare("SELECT id FROM invites WHERE code_hash = ? AND expires_at > ?")
         .bind(await sha256Hex(code), Date.now())
         .first<{ id: string }>();

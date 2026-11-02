@@ -16,7 +16,9 @@ bun run typecheck
 ```
 
 `admin.ts` reads `admin-secret` and `owner-token` from `~/.config/team-chat/<env>/` and writes
-new tokens and invite codes there (mode 600); it prints only file paths. Base URL: `--url`, or
+new tokens and invite codes there (mode 600); it prints only file paths. Invite codes are 8
+Crockford characters, `XXXX-XXXX`, single use, valid 7 days; redeem allows 10 attempts per minute
+per IP (12-character codes made earlier still redeem). Base URL: `--url`, or
 `product.json` `servers.<env>`, or `http://127.0.0.1:8789` for local.
 
 Extension points (all in `src/core/registry.ts`):

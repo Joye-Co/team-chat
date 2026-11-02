@@ -497,6 +497,7 @@ describe("releases and updates", () => {
 
     const bad = await raw("/download?code=AAAA-BBBB-CCCC", { headers: ip });
     expect(bad.status).toBe(404);
+    expect((await raw("/download?code=AAAA-BBBB", { headers: ip })).status).toBe(404);
     expect(bad.headers.get("content-type")).toContain("text/plain");
     expect((await raw("/download", { headers: ip })).status).toBe(404);
 
