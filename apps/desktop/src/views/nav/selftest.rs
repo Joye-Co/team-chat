@@ -258,13 +258,13 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
 
         // A new group opens once the provider delivers it.
         cx.update(|cx| {
-            let _ = super::create_group(
+            drop(super::create_group(
                 CreateGroupRequest {
                     name: "自测新群".into(),
                     member_ids: vec![],
                 },
                 cx,
-            );
+            ));
         });
         pause(cx).await;
         let new_id = provider

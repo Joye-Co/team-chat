@@ -259,10 +259,16 @@ mod tests {
     fn ranges_move_with_the_text() {
         let text = "…明 ### 新功能 - 群和私聊 - 话题状态";
         let at = text.chars().position(|c| c == '话').unwrap();
-        assert_eq!(marked(text, &[at..at + 2]), vec!["话题"]);
+        assert_eq!(
+            marked(text, std::slice::from_ref(&(at..at + 2))),
+            vec!["话题"]
+        );
         let text = "**加粗的话题**";
-        assert_eq!(marked(text, &[0..text.chars().count()]), vec!["加粗的话题"]);
+        assert_eq!(
+            marked(text, std::slice::from_ref(&(0..text.chars().count()))),
+            vec!["加粗的话题"]
+        );
         // A range over marks only is dropped.
-        assert!(marked("### 标题", &[0..3]).is_empty());
+        assert!(marked("### 标题", std::slice::from_ref(&(0..3))).is_empty());
     }
 }

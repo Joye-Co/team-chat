@@ -585,10 +585,10 @@ mod tests {
     fn fake_group_commands_work() {
         let p = FakeProvider::new();
         let before = p.groups().len();
-        let _ = p.create_group(crate::data::CreateGroupRequest {
+        drop(p.create_group(crate::data::CreateGroupRequest {
             name: "新群".into(),
             member_ids: vec!["m-alex".into()],
-        });
+        }));
         let groups = p.groups();
         assert_eq!(groups.len(), before + 1);
         let new = groups.iter().find(|g| g.name == "新群").unwrap();
@@ -626,8 +626,8 @@ mod tests {
                         .any(|g| g.dm_peer.as_deref() == Some(m.id.as_str()))
             })
             .unwrap();
-        let _ = p.open_dm(&peer.id);
-        let _ = p.open_dm(&peer.id);
+        drop(p.open_dm(&peer.id));
+        drop(p.open_dm(&peer.id));
         let dms = p
             .groups()
             .into_iter()

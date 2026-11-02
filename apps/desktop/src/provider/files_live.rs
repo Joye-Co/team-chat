@@ -102,10 +102,10 @@ fn files_live() {
 
     // A new 群 with B.
     let name = format!("文件 {}", chat_core::new_id());
-    let _ = a.create_group(CreateGroupRequest {
+    drop(a.create_group(CreateGroupRequest {
         name: name.clone(),
         member_ids: vec![me_b.clone()],
-    });
+    }));
     let g = wait("group made", || {
         a.groups().into_iter().find(|x| x.name == name)
     })

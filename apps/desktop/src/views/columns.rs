@@ -307,9 +307,11 @@ mod tests {
 
     #[test]
     fn narrow_windows_keep_the_topic_view_minimum() {
-        let mut c = Columns::default();
-        c.sidebar = px(320.);
-        c.topic_list = px(400.);
+        let c = Columns {
+            sidebar: px(320.),
+            topic_list: px(400.),
+            ..Columns::default()
+        };
         let (s, l) = c.fitted(px(1100.), true);
         assert_eq!(s + l, px(1100. - 480.));
         assert!(l >= theme::TOPIC_LIST_MIN_WIDTH);

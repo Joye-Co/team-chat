@@ -1257,7 +1257,7 @@ impl ChatProvider for CoreProvider {
             return Some(convert::quoted(&q));
         }
         let reply = store.message(quoting_id).ok().flatten()?.reply_to?;
-        (reply.message_id == quoted_id).then(|| crate::data::QuotedMessage {
+        (reply.message_id == quoted_id).then_some(crate::data::QuotedMessage {
             author_id: reply.author_id,
             body: reply.excerpt,
             deleted: false,

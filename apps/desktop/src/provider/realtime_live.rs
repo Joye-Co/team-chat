@@ -145,10 +145,10 @@ fn realtime_live() {
 
     // A new 群 with both members.
     let name = format!("rt-{}", chat_core::now_ms());
-    let _ = a.p.create_group(CreateGroupRequest {
+    drop(a.p.create_group(CreateGroupRequest {
         name: name.clone(),
         member_ids: vec![me_b.clone()],
-    });
+    }));
     let g = wait("B sees the new group", || {
         b.p.groups()
             .into_iter()
