@@ -25,6 +25,8 @@ crate::copy! {
     COMING_SOON = "即将推出",
     DIAGNOSTICS = "诊断",
     SIGN_OUT = "退出登录",
+    SIGN_OUT_WIPE = "退出并删除本机记录",
+    SIGN_OUT_HINT = "退出登录会保留这台 Mac 上的聊天记录，下次登录更快",
     DEVELOPER_VIEW = "开发者视图",
     DEVELOPER_VIEW_HINT = "显示连接和运行细节",
 }

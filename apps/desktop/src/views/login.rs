@@ -80,7 +80,7 @@ impl LoginView {
         self.services.provider.login(LoginRequest {
             server_url,
             credential,
-            device_name: "macOS".into(),
+            device_name: crate::provider::session::device_name(),
         });
         // The secret is not kept in the field after a try.
         self.code

@@ -27,7 +27,7 @@ use crate::{
     data::{Change, ChatProvider, GroupId, SessionState, TopicId},
     theme,
     views::{
-        composer::ComposerView, login::LoginView, settings::SettingsView, side_panel::SidePanel,
+        composer::ComposerView, connection_banner::ConnectionBanner, login::LoginView, settings::SettingsView, side_panel::SidePanel,
         sidebar::Sidebar, timeline::TimelineView, topic_list::TopicListView,
     },
 };
@@ -202,6 +202,7 @@ pub struct RootView {
     composer: Entity<ComposerView>,
     side_panel: Entity<SidePanel>,
     login: Entity<LoginView>,
+    banner: Entity<ConnectionBanner>,
     first_frame: Option<FirstFrameHook>,
     _subscriptions: Vec<Subscription>,
 }
@@ -230,6 +231,7 @@ impl RootView {
             composer: cx.new(|cx| ComposerView::new(services.clone(), window, cx)),
             side_panel: cx.new(|cx| SidePanel::new(services.clone(), cx)),
             login: cx.new(|cx| LoginView::new(services.clone(), window, cx)),
+            banner: cx.new(|cx| ConnectionBanner::new(services.clone(), cx)),
             services,
             first_frame,
             _subscriptions: subscriptions,
@@ -294,6 +296,7 @@ impl Render for RootView {
                     .h_full()
                     .flex()
                     .flex_col()
+                    .child(self.banner.clone())
                     .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))
                     .child(self.composer.clone())
                     .into_any_element(),

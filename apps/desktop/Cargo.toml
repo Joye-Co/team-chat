@@ -14,6 +14,10 @@ futures = "0.3"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde.workspace = true
 serde_json.workspace = true
+# The chat-core provider (src/provider/).
+chat-core.workspace = true
+tokio = { version = "1", features = ["sync", "time"] }
+tracing = "0.1"
 
 [dev-dependencies]
 gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] }
@@ -28,3 +32,7 @@ objc2 = "0.6"
 objc2-foundation = "0.3"
 objc2-app-kit = "0.3"
 raw-window-handle = "0.6"
+# Notifications, wake and network watching (src/provider/macos.rs).
+block2 = "0.6"
+libc = "0.2"
+objc2-user-notifications = "0.3"

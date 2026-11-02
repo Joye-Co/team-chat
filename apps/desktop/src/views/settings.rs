@@ -184,12 +184,39 @@ impl Render for SettingsView {
                 )
             })
             .child(
-                div().pt(px(20.)).child(
-                    Button::new("sign-out")
-                        .danger()
-                        .label(s::SIGN_OUT)
-                        .on_click(cx.listener(|this, _, _, _| this.services.provider.logout())),
-                ),
+                div()
+                    .pt(px(20.))
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(8.))
+                            .child(
+                                Button::new("sign-out")
+                                    .danger()
+                                    .label(s::SIGN_OUT)
+                                    .on_click(cx.listener(|this, _, _, _| {
+                                        this.services.provider.sign_out(false)
+                                    })),
+                            )
+                            .child(
+                                Button::new("sign-out-wipe")
+                                    .danger()
+                                    .outline()
+                                    .label(s::SIGN_OUT_WIPE)
+                                    .on_click(cx.listener(|this, _, _, _| {
+                                        this.services.provider.sign_out(true)
+                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_xs()
+                            .text_color(colors.muted_foreground)
+                            .child(s::SIGN_OUT_HINT),
+                    ),
             )
     }
 }

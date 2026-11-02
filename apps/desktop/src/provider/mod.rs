@@ -1,0 +1,1207 @@
+//! The chat-core provider: implements [`ChatProvider`] on `chat_core::Client`.
+//!
+//! - Getters read the chat-core SQLite cache (and its in-memory transient
+//!   state) synchronously. They never wait for the network.
+//! - Commands go to chat-core's outbox or engine and return at once. Sign-in
+//!   and sign-out run on chat-core's background runtime.
+//! - A pump thread per client turns `ClientUpdate`s into coalesced [`Change`]
+//!   batches, so only the views whose data changed refresh.
+//! - A topic started here is shown at once as a pending topic
+//!   (`pending:<clientMsgId>`) until the server acks its first message; after
+//!   the ack the pending id is an alias of the real topic id.
+//! - `ClientUpdate::Notify` becomes a [`Notice`] on [`CoreProvider::notices`];
+//!   the app shows it when it is in the background (see `macos.rs`).
+
+pub mod app_glue;
+pub mod convert;
+#[cfg(target_os = "macos")]
+pub mod macos;
+pub mod selftest_live;
+pub mod session;
+
+use std::{
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    sync::{Arc, Mutex, MutexGuard},
+    time::Duration,
+};
+
+use chat_core::{Client, ClientConfig, ClientUpdate, TopicPatch, proto::NotifyReason};
+use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
+
+use crate::{
+    copy::{fill, notify as n},
+    data::{
+        ArtifactSummary, Change, ChatProvider, ClientMsgId, ConnectionState, Draft, DraftKey,
+        GroupKind, GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId, MessageWindow, NewFile, SendRequest, SessionState,
+        StartTopicRequest, TodoItem, TodoReason, Topic, TopicStatus,
+    },
+    drafts::DraftStore,
+};
+
+use convert::{pending_cid, pending_topic_id};
+use session::{SavedSession, TokenStorage};
+
+/// Messages added to a topic's window by each `load_older`.
+const PAGE: usize = 100;
+/// Most topics read per group for the topic list and 待办.
+const TOPIC_LIMIT: usize = 500;
+
+/// Where the provider keeps its data and tokens.
+#[derive(Clone)]
+pub struct ProviderConfig {
+    pub data_root: PathBuf,
+    pub tokens: TokenStorage,
+    /// Restore the saved session at start.
+    pub restore: bool,
+}
+
+impl ProviderConfig {
+    /// The app: Application Support and the Keychain.
+    pub fn app() -> Self {
+        Self {
+            data_root: session::default_data_root(),
+            tokens: TokenStorage::Keychain,
+            restore: true,
+        }
+    }
+}
+
+/// A notification the app may show (mentions, DMs, topics waiting on me,
+/// results of topics I follow). The server decides which events notify.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Notice {
+    pub title: String,
+    pub body: String,
+    pub group_id: String,
+    pub topic_id: Option<String>,
+}
+
+struct Account {
+    client: Arc<Client>,
+    server_url: String,
+    me: chat_core::proto::Member,
+    dir: PathBuf,
+}
+
+#[derive(Default)]
+struct State {
+    session: Option<SessionState>,
+    account: Option<Arc<Account>>,
+    /// Bumped on every sign-in and sign-out; stale background work checks it.
+    generation: u64,
+    ever_connected: bool,
+    attempt: u32,
+    connection: Option<ConnectionState>,
+    /// Extra messages per topic beyond the view's limit (older pages).
+    extra: HashMap<String, usize>,
+    loading_older: HashSet<String>,
+    /// Pending topic id -> real topic id, after the ack.
+    aliases: HashMap<String, String>,
+    /// Sends into a pending topic, held until its ack: (pending topic id, request).
+    deferred: Vec<(String, ClientMsgId, SendRequest)>,
+    /// Acks seen: clientMsgId -> message id (self-tests read it).
+    acked: HashMap<String, String>,
+}
+
+struct Shared {
+    config: ProviderConfig,
+    state: Mutex<State>,
+    subscribers: Mutex<Vec<UnboundedSender<Vec<Change>>>>,
+    notices: Mutex<Option<UnboundedSender<Notice>>>,
+    drafts: DraftStore,
+}
+
+/// [`ChatProvider`] on chat-core. Cheap to clone.
+#[derive(Clone)]
+pub struct CoreProvider {
+    shared: Arc<Shared>,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+impl CoreProvider {
+    /// Makes the provider and, with `config.restore`, restores the saved
+    /// session from the cache at once (the token is read in the background).
+    pub fn new(config: ProviderConfig) -> Arc<Self> {
+        let _ = std::fs::create_dir_all(&config.data_root);
+        if let Some(guard) = chat_core::logging::init(&config.data_root, "app") {
+            // Logs flush until the process ends.
+            std::mem::forget(guard);
+        }
+        let provider = Arc::new(CoreProvider {
+            shared: Arc::new(Shared {
+                config,
+                state: Mutex::new(State::default()),
+                subscribers: Mutex::new(Vec::new()),
+                notices: Mutex::new(None),
+                drafts: DraftStore::new(),
+            }),
+        });
+        if provider.shared.config.restore {
+            provider.restore();
+        }
+        provider
+    }
+
+    fn state(&self) -> MutexGuard<'_, State> {
+        lock(&self.shared.state)
+    }
+
+    fn account(&self) -> Option<Arc<Account>> {
+        self.state().account.clone()
+    }
+
+    fn emit(&self, mut changes: Vec<Change>) {
+        if changes.is_empty() {
+            return;
+        }
+        // A pending topic id stays open in the views after its ack: name it too.
+        let aliases: Vec<(String, String)> = self
+            .state()
+            .aliases
+            .iter()
+            .map(|(p, r)| (p.clone(), r.clone()))
+            .collect();
+        if !aliases.is_empty() {
+            let mut extra = Vec::new();
+            for c in &changes {
+                if let Change::Messages { group_id, topic_id }
+                | Change::Typing { group_id, topic_id } = c
+                {
+                    for (pending, real) in &aliases {
+                        if real == topic_id {
+                            extra.push(match c {
+                                Change::Messages { .. } => Change::Messages {
+                                    group_id: group_id.clone(),
+                                    topic_id: pending.clone(),
+                                },
+                                _ => Change::Typing {
+                                    group_id: group_id.clone(),
+                                    topic_id: pending.clone(),
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+            changes.extend(extra);
+        }
+        let mut subs = lock(&self.shared.subscribers);
+        subs.retain(|s| s.unbounded_send(changes.clone()).is_ok());
+    }
+
+    /// Notifications to show; the app drains this on the main thread. A new
+    /// call replaces the previous receiver.
+    pub fn notices(&self) -> UnboundedReceiver<Notice> {
+        let (tx, rx) = unbounded();
+        *lock(&self.shared.notices) = Some(tx);
+        rx
+    }
+
+    /// Reconnects at once (wake from sleep, network change).
+    pub fn reconnect_now_inner(&self) {
+        if let Some(a) = self.account() {
+            tracing::info!("reconnect requested");
+            a.client.reconnect_now();
+        }
+    }
+
+    /// The message id the server gave a send, once acked.
+    pub fn acked_message(&self, client_msg_id: &str) -> Option<String> {
+        self.state().acked.get(client_msg_id).cloned()
+    }
+
+    /// The real topic id of a pending topic id (or the id itself).
+    pub fn resolve_topic(&self, topic_id: &str) -> String {
+        self.state()
+            .aliases
+            .get(topic_id)
+            .cloned()
+            .unwrap_or_else(|| topic_id.to_string())
+    }
+
+    /// The chat-core client of the signed-in account (self-tests).
+    pub fn client(&self) -> Option<Arc<Client>> {
+        self.account().map(|a| a.client.clone())
+    }
+
+    // ------------------------------------------------------------------
+    // Session
+    // ------------------------------------------------------------------
+
+    fn restore(&self) {
+        let root = self.shared.config.data_root.clone();
+        let Some(saved) = session::load_session(&root) else {
+            return;
+        };
+        let dir = session::account_dir(&root, &saved.server_url, &saved.member.id);
+        // The token comes from the Keychain in the background; the cache can
+        // be read at once.
+        let client = match open_client(&saved.server_url, String::new(), &dir) {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::warn!(error = %e, "cannot open the cache; signing out");
+                return;
+            }
+        };
+        let generation = self.install(saved.clone(), client.clone(), dir);
+        let this = self.clone();
+        let tokens = self.shared.config.tokens.clone();
+        chat_core::background().spawn(async move {
+            let loaded = tokio_blocking(move || tokens.store(&saved.server_url).load()).await;
+            match loaded {
+                Ok(Some(token)) => {
+                    if this.state().generation == generation {
+                        client.set_token(token);
+                        client.start();
+                    }
+                }
+                Ok(None) => {
+                    tracing::info!("no saved token; signing out");
+                    this.drop_session(generation, None);
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "cannot read the saved token; signing out");
+                    this.drop_session(generation, Some(LoginError::Other));
+                }
+            }
+        });
+    }
+
+    /// Makes `client` the signed-in account and starts its pump. Returns the
+    /// new generation.
+    fn install(&self, saved: SavedSession, client: Arc<Client>, dir: PathBuf) -> u64 {
+        let me = client
+            .me()
+            .ok()
+            .flatten()
+            .filter(|m| m.id == saved.member.id)
+            .unwrap_or_else(|| saved.member.clone());
+        let updates = client.subscribe();
+        let generation = {
+            let mut s = self.state();
+            s.generation += 1;
+            s.account = Some(Arc::new(Account {
+                client: client.clone(),
+                server_url: saved.server_url.clone(),
+                me,
+                dir,
+            }));
+            s.session = None;
+            s.connection = None;
+            s.ever_connected = false;
+            s.attempt = 0;
+            s.extra.clear();
+            s.loading_older.clear();
+            s.aliases.clear();
+            s.deferred.clear();
+            s.generation
+        };
+        self.spawn_pump(generation, updates);
+        self.emit(vec![
+            Change::Session,
+            Change::Connection,
+            Change::Members,
+            Change::Groups,
+            Change::Todo,
+        ]);
+        generation
+    }
+
+    /// Signs out locally: forgets the account and shows the login view.
+    /// Returns the account that was signed in.
+    fn take_account(&self, error: Option<LoginError>) -> Option<Arc<Account>> {
+        let account = {
+            let mut s = self.state();
+            s.generation += 1;
+            s.session = Some(SessionState::SignedOut { last_error: error });
+            s.connection = None;
+            s.extra.clear();
+            s.loading_older.clear();
+            s.aliases.clear();
+            s.deferred.clear();
+            s.account.take()
+        };
+        if let Some(a) = &account {
+            a.client.stop();
+        }
+        self.emit(vec![
+            Change::Session,
+            Change::Connection,
+            Change::Members,
+            Change::Groups,
+            Change::Todo,
+        ]);
+        account
+    }
+
+    /// The server refused the token, or it is gone: sign out, keep the cache.
+    fn drop_session(&self, generation: u64, error: Option<LoginError>) {
+        if self.state().generation != generation {
+            return;
+        }
+        let Some(account) = self.take_account(error) else {
+            return;
+        };
+        let root = self.shared.config.data_root.clone();
+        let tokens = self.shared.config.tokens.clone();
+        std::thread::spawn(move || {
+            let _ = tokens.store(&account.server_url).clear();
+            session::clear_session(&root);
+            drop(account);
+        });
+    }
+
+    /// Signs out: revokes this token on the server (best effort), deletes it
+    /// from the Keychain, and keeps or wipes the local cache.
+    pub fn sign_out_inner(&self, wipe_cache: bool) {
+        let Some(account) = self.take_account(None) else {
+            return;
+        };
+        let root = self.shared.config.data_root.clone();
+        let tokens = self.shared.config.tokens.clone();
+        chat_core::background().spawn(async move {
+            // Forget locally first, so a crash during the revoke cannot keep the session.
+            session::clear_session(&root);
+            let server = account.server_url.clone();
+            let token_store = tokens.clone();
+            let _ = tokio_blocking(move || token_store.store(&server).clear()).await;
+            let http = account.client.http();
+            match tokio::time::timeout(Duration::from_secs(5), http.revoke(None, false)).await {
+                Ok(Ok(_)) => tracing::info!("token revoked"),
+                Ok(Err(e)) => tracing::warn!(error = %e, "revoke failed"),
+                Err(_) => tracing::warn!("revoke timed out"),
+            }
+            let dir = account.dir.clone();
+            drop(account);
+            if wipe_cache {
+                // The engine closes its database as its runtime shuts down.
+                tokio::time::sleep(Duration::from_millis(300)).await;
+                if let Err(e) = std::fs::remove_dir_all(&dir) {
+                    tracing::warn!(error = %e, "cannot remove the cache");
+                }
+            }
+        });
+    }
+
+    fn login_inner(&self, request: LoginRequest) {
+        let Some(server_url) = session::normalize_server_url(&request.server_url) else {
+            let mut s = self.state();
+            s.session = Some(SessionState::SignedOut {
+                last_error: Some(LoginError::ServerUnreachable),
+            });
+            drop(s);
+            self.emit(vec![Change::Session]);
+            return;
+        };
+        let generation = {
+            let mut s = self.state();
+            if s.account.is_some() || matches!(s.session, Some(SessionState::SigningIn)) {
+                return;
+            }
+            s.generation += 1;
+            s.session = Some(SessionState::SigningIn);
+            s.generation
+        };
+        self.emit(vec![Change::Session]);
+        let this = self.clone();
+        chat_core::background().spawn(async move {
+            let result = this.finish_login(&server_url, &request, generation).await;
+            if let Err(error) = result {
+                let mut s = this.state();
+                if s.generation == generation {
+                    s.session = Some(SessionState::SignedOut {
+                        last_error: Some(error),
+                    });
+                    drop(s);
+                    this.emit(vec![Change::Session]);
+                }
+            }
+        });
+    }
+
+    async fn finish_login(
+        &self,
+        server_url: &str,
+        request: &LoginRequest,
+        generation: u64,
+    ) -> Result<(), LoginError> {
+        let (token, me) =
+            session::sign_in(server_url, &request.credential, &request.device_name).await?;
+        if self.state().generation != generation {
+            return Ok(());
+        }
+        let tokens = self.shared.config.tokens.clone();
+        let root = self.shared.config.data_root.clone();
+        let saved = SavedSession {
+            server_url: server_url.to_string(),
+            member: me.clone(),
+        };
+        let dir = session::account_dir(&root, server_url, &me.id);
+        let (server, t) = (server_url.to_string(), token.clone());
+        let saved2 = saved.clone();
+        let dir2 = dir.clone();
+        let client = tokio_blocking(move || -> Result<Arc<Client>, LoginError> {
+            tokens.store(&server).save(&t).map_err(|e| {
+                tracing::warn!(error = %e, "cannot save the token");
+                LoginError::Other
+            })?;
+            session::save_session(&root, &saved2).map_err(|e| {
+                tracing::warn!(error = %e, "cannot save the session");
+                LoginError::Other
+            })?;
+            open_client(&server, t, &dir2).map_err(|e| {
+                tracing::warn!(error = %e, "cannot open the cache");
+                LoginError::Other
+            })
+        })
+        .await?;
+        if self.state().generation != generation {
+            return Ok(());
+        }
+        tracing::info!(member = %me.id, "signed in");
+        self.install(saved, client.clone(), dir);
+        client.start();
+        Ok(())
+    }
+
+    // ------------------------------------------------------------------
+    // Updates
+    // ------------------------------------------------------------------
+
+    fn spawn_pump(
+        &self,
+        generation: u64,
+        mut updates: tokio::sync::mpsc::UnboundedReceiver<ClientUpdate>,
+    ) {
+        let this = self.clone();
+        let spawned = std::thread::Builder::new()
+            .name("provider-pump".into())
+            .spawn(move || {
+                while let Some(first) = updates.blocking_recv() {
+                    if this.state().generation != generation {
+                        break;
+                    }
+                    let mut batch = vec![first];
+                    while let Ok(u) = updates.try_recv() {
+                        batch.push(u);
+                        if batch.len() >= 256 {
+                            break;
+                        }
+                    }
+                    let mut changes = Vec::new();
+                    for u in batch {
+                        this.on_update(generation, u, &mut changes);
+                    }
+                    if this.state().generation != generation {
+                        break;
+                    }
+                    let mut seen = HashSet::new();
+                    changes.retain(|c| seen.insert(c.clone()));
+                    this.emit(changes);
+                }
+            });
+        if let Err(e) = spawned {
+            tracing::error!(error = %e, "cannot start the update thread");
+        }
+    }
+
+    fn on_update(&self, generation: u64, u: ClientUpdate, out: &mut Vec<Change>) {
+        match u {
+            ClientUpdate::Connection(c) => {
+                use chat_core::ConnectionState as C;
+                match c {
+                    C::Unauthorized => {
+                        tracing::info!("the server refused the token");
+                        let this = self.clone();
+                        // Not on the pump thread: it ends with this generation.
+                        std::thread::spawn(move || {
+                            this.drop_session(generation, Some(LoginError::BadCredential))
+                        });
+                        return;
+                    }
+                    other => {
+                        let mut s = self.state();
+                        let state = match other {
+                            C::Connected => {
+                                s.ever_connected = true;
+                                s.attempt = 0;
+                                ConnectionState::Online
+                            }
+                            C::Connecting if !s.ever_connected && s.attempt == 0 => {
+                                ConnectionState::Connecting
+                            }
+                            C::Connecting => ConnectionState::Reconnecting {
+                                attempt: s.attempt.max(1),
+                                retry_in_ms: 0,
+                            },
+                            C::Disconnected { retry_in } => {
+                                s.attempt = s.attempt.saturating_add(1);
+                                ConnectionState::Reconnecting {
+                                    attempt: s.attempt,
+                                    retry_in_ms: retry_in.as_millis() as u64,
+                                }
+                            }
+                            C::Stopped | C::Unsupported | C::Unauthorized => {
+                                ConnectionState::Offline
+                            }
+                        };
+                        s.connection = Some(state);
+                    }
+                }
+                out.push(Change::Connection);
+            }
+            ClientUpdate::DirectoryChanged => {
+                out.extend([Change::Members, Change::Groups, Change::Todo, Change::Session]);
+            }
+            ClientUpdate::GroupChanged { group_id } => {
+                out.extend([Change::Groups, Change::Todo, Change::Topics { group_id }]);
+            }
+            ClientUpdate::TopicsChanged { group_id } => {
+                out.extend([Change::Topics { group_id }, Change::Todo]);
+            }
+            ClientUpdate::MessagesChanged { group_id, topic_id } => {
+                out.push(Change::Messages { group_id, topic_id });
+            }
+            ClientUpdate::HistoryLoaded {
+                group_id, topic_id, ..
+            } => {
+                let mut s = self.state();
+                if s.loading_older.remove(&topic_id) {
+                    *s.extra.entry(topic_id.clone()).or_default() += PAGE;
+                }
+                out.push(Change::Messages { group_id, topic_id });
+            }
+            ClientUpdate::Typing { group_id, topic_id } => {
+                out.push(Change::Typing { group_id, topic_id });
+            }
+            ClientUpdate::Presence { .. } => {
+                out.extend([Change::Members, Change::Groups]);
+            }
+            ClientUpdate::Sent {
+                client_msg_id,
+                message_id,
+                topic_id,
+                ..
+            } => {
+                let pending = pending_topic_id(&client_msg_id);
+                // The first message of a topic I started: the pending id becomes an alias.
+                let is_root = self.account().is_some_and(|a| {
+                    a.client
+                        .store()
+                        .topic(&topic_id)
+                        .ok()
+                        .flatten()
+                        .is_some_and(|t| t.topic.root_message_id == message_id)
+                });
+                let flush = {
+                    let mut s = self.state();
+                    s.acked.insert(client_msg_id, message_id);
+                    if s.acked.len() > 1000 {
+                        s.acked.clear();
+                    }
+                    if is_root {
+                        s.aliases.insert(pending.clone(), topic_id.clone());
+                    }
+                    let (ready, rest): (Vec<_>, Vec<_>) =
+                        std::mem::take(&mut s.deferred)
+                            .into_iter()
+                            .partition(|(p, _, _)| *p == pending);
+                    s.deferred = rest;
+                    ready
+                };
+                if let Some(group_id) = self.group_of_topic(&topic_id) {
+                    out.extend([
+                        Change::Messages {
+                            group_id: group_id.clone(),
+                            topic_id: topic_id.clone(),
+                        },
+                        Change::Messages {
+                            group_id: group_id.clone(),
+                            topic_id: pending,
+                        },
+                        Change::Topics { group_id },
+                    ]);
+                }
+                for (_, _, mut req) in flush {
+                    req.topic_id = topic_id.clone();
+                    self.send_now(req);
+                }
+            }
+            ClientUpdate::SendFailed(f) => {
+                tracing::warn!(kind = f.kind, code = ?f.code, "write refused");
+                match f.topic_id {
+                    Some(topic_id) => out.push(Change::Messages {
+                        group_id: f.group_id,
+                        topic_id,
+                    }),
+                    None => out.push(Change::Topics {
+                        group_id: f.group_id,
+                    }),
+                }
+            }
+            ClientUpdate::CaughtUp => out.extend([Change::Groups, Change::Todo]),
+            ClientUpdate::Notify {
+                reason,
+                group_id,
+                topic_id,
+                message_id,
+            } => {
+                if let Some(notice) =
+                    self.notice(reason, &group_id, topic_id.as_deref(), message_id.as_deref())
+                    && let Some(tx) = lock(&self.shared.notices).as_ref()
+                {
+                    let _ = tx.unbounded_send(notice);
+                }
+            }
+            ClientUpdate::GroupEvent(_)
+            | ClientUpdate::SearchResults { .. }
+            | ClientUpdate::SearchFailed { .. } => {}
+        }
+    }
+
+    fn group_of_topic(&self, topic_id: &str) -> Option<String> {
+        let a = self.account()?;
+        a.client.store().topic_group(topic_id).ok().flatten()
+    }
+
+    fn notice(
+        &self,
+        reason: NotifyReason,
+        group_id: &str,
+        topic_id: Option<&str>,
+        message_id: Option<&str>,
+    ) -> Option<Notice> {
+        let a = self.account()?;
+        let store = a.client.store();
+        let group = self.groups().into_iter().find(|g| g.id == group_id)?;
+        let message = message_id.and_then(|id| store.message(id).ok().flatten());
+        let topic = topic_id.and_then(|t| store.topic(t).ok().flatten());
+        let author = message
+            .as_ref()
+            .and_then(|m| store.member(&m.author_id).ok().flatten())
+            .map(|m| m.name)
+            .unwrap_or_default();
+        let excerpt = |s: &str| -> String {
+            let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
+            let mut out: String = one.chars().take(180).collect();
+            if one.chars().count() > 180 {
+                out.push('…');
+            }
+            out
+        };
+        let topic_title = topic.as_ref().map(|t| t.topic.title.clone()).unwrap_or_default();
+        let body_text = message.as_ref().map(|m| excerpt(&m.body)).unwrap_or_default();
+        let (title, body) = match reason {
+            NotifyReason::Mention => (
+                fill(n::MENTION_TITLE, &[("name", &author), ("group", &group.name)]),
+                body_text,
+            ),
+            NotifyReason::Waiting => (
+                fill(n::WAITING_TITLE, &[("group", &group.name)]),
+                topic_title,
+            ),
+            NotifyReason::Result => (
+                fill(n::RESULT_TITLE, &[("group", &group.name)]),
+                topic_title,
+            ),
+            NotifyReason::Message if group.kind == GroupKind::Dm => (author, body_text),
+            NotifyReason::Message => (
+                fill(n::MESSAGE_TITLE, &[("name", &author), ("group", &group.name)]),
+                body_text,
+            ),
+        };
+        Some(Notice {
+            title,
+            body,
+            group_id: group_id.to_string(),
+            topic_id: topic_id.map(str::to_string),
+        })
+    }
+
+    fn send_now(&self, req: SendRequest) -> ClientMsgId {
+        let Some(a) = self.account() else {
+            return String::new();
+        };
+        let result = a.client.send(chat_core::SendRequest {
+            group_id: req.group_id,
+            topic_id: Some(req.topic_id),
+            body: req.body,
+            mentions: req.mentions,
+            reply_to: req.quote_of,
+            ..Default::default()
+        });
+        result.unwrap_or_else(|e| {
+            tracing::warn!(error = %e, "send refused");
+            String::new()
+        })
+    }
+
+    fn topics_of(&self, a: &Account, group_id: &str) -> Vec<Topic> {
+        let me = a.me.id.as_str();
+        let mut out: Vec<Topic> = a
+            .client
+            .pending_new_topics(group_id)
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|item| convert::pending_topic(item, me))
+            .collect();
+        out.reverse();
+        match a.client.topics(group_id, TOPIC_LIMIT) {
+            Ok(rows) => out.extend(rows.iter().map(convert::topic)),
+            Err(e) => tracing::warn!(error = %e, "topics read failed"),
+        }
+        out
+    }
+}
+
+/// Runs blocking work (Keychain, files, SQLite open) off the async threads.
+async fn tokio_blocking<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = tx.send(f());
+    });
+    rx.await.expect("blocking task ended")
+}
+
+fn open_client(
+    server_url: &str,
+    token: String,
+    dir: &std::path::Path,
+) -> Result<Arc<Client>, chat_core::ClientError> {
+    std::fs::create_dir_all(dir).map_err(|e| chat_core::ClientError::Runtime(e.to_string()))?;
+    let mut cfg = ClientConfig::new(server_url, token, dir);
+    cfg.client_name = env!("PRODUCT_SLUG").into();
+    cfg.client_version = env!("CARGO_PKG_VERSION").into();
+    Ok(Arc::new(Client::new(cfg)?))
+}
+
+impl ChatProvider for CoreProvider {
+    fn session(&self) -> SessionState {
+        let s = self.state();
+        if let Some(a) = &s.account {
+            return SessionState::SignedIn {
+                me: convert::member(&a.me, true),
+                server_url: a.server_url.clone(),
+            };
+        }
+        s.session
+            .clone()
+            .unwrap_or(SessionState::SignedOut { last_error: None })
+    }
+
+    fn login(&self, request: LoginRequest) {
+        self.login_inner(request);
+    }
+
+    fn logout(&self) {
+        self.sign_out_inner(false);
+    }
+
+    fn sign_out(&self, wipe_cache: bool) {
+        self.sign_out_inner(wipe_cache);
+    }
+
+    fn reconnect_now(&self) {
+        self.reconnect_now_inner();
+    }
+
+    fn connection(&self) -> ConnectionState {
+        let s = self.state();
+        match (&s.account, s.connection) {
+            (None, _) => ConnectionState::Offline,
+            (Some(_), Some(c)) => c,
+            (Some(_), None) => ConnectionState::Connecting,
+        }
+    }
+
+    fn members(&self) -> Vec<Member> {
+        let Some(a) = self.account() else {
+            return Vec::new();
+        };
+        let online: HashSet<String> = a.client.online_members().into_iter().collect();
+        a.client
+            .members()
+            .unwrap_or_default()
+            .iter()
+            .map(|m| convert::member(m, online.contains(&m.id) || m.id == a.me.id))
+            .collect()
+    }
+
+    fn member(&self, id: &str) -> Option<Member> {
+        let a = self.account()?;
+        let m = a.client.member(id).ok().flatten()?;
+        Some(convert::member(&m, m.id == a.me.id || a.client.is_online(id)))
+    }
+
+    fn groups(&self) -> Vec<GroupSummary> {
+        let Some(a) = self.account() else {
+            return Vec::new();
+        };
+        let names: HashMap<String, String> = a
+            .client
+            .members()
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| (m.id, m.name))
+            .collect();
+        let mut out: Vec<GroupSummary> = a
+            .client
+            .groups()
+            .unwrap_or_default()
+            .iter()
+            .map(|row| convert::group(row, &a.me.id, |id| names.get(id).cloned()))
+            .collect();
+        // A topic I just started counts as activity.
+        for g in out.iter_mut() {
+            if let Some(newest) = a
+                .client
+                .pending_new_topics(&g.id)
+                .unwrap_or_default()
+                .last()
+            {
+                g.last_activity_at = g.last_activity_at.max(newest.created_at as i64);
+            }
+        }
+        out.sort_by(|x, y| y.last_activity_at.cmp(&x.last_activity_at));
+        out
+    }
+
+    fn topics(&self, group_id: &str) -> Vec<Topic> {
+        match self.account() {
+            Some(a) => self.topics_of(&a, group_id),
+            None => Vec::new(),
+        }
+    }
+
+    fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
+        let a = self.account()?;
+        let real = self.resolve_topic(topic_id);
+        if let Some(cid) = pending_cid(&real) {
+            let item = a.client.store().outbox_get(cid).ok().flatten()?;
+            return convert::pending_topic(&item, &a.me.id);
+        }
+        let row = a.client.store().topic(&real).ok().flatten()?;
+        (row.topic.group_id == group_id).then(|| convert::topic(&row))
+    }
+
+    fn todo(&self) -> Vec<TodoItem> {
+        let Some(a) = self.account() else {
+            return Vec::new();
+        };
+        let me = a.me.id.clone();
+        let mut out = Vec::new();
+        for g in self.groups() {
+            for row in a.client.topics(&g.id, TOPIC_LIMIT).unwrap_or_default() {
+                let topic = convert::topic(&row);
+                let reason = if topic.status != TopicStatus::Done && topic.waiting_on.contains(&me)
+                {
+                    TodoReason::WaitingOnMe
+                } else if topic.mentions > 0 {
+                    TodoReason::Mentioned
+                } else {
+                    continue;
+                };
+                out.push(TodoItem {
+                    group_id: g.id.clone(),
+                    group_name: g.name.clone(),
+                    topic,
+                    reason,
+                });
+            }
+        }
+        out.sort_by(|x, y| y.topic.last_activity_at.cmp(&x.topic.last_activity_at));
+        out
+    }
+
+    fn messages(&self, group_id: &str, topic_id: &str, limit: usize) -> MessageWindow {
+        let Some(a) = self.account() else {
+            return MessageWindow::default();
+        };
+        let me = a.me.id.as_str();
+        let real = self.resolve_topic(topic_id);
+        let (extra, loading, deferred) = {
+            let s = self.state();
+            let deferred: Vec<_> = s
+                .deferred
+                .iter()
+                .filter(|(p, _, _)| *p == topic_id || *p == real)
+                .map(|(_, cid, req)| (cid.clone(), req.clone()))
+                .collect();
+            (
+                s.extra.get(&real).copied().unwrap_or(0),
+                s.loading_older.contains(&real),
+                deferred,
+            )
+        };
+        let mut window = MessageWindow {
+            loading_older: loading,
+            ..Default::default()
+        };
+        if let Some(cid) = pending_cid(&real) {
+            // Only the queued first message exists.
+            if let Some(item) = a.client.store().outbox_get(cid).ok().flatten() {
+                window
+                    .messages
+                    .extend(convert::outbox_message(&item, topic_id, me));
+            }
+        } else {
+            let n = limit.max(1) + extra;
+            let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
+            let cached_more = msgs.len() > n;
+            if cached_more {
+                msgs.remove(0);
+            }
+            let complete = a
+                .client
+                .store()
+                .topic(&real)
+                .ok()
+                .flatten()
+                .is_none_or(|t| t.history_complete);
+            window.has_older = cached_more || (!complete && !msgs.is_empty());
+            let known: HashSet<String> = msgs.iter().map(|m| m.client_msg_id.clone()).collect();
+            window
+                .messages
+                .extend(msgs.iter().map(convert::message).map(|mut m| {
+                    m.topic_id = topic_id.to_string();
+                    m
+                }));
+            for item in a.client.pending_sends(&real).unwrap_or_default() {
+                if known.contains(&item.id) {
+                    continue;
+                }
+                window
+                    .messages
+                    .extend(convert::outbox_message(&item, topic_id, me));
+            }
+        }
+        for (cid, req) in deferred {
+            window.messages.push(crate::data::Message {
+                id: String::new(),
+                client_msg_id: cid,
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+                author_id: me.to_string(),
+                body: req.body,
+                mentions: req.mentions,
+                created_seq: 0,
+                created_at: chat_core::now_ms() as i64,
+                edited_at: None,
+                deleted_at: None,
+                streaming: false,
+                send_state: crate::data::SendState::Pending,
+                quote_of: req.quote_of,
+            });
+        }
+        window
+    }
+
+    fn load_older(&self, group_id: &str, topic_id: &str) {
+        let Some(a) = self.account() else {
+            return;
+        };
+        let real = self.resolve_topic(topic_id);
+        if pending_cid(&real).is_some() {
+            return;
+        }
+        let cached = a.client.store().message_count_cached(&real).unwrap_or(0) as usize;
+        let mut s = self.state();
+        if s.loading_older.contains(&real) {
+            return;
+        }
+        let shown = s.extra.get(&real).copied().unwrap_or(0) + PAGE;
+        if cached > shown {
+            // The cache has more: grow the window without the network.
+            *s.extra.entry(real.clone()).or_default() += PAGE;
+            drop(s);
+            self.emit(vec![Change::Messages {
+                group_id: group_id.into(),
+                topic_id: real,
+            }]);
+            return;
+        }
+        if a.client.load_older(&real).is_ok() {
+            s.loading_older.insert(real.clone());
+            drop(s);
+            self.emit(vec![Change::Messages {
+                group_id: group_id.into(),
+                topic_id: real,
+            }]);
+        }
+    }
+
+    fn typing(&self, group_id: &str, topic_id: &str) -> Vec<MemberId> {
+        match self.account() {
+            Some(a) => a.client.typing(group_id, &self.resolve_topic(topic_id)),
+            None => Vec::new(),
+        }
+    }
+
+    fn artifacts(&self, _group_id: &str, _topic_id: &str) -> Vec<ArtifactSummary> {
+        // chat-core does not keep 产出 yet; the 产出 track adds them.
+        Vec::new()
+    }
+
+    fn send(&self, request: SendRequest) -> ClientMsgId {
+        let real = self.resolve_topic(&request.topic_id);
+        if pending_cid(&real).is_some() {
+            // The topic has no server id yet: hold the message until its ack.
+            let cid = chat_core::new_id();
+            let group_id = request.group_id.clone();
+            let topic_id = request.topic_id.clone();
+            self.state()
+                .deferred
+                .push((real, cid.clone(), request));
+            self.emit(vec![Change::Messages { group_id, topic_id }]);
+            return cid;
+        }
+        self.send_now(SendRequest {
+            topic_id: real,
+            ..request
+        })
+    }
+
+    fn start_topic(&self, request: StartTopicRequest) -> ClientMsgId {
+        let Some(a) = self.account() else {
+            return String::new();
+        };
+        let title = Some(convert::topic_title(request.title.as_deref(), &request.body))
+            .filter(|t| !t.is_empty());
+        let result = a.client.send(chat_core::SendRequest {
+            group_id: request.group_id.clone(),
+            topic_id: None,
+            title,
+            body: request.body,
+            mentions: request.mentions,
+            ..Default::default()
+        });
+        match result {
+            Ok(cid) => {
+                self.emit(vec![
+                    Change::Topics {
+                        group_id: request.group_id,
+                    },
+                    Change::Groups,
+                ]);
+                cid
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "start topic refused");
+                String::new()
+            }
+        }
+    }
+
+    fn edit(&self, _group_id: &str, message_id: &str, body: String) {
+        if let Some(a) = self.account()
+            && let Err(e) = a.client.edit_message(message_id, &body)
+        {
+            tracing::warn!(error = %e, "edit refused");
+        }
+    }
+
+    fn delete(&self, _group_id: &str, message_id: &str) {
+        if let Some(a) = self.account()
+            && let Err(e) = a.client.delete_message(message_id)
+        {
+            tracing::warn!(error = %e, "delete refused");
+        }
+    }
+
+    fn set_topic_status(
+        &self,
+        _group_id: &str,
+        topic_id: &str,
+        status: TopicStatus,
+        waiting_on: Vec<MemberId>,
+    ) {
+        let Some(a) = self.account() else {
+            return;
+        };
+        let real = self.resolve_topic(topic_id);
+        if pending_cid(&real).is_some() {
+            return;
+        }
+        let patch = TopicPatch {
+            status: Some(convert::status_to_wire(status)),
+            waiting_on: Some(waiting_on),
+            ..Default::default()
+        };
+        if let Err(e) = a.client.update_topic(&real, patch) {
+            tracing::warn!(error = %e, "topic update refused");
+        }
+    }
+
+    fn mark_read(&self, group_id: &str, topic_id: &str, seq: u64) {
+        let real = self.resolve_topic(topic_id);
+        if seq == 0 || pending_cid(&real).is_some() {
+            return;
+        }
+        if let Some(a) = self.account()
+            && let Err(e) = a.client.mark_topic_read(group_id, &real, seq)
+        {
+            tracing::warn!(error = %e, "mark read failed");
+        }
+    }
+
+    fn set_typing(&self, group_id: &str, topic_id: &str) {
+        let real = self.resolve_topic(topic_id);
+        if pending_cid(&real).is_some() {
+            return;
+        }
+        if let Some(a) = self.account() {
+            a.client.typing_in(group_id, &real);
+        }
+    }
+
+    fn retry_send(&self, _group_id: &str, client_msg_id: &str) {
+        if let Some(a) = self.account()
+            && let Err(e) = a.client.retry_failed(client_msg_id)
+        {
+            tracing::warn!(error = %e, "retry failed");
+        }
+    }
+
+    fn discard_send(&self, _group_id: &str, client_msg_id: &str) {
+        if let Some(a) = self.account()
+            && let Err(e) = a.client.discard(client_msg_id)
+        {
+            tracing::warn!(error = %e, "discard failed");
+        }
+    }
+
+    fn draft(&self, key: &DraftKey) -> Draft {
+        self.shared.drafts.get(key)
+    }
+
+    fn save_draft_text(&self, key: &DraftKey, body: String, mentions: Vec<MemberId>) {
+        self.shared.drafts.save_text(key, body, mentions);
+    }
+
+    fn set_quote(&self, key: &DraftKey, quote_of: Option<MessageId>) {
+        if self.shared.drafts.set_quote(key, quote_of) {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+    }
+
+    fn attach_files(&self, _key: &DraftKey, _files: Vec<NewFile>) {
+        // Uploads are not in chat-core yet; the files track adds them. Not
+        // keeping the files avoids a send that drops them silently.
+    }
+
+    fn clear_draft(&self, key: &DraftKey) {
+        if self.shared.drafts.clear(key) {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+    }
+
+    fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
+        let (tx, rx) = unbounded();
+        lock(&self.shared.subscribers).push(tx);
+        rx
+    }
+}

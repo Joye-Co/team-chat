@@ -10,9 +10,11 @@
 
 pub mod common;
 pub mod composer;
+pub mod connection;
 pub mod dev;
 pub mod login;
 pub mod nav;
+pub mod notify;
 pub mod panel;
 pub mod settings;
 pub mod timeline;
@@ -74,6 +76,16 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "panel",
         entries: panel::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "connection",
+        entries: connection::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "notify",
+        entries: notify::ENTRIES,
         developer: false,
     },
     Section {

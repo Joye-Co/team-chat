@@ -471,6 +471,14 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn logout(&self);
     /// State of the live connection, for the status line.
     fn connection(&self) -> ConnectionState;
+    /// Signs out like [`ChatProvider::logout`] (this token is revoked on the
+    /// server) and, with `wipe_cache`, also deletes the local copy of the
+    /// chats on this Mac.
+    fn sign_out(&self, _wipe_cache: bool) {
+        self.logout();
+    }
+    /// Reconnects at once instead of waiting for the next retry.
+    fn reconnect_now(&self) {}
 
     // --- directory ---
 
@@ -530,6 +538,8 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn mark_read(&self, group_id: &str, topic_id: &str, seq: u64);
     /// Tells others I am typing. The provider limits it to one per 3 s per topic.
     fn set_typing(&self, group_id: &str, topic_id: &str);
+    /// Drops a failed or pending message of mine that the server has not acked.
+    fn discard_send(&self, _group_id: &str, _client_msg_id: &str) {}
 
     // --- composer drafts ---
     //

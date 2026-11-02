@@ -1,13 +1,19 @@
 //! Desktop app entry: arguments and self-tests.
 //!
 //! Usage:
-//!   desktop                          open the app (fake data until the chat-core provider lands)
+//!   desktop                          open the app on the chat-core provider (signs in, or
+//!                                    restores the saved session)
+//!   desktop --fake                   open the app with fake data
 //!   desktop --signed-out             start at the login view (fake provider)
 //!   desktop --selftest-smoke --report <path>
 //!       open the window with fake data without taking focus, render the long
 //!       topic, write a JSON report (first_frame_ms, ...) and exit. Exit code 0
 //!       on success, 1 on failure or timeout. `--hold-ms <n>` keeps the window
 //!       open n ms after the first frame (for a screenshot with `screencapture`).
+//!   desktop --selftest-live <url> --token-file <path> --report <path>
+//!       sign in to a real server with the token in the file, open the first
+//!       group, start a topic and send a message, wait for the acks and the
+//!       event, write a JSON report and exit (0 on success). No focus taken.
 //!   desktop --screenshot <dir> [--theme light|dark|both] [--scenes ...] [--worst-case]
 //!       capture every scene's window in each theme; see `selftest/mod.rs`.
 //!   desktop --selftest-nav --report <path>
@@ -28,6 +34,7 @@ mod drafts;
 #[allow(dead_code)]
 mod fake;
 mod markdown;
+mod provider;
 mod selftest;
 #[allow(dead_code)]
 mod theme;
@@ -62,7 +69,10 @@ struct Args {
     selftest_timeline: Option<usize>,
     report: Option<PathBuf>,
     signed_out: bool,
+    fake: bool,
     hold_ms: u64,
+    live_url: Option<String>,
+    token_file: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -81,6 +91,13 @@ fn parse_args() -> Result<Args, String> {
             }
             "--report" => args.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--signed-out" => args.signed_out = true,
+            "--fake" => args.fake = true,
+            "--selftest-live" => {
+                args.live_url = Some(it.next().ok_or("--selftest-live needs a server URL")?)
+            }
+            "--token-file" => {
+                args.token_file = Some(it.next().ok_or("--token-file needs a path")?.into())
+            }
             "--hold-ms" => {
                 args.hold_ms = it
                     .next()
@@ -95,6 +112,9 @@ fn parse_args() -> Result<Args, String> {
         && args.report.is_none()
     {
         return Err("a self-test needs --report <path>".into());
+    }
+    if args.live_url.is_some() && (args.token_file.is_none() || args.report.is_none()) {
+        return Err("--selftest-live needs --token-file <path> and --report <path>".into());
     }
     Ok(args)
 }
@@ -112,7 +132,7 @@ fn main() {
                 eprintln!("{error}");
             }
             eprintln!(
-                "usage: desktop [--signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]"
+                "usage: desktop [--fake | --signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]\n       desktop --selftest-live <url> --token-file <path> --report <path>"
             );
             std::process::exit(2);
         }
@@ -123,8 +143,26 @@ fn main() {
     application.on_reopen(views::nav::show_main_window);
     application.run(move |cx: &mut App| {
         gpui_kit::init(cx);
+        if let Some(url) = args.live_url.clone() {
+            let live = provider::selftest_live::LiveArgs {
+                url,
+                token_file: args.token_file.clone().unwrap(),
+                report: args.report.clone().unwrap(),
+            };
+            provider::selftest_live::run(live, started, finish, cx);
+            return;
+        }
+        // Self-tests, --fake and --signed-out use fake data; the app uses chat-core.
+        let fake_data = args.fake
+            || args.signed_out
+            || args.selftest_smoke
+            || args.selftest_nav
+            || args.selftest_timeline.is_some();
+        let core = (!fake_data).then(|| provider::CoreProvider::new(provider::ProviderConfig::app()));
         let provider: Arc<dyn ChatProvider> = if let Some(n) = args.selftest_timeline {
             views::timeline::selftest::provider(n)
+        } else if let Some(core) = &core {
+            core.clone()
         } else if args.signed_out {
             fake::FakeProvider::signed_out()
         } else {
@@ -138,6 +176,9 @@ fn main() {
             !args.selftest_smoke && args.selftest_timeline.is_none(),
             cx,
         );
+        if let Some(core) = core {
+            provider::app_glue::install(core, services.clone(), cx);
+        }
 
         if let Some(n) = args.selftest_timeline {
             views::timeline::selftest::run(services, n, args.report.clone().unwrap(), cx);
