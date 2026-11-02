@@ -25,6 +25,7 @@ import { logger as baseLogger, type Logger } from "./logger";
 import { type MigrationStep, runMigrations } from "./migrations";
 import {
   type Actor,
+  type ArchivedEvent,
   type EventDraft,
   type HookContext,
   type RoomContext,
@@ -32,6 +33,7 @@ import {
   afterCommitHooks,
   editExtensions,
   eventDecorators,
+  eventImporters,
   messageExtensions,
   roomMigrations,
   roomRpcHandlers,
@@ -987,6 +989,94 @@ export class GroupRoom extends DurableObject<Env> {
     return run(async () => {
       await this.ready(groupId);
       return { groupId, ...this.page(afterSeq, Math.max(1, Math.min(limit, MAX_EXPORT_LIMIT))) };
+    });
+  }
+
+  /** Stored event rows after `afterSeq` (with topic and message ids), for the daily archive. Internal. */
+  async exportRows(
+    groupId: string,
+    afterSeq: number,
+    limit = MAX_EXPORT_LIMIT,
+  ): Promise<Result<{ rows: ArchivedEvent[]; hasMore: boolean; lastSeq: number }>> {
+    return run(async () => {
+      await this.ready(groupId);
+      const n = Math.max(1, Math.min(limit, MAX_EXPORT_LIMIT));
+      const rows = this.sql
+        .exec<EventRow & { topic_id: string | null; message_id: string | null }>(
+          "SELECT seq, type, at, actor_id, topic_id, message_id, data FROM events WHERE seq > ? ORDER BY seq LIMIT ?",
+          afterSeq,
+          n + 1,
+        )
+        .toArray();
+      return {
+        rows: rows.slice(0, n).map((r) => ({
+          seq: r.seq,
+          type: r.type,
+          at: r.at,
+          actorId: r.actor_id,
+          topicId: r.topic_id,
+          messageId: r.message_id,
+          data: JSON.parse(r.data),
+        })),
+        hasMore: rows.length > n,
+        lastSeq: this.lastSeq,
+      };
+    });
+  }
+
+  /**
+   * Restore: appends archived events to a room that has no live events. Rows with seq <= lastSeq
+   * are skipped (re-running a chunk is safe); the first new row must be lastSeq + 1. Registered
+   * event importers rebuild the room tables. Nothing is fanned out. Internal (admin route only).
+   */
+  async importEvents(
+    groupId: string,
+    rows: ArchivedEvent[],
+  ): Promise<Result<{ lastSeq: number; imported: number; skipped: number }>> {
+    return run(async () => {
+      await this.ready(groupId);
+      const marker = this.sql
+        .exec<{ value: string }>("SELECT value FROM meta WHERE key = 'import_last_seq'")
+        .toArray()[0]?.value;
+      if (this.lastSeq > 0 && Number(marker) !== this.lastSeq) {
+        throw new ApiError("conflict", "room has live events; import needs an empty room");
+      }
+      const sorted = [...rows].sort((a, b) => a.seq - b.seq);
+      const start = this.lastSeq;
+      let imported = 0;
+      let skipped = 0;
+      try {
+        this.ctx.storage.transactionSync(() => {
+          for (const r of sorted) {
+            if (r.seq <= this.lastSeq) {
+              skipped++;
+              continue;
+            }
+            if (r.seq !== this.lastSeq + 1) {
+              throw new ApiError("invalid", `gap in archive: expected seq ${this.lastSeq + 1}, got ${r.seq}`);
+            }
+            this.sql.exec(
+              "INSERT INTO events (seq, type, at, actor_id, topic_id, message_id, data) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              r.seq,
+              r.type,
+              r.at,
+              r.actorId,
+              r.topicId ?? null,
+              r.messageId ?? null,
+              JSON.stringify(r.data),
+            );
+            for (const importer of eventImporters) importer(r, this.sql);
+            this.lastSeq = r.seq;
+            imported++;
+          }
+          this.sql.exec("INSERT OR REPLACE INTO meta (key, value) VALUES ('import_last_seq', ?)", String(this.lastSeq));
+        });
+      } catch (err) {
+        this.lastSeq = start;
+        throw err;
+      }
+      if (imported > 0) this.log.info("events imported", { imported, lastSeq: this.lastSeq });
+      return { lastSeq: this.lastSeq, imported, skipped };
     });
   }
 

@@ -6,7 +6,7 @@ import { INTERNAL_HEADERS } from "./gateway";
 import { type CompiledRoute, compilePath, errorResponse, json, matchRoute, readJson } from "./http";
 import { logger } from "./logger";
 import { LIMITS } from "./ratelimit";
-import { type RouteContext, type RouteDef, routes } from "./registry";
+import { type RouteContext, type RouteDef, routes, scheduledHandlers } from "./registry";
 import { registerCoreRoutes } from "./routes";
 
 registerCoreRoutes();
@@ -81,4 +81,17 @@ export async function handleFetch(request: Request, env: Env, ctx: ExecutionCont
   } finally {
     log.info("request", { status, ms: Date.now() - started });
   }
+}
+
+/** Cron entry: runs every handler registered for this cron (or for "*"). Errors are logged. */
+export async function handleScheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+  const log = logger.child({ cron: controller.cron });
+  const started = Date.now();
+  const due = scheduledHandlers.filter((h) => h.cron === "*" || h.cron === controller.cron);
+  const results = await Promise.allSettled(
+    due.map((h) => h.handler({ env, ctx, cron: controller.cron, scheduledTime: controller.scheduledTime, log })),
+  );
+  const failed = results.filter((r) => r.status === "rejected");
+  for (const r of failed) log.error("scheduled handler failed", { err: (r as PromiseRejectedResult).reason });
+  log.info("scheduled", { handlers: due.length, failed: failed.length, ms: Date.now() - started });
 }

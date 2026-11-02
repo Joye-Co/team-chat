@@ -245,3 +245,43 @@ export const afterCommitHooks: AfterCommitHook[] = [];
 export function registerAfterCommit(hook: AfterCommitHook): void {
   afterCommitHooks.push(hook);
 }
+
+// ---------------------------------------------------------------------------
+// Cron (scheduled handler) and archive import
+// ---------------------------------------------------------------------------
+
+export interface ScheduledContext {
+  env: Env;
+  ctx: ExecutionContext;
+  /** The cron expression that fired, e.g. "0 3 * * *". */
+  cron: string;
+  scheduledTime: number;
+  log: Logger;
+}
+export type ScheduledHandler = (c: ScheduledContext) => Promise<void> | void;
+export const scheduledHandlers: { cron: string; handler: ScheduledHandler }[] = [];
+/** `cron` = the expression from wrangler.jsonc `triggers.crons`, or "*" for every trigger. */
+export function registerScheduled(cron: string, handler: ScheduledHandler): void {
+  scheduledHandlers.push({ cron, handler });
+}
+
+/** One stored event row as archived and imported: the Event plus its topic and message ids. */
+export interface ArchivedEvent {
+  seq: number;
+  type: string;
+  at: number;
+  actorId: string;
+  topicId?: string | null;
+  messageId?: string | null;
+  data: unknown;
+}
+
+/**
+ * Rebuilds a feature's room tables from one imported event (restore from the archive). Runs
+ * inside the import transaction, after the event row is stored, in seq order. Throw to abort.
+ */
+export type EventImporter = (event: ArchivedEvent, sql: SqlStorage) => void;
+export const eventImporters: EventImporter[] = [];
+export function registerEventImporter(importer: EventImporter): void {
+  eventImporters.push(importer);
+}
