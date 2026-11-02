@@ -6,7 +6,8 @@ pub mod migrations;
 mod rows;
 
 use crate::proto::{
-    Event, EventData, GroupSummary, Member, Message, SendResult, Topic, TopicStatus,
+    Event, EventData, GroupMemberChangeData, GroupSummary, Member, Message, MessageDeletedData,
+    MessageUpdatedData, SendResult, Topic, TopicStatus, TopicUpdatedData,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use std::collections::{BTreeMap, BTreeSet};
@@ -37,15 +38,39 @@ struct Inner {
     reader: Mutex<Connection>,
 }
 
+/// One entry of a group log as received.
+#[derive(Debug, Clone, PartialEq)]
+pub enum LogEntry {
+    Known(Event),
+    /// An event type this client does not know (added by a newer server). It keeps
+    /// the seq order and is otherwise skipped.
+    Unknown { seq: u64, group_id: String, event_type: String },
+}
+
+impl LogEntry {
+    pub fn seq(&self) -> u64 {
+        match self {
+            LogEntry::Known(e) => e.seq,
+            LogEntry::Unknown { seq, .. } => *seq,
+        }
+    }
+    pub fn group_id(&self) -> &str {
+        match self {
+            LogEntry::Known(e) => &e.group_id,
+            LogEntry::Unknown { group_id, .. } => group_id,
+        }
+    }
+}
+
 /// What one `apply_events` call changed.
 #[derive(Debug, Default, Clone, PartialEq)]
 pub struct ApplyOutcome {
     /// Events applied in this call.
     pub applied: usize,
     /// `lastApplied` of the group after the call.
-    pub last_applied: i64,
+    pub last_applied: u64,
     /// First seq that could not be applied because an earlier seq is missing.
-    pub gap_at: Option<i64>,
+    pub gap_at: Option<u64>,
     pub group_changed: bool,
     pub topic_list_changed: bool,
     /// Topics whose messages changed.
@@ -201,22 +226,32 @@ impl Store {
     /// `lastApplied` are skipped, and application stops at the first gap.
     /// `events` may be in any order and contain duplicates.
     pub fn apply_events(&self, group_id: &str, events: &[Event]) -> StoreResult<ApplyOutcome> {
+        let entries: Vec<LogEntry> = events.iter().cloned().map(LogEntry::Known).collect();
+        self.apply_log(group_id, &entries)
+    }
+
+    /// Like `apply_events`, for log entries that may include event types this client
+    /// does not know: those only advance `lastApplied`.
+    pub fn apply_log(&self, group_id: &str, entries: &[LogEntry]) -> StoreResult<ApplyOutcome> {
         let me = self.me_id()?.unwrap_or_default();
-        let mut sorted: Vec<&Event> = events.iter().filter(|e| e.group_id == group_id).collect();
-        sorted.sort_by_key(|e| e.seq);
+        let mut sorted: Vec<&LogEntry> = entries.iter().filter(|e| e.group_id() == group_id).collect();
+        sorted.sort_by_key(|e| e.seq());
         self.with_writer(|tx| {
             let mut last = last_applied_tx(tx, group_id)?;
             let mut out = ApplyOutcome::default();
-            for ev in sorted {
-                if ev.seq <= last {
+            for entry in sorted {
+                let seq = entry.seq();
+                if seq <= last {
                     continue;
                 }
-                if ev.seq != last + 1 {
-                    out.gap_at = Some(ev.seq);
+                if seq != last + 1 {
+                    out.gap_at = Some(seq);
                     break;
                 }
-                apply_one(tx, &me, ev, &mut out)?;
-                last = ev.seq;
+                if let LogEntry::Known(ev) = entry {
+                    apply_one(tx, &me, ev, &mut out)?;
+                }
+                last = seq;
                 out.applied += 1;
             }
             if out.applied > 0 {
@@ -269,7 +304,7 @@ impl Store {
 
     /// Moves a read cursor forward locally. `topic_id = None` is the group cursor.
     /// Returns the group cursor to send to the server when it moved forward.
-    pub fn mark_read(&self, group_id: &str, topic_id: Option<&str>, seq: i64) -> StoreResult<Option<i64>> {
+    pub fn mark_read(&self, group_id: &str, topic_id: Option<&str>, seq: u64) -> StoreResult<Option<u64>> {
         let me = self.me_id()?.unwrap_or_default();
         self.with_writer(|tx| {
             let key = topic_id.unwrap_or("");
@@ -279,7 +314,7 @@ impl Store {
                  WHERE excluded.seq > read_cursors.seq",
                 params![group_id, key, seq],
             )?;
-            let before: i64 = tx
+            let before: u64 = tx
                 .query_row("SELECT read_seq FROM groups WHERE id = ?1", [group_id], |r| r.get(0))
                 .optional()?
                 .unwrap_or(0);
@@ -291,7 +326,7 @@ impl Store {
             }
             recount_unread(tx, &me, group_id)?;
             // When every topic is read, the group cursor moves to the newest seq.
-            let (unread, last_seq): (i64, i64) = tx
+            let (unread, last_seq): (u64, u64) = tx
                 .query_row("SELECT unread, last_seq FROM groups WHERE id = ?1", [group_id], |r| {
                     Ok((r.get(0)?, r.get(1)?))
                 })
@@ -303,7 +338,7 @@ impl Store {
                     params![group_id, last_seq],
                 )?;
             }
-            let after: i64 = tx
+            let after: u64 = tx
                 .query_row("SELECT read_seq FROM groups WHERE id = ?1", [group_id], |r| r.get(0))
                 .optional()?
                 .unwrap_or(0);
@@ -321,14 +356,14 @@ impl Store {
     }
 
     /// Group cursors not yet sent to the server.
-    pub fn unsynced_group_reads(&self) -> StoreResult<Vec<(String, i64)>> {
+    pub fn unsynced_group_reads(&self) -> StoreResult<Vec<(String, u64)>> {
         self.with_reader(|c| {
             let mut st = c.prepare("SELECT group_id, seq FROM read_cursors WHERE topic_id = '' AND synced = 0")?;
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
         })
     }
 
-    pub fn mark_read_synced(&self, group_id: &str, seq: i64) -> StoreResult<()> {
+    pub fn mark_read_synced(&self, group_id: &str, seq: u64) -> StoreResult<()> {
         self.with_writer(|tx| {
             tx.execute(
                 "UPDATE read_cursors SET synced = 1 WHERE group_id = ?1 AND topic_id = '' AND seq <= ?2",
@@ -492,7 +527,7 @@ impl Store {
                 rows::TOPIC_COLS,
                 rows::TOPIC_UNREAD_SQL
             ))?;
-            st.query_map(params![group_id, me, limit as i64], rows::topic_from_row)?.collect()
+            st.query_map(params![group_id, me, limit as u64], rows::topic_from_row)?.collect()
         })
     }
 
@@ -514,7 +549,7 @@ impl Store {
 
     /// Up to `limit` messages of a topic created before `before_seq` (or the newest when
     /// `None`), returned oldest first.
-    pub fn messages_before(&self, topic_id: &str, before_seq: Option<i64>, limit: usize) -> StoreResult<Vec<Message>> {
+    pub fn messages_before(&self, topic_id: &str, before_seq: Option<u64>, limit: usize) -> StoreResult<Vec<Message>> {
         self.with_reader(|c| {
             let mut st = c.prepare_cached(&format!(
                 "SELECT {} FROM messages WHERE topic_id = ?1 AND created_seq < ?2 ORDER BY created_seq DESC LIMIT ?3",
@@ -522,7 +557,7 @@ impl Store {
             ))?;
             let mut v: Vec<Message> = st
                 .query_map(
-                    params![topic_id, before_seq.unwrap_or(i64::MAX), limit as i64],
+                    params![topic_id, before_seq.map_or(i64::MAX, |s| s.min(i64::MAX as u64) as i64), limit as u64],
                     rows::message_from_row,
                 )?
                 .collect::<Result<_, _>>()?;
@@ -532,13 +567,13 @@ impl Store {
     }
 
     /// Up to `limit` messages of a topic created after `after_seq`, oldest first.
-    pub fn messages_after(&self, topic_id: &str, after_seq: i64, limit: usize) -> StoreResult<Vec<Message>> {
+    pub fn messages_after(&self, topic_id: &str, after_seq: u64, limit: usize) -> StoreResult<Vec<Message>> {
         self.with_reader(|c| {
             let mut st = c.prepare_cached(&format!(
                 "SELECT {} FROM messages WHERE topic_id = ?1 AND created_seq > ?2 ORDER BY created_seq ASC LIMIT ?3",
                 rows::MESSAGE_COLS
             ))?;
-            st.query_map(params![topic_id, after_seq, limit as i64], rows::message_from_row)?
+            st.query_map(params![topic_id, after_seq, limit as u64], rows::message_from_row)?
                 .collect()
         })
     }
@@ -554,19 +589,19 @@ impl Store {
         })
     }
 
-    pub fn message_count_cached(&self, topic_id: &str) -> StoreResult<i64> {
+    pub fn message_count_cached(&self, topic_id: &str) -> StoreResult<u64> {
         self.with_reader(|c| c.query_row("SELECT COUNT(*) FROM messages WHERE topic_id = ?1", [topic_id], |r| r.get(0)))
     }
 
     /// `lastApplied` per group (the `hello` cursors).
-    pub fn cursors(&self) -> StoreResult<BTreeMap<String, i64>> {
+    pub fn cursors(&self) -> StoreResult<BTreeMap<String, u64>> {
         self.with_reader(|c| {
             let mut st = c.prepare("SELECT group_id, last_applied FROM sync_state")?;
             st.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?.collect()
         })
     }
 
-    pub fn last_applied(&self, group_id: &str) -> StoreResult<i64> {
+    pub fn last_applied(&self, group_id: &str) -> StoreResult<u64> {
         self.with_reader(|c| {
             Ok(c.query_row("SELECT last_applied FROM sync_state WHERE group_id = ?1", [group_id], |r| r.get(0))
                 .optional()?
@@ -575,7 +610,7 @@ impl Store {
     }
 
     /// Oldest cached `createdSeq` of a topic, the `beforeSeq` for loading older history.
-    pub fn oldest_cached_seq(&self, topic_id: &str) -> StoreResult<Option<i64>> {
+    pub fn oldest_cached_seq(&self, topic_id: &str) -> StoreResult<Option<u64>> {
         self.with_reader(|c| {
             c.query_row("SELECT MIN(created_seq) FROM messages WHERE topic_id = ?1", [topic_id], |r| r.get(0))
         })
@@ -593,7 +628,7 @@ impl Store {
 // Write helpers (inside a transaction)
 // ----------------------------------------------------------------------
 
-fn last_applied_tx(tx: &Transaction<'_>, group_id: &str) -> rusqlite::Result<i64> {
+fn last_applied_tx(tx: &Transaction<'_>, group_id: &str) -> rusqlite::Result<u64> {
     Ok(tx
         .query_row("SELECT last_applied FROM sync_state WHERE group_id = ?1", [group_id], |r| r.get(0))
         .optional()?
@@ -609,10 +644,10 @@ fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
             m.id,
             rows::enum_str(&m.kind)?,
             m.name,
-            m.role,
+            m.role(),
             rows::enum_str(&m.level)?,
-            m.avatar_url,
-            m.deactivated.unwrap_or(false)
+            m.avatar_url(),
+            m.is_deactivated()
         ],
     )?;
     Ok(())
@@ -621,7 +656,7 @@ fn upsert_member(tx: &Transaction<'_>, m: &Member) -> StoreResult<()> {
 fn upsert_group_summary(tx: &Transaction<'_>, me: &str, s: &GroupSummary) -> StoreResult<()> {
     let g = &s.group;
     // The local read cursor may be ahead of the server (a read not yet sent).
-    let local_read: i64 = tx
+    let local_read: u64 = tx
         .query_row(
             "SELECT seq FROM read_cursors WHERE group_id = ?1 AND topic_id = ''",
             [&g.id],
@@ -704,7 +739,7 @@ fn insert_message_if_absent(tx: &Transaction<'_>, m: &Message) -> StoreResult<us
     )?)
 }
 
-fn insert_topic_if_absent(tx: &Transaction<'_>, t: &Topic, activity: i64) -> StoreResult<()> {
+fn insert_topic_if_absent(tx: &Transaction<'_>, t: &Topic, activity: u64) -> StoreResult<()> {
     tx.execute(
         "INSERT OR IGNORE INTO topics (id, group_id, title, status, created_by, created_at, root_message_id, last_seq, message_count, last_activity_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
@@ -727,7 +762,8 @@ fn insert_topic_if_absent(tx: &Transaction<'_>, t: &Topic, activity: i64) -> Sto
 fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome) -> StoreResult<()> {
     let gid = &ev.group_id;
     match &ev.data {
-        EventData::TopicCreated { topic } => {
+        EventData::TopicCreated(d) => {
+            let topic = &d.topic; {
             tx.execute(
                 "INSERT INTO topics (id, group_id, title, status, created_by, created_at, root_message_id, last_seq, message_count, last_activity_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
@@ -750,8 +786,9 @@ fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome)
             )?;
             touch_group(tx, gid, ev.at)?;
             out.topic_list_changed = true;
+            }
         }
-        EventData::TopicUpdated { topic_id, title, status } => {
+        EventData::TopicUpdated(TopicUpdatedData { topic_id, title, status }) => {
             let status = match status {
                 Some(s) => Some(rows::enum_str::<TopicStatus>(s)?),
                 None => None,
@@ -763,7 +800,8 @@ fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome)
             )?;
             out.topic_list_changed = true;
         }
-        EventData::MessageCreated { message } => {
+        EventData::MessageCreated(d) => {
+            let message = &d.message;
             let m = message;
             tx.execute(
                 &format!(
@@ -795,8 +833,8 @@ fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome)
             }
             // Unread counters: only events newer than the server summary count.
             if m.author_id != me {
-                let mention = m.mentions.iter().any(|x| x == me) as i64;
-                let topic_read: i64 = tx
+                let mention = m.mentions.iter().any(|x| x == me) as u64;
+                let topic_read: u64 = tx
                     .query_row(
                         "SELECT seq FROM read_cursors WHERE group_id = ?1 AND topic_id = ?2",
                         params![gid, m.topic_id],
@@ -819,7 +857,7 @@ fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome)
             out.topic_list_changed = true;
             out.group_changed = true;
         }
-        EventData::MessageUpdated { message_id, body, edited_at, streaming } => {
+        EventData::MessageUpdated(MessageUpdatedData { message_id, body, edited_at, streaming }) => {
             out.replaced_bodies.push(message_id.clone());
             let topic: Option<String> = tx
                 .query_row(
@@ -834,7 +872,7 @@ fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome)
                 out.message_topics.insert(t);
             }
         }
-        EventData::MessageDeleted { message_id, deleted_at } => {
+        EventData::MessageDeleted(MessageDeletedData { message_id, deleted_at }) => {
             out.replaced_bodies.push(message_id.clone());
             let topic: Option<String> = tx
                 .query_row(
@@ -847,12 +885,14 @@ fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome)
                 out.message_topics.insert(t);
             }
         }
-        EventData::GroupUpdated { name } => {
+        EventData::GroupUpdated(d) => {
+            let name = &d.name;
             tx.execute("UPDATE groups SET name = ?2 WHERE id = ?1", params![gid, name])?;
             out.group_changed = true;
         }
-        EventData::GroupMemberAdded { member_id } | EventData::GroupMemberRemoved { member_id } => {
-            let add = matches!(ev.data, EventData::GroupMemberAdded { .. });
+        EventData::GroupMemberAdded(GroupMemberChangeData { member_id })
+        | EventData::GroupMemberRemoved(GroupMemberChangeData { member_id }) => {
+            let add = matches!(ev.data, EventData::GroupMemberAdded(_));
             let ids: Option<String> = tx
                 .query_row("SELECT member_ids FROM groups WHERE id = ?1", [gid], |r| r.get(0))
                 .optional()?;
@@ -873,7 +913,7 @@ fn apply_one(tx: &Transaction<'_>, me: &str, ev: &Event, out: &mut ApplyOutcome)
     Ok(())
 }
 
-fn touch_group(tx: &Transaction<'_>, gid: &str, at: i64) -> rusqlite::Result<()> {
+fn touch_group(tx: &Transaction<'_>, gid: &str, at: u64) -> rusqlite::Result<()> {
     tx.execute(
         "UPDATE groups SET last_activity_at = MAX(last_activity_at, ?2) WHERE id = ?1",
         params![gid, at],

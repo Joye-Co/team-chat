@@ -116,31 +116,26 @@ fn edits_and_deletes_keep_rows() {
         G1,
         &[
             msg_created(3, message("M3", G1, "T1", ALICE, 3, "draft")),
-            ev(4, G1, ALICE, EventData::MessageUpdated {
-                message_id: "M3".into(),
-                body: "final".into(),
-                edited_at: 9,
-                streaming: false,
-            }),
-            ev(5, G1, ALICE, EventData::MessageDeleted { message_id: "M1".into(), deleted_at: 10 }),
-            ev(6, G1, ME, EventData::TopicUpdated {
+            ev(4, G1, ALICE, EventData::MessageUpdated(MessageUpdatedData { message_id: "M3".into(), body: "final".into(), edited_at: 9, streaming: false })),
+            ev(5, G1, ALICE, EventData::MessageDeleted(MessageDeletedData { message_id: "M1".into(), deleted_at: 10 })),
+            ev(6, G1, ME, EventData::TopicUpdated(TopicUpdatedData {
                 topic_id: "T1".into(),
                 title: Some("new".into()),
                 status: Some(TopicStatus::WaitingReview),
-            }),
-            ev(7, G1, ME, EventData::GroupUpdated { name: "renamed".into() }),
-            ev(8, G1, ME, EventData::GroupMemberRemoved { member_id: ALICE.into() }),
+            })),
+            ev(7, G1, ME, EventData::GroupUpdated(GroupUpdatedData { name: "renamed".into() })),
+            ev(8, G1, ME, EventData::GroupMemberRemoved(GroupMemberChangeData { member_id: ALICE.into() })),
         ],
     )
     .unwrap();
     let m3 = s.message("M3").unwrap().unwrap();
-    assert_eq!((m3.body.as_str(), m3.edited_at), ("final", Some(9)));
+    assert_eq!((m3.body.as_str(), m3.edited_at), ("final", Some(Some(9))));
     let m1 = s.message("M1").unwrap().unwrap();
-    assert_eq!((m1.body.as_str(), m1.deleted_at), ("", Some(10)));
+    assert_eq!((m1.body.as_str(), m1.deleted_at), ("", Some(Some(10))));
     // A late edit does not bring a deleted body back.
     s.apply_events(
         G1,
-        &[ev(9, G1, ME, EventData::MessageUpdated { message_id: "M1".into(), body: "x".into(), edited_at: 11, streaming: false })],
+        &[ev(9, G1, ME, EventData::MessageUpdated(MessageUpdatedData { message_id: "M1".into(), body: "x".into(), edited_at: 11, streaming: false }))],
     )
     .unwrap();
     assert_eq!(s.message("M1").unwrap().unwrap().body, "");

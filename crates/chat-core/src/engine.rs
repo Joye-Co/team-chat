@@ -5,10 +5,12 @@
 use crate::backoff::Backoff;
 use crate::client::{ClientConfig, ClientUpdate, ConnectionState, SendFailure, Shared};
 use crate::proto::{
-    ClientFrame, ClientInfo, ErrorBody, ErrorCode, Event, Message, PROTOCOL_VERSION, SendResult, ServerFrame,
-    TransientEvent,
+    AckFrame, AckOutcome, ClientFrame, ClientInfo, DeleteFrame, DeltaFrame, DirectoryFrame, EditFrame, ErrorBody,
+    ErrorCode, Event, FetchFrame, HelloFrame, HistoryFrame, HistoryRequestFrame, Message, MessageDeltaEvent,
+    PROTOCOL_VERSION, PresenceEvent, ReadFrame, SendFrame, SendResult, ServerFrame, TopicUpdateFrame,
+    TransientEvent, TypingEvent, TypingFrame, WelcomeFrame,
 };
-use crate::store::{ApplyOutcome, OutboxOp, OutboxState};
+use crate::store::{ApplyOutcome, LogEntry, OutboxOp, OutboxState};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
@@ -32,7 +34,7 @@ pub(crate) enum Command {
     /// The outbox has new or retried rows.
     Flush,
     Typing { group_id: String, topic_id: String },
-    Read { group_id: String, seq: i64 },
+    Read { group_id: String, seq: u64 },
     LoadOlder { group_id: String, topic_id: String },
     Delta { group_id: String, message_id: String, append: String },
     ReconnectNow,
@@ -197,7 +199,7 @@ enum Pending {
 #[derive(Default)]
 struct GroupSync {
     fetch_rid: Option<String>,
-    buffer: BTreeMap<i64, Event>,
+    buffer: BTreeMap<u64, LogEntry>,
 }
 
 struct Session {
@@ -268,11 +270,11 @@ impl Session {
                 BTreeMap::new()
             }
         };
-        self.out.push(ClientFrame::Hello {
+        self.out.push(ClientFrame::Hello(HelloFrame {
             protocol: PROTOCOL_VERSION,
             client: self.client.clone(),
             cursors: Some(cursors),
-        });
+        }));
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         let end = loop {
@@ -313,7 +315,7 @@ impl Session {
                         WsMessage::Close(_) => break SessionEnd::Reconnect { reason: "close frame".into(), immediate: false },
                         _ => continue,
                     };
-                    let frame: ServerFrame = match serde_json::from_str(text.as_str()) {
+                    let frame = match parse_incoming(text.as_str()) {
                         Ok(f) => f,
                         Err(e) => {
                             warn!(error = %e, "unparsable server frame");
@@ -388,7 +390,7 @@ impl Session {
                     return;
                 }
                 self.typing_sent.insert(key, now);
-                self.out.push(ClientFrame::Typing { group_id, topic_id });
+                self.out.push(ClientFrame::Typing(TypingFrame { group_id, topic_id }));
             }
             Command::Read { group_id, seq } => self.send_read(group_id, seq),
             Command::LoadOlder { group_id, topic_id } => {
@@ -398,24 +400,24 @@ impl Session {
                 let before = self.shared.store.oldest_cached_seq(&topic_id).ok().flatten();
                 let rid = self.rid();
                 self.history_inflight.insert(topic_id.clone());
-                self.out.push(ClientFrame::History {
+                self.out.push(ClientFrame::History(HistoryRequestFrame {
                     rid: rid.clone(),
                     group_id: group_id.clone(),
                     topic_id: topic_id.clone(),
                     before_seq: before,
                     limit: Some(self.history_limit),
-                });
+                }));
                 self.track(rid, Pending::History { group_id, topic_id });
             }
             Command::Delta { group_id, message_id, append } => {
-                self.out.push(ClientFrame::Delta { group_id, message_id, append });
+                self.out.push(ClientFrame::Delta(DeltaFrame { group_id, message_id, append }));
             }
             Command::ReconnectNow | Command::Stop => {}
         }
     }
 
-    fn send_read(&mut self, group_id: String, seq: i64) {
-        self.out.push(ClientFrame::Read { group_id: group_id.clone(), seq });
+    fn send_read(&mut self, group_id: String, seq: u64) {
+        self.out.push(ClientFrame::Read(ReadFrame { group_id: group_id.clone(), seq }));
         if let Err(e) = self.shared.store.mark_read_synced(&group_id, seq) {
             warn!(error = %e, "mark read synced");
         }
@@ -447,7 +449,7 @@ impl Session {
             }
             let rid = self.rid();
             let frame = match item.op.clone() {
-                OutboxOp::Send { group_id, topic_id, title, body, mentions, streaming } => ClientFrame::Send {
+                OutboxOp::Send { group_id, topic_id, title, body, mentions, streaming } => ClientFrame::Send(SendFrame {
                     rid: rid.clone(),
                     group_id,
                     topic_id,
@@ -456,19 +458,19 @@ impl Session {
                     body,
                     mentions: (!mentions.is_empty()).then_some(mentions),
                     streaming: streaming.then_some(true),
-                },
-                OutboxOp::Edit { group_id, message_id, body, streaming, .. } => ClientFrame::Edit {
+                }),
+                OutboxOp::Edit { group_id, message_id, body, streaming, .. } => ClientFrame::Edit(EditFrame {
                     rid: rid.clone(),
                     group_id,
                     message_id,
                     body,
                     streaming: Some(streaming),
-                },
+                }),
                 OutboxOp::Delete { group_id, message_id, .. } => {
-                    ClientFrame::Delete { rid: rid.clone(), group_id, message_id }
+                    ClientFrame::Delete(DeleteFrame { rid: rid.clone(), group_id, message_id })
                 }
                 OutboxOp::TopicUpdate { group_id, topic_id, title, status } => {
-                    ClientFrame::TopicUpdate { rid: rid.clone(), group_id, topic_id, title, status }
+                    ClientFrame::TopicUpdate(TopicUpdateFrame { rid: rid.clone(), group_id, topic_id, title, status })
                 }
             };
             if let Err(e) = self.shared.store.outbox_attempt(&item.id) {
@@ -481,12 +483,25 @@ impl Session {
         }
     }
 
-    fn on_frame(&mut self, frame: ServerFrame, backoff: &mut Backoff) -> Option<SessionEnd> {
-        match frame {
-            ServerFrame::Welcome { protocol, me, members, groups, .. } => {
-                if protocol != PROTOCOL_VERSION {
-                    return Some(SessionEnd::Unsupported);
+    fn on_frame(&mut self, frame: Incoming, backoff: &mut Backoff) -> Option<SessionEnd> {
+        let frame = match frame {
+            Incoming::Unsupported => return Some(SessionEnd::Unsupported),
+            Incoming::Event(entry) => {
+                if self.welcomed {
+                    let gid = entry.group_id().to_string();
+                    self.groups.entry(gid.clone()).or_default().buffer.insert(entry.seq(), entry);
+                    self.drain(&gid);
                 }
+                return None;
+            }
+            Incoming::Page { rid, group_id, entries, has_more, last_seq } => {
+                self.on_page(rid, group_id, entries, has_more, last_seq);
+                return None;
+            }
+            Incoming::Frame(f) => f,
+        };
+        match frame {
+            ServerFrame::Welcome(WelcomeFrame { me, members, groups, .. }) => {
                 let out = match self.shared.store.apply_welcome(&me, &members, &groups) {
                     Ok(o) => o,
                     Err(e) => {
@@ -520,42 +535,9 @@ impl Session {
                 }
                 self.flush_outbox();
             }
-            ServerFrame::Event { event } => {
-                if !self.welcomed {
-                    return None;
-                }
-                let gid = event.group_id.clone();
-                self.groups.entry(gid.clone()).or_default().buffer.insert(event.seq, event);
-                self.drain(&gid);
-            }
-            ServerFrame::Page { rid, group_id, events, has_more, last_seq } => {
-                let Some((Pending::Fetch { .. }, _)) = self.pending.remove(&rid) else {
-                    return None;
-                };
-                let empty = events.is_empty();
-                {
-                    let gs = self.groups.entry(group_id.clone()).or_default();
-                    if gs.fetch_rid.as_deref() == Some(rid.as_str()) {
-                        gs.fetch_rid = None;
-                    }
-                    for e in events.into_iter().filter(|e| e.group_id == group_id) {
-                        gs.buffer.insert(e.seq, e);
-                    }
-                }
-                let last = self.drain(&group_id);
-                let gap = self.groups.get(&group_id).is_some_and(|g| !g.buffer.is_empty());
-                if (has_more || gap || last < last_seq) && !empty {
-                    self.start_fetch(&group_id);
-                } else {
-                    if last < last_seq || gap {
-                        warn!(group = %group_id, last, last_seq, "fetch ended behind the server");
-                    }
-                    if self.catching_up.remove(&group_id) && self.catching_up.is_empty() {
-                        self.shared.emit(ClientUpdate::CaughtUp);
-                    }
-                }
-            }
-            ServerFrame::History { rid, group_id, topic_id, messages, has_more } => {
+            // Parsed by `parse_incoming` into `Incoming::Event` and `Incoming::Page`.
+            ServerFrame::Event(_) | ServerFrame::Page(_) => {}
+            ServerFrame::History(HistoryFrame { rid, group_id, topic_id, messages, has_more }) => {
                 if self.pending.remove(&rid).is_none() {
                     return None;
                 }
@@ -567,9 +549,13 @@ impl Session {
                 self.shared.emit(ClientUpdate::MessagesChanged { group_id: group_id.clone(), topic_id: topic_id.clone() });
                 self.shared.emit(ClientUpdate::HistoryLoaded { group_id, topic_id, has_more });
             }
-            ServerFrame::Ack { rid, ok, result, error } => {
+            ServerFrame::Ack(AckFrame { rid, outcome }) => {
                 let Some((p, _)) = self.pending.remove(&rid) else {
                     return None;
+                };
+                let (ok, result, error) = match outcome {
+                    AckOutcome::Ok { result } => (true, result, None),
+                    AckOutcome::Err { error } => (false, None, Some(error)),
                 };
                 match p {
                     Pending::Outbox { id } => return self.on_outbox_ack(id, ok, result, error),
@@ -579,7 +565,9 @@ impl Session {
                         if let Some(g) = self.groups.get_mut(&group_id) {
                             g.fetch_rid = None;
                         }
-                        self.catching_up.remove(&group_id);
+                        if self.catching_up.remove(&group_id) && self.catching_up.is_empty() {
+                            self.shared.emit(ClientUpdate::CaughtUp);
+                        }
                     }
                     Pending::History { group_id, topic_id } => {
                         self.history_inflight.remove(&topic_id);
@@ -587,8 +575,8 @@ impl Session {
                     }
                 }
             }
-            ServerFrame::Transient { event } => self.on_transient(event),
-            ServerFrame::Directory { members, groups, removed_group_ids } => {
+            ServerFrame::Transient(t) => self.on_transient(t.event),
+            ServerFrame::Directory(DirectoryFrame { members, groups, removed_group_ids }) => {
                 let out = match self.shared.store.apply_directory(
                     members.as_deref(),
                     groups.as_deref(),
@@ -614,17 +602,46 @@ impl Session {
                     }
                 }
             }
-            ServerFrame::Error { error } => {
-                warn!(code = ?error.code, "connection error frame");
-                return Some(match error.code {
+            ServerFrame::Error(e) => {
+                let code = e.error.code;
+                warn!(?code, "connection error frame");
+                return Some(match code {
                     ErrorCode::Unauthorized => SessionEnd::Unauthorized,
                     ErrorCode::UnsupportedProtocol => SessionEnd::Unsupported,
-                    _ => SessionEnd::Reconnect { reason: format!("error frame {:?}", error.code), immediate: false },
+                    _ => SessionEnd::Reconnect { reason: format!("error frame {code:?}"), immediate: false },
                 });
             }
             ServerFrame::Pong => self.pong_deadline = None,
         }
         None
+    }
+
+    fn on_page(&mut self, rid: String, group_id: String, entries: Vec<LogEntry>, has_more: bool, last_seq: u64) {
+        let Some((Pending::Fetch { .. }, _)) = self.pending.remove(&rid) else {
+            return;
+        };
+        let empty = entries.is_empty();
+        {
+            let gs = self.groups.entry(group_id.clone()).or_default();
+            if gs.fetch_rid.as_deref() == Some(rid.as_str()) {
+                gs.fetch_rid = None;
+            }
+            for e in entries.into_iter().filter(|e| e.group_id() == group_id) {
+                gs.buffer.insert(e.seq(), e);
+            }
+        }
+        let last = self.drain(&group_id);
+        let gap = self.groups.get(&group_id).is_some_and(|g| !g.buffer.is_empty());
+        if (has_more || gap || last < last_seq) && !empty {
+            self.start_fetch(&group_id);
+        } else {
+            if last < last_seq || gap {
+                warn!(group = %group_id, last, last_seq, "fetch ended behind the server");
+            }
+            if self.catching_up.remove(&group_id) && self.catching_up.is_empty() {
+                self.shared.emit(ClientUpdate::CaughtUp);
+            }
+        }
     }
 
     fn on_outbox_ack(
@@ -723,19 +740,19 @@ impl Session {
 
     fn on_transient(&mut self, ev: TransientEvent) {
         match ev {
-            TransientEvent::Typing { group_id, topic_id, member_id, .. } => {
+            TransientEvent::Typing(TypingEvent { group_id, topic_id, member_id, .. }) => {
                 if member_id == self.me {
                     return;
                 }
                 self.shared.transient().on_typing(&group_id, &topic_id, &member_id, Instant::now());
                 self.shared.emit(ClientUpdate::Typing { group_id, topic_id });
             }
-            TransientEvent::Presence { member_id, online, .. } => {
+            TransientEvent::Presence(PresenceEvent { member_id, online, .. }) => {
                 if self.shared.transient().set_presence(&member_id, online) {
                     self.shared.emit(ClientUpdate::Presence { member_id, online });
                 }
             }
-            TransientEvent::MessageDelta { group_id, topic_id, message_id, append } => {
+            TransientEvent::MessageDelta(MessageDeltaEvent { group_id, topic_id, message_id, append }) => {
                 self.shared.transient().append_delta(&message_id, &append);
                 self.shared.emit(ClientUpdate::MessagesChanged { group_id, topic_id });
             }
@@ -751,23 +768,23 @@ impl Session {
         }
         gs.fetch_rid = Some(rid.clone());
         debug!(group = %group_id, after, "fetch");
-        self.out.push(ClientFrame::Fetch {
+        self.out.push(ClientFrame::Fetch(FetchFrame {
             rid: rid.clone(),
             group_id: group_id.to_string(),
             after_seq: after,
             limit: Some(self.fetch_limit),
-        });
+        }));
         self.track(rid, Pending::Fetch { group_id: group_id.to_string() });
     }
 
     /// Applies the contiguous buffered events of a group; fetches when a gap remains.
     /// Returns `lastApplied`.
-    fn drain(&mut self, group_id: &str) -> i64 {
-        let events: Vec<Event> = match self.groups.get(group_id) {
+    fn drain(&mut self, group_id: &str) -> u64 {
+        let events: Vec<LogEntry> = match self.groups.get(group_id) {
             Some(g) if !g.buffer.is_empty() => g.buffer.values().cloned().collect(),
             _ => return self.shared.store.last_applied(group_id).unwrap_or(0),
         };
-        let out = match self.shared.store.apply_events(group_id, &events) {
+        let out = match self.shared.store.apply_log(group_id, &events) {
             Ok(o) => o,
             Err(e) => {
                 warn!(group = %group_id, error = %e, "apply events");
@@ -814,6 +831,55 @@ impl Session {
         for t in &out.message_topics {
             self.shared.emit(ClientUpdate::MessagesChanged { group_id: group_id.into(), topic_id: t.clone() });
         }
+    }
+}
+
+pub(crate) enum Incoming {
+    Frame(ServerFrame),
+    Event(LogEntry),
+    Page { rid: String, group_id: String, entries: Vec<LogEntry>, has_more: bool, last_seq: u64 },
+    /// A `welcome` for another protocol version.
+    Unsupported,
+}
+
+/// Parses a server frame. Events are parsed one by one, so an event type added by a
+/// newer server keeps its place in the seq order instead of failing the whole frame.
+pub(crate) fn parse_incoming(text: &str) -> Result<Incoming, String> {
+    let mut v: serde_json::Value = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    match v.get("t").and_then(|t| t.as_str()) {
+        Some("event") => Ok(Incoming::Event(log_entry(v.get_mut("event").map(serde_json::Value::take).ok_or("event frame without event")?)?)),
+        Some("page") => {
+            let rid = v.get("rid").and_then(|x| x.as_str()).ok_or("page without rid")?.to_string();
+            let group_id = v.get("groupId").and_then(|x| x.as_str()).ok_or("page without groupId")?.to_string();
+            let has_more = v.get("hasMore").and_then(|x| x.as_bool()).ok_or("page without hasMore")?;
+            let last_seq = v.get("lastSeq").and_then(|x| x.as_u64()).ok_or("page without lastSeq")?;
+            let events = match v.get_mut("events").map(serde_json::Value::take) {
+                Some(serde_json::Value::Array(a)) => a,
+                _ => return Err("page without events".into()),
+            };
+            let entries = events.into_iter().map(log_entry).collect::<Result<Vec<_>, _>>()?;
+            Ok(Incoming::Page { rid, group_id, entries, has_more, last_seq })
+        }
+        Some("welcome") if v.get("protocol").and_then(|p| p.as_u64()) != Some(PROTOCOL_VERSION as u64) => {
+            Ok(Incoming::Unsupported)
+        }
+        _ => crate::proto::parse_server_frame(text).map(Incoming::Frame).map_err(|e| e.to_string()),
+    }
+}
+
+fn log_entry(v: serde_json::Value) -> Result<LogEntry, String> {
+    let seq = v.get("seq").and_then(|x| x.as_u64());
+    let group_id = v.get("groupId").and_then(|x| x.as_str()).map(str::to_string);
+    let event_type = v.get("type").and_then(|x| x.as_str()).unwrap_or("").to_string();
+    match serde_json::from_value::<Event>(v) {
+        Ok(e) => Ok(LogEntry::Known(e)),
+        Err(err) => match (seq, group_id) {
+            (Some(seq), Some(group_id)) if seq > 0 => {
+                warn!(seq, event_type = %event_type, error = %err, "skipping event this client cannot read");
+                Ok(LogEntry::Unknown { seq, group_id, event_type })
+            }
+            _ => Err(err.to_string()),
+        },
     }
 }
 

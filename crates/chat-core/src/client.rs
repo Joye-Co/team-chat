@@ -295,14 +295,14 @@ impl Client {
 
     /// A window of messages of a topic, oldest first: up to `limit` messages created
     /// before `before_seq` (the newest when `None`). Streaming text is merged in.
-    pub fn messages(&self, topic_id: &str, before_seq: Option<i64>, limit: usize) -> Result<Vec<Message>, ClientError> {
+    pub fn messages(&self, topic_id: &str, before_seq: Option<u64>, limit: usize) -> Result<Vec<Message>, ClientError> {
         let mut v = self.shared.store.messages_before(topic_id, before_seq, limit)?;
         self.merge_streams(&mut v);
         Ok(v)
     }
 
     /// Up to `limit` messages created after `after_seq`, oldest first.
-    pub fn messages_after(&self, topic_id: &str, after_seq: i64, limit: usize) -> Result<Vec<Message>, ClientError> {
+    pub fn messages_after(&self, topic_id: &str, after_seq: u64, limit: usize) -> Result<Vec<Message>, ClientError> {
         let mut v = self.shared.store.messages_after(topic_id, after_seq, limit)?;
         self.merge_streams(&mut v);
         Ok(v)
@@ -488,16 +488,16 @@ impl Client {
 
     /// Marks a topic read up to `seq` (a message `createdSeq`). When no topic of the
     /// group is unread any more, the group cursor moves and is sent to the server.
-    pub fn mark_topic_read(&self, group_id: &str, topic_id: &str, seq: i64) -> Result<(), ClientError> {
+    pub fn mark_topic_read(&self, group_id: &str, topic_id: &str, seq: u64) -> Result<(), ClientError> {
         self.mark_read_inner(group_id, Some(topic_id), seq)
     }
 
     /// Moves the group read cursor to `seq` and sends it to the server.
-    pub fn mark_group_read(&self, group_id: &str, seq: i64) -> Result<(), ClientError> {
+    pub fn mark_group_read(&self, group_id: &str, seq: u64) -> Result<(), ClientError> {
         self.mark_read_inner(group_id, None, seq)
     }
 
-    fn mark_read_inner(&self, group_id: &str, topic_id: Option<&str>, seq: i64) -> Result<(), ClientError> {
+    fn mark_read_inner(&self, group_id: &str, topic_id: Option<&str>, seq: u64) -> Result<(), ClientError> {
         let sent = self.shared.store.mark_read(group_id, topic_id, seq)?;
         self.shared.emit(ClientUpdate::GroupChanged { group_id: group_id.into() });
         self.shared.emit(ClientUpdate::TopicsChanged { group_id: group_id.into() });

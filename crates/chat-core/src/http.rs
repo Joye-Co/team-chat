@@ -3,7 +3,7 @@
 
 use crate::proto::{
     CreateBotRequest, CreateBotResponse, CreateGroupRequest, CreateInviteRequest, CreateInviteResponse,
-    ErrorCode, ErrorResponse, GroupSummary, HealthResponse, Member, MemberIdRequest, MemberKind,
+    AddGroupMemberRequest, CreateDmRequest, ErrorCode, ErrorResponse, GroupSummary, HealthResponse, Member, MemberKind,
     MemberLevel, RedeemRequest, RedeemResponse, RevokeTokensRequest, RevokeTokensResponse,
 };
 use reqwest::{Method, StatusCode};
@@ -150,7 +150,7 @@ impl HttpClient {
     }
 
     pub async fn add_group_member(&self, group_id: &str, member_id: &str) -> ApiResult<GroupSummary> {
-        let body = MemberIdRequest { member_id: member_id.to_string() };
+        let body = AddGroupMemberRequest { member_id: member_id.to_string() };
         self.call(Method::POST, &format!("/v1/groups/{}/members", enc(group_id)), Some(&body), true).await
     }
 
@@ -168,7 +168,7 @@ impl HttpClient {
 
     /// Finds or creates the DM with a member.
     pub async fn dm(&self, member_id: &str) -> ApiResult<GroupSummary> {
-        let body = MemberIdRequest { member_id: member_id.to_string() };
+        let body = CreateDmRequest { member_id: member_id.to_string() };
         self.call(Method::POST, "/v1/dms", Some(&body), true).await
     }
 

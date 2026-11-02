@@ -10,24 +10,24 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 pub struct GroupRow {
     pub group: Group,
     /// Newest seq known for the group (server summary or applied events).
-    pub last_seq: i64,
+    pub last_seq: u64,
     /// My group read cursor.
-    pub read_seq: i64,
-    pub unread: i64,
-    pub mentions: i64,
+    pub read_seq: u64,
+    pub unread: u64,
+    pub mentions: u64,
     /// Time of the newest cached activity, 0 when none is cached.
-    pub last_activity_at: i64,
+    pub last_activity_at: u64,
 }
 
 /// A topic with per-topic unread state, for the topic list.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TopicRow {
     pub topic: Topic,
-    pub last_activity_at: i64,
+    pub last_activity_at: u64,
     /// Every older message of the topic is cached.
     pub history_complete: bool,
     /// Messages after my read position that I did not write.
-    pub unread: i64,
+    pub unread: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -114,10 +114,10 @@ pub struct OutboxItem {
     /// `clientMsgId` for a send; a local ULID for other writes.
     pub id: String,
     pub op: OutboxOp,
-    pub attempts: i64,
+    pub attempts: u64,
     pub last_error: Option<String>,
     pub state: OutboxState,
-    pub created_at: i64,
+    pub created_at: u64,
 }
 
 pub(crate) fn outbox_from_row(r: &Row<'_>) -> rusqlite::Result<OutboxItem> {
@@ -153,13 +153,15 @@ pub(crate) const MEMBER_COLS: &str = "id, kind, name, role, level, avatar_url, d
 
 pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
     let deactivated: bool = r.get(6)?;
+    let role: Option<String> = r.get(3)?;
+    let avatar_url: Option<String> = r.get(5)?;
     Ok(Member {
         id: r.get(0)?,
         kind: enum_from(r.get(1)?)?,
         name: r.get(2)?,
-        role: r.get(3)?,
+        role: role.map(Some),
         level: enum_from(r.get(4)?)?,
-        avatar_url: r.get(5)?,
+        avatar_url: avatar_url.map(Some),
         deactivated: Some(deactivated),
     })
 }
@@ -223,19 +225,21 @@ pub(crate) fn message_values(m: &Message) -> Result<Vec<Value>, serde_json::Erro
         Value::Text(m.group_id.clone()),
         Value::Text(m.topic_id.clone()),
         Value::Text(m.author_id.clone()),
-        Value::Text(if m.deleted_at.is_some() { String::new() } else { m.body.clone() }),
+        Value::Text(if m.is_deleted() { String::new() } else { m.body.clone() }),
         Value::Text(serde_json::to_string(&m.mentions)?),
-        Value::Integer(m.created_seq),
-        Value::Integer(m.created_at),
-        m.edited_at.map_or(Value::Null, Value::Integer),
-        m.deleted_at.map_or(Value::Null, Value::Integer),
-        Value::Integer(m.streaming.unwrap_or(false) as i64),
+        Value::Integer(m.created_seq as i64),
+        Value::Integer(m.created_at as i64),
+        m.edited_at().map_or(Value::Null, |v| Value::Integer(v as i64)),
+        m.deleted_at().map_or(Value::Null, |v| Value::Integer(v as i64)),
+        Value::Integer(m.is_streaming() as i64),
     ])
 }
 
 pub(crate) fn message_from_row(r: &Row<'_>) -> rusqlite::Result<Message> {
     let mentions: String = r.get(6)?;
     let streaming: bool = r.get(11)?;
+    let edited_at: Option<u64> = r.get(9)?;
+    let deleted_at: Option<u64> = r.get(10)?;
     Ok(Message {
         id: r.get(0)?,
         client_msg_id: r.get(1)?,
@@ -246,8 +250,8 @@ pub(crate) fn message_from_row(r: &Row<'_>) -> rusqlite::Result<Message> {
         mentions: serde_json::from_str(&mentions).map_err(json_err)?,
         created_seq: r.get(7)?,
         created_at: r.get(8)?,
-        edited_at: r.get(9)?,
-        deleted_at: r.get(10)?,
+        edited_at: edited_at.map(Some),
+        deleted_at: deleted_at.map(Some),
         streaming: streaming.then_some(true),
     })
 }
