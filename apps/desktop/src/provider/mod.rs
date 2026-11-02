@@ -233,6 +233,15 @@ impl CoreProvider {
 
     /// Reconnects at once (wake from sleep, network change).
     pub fn reconnect_now_inner(&self) {
+        let (generation, unreadable) = {
+            let s = self.state();
+            (s.generation, s.connection == Some(ConnectionState::TokenUnreadable))
+        };
+        if unreadable && let Some(a) = self.account() {
+            tracing::info!("reading the saved token again");
+            self.load_token(generation, a.server_url.clone(), a.client.clone());
+            return;
+        }
         if let Some(a) = self.account() {
             tracing::info!("reconnect requested");
             a.client.reconnect_now();
@@ -274,15 +283,28 @@ impl CoreProvider {
             }
         };
         let generation = self.install(saved.clone(), client.clone(), dir);
+        self.load_token(generation, saved.server_url, client);
+    }
+
+    /// Reads the saved token from the Keychain and starts `client` with it.
+    /// A Keychain error keeps the session and the token: it is often a denied
+    /// access prompt after an update, or a keychain that is still locked.
+    fn load_token(&self, generation: u64, server_url: String, client: Arc<Client>) {
         let this = self.clone();
         let tokens = self.shared.config.tokens.clone();
         chat_core::background().spawn(async move {
-            let loaded = tokio_blocking(move || tokens.store(&saved.server_url).load()).await;
+            let loaded = tokio_blocking(move || tokens.store(&server_url).load()).await;
             match loaded {
                 Ok(Some(token)) => {
-                    if this.state().generation == generation {
+                    let mut s = this.state();
+                    if s.generation == generation {
+                        if s.connection == Some(ConnectionState::TokenUnreadable) {
+                            s.connection = None;
+                        }
+                        drop(s);
                         client.set_token(token);
                         client.start();
+                        this.emit(vec![Change::Connection]);
                     }
                 }
                 Ok(None) => {
@@ -290,8 +312,13 @@ impl CoreProvider {
                     this.drop_session(generation, None);
                 }
                 Err(e) => {
-                    tracing::warn!(error = %e, "cannot read the saved token; signing out");
-                    this.drop_session(generation, Some(LoginError::Other));
+                    tracing::warn!(error = %e, "cannot read the saved token; keeping the session");
+                    let mut s = this.state();
+                    if s.generation == generation {
+                        s.connection = Some(ConnectionState::TokenUnreadable);
+                        drop(s);
+                        this.emit(vec![Change::Connection]);
+                    }
                 }
             }
         });

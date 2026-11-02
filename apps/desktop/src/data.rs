@@ -511,6 +511,10 @@ pub enum ConnectionState {
         attempt: u32,
         retry_in_ms: u64,
     },
+    /// Signed in, but the saved token cannot be read from the Keychain (the
+    /// access prompt was denied, or the keychain is locked). The cache still
+    /// shows; [`ChatProvider::reconnect_now`] reads the token again.
+    TokenUnreadable,
 }
 
 /// A new message from the composer.

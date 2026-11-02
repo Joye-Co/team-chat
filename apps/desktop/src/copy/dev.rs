@@ -14,6 +14,7 @@ crate::copy! {
     PROVIDER = "provider: {name}",
     MEMBER_ID = "member id: {id}",
     STATE_OFFLINE = "offline",
+    STATE_TOKEN_UNREADABLE = "keychain read failed",
     STATE_CONNECTING = "connecting",
     STATE_ONLINE = "online",
     STATE_RECONNECTING = "reconnecting (attempt {attempt}, retry in {ms} ms)",

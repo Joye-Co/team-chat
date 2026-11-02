@@ -30,6 +30,13 @@ pub enum TokenStorage {
     Keychain,
     /// Process memory only (self-tests).
     Memory(Arc<Mutex<Option<String>>>),
+    /// Tests: reads fail while the flag is set, as when the Keychain prompt
+    /// is denied; otherwise the slot.
+    #[cfg(test)]
+    Failing(
+        Arc<std::sync::atomic::AtomicBool>,
+        Arc<Mutex<Option<String>>>,
+    ),
 }
 
 impl TokenStorage {
@@ -49,6 +56,11 @@ impl TokenStorage {
                 default_data_root().join("token"),
             )),
             TokenStorage::Memory(slot) => Box::new(MemoryTokenStore(slot.clone())),
+            #[cfg(test)]
+            TokenStorage::Failing(fail, slot) => Box::new(FailingTokenStore(
+                fail.clone(),
+                MemoryTokenStore(slot.clone()),
+            )),
         }
     }
 }
@@ -66,6 +78,25 @@ impl TokenStore for MemoryTokenStore {
     fn clear(&self) -> Result<(), TokenStoreError> {
         *self.0.lock().unwrap_or_else(|e| e.into_inner()) = None;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+struct FailingTokenStore(Arc<std::sync::atomic::AtomicBool>, MemoryTokenStore);
+
+#[cfg(test)]
+impl TokenStore for FailingTokenStore {
+    fn load(&self) -> Result<Option<String>, TokenStoreError> {
+        if self.0.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(TokenStoreError::Keychain("user denied".into()));
+        }
+        self.1.load()
+    }
+    fn save(&self, token: &str) -> Result<(), TokenStoreError> {
+        self.1.save(token)
+    }
+    fn clear(&self) -> Result<(), TokenStoreError> {
+        self.1.clear()
     }
 }
 
@@ -271,5 +302,60 @@ mod tests {
             login_error(&server(400, ErrorCode::UnsupportedProtocol)),
             LoginError::Unsupported
         );
+    }
+
+    #[test]
+    fn a_keychain_read_error_keeps_the_session_and_the_token() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::time::{Duration, Instant};
+
+        use crate::data::{ChatProvider as _, ConnectionState, SessionState};
+        use crate::provider::{CoreProvider, ProviderConfig};
+
+        let root = std::env::temp_dir().join(format!("token-unreadable-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        let member: proto::Member = serde_json::from_value(serde_json::json!({
+            "id": "m1", "kind": "human", "name": "A", "level": "member"
+        }))
+        .unwrap();
+        save_session(
+            &root,
+            &SavedSession {
+                server_url: "http://127.0.0.1:9".into(),
+                member,
+            },
+        )
+        .unwrap();
+        let fail = Arc::new(AtomicBool::new(true));
+        let slot = Arc::new(Mutex::new(Some("saved-token".to_string())));
+        let p = CoreProvider::new(ProviderConfig {
+            data_root: root.clone(),
+            tokens: TokenStorage::Failing(fail.clone(), slot.clone()),
+            restore: true,
+        });
+        let wait = |what: &str, f: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !f() {
+                assert!(Instant::now() < deadline, "timed out: {what}");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        };
+        wait("unreadable", &|| {
+            p.connection() == ConnectionState::TokenUnreadable
+        });
+        assert!(matches!(p.session(), SessionState::SignedIn { .. }));
+        assert!(session_path(&root).exists());
+        assert!(slot.lock().unwrap().is_some());
+
+        // The prompt is allowed on retry: the client starts.
+        fail.store(false, Ordering::SeqCst);
+        p.reconnect_now();
+        wait("token read again", &|| {
+            p.connection() != ConnectionState::TokenUnreadable
+        });
+        assert!(matches!(p.session(), SessionState::SignedIn { .. }));
+        p.sign_out_local_for_selftest();
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

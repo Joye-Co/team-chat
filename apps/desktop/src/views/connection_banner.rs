@@ -43,6 +43,7 @@ pub fn banner_text(state: ConnectionState) -> Option<String> {
         }
         ConnectionState::Reconnecting { .. } => Some(c::RECONNECTING_NOW.to_string()),
         ConnectionState::Offline => Some(c::OFFLINE.to_string()),
+        ConnectionState::TokenUnreadable => Some(c::TOKEN_UNREADABLE.to_string()),
     }
 }
 
@@ -63,6 +64,9 @@ pub fn banner_lines(state: ConnectionState) -> Option<(&'static str, String)> {
             (c::BANNER_DISCONNECTED, c::RECONNECTING_NOW.to_string())
         }
         ConnectionState::Offline => (c::OFFLINE, c::QUEUED_HINT.to_string()),
+        ConnectionState::TokenUnreadable => {
+            (c::TOKEN_UNREADABLE, c::TOKEN_UNREADABLE_HINT.to_string())
+        }
     })
 }
 
@@ -83,7 +87,11 @@ impl Render for ConnectionBanner {
             vec![
                 ui::button(
                     "reconnect-now",
-                    c::RECONNECT,
+                    if state == ConnectionState::TokenUnreadable {
+                        c::RETRY_TOKEN
+                    } else {
+                        c::RECONNECT
+                    },
                     ui::ButtonKind::Ghost,
                     ui::ButtonSize::Sm,
                     cx,
@@ -135,6 +143,10 @@ mod tests {
             })
             .as_deref(),
             Some(c::RECONNECTING_NOW)
+        );
+        assert_eq!(
+            banner_lines(ConnectionState::TokenUnreadable).map(|(t, _)| t),
+            Some(c::TOKEN_UNREADABLE)
         );
     }
 }

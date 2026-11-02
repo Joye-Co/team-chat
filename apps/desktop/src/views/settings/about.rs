@@ -216,6 +216,9 @@ impl Render for AboutPage {
                     .when(developer, |el| {
                         let connection = match provider.connection() {
                             ConnectionState::Offline => dev::STATE_OFFLINE.to_string(),
+                            ConnectionState::TokenUnreadable => {
+                                dev::STATE_TOKEN_UNREADABLE.to_string()
+                            }
                             ConnectionState::Connecting => dev::STATE_CONNECTING.to_string(),
                             ConnectionState::Online => dev::STATE_ONLINE.to_string(),
                             ConnectionState::Reconnecting {
