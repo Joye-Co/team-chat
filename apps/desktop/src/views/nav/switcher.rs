@@ -890,14 +890,16 @@ impl Render for Switcher {
                     .child(ui::icon(Lucide::Search, px(20.), k.text_2))
                     .children(scope_token)
                     .child(
-                        div().flex_1().min_w(px(0.)).child(
+                        div().flex_1().min_w(px(0.)).child(ui::placeholder_input(
                             Input::new(&self.query)
                                 .appearance(false)
                                 .px_0()
                                 .py_0()
                                 .text_size(type_scale::HEADING.0)
                                 .line_height(px(24.)),
-                        ),
+                            window,
+                            cx,
+                        )),
                     )
                     .child(Kbd::new(nav::KEY_ESC)),
             )

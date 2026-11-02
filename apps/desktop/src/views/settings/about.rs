@@ -115,7 +115,7 @@ impl AboutPage {
 }
 
 impl Render for AboutPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let provider = self.services.provider.clone();
         let session = provider.session();
@@ -130,7 +130,7 @@ impl Render for AboutPage {
             .description
             .read(cx)
             .focus_handle(cx)
-            .is_focused(_window);
+            .is_focused(window);
         div()
             .flex()
             .flex_col()
@@ -166,12 +166,14 @@ impl Render for AboutPage {
                     })
                     .when(focused && !failed, |el| el.shadow(colors.focus_halo()))
                     .when(failed, |el| el.shadow(colors.error_halo()))
-                    .child(
+                    .child(crate::ui::placeholder_input(
                         Textarea::new(&self.description)
                             .appearance(false)
                             .text_size(theme::type_scale::BODY.0)
                             .line_height(theme::type_scale::BODY.1),
-                    ),
+                        window,
+                        cx,
+                    )),
             )
             .child(
                 div()

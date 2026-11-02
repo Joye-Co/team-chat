@@ -688,14 +688,19 @@ impl Render for Gallery {
                         state: &Entity<TextareaState>,
                         focused: bool,
                         ready: bool,
+                        window: &mut Window,
                         cx: &mut Context<Self>| {
             ComposerShell::new(
                 id,
-                Textarea::new(state)
-                    .appearance(false)
-                    .with_size(gpui_component::Size::XSmall)
-                    .p_0()
-                    .t_body(),
+                ui::placeholder_input(
+                    Textarea::new(state)
+                        .appearance(false)
+                        .with_size(gpui_component::Size::XSmall)
+                        .p_0()
+                        .t_body(),
+                    window,
+                    cx,
+                ),
             )
             .focused(focused)
             .tool(ui::composer_tool(
@@ -730,12 +735,20 @@ impl Render for Gallery {
             .flex()
             .flex_col()
             .gap(space::S16)
-            .child(composer("c-empty", &self.composer_empty, false, false, cx))
+            .child(composer(
+                "c-empty",
+                &self.composer_empty,
+                false,
+                false,
+                window,
+                cx,
+            ))
             .child(composer(
                 "c-focus",
                 &self.composer_focused,
                 focused,
                 true,
+                window,
                 cx,
             ));
 

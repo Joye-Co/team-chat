@@ -300,7 +300,7 @@ impl ComposerView {
                 format!(
                     "{}：{}",
                     fill(c::QUOTING, &[("name", &name)]),
-                    model::excerpt(&strip_marks(&m.body), 40)
+                    model::excerpt(&strip_marks(&m.body), 200)
                 )
             }
             None => fill(c::QUOTING, &[("name", c::UNKNOWN_MEMBER)]),
@@ -1071,6 +1071,18 @@ impl Render for ComposerView {
         })
         .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
 
+        // XSmall drops the editor's own inset; the shell pads the text 12 top
+        // and 14 at the sides (DESIGN.md §7.2).
+        let editor = ui::placeholder_input(
+            Textarea::new(&self.input)
+                .appearance(false)
+                .xsmall()
+                .p_0()
+                .t_body()
+                .disabled(!enabled),
+            window,
+            cx,
+        );
         let mut shell = ui::ComposerShell::new(
             "composer-box",
             div()
@@ -1083,16 +1095,7 @@ impl Render for ComposerView {
                 .capture_action(cx.listener(Self::on_escape))
                 .capture_action(cx.listener(Self::on_paste))
                 .capture_key_down(cx.listener(Self::on_format_key))
-                .child(
-                    // XSmall drops the editor's own inset; the shell pads the
-                    // text 12 top and 14 at the sides (DESIGN.md §7.2).
-                    Textarea::new(&self.input)
-                        .appearance(false)
-                        .xsmall()
-                        .p_0()
-                        .t_body()
-                        .disabled(!enabled),
-                ),
+                .child(editor),
         )
         .focused(focused && enabled)
         .disabled(!enabled)

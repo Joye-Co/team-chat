@@ -142,7 +142,7 @@ impl TimelineView {
                     .into_any_element(),
             )
         } else if let Some(input) = editing {
-            Some(self.render_editor(&input, cx))
+            Some(self.render_editor(&input, window, cx))
         } else if body_hidden {
             None
         } else if message.body.is_empty() && message.streaming {
@@ -659,6 +659,7 @@ impl TimelineView {
     fn render_editor(
         &self,
         input: &gpui::Entity<gpui_component::input::TextareaState>,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let colors = theme::colors(cx);
@@ -682,13 +683,15 @@ impl TimelineView {
                     .px(space::S12 - crate::ui::composer::EDITOR_INSET)
                     .py(space::S8)
                     .t_body()
-                    .child(
+                    .child(crate::ui::placeholder_input(
                         Textarea::new(input)
                             .appearance(false)
                             .xsmall()
                             .p_0()
                             .t_body(),
-                    ),
+                        window,
+                        cx,
+                    )),
             )
             .child(
                 div()

@@ -319,7 +319,7 @@ impl RenderOnce for TextField {
                 el.child(icon(Lucide::Search, theme::icon::ROW, k.text_3))
             })
             .child(
-                div().flex_1().min_w(px(0.)).child(
+                div().flex_1().min_w(px(0.)).child(placeholder_input(
                     Input::new(&self.state)
                         .appearance(false)
                         .disabled(self.disabled)
@@ -329,13 +329,32 @@ impl RenderOnce for TextField {
                         .text_size(type_scale::UI.0)
                         .line_height(type_scale::UI.1)
                         .text_color(if self.disabled { k.text_3 } else { k.text_1 }),
-                ),
+                    window,
+                    cx,
+                )),
             )
             .children(self.trailing)
             .when_some(self.shortcut.filter(|_| empty), |el, s| {
                 el.child(Kbd::new(s))
             })
     }
+}
+
+/// Renders a gpui-component input (`Input`, `Textarea`) with its
+/// placeholder in the `placeholder` token, light and dark (§2.2, §7.4).
+///
+/// gpui-component paints a placeholder in the theme's `muted_foreground`,
+/// which this app sets to `text-2` for secondary text, so placeholders read
+/// as typed text. The input copies the theme colors into its state while it
+/// renders, so the theme carries `placeholder` for that call only. Every
+/// input in the app renders through here.
+pub fn placeholder_input(input: impl RenderOnce, window: &mut Window, cx: &mut App) -> AnyElement {
+    let placeholder = theme::colors(cx).placeholder;
+    let theme = gpui_component::Theme::global_mut(cx);
+    let saved = std::mem::replace(&mut theme.muted_foreground, placeholder);
+    let element = input.render(window, cx).into_any_element();
+    gpui_component::Theme::global_mut(cx).muted_foreground = saved;
+    element
 }
 
 /// The label above a form field: `small` 13/20 500 `text-2`, 8 pt above the
