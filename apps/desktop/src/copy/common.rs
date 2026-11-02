@@ -19,6 +19,8 @@ crate::copy! {
     STATUS_WAITING_REVIEW_ME = "等你审",
     STATUS_WAITING_REVIEW_NAMED = "等{name}审",
     STATUS_WAITING_REVIEW = "等审",
+    STATUS_WAITING_ANSWER_ME_SHORT = "等你答",
+    COUNT_CAP = "99+",
     STATUS_BLOCKED = "卡住了",
     STATUS_DONE = "完成",
     STATUS_OPEN = "未开始",

@@ -1,10 +1,16 @@
-//! `MemberAvatar` (DESIGN.md §14): the one avatar path of the app. People are
-//! circles, bots are rounded squares with a graphite mark. A photo goes
-//! through gpui-component's `Avatar`; without one the monogram box is drawn
-//! here with the §2.7 palettes, because `Avatar`'s initials and colors do not
-//! follow our rules. A member with a jojo-friends character draws the
-//! character with its live status instead (`crate::characters`); the
-//! character's own signal replaces the bot mark and the presence dot.
+//! `MemberAvatar` (DESIGN.md §7.9): the one avatar path of the app.
+//!
+//! - People are circles: a photo through gpui-component's `Avatar`, or the
+//!   neutral `avatar-bg` disc with `avatar-fg` initials. One character for a
+//!   CJK name, two letters for a Latin name at 32 pt and above, one letter at
+//!   24 pt and below; a leading emoji is skipped. A presence dot shows for
+//!   people who are online; offline shows no dot.
+//! - Bots are rounded-square tiles (radius 0.25 x size) in the bot's tint,
+//!   with its jojo-friends character at its live status fitted inside
+//!   (`characters::tile`). The status shows as a pip in the presence position,
+//!   only for working, needs-input and error, at 36 pt and below.
+//!
+//! The shape alone says bot or person.
 
 use gpui::{
     App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
@@ -13,14 +19,14 @@ use gpui::{
 use gpui_component::avatar::Avatar;
 
 use crate::{
-    characters::{self, status::StatusBoard},
+    characters::{self, CharacterStatus, status::StatusBoard},
     data::Member,
-    theme::{self, Type as _},
+    theme::{self, Type as _, type_scale},
     ui::icons::{Lucide, icon},
 };
 
-/// Ring width of the bot mark and presence dot.
-const RING: Pixels = px(1.5);
+/// Ring around presence dots and pips.
+const DOT_RING: Pixels = px(2.);
 
 #[derive(IntoElement)]
 pub struct MemberAvatar {
@@ -29,13 +35,18 @@ pub struct MemberAvatar {
     photo: Option<String>,
     bot: bool,
     size: Pixels,
-    /// Show the presence dot (people who are online).
+    /// Show the presence dot (people who are online) or the status pip (bots).
     online: bool,
-    /// The surface the avatar sits on: the color of the 1.5 pt rings.
+    show_status: bool,
+    /// The surface the avatar sits on: the color of the dot ring.
     surface: Option<Hsla>,
+    /// The row is selected: a bot tile gets a 1 pt `tile-ring`.
+    selected: bool,
     dimmed: bool,
     /// The member, when it has a character (drawn with its live status).
     character: Option<(characters::CharacterId, Member)>,
+    /// A fixed status instead of the live one (previews, the self-test).
+    status_override: Option<CharacterStatus>,
 }
 
 impl MemberAvatar {
@@ -47,133 +58,228 @@ impl MemberAvatar {
             bot: member.is_some_and(|m| m.is_bot()),
             size,
             online: false,
+            show_status: false,
             surface: None,
+            selected: false,
             dimmed: member.is_some_and(|m| m.deactivated),
             character: member.and_then(|m| m.character.map(|c| (c, m.clone()))),
+            status_override: None,
         }
     }
 
-    /// Shows the presence dot when the member is online (people only; the
-    /// bot mark takes that corner on bots).
+    /// Shows the presence dot when a person is online, and the status pip of
+    /// a bot that works, waits or failed.
     pub fn presence(mut self, member: Option<&Member>) -> Self {
         self.online = member.is_some_and(|m| m.online && !m.is_bot());
+        self.show_status = member.is_some_and(|m| m.is_bot());
         self
     }
 
-    /// The surface behind the avatar, for the rings of the mark and the dot.
+    /// The surface behind the avatar, for the ring of the dot.
     pub fn on(mut self, surface: Hsla) -> Self {
         self.surface = Some(surface);
+        self
+    }
+
+    /// The avatar sits on a selected row.
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    /// Draws the character at a fixed status.
+    pub fn status(mut self, status: CharacterStatus) -> Self {
+        self.status_override = Some(status);
         self
     }
 }
 
 impl RenderOnce for MemberAvatar {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = theme::colors(cx);
         let size = self.size;
-        if let Some((character, member)) = &self.character {
-            let status = StatusBoard::status(cx, member);
+        let surface = self.surface.unwrap_or(k.content);
+        let small = size <= px(24.);
+        let (dot_size, dot_offset) = if small {
+            (px(8.), px(-3.))
+        } else {
+            (px(10.), px(-1.))
+        };
+        let dot = |color: Hsla| {
+            div()
+                .absolute()
+                .right(dot_offset - DOT_RING)
+                .bottom(dot_offset - DOT_RING)
+                .size(dot_size + DOT_RING * 2.)
+                .rounded_full()
+                .border(DOT_RING)
+                .border_color(surface)
+                .bg(color)
+        };
+
+        // Bots: a tinted tile with the fitted character.
+        if self.bot || self.character.is_some() {
+            let status = match (&self.character, self.status_override) {
+                (_, Some(s)) => s,
+                (Some((_, member)), None) => StatusBoard::status(cx, member),
+                (None, None) => CharacterStatus::Idle,
+            };
+            let key = self
+                .character
+                .as_ref()
+                .map(|(c, _)| c.as_str().to_string())
+                .unwrap_or_else(|| self.id.clone());
+            let art = match &self.character {
+                Some((c, _)) => characters::tile::tile_image(*c, status, size).into_any_element(),
+                None => icon(Lucide::Bot, size * 0.5, k.text_2).into_any_element(),
+            };
+            let pip = match status {
+                CharacterStatus::Working => Some(k.accent),
+                CharacterStatus::NeedsInput => Some(k.you_glyph),
+                CharacterStatus::Error => Some(k.danger),
+                _ => None,
+            }
+            .filter(|_| self.show_status && size <= px(36.));
             return div()
                 .relative()
                 .flex_none()
                 .size(size)
                 .when(self.dimmed, |el| el.opacity(0.5))
-                .child(characters::image(*character, status, size))
+                .child(
+                    div()
+                        .size(size)
+                        .rounded(theme::radius::bot(size))
+                        .bg(k.bot_tint(&key))
+                        .when(self.selected, |el| el.border_1().border_color(k.tile_ring))
+                        .overflow_hidden()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .child(art),
+                )
+                .children(pip.map(dot))
                 .into_any_element();
         }
-        let k = theme::colors(cx);
-        let radius = if self.bot {
-            theme::radius::bot(size)
-        } else {
-            size / 2.
-        };
-        let surface = self.surface.unwrap_or(k.content);
-        let (bg, fg) = k.palette(theme::palette_index(&self.id));
-        let text = monogram(&self.name, self.bot, size);
-        let han = text.chars().any(is_han);
-        let font = match (han, text.chars().count()) {
-            (true, 2) => size * 0.34,
-            (true, _) => size * 0.44,
-            _ => size * 0.38,
-        };
 
+        // People: a circle.
+        let text = monogram(&self.name, size);
+        let (font, line) = if small {
+            type_scale::META
+        } else {
+            let share = if text.chars().count() > 1 { 0.38 } else { 0.44 };
+            ((size * share).round(), size)
+        };
         let face = match self.photo {
             Some(url) => Avatar::new()
                 .src(url)
                 .size(size)
                 .border_0()
-                .rounded(radius)
+                .rounded_full()
                 .into_any_element(),
             None => div()
                 .size(size)
-                .rounded(radius)
-                .bg(bg)
-                .text_color(fg)
+                .rounded_full()
+                .bg(k.avatar_bg)
+                .text_color(k.avatar_fg)
                 .flex()
                 .items_center()
                 .justify_center()
                 .text_size(font)
-                .line_height(size)
-                .medium()
+                .line_height(line)
+                .semibold()
                 .overflow_hidden()
                 .child(text)
                 .into_any_element(),
         };
-
-        let mark = self.bot.then(|| {
-            let mark = (size * 0.42).max(px(11.));
-            let glyph = (size * 0.28).max(px(8.));
-            let offset = -(mark * 0.22) - RING;
-            div()
-                .absolute()
-                .right(offset)
-                .bottom(offset)
-                .size(mark + RING * 2.)
-                .rounded_full()
-                .border(RING)
-                .border_color(surface)
-                .bg(k.bot_mark)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(icon(Lucide::Bot, glyph, k.on_accent))
-        });
-        let dot = self.online.then(|| {
-            let d = (size * 0.3).max(px(8.));
-            div()
-                .absolute()
-                .right(-RING)
-                .bottom(-RING)
-                .size(d + RING * 2.)
-                .rounded_full()
-                .border(RING)
-                .border_color(surface)
-                .bg(k.online)
-        });
-
         div()
             .relative()
             .flex_none()
             .size(size)
             .when(self.dimmed, |el| el.opacity(0.5))
             .child(face)
-            .children(mark)
-            .children(dot)
+            .when(self.online, |el| el.child(dot(k.online)))
             .into_any_element()
     }
 }
 
-/// A rounded-square tile with the first character of a 群 name (§5.2).
+/// The glyph slot of a 群 in lists (§7.9): a monochrome `hash` in a 24 pt
+/// slot, never a letter tile. `text-3` at rest, `text-1` when unread,
+/// `sel-glyph` when selected.
+#[derive(IntoElement)]
+pub struct GroupGlyph {
+    unread: bool,
+    selected: bool,
+    size: Pixels,
+}
+
+impl GroupGlyph {
+    pub fn new() -> Self {
+        Self {
+            unread: false,
+            selected: false,
+            size: theme::size::AVATAR_ROW,
+        }
+    }
+
+    pub fn unread(mut self, unread: bool) -> Self {
+        self.unread = unread;
+        self
+    }
+
+    pub fn selected(mut self, selected: bool) -> Self {
+        self.selected = selected;
+        self
+    }
+
+    /// The slot size (24 in rows; the glyph is 16, 18 from 32 pt slots).
+    pub fn size(mut self, size: Pixels) -> Self {
+        self.size = size;
+        self
+    }
+}
+
+impl Default for GroupGlyph {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl RenderOnce for GroupGlyph {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = theme::colors(cx);
+        let color = if self.selected {
+            k.sel_glyph
+        } else if self.unread {
+            k.text_1
+        } else {
+            k.text_3
+        };
+        let glyph = if self.size >= px(32.) {
+            theme::icon::HEADER
+        } else {
+            theme::icon::ROW
+        };
+        div()
+            .flex_none()
+            .size(self.size)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(icon(Lucide::Hash, glyph, color))
+    }
+}
+
+/// A neutral rounded tile with the first character of a 群 name, for dialogs
+/// that need a group image (§7.9). Lists use [`GroupGlyph`].
 #[derive(IntoElement)]
 pub struct GroupTile {
-    id: String,
     name: String,
     size: Pixels,
 }
 
 impl GroupTile {
-    pub fn new(id: impl Into<String>, name: impl Into<String>, size: Pixels) -> Self {
+    pub fn new(_id: impl Into<String>, name: impl Into<String>, size: Pixels) -> Self {
         Self {
-            id: id.into(),
             name: name.into(),
             size,
         }
@@ -183,25 +289,17 @@ impl GroupTile {
 impl RenderOnce for GroupTile {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
-        let (bg, fg) = k.palette(theme::palette_index(&self.id));
-        let first = self
-            .name
-            .chars()
-            .find(|c| c.is_alphanumeric())
-            .map(|c| c.to_uppercase().collect::<String>())
-            // Emoji-only names show their first character.
-            .or_else(|| self.name.trim().chars().next().map(String::from))
-            .unwrap_or_default();
+        let first = monogram(&self.name, px(0.));
         div()
             .flex_none()
             .size(self.size)
-            .rounded(theme::radius::TILE)
-            .bg(bg)
-            .text_color(fg)
+            .rounded(theme::radius::bot(self.size))
+            .bg(k.tile)
+            .text_color(k.text_2)
             .flex()
             .items_center()
             .justify_center()
-            .text_size(self.size * 0.55)
+            .text_size((self.size * 0.5).round())
             .line_height(self.size)
             .semibold()
             .child(first)
@@ -213,48 +311,34 @@ pub fn is_han(c: char) -> bool {
         0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2EBEF)
 }
 
-/// The monogram of a name (§14).
-pub fn monogram(name: &str, bot: bool, size: Pixels) -> String {
-    let name = name.trim();
-    let chars: Vec<char> = name.chars().collect();
-    let Some(&first) = chars.first() else {
-        return String::new();
+/// The initials of a name (§7.9): one character for a CJK name; two letters
+/// for a Latin name at 32 pt and above, one at 24 pt and below; a leading
+/// emoji is skipped.
+pub fn monogram(name: &str, size: Pixels) -> String {
+    // Skip leading symbols (emoji, ZWJ, variation selectors) and spaces.
+    let trimmed: &str = name.trim_start_matches(|c: char| !c.is_alphanumeric());
+    let trimmed = trimmed.trim();
+    let Some(first) = trimmed.chars().next() else {
+        return name
+            .trim()
+            .chars()
+            .next()
+            .map(String::from)
+            .unwrap_or_default();
     };
-    if chars.iter().all(|&c| is_han(c)) {
-        let two = size >= px(28.) && chars.len() >= 2;
-        return match (two, bot) {
-            (false, _) => first.to_string(),
-            (true, true) => chars[..2].iter().collect(),
-            (true, false) => chars[chars.len() - 2..].iter().collect(),
-        };
+    if is_han(first) {
+        return first.to_string();
     }
-    let latin_word = |w: &&str| {
-        w.chars()
-            .all(|c| c.is_alphabetic() && !is_han(c) || c == '-' || c == '\'' || c == '.')
-    };
-    let words: Vec<&str> = name.split_whitespace().collect();
-    if words.iter().all(latin_word) && first.is_alphabetic() {
-        let initial = |w: &str| {
-            w.chars()
-                .next()
-                .map(|c| c.to_uppercase().collect::<String>())
-        };
-        return match words.as_slice() {
-            [one] => initial(one).unwrap_or_default(),
-            [a, .., b] => format!(
-                "{}{}",
-                initial(a).unwrap_or_default(),
-                initial(b).unwrap_or_default()
-            ),
-            [] => String::new(),
-        };
+    let upper = |c: char| c.to_uppercase().collect::<String>();
+    let words: Vec<&str> = trimmed.split_whitespace().collect();
+    let two = size >= px(32.) && words.len() > 1;
+    let last = words
+        .last()
+        .and_then(|w| w.chars().find(|c| c.is_alphabetic() && !is_han(*c)));
+    match (two, last) {
+        (true, Some(l)) => format!("{}{}", upper(first), upper(l)),
+        _ => upper(first),
     }
-    // Mixed or emoji-first: the first letter.
-    chars
-        .iter()
-        .find(|c| c.is_alphabetic())
-        .map(|c| c.to_uppercase().collect())
-        .unwrap_or_else(|| first.to_string())
 }
 
 #[cfg(test)]
@@ -262,17 +346,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn monograms_follow_section_14() {
-        let big = px(32.);
-        let small = px(20.);
-        assert_eq!(monogram("林晓", false, big), "林晓");
-        assert_eq!(monogram("陈思远", false, big), "思远");
-        assert_eq!(monogram("设计助手", true, big), "设计");
-        assert_eq!(monogram("陈思远", false, small), "陈");
-        assert_eq!(monogram("Aleksandra Wiśniewska", false, big), "AW");
-        assert_eq!(monogram("Joye", false, big), "J");
-        assert_eq!(monogram("🦊 Fox 狐狸", false, big), "F");
-        assert_eq!(monogram("王", false, big), "王");
-        assert_eq!(monogram("", false, big), "");
+    fn initials_follow_section_7_9() {
+        let big = px(36.);
+        let small = px(24.);
+        assert_eq!(monogram("王一鸣", big), "王");
+        assert_eq!(monogram("王一鸣", small), "王");
+        assert_eq!(monogram("Alex Chen", big), "AC");
+        assert_eq!(monogram("Alex Chen", small), "A");
+        assert_eq!(monogram("Aleksandra Wiśniewska", big), "AW");
+        assert_eq!(monogram("Joye", big), "J");
+        assert_eq!(monogram("🧑‍💻 Priya", big), "P");
+        assert_eq!(monogram("", big), "");
     }
 }

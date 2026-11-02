@@ -12,6 +12,7 @@
 
 pub mod assets;
 pub mod status;
+pub mod tile;
 
 use gpui::{Img, Pixels, SharedString, Styled as _, img};
 
@@ -72,6 +73,7 @@ pub fn bundled_size(size: Pixels) -> u32 {
 
 /// The asset path of one bundled image, for example
 /// `characters/o03/needs-input-24.svg`.
+#[allow(dead_code)] // the full art for 48 pt and larger outside a tile
 pub fn image_path(character: CharacterId, status: CharacterStatus, size: Pixels) -> SharedString {
     format!(
         "characters/{}/{}-{}.svg",
@@ -84,6 +86,7 @@ pub fn image_path(character: CharacterId, status: CharacterStatus, size: Pixels)
 
 /// The character at `size` showing `status`. The character is its own shape:
 /// do not clip it to a circle.
+#[allow(dead_code)] // the full art for 48 pt and larger outside a tile
 pub fn image(character: CharacterId, status: CharacterStatus, size: Pixels) -> Img {
     img(image_path(character, status, size))
         .size(size)

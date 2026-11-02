@@ -50,6 +50,12 @@ gpui_kit::assets::icon_assets!(
         Trash,
         SearchX,
         Hash,
+        CornerDownLeft,
+        Type,
+        FaceSlightlySmiling,
+        FaceSlightlySmilingPlus,
+        Reply,
+        FileImage,
     ]
 );
 
@@ -67,6 +73,9 @@ impl AssetSource for AppAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
         if path == APP_ICON_88 {
             return Ok(Some(Cow::Borrowed(APP_ICON_88_BYTES)));
+        }
+        if let Some(bytes) = crate::characters::tile::load(path) {
+            return Ok(Some(Cow::Owned(bytes)));
         }
         if let Some(bytes) = crate::characters::assets::load(path) {
             return Ok(Some(Cow::Borrowed(bytes)));

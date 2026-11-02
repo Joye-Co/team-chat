@@ -1,35 +1,51 @@
-//! Status chips and count badges (DESIGN.md §2.5, §2.6, §12).
+//! Status marks, badges, counts, the role tag and kbd (DESIGN.md §7.8, §7.9).
+//!
+//! | Mark | Shape | Use |
+//! | --- | --- | --- |
+//! | [`StatusChip`] chip | 22 pt, filled | `you` in the start block, `info` in the topic header |
+//! | compact chip | 20 pt, filled, no glyph | 等你答 / 等你审 in topic rows and the switcher |
+//! | quiet label | no fill, `you-glyph` glyph, `text-2` text | 等你回答 in headers |
+//! | label | no fill | 卡住了 (`danger-text`), 完成 and 等… (`text-3`) |
+//! | [`CountBadge`] | 20 pt pill | red for @ only; neutral `count-solid` for unread; grey for tabs |
 
 use gpui::{
-    AbsoluteLength, App, EdgesRefinement, IntoElement, ParentElement, RenderOnce, Styled, Window,
-    div, prelude::FluentBuilder as _, px,
+    App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::tag::Tag;
 
 use crate::{
     copy::{common, nav},
     data::{Member, Topic, TopicStatus},
-    theme::{self, ChipKind, Type as _},
+    theme::{self, ChipKind, Type as _, size, space},
     ui::icons::{Lucide, icon},
 };
 
-/// Height of chips and badges.
-const CHIP_H: gpui::Pixels = px(18.);
-/// A name inside 等{name}… truncates here; 等 and the verb stay visible.
-const CHIP_NAME_MAX: gpui::Pixels = px(104.);
-const CHIP_MAX: gpui::Pixels = px(168.);
+/// How a status mark is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChipStyle {
+    /// 22 pt filled chip with a glyph.
+    Chip,
+    /// 20 pt filled chip, no glyph, 600 (topic rows).
+    Compact,
+    /// No fill, glyph and text (headers, the start block, labels in rows).
+    Label,
+}
 
-/// The status chip of a topic. Renders nothing for `open` topics.
+/// The status mark of a topic. Renders nothing for `open` and `in_progress`
+/// in rows (§9.1).
 #[derive(IntoElement)]
 pub struct StatusChip {
     status: TopicStatus,
     kind: ChipKind,
-    /// Text before the name, the name (may be empty), text after it.
-    parts: (String, String, String),
+    style: ChipStyle,
+    label: SharedString,
+    /// The full label for the tooltip (a name never goes inside a label).
+    full: Option<SharedString>,
 }
 
 impl StatusChip {
-    /// `None` for `open` topics (they have no chip).
+    /// The mark of a topic as rows show it: the compact chip when it waits
+    /// for the viewer, otherwise a label. `None` for `open` and `in_progress`.
     pub fn for_topic(topic: &Topic, me: Option<&str>, members: &[Member]) -> Option<Self> {
         let waits_on_me = me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me));
         let name = topic
@@ -37,65 +53,115 @@ impl StatusChip {
             .first()
             .and_then(|id| members.iter().find(|m| &m.id == id))
             .map(|m| m.name.clone());
-        let plain = |s: &str| (s.to_string(), String::new(), String::new());
-        let named = |template: &str, name: &str| {
-            let (before, after) = template.split_once("{name}").unwrap_or((template, ""));
-            (before.to_string(), name.to_string(), after.to_string())
+        let named = |template: &str| {
+            name.as_deref()
+                .map(|n| SharedString::from(crate::copy::fill(template, &[("name", n)])))
         };
-        let (kind, parts) = match topic.status {
-            TopicStatus::Open => return None,
-            TopicStatus::InProgress => (ChipKind::Quiet, plain(common::STATUS_IN_PROGRESS)),
-            TopicStatus::Done => (ChipKind::Quiet, plain(common::STATUS_DONE)),
-            TopicStatus::Blocked => (ChipKind::Blocked, plain(common::STATUS_BLOCKED)),
-            TopicStatus::WaitingAnswer if waits_on_me => {
-                (ChipKind::You, plain(common::STATUS_WAITING_ANSWER_ME))
-            }
-            TopicStatus::WaitingReview if waits_on_me => {
-                (ChipKind::You, plain(common::STATUS_WAITING_REVIEW_ME))
-            }
-            TopicStatus::WaitingAnswer => match name {
-                Some(n) => (
-                    ChipKind::Quiet,
-                    named(common::STATUS_WAITING_ANSWER_NAMED, &n),
-                ),
-                None => (ChipKind::Quiet, plain(common::STATUS_WAITING_ANSWER)),
-            },
-            TopicStatus::WaitingReview => match name {
-                Some(n) => (
-                    ChipKind::Quiet,
-                    named(common::STATUS_WAITING_REVIEW_NAMED, &n),
-                ),
-                None => (ChipKind::Quiet, plain(common::STATUS_WAITING_REVIEW)),
-            },
+        let (kind, style, label, full) = match topic.status {
+            TopicStatus::Open | TopicStatus::InProgress => return None,
+            TopicStatus::Done => (ChipKind::Quiet, ChipStyle::Label, common::STATUS_DONE, None),
+            TopicStatus::Blocked => (
+                ChipKind::Blocked,
+                ChipStyle::Label,
+                common::STATUS_BLOCKED,
+                None,
+            ),
+            TopicStatus::WaitingAnswer if waits_on_me => (
+                ChipKind::You,
+                ChipStyle::Compact,
+                common::STATUS_WAITING_ANSWER_ME_SHORT,
+                Some(common::STATUS_WAITING_ANSWER_ME.into()),
+            ),
+            TopicStatus::WaitingReview if waits_on_me => (
+                ChipKind::You,
+                ChipStyle::Compact,
+                common::STATUS_WAITING_REVIEW_ME,
+                None,
+            ),
+            TopicStatus::WaitingAnswer => (
+                ChipKind::Quiet,
+                ChipStyle::Label,
+                common::STATUS_WAITING_ANSWER,
+                named(common::STATUS_WAITING_ANSWER_NAMED),
+            ),
+            TopicStatus::WaitingReview => (
+                ChipKind::Quiet,
+                ChipStyle::Label,
+                common::STATUS_WAITING_REVIEW,
+                named(common::STATUS_WAITING_REVIEW_NAMED),
+            ),
         };
         Some(Self {
             status: topic.status,
             kind,
-            parts,
+            style,
+            label: label.into(),
+            full,
         })
     }
 
-    /// A chip with a free label, drawn like the chip of `status` in `kind`
-    /// (cards use this for their status).
+    /// The mark of a topic in its header (§8.1): a quiet label for 等你…, the
+    /// info chip for 进行中, labels for the rest.
+    pub fn header_for_topic(topic: &Topic, me: Option<&str>, members: &[Member]) -> Option<Self> {
+        if topic.status == TopicStatus::InProgress {
+            return Some(Self::labeled(
+                common::STATUS_IN_PROGRESS,
+                TopicStatus::InProgress,
+                ChipKind::Info,
+            ));
+        }
+        let mut chip = Self::for_topic(topic, me, members)?;
+        if chip.kind == ChipKind::You {
+            chip.style = ChipStyle::Label;
+            chip.label = match topic.status {
+                TopicStatus::WaitingAnswer => common::STATUS_WAITING_ANSWER_ME.into(),
+                _ => common::STATUS_WAITING_REVIEW_ME.into(),
+            };
+            chip.full = None;
+        }
+        Some(chip)
+    }
+
+    /// A mark with a free label: a filled chip for `You` and `Info`, a label
+    /// otherwise (cards use this for their status).
     pub fn labeled(label: impl Into<String>, status: TopicStatus, kind: ChipKind) -> Self {
+        let style = match kind {
+            ChipKind::You | ChipKind::Info => ChipStyle::Chip,
+            _ => ChipStyle::Label,
+        };
         Self {
             status,
             kind,
-            parts: (label.into(), String::new(), String::new()),
+            style,
+            label: label.into().into(),
+            full: None,
         }
     }
 
-    /// A quiet chip with a free label and no glyph (for example 等待加入).
-    pub fn quiet(label: impl Into<String>) -> Self {
+    /// A quiet label with a free text and no glyph (for example 等待加入).
+    pub fn quiet(label: impl Into<SharedString>) -> Self {
         Self {
             status: TopicStatus::Open,
             kind: ChipKind::Quiet,
-            parts: (label.into(), String::new(), String::new()),
+            style: ChipStyle::Label,
+            label: label.into(),
+            full: None,
         }
+    }
+
+    pub fn style(mut self, style: ChipStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// The full text (with a name) for a tooltip.
+    pub fn full_label(&self) -> Option<SharedString> {
+        self.full.clone()
     }
 }
 
-fn glyph(status: TopicStatus) -> Option<Lucide> {
+/// The glyph of a status (§7.8).
+pub fn status_glyph(status: TopicStatus) -> Option<Lucide> {
     Some(match status {
         TopicStatus::Open => return None,
         TopicStatus::InProgress => Lucide::CircleDot,
@@ -108,73 +174,69 @@ fn glyph(status: TopicStatus) -> Option<Lucide> {
 
 impl RenderOnce for StatusChip {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = theme::colors(cx);
         let colors = theme::chip_colors(self.kind, self.status, cx);
-        let glyph = glyph(self.status);
-        let (before, name, after) = self.parts;
-        let mut tag = Tag::custom(colors.bg, colors.text, colors.ring)
-            .rounded(theme::radius::CHIP)
-            .flex_none()
-            .h(CHIP_H)
-            .max_w(CHIP_MAX)
-            .py_0()
-            .pl(if glyph.is_some() {
-                theme::space::S4
-            } else {
-                theme::space::S6
-            })
-            .pr(theme::space::S6)
-            .gap(px(3.))
-            .t_caption()
-            .when(self.kind == ChipKind::You, |el| el.semibold());
-        // The quiet chip's ring is a hairline; the filled kinds have none.
-        let width: AbsoluteLength = if self.kind == ChipKind::Quiet {
-            theme::HAIRLINE.into()
+        let glyph = status_glyph(self.status).filter(|_| self.style != ChipStyle::Compact);
+        let (height, max_w) = match self.style {
+            ChipStyle::Compact => (size::CHIP_COMPACT, size::CHIP_COMPACT_MAX),
+            _ => (size::CHIP, size::CHIP_MAX),
+        };
+        let filled = self.style != ChipStyle::Label;
+        // A quiet 等你… label keeps `text-2` text with the `you-glyph` glyph.
+        let text = if !filled && self.kind == ChipKind::You {
+            k.text_2
         } else {
-            px(0.).into()
+            colors.text
         };
-        tag.style().border_widths = EdgesRefinement {
-            top: Some(width),
-            right: Some(width),
-            bottom: Some(width),
-            left: Some(width),
-        };
-        tag.when_some(glyph, |el, g| {
-            el.child(icon(g, theme::icon::CHIP, colors.glyph))
-        })
-        .child(
-            div()
-                .min_w(px(0.))
-                .flex()
-                .items_center()
-                .child(div().flex_none().whitespace_nowrap().child(before))
-                .when(!name.is_empty(), |el| {
-                    el.child(
-                        div()
-                            .min_w(px(0.))
-                            .max_w(CHIP_NAME_MAX)
-                            .one_line()
-                            .child(name),
-                    )
+        div()
+            .flex_none()
+            .h(height)
+            .max_w(max_w)
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .rounded(theme::radius::SM)
+            .when(filled, |el| {
+                el.bg(colors.bg).map(|el| match (self.style, glyph) {
+                    (ChipStyle::Compact, _) => el.px(space::S6),
+                    (_, Some(_)) => el.pl(space::S6).pr(space::S8),
+                    (_, None) => el.px(space::S8),
                 })
-                .when(!after.is_empty(), |el| {
-                    el.child(div().flex_none().whitespace_nowrap().child(after))
-                }),
-        )
+            })
+            .t_meta_medium()
+            .when(
+                self.style == ChipStyle::Compact || self.kind == ChipKind::You && filled,
+                |el| el.semibold(),
+            )
+            .text_color(text)
+            .when_some(glyph, |el, g| {
+                let glyph_color = if !filled && self.kind == ChipKind::You {
+                    k.you_glyph
+                } else {
+                    colors.glyph
+                };
+                el.child(icon(g, theme::icon::CHIP, glyph_color))
+            })
+            .child(div().min_w(px(0.)).one_line().child(self.label))
     }
 }
 
-/// What a count badge counts.
+/// What a count badge counts (§7.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BadgeKind {
-    /// Gray unread count, capped at 999+.
+    /// Neutral solid badge: unread topics and DMs without a mention.
     Unread,
-    /// Accent `@n`, capped at @99+.
+    /// Red `@n` badge: @ mentions in topic rows.
     Mention,
-    /// Accent count without `@` (the 待办 count), capped at 99+.
+    /// Red `n` badge without `@` (mentions on a 群 row).
+    MentionCount,
+    /// Grey count in tabs and section headers (`count-bg`).
+    Count,
+    /// Older name: the 待办 count, now a grey count.
     Todo,
 }
 
-/// An 18 pt count capsule. Renders nothing for zero.
+/// A 20 pt count pill. Renders nothing for zero. Every count caps at `99+`.
 #[derive(IntoElement)]
 pub struct CountBadge {
     count: u32,
@@ -186,18 +248,19 @@ impl CountBadge {
         Self { count, kind }
     }
 
+    /// The capped text of a count (`99+` past 99).
+    pub fn cap(count: u32) -> String {
+        if count > 99 {
+            common::COUNT_CAP.to_string()
+        } else {
+            count.to_string()
+        }
+    }
+
     pub fn text(count: u32, kind: BadgeKind) -> String {
-        let cap = |max: u32| {
-            if count > max {
-                format!("{max}+")
-            } else {
-                count.to_string()
-            }
-        };
         match kind {
-            BadgeKind::Unread => cap(999),
-            BadgeKind::Todo => cap(99),
-            BadgeKind::Mention => format!("{}{}", nav::MENTION_MARK, cap(99)),
+            BadgeKind::Mention => format!("{}{}", nav::MENTION_MARK, Self::cap(count)),
+            _ => Self::cap(count),
         }
     }
 }
@@ -209,25 +272,92 @@ impl RenderOnce for CountBadge {
         }
         let k = theme::colors(cx);
         let (bg, fg) = match self.kind {
-            BadgeKind::Unread => (k.badge_bg, k.badge_text),
-            BadgeKind::Mention | BadgeKind::Todo => (k.badge_mention_bg, k.on_accent),
+            BadgeKind::Mention | BadgeKind::MentionCount => (k.badge, k.on_accent),
+            BadgeKind::Unread => (k.count_solid, k.on_accent),
+            BadgeKind::Count | BadgeKind::Todo => (k.count_bg, k.count_text),
         };
         div()
             .flex_none()
-            .h(CHIP_H)
-            .min_w(CHIP_H)
-            .px(theme::space::S6)
+            .h(size::BADGE)
+            .min_w(size::BADGE)
+            .px(space::S6)
             .rounded_full()
             .bg(bg)
             .text_color(fg)
             .flex()
             .items_center()
             .justify_center()
-            .t_caption()
+            .t_section()
             .tnum()
-            .when(self.kind != BadgeKind::Unread, |el| el.semibold())
             .child(Self::text(self.count, self.kind))
             .into_any_element()
+    }
+}
+
+/// The role tag after a bot's name (§7.9): 20 pt, `field`, `bot` glyph 12 +
+/// 岗位 12/16 500 `text-2`.
+#[derive(IntoElement)]
+pub struct RoleTag {
+    label: SharedString,
+}
+
+impl RoleTag {
+    pub fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+        }
+    }
+}
+
+impl RenderOnce for RoleTag {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = theme::colors(cx);
+        div()
+            .flex_none()
+            .h(size::ROLE_TAG)
+            .px(space::S6)
+            .rounded(theme::radius::SM)
+            .bg(k.field)
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .t_meta_medium()
+            .text_color(k.text_2)
+            .child(icon(Lucide::Bot, theme::icon::TAG, k.text_2))
+            .child(div().one_line().max_w(px(120.)).child(self.label))
+    }
+}
+
+/// A keyboard key (§7.8): 20 pt, min width 20, `field`, 12/16 500 `text-2`.
+#[derive(IntoElement)]
+pub struct Kbd {
+    label: SharedString,
+}
+
+impl Kbd {
+    pub fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+        }
+    }
+}
+
+impl RenderOnce for Kbd {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = theme::colors(cx);
+        div()
+            .flex_none()
+            .h(size::KBD)
+            .min_w(size::KBD)
+            .px(px(5.))
+            .rounded(theme::radius::SM)
+            .bg(k.field)
+            .flex()
+            .items_center()
+            .justify_center()
+            .t_meta_medium()
+            .text_color(k.text_2)
+            .child(self.label)
     }
 }
 
@@ -236,11 +366,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn counts_are_capped() {
-        assert_eq!(CountBadge::text(1000, BadgeKind::Unread), "999+");
-        assert_eq!(CountBadge::text(999, BadgeKind::Unread), "999");
+    fn counts_cap_at_99() {
+        assert_eq!(CountBadge::text(1000, BadgeKind::Unread), "99+");
+        assert_eq!(CountBadge::text(99, BadgeKind::Unread), "99");
         assert_eq!(CountBadge::text(100, BadgeKind::Mention), "@99+");
         assert_eq!(CountBadge::text(3, BadgeKind::Mention), "@3");
-        assert_eq!(CountBadge::text(12345, BadgeKind::Todo), "99+");
+        assert_eq!(CountBadge::text(12345, BadgeKind::Count), "99+");
     }
 }
