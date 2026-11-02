@@ -51,8 +51,18 @@ fn wrap(window: &Window, text: &str, chars: f32) -> Vec<String> {
         .collect()
 }
 
-/// `text` cut to `chars` characters with an ellipsis.
+/// `text` cut to `chars` characters with an ellipsis at the end.
 fn truncate(window: &Window, cx: &gpui::App, text: &str, chars: f32) -> String {
+    cut(window, cx, text, chars, gpui::TruncateFrom::End)
+}
+
+fn cut(
+    window: &Window,
+    cx: &gpui::App,
+    text: &str,
+    chars: f32,
+    from: gpui::TruncateFrom,
+) -> String {
     let width = em(window) * chars + px(0.5);
     let mut wrapper = cx.text_system().line_wrapper(font("Dummy"), SIZE);
     let (cut, _) = wrapper.truncate_line(
@@ -60,7 +70,7 @@ fn truncate(window: &Window, cx: &gpui::App, text: &str, chars: f32) -> String {
         width,
         "…",
         &runs(text),
-        gpui::TruncateFrom::End,
+        from,
     );
     cut.to_string()
 }
@@ -112,6 +122,23 @@ fn truncation_trims_punctuation_and_short_word_cuts(cx: &mut TestAppContext) {
         assert_eq!(
             truncate(window, cx, "生产环境 v0.9.2 发布", 10.),
             "生产环境…"
+        );
+    });
+}
+
+#[gpui::test]
+fn middle_truncation_keeps_the_last_twelve_characters(cx: &mut TestAppContext) {
+    let vcx = cx.add_empty_window();
+    vcx.update(|window, cx| {
+        let name = "websocket-reconnect-trace-2025-11-03-build-4412.log";
+        let middle = cut(window, cx, name, 30., gpui::TruncateFrom::Middle);
+        assert!(middle.ends_with("…ild-4412.log"), "{middle}");
+        assert!(middle.starts_with("websocket-recon"), "{middle}");
+        // The cut drops punctuation before the ellipsis.
+        assert!(!middle.contains("-…"), "{middle}");
+        assert_eq!(
+            cut(window, cx, "a.pdf", 30., gpui::TruncateFrom::Middle),
+            "a.pdf"
         );
     });
 }

@@ -232,7 +232,6 @@ fn row_frame(
     } else {
         theme::icon::EMPTY
     };
-    let budget = if compact { 200. } else { 400. };
     let row = div()
         .group(group.clone())
         .relative()
@@ -277,12 +276,16 @@ fn row_frame(
             .flex_col()
             .when(!compact, |el| el.gap(space::S2))
             .child(
+                // Middle cut on the measured width: the last 12 characters
+                // and the extension stay (§15).
                 div()
                     .t_ui()
                     .medium()
                     .text_color(k.text_1)
-                    .one_line()
-                    .child(super::middle_name(&file.name, budget)),
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_middle()
+                    .child(file.name.clone()),
             )
             .child(div().t_meta().text_color(k.text_2).one_line().child(meta)),
     )

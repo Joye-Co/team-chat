@@ -124,7 +124,12 @@ impl FilesPreview {
             artifact_refs: Vec::new(),
             reactions: Vec::new(),
         };
-        let mut a = base("pv-1", &other, "首页的新稿子和数据都在这里，看看有没有问题。", now - 600_000);
+        let mut a = base(
+            "pv-1",
+            &other,
+            "首页的新稿子和数据都在这里，看看有没有问题。",
+            now - 600_000,
+        );
         a.attachments = vec![photo(), pdf()];
         let mut b = base("pv-2", &bot, "整理好了，页面放在产出里：", now - 300_000);
         b.artifact_refs = vec![ArtifactRef {
@@ -190,7 +195,9 @@ impl ChatProvider for FilesPreview {
     }
     fn artifacts(&self, group_id: &str, topic_id: &str) -> Vec<ArtifactSummary> {
         if self.mine(group_id, topic_id) {
-            self.artifact(ARTIFACT).map(|d| vec![d.summary]).unwrap_or_default()
+            self.artifact(ARTIFACT)
+                .map(|d| vec![d.summary])
+                .unwrap_or_default()
         } else {
             self.inner.artifacts(group_id, topic_id)
         }
@@ -235,7 +242,9 @@ impl ChatProvider for FilesPreview {
         }
     }
     fn thumbnail(&self, _g: &str, _t: &str, file: &FileAttachment) -> Option<PathBuf> {
-        (file.file_id == "f-photo").then(|| self.image.clone()).flatten()
+        (file.file_id == "f-photo")
+            .then(|| self.image.clone())
+            .flatten()
     }
     fn cached_file(&self, file: &FileAttachment) -> Option<PathBuf> {
         self.thumbnail("", "", file)
@@ -295,7 +304,11 @@ impl ChatProvider for FilesPreview {
 }
 
 /// The scene opener: the main window on the preview provider.
-pub fn open(services: Services, content: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
+pub fn open(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     let provider: Arc<dyn ChatProvider> = FilesPreview::new(services.provider.clone());
     let services = Services::new(provider, cx);
     open_first_topic(&services, cx);

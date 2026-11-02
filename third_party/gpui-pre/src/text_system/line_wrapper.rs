@@ -266,8 +266,21 @@ impl LineWrapper {
             return Some((0, line.len()));
         }
 
-        let front_budget = content_budget * (2.0 / 3.0);
-        let back_budget = content_budget - front_budget;
+        // Keep the last 12 characters (a file name's extension and version)
+        // whole when they take at most two thirds of the room; otherwise
+        // keep the end in one third.
+        let tail_width: Pixels = line
+            .chars()
+            .rev()
+            .take(Self::MIDDLE_TAIL_CHARS)
+            .map(|c| self.width_for_char(c))
+            .fold(px(0.0), |a, x| a + x);
+        let back_budget = if tail_width <= content_budget * (2.0 / 3.0) {
+            tail_width
+        } else {
+            content_budget / 3.0
+        };
+        let front_budget = content_budget - back_budget;
 
         let mut front_width = px(0.);
         let mut front_end_ix = 0usize;
@@ -311,6 +324,7 @@ impl LineWrapper {
             if let Some((front_end_ix, back_start_ix)) =
                 self.should_truncate_line_middle(&line, truncate_width, truncation_affix)
             {
+                let front_end_ix = trim_before_affix(&line, front_end_ix).len();
                 let result = SharedString::from(format!(
                     "{}{truncation_affix}{}",
                     &line[..front_end_ix],
@@ -498,6 +512,9 @@ impl LineWrapper {
         // Text fits within max_lines without truncation.
         (text, Cow::Borrowed(runs))
     }
+
+    /// Characters kept at the end by a middle truncation.
+    pub const MIDDLE_TAIL_CHARS: usize = 12;
 
     /// CJK line-breaking rule (kinsoku): no line starts with closing
     /// punctuation and no line ends with opening punctuation.

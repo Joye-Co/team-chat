@@ -32,30 +32,6 @@ pub const FILE_ROW_H: Pixels = px(64.);
 /// Height of a 产出 or file row in the side panel (§7.11).
 pub const PANEL_ROW_H: Pixels = px(48.);
 
-/// A file name cut in the middle (§15): it keeps the last 12 characters and
-/// the extension, and the start as far as `budget` (in pt at 14 pt text)
-/// allows, joined by `…`.
-pub fn middle_name(name: &str, budget: f32) -> String {
-    let width = |c: char| if c.is_ascii() { 7.6 } else { 14.0 };
-    let total: f32 = name.chars().map(width).sum();
-    if total <= budget {
-        return name.to_string();
-    }
-    let chars: Vec<char> = name.chars().collect();
-    let tail_len = chars.len().min(12);
-    let tail: String = chars[chars.len() - tail_len..].iter().collect();
-    let mut room = budget - tail.chars().map(width).sum::<f32>() - 14.0;
-    let mut head = String::new();
-    for &c in &chars[..chars.len() - tail_len] {
-        room -= width(c);
-        if room < 0.0 {
-            break;
-        }
-        head.push(c);
-    }
-    let head = head.trim_end_matches(|c: char| c.is_whitespace() || "-_.（(【[·".contains(c));
-    format!("{head}…{tail}")
-}
 /// Images up to this size download by themselves for the inline preview.
 pub const AUTO_DOWNLOAD_MAX_BYTES: u64 = 20_000_000;
 
@@ -284,15 +260,6 @@ mod tests {
             assert!(!opens_unsafely(name), "{name}");
         }
         assert!(is_html("Index.HTM"));
-    }
-
-    #[test]
-    fn long_names_keep_their_end() {
-        let n = "websocket-reconnect-trace-2025-11-03-build-4412.log";
-        let cut = middle_name(n, 300.);
-        assert!(cut.ends_with("ld-4412.log"), "{cut}");
-        assert!(cut.contains('…'));
-        assert_eq!(middle_name("a.pdf", 300.), "a.pdf");
     }
 
     #[test]
