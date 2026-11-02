@@ -413,6 +413,26 @@ pub fn open_long_topic(services: &Services, cx: &mut App) {
 
 // --- openers ---
 
+/// `content` centered on the main display below the menu bar. The Dock may
+/// cover the bottom edge: it does not show in a capture of the window, and
+/// `Bounds::centered` would clip a 900 pt window to a visible frame that the
+/// Dock shortens (887 pt on a 982 pt display).
+fn capture_bounds(content: Size<Pixels>, cx: &App) -> Bounds<Pixels> {
+    let Some(display) = cx.primary_display() else {
+        return Bounds::centered(None, content, cx);
+    };
+    let full = display.bounds();
+    let top = display.visible_bounds().origin.y;
+    let room = gpui::size(full.size.width, full.bottom() - top);
+    let size = content.min(&room);
+    // Whole points, so the capture is exactly `content` at 2x.
+    let origin = gpui::point(
+        (full.origin.x + (room.width - size.width) / 2.).round(),
+        (top + (room.height - size.height) / 2.).round(),
+    );
+    Bounds { origin, size }
+}
+
 /// The main window (login or chat) without focus, at `content`.
 pub fn open_main(
     services: Services,
@@ -420,7 +440,7 @@ pub fn open_main(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(None, content, cx)));
+    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
     options.window_min_size = None;
     gpui_kit::open_window(options, cx, move |window, cx| {
         cx.new(|cx| RootView::new(services, None, window, cx))
@@ -438,7 +458,7 @@ pub fn open_login(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(None, content, cx)));
+    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
     options.window_min_size = None;
     gpui_kit::open_window(options, cx, move |window, cx| {
         let root = cx.new(|cx| RootView::new(services, None, window, cx));
@@ -458,7 +478,7 @@ pub fn open_gallery(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     let mut options = main_window_options(false, cx);
-    options.window_bounds = Some(WindowBounds::Windowed(Bounds::centered(None, content, cx)));
+    options.window_bounds = Some(WindowBounds::Windowed(capture_bounds(content, cx)));
     options.window_min_size = None;
     gpui_kit::open_window(options, cx, move |window, cx| {
         cx.new(|cx| crate::ui::gallery::Gallery::new(page, window, cx))

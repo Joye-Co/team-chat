@@ -42,6 +42,93 @@ pub fn order_front(_window: &Window) -> Result<(), String> {
     Ok(())
 }
 
+/// Gives a window that opened at the requested `width` exactly `height`, with
+/// its top edge kept (a new window can come 1 pt taller than asked). AppKit shrinks a window
+/// to the screen's visible frame, which the Dock shortens (887 pt on a 982 pt
+/// display), in `constrainFrameRect:toScreen:`. The screenshot process adds
+/// an override to the window's class that keeps the frame as asked: the Dock
+/// does not show in a capture of one window. Windows with their own size
+/// (settings) keep it.
+#[cfg(target_os = "macos")]
+pub fn undo_clamp(window: &Window, width: f64, height: f64) -> Result<(), String> {
+    use objc2::runtime::{AnyClass, AnyObject, Imp, Sel};
+    use objc2_foundation::{NSPoint, NSRect, NSSize};
+
+    extern "C-unwind" fn keep_frame(
+        _: *mut AnyObject,
+        _: Sel,
+        rect: NSRect,
+        _: *mut AnyObject,
+    ) -> NSRect {
+        rect
+    }
+
+    let ns_window = ns_window(window)?;
+    // SAFETY: a live NSWindow on the main thread. `class_addMethod` only adds
+    // the method to GPUI's own window subclass (it fails, harmlessly, when the
+    // method is already there) with the signature of
+    // `-[NSWindow constrainFrameRect:toScreen:]`; `frame` is a getter and
+    // `setFrame:display:` a setter.
+    unsafe {
+        let class: *const AnyClass = objc2::msg_send![ns_window, class];
+        let imp: Imp = std::mem::transmute::<
+            extern "C-unwind" fn(*mut AnyObject, Sel, NSRect, *mut AnyObject) -> NSRect,
+            Imp,
+        >(keep_frame);
+        objc2::ffi::class_addMethod(
+            class.cast_mut(),
+            objc2::sel!(constrainFrameRect:toScreen:),
+            imp,
+            c"{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@".as_ptr(),
+        );
+        let frame: NSRect = objc2::msg_send![ns_window, frame];
+        if frame.size.width != width || frame.size.height == height {
+            return Ok(());
+        }
+        let top = frame.origin.y + frame.size.height;
+        let next = NSRect::new(
+            NSPoint::new(frame.origin.x, (top - height).max(0.)),
+            NSSize::new(width, height),
+        );
+        let _: () = objc2::msg_send![ns_window, setFrame: next, display: true];
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn undo_clamp(_window: &Window, _width: f64, _height: f64) -> Result<(), String> {
+    Ok(())
+}
+
+/// The app that had the focus before the self-test activated itself.
+pub struct Frontmost(
+    #[cfg(target_os = "macos")] Option<objc2::rc::Retained<objc2_app_kit::NSRunningApplication>>,
+);
+
+impl Frontmost {
+    #[cfg(target_os = "macos")]
+    pub fn now() -> Self {
+        Self(objc2_app_kit::NSWorkspace::sharedWorkspace().frontmostApplication())
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn now() -> Self {
+        Self()
+    }
+
+    /// Gives the focus back to that app.
+    #[cfg(target_os = "macos")]
+    pub fn restore(&self) {
+        if let Some(app) = &self.0 {
+            #[allow(deprecated)] // `activate` needs macOS 14
+            app.activateWithOptions(objc2_app_kit::NSApplicationActivationOptions::empty());
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn restore(&self) {}
+}
+
 /// The window server number of this window (`-[NSWindow windowNumber]`).
 #[cfg(target_os = "macos")]
 pub fn window_number(window: &Window) -> Result<isize, String> {

@@ -181,11 +181,15 @@ fn run(options: Options) -> i32 {
         .with_assets(crate::ui::AppAssets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
-            // No Dock icon and no activation: the user keeps working.
+            // No Dock icon. The app activates while it captures, so the
+            // windows draw as key windows (traffic lights in color), then
+            // hands the focus back to the app that had it.
             cx.set_activation_policy(ActivationPolicy::Accessory);
+            let frontmost = capture::Frontmost::now();
             let started = Instant::now();
             cx.spawn(async move |cx| {
                 let ok = run_all(&options, cx).await;
+                frontmost.restore();
                 eprintln!(
                     "screenshots done in {:.1} s",
                     started.elapsed().as_secs_f32()
@@ -277,10 +281,18 @@ async fn shoot(
     };
     let result = async {
         cx.update(|cx| {
+            cx.activate(true);
             handle.update(cx, |_, window, cx| {
                 crate::theme::set_mode(theme_mode, cx);
+                capture::undo_clamp(
+                    window,
+                    f32::from(content.width).into(),
+                    f32::from(content.height).into(),
+                )?;
                 window.refresh();
-                capture::order_front(window)
+                capture::order_front(window)?;
+                window.activate_window();
+                Ok::<_, String>(())
             })
         })
         .map_err(|e| e.to_string())??;
@@ -300,6 +312,7 @@ async fn shoot(
                 cx.background_executor().timer(options.settle).await;
                 settled = true;
             }
+            park_pointer(handle, cx);
             match next_frame(handle, cx).await {
                 Ok(()) => frames += 1,
                 Err(_) => {
@@ -325,6 +338,24 @@ async fn shoot(
         .timer(Duration::from_millis(150))
         .await;
     result
+}
+
+/// Tells the window the pointer is far outside it, so no row, button or
+/// tooltip under the real pointer shows its hover state in the capture.
+/// The real pointer does not move.
+fn park_pointer(handle: AnyWindowHandle, cx: &mut AsyncApp) {
+    let _ = cx.update(|cx| {
+        handle.update(cx, |_, window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
+                    position: gpui::point(px(-10_000.), px(-10_000.)),
+                    pressed_button: None,
+                    modifiers: gpui::Modifiers::default(),
+                }),
+                cx,
+            );
+        })
+    });
 }
 
 /// Resolves after the window draws its next frame (or fails after 2 s).
