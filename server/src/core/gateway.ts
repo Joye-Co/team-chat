@@ -12,6 +12,7 @@ import {
 } from "@chat/protocol";
 import { getMember, groupsOfMember, isGroupMember, listMembers, toMember, viewGroup } from "./db";
 import { type Env, gatewayStub, roomStub } from "./env";
+import type { WriteOrder } from "./room";
 import { ApiError, toErrorBody, unwrap } from "./errors";
 import { logger as baseLogger, type Logger } from "./logger";
 import { type MigrationStep, runMigrations } from "./migrations";
@@ -50,6 +51,8 @@ export interface SocketState {
   kind: Actor["kind"];
   ready: boolean;
   connectedAt: number;
+  /** Socket id for write order; older attachments have none (see `socketId`). */
+  sid?: string;
   client?: { name: string; version: string };
 }
 
@@ -78,8 +81,21 @@ const CORE_RATE: Record<string, RateClass> = {
   fetch: "read",
   history: "read",
 };
-/** Frames processed strictly in arrival order per socket (writes and streaming). */
+/**
+ * Frames that reach the room in arrival order per socket (writes and streaming). The gateway
+ * starts each one's room RPC as soon as the frame arrives, and numbers it; the room runs them in
+ * that order (`GroupRoom.ordered`). Starting the RPC at once matters on a deployed Worker: a
+ * Durable Object counts every outgoing call against its newest unfinished incoming request.
+ * A write started after a room delivery to this gateway would nest one subrequest level deeper
+ * than that delivery, the room's next delivery one level deeper again, and the runtime refuses a
+ * call chain at depth 16 ("Subrequest depth limit exceeded", after about 8 pipelined writes).
+ * When a frame arrives, its own WebSocket event is the newest request.
+ */
 const ORDERED = new Set(["send", "edit", "delete", "topic.update", "delta"]);
+
+function socketId(st: SocketState): string {
+  return st.sid ?? `${st.tokenId}.${st.connectedAt}`;
+}
 
 export class MemberGateway extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -90,7 +106,12 @@ export class MemberGateway extends DurableObject<Env> {
     delta: new TokenBucket(LIMITS.delta.rate, LIMITS.delta.burst),
     read: new TokenBucket(LIMITS.read.rate, LIMITS.read.burst),
   };
-  private readonly chains = new WeakMap<WebSocket, Promise<void>>();
+  /** Set while an ordered frame of a socket waits for I/O before its room RPC; later ones queue. */
+  private readonly barriers = new WeakMap<WebSocket, Promise<void>>();
+  /** Last write number per socket and group (see `ORDERED`). */
+  private readonly writeSeq = new Map<string, number>();
+  /** Changes with each instance, so numbers restart after hibernation or a restart. */
+  private readonly epoch = crypto.randomUUID().slice(0, 8);
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -131,7 +152,15 @@ export class MemberGateway extends DurableObject<Env> {
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     this.ctx.acceptWebSocket(server, [`tok:${tokenId}`]);
-    const state: SocketState = { memberId, tokenId, level, kind, ready: false, connectedAt: Date.now() };
+    const state: SocketState = {
+      memberId,
+      tokenId,
+      level,
+      kind,
+      ready: false,
+      connectedAt: Date.now(),
+      sid: crypto.randomUUID(),
+    };
     server.serializeAttachment(state);
     if (!wasOnline) this.ctx.waitUntil(this.reportPresence(true));
     return new Response(null, { status: 101, webSocket: client });
@@ -158,10 +187,17 @@ export class MemberGateway extends DurableObject<Env> {
     }
     const frame = parsed.frame;
     if (ORDERED.has(frame.t)) {
-      // Writes and deltas from one socket are processed one at a time, in order.
-      const prev = this.chains.get(ws) ?? Promise.resolve();
-      const next = prev.then(() => this.dispatch(ws, frame));
-      this.chains.set(ws, next.catch(() => {}));
+      // Fast path: the room RPC starts in this event, with no I/O before it.
+      const barrier = this.barriers.get(ws);
+      if (!barrier && this.isMemberCached(frame.groupId)) return this.dispatch(ws, frame);
+      // Slow path (membership not cached yet): this frame and the ordered frames after it on this
+      // socket wait for the membership check, in order.
+      const next = (barrier ?? Promise.resolve()).then(() => this.dispatch(ws, frame));
+      const done = next.catch(() => {});
+      this.barriers.set(ws, done);
+      void done.then(() => {
+        if (this.barriers.get(ws) === done) this.barriers.delete(ws);
+      });
       return next;
     }
     return this.dispatch(ws, frame);
@@ -181,6 +217,11 @@ export class MemberGateway extends DurableObject<Env> {
   }
 
   private async afterSocketGone(ws: WebSocket): Promise<void> {
+    const st = ws.deserializeAttachment() as SocketState | null;
+    if (st) {
+      const prefix = `${socketId(st)}:`;
+      for (const k of this.writeSeq.keys()) if (k.startsWith(prefix)) this.writeSeq.delete(k);
+    }
     if (this.openSockets(ws).length === 0) await this.reportPresence(false);
   }
 
@@ -281,6 +322,20 @@ export class MemberGateway extends DurableObject<Env> {
     };
   }
 
+  private isMemberCached(groupId: unknown): boolean {
+    if (typeof groupId !== "string") return false;
+    return this.sql.exec("SELECT 1 FROM memberships WHERE group_id = ?", groupId).toArray().length > 0;
+  }
+
+  /** The next write number of this socket in this group. */
+  private writeOrder(state: SocketState, groupId: string): WriteOrder {
+    const key = `${this.epoch}:${socketId(state)}`;
+    const k = `${socketId(state)}:${groupId}`;
+    const n = (this.writeSeq.get(k) ?? 0) + 1;
+    this.writeSeq.set(k, n);
+    return { key, n };
+  }
+
   /** Membership check: local cache first, then D1 (the cache may lag a just-made change). */
   private async requireMember(groupId: string): Promise<void> {
     const cached = this.sql.exec("SELECT 1 FROM memberships WHERE group_id = ?", groupId).toArray().length > 0;
@@ -299,23 +354,23 @@ export class MemberGateway extends DurableObject<Env> {
     switch (frame.t) {
       case "send": {
         await this.requireMember(frame.groupId);
-        return ack(unwrap(await roomStub(this.env, frame.groupId).send(frame.groupId, actor, frame)));
+        return ack(unwrap(await roomStub(this.env, frame.groupId).send(frame.groupId, actor, frame, this.writeOrder(state, frame.groupId))));
       }
       case "edit": {
         await this.requireMember(frame.groupId);
-        return ack(unwrap(await roomStub(this.env, frame.groupId).edit(frame.groupId, actor, frame)));
+        return ack(unwrap(await roomStub(this.env, frame.groupId).edit(frame.groupId, actor, frame, this.writeOrder(state, frame.groupId))));
       }
       case "delete": {
         await this.requireMember(frame.groupId);
-        return ack(unwrap(await roomStub(this.env, frame.groupId).remove(frame.groupId, actor, frame.messageId)));
+        return ack(unwrap(await roomStub(this.env, frame.groupId).remove(frame.groupId, actor, frame.messageId, this.writeOrder(state, frame.groupId))));
       }
       case "topic.update": {
         await this.requireMember(frame.groupId);
-        return ack(unwrap(await roomStub(this.env, frame.groupId).topicUpdate(frame.groupId, actor, frame)));
+        return ack(unwrap(await roomStub(this.env, frame.groupId).topicUpdate(frame.groupId, actor, frame, this.writeOrder(state, frame.groupId))));
       }
       case "delta": {
         await this.requireMember(frame.groupId);
-        unwrap(await roomStub(this.env, frame.groupId).delta(frame.groupId, actor, frame.messageId, frame.append));
+        unwrap(await roomStub(this.env, frame.groupId).delta(frame.groupId, actor, frame.messageId, frame.append, this.writeOrder(state, frame.groupId)));
         return;
       }
       case "typing": {

@@ -307,6 +307,52 @@ describe("websocket", () => {
     c.close();
   });
 
+  it("takes 50 pipelined sends from one socket and delivers each once, in order", async () => {
+    // A deployed gateway once refused pipelined writes after about 8 ("Subrequest depth limit
+    // exceeded"). The gateway now starts each write's room RPC when its frame arrives and the
+    // room keeps the socket's order. wrangler dev does not enforce the depth limit; the
+    // tools/e2e "pipeline" scenario checks it on a deployed env.
+    const { members, gid } = await setup(2);
+    const { c: a } = await Client.connect(members[0].token);
+    const { c: b } = await Client.connect(members[1].token);
+    const first = await a.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "root" });
+    const topicId = first.topic.id;
+    const ids = Array.from({ length: 50 }, () => clientMsgId());
+    let todo = ids.map((id, i) => ({ id, i }));
+    while (todo.length > 0) {
+      const rids = todo.map(({ id, i }) => {
+        const rid = a.rid();
+        a.send({ t: "send", rid, groupId: gid, topicId, clientMsgId: id, body: `p${i}` });
+        return rid;
+      });
+      const acks = await waitUntil(() => {
+        const got = a.frames.filter((f) => f.t === "ack" && rids.includes(f.rid));
+        return got.length === rids.length ? got : undefined;
+      }, 15000, "acks");
+      // Only the rate limit may refuse a pipelined send.
+      expect(acks.filter((x) => !x.ok && x.error.code !== "rate_limited")).toEqual([]);
+      // The sends of one round that were accepted keep their order in the log.
+      const seqs = rids.map((rid) => acks.find((x) => x.rid === rid)).filter((x) => x.ok).map((x) => x.result.message.createdSeq);
+      expect(seqs).toEqual([...seqs].sort((x, y) => x - y));
+      const refused = new Set(acks.filter((x) => !x.ok).map((x) => x.rid));
+      todo = todo.filter((_, k) => refused.has(rids[k]));
+      if (todo.length > 0) await new Promise((r) => setTimeout(r, 1100));
+    }
+    for (const c of [a, b]) {
+      const created = await waitUntil(() => {
+        const got = c.events(gid).filter((e) => e.type === "message.created" && ids.includes(e.data.message.clientMsgId));
+        return got.length >= 50 ? got : undefined;
+      }, 10000, "50 events");
+      expect(created.length).toBe(50);
+      expect(new Set(created.map((e) => e.data.message.clientMsgId)).size).toBe(50);
+      const seqs = c.events(gid).map((e) => e.seq);
+      expect(seqs).toEqual([...seqs].sort((x, y) => x - y));
+      expect(new Set(seqs).size).toBe(seqs.length);
+    }
+    a.close();
+    b.close();
+  });
+
   it("rejects frames over 1 MiB and invalid frames", async () => {
     const { members, gid } = await setup(1);
     const { c } = await Client.connect(members[0].token);

@@ -171,6 +171,17 @@ const MAX_EXPORT_LIMIT = 1000;
 const DELTA_FLUSH_MS = 100;
 const DELTA_FLUSH_BYTES = 8 * 1024;
 const DELIVER_BATCH = 200;
+/** A write waits at most this long for the write numbered before it on the same socket. */
+const TURN_WAIT_MS = 2000;
+/** Socket write orders kept before idle ones are dropped. */
+const MAX_TURNS = 256;
+const TURN_IDLE_MS = 5 * 60_000;
+
+/** Position of a write among the writes of one gateway socket (see `GroupRoom.ordered`). */
+export interface WriteOrder {
+  key: string;
+  n: number;
+}
 
 type SendFrame = ClientFrameOf<"send">;
 type EditFrame = ClientFrameOf<"edit">;
@@ -207,6 +218,8 @@ export class GroupRoom extends DurableObject<Env> {
   private lastSeq = 0;
   private log: Logger = baseLogger.child({ obj: "GroupRoom" });
   private readonly outbox = new Map<string, { queue: unknown[]; busy: boolean }>();
+  /** Per-socket write order (see `ordered`). */
+  private readonly turns = new Map<string, { next: number; waiters: Map<number, () => void>; at: number }>();
   private readonly typingAt = new Map<string, number>();
   private readonly deltas = new Map<
     string,
@@ -382,6 +395,50 @@ export class GroupRoom extends DurableObject<Env> {
     } finally {
       box.busy = false;
       if (box.queue.length === 0) this.outbox.delete(memberId);
+    }
+  }
+
+  /**
+   * Runs the writes of one gateway socket in the order the gateway numbered them. The gateway
+   * starts each write RPC at once, when its frame arrives (see `MemberGateway.webSocketMessage`),
+   * so writes may overlap; a write whose predecessor has not run yet waits for it, at most
+   * `TURN_WAIT_MS`.
+   */
+  private async ordered<T>(order: WriteOrder | undefined, fn: () => Promise<T>): Promise<T> {
+    if (!order) return fn();
+    const now = Date.now();
+    let turn = this.turns.get(order.key);
+    if (!turn) {
+      if (this.turns.size >= MAX_TURNS) {
+        for (const [k, t] of this.turns) if (now - t.at > TURN_IDLE_MS && t.waiters.size === 0) this.turns.delete(k);
+      }
+      turn = { next: order.n, waiters: new Map(), at: now };
+      this.turns.set(order.key, turn);
+    }
+    const t = turn;
+    if (order.n > t.next) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          t.waiters.delete(order.n);
+          this.log.warn("write turn timed out", { expected: t.next, n: order.n });
+          resolve();
+        }, TURN_WAIT_MS);
+        t.waiters.set(order.n, () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    }
+    try {
+      return await fn();
+    } finally {
+      t.next = Math.max(t.next, order.n + 1);
+      t.at = Date.now();
+      const w = t.waiters.get(t.next);
+      if (w) {
+        t.waiters.delete(t.next);
+        w();
+      }
     }
   }
 
@@ -578,7 +635,11 @@ export class GroupRoom extends DurableObject<Env> {
     return { messageId: q.id, authorId: q.author_id, excerpt: excerpt(q.body !== "" ? q.body : (card?.title ?? "")) };
   }
 
-  async send(groupId: string, actor: Actor, frame: SendFrame): Promise<Result<SendResult>> {
+  async send(groupId: string, actor: Actor, frame: SendFrame, order?: WriteOrder): Promise<Result<SendResult>> {
+    return this.ordered(order, () => this.sendNow(groupId, actor, frame));
+  }
+
+  private async sendNow(groupId: string, actor: Actor, frame: SendFrame): Promise<Result<SendResult>> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
@@ -671,7 +732,11 @@ export class GroupRoom extends DurableObject<Env> {
     });
   }
 
-  async edit(groupId: string, actor: Actor, frame: EditFrame): Promise<Result<{ message: Message }>> {
+  async edit(groupId: string, actor: Actor, frame: EditFrame, order?: WriteOrder): Promise<Result<{ message: Message }>> {
+    return this.ordered(order, () => this.editNow(groupId, actor, frame));
+  }
+
+  private async editNow(groupId: string, actor: Actor, frame: EditFrame): Promise<Result<{ message: Message }>> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
@@ -719,6 +784,15 @@ export class GroupRoom extends DurableObject<Env> {
   }
 
   async remove(
+    groupId: string,
+    actor: Actor,
+    messageId: string,
+    order?: WriteOrder,
+  ): Promise<Result<{ messageId: string; deletedAt: number }>> {
+    return this.ordered(order, () => this.removeNow(groupId, actor, messageId));
+  }
+
+  private async removeNow(
     groupId: string,
     actor: Actor,
     messageId: string,
@@ -781,7 +855,11 @@ export class GroupRoom extends DurableObject<Env> {
     });
   }
 
-  async topicUpdate(groupId: string, actor: Actor, frame: TopicUpdateFrame): Promise<Result<{ topic: Topic }>> {
+  async topicUpdate(groupId: string, actor: Actor, frame: TopicUpdateFrame, order?: WriteOrder): Promise<Result<{ topic: Topic }>> {
+    return this.ordered(order, () => this.topicUpdateNow(groupId, actor, frame));
+  }
+
+  private async topicUpdateNow(groupId: string, actor: Actor, frame: TopicUpdateFrame): Promise<Result<{ topic: Topic }>> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
@@ -890,7 +968,11 @@ export class GroupRoom extends DurableObject<Env> {
   }
 
   /** Streaming delta from the message's author. Coalesced every 100 ms or 8 KiB; never stored. */
-  async delta(groupId: string, actor: Actor, messageId: string, append: string): Promise<Result<{ buffered: number }>> {
+  async delta(groupId: string, actor: Actor, messageId: string, append: string, order?: WriteOrder): Promise<Result<{ buffered: number }>> {
+    return this.ordered(order, () => this.deltaNow(groupId, actor, messageId, append));
+  }
+
+  private async deltaNow(groupId: string, actor: Actor, messageId: string, append: string): Promise<Result<{ buffered: number }>> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
