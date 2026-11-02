@@ -340,6 +340,17 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             }
             ok(g.clone())
         }
+        (&Method::PATCH, ["v1", "groups", id]) => {
+            let r: UpdateGroupRequest = serde_json::from_value(json_body()).unwrap();
+            let Some(g) = s.groups.get_mut(*id) else {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            };
+            if g.group.kind == GroupKind::Dm {
+                return err(StatusCode::FORBIDDEN, "forbidden");
+            }
+            g.group.name = r.name.split_whitespace().collect::<Vec<_>>().join(" ");
+            ok(g.clone())
+        }
         (&Method::PATCH, ["v1", "members", id]) => {
             let r: UpdateMemberRequest = serde_json::from_value(json_body()).unwrap();
             let Some(m) = s.members.get_mut(*id) else {

@@ -6,8 +6,8 @@ use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::{
     AddArtifactVersionRequest, Artifact, ArtifactResponse, ArtifactVersionResponse, AuditResponse,
     CreateArtifactRequest, CreateFileRequest, CreateFileResponse, CreateHookRequest,
-    CreateHookResponse, FileMeta, GroupSummary, Hook, Member, UpdateGroupPrefsRequest, UpdateInfo,
-    UpdateMemberRequest,
+    CreateHookResponse, FileMeta, GroupSummary, Hook, Member, UpdateGroupPrefsRequest,
+    UpdateGroupRequest, UpdateInfo, UpdateMemberRequest,
 };
 use reqwest::Method;
 
@@ -42,6 +42,22 @@ impl HttpClient {
             Method::PATCH,
             &format!("/v1/groups/{}/prefs", enc(group_id)),
             Some(req),
+            true,
+        )
+        .await
+    }
+
+    /// Renames a group (a member of it, or an owner). The server trims the name and collapses
+    /// whitespace; a DM answers `forbidden`.
+    pub async fn rename_group(&self, group_id: &str, name: &str) -> ApiResult<GroupSummary> {
+        let req = UpdateGroupRequest {
+            name: name.to_string(),
+        };
+        req.validate().map_err(invalid)?;
+        self.call(
+            Method::PATCH,
+            &format!("/v1/groups/{}", enc(group_id)),
+            Some(&req),
             true,
         )
         .await

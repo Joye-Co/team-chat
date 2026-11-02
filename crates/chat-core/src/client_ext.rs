@@ -95,6 +95,32 @@ impl Client {
         })
     }
 
+    /// Renames a group (`PATCH /v1/groups/:id`). The server appends `group.updated`, which
+    /// updates every client; the answer is stored at once too when I am in the group, so the
+    /// sidebar does not wait for the event. Answers with the stored name.
+    pub fn rename_group(
+        &self,
+        group_id: &str,
+        name: &str,
+    ) -> JoinHandle<Result<String, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let (gid, name) = (group_id.to_string(), name.to_string());
+        self.spawn(async move {
+            let summary = http.rename_group(&gid, &name).await?;
+            let me = shared.store.me()?.map(|m| m.id).unwrap_or_default();
+            if summary.group.member_ids.contains(&me) {
+                shared
+                    .store
+                    .apply_directory(None, Some(std::slice::from_ref(&summary)), None)?;
+                shared.emit(ClientUpdate::GroupChanged {
+                    group_id: gid.clone(),
+                });
+            }
+            Ok(summary.group.name)
+        })
+    }
+
     /// Changes a member (owner: every field; self: name and role) and stores it.
     pub fn update_member(
         &self,

@@ -759,6 +759,51 @@ async fn members_prefs_avatars_audit_and_hooks() {
     })
     .await;
 
+    // Rename: the stored group takes the server's normalized name at once.
+    let name = client
+        .rename_group(G1, "  前端   小组 ")
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(name, "前端 小组");
+    assert_eq!(
+        client.store().group(G1).unwrap().unwrap().group.name,
+        "前端 小组"
+    );
+    next_update(
+        &mut rx,
+        "group renamed",
+        |u| matches!(u, ClientUpdate::GroupChanged { group_id } if group_id == G1),
+    )
+    .await;
+    let e = client
+        .rename_group(G1, &"群".repeat(65))
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(matches!(e, ClientError::Api(ApiError::Invalid(_))), "{e:?}");
+    const DM: &str = "01DM000000000000000000000A";
+    http.with(|s| {
+        let mut g = group(DM, &[ME, ALICE]);
+        g.kind = GroupKind::Dm;
+        s.groups.insert(DM.into(), summary(g, 0, 0, 0));
+    });
+    let e = client
+        .rename_group(DM, "我们俩")
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        matches!(
+            e,
+            ClientError::Api(ApiError::Server {
+                code: ErrorCode::Forbidden,
+                ..
+            })
+        ),
+        "{e:?}"
+    );
+
     let m = client
         .update_member(
             ALICE,
