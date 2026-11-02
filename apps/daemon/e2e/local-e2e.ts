@@ -5,6 +5,10 @@
 // the run log and the uploaded raw session.
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
+// Against a deployed env (no wrangler; the owner token comes from a file, and the run makes its
+// own group, member, bot runner and machine, then removes the runner and the machine):
+//   bun apps/daemon/e2e/local-e2e.ts --base-url https://chat-api-e2e.<account>.workers.dev \
+//     --owner-token-file ~/.config/team-chat/e2e/owner-token
 // Needs: `bun install`, and the daemon binary (built here with cargo when missing).
 // Tokens stay in memory or in files of mode 600 inside the temp folder; nothing is printed.
 import { spawn, spawnSync } from "node:child_process";
@@ -14,11 +18,15 @@ import { dirname, join, resolve } from "node:path";
 
 const ROOT = resolve(dirname(new URL(import.meta.url).pathname), "../../..");
 const args = process.argv.slice(2);
-const PORT = Number(args[args.indexOf("--port") + 1] || 0) || 8793;
+const flag = (name: string) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined);
+const PORT = Number(flag("--port") || 0) || 8793;
 const KEEP = args.includes("--keep");
-const BASE = `http://127.0.0.1:${PORT}`;
+const REMOTE = flag("--base-url")?.replace(/\/$/, "");
+const OWNER_TOKEN_FILE = flag("--owner-token-file")?.replace(/^~/, process.env.HOME ?? "~");
+const BASE = REMOTE ?? `http://127.0.0.1:${PORT}`;
 const TMP = mkdtempSync(join(tmpdir(), "bots-e2e-"));
-const LABEL = "e2e";
+// A label of its own on a shared env, so no other machine takes the run.
+const LABEL = REMOTE ? `e2e-${crypto.randomUUID().slice(0, 8)}` : "e2e";
 const report: Record<string, unknown> = { base: BASE, tmp: TMP, steps: [] as string[] };
 const children: { name: string; pid: number; kill: () => void }[] = [];
 
@@ -83,8 +91,39 @@ async function call(method: string, path: string, opts: { token?: string; body?:
   return data;
 }
 
+const cleanup: (() => Promise<unknown>)[] = [];
+
 async function main() {
   const server = join(ROOT, "server");
+  let owner: string;
+  let groupId: string;
+  let alice: { token: string; member: { id: string } };
+  let bot: { member: { id: string } };
+  if (REMOTE) {
+    if (!OWNER_TOKEN_FILE) throw new Error("--base-url needs --owner-token-file");
+    owner = (await Bun.file(OWNER_TOKEN_FILE).text()).trim();
+    await until("server health", async () => (await fetch(`${BASE}/v1/health`)).ok, 30_000);
+    step("server is up");
+    const invite = await call("POST", "/v1/invites", { token: owner, body: { name: `Alice ${LABEL}`, kind: "human", level: "member" } });
+    alice = await call("POST", "/v1/auth/redeem", { body: { inviteCode: invite.code, deviceName: "e2e" } });
+    bot = await call("POST", "/v1/bots", { token: owner, body: { name: `dev-${LABEL}`, role: "开发" } });
+    const g = await call("POST", "/v1/groups", { token: owner, body: { name: `daemon ${LABEL}`, memberIds: [alice.member.id, bot.member.id] } });
+    groupId = g.group.id;
+  } else {
+    ({ owner, groupId, alice, bot } = await localServer(server));
+  }
+  await call("PUT", `/v1/bots/${bot.member.id}/runner`, { token: owner, body: { runtime: "claude", labels: [LABEL] } });
+  const machine = await call("POST", "/v1/machines", { token: owner, body: { name: `mac-${LABEL}`, labels: [LABEL] } });
+  if (REMOTE) {
+    cleanup.push(() => call("DELETE", `/v1/machines/${machine.machine.id}`, { token: owner }));
+    cleanup.push(() => call("DELETE", `/v1/bots/${bot.member.id}/runner`, { token: owner }));
+  }
+  const tokenFile = secretFile("machine-token", machine.token);
+  step("owner, member, bot runner and machine made");
+  await runDaemonCheck(owner, groupId, alice, bot, machine, tokenFile);
+}
+
+async function localServer(server: string) {
   const state = join(TMP, "wrangler-state");
   const adminSecret = crypto.randomUUID();
   // A throwaway admin secret for this fresh local state only.
@@ -111,10 +150,17 @@ async function main() {
   const invite = await call("POST", "/v1/invites", { token: owner, body: { name: "Alice", kind: "human", level: "member" } });
   const alice = await call("POST", "/v1/auth/redeem", { body: { inviteCode: invite.code, deviceName: "e2e" } });
   const bot = await call("POST", "/v1/bots", { token: owner, body: { name: "dev", role: "开发" } });
-  await call("PUT", `/v1/bots/${bot.member.id}/runner`, { token: owner, body: { runtime: "claude", labels: [LABEL] } });
-  const machine = await call("POST", "/v1/machines", { token: owner, body: { name: "e2e-mac", labels: [LABEL] } });
-  const tokenFile = secretFile("machine-token", machine.token);
-  step("owner, member, bot runner and machine made");
+  return { owner, groupId, alice, bot };
+}
+
+async function runDaemonCheck(
+  owner: string,
+  groupId: string,
+  alice: { token: string },
+  bot: { member: { id: string } },
+  machine: { machine: { id: string } },
+  tokenFile: string,
+) {
 
   // The daemon with the fake Claude Code CLI.
   const daemonBin = join(process.env.CARGO_TARGET_DIR ?? join(ROOT, "target"), "debug", "daemon");
@@ -133,7 +179,7 @@ async function main() {
     [
       `server_url = "${BASE}"`,
       `token_file = "${tokenFile}"`,
-      `name = "e2e-mac"`,
+      `name = "mac-${LABEL}"`,
       `labels = ["${LABEL}"]`,
       `work_root = "${work}"`,
       "max_parallel_runs = 2",
@@ -226,6 +272,7 @@ try {
   console.error(`FAILED: ${String(err)}`);
 } finally {
   stopAll();
+  for (const c of cleanup) await c().catch((e) => console.error(`cleanup: ${String(e)}`));
   const out = join(TMP, "report.json");
   writeFileSync(out, `${JSON.stringify(report, null, 2)}\n`);
   console.log(`report: ${out}`);
