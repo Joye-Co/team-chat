@@ -431,7 +431,8 @@ impl State {
             "Composer: paste images from the clipboard",
             WaitingReview,
             &[LIXUE],
-            Some(CODER),
+            // Joye owns the review: Forge's only state is its run in t-login.
+            Some(ME),
             &[
                 (CODER, "Done. Pasting a PNG now uploads it and shows a preview. Waiting for @李雪 to review the UX.", DAY + 2 * HOUR),
             ],
