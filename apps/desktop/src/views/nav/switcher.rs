@@ -1,44 +1,93 @@
-//! The Cmd+K quick switcher: one search field over 群, 私聊, 话题 and 成员.
-//! The palette matches the typed text as a substring of each name or title,
-//! ignoring case. Picking a member opens (or starts) the DM with them.
+//! The Cmd+K quick switcher (DESIGN.md §7.12): one 640 pt panel over the
+//! scrim, 96 pt from the window top. A 56 pt query row (`search` 20, 18/24
+//! text, `esc`), grouped rows (话题, 群, 私聊, 成员, 消息), every match marked
+//! with `hl-bg`, and a 40 pt footer with the keys. With no query it shows 最近
+//! (five topics), then 群 and 私聊. Picking a member opens (or starts) the DM
+//! with them; picking a message opens its topic at that message.
 
-use std::{cell::Cell, rc::Rc};
+use std::{rc::Rc, time::Duration};
 
 use gpui::{
-    App, AppContext as _, ParentElement, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable,
+    InteractiveElement as _, IntoElement, KeyBinding, ParentElement, Render, ScrollHandle,
+    StatefulInteractiveElement as _, Styled, Subscription, Task, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     WindowExt as _,
-    command::{Command, CommandGroup, CommandItem, CommandState},
+    input::{Input, InputEvent, InputState},
 };
 
 use crate::{
     app::Services,
-    copy::nav,
-    data::{ChatProvider, GroupId, GroupKind, Member, MemberId, Topic, TopicId},
-    theme::{self, Type as _, space},
-    ui::{self, KbdHint, Lucide, StatusChip},
+    copy::{fill, nav},
+    data::{
+        ChatProvider, GroupId, GroupKind, Member, MemberId, SearchHit, SearchQuery, Topic, TopicId,
+    },
+    theme::{self, Type as _, size, space, type_scale},
+    ui::{self, GroupGlyph, Kbd, KbdHint, Lucide, MemberAvatar, RowSurface, StatusChip},
     views::{sidebar::topic_line, topic_list::list_time},
 };
 
-/// What the palette shows (DESIGN.md §13.12): 话题 first, then 群, DMs and
-/// members together under 群和成员. Confirm indexes refer to this list.
+gpui::actions!(switcher, [SelectPrevious, SelectNext, OpenSelected]);
+
+pub(super) const CONTEXT: &str = "TeamSwitcher";
+
+/// Rows per group while a query is typed.
+const MAX_PER_GROUP: usize = 5;
+/// Message hits shown under 消息.
+const MAX_HITS: usize = 3;
+/// Recent topics with no query.
+const RECENT: usize = 5;
+
+/// The switcher's keys (call once at start-up).
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
+        KeyBinding::new("down", SelectNext, Some(CONTEXT)),
+        KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
+        KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
+        KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
+    ]);
+}
+
+/// What the switcher shows with no query (§7.12): 最近 (five topics), then 群
+/// and 私聊. Indexes of the keyboard selection refer to this list.
 pub fn display(sections: Vec<(Section, Vec<Entry>)>) -> Vec<(&'static str, Vec<Entry>)> {
-    let mut topics = Vec::new();
-    let mut others = Vec::new();
-    for (section, items) in sections {
-        match section {
-            Section::Topics => topics.extend(items),
-            _ => others.extend(items),
-        }
-    }
-    [
-        (nav::SECTION_TOPICS, topics),
-        (nav::SECTION_GROUPS_MEMBERS, others),
-    ]
-    .into_iter()
-    .filter(|(_, e)| !e.is_empty())
-    .collect()
+    grouped(&sections, "")
+}
+
+/// The groups for `query`: with no query 最近, 群, 私聊; with one, matches in
+/// 话题, 群, 私聊 and 成员 (five each).
+pub fn grouped(sections: &[(Section, Vec<Entry>)], query: &str) -> Vec<(&'static str, Vec<Entry>)> {
+    let get = |section: Section| -> Vec<Entry> {
+        sections
+            .iter()
+            .filter(|(s, _)| *s == section)
+            .flat_map(|(_, e)| e.iter().filter(|e| matches(e, query)).cloned())
+            .collect()
+    };
+    let groups: Vec<(&'static str, Vec<Entry>)> = if query.trim().is_empty() {
+        vec![
+            (
+                nav::SECTION_RECENT,
+                get(Section::Topics).into_iter().take(RECENT).collect(),
+            ),
+            (nav::GROUPS, get(Section::Groups)),
+            (nav::DMS, get(Section::Dms)),
+        ]
+    } else {
+        [
+            (nav::SECTION_TOPICS, Section::Topics),
+            (nav::GROUPS, Section::Groups),
+            (nav::DMS, Section::Dms),
+            (nav::SECTION_MEMBERS, Section::Members),
+        ]
+        .into_iter()
+        .map(|(label, s)| (label, get(s).into_iter().take(MAX_PER_GROUP).collect()))
+        .collect()
+    };
+    groups.into_iter().filter(|(_, e)| !e.is_empty()).collect()
 }
 
 /// What an entry opens.
@@ -83,7 +132,13 @@ pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, V
         let entry = Entry {
             target: Target::Group(g.id.clone()),
             label: g.name.clone(),
-            detail: None,
+            detail: match g.kind {
+                GroupKind::Group => Some(fill(
+                    nav::MEMBER_COUNT,
+                    &[("n", &g.member_ids.len().to_string())],
+                )),
+                GroupKind::Dm => g.dm_peer.as_deref().and_then(find).and_then(|m| m.role),
+            },
             member: g.dm_peer.as_deref().and_then(find),
             topic: None,
         };
@@ -157,162 +212,554 @@ pub fn go(services: &Services, target: &Target, cx: &mut App) {
     }
 }
 
-/// The widest a row's title gets before it truncates.
-const LABEL_MAX: gpui::Pixels = px(320.);
+/// `label` split around the first case-insensitive match of `query`.
+fn split_match(label: &str, query: &str) -> Option<(String, String, String)> {
+    let q: Vec<char> = query
+        .trim()
+        .chars()
+        .map(|c| c.to_ascii_lowercase())
+        .collect();
+    if q.is_empty() {
+        return None;
+    }
+    let chars: Vec<char> = label.chars().collect();
+    let lower: Vec<char> = chars.iter().map(|c| c.to_ascii_lowercase()).collect();
+    let at = lower.windows(q.len()).position(|w| w == q.as_slice())?;
+    let s = |r: std::ops::Range<usize>| chars[r].iter().collect::<String>();
+    Some((s(0..at), s(at..at + q.len()), s(at + q.len()..chars.len())))
+}
 
-fn row(
-    entry: &Entry,
-    me: Option<String>,
-    members: Rc<Vec<Member>>,
-) -> impl Fn(&mut Window, &mut App) -> gpui::Div + 'static {
-    let entry = entry.clone();
-    move |_, cx| {
-        let colors = theme::colors(cx);
-        let tile = |glyph: Lucide| {
-            div()
-                .flex_none()
-                .size(px(24.))
-                .rounded(theme::radius::SM)
-                .bg(colors.fill_field)
-                .flex()
-                .items_center()
-                .justify_center()
-                .child(ui::icon(glyph, theme::icon::BUTTON, colors.text_2))
-        };
-        let lead = match (&entry.target, &entry.member) {
-            (Target::Topic(..), _) => tile(Lucide::MessageSquarePlus),
-            (_, Some(m)) => div()
-                .flex_none()
-                .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.elevated)),
-            (Target::Group(g), _) => {
+/// A search mark (§7.12): `hl-bg`, radius 4, padding 0 2, 20 pt tall, the
+/// text keeps its color.
+fn mark(text: String, cx: &App) -> gpui::Div {
+    div()
+        .flex_none()
+        .h(px(20.))
+        .px(space::S2)
+        .rounded(theme::radius::MARK)
+        .bg(theme::colors(cx).hl_bg)
+        .child(text)
+}
+
+/// Text with every match marked: one line, the tail truncates.
+fn marked(text: &str, ranges: &[std::ops::Range<usize>], cx: &App) -> gpui::Div {
+    let chars: Vec<char> = text.chars().collect();
+    let mut parts: Vec<AnyElement> = Vec::new();
+    let mut at = 0;
+    for r in ranges {
+        let (start, end) = (r.start.min(chars.len()), r.end.min(chars.len()));
+        if start < at || start >= end {
+            continue;
+        }
+        if start > at {
+            parts.push(
                 div()
                     .flex_none()
-                    .child(ui::GroupTile::new(g.clone(), entry.label.clone(), px(24.)))
-            }
-            _ => tile(Lucide::Hash),
+                    .child(chars[at..start].iter().collect::<String>())
+                    .into_any_element(),
+            );
+        }
+        parts.push(mark(chars[start..end].iter().collect(), cx).into_any_element());
+        at = end;
+    }
+    if at < chars.len() {
+        parts.push(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .one_line()
+                .child(chars[at..].iter().collect::<String>())
+                .into_any_element(),
+        );
+    }
+    div()
+        .min_w(px(0.))
+        .overflow_hidden()
+        .flex()
+        .items_center()
+        .children(parts)
+}
+
+/// A title with the query marked (or plain when it does not match).
+fn title_with_mark(label: &str, query: &str, cx: &App) -> gpui::Div {
+    match split_match(label, query) {
+        Some((pre, hit, post)) => {
+            let start = pre.chars().count();
+            let len = hit.chars().count();
+            let full = format!("{pre}{hit}{post}");
+            marked(&full, &[start..start + len], cx)
+        }
+        None => div().min_w(px(0.)).one_line().child(label.to_string()),
+    }
+}
+
+/// One row of the switcher.
+enum Row {
+    Entry(Entry),
+    Hit(SearchHit),
+}
+
+pub struct Switcher {
+    services: Services,
+    query: Entity<InputState>,
+    focus: FocusHandle,
+    all: Vec<(Section, Vec<Entry>)>,
+    groups: Vec<(&'static str, Vec<Entry>)>,
+    hits: Vec<SearchHit>,
+    /// The flat keyboard-selectable rows.
+    rows: Vec<Row>,
+    active: usize,
+    members: Rc<Vec<Member>>,
+    scroll: ScrollHandle,
+    search: Option<Task<()>>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl Focusable for Switcher {
+    fn focus_handle(&self, _: &App) -> FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl Switcher {
+    pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let query =
+            cx.new(|cx| InputState::new(window, cx).placeholder(nav::QUICK_SWITCH_PLACEHOLDER));
+        let me = services.me();
+        let all = entries(services.provider.as_ref(), me.as_deref());
+        let subscriptions =
+            vec![
+                cx.subscribe_in(&query, window, |this, _, event: &InputEvent, window, cx| {
+                    match event {
+                        InputEvent::Change => this.requery(cx),
+                        InputEvent::PressEnter { .. } => this.confirm(window, cx),
+                        _ => {}
+                    }
+                }),
+            ];
+        let members = Rc::new(services.provider.members());
+        let mut this = Self {
+            services,
+            query,
+            focus: cx.focus_handle(),
+            all,
+            groups: Vec::new(),
+            hits: Vec::new(),
+            rows: Vec::new(),
+            active: 0,
+            members,
+            scroll: ScrollHandle::new(),
+            search: None,
+            _subscriptions: subscriptions,
         };
-        let (label, untitled) = match &entry.topic {
+        this.rebuild();
+        this
+    }
+
+    fn text(&self, cx: &App) -> String {
+        self.query.read(cx).value().trim().to_string()
+    }
+
+    fn rebuild(&mut self) {
+        self.rows = self
+            .groups
+            .iter()
+            .flat_map(|(_, e)| e.iter().cloned().map(Row::Entry))
+            .chain(self.hits.iter().cloned().map(Row::Hit))
+            .collect();
+        if self.active >= self.rows.len() {
+            self.active = self.rows.len().saturating_sub(1);
+        }
+    }
+
+    fn requery(&mut self, cx: &mut Context<Self>) {
+        let text = self.text(cx);
+        self.groups = grouped(&self.all, &text);
+        self.hits.clear();
+        self.active = 0;
+        self.rebuild();
+        self.scroll.set_offset(gpui::point(px(0.), px(0.)));
+        cx.notify();
+        // Messages need the server: after a short pause, two or more characters.
+        self.search = (text.chars().count() >= 2).then(|| {
+            let provider = self.services.provider.clone();
+            cx.spawn(async move |this, cx| {
+                cx.background_executor()
+                    .timer(Duration::from_millis(150))
+                    .await;
+                let reply = provider.search(SearchQuery {
+                    text: text.clone(),
+                    group_id: None,
+                    limit: MAX_HITS as u32,
+                });
+                if let Ok(Ok(hits)) = reply.await {
+                    let _ = this.update(cx, |this, cx| {
+                        if this.text(cx) == text {
+                            this.hits = hits.into_iter().take(MAX_HITS).collect();
+                            this.rebuild();
+                            cx.notify();
+                        }
+                    });
+                }
+            })
+        });
+    }
+
+    fn select(&mut self, delta: isize, cx: &mut Context<Self>) {
+        if self.rows.is_empty() {
+            return;
+        }
+        let n = self.rows.len() as isize;
+        self.active = ((self.active as isize + delta).rem_euclid(n)) as usize;
+        cx.notify();
+    }
+
+    fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(row) = self.rows.get(self.active) else {
+            return;
+        };
+        let services = self.services.clone();
+        match row {
+            Row::Entry(e) => {
+                let target = e.target.clone();
+                window.close_dialog(cx);
+                go(&services, &target, cx);
+            }
+            Row::Hit(h) => {
+                let h = h.clone();
+                window.close_dialog(cx);
+                services.nav.update(cx, |nav, cx| {
+                    nav.open_message(h.group_id, h.topic_id, h.message_id, h.seq, cx)
+                });
+            }
+        }
+    }
+
+    fn open_row(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.active = ix;
+        self.confirm(window, cx);
+    }
+
+    fn group_label(label: &'static str, cx: &App) -> gpui::Div {
+        div()
+            .flex_none()
+            .h(px(32.))
+            .pt(space::S4)
+            .px(space::S12)
+            .flex()
+            .items_center()
+            .t_meta_medium()
+            .text_color(theme::colors(cx).text_3)
+            .child(label)
+    }
+
+    fn entry_row(&self, ix: usize, e: &Entry, query: &str, cx: &mut Context<Self>) -> AnyElement {
+        let k = theme::colors(cx);
+        let active = ix == self.active;
+        let me = self.services.me();
+        let surface = if active { k.selected } else { k.overlay };
+        let slot = div()
+            .flex_none()
+            .size(size::AVATAR_ROW)
+            .flex()
+            .items_center()
+            .justify_center();
+        let lead = match (&e.target, &e.member, &e.topic) {
+            (Target::Topic(..), _, Some(t)) => {
+                let id = t.owner_id.as_ref().unwrap_or(&t.created_by);
+                let m = self.members.iter().find(|m| &m.id == id);
+                slot.child(
+                    MemberAvatar::new(m, size::AVATAR_ROW)
+                        .on(surface)
+                        .selected(active),
+                )
+            }
+            (_, Some(m), _) => slot.child(
+                MemberAvatar::new(Some(m), size::AVATAR_ROW)
+                    .presence(Some(m))
+                    .on(surface)
+                    .selected(active),
+            ),
+            _ => slot.child(GroupGlyph::new().size(size::AVATAR_ROW).selected(false)),
+        };
+        let (label, untitled) = match &e.topic {
             Some(_) => {
-                let line = topic_line(&entry.label);
+                let line = topic_line(&e.label);
                 if line.is_empty() {
                     (nav::UNTITLED.to_string(), true)
                 } else {
                     (line, false)
                 }
             }
-            None => (entry.label.clone(), false),
+            None => (e.label.clone(), false),
         };
-        let chip = entry
+        let chip = e
             .topic
             .as_ref()
-            .and_then(|t| StatusChip::for_topic(t, me.as_deref(), &members));
-        // `开发 · 14:32` for topics, the 岗位 for members.
-        let detail = match (&entry.topic, &entry.detail) {
-            (Some(t), Some(group)) => {
-                let time = list_time(t.last_activity_at, chrono::Local::now());
-                Some(if time.is_empty() {
-                    group.clone()
-                } else {
-                    format!("{group} · {time}")
-                })
+            .and_then(|t| StatusChip::for_topic(t, me.as_deref(), &self.members));
+        let detail = e.detail.clone().map(|d| format!(" · {d}"));
+        ui::list_row(
+            ElementId::NamedInteger("switcher-row".into(), ix as u64),
+            RowSurface::Content,
+            active,
+            cx,
+        )
+        .h(size::SWITCHER_ROW)
+        .px(space::S12)
+        .gap(space::S12)
+        .t_ui()
+        .text_color(k.text_1)
+        .child(lead)
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .flex()
+                .items_center()
+                .child(
+                    title_with_mark(&label, query, cx)
+                        .flex_shrink(1.)
+                        .medium()
+                        .when(untitled, |el| el.text_color(k.text_2)),
+                )
+                .children(detail.map(|d| {
+                    div()
+                        .flex_shrink(2.)
+                        .min_w(px(40.))
+                        .t_small()
+                        .text_color(k.text_3)
+                        .one_line()
+                        .child(d)
+                })),
+        )
+        .children(chip)
+        .when(active, |el| {
+            el.child(ui::icon(Lucide::CornerDownLeft, theme::icon::ROW, k.text_3))
+        })
+        .on_click(cx.listener(move |this, _, window, cx| this.open_row(ix, window, cx)))
+        .into_any_element()
+    }
+
+    fn hit_row(&self, ix: usize, h: &SearchHit, cx: &mut Context<Self>) -> AnyElement {
+        let k = theme::colors(cx);
+        let active = ix == self.active;
+        let author = self.members.iter().find(|m| m.id == h.author_id);
+        let group = self
+            .all
+            .iter()
+            .flat_map(|(_, e)| e)
+            .find(|e| e.target == Target::Group(h.group_id.clone()))
+            .map(|e| e.label.clone())
+            .unwrap_or_default();
+        let time = list_time(h.created_at, chrono::Local::now());
+        let meta = [group, time]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .map(|s| format!(" · {s}"))
+            .collect::<String>();
+        ui::list_row(
+            ElementId::NamedInteger("switcher-row".into(), ix as u64),
+            RowSurface::Content,
+            active,
+            cx,
+        )
+        .h(size::SWITCHER_HIT_ROW)
+        .px(space::S12)
+        .gap(space::S12)
+        .items_start()
+        .pt(space::S8)
+        .t_ui()
+        .text_color(k.text_1)
+        .child(
+            div().flex_none().size(size::AVATAR_ROW).child(
+                MemberAvatar::new(author, size::AVATAR_ROW)
+                    .on(if active { k.selected } else { k.overlay })
+                    .selected(active),
+            ),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .flex()
+                .flex_col()
+                .child(
+                    div()
+                        .h(px(20.))
+                        .flex()
+                        .items_center()
+                        .min_w(px(0.))
+                        .child(
+                            div()
+                                .flex_none()
+                                .medium()
+                                .child(author.map(|a| a.name.clone()).unwrap_or_default()),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .t_small()
+                                .text_color(k.text_3)
+                                .one_line()
+                                .child(meta),
+                        ),
+                )
+                .child(
+                    marked(&h.snippet, &h.highlights, cx)
+                        .h(px(20.))
+                        .t_small()
+                        .text_color(k.text_2),
+                ),
+        )
+        .when(active, |el| {
+            el.child(div().h(px(20.)).flex().items_center().child(ui::icon(
+                Lucide::CornerDownLeft,
+                theme::icon::ROW,
+                k.text_3,
+            )))
+        })
+        .on_click(cx.listener(move |this, _, window, cx| this.open_row(ix, window, cx)))
+        .into_any_element()
+    }
+}
+
+impl Render for Switcher {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = theme::colors(cx);
+        let query = self.text(cx);
+        // Children of the scroll area, with the scroll index of the active row.
+        let mut children: Vec<AnyElement> = Vec::new();
+        let mut active_child = 0;
+        let mut ix = 0;
+        let groups = self.groups.clone();
+        for (label, items) in &groups {
+            children.push(Self::group_label(label, cx).into_any_element());
+            for e in items {
+                if ix == self.active {
+                    active_child = children.len();
+                }
+                children.push(self.entry_row(ix, e, &query, cx));
+                ix += 1;
             }
-            (_, detail) => detail.clone(),
-        };
-        // CommandItem adds 6 pt above and below: 28 + 12 = the 40 pt row (§13.12).
+        }
+        if !self.hits.is_empty() {
+            children.push(Self::group_label(nav::SECTION_MESSAGES, cx).into_any_element());
+            let hits = self.hits.clone();
+            for h in &hits {
+                if ix == self.active {
+                    active_child = children.len();
+                }
+                children.push(self.hit_row(ix, h, cx));
+                ix += 1;
+            }
+        }
+        if !self.rows.is_empty() {
+            self.scroll.scroll_to_item(active_child);
+        }
+        let empty = self.rows.is_empty();
+        // Up to 70 % of the window, the query row and footer included.
+        let max_list = (window.viewport_size().height * 0.7 - px(96.)).max(px(160.));
         div()
-            .h(px(28.))
-            .flex()
-            .items_center()
-            .gap(space::S10)
+            .key_context(CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.select(-1, cx)))
+            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
+            .on_action(cx.listener(|this, _: &OpenSelected, window, cx| this.confirm(window, cx)))
             .w_full()
-            .overflow_hidden()
-            .t_ui()
-            .child(lead)
+            .flex()
+            .flex_col()
+            .text_color(k.text_1)
             .child(
-                // A definite cap so the ellipsis shows and the chip and the
-                // detail keep room (DESIGN.md §12).
                 div()
                     .flex_none()
-                    .max_w(LABEL_MAX)
-                    .one_line()
-                    .when(untitled, |el| el.text_color(colors.text_2))
-                    .child(label),
+                    .h(size::SWITCHER_QUERY)
+                    .px(space::S16)
+                    .flex()
+                    .items_center()
+                    .gap(space::S12)
+                    .border_b(theme::HAIRLINE)
+                    .border_color(k.sep)
+                    .child(ui::icon(Lucide::Search, px(20.), k.text_2))
+                    .child(
+                        div().flex_1().min_w(px(0.)).child(
+                            Input::new(&self.query)
+                                .appearance(false)
+                                .px_0()
+                                .py_0()
+                                .text_size(type_scale::HEADING.0)
+                                .line_height(px(24.)),
+                        ),
+                    )
+                    .child(Kbd::new(nav::KEY_ESC)),
             )
-            .children(chip.map(|c| div().flex_none().child(c)))
-            .children(detail.map(|d| {
+            .child(
                 div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .t_callout()
-                    .tnum()
-                    .text_color(colors.text_2)
-                    .one_line()
-                    .child(d)
-            }))
+                    .id("switcher-list")
+                    .flex_none()
+                    .max_h(max_list)
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .pt(space::S4)
+                    .px(space::S8)
+                    .pb(space::S8)
+                    .flex()
+                    .flex_col()
+                    .children(children)
+                    .when(empty, |el| {
+                        el.child(div().h(px(160.)).child(ui::EmptyState::new(
+                            Lucide::SearchX,
+                            nav::QUICK_SWITCH_EMPTY,
+                        )))
+                    }),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .h(px(40.))
+                    .px(space::S16)
+                    .flex()
+                    .items_center()
+                    .gap(space::S20)
+                    .border_t(theme::HAIRLINE)
+                    .border_color(k.sep)
+                    .t_meta()
+                    .text_color(k.text_3)
+                    .child(KbdHint::new(&["up", "down"]).label(nav::SWITCHER_SELECT))
+                    .child(KbdHint::new(&["enter"]).label(nav::SWITCHER_OPEN))
+                    .child(KbdHint::new(&["cmd-f"]).label(nav::SWITCHER_IN_GROUP)),
+            )
     }
 }
 
 /// Opens the switcher in `window`.
 pub fn open(services: Services, window: &mut Window, cx: &mut App) {
-    let me = services.me();
-    let members = Rc::new(services.provider.members());
-    let sections = Rc::new(display(entries(services.provider.as_ref(), me.as_deref())));
-    let state = cx.new(|cx| CommandState::new(window, cx));
-    let first = Cell::new(true);
+    open_with(services, "", window, cx);
+}
+
+/// Opens the switcher with `query` typed (the self-test uses it).
+pub fn open_with(services: Services, query: &str, window: &mut Window, cx: &mut App) {
+    let query = query.to_string();
+    let view = cx.new(|cx| {
+        let mut s = Switcher::new(services, window, cx);
+        if !query.is_empty() {
+            s.query
+                .update(cx, |q, cx| q.set_value(query.clone(), window, cx));
+        }
+        s.requery(cx);
+        s
+    });
+    let first = std::cell::Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
         if first.replace(false) {
-            state.update(cx, |s, cx| s.focus(window, cx));
+            let handle = view.read(cx).query.read(cx).focus_handle(cx);
+            handle.focus(window, cx);
         }
-        let mut command = Command::new(&state)
-            .placeholder(nav::QUICK_SWITCH_PLACEHOLDER)
-            .max_h(px(420.))
-            .bordered(false)
-            .empty(|_, _, _| {
-                div().h(px(160.)).child(ui::EmptyState::new(
-                    Lucide::SearchX,
-                    nav::QUICK_SWITCH_EMPTY,
-                ))
-            })
-            .footer(|_, _, cx| {
-                let colors = theme::colors(cx);
-                div()
-                    .h(px(36.))
-                    .px(space::S16)
-                    .flex()
-                    .items_center()
-                    .gap(space::S16)
-                    .border_t_1()
-                    .border_color(colors.sep)
-                    .child(KbdHint::new(&["up", "down"]).label(nav::SWITCHER_SELECT))
-                    .child(KbdHint::new(&["enter"]).label(nav::SWITCHER_OPEN))
-            });
-        for (heading, items) in sections.iter() {
-            command = command.group(CommandGroup::new().label(*heading).items(items.iter().map(
-                |e| {
-                    CommandItem::new().label(e.label.clone()).child(row(
-                        e,
-                        me.clone(),
-                        members.clone(),
-                    ))
-                },
-            )));
-        }
-        let sections = sections.clone();
-        let services = services.clone();
-        let command = command.on_confirm(move |ix, window, cx| {
-            let target = sections
-                .get(ix.section)
-                .and_then(|(_, items)| items.get(ix.row))
-                .map(|e| e.target.clone());
-            window.close_dialog(cx);
-            if let Some(target) = target {
-                go(&services, &target, cx);
-            }
-        });
         crate::ui::sheet::switcher(dialog)
             .close_button(false)
             .p_0()
-            .child(command)
+            .overflow_hidden()
+            .child(view.clone())
     });
 }
 

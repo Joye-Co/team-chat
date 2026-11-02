@@ -206,6 +206,13 @@ pub const SCENES: &[Scene] = &[
         open: open_switcher,
     },
     Scene {
+        name: "switcher-query",
+        about: "The quick switcher with a query: marked matches in 话题, 群 and 消息",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::switcher_query,
+    },
+    Scene {
         name: "new-group",
         about: "The new-群 sheet: name, member picker and buttons",
         start: Start::SignedIn,

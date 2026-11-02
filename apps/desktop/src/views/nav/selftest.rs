@@ -313,6 +313,17 @@ pub mod scenes {
         Ok(handle)
     }
 
+    /// The quick switcher with a query typed.
+    pub fn switcher_query(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            super::super::switcher::open_with(services, "话题", window, cx)
+        })
+    }
+
     /// The new-group sheet.
     pub fn new_group(
         services: Services,
