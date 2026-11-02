@@ -142,6 +142,16 @@ pub fn opens_unsafely(name: &str) -> bool {
         "jnlp",
         "dmg",
         "iso",
+        // Web documents that a browser runs with scripts and network, and
+        // that the isolated 产出 window cannot show.
+        "webarchive",
+        "mht",
+        "mhtml",
+        "svgz",
+        "xml",
+        "xsl",
+        "xslt",
+        "shtml",
     ];
     let lower = name.to_ascii_lowercase();
     let ext = Path::new(&lower)
@@ -152,10 +162,13 @@ pub fn opens_unsafely(name: &str) -> bool {
     ext.is_empty() || RISKY.contains(&ext.as_str())
 }
 
-/// An HTML file: it opens in the isolated 产出 window, not in a browser.
+/// A page that can run scripts (HTML, XHTML, SVG): it opens in the isolated
+/// 产出 window, never in a browser.
 pub fn is_html(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
-    l.ends_with(".html") || l.ends_with(".htm")
+    [".html", ".htm", ".xhtml", ".xht", ".svg"]
+        .iter()
+        .any(|ext| l.ends_with(ext))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -253,6 +266,9 @@ mod tests {
             "x.sh",
             "Makefile",
             "a.webloc",
+            "page.webarchive",
+            "page.MHT",
+            "feed.xml",
         ] {
             assert!(opens_unsafely(name), "{name}");
         }
@@ -260,6 +276,10 @@ mod tests {
             assert!(!opens_unsafely(name), "{name}");
         }
         assert!(is_html("Index.HTM"));
+        for name in ["a.xhtml", "b.XHT", "logo.svg"] {
+            assert!(is_html(name), "{name}");
+        }
+        assert!(!is_html("photo.png"));
     }
 
     #[test]

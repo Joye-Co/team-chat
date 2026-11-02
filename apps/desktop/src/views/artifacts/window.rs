@@ -20,7 +20,7 @@ use gpui::{App, AsyncApp, Global};
 use crate::{
     copy::{artifacts as ca, fill},
     data::{ArtifactFolder, ChatProvider, FileAttachment, FileError},
-    views::files::{error_text, notify_error, opens_unsafely},
+    views::files::{error_text, is_html, notify_error, opens_unsafely},
 };
 
 /// Open 产出 windows and the 产出 being fetched.
@@ -102,9 +102,10 @@ pub fn open_artifact(provider: &Arc<dyn ChatProvider>, artifact_id: &str, versio
 }
 
 /// Shows a version folder: a page in the 产出 window, a single file with the
-/// default app.
+/// default app. A file 产出 whose entry is a page (HTML, SVG, ...) also opens
+/// in the 产出 window: a browser would run it with network access.
 fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mut App) {
-    if !folder.is_page {
+    if !opens_in_window(&folder) {
         let path = folder.dir.join(&folder.entry);
         if opens_unsafely(&folder.entry) {
             cx.reveal_path(&path);
@@ -141,6 +142,11 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
         let _ = provider;
         cx.open_with_system(&folder.dir.join(&folder.entry));
     }
+}
+
+/// True when the version shows in the isolated 产出 window.
+fn opens_in_window(folder: &ArtifactFolder) -> bool {
+    folder.is_page || is_html(&folder.entry)
 }
 
 /// Opens an HTML file attached to a message in its own isolated window
@@ -284,4 +290,28 @@ fn ask_to_open_link(url: String) {
         }
         PROMPTING.store(false, Ordering::SeqCst);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn folder(entry: &str, is_page: bool) -> ArtifactFolder {
+        ArtifactFolder {
+            artifact_id: "a1".into(),
+            version: 1,
+            dir: "/tmp/a1".into(),
+            entry: entry.into(),
+            is_page,
+        }
+    }
+
+    #[test]
+    fn file_artifacts_that_are_pages_open_in_the_isolated_window() {
+        assert!(opens_in_window(&folder("index.html", true)));
+        for entry in ["report.html", "docs/a.XHTML", "logo.svg"] {
+            assert!(opens_in_window(&folder(entry, false)), "{entry}");
+        }
+        assert!(!opens_in_window(&folder("report.pdf", false)));
+    }
 }
