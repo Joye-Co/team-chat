@@ -343,6 +343,27 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "panel-run",
+        about: "The side panel of a 话题 where a bot member works: its state, latest steps and 成员",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_running_details,
+        open: open_main,
+    },
+    Scene {
+        name: "panel-failed",
+        about: "The side panel of a 话题 whose bot run failed",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_failed_details,
+        open: open_main,
+    },
+    Scene {
+        name: "panel-plan",
+        about: "The side panel of the sample-card 话题: a plan list from a card",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_plan_details,
+        open: open_main,
+    },
+    Scene {
         name: "topic",
         about: "main-*: a long 话题 with a date divider, a steps row, a 产出, an ask card, a bot at work and the @ list",
         start: Start::SignedIn,
