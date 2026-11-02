@@ -5,28 +5,24 @@
 use std::path::PathBuf;
 
 use gpui::{
-    AsyncApp, Context, ElementId, InteractiveElement as _, IntoElement,
-    ParentElement, PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _,
-    Styled, Subscription, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+    AsyncApp, Context, ElementId, InteractiveElement as _, IntoElement, ParentElement,
+    PathPromptOptions, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
+    WeakEntity, Window, div, prelude::FluentBuilder as _, px, relative,
 };
-use gpui_component::{
-    Disableable as _, Icon, IconName, Sizable as _,
-    button::{Button, ButtonVariants as _},
-    notification::Notification,
-    progress::Progress,
-};
+use gpui_component::{Disableable as _, notification::Notification};
 
 use super::window;
 use crate::{
     app::{Changes, Services},
     copy::{artifacts as ca, files as f, fill, panel as p},
     data::{
-        ArtifactKind, ArtifactSummary, Change, FileError, GroupId, Member, NewArtifactRequest, TopicFile,
-        TopicId, TransferState, create_key,
+        ArtifactKind, ArtifactSummary, Change, FileError, GroupId, Member, NewArtifactRequest,
+        TopicFile, TopicId, TransferState, create_key,
     },
-    theme,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
     views::{
-        files::{error_text, extra::file_row_in, notify, notify_error},
+        files::{PANEL_ROW_H, error_text, extra::file_row_in, notify, notify_error},
         time_text,
     },
 };
@@ -130,7 +126,10 @@ impl TopicOutputs {
                 Ok(created) => notify(
                     Notification::success(fill(
                         ca::CREATED,
-                        &[("title", &created.title), ("n", &created.version.to_string())],
+                        &[
+                            ("title", &created.title),
+                            ("n", &created.version.to_string()),
+                        ],
                     )),
                     cx,
                 ),
@@ -143,101 +142,138 @@ impl TopicOutputs {
 
 impl Render for TopicOutputs {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
+        let k = theme::colors(cx);
         let Some((g, t)) = self.open.clone() else {
             return div();
-        };
-        let section = |title: &'static str| {
-            div()
-                .pt(px(12.))
-                .pb(px(4.))
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child(title)
         };
         let provider = self.services.provider.clone();
         let creating = provider.file_transfer(&create_key(&t));
         let busy = matches!(creating, Some(TransferState::Running { .. }));
+        let quiet = |text: &'static str| {
+            div()
+                .h(px(24.))
+                .flex()
+                .items_center()
+                .t_meta()
+                .text_color(k.text_3)
+                .child(text)
+        };
 
+        // `产出 · 2` with the upload button at the right (§8.1 sections).
         let header = div()
+            .h(px(20.))
+            .mb(space::S4)
             .flex()
             .items_center()
-            .child(section(p::ARTIFACTS).flex_1())
+            .child(div().flex_1().min_w(px(0.)).child(ui::panel_label(
+                p::ARTIFACTS,
+                Some(self.artifacts.len() as u32),
+                cx,
+            )))
             .child(
-                Button::new("artifact-new")
-                    .xsmall()
-                    .ghost()
-                    .icon(IconName::Plus)
-                    .label(ca::NEW)
+                ui::icon_button_sm("artifact-new", Lucide::Plus)
+                    .tooltip(ca::NEW)
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.pick_and_upload(None, cx))),
             );
 
+        // 48 pt rows (§7.11): a 32 pt `accent-soft` tile, the title 14/500,
+        // `网页 · v3 · 今天 14:31` 12/16 `text-2`; a new version on hover.
         let rows: Vec<_> = self
             .artifacts
             .iter()
             .map(|a| {
-                let kind = match a.kind {
-                    ArtifactKind::Page => ca::KIND_PAGE,
-                    _ => ca::KIND_FILE,
+                let (kind, glyph) = match a.kind {
+                    ArtifactKind::Page => (ca::PANEL_KIND_PAGE, Lucide::FileCode),
+                    _ => (ca::KIND_FILE, Lucide::FileText),
                 };
-                let name = self
+                let meta = format!(
+                    "{kind} · {} · {}",
+                    fill(ca::VERSION_SHORT, &[("n", &a.version.to_string())]),
+                    time_text(a.updated_at)
+                );
+                let author = self
                     .members
                     .iter()
                     .find(|m| m.id == a.created_by)
                     .map(|m| m.name.clone())
                     .unwrap_or_default();
-                let icon = match a.kind {
-                    ArtifactKind::Page => IconName::Globe,
-                    _ => IconName::FileText,
-                };
                 let (id, id2) = (a.id.clone(), a.id.clone());
+                let group = SharedString::from(format!("panel-artifact-{}", a.id));
                 let provider = provider.clone();
                 div()
-                    .id(ElementId::Name(SharedString::from(format!("panel-artifact-{}", a.id))))
-                    .py(px(4.))
-                    .px(px(4.))
-                    .rounded(px(6.))
-                    .hover(|s| s.bg(colors.row_hover))
+                    .id(ElementId::Name(group.clone()))
+                    .group(group.clone())
+                    .h(PANEL_ROW_H)
+                    .mx(-space::S8)
+                    .px(space::S8)
+                    .rounded(theme::radius::MD)
+                    .hover(|s| s.bg(k.hover))
+                    .active(|s| s.bg(k.pressed))
                     .cursor_pointer()
                     .flex()
                     .items_center()
-                    .gap(px(8.))
-                    .child(Icon::new(icon).text_color(colors.accent).flex_none())
+                    .gap(space::S12)
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(32.))
+                            .rounded(theme::radius::MD)
+                            .bg(k.accent_soft)
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(ui::icon(glyph, theme::icon::ROW, k.accent_text)),
+                    )
                     .child(
                         div()
                             .flex_1()
                             .min_w(px(0.))
                             .flex()
                             .flex_col()
-                            .child(div().text_sm().truncate().child(a.title.clone()))
                             .child(
                                 div()
-                                    .flex()
-                                    .gap(px(6.))
-                                    .text_xs()
-                                    .text_color(colors.muted_foreground)
-                                    .child(kind)
-                                    .child(fill(p::VERSION, &[("n", &a.version.to_string())]))
-                                    .when(!name.is_empty(), |el| el.child(name))
-                                    .child(time_text(a.updated_at)),
+                                    .t_ui()
+                                    .medium()
+                                    .text_color(k.text_1)
+                                    .one_line()
+                                    .child(a.title.clone()),
+                            )
+                            .child(
+                                div()
+                                    .t_meta()
+                                    .tnum()
+                                    .text_color(k.text_2)
+                                    .one_line()
+                                    .child(meta),
                             ),
                     )
                     .child(
-                        Button::new(ElementId::Name(SharedString::from(format!(
-                            "panel-artifact-version-{}",
-                            a.id
-                        ))))
-                        .xsmall()
-                        .ghost()
-                        .icon(IconName::Plus)
-                        .tooltip(ca::NEW_VERSION)
-                        .disabled(busy)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.pick_and_upload(Some(id2.clone()), cx)
-                        })),
+                        div()
+                            .flex_none()
+                            .invisible()
+                            .group_hover(group, |s| s.visible())
+                            .child(
+                                ui::icon_button_sm(
+                                    ElementId::Name(SharedString::from(format!(
+                                        "panel-artifact-version-{}",
+                                        a.id
+                                    ))),
+                                    Lucide::Plus,
+                                )
+                                .tooltip(ca::NEW_VERSION)
+                                .disabled(busy)
+                                .on_click(cx.listener(
+                                    move |this, _, _, cx| {
+                                        cx.stop_propagation();
+                                        this.pick_and_upload(Some(id2.clone()), cx)
+                                    },
+                                )),
+                            ),
                     )
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(author.clone()).build(window, cx)
+                    })
                     .on_click(move |_, _, cx| window::open_artifact(&provider, &id, None, cx))
                     .into_any_element()
             })
@@ -249,60 +285,69 @@ impl Render for TopicOutputs {
             .enumerate()
             .map(|(i, tf)| {
                 let key = format!("panel-file-{}-{i}", tf.message_id);
-                div()
-                    .py(px(2.))
-                    .flex()
-                    .flex_col()
-                    .child(file_row_in(
-                        &g,
-                        &t,
-                        &tf.file,
-                        &provider,
-                        true,
-                        |part| ElementId::Name(SharedString::from(format!("{key}-{part}"))),
-                        cx,
-                    ))
-                    .into_any_element()
+                file_row_in(
+                    &g,
+                    &t,
+                    &tf.file,
+                    &provider,
+                    true,
+                    |part| ElementId::Name(SharedString::from(format!("{key}-{part}"))),
+                    cx,
+                )
             })
             .collect();
+        let n_files = files.len() as u32;
 
         div()
             .flex()
             .flex_col()
-            .child(header)
-            .when_some(creating, |el, state| match state {
-                TransferState::Running { .. } => el.child(
+            .gap(space::S16)
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .child(header)
+                    .when_some(creating, |el, state| match state {
+                        TransferState::Running { .. } => el.child(
+                            div()
+                                .py(space::S4)
+                                .flex()
+                                .flex_col()
+                                .gap(space::S6)
+                                .child(div().t_meta().tnum().text_color(k.text_2).child(fill(
+                                    ca::CREATING,
+                                    &[("p", &format!("{:.0}", state.percent()))],
+                                )))
+                                .child(
+                                    div().h(px(3.)).rounded(px(1.5)).bg(k.field).child(
+                                        div()
+                                            .h_full()
+                                            .w(relative((state.percent() / 100.).clamp(0., 1.)))
+                                            .rounded(px(1.5))
+                                            .bg(k.accent),
+                                    ),
+                                ),
+                        ),
+                        _ => el,
+                    })
+                    .when(rows.is_empty(), |el| el.child(quiet(p::ARTIFACTS_NONE)))
+                    .children(rows),
+            )
+            .when(n_files > 0, |el| {
+                el.child(
                     div()
-                        .py(px(4.))
                         .flex()
                         .flex_col()
-                        .gap(px(4.))
                         .child(
                             div()
-                                .text_xs()
-                                .text_color(colors.muted_foreground)
-                                .child(fill(ca::CREATING, &[("p", &format!("{:.0}", state.percent()))])),
+                                .h(px(20.))
+                                .mb(space::S4)
+                                .flex()
+                                .items_center()
+                                .child(ui::panel_label(f::PANEL_FILES, Some(n_files), cx)),
                         )
-                        .child(Progress::new("artifact-create-progress").value(state.percent())),
-                ),
-                _ => el,
-            })
-            .when(rows.is_empty(), |el| {
-                el.child(
-                    div()
-                        .text_color(colors.muted_foreground)
-                        .child(p::ARTIFACTS_EMPTY),
+                        .children(files),
                 )
             })
-            .children(rows)
-            .child(section(f::PANEL_FILES))
-            .when(files.is_empty(), |el| {
-                el.child(
-                    div()
-                        .text_color(colors.muted_foreground)
-                        .child(f::PANEL_FILES_EMPTY),
-                )
-            })
-            .children(files)
     }
 }

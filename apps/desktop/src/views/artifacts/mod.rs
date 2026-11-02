@@ -8,6 +8,7 @@ pub mod window;
 
 use gpui::{Pixels, px};
 
-/// Size of a 产出 card in the timeline (fixed, so the row height is stable).
-pub const CARD_W: Pixels = px(360.);
-pub const CARD_H: Pixels = px(52.);
+/// Size of a 产出 card in the timeline: a file row (§7.11) at the one
+/// measure, fixed height so the row height is stable.
+pub const CARD_W: Pixels = px(620.);
+pub const CARD_H: Pixels = px(64.);
