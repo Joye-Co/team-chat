@@ -632,7 +632,6 @@ scene_opener!(open_profile, Page::Profile);
 scene_opener!(open_members, Page::Members);
 scene_opener!(open_machines, Page::Machines);
 scene_opener!(open_notifications, Page::Notifications);
-scene_opener!(open_cost, Page::Cost);
 scene_opener!(open_about, Page::About);
 
 /// 成员 scrolled to its end: the last rows and the footnote under the table.

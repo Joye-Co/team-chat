@@ -43,17 +43,16 @@ pub enum Page {
     Members,
     Machines,
     Notifications,
-    Cost,
     About,
 }
 
 impl Page {
-    pub const ALL: [Page; 6] = [
+    /// 成本 has no page until it exists (U43).
+    pub const ALL: [Page; 5] = [
         Page::Profile,
         Page::Members,
         Page::Machines,
         Page::Notifications,
-        Page::Cost,
         Page::About,
     ];
 
@@ -63,7 +62,6 @@ impl Page {
             Page::Members => s::PAGE_MEMBERS,
             Page::Machines => s::PAGE_MACHINES,
             Page::Notifications => s::PAGE_NOTIFICATIONS,
-            Page::Cost => s::PAGE_COST,
             Page::About => s::PAGE_GENERAL,
         }
     }
@@ -75,7 +73,6 @@ impl Page {
             Page::Members => "members",
             Page::Machines => "machines",
             Page::Notifications => "notifications",
-            Page::Cost => "cost",
             Page::About => "about",
         }
     }
@@ -182,10 +179,6 @@ impl SettingsView {
             Page::Machines => self.machines.clone().into_any_element(),
             Page::Notifications => self.notifications.clone().into_any_element(),
             Page::About => self.about.clone().into_any_element(),
-            // Hidden until it exists (U43); kept for the self-test scene.
-            Page::Cost => ui::EmptyState::new(ui::icons::Lucide::ChartColumn, s::COMING_SOON)
-                .description(s::COST_HINT)
-                .into_any_element(),
         }
     }
 
@@ -207,19 +200,9 @@ impl Page {
             Page::Members => Lucide::Users,
             Page::Machines => Lucide::Monitor,
             Page::Notifications => Lucide::Bell,
-            Page::Cost => Lucide::ChartColumn,
             Page::About => Lucide::Settings,
         }
     }
-
-    /// The pages in the section list: 成本 is hidden until it exists (U43).
-    const LISTED: [Page; 5] = [
-        Page::Profile,
-        Page::Members,
-        Page::Machines,
-        Page::Notifications,
-        Page::About,
-    ];
 }
 
 /// Width of the section list (§8.4).
@@ -231,7 +214,7 @@ impl Render for SettingsView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let current = self.page;
-        let rows = Page::LISTED.into_iter().map(|page| {
+        let rows = Page::ALL.into_iter().map(|page| {
             let on = page == current;
             ui::list_row(
                 gpui::SharedString::from(format!("settings-page-{}", page.slug())),

@@ -11,7 +11,6 @@ crate::copy! {
     PAGE_MEMBERS = "成员",
     PAGE_MACHINES = "机器",
     PAGE_NOTIFICATIONS = "通知",
-    PAGE_COST = "成本",
     PAGE_GENERAL = "通用",
 
     // 个人
@@ -154,11 +153,6 @@ crate::copy! {
     UNFOLLOW = "取消关注",
     MUTE_GROUP = "静音这个群",
     FOLLOW_TOPIC = "关注这个话题",
-
-    // 成本
-    COST = "成本",
-    COMING_SOON = "即将推出",
-    COST_HINT = "以后会在这里看到每个自动成员花了多少钱。",
 
     // 通用
     ABOUT = "关于",

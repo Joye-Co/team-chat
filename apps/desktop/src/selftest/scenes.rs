@@ -191,13 +191,6 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_notifications,
     },
     Scene {
-        name: "settings-cost",
-        about: "Settings: 成本 placeholder",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: settings_scenes::open_cost,
-    },
-    Scene {
         name: "settings-about",
         about: "Settings: 通用 (about card, diagnostics, developer view)",
         start: Start::SignedIn,
