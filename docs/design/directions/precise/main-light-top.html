@@ -1,0 +1,909 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head><meta charset="utf-8"><title>精密工具 · 主窗口（向上滚动） · light</title>
+<style>
+/* 精密工具 Precise pro: shared tokens and components for the mockups.
+   Every value here has the same name in DIRECTION.md. */
+
+:root {
+  /* surfaces */
+  --window: #f3f3f4;          /* window base, sidebar sits on it */
+  --sidebar: #f3f3f4;
+  --content: #ffffff;         /* inset content panel */
+  --elevated: #ffffff;        /* cards in the timeline */
+  --popover: #ffffff;
+  --sunken: #f6f6f7;          /* code, inputs at rest, quote fill */
+  --scrim: rgba(17, 17, 20, 0.22);
+
+  /* text */
+  --text-1: #18181b;
+  --text-2: #55555d;
+  --text-3: #8b8b93;
+  --text-4: #b3b3ba;
+  --text-on-accent: #ffffff;
+
+  /* lines */
+  --separator: rgba(0, 0, 0, 0.07);
+  --separator-strong: rgba(0, 0, 0, 0.12);
+
+  /* fills (row states) */
+  --hover: rgba(0, 0, 0, 0.035);
+  --pressed: rgba(0, 0, 0, 0.07);
+  --selected: rgba(0, 0, 0, 0.06);
+  --fill-quiet: rgba(0, 0, 0, 0.05);
+
+  /* accent: cobalt */
+  --accent: #3656e0;
+  --accent-hover: #2c4bd0;
+  --accent-pressed: #2541b8;
+  --accent-text: #2f4fd6;
+  --accent-tint: rgba(54, 86, 224, 0.09);
+  --accent-tint-strong: rgba(54, 86, 224, 0.16);
+  --ring: rgba(54, 86, 224, 0.42);
+  --text-selection: rgba(54, 86, 224, 0.22);
+
+  /* topic status */
+  --st-open: #9a9aa2;
+  --st-progress: #c7860a;
+  --st-answer: #3656e0;
+  --st-review: #7a55d1;
+  --st-blocked: #d93a3a;
+  --st-done: #2a9a58;
+  --st-progress-text: #9a6500;
+  --st-answer-text: #2f4fd6;
+  --st-review-text: #6643bd;
+  --st-blocked-text: #c02f2f;
+  --st-done-text: #20804a;
+
+  /* signals */
+  --online: #2fa564;
+  --offline-ring: #b3b3ba;
+  --danger: #d93a3a;
+  --danger-tint: rgba(217, 58, 58, 0.09);
+  --warning: #c7860a;
+  --bot-mark-bg: #18181b;
+  --bot-mark-fg: #ffffff;
+
+  /* code */
+  --code-bg: #f6f6f7;
+  --code-text: #2b2b31;
+  --code-keyword: #b13a6a;
+  --code-fn: #2f4fd6;
+  --code-type: #8a5a00;
+  --code-comment: #8b8b93;
+  --code-string: #20804a;
+
+  /* elevation: rings are shadows, not borders */
+  --e1: 0 0 0 1px rgba(0, 0, 0, 0.055), 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 12px -6px rgba(0, 0, 0, 0.05);
+  --e2: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.05), 0 2px 6px -2px rgba(0, 0, 0, 0.05);
+  --e3: 0 0 0 1px rgba(0, 0, 0, 0.075), 0 2px 6px rgba(0, 0, 0, 0.06), 0 12px 28px -6px rgba(0, 0, 0, 0.16);
+  --e4: 0 0 0 1px rgba(0, 0, 0, 0.08), 0 8px 18px -8px rgba(0, 0, 0, 0.14), 0 28px 64px -12px rgba(0, 0, 0, 0.28);
+  --window-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.18), 0 22px 70px -10px rgba(0, 0, 0, 0.32), 0 8px 20px -8px rgba(0, 0, 0, 0.2);
+
+  /* avatar hues (initials background / text) */
+  --av-1-bg: #e6ecff; --av-1-fg: #2f4fd6;
+  --av-2-bg: #fdebd9; --av-2-fg: #a35400;
+  --av-3-bg: #dff3e7; --av-3-fg: #1f7a45;
+  --av-4-bg: #f2e6fb; --av-4-fg: #7643b8;
+  --av-5-bg: #fde4e4; --av-5-fg: #b42f2f;
+  --av-6-bg: #ddf1f4; --av-6-fg: #11727f;
+  --av-bot-bg: #ececef; --av-bot-fg: #3a3a41;
+
+  /* type */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Apple Color Emoji", sans-serif;
+  --mono: "SF Mono", ui-monospace, Menlo, monospace;
+
+  /* radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 10px;
+  --r-xl: 14px;
+
+  color-scheme: light;
+}
+
+[data-theme="dark"] {
+  --window: #111113;
+  --sidebar: #111113;
+  --content: #18181b;
+  --elevated: #202024;
+  --popover: #232328;
+  --sunken: #131315;
+  --scrim: rgba(0, 0, 0, 0.42);
+
+  --text-1: #ededef;
+  --text-2: #a5a5ad;
+  --text-3: #74747c;
+  --text-4: #4f4f56;
+
+  --separator: rgba(255, 255, 255, 0.065);
+  --separator-strong: rgba(255, 255, 255, 0.11);
+
+  --hover: rgba(255, 255, 255, 0.04);
+  --pressed: rgba(255, 255, 255, 0.08);
+  --selected: rgba(255, 255, 255, 0.07);
+  --fill-quiet: rgba(255, 255, 255, 0.06);
+
+  --accent: #5272ff;
+  --accent-hover: #6380ff;
+  --accent-pressed: #4562e8;
+  --accent-text: #8ea2ff;
+  --accent-tint: rgba(82, 114, 255, 0.14);
+  --accent-tint-strong: rgba(82, 114, 255, 0.24);
+  --ring: rgba(102, 132, 255, 0.55);
+  --text-selection: rgba(82, 114, 255, 0.34);
+
+  --st-open: #6e6e76;
+  --st-progress: #e0a33a;
+  --st-answer: #6f8bff;
+  --st-review: #a88bf0;
+  --st-blocked: #f06464;
+  --st-done: #45c07a;
+  --st-progress-text: #e8b45a;
+  --st-answer-text: #93a7ff;
+  --st-review-text: #b9a1f5;
+  --st-blocked-text: #f58080;
+  --st-done-text: #5fcb8d;
+
+  --online: #3fbf75;
+  --offline-ring: #5a5a62;
+  --danger: #f06464;
+  --danger-tint: rgba(240, 100, 100, 0.13);
+  --warning: #e0a33a;
+  --bot-mark-bg: #ededef;
+  --bot-mark-fg: #18181b;
+
+  --code-bg: #131315;
+  --code-text: #d9d9de;
+  --code-keyword: #f08bb4;
+  --code-fn: #8ea2ff;
+  --code-type: #e8b45a;
+  --code-comment: #6e6e76;
+  --code-string: #6fd29a;
+
+  --e1: 0 0 0 1px rgba(255, 255, 255, 0.055), 0 1px 2px rgba(0, 0, 0, 0.5), 0 6px 16px -6px rgba(0, 0, 0, 0.5);
+  --e2: 0 0 0 1px rgba(255, 255, 255, 0.06), inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 1px 3px rgba(0, 0, 0, 0.45);
+  --e3: 0 0 0 1px rgba(255, 255, 255, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 14px 32px -6px rgba(0, 0, 0, 0.6);
+  --e4: 0 0 0 1px rgba(255, 255, 255, 0.09), inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 30px 70px -10px rgba(0, 0, 0, 0.75);
+  --window-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 22px 70px -10px rgba(0, 0, 0, 0.7);
+
+  --av-1-bg: #232c52; --av-1-fg: #9fb1ff;
+  --av-2-bg: #3b2a18; --av-2-fg: #f0b878;
+  --av-3-bg: #1a3527; --av-3-fg: #79d6a0;
+  --av-4-bg: #33244a; --av-4-fg: #c6a8f5;
+  --av-5-bg: #3e2222; --av-5-fg: #f59a9a;
+  --av-6-bg: #173438; --av-6-fg: #7fd3de;
+  --av-bot-bg: #2c2c32; --av-bot-fg: #d5d5da;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1440px; height: 900px; overflow: hidden; }
+html:has(body.tall), body.tall { height: 1000px; }
+body {
+  font-family: var(--font);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--text-1);
+  background: var(--window);
+  -webkit-font-smoothing: antialiased;
+  font-feature-settings: "kern";
+}
+::selection { background: var(--text-selection); }
+.num { font-variant-numeric: tabular-nums; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.75; stroke-linecap: round; stroke-linejoin: round; }
+svg.i.s14 { width: 14px; height: 14px; }
+svg.i.s12 { width: 12px; height: 12px; stroke-width: 2; }
+svg.i.s18 { width: 18px; height: 18px; stroke-width: 1.6; }
+svg.i.s20 { width: 20px; height: 20px; stroke-width: 1.5; }
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+
+/* ------------------------------------------------------------ window */
+.win { position: absolute; inset: 0; display: flex; background: var(--window); }
+.traffic { position: absolute; left: 18px; top: 18px; display: flex; gap: 8px; z-index: 5; }
+.traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; box-shadow: inset 0 0 0 0.5px rgba(0,0,0,0.12); }
+.traffic i:nth-child(1) { background: #ff5f57; }
+.traffic i:nth-child(2) { background: #febc2e; }
+.traffic i:nth-child(3) { background: #28c840; }
+.traffic.off i { background: var(--fill-quiet); box-shadow: inset 0 0 0 0.5px var(--separator-strong); }
+
+/* ------------------------------------------------------------ sidebar */
+.sidebar { width: 232px; flex: none; display: flex; flex-direction: column; padding: 52px 10px 10px; background: var(--sidebar); }
+.search {
+  height: 28px; display: flex; align-items: center; gap: 6px; padding: 0 6px 0 8px; margin: 0 0 12px;
+  border-radius: var(--r-sm); background: var(--fill-quiet); color: var(--text-3); font-size: 13px;
+}
+.kbd {
+  display: inline-flex; align-items: center; justify-content: center; gap: 1px; height: 18px; min-width: 18px; padding: 0 4px;
+  border-radius: var(--r-xs); font: 500 11px/1 var(--font); color: var(--text-3);
+  background: var(--content); box-shadow: 0 0 0 1px var(--separator), 0 1px 0 var(--separator);
+  font-variant-numeric: tabular-nums;
+}
+[data-theme="dark"] .kbd { background: rgba(255,255,255,0.06); box-shadow: 0 0 0 1px var(--separator); }
+.kbd.flat { background: transparent; box-shadow: none; padding: 0 2px; min-width: 0; }
+.sec { display: flex; align-items: center; height: 26px; padding: 0 8px; margin-top: 10px; color: var(--text-3); font-size: 12px; font-weight: 500; }
+.sec .grow { flex: 1; }
+.sec .sec-count { font-size: 11px; color: var(--text-3); }
+.row {
+  height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 6px 0 8px; border-radius: var(--r-sm);
+  color: var(--text-2); font-size: 13px; position: relative;
+}
+.row .label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.row .ic { color: var(--text-3); }
+.row.unread { color: var(--text-1); font-weight: 600; }
+.row.unread .ic { color: var(--text-2); }
+.row.sel { background: var(--selected); color: var(--text-1); }
+.row.sel .ic { color: var(--text-1); }
+.row.hover { background: var(--hover); }
+.row.muted { color: var(--text-3); }
+.row .tail { display: flex; align-items: center; gap: 4px; flex: none; }
+.todo-row { height: 30px; }
+.todo-row .why { font-size: 11px; color: var(--text-3); font-weight: 400; flex: none; }
+.side-foot { margin-top: auto; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 6px 0 8px; border-radius: var(--r-sm); }
+.side-foot .who { flex: 1; min-width: 0; }
+.side-foot .who b { display: block; font-weight: 500; font-size: 13px; }
+.side-foot .who small { display: block; font-size: 11px; color: var(--text-3); line-height: 14px; }
+.side-foot .ic { color: var(--text-3); }
+
+/* badges */
+.badge {
+  height: 16px; min-width: 16px; padding: 0 5px; border-radius: 5px; display: inline-flex; align-items: center; justify-content: center;
+  font: 600 11px/1 var(--font); font-variant-numeric: tabular-nums; color: var(--text-2); background: var(--fill-quiet);
+}
+.badge.mention { background: var(--accent); color: var(--text-on-accent); padding: 0 5px 0 4px; }
+.badge.dot { min-width: 6px; width: 6px; height: 6px; padding: 0; border-radius: 50%; background: var(--accent); }
+
+/* avatars */
+.av {
+  --s: 32px; width: var(--s); height: var(--s); flex: none; border-radius: 50%; position: relative;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: calc(var(--s) * 0.36); letter-spacing: 0; line-height: 1;
+  background: var(--av-1-bg); color: var(--av-1-fg);
+}
+.av.c2 { background: var(--av-2-bg); color: var(--av-2-fg); }
+.av.c3 { background: var(--av-3-bg); color: var(--av-3-fg); }
+.av.c4 { background: var(--av-4-bg); color: var(--av-4-fg); }
+.av.c5 { background: var(--av-5-bg); color: var(--av-5-fg); }
+.av.c6 { background: var(--av-6-bg); color: var(--av-6-fg); }
+.av.bot { background: var(--av-bot-bg); color: var(--av-bot-fg); }
+.av.bot > svg.i { width: 56%; height: 56%; stroke-width: 1.7; }
+.av.s16 { --s: 16px; font-size: 8px; }
+.av.s18 { --s: 18px; font-size: 8.5px; }
+.av.s20 { --s: 20px; font-size: 9px; }
+.av.s24 { --s: 24px; font-size: 10px; }
+.av.s28 { --s: 28px; font-size: 11px; }
+.av.s36 { --s: 36px; font-size: 13px; }
+.av .mark {
+  position: absolute; right: -3px; bottom: -3px; width: 14px; height: 14px; border-radius: 4px;
+  background: var(--bot-mark-bg); color: var(--bot-mark-fg); display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px var(--ring-bg, var(--content));
+}
+.av .mark svg { width: 9px; height: 9px; stroke-width: 2.4; }
+.av.s18 .mark, .av.s20 .mark, .av.s16 .mark { width: 10px; height: 10px; right: -3px; bottom: -3px; border-radius: 3px; }
+.av.s18 .mark svg, .av.s20 .mark svg, .av.s16 .mark svg { width: 7px; height: 7px; stroke-width: 2.8; }
+.av .pres {
+  position: absolute; right: -1px; bottom: -1px; width: 8px; height: 8px; border-radius: 50%;
+  background: var(--online); box-shadow: 0 0 0 2px var(--ring-bg, var(--sidebar));
+}
+.av .pres.off { background: var(--ring-bg, var(--sidebar)); box-shadow: 0 0 0 2px var(--ring-bg, var(--sidebar)), inset 0 0 0 1.5px var(--offline-ring); }
+.sidebar .av { --ring-bg: var(--sidebar); }
+.sidebar .row.sel .av { --ring-bg: var(--sidebar); }
+
+/* status glyph + chip */
+.sg { width: 14px; height: 14px; flex: none; display: block; }
+.sg.s12 { width: 12px; height: 12px; }
+.chip {
+  display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px 0 5px; border-radius: var(--r-sm);
+  font-size: 12px; line-height: 16px; font-weight: 500; white-space: nowrap; flex: none; max-width: 100%;
+}
+.chip .sg { width: 12px; height: 12px; }
+.chip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.chip.progress { color: var(--st-progress-text); background: color-mix(in srgb, var(--st-progress) 12%, transparent); }
+.chip.answer { color: var(--st-answer-text); background: color-mix(in srgb, var(--st-answer) 11%, transparent); }
+.chip.review { color: var(--st-review-text); background: color-mix(in srgb, var(--st-review) 12%, transparent); }
+.chip.blocked { color: var(--st-blocked-text); background: color-mix(in srgb, var(--st-blocked) 11%, transparent); }
+.chip.done { color: var(--st-done-text); background: color-mix(in srgb, var(--st-done) 12%, transparent); }
+/* waiting on me: solid, the only filled chip */
+.chip.me { color: #fff; font-weight: 600; }
+.chip.me.answer { background: var(--st-answer); }
+.chip.me.review { background: var(--st-review); }
+.chip.sm { height: 18px; font-size: 11px; padding: 0 6px 0 4px; gap: 3px; }
+.chip.sm .sg { width: 11px; height: 11px; }
+
+/* buttons */
+.btn {
+  height: 28px; padding: 0 10px; border-radius: var(--r-sm); display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font: 500 13px/1 var(--font); color: var(--text-1); background: var(--content); box-shadow: var(--e2); white-space: nowrap; flex: none;
+}
+[data-theme="dark"] .btn { background: rgba(255,255,255,0.07); box-shadow: 0 0 0 1px rgba(255,255,255,0.06), inset 0 1px 0 rgba(255,255,255,0.04); }
+.btn.primary { background: var(--accent); color: var(--text-on-accent); box-shadow: 0 0 0 1px var(--accent-pressed), inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 2px rgba(0,0,0,0.12); }
+.btn.ghost { background: transparent; box-shadow: none; color: var(--text-2); }
+.btn.icon { width: 28px; padding: 0; background: transparent; box-shadow: none; color: var(--text-2); }
+.btn.icon.on { background: var(--selected); color: var(--text-1); }
+.btn.danger { color: var(--danger); }
+.btn.lg { height: 32px; padding: 0 14px; font-size: 13px; border-radius: 7px; }
+.btn .kbd { background: rgba(255,255,255,0.18); color: rgba(255,255,255,0.9); box-shadow: none; height: 16px; min-width: 16px; font-size: 10.5px; }
+.btn:not(.primary) .kbd { background: var(--fill-quiet); color: var(--text-3); }
+
+/* ------------------------------------------------------------ inset content panel */
+.panel {
+  flex: 1; min-width: 0; margin: 8px 8px 8px 0; border-radius: 12px; background: var(--content); box-shadow: var(--e1);
+  display: flex; overflow: hidden; position: relative;
+}
+.col-head { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 12px 0 16px; }
+
+/* topic list */
+.topics { width: 304px; flex: none; display: flex; flex-direction: column; box-shadow: 1px 0 0 var(--separator); position: relative; z-index: 1; }
+.topics .col-head h2 { font-size: 15px; line-height: 20px; font-weight: 600; }
+.topics .col-head .meta { font-size: 12px; color: var(--text-3); flex: 1; }
+.tfilter { display: flex; gap: 2px; padding: 0 12px 8px 12px; overflow: hidden; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+.tfilter span { white-space: nowrap; flex: none; height: 24px; padding: 0 8px; border-radius: var(--r-sm); font-size: 12px; font-weight: 500; color: var(--text-3); display: inline-flex; align-items: center; gap: 5px; }
+.tfilter span.on { background: var(--selected); color: var(--text-1); }
+.tfilter span .n { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.tlist { padding: 0 6px; display: flex; flex-direction: column; gap: 1px; }
+.trow { padding: 9px 10px 10px; border-radius: var(--r-md); display: flex; flex-direction: column; gap: 5px; }
+.trow.sel { background: var(--selected); }
+.trow .l1 { display: flex; align-items: baseline; gap: 8px; }
+.trow .t { flex: 1; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text-1); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.trow.read .t { color: var(--text-2); font-weight: 400; }
+.trow .time { font-size: 11px; color: var(--text-3); flex: none; font-variant-numeric: tabular-nums; }
+.trow .l2 { display: flex; align-items: center; gap: 6px; min-height: 18px; }
+.trow .pv { flex: 1; font-size: 12px; line-height: 16px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.trow .pv b { font-weight: 500; color: var(--text-2); }
+
+/* timeline */
+.topic { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+.topic .col-head { padding: 0 10px 0 20px; box-shadow: 0 1px 0 var(--separator); position: relative; z-index: 2; background: var(--content); }
+.topic .col-head h1 { font-size: 15px; line-height: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.topic .col-head .sp { flex: 1; }
+.stack { display: flex; align-items: center; margin-right: 6px; }
+.stack .av { --ring-bg: var(--content); box-shadow: 0 0 0 2px var(--content); }
+.stack .av + .av { margin-left: -5px; }
+.stack .more { font-size: 11px; color: var(--text-3); margin-left: 6px; font-variant-numeric: tabular-nums; }
+.vr { width: 1px; height: 16px; background: var(--separator-strong); margin: 0 4px; }
+
+.tl { flex: 1; overflow: hidden; padding: 4px 0 0; display: flex; flex-direction: column; justify-content: flex-end;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 20px, #000 calc(100% - 16px), transparent 100%); }
+.day { display: flex; align-items: center; gap: 10px; padding: 14px 20px 6px; color: var(--text-3); font-size: 11px; font-weight: 500; }
+.day::after, .day::before { content: ""; height: 1px; flex: 1; background: var(--separator); }
+.newdiv { display: flex; align-items: center; gap: 8px; padding: 10px 20px 6px; color: var(--accent-text); font-size: 11px; font-weight: 600; }
+.newdiv::before { content: ""; height: 1px; flex: 1; background: var(--accent); opacity: 0.55; }
+
+.msg { display: flex; gap: 12px; padding: 6px 20px 6px; position: relative; }
+.msg .av { margin-top: 1px; --ring-bg: var(--content); }
+.msg .body { flex: 1; min-width: 0; }
+.msg .who { display: flex; align-items: baseline; gap: 8px; height: 20px; }
+.msg .who b { font-size: 13px; font-weight: 600; color: var(--text-1); }
+.msg .who .role { font-size: 12px; color: var(--text-3); }
+.msg .who time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.msg p { font-size: 14px; line-height: 22px; color: var(--text-1); max-width: 600px; overflow-wrap: anywhere; }
+.msg p + p { margin-top: 4px; }
+.msg.cont { padding-top: 1px; }
+.msg.cont .gutter { width: 32px; flex: none; text-align: right; font-size: 10.5px; color: var(--text-4); padding-top: 3px; font-variant-numeric: tabular-nums; }
+.msg.hover { background: var(--hover); }
+.msg.hover .tools { display: flex; }
+.tools { display: none; position: absolute; right: 16px; top: -12px; height: 28px; padding: 2px; gap: 1px; border-radius: var(--r-md); background: var(--popover); box-shadow: var(--e3); }
+.tools .btn.icon { width: 24px; height: 24px; }
+.mention { color: var(--accent-text); background: var(--accent-tint); border-radius: 4px; padding: 0 3px; font-weight: 500; }
+.mention.me { background: var(--accent-tint-strong); font-weight: 600; }
+
+/* bot acknowledgement: one quiet line */
+.ack { display: flex; align-items: center; gap: 8px; padding: 3px 20px 6px 64px; font-size: 13px; color: var(--text-2); }
+.ack .av { --ring-bg: var(--content); }
+.ack b { font-weight: 500; color: var(--text-2); }
+.ack .ok { color: var(--st-done); }
+.ack time { font-size: 11px; color: var(--text-3); margin-left: 2px; }
+
+.quote { display: flex; gap: 8px; margin: 2px 0 4px; max-width: 560px; }
+.quote::before { content: ""; width: 2px; border-radius: 1px; background: var(--separator-strong); flex: none; }
+.quote div { font-size: 13px; line-height: 20px; color: var(--text-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.quote div b { font-weight: 500; color: var(--text-2); margin-right: 6px; }
+
+.img { margin-top: 6px; width: 344px; height: 196px; border-radius: var(--r-md); overflow: hidden; box-shadow: 0 0 0 1px var(--separator); position: relative; }
+.img .cap { font-size: 12px; color: var(--text-3); margin-top: 6px; }
+
+.code { margin-top: 8px; max-width: 600px; border-radius: var(--r-md); background: var(--code-bg); overflow: hidden; box-shadow: inset 0 0 0 1px var(--separator); }
+.code .hd { display: flex; align-items: center; height: 28px; padding: 0 6px 0 12px; font-size: 11px; color: var(--text-3); font-weight: 500; }
+.code .hd .sp { flex: 1; }
+.code pre { font: 12px/19px var(--mono); color: var(--code-text); padding: 0 12px 10px; white-space: pre; overflow: hidden; }
+.code .k { color: var(--code-keyword); } .code .f { color: var(--code-fn); } .code .ty { color: var(--code-type); } .code .c { color: var(--code-comment); } .code .s { color: var(--code-string); }
+
+.card { margin-top: 8px; max-width: 480px; border-radius: var(--r-lg); background: var(--elevated); box-shadow: var(--e2); }
+.card .ch { display: flex; align-items: center; gap: 8px; padding: 12px 14px 0; font-size: 13px; font-weight: 600; }
+.card .ch .sp { flex: 1; }
+.card .ch small { font-size: 11px; color: var(--text-3); font-weight: 400; }
+.fields { display: grid; grid-template-columns: 64px 1fr; gap: 6px 12px; padding: 10px 14px 12px; font-size: 13px; line-height: 18px; }
+.fields dt { color: var(--text-3); font-size: 12px; }
+.fields dd { color: var(--text-1); min-width: 0; overflow-wrap: anywhere; }
+.fields dd code { font: 12px/18px var(--mono); color: var(--text-2); background: var(--fill-quiet); padding: 1px 4px; border-radius: 4px; }
+.card .acts { display: flex; justify-content: flex-end; gap: 8px; padding: 10px 14px 12px; box-shadow: inset 0 1px 0 var(--separator); }
+.art { display: flex; align-items: center; gap: 12px; padding: 12px 12px 12px 12px; max-width: 420px; }
+.art .tile { width: 36px; height: 36px; border-radius: var(--r-md); background: var(--accent-tint); color: var(--accent-text); display: flex; align-items: center; justify-content: center; flex: none; }
+.art .meta { flex: 1; min-width: 0; }
+.art .meta b { display: block; font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.art .meta small { display: block; font-size: 12px; color: var(--text-3); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+.stream-caret { display: inline-block; width: 2px; height: 15px; background: var(--accent); vertical-align: -2px; margin-left: 2px; border-radius: 1px; }
+.live { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--accent-text); font-weight: 500; }
+.live .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 3px var(--accent-tint); }
+
+.typing { height: 22px; display: flex; align-items: center; gap: 6px; padding: 0 22px; font-size: 12px; color: var(--text-3); }
+.dots { display: inline-flex; gap: 2px; }
+.dots i { width: 4px; height: 4px; border-radius: 50%; background: var(--text-3); display: block; }
+.dots i:nth-child(2) { opacity: 0.65; } .dots i:nth-child(3) { opacity: 0.35; }
+
+/* composer */
+.composer { margin: 0 16px 16px; border-radius: var(--r-lg); background: var(--content); box-shadow: var(--e2); position: relative; }
+.composer.focus { box-shadow: 0 0 0 1px var(--accent), 0 0 0 4px var(--accent-tint), 0 1px 2px rgba(0,0,0,0.04); }
+[data-theme="dark"] .composer { background: var(--elevated); }
+.composer .field { padding: 11px 14px 4px; font-size: 14px; line-height: 22px; min-height: 40px; color: var(--text-1); }
+.composer .ph { color: var(--text-3); }
+.composer .bar { display: flex; align-items: center; gap: 2px; padding: 4px 6px 6px 8px; }
+.composer .bar .sp { flex: 1; }
+.composer .hint { font-size: 11px; color: var(--text-3); margin-right: 8px; display: flex; gap: 4px; align-items: center; }
+.send { width: 28px; height: 28px; border-radius: 7px; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; box-shadow: inset 0 1px 0 rgba(255,255,255,0.14); }
+.send svg { stroke-width: 2.2; }
+.caret { display: inline-block; width: 1.5px; height: 18px; background: var(--accent); vertical-align: -3px; margin-left: 1px; }
+
+/* popover / menu */
+.pop { position: absolute; border-radius: var(--r-lg); background: var(--popover); box-shadow: var(--e3); padding: 4px; z-index: 20; }
+.pop .ph { padding: 6px 8px 4px; font-size: 11px; color: var(--text-3); font-weight: 500; }
+.mi { height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 8px; border-radius: var(--r-sm); font-size: 13px; color: var(--text-1); }
+.mi .av { --ring-bg: var(--popover); }
+.mi.on { background: var(--accent-tint); }
+.mi .role { color: var(--text-3); font-size: 12px; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.mi .hl { color: var(--accent-text); font-weight: 600; }
+.pop .foot { display: flex; gap: 12px; padding: 7px 8px 4px; margin-top: 4px; box-shadow: inset 0 1px 0 var(--separator); font-size: 11px; color: var(--text-3); }
+.pop .foot span { display: inline-flex; gap: 4px; align-items: center; }
+
+/* side panel */
+.side { width: 288px; flex: none; box-shadow: -1px 0 0 var(--separator); display: flex; flex-direction: column; background: var(--content); }
+.side .col-head { padding: 0 12px 0 16px; font-size: 13px; font-weight: 600; }
+.side .col-head .sp { flex: 1; }
+.side .blk { padding: 6px 16px 14px; }
+.side .blk + .blk { box-shadow: inset 0 1px 0 var(--separator); padding-top: 12px; }
+.side h3 { font-size: 12px; font-weight: 500; color: var(--text-3); margin-bottom: 8px; display: flex; align-items: center; }
+.side h3 .sp { flex: 1; }
+.side h3 .n { font-size: 11px; font-variant-numeric: tabular-nums; }
+.kv { display: grid; grid-template-columns: 56px 1fr; gap: 8px 10px; align-items: center; font-size: 13px; }
+.kv dt { color: var(--text-3); font-size: 12px; }
+.kv dd { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.kv dd .av { --ring-bg: var(--content); }
+.alist { display: flex; flex-direction: column; gap: 2px; margin: 0 -8px; }
+.aitem { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--r-sm); }
+.aitem .tile { width: 28px; height: 28px; border-radius: 7px; display: flex; align-items: center; justify-content: center; flex: none; background: var(--fill-quiet); color: var(--text-2); }
+.aitem .tile.acc { background: var(--accent-tint); color: var(--accent-text); }
+.aitem .m { flex: 1; min-width: 0; }
+.aitem .m b { display: block; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aitem .m small { display: block; font-size: 11px; color: var(--text-3); line-height: 15px; font-variant-numeric: tabular-nums; }
+.steps { display: flex; flex-direction: column; gap: 0; }
+.step { display: flex; gap: 10px; font-size: 13px; line-height: 18px; position: relative; padding-bottom: 12px; }
+.step:not(:last-child)::after { content: ""; position: absolute; left: 6.5px; top: 18px; bottom: 2px; width: 1px; background: var(--separator-strong); }
+.step .sg { margin-top: 2px; }
+.step small { display: block; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.step.now b { color: var(--text-1); }
+.step b { font-weight: 500; }
+.bar-track { height: 4px; border-radius: 2px; background: var(--fill-quiet); margin-top: 6px; overflow: hidden; width: 180px; }
+.bar-track i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+
+/* desktop backdrop for floating windows */
+.desk { position: absolute; inset: 0; background: #d9dbe0; }
+[data-theme="dark"] .desk { background: #0b0b0d; }
+.fwin { position: absolute; border-radius: 16px; background: var(--content); box-shadow: var(--window-shadow); overflow: hidden; }
+
+/* inputs */
+.input {
+  height: 32px; display: flex; align-items: center; gap: 8px; padding: 0 10px; border-radius: 7px; font-size: 13px;
+  background: var(--content); box-shadow: inset 0 0 0 1px var(--separator-strong); color: var(--text-1);
+}
+[data-theme="dark"] .input { background: rgba(255,255,255,0.04); }
+.input.focus { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--ring); }
+.input .ph { color: var(--text-3); }
+.label { font-size: 12px; font-weight: 500; color: var(--text-2); margin-bottom: 6px; display: block; }
+.help { font-size: 12px; color: var(--text-3); margin-top: 6px; line-height: 16px; }
+.switch { width: 30px; height: 18px; border-radius: 9px; background: var(--separator-strong); position: relative; flex: none; }
+.switch::after { content: ""; position: absolute; left: 2px; top: 2px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.2); }
+.switch.on { background: var(--accent); }
+.switch.on::after { left: 14px; }
+.select { height: 26px; display: inline-flex; align-items: center; gap: 4px; padding: 0 6px 0 8px; border-radius: var(--r-sm); font-size: 12px; color: var(--text-1); background: var(--fill-quiet); }
+.select svg { color: var(--text-3); }
+
+.sg { color: var(--st-open); }
+.sg.progress, .chip.progress .sg { color: var(--st-progress); }
+.sg.answer, .chip.answer .sg { color: var(--st-answer); }
+.sg.review, .chip.review .sg { color: var(--st-review); }
+.sg.blocked, .chip.blocked .sg { color: var(--st-blocked); }
+.sg.done, .chip.done .sg { color: var(--st-done); }
+.chip.me .sg { color: #fff; }
+
+.search .grow { flex: 1; }
+.v-top-only { display: none; }
+body.top .v-top-only { display: block; }
+body.top .v-bottom-only { display: none; }
+body.top .tl { justify-content: flex-start; }
+[data-theme="dark"] .chip.me.answer { background: #4766f0; }
+[data-theme="dark"] .chip.me.review { background: #7556d6; }
+
+/* command palette (Cmd+K): no open or close animation */
+.scrim { position: absolute; inset: 0; background: var(--scrim); z-index: 30; }
+.palette { position: absolute; left: 50%; top: 132px; width: 640px; margin-left: -320px; border-radius: var(--r-xl); background: var(--popover); box-shadow: var(--e4); z-index: 31; overflow: hidden; }
+.palette .q { height: 52px; display: flex; align-items: center; gap: 10px; padding: 0 16px; font-size: 16px; box-shadow: inset 0 -1px 0 var(--separator); }
+.palette .q svg { color: var(--text-3); }
+.palette .q .scope { font-size: 12px; font-weight: 500; height: 22px; padding: 0 8px; display: inline-flex; align-items: center; border-radius: var(--r-sm); background: var(--fill-quiet); color: var(--text-2); }
+.palette .res { padding: 6px; }
+.palette .gh { padding: 8px 10px 4px; font-size: 11px; font-weight: 500; color: var(--text-3); display: flex; }
+.palette .gh .sp { flex: 1; }
+.palette .it { height: 40px; display: flex; align-items: center; gap: 10px; padding: 0 10px; border-radius: var(--r-md); font-size: 13px; }
+.palette .it.on { background: var(--accent-tint); }
+.palette .it .t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.palette .it .t em { font-style: normal; color: var(--accent-text); font-weight: 600; }
+.palette .it .ctx { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+.palette .it .sp { flex: 1; }
+.palette .it .ic { color: var(--text-3); }
+.palette .it .time { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.palette .ft { display: flex; align-items: center; gap: 14px; height: 36px; padding: 0 14px; box-shadow: inset 0 1px 0 var(--separator); font-size: 11px; color: var(--text-3); background: var(--sunken); }
+.palette .ft span { display: inline-flex; align-items: center; gap: 4px; }
+.palette .ft .sp { flex: 1; }
+
+/* settings window */
+.set { display: flex; height: 100%; }
+.set-nav { width: 208px; flex: none; background: var(--sidebar); padding: 52px 10px 10px; display: flex; flex-direction: column; gap: 1px; }
+.set-nav .row { height: 30px; }
+.set-nav .row .soon { font-size: 11px; color: var(--text-3); font-weight: 400; }
+.set-main { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--content); }
+.set-head { display: flex; align-items: center; gap: 8px; padding: 22px 24px 14px; }
+.set-head h1 { font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.01em; }
+.set-head .meta { font-size: 12px; color: var(--text-3); flex: 1; padding-top: 4px; }
+.mtable { padding: 0 12px; }
+.mth { display: grid; grid-template-columns: minmax(0,1fr) 120px 96px 112px 28px; gap: 12px; align-items: center; height: 30px; padding: 0 12px; font-size: 11px; font-weight: 500; color: var(--text-3); box-shadow: inset 0 -1px 0 var(--separator); }
+.mtr { display: grid; grid-template-columns: minmax(0,1fr) 120px 96px 112px 28px; gap: 12px; align-items: center; height: 52px; padding: 0 12px; border-radius: var(--r-md); font-size: 13px; }
+.mtr + .mtr { box-shadow: inset 0 1px 0 var(--separator); }
+.mtr.hover { background: var(--hover); box-shadow: none; }
+.mtr .who { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mtr .who .av { --ring-bg: var(--content); }
+.mtr .who b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtr .who small { display: block; font-size: 12px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtr .st { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.mtr .st i { width: 6px; height: 6px; border-radius: 50%; background: var(--online); display: block; }
+.mtr .st i.off { background: transparent; box-shadow: inset 0 0 0 1.5px var(--offline-ring); }
+.mtr .st i.inv { background: var(--warning); }
+.mtr .ago { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.mtr.off { color: var(--text-3); }
+.mtr.off b { color: var(--text-3); }
+
+.sheet-scrim { position: absolute; inset: 0; background: rgba(17,17,20,0.14); }
+[data-theme="dark"] .sheet-scrim { background: rgba(0,0,0,0.4); }
+.dialog { position: absolute; left: 50%; top: 50%; width: 432px; transform: translate(-50%, -50%); border-radius: var(--r-xl); background: var(--popover); box-shadow: var(--e4); padding: 20px; }
+.dialog h2 { font-size: 15px; line-height: 20px; font-weight: 600; }
+.dialog .desc { font-size: 13px; line-height: 20px; color: var(--text-2); margin-top: 6px; }
+.codebox { margin-top: 16px; border-radius: var(--r-lg); background: var(--sunken); box-shadow: inset 0 0 0 1px var(--separator); padding: 16px 16px 14px; text-align: center; }
+.codebox .code-v { font: 600 26px/32px var(--mono); letter-spacing: 0.06em; color: var(--text-1); font-variant-numeric: tabular-nums; }
+.codebox .code-v span { color: var(--text-4); font-weight: 400; margin: 0 2px; }
+.codebox .code-m { font-size: 12px; color: var(--text-3); margin-top: 6px; font-variant-numeric: tabular-nums; }
+.note { display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 9px 10px; border-radius: var(--r-md); background: color-mix(in srgb, var(--warning) 10%, transparent); font-size: 12px; line-height: 18px; color: var(--text-1); }
+.note svg { color: var(--warning); margin-top: 1px; }
+.dialog .acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+
+/* login */
+.login { display: flex; flex-direction: column; align-items: center; padding: 64px 48px 32px; height: 100%; }
+.login .appicon { width: 72px; height: 72px; }
+.login h1 { font-size: 22px; line-height: 28px; font-weight: 600; letter-spacing: -0.015em; margin-top: 20px; }
+.login .sub { font-size: 13px; color: var(--text-3); margin-top: 6px; }
+.login form { width: 100%; margin-top: 32px; display: flex; flex-direction: column; gap: 18px; }
+.otp { display: flex; align-items: center; gap: 6px; }
+.otp .seg { flex: 1; height: 40px; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 0; font: 500 17px/1 var(--mono); letter-spacing: 0.12em; background: var(--content); box-shadow: inset 0 0 0 1px var(--separator-strong); color: var(--text-1); }
+.otp .seg.focus { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px var(--ring); }
+.otp .seg .ph { color: var(--text-4); }
+.otp .dash { color: var(--text-4); font: 400 16px var(--mono); }
+.login .foot { margin-top: auto; font-size: 11px; color: var(--text-3); display: flex; gap: 6px; align-items: center; }
+.btn.disabled { background: var(--fill-quiet); color: var(--text-3); box-shadow: none; }
+.btn.disabled .kbd { background: var(--fill-quiet); color: var(--text-3); }
+.chip.cap { max-width: 168px; }
+.msg .who { min-width: 0; }
+.msg .who b { flex: none; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msg .who .role { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.msg .who time { flex: none; }
+.deleted { font-size: 13px; color: var(--text-3); font-style: normal; display: inline-flex; gap: 6px; align-items: center; }
+.failed { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--danger); margin-top: 2px; }
+.failed .btn { height: 22px; font-size: 12px; padding: 0 8px; }
+.msg.pending p { color: var(--text-3); }
+.msg p.big-emoji { font-size: 30px; line-height: 38px; }
+.wc-tag { position: absolute; left: 116px; bottom: 62px; transform: translateX(-50%); z-index: 40; height: 28px; padding: 2px; border-radius: 8px; background: #2a2a2e; display: flex; gap: 2px; font: 500 12px/24px var(--font); color: #a5a5ad; box-shadow: 0 6px 20px rgba(0,0,0,.25); }
+.wc-tag span { padding: 0 10px; border-radius: 6px; }
+.wc-tag span.on { background: #fff; color: #18181b; }
+[dir="auto"] { text-align: left; }
+
+</style>
+</head>
+<body class="top">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7" />
+  <path d="M12 19V5" /></symbol><symbol id="i-at-sign" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4" />
+  <path d="M16 8v5a3 3 0 0 0 6 0v-1a10 10 0 1 0-4 8" /></symbol><symbol id="i-bell-off" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0" />
+  <path d="M17 17H4a1 1 0 0 1-.74-1.673C4.59 13.956 6 12.499 6 8a6 6 0 0 1 .258-1.742" />
+  <path d="m2 2 20 20" />
+  <path d="M8.668 3.01A6 6 0 0 1 18 8c0 2.687.77 4.653 1.707 6.05" /></symbol><symbol id="i-bot" viewBox="0 0 24 24"><path d="M12 8V4H8" />
+  <rect width="16" height="12" x="4" y="8" rx="2" />
+  <path d="M2 14h2" />
+  <path d="M20 14h2" />
+  <path d="M15 13v2" />
+  <path d="M9 13v2" /></symbol><symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5" /></symbol><symbol id="i-copy" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+  <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></symbol><symbol id="i-ellipsis" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1" />
+  <circle cx="19" cy="12" r="1" />
+  <circle cx="5" cy="12" r="1" /></symbol><symbol id="i-file-text" viewBox="0 0 24 24"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+  <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+  <path d="M10 9H8" />
+  <path d="M16 13H8" />
+  <path d="M16 17H8" /></symbol><symbol id="i-hash" viewBox="0 0 24 24"><line x1="4" x2="20" y1="9" y2="9" />
+  <line x1="4" x2="20" y1="15" y2="15" />
+  <line x1="10" x2="8" y1="3" y2="21" />
+  <line x1="16" x2="14" y1="3" y2="21" /></symbol><symbol id="i-image" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" ry="2" />
+  <circle cx="9" cy="9" r="2" />
+  <path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" /></symbol><symbol id="i-panel-right" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2" />
+  <path d="M15 3v18" /></symbol><symbol id="i-paperclip" viewBox="0 0 24 24"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551" /></symbol><symbol id="i-plus" viewBox="0 0 24 24"><path d="M5 12h14" />
+  <path d="M12 5v14" /></symbol><symbol id="i-quote" viewBox="0 0 24 24"><path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z" />
+  <path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z" /></symbol><symbol id="i-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34" />
+  <circle cx="11" cy="11" r="8" /></symbol><symbol id="i-settings" viewBox="0 0 24 24"><path d="M9.671 4.136a2.34 2.34 0 0 1 4.659 0 2.34 2.34 0 0 0 3.319 1.915 2.34 2.34 0 0 1 2.33 4.033 2.34 2.34 0 0 0 0 3.831 2.34 2.34 0 0 1-2.33 4.033 2.34 2.34 0 0 0-3.319 1.915 2.34 2.34 0 0 1-4.659 0 2.34 2.34 0 0 0-3.32-1.915 2.34 2.34 0 0 1-2.33-4.033 2.34 2.34 0 0 0 0-3.831A2.34 2.34 0 0 1 6.35 6.051a2.34 2.34 0 0 0 3.319-1.915" />
+  <circle cx="12" cy="12" r="3" /></symbol><symbol id="i-square-pen" viewBox="0 0 24 24"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+  <path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z" /></symbol><symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18" />
+  <path d="m6 6 12 12" /></symbol></svg>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <mask id="m-done" maskUnits="userSpaceOnUse" x="0" y="0" width="14" height="14"><rect width="14" height="14" fill="#fff"/><path d="M4.35 7.25 6.15 9.05 9.75 5.15" stroke="#000" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></mask>
+    <mask id="m-blocked" maskUnits="userSpaceOnUse" x="0" y="0" width="14" height="14"><rect width="14" height="14" fill="#fff"/><rect x="4" y="6.2" width="6" height="1.6" rx="0.8" fill="#000"/></mask>
+  </defs>
+  <symbol id="st-open" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.4 1.72"/></symbol>
+  <symbol id="st-progress" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 3.75A3.25 3.25 0 0 1 7 10.25Z" fill="currentColor"/></symbol>
+  <symbol id="st-answer" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7" cy="7" r="2.1" fill="currentColor"/></symbol>
+  <symbol id="st-review" viewBox="0 0 14 14"><circle cx="7" cy="7" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 7V3.75A3.25 3.25 0 1 1 3.75 7Z" fill="currentColor"/></symbol>
+  <symbol id="st-blocked" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="currentColor" mask="url(#m-blocked)"/></symbol>
+  <symbol id="st-done" viewBox="0 0 14 14"><circle cx="7" cy="7" r="6" fill="currentColor" mask="url(#m-done)"/></symbol>
+</svg>
+
+<div class="win">
+  <div class="traffic"><i></i><i></i><i></i></div>
+
+  <!-- sidebar -->
+  <aside class="sidebar">
+    <div class="search"><svg class="i s14"><use href="#i-search"/></svg><span class="grow">搜索或跳转</span><span class="kbd">⌘K</span></div>
+
+    <div class="sec" style="margin-top:0"><span class="grow">待办</span><span class="sec-count num">3</span></div>
+    <div class="row todo-row unread"><svg class="sg review"><use href="#st-review"/></svg><span class="label">登录页改版：邀请码输入</span><span class="why">等你审</span></div>
+    <div class="row todo-row unread"><svg class="sg answer"><use href="#st-answer"/></svg><span class="label">发版窗口改到周四？</span><span class="why">等你回答</span></div>
+    <div class="row todo-row unread"><svg class="i s14 ic" style="color:var(--accent-text)"><use href="#i-at-sign"/></svg><span class="label">磁盘告警阈值</span><span class="why">顾晨 @你</span></div>
+
+    <div class="sec"><span class="grow">群</span><svg class="i s14" style="color:var(--text-3)"><use href="#i-plus"/></svg></div>
+    <div class="row sel"><svg class="i ic"><use href="#i-hash"/></svg><span class="label">开发</span><span class="tail"><span class="badge mention num">@2</span></span></div>
+    <div class="row unread"><span class="av s18 c4">雨<span class="pres"></span></span><span class="label">林小雨</span><span class="tail"><span class="badge num">1</span></span></div>
+    <div class="row unread"><svg class="i ic"><use href="#i-hash"/></svg><span class="label">全员</span><span class="tail"><span class="badge num">12</span></span></div>
+    <div class="row"><span class="av s18 bot">构<span class="mark" style="--ring-bg:var(--sidebar)"><svg class="i"><use href="#i-bot"/></svg></span></span><span class="label">构建助手</span></div>
+    <div class="row unread"><svg class="i ic"><use href="#i-hash"/></svg><span class="label">产品</span><span class="tail"><span class="badge num">3</span></span></div>
+    <div class="row muted"><svg class="i ic"><use href="#i-hash"/></svg><span class="label">运维</span><span class="tail"><svg class="i s14" style="color:var(--text-4)"><use href="#i-bell-off"/></svg></span></div>
+    <div class="row"><svg class="i ic"><use href="#i-hash"/></svg><span class="label">设计评审</span></div>
+    <div class="row"><span class="av s18 c2">航<span class="pres off"></span></span><span class="label">周子航</span></div>
+    <div class="row"><span class="av s18 c3">默<span class="pres"></span></span><span class="label">陈默</span></div>
+
+    <div class="side-foot">
+      <span class="av s28 c1" style="--ring-bg:var(--sidebar)">J<span class="pres"></span></span>
+      <span class="who"><b>Joye</b><small>负责人 · 在线</small></span>
+      <svg class="i ic"><use href="#i-settings"/></svg>
+    </div>
+  </aside>
+
+  <!-- inset content panel -->
+  <main class="panel">
+    <!-- topic list -->
+    <section class="topics">
+      <div class="col-head">
+        <h2>开发</h2><span class="meta num">12 位成员</span>
+        <span class="btn icon" title="新话题 ⌘N"><svg class="i"><use href="#i-square-pen"/></svg></span>
+      </div>
+      <div class="tfilter"><span class="on">全部 <span class="n">8</span></span><span>等我 <span class="n">1</span></span><span>进行中 <span class="n">2</span></span><span>完成</span></div>
+      <div class="tlist">
+        <div class="trow">
+          <div class="l1"><span class="t">登录页改版：邀请码输入框</span><span class="time">10:42</span></div>
+          <div class="l2"><span class="chip sm me review"><svg class="sg"><use href="#st-review"/></svg><span>等你审</span></span><span class="pv"><b>林小雨：</b>两种状态都截图了</span><span class="badge num">2</span></div>
+        </div>
+        <div class="trow sel">
+          <div class="l1"><span class="t">消息在睡眠后丢失</span><span class="time">10:38</span></div>
+          <div class="l2"><span class="chip sm progress"><svg class="sg"><use href="#st-progress"/></svg><span>进行中</span></span><span class="pv"><b>构建助手：</b>正在跑回归测试</span></div>
+        </div>
+        <div class="trow">
+          <div class="l1"><span class="t">发版脚本签名失败</span><span class="time">09:57</span></div>
+          <div class="l2"><span class="chip sm blocked"><svg class="sg"><use href="#st-blocked"/></svg><span>卡住了</span></span><span class="pv"><b>构建助手：</b>缺少 notarytool 凭证</span><span class="badge mention num">@1</span></div>
+        </div>
+        <div class="trow">
+          <div class="l1"><span class="t">实习生入门文档</span><span class="time">昨天</span></div>
+          <div class="l2"><span class="chip sm answer"><svg class="sg"><use href="#st-answer"/></svg><span>等周子航回答</span></span><span class="pv">Mac mini 的账号谁来开？</span></div>
+        </div>
+        <div class="trow">
+          <div class="l1"><span class="t">搜索支持两个字的中文词</span><span class="time">昨天</span></div>
+          <div class="l2"><span class="chip sm review"><svg class="sg"><use href="#st-review"/></svg><span>等陈默审</span></span><span class="pv"><b>审阅助手：</b>分词表已更新</span></div>
+        </div>
+        <div class="trow read">
+          <div class="l1"><span class="t">头像上传的尺寸限制</span><span class="time">周一</span></div>
+          <div class="l2"><span class="pv"><b>周子航：</b>先限制 4 MB，服务端再压缩</span></div>
+        </div>
+        <div class="trow read">
+          <div class="l1"><span class="t">⌘K 快速切换</span><span class="time">周一</span></div>
+          <div class="l2"><span class="chip sm done"><svg class="sg"><use href="#st-done"/></svg><span>完成</span></span><span class="pv"><b>林小雨：</b>已合并，下个版本带上</span></div>
+        </div>
+        <div class="trow read">
+          <div class="l1"><span class="t">通知只在 @我 时提醒</span><span class="time num">10月28日</span></div>
+          <div class="l2"><span class="chip sm done"><svg class="sg"><use href="#st-done"/></svg><span>完成</span></span><span class="pv">产出：通知规则说明 第 3 版</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- topic view -->
+    <section class="topic">
+      <div class="col-head">
+        <h1>消息在睡眠后丢失</h1>
+        <span class="chip progress"><svg class="sg"><use href="#st-progress"/></svg><span>进行中</span></span>
+        <span class="sp"></span>
+        <span class="stack"><span class="av s20 bot">构</span><span class="av s20 c2">航</span><span class="av s20 c4">雨</span><span class="more">+2</span></span>
+        <span class="btn icon"><svg class="i"><use href="#i-search"/></svg></span>
+        <span class="btn icon on"><svg class="i"><use href="#i-panel-right"/></svg></span>
+        <span class="btn icon"><svg class="i"><use href="#i-ellipsis"/></svg></span>
+      </div>
+
+      <div class="tl">
+        <div class="day">今天</div>
+
+        <div class="msg">
+          <span class="av c2">子航</span>
+          <div class="body">
+            <div class="who"><b>周子航</b><span class="role">后端</span><time>09:12</time></div>
+            <p>合盖睡眠 20 分钟再打开，开发群里有 3 条消息没出来，重启后才看到。<span class="mention">@构建助手</span> 能查一下重连后的补拉逻辑吗？</p>
+          </div>
+        </div>
+        <div class="ack">
+          <span class="av s20 bot">构<span class="mark"><svg class="i"><use href="#i-bot"/></svg></span></span>
+          <b>构建助手</b><span>收到，我先复现，有结果再回来。</span><time class="num">09:12</time>
+        </div>
+
+        <div class="msg">
+          <span class="av c4">小雨</span>
+          <div class="body">
+            <div class="who"><b>林小雨</b><span class="role">前端</span><time>09:30</time></div>
+            <div class="quote"><div><b>周子航</b>合盖睡眠 20 分钟再打开，开发群里有 3 条消息没出来，重启后才看到。</div></div>
+            <p>我这边也能复现，切换 Wi-Fi 时更明显。连接日志截了一段：</p>
+            <div class="img">
+              <div style="position:absolute;inset:0;background:#16161a;padding:12px 14px;font:10.5px/17px var(--mono);color:#a9a9b2">
+                <div><span style="color:#6e6e76">09:28:41.204</span> socket <span style="color:#45c07a">open</span> seq=18231</div>
+                <div><span style="color:#6e6e76">09:28:41.390</span> resume from=18231 ok</div>
+                <div><span style="color:#6e6e76">09:29:02.118</span> <span style="color:#e0a33a">sleep</span> power=lid-closed</div>
+                <div><span style="color:#6e6e76">09:49:15.872</span> <span style="color:#e0a33a">wake</span> network=en0</div>
+                <div><span style="color:#6e6e76">09:49:16.031</span> socket <span style="color:#45c07a">open</span> seq=0</div>
+                <div><span style="color:#6e6e76">09:49:16.040</span> resume from=0 <span style="color:#f06464">gap 18232..18234</span></div>
+                <div><span style="color:#6e6e76">09:49:16.212</span> catch_up skipped: cursor reset</div>
+                <div><span style="color:#6e6e76">09:49:44.590</span> heartbeat ok rtt=41ms</div>
+                <div style="color:#6e6e76">09:50:14.590 heartbeat ok rtt=38ms</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="newdiv">新消息</div>
+
+        <div class="msg">
+          <span class="av bot">构建<span class="mark"><svg class="i"><use href="#i-bot"/></svg></span></span>
+          <div class="body">
+            <div class="who"><b>构建助手</b><span class="role">构建与发布</span><time>10:31</time></div>
+            <div class="card">
+              <div class="ch"><svg class="sg done"><use href="#st-done"/></svg>已复现<span class="sp"></span><small class="num">用时 1 小时 19 分</small></div>
+              <dl class="fields">
+                <dt>原因</dt><dd>唤醒后序号从 0 开始，补拉被跳过</dd>
+                <dt>影响</dt><dd>所有群，睡眠超过 15 分钟</dd>
+                <dt>修复</dt><dd><code>fix/catch-up-cursor</code></dd>
+              </dl>
+              <div class="acts"><span class="btn">先不修</span><span class="btn primary">开始修复</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg cont">
+          <span class="gutter">10:36</span>
+          <div class="body">
+            <p>补拉起点改成已读位置和已确认序号中较大的那个：</p>
+            <div class="code">
+              <div class="hd">rust<span class="sp"></span><span class="btn icon" style="width:22px;height:22px"><svg class="i s14"><use href="#i-copy"/></svg></span></div>
+<pre><span class="k">fn</span> <span class="f">catch_up_from</span>(&amp;<span class="k">self</span>) -&gt; <span class="ty">Seq</span> {
+    <span class="c">// 唤醒后 last_acked 可能被重置为 0</span>
+    <span class="k">self</span>.read_cursor.<span class="f">max</span>(<span class="k">self</span>.last_acked)
+}</pre>
+            </div>
+            <div class="card art">
+              <span class="tile"><svg class="i s18"><use href="#i-file-text"/></svg></span>
+              <span class="meta"><b>补拉逻辑修复说明</b><small>产出 · 页面 · 第 2 版 · 10:37</small></span>
+              <span class="btn">打开</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="msg cont">
+          <span class="gutter"></span>
+          <div class="body">
+            <div class="who" style="height:18px"><span class="live"><span class="pulse"></span>正在输入…</span></div>
+            <p>正在跑回归测试：58 项中已通过 41 项，睡眠和切换网络两组都过了，剩下的是断网 10 分钟后的重连<span class="stream-caret"></span></p>
+          </div>
+        </div>
+
+        <div class="msg" style="padding-bottom:4px">
+          <span class="av c3">陈默</span>
+          <div class="body">
+            <div class="who"><b>陈默</b><span class="role">产品</span><time>10:40</time></div>
+            <p>测试过了的话这周就发，<span class="mention me">@Joye</span> 你看要不要等周四？</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="typing"><span class="dots"><i></i><i></i><i></i></span>林小雨 正在输入…</div>
+
+      <div class="composer focus v-bottom-only">
+        <!-- composer, popup variant -->
+        <div class="pop" style="left:300px;bottom:calc(100% + 6px);width:272px">
+          <div class="ph">成员</div>
+          <div class="mi on"><span class="av s20 bot">构<span class="mark" style="--ring-bg:var(--popover)"><svg class="i"><use href="#i-bot"/></svg></span></span><span><span class="hl">构</span>建助手</span><span class="role">构建与发布</span><span class="kbd flat">↵</span></div>
+          <div class="mi"><span class="av s20 c6">晨<span class="pres" style="--ring-bg:var(--popover)"></span></span><span>顾晨</span><span class="role">运维</span></div>
+          <div class="mi"><span class="av s20 c5">婷<span class="pres off" style="--ring-bg:var(--popover)"></span></span><span>郭婷婷</span><span class="role">设计 · 实习</span></div>
+          <div class="mi"><span class="av s20 bot">文<span class="mark" style="--ring-bg:var(--popover)"><svg class="i"><use href="#i-bot"/></svg></span></span><span>文档助手</span><span class="role">写说明和周报</span></div>
+          <div class="foot"><span><span class="kbd">↑</span><span class="kbd">↓</span>选择</span><span><span class="kbd">↵</span>提及</span><span><span class="kbd">esc</span>关闭</span></div>
+        </div>
+        <div class="field">测试跑完把结果贴在这里，发版前再请 <span class="mention">@构</span><span class="caret"></span></div>
+        <div class="bar">
+          <span class="btn icon"><svg class="i"><use href="#i-paperclip"/></svg></span>
+          <span class="btn icon"><svg class="i"><use href="#i-at-sign"/></svg></span>
+          <span class="btn icon"><svg class="i"><use href="#i-quote"/></svg></span>
+          <span class="sp"></span>
+          <span class="hint"><span class="kbd">⇧↵</span>换行</span>
+          <span class="send"><svg class="i"><use href="#i-arrow-up"/></svg></span>
+        </div>
+      </div>
+      <div class="composer v-top-only">
+        <div class="field"><span class="ph">写消息，Enter 发送，Shift+Enter 换行</span></div>
+        <div class="bar">
+          <span class="btn icon"><svg class="i"><use href="#i-paperclip"/></svg></span>
+          <span class="btn icon"><svg class="i"><use href="#i-at-sign"/></svg></span>
+          <span class="btn icon"><svg class="i"><use href="#i-quote"/></svg></span>
+          <span class="sp"></span>
+          <span class="send" style="opacity:.35"><svg class="i"><use href="#i-arrow-up"/></svg></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- side panel -->
+    <aside class="side">
+      <div class="col-head">详情<span class="sp"></span><span class="btn icon"><svg class="i"><use href="#i-x"/></svg></span></div>
+      <div class="blk">
+        <dl class="kv">
+          <dt>状态</dt><dd><span class="chip progress"><svg class="sg"><use href="#st-progress"/></svg><span>进行中</span></span></dd>
+          <dt>负责人</dt><dd><span class="av s20 bot">构<span class="mark"><svg class="i"><use href="#i-bot"/></svg></span></span>构建助手</dd>
+          <dt>在等</dt><dd style="color:var(--text-3)">没有人</dd>
+          <dt>成员</dt><dd><span class="stack" style="margin:0"><span class="av s20 bot">构</span><span class="av s20 c2">航</span><span class="av s20 c4">雨</span><span class="av s20 c3">默</span><span class="av s20 c1">J</span></span></dd>
+        </dl>
+      </div>
+      <div class="blk">
+        <h3>产出<span class="sp"></span><span class="n">3</span></h3>
+        <div class="alist">
+          <div class="aitem"><span class="tile acc"><svg class="i s14"><use href="#i-file-text"/></svg></span><span class="m"><b>补拉逻辑修复说明</b><small>页面 · 第 2 版 · 10:37</small></span></div>
+          <div class="aitem"><span class="tile"><svg class="i s14"><use href="#i-image"/></svg></span><span class="m"><b>连接日志.png</b><small>图片 · 林小雨 · 09:30</small></span></div>
+          <div class="aitem"><span class="tile"><svg class="i s14"><use href="#i-check"/></svg></span><span class="m"><b>补拉以已读位置为准</b><small>决定 · 周子航 · 10:33</small></span></div>
+        </div>
+      </div>
+      <div class="blk">
+        <h3>工作过程<span class="sp"></span><span class="n">构建助手</span></h3>
+        <div class="steps">
+          <div class="step"><svg class="sg done"><use href="#st-done"/></svg><div><b>复现问题</b><small>09:13 – 09:58 · 4 次尝试</small></div></div>
+          <div class="step"><svg class="sg done"><use href="#st-done"/></svg><div><b>定位原因</b><small>09:58 – 10:31 · 读了 12 个文件</small></div></div>
+          <div class="step"><svg class="sg done"><use href="#st-done"/></svg><div><b>修改补拉起点</b><small>10:33 – 10:36 · 2 个文件</small></div></div>
+          <div class="step now"><svg class="sg progress"><use href="#st-progress"/></svg><div><b>回归测试</b><small>10:37 起 · 41 / 58</small><div class="bar-track"><i style="width:71%"></i></div></div></div>
+        </div>
+      </div>
+    </aside>
+  </main>
+</div>
+
+</body>
+</html>

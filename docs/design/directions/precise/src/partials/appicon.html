@@ -1,0 +1,25 @@
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="ai-body" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#34363d"/><stop offset="1" stop-color="#16171b"/></linearGradient>
+    <linearGradient id="ai-sheen" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity="0.10"/><stop offset="0.45" stop-color="#fff" stop-opacity="0"/></linearGradient>
+    <linearGradient id="ai-person" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#dfe2e9"/></linearGradient>
+    <linearGradient id="ai-bot" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#5d7bff"/><stop offset="1" stop-color="#2f4fd6"/></linearGradient>
+    <linearGradient id="ai-meet" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b9c6ff"/><stop offset="1" stop-color="#8ea2ff"/></linearGradient>
+    <clipPath id="ai-circle"><circle cx="398" cy="398" r="182"/></clipPath>
+    <filter id="ai-shadow" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000" flood-opacity="0.32"/></filter>
+    <filter id="ai-lift" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="10" stdDeviation="14" flood-color="#000" flood-opacity="0.35"/></filter>
+  </defs>
+  <symbol id="app-icon" viewBox="0 0 1024 1024">
+    <g filter="url(#ai-shadow)">
+      <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#ai-body)"/>
+    </g>
+    <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#ai-sheen)"/>
+    <rect x="101.5" y="101.5" width="821" height="821" rx="184.5" fill="none" stroke="#fff" stroke-opacity="0.14" stroke-width="3"/>
+    <g filter="url(#ai-lift)">
+      <circle cx="398" cy="398" r="182" fill="url(#ai-person)"/>
+      <rect x="430" y="430" width="368" height="368" rx="96" fill="url(#ai-bot)"/>
+      <rect x="430" y="430" width="368" height="368" rx="96" fill="url(#ai-meet)" clip-path="url(#ai-circle)"/>
+    </g>
+    <rect x="431.5" y="431.5" width="365" height="365" rx="94.5" fill="none" stroke="#fff" stroke-opacity="0.18" stroke-width="3"/>
+  </symbol>
+</svg>

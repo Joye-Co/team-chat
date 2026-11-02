@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-Hans" data-theme="light">
+<head><meta charset="utf-8"><title>精密工具 · 应用图标</title>
+<!--@css-->
+<style>
+  html, body { height: 1000px; }
+  body { background: #ececee; display: grid; grid-template-columns: 760px 1fr; }
+  .big { display: flex; align-items: center; justify-content: center; }
+  .big svg { width: 640px; height: 640px; }
+  .sizes { display: flex; flex-direction: column; justify-content: center; gap: 0; padding-right: 64px; }
+  .strip { display: flex; align-items: flex-end; gap: 48px; padding: 56px 48px; }
+  .strip.light { background: #ffffff; border-radius: 18px 18px 0 0; }
+  .strip.dark { background: #1b1b1e; border-radius: 0 0 18px 18px; }
+  .cell { display: flex; flex-direction: column; align-items: center; gap: 14px; font: 500 12px/1 var(--font); color: #8b8b93; }
+  .dark .cell { color: #74747c; }
+  .cap { font: 500 13px/18px var(--font); color: #55555d; margin: 0 0 14px 4px; }
+  .cap b { color: #18181b; font-weight: 600; }
+</style>
+</head>
+<body class="tall">
+<!--@include appicon-->
+<div class="big"><svg viewBox="0 0 1024 1024"><use href="#app-icon"/></svg></div>
+<div class="sizes">
+  <p class="cap"><b>一圆一方</b>：人和自动成员同样大小、斜向相交，交汇处是对话。石墨底，钴蓝方块。</p>
+  <div class="strip light">
+    <div class="cell"><svg width="128" height="128" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>128</div>
+    <div class="cell"><svg width="64" height="64" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>64</div>
+    <div class="cell"><svg width="32" height="32" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>32</div>
+    <div class="cell"><svg width="16" height="16" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>16</div>
+  </div>
+  <div class="strip dark">
+    <div class="cell"><svg width="128" height="128" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>128</div>
+    <div class="cell"><svg width="64" height="64" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>64</div>
+    <div class="cell"><svg width="32" height="32" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>32</div>
+    <div class="cell"><svg width="16" height="16" viewBox="0 0 1024 1024"><use href="#app-icon"/></svg>16</div>
+  </div>
+</div>
+</body>
+</html>
