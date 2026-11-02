@@ -272,15 +272,35 @@ async fn shoot(
             handle.update(cx, |_, window, cx| {
                 Theme::change(theme_mode, Some(window), cx);
                 window.refresh();
+                capture::order_front(window)
             })
         })
-        .map_err(|e| e.to_string())?;
-        // Three frames: layout, then lists that measure themselves, then images.
-        for _ in 0..3 {
-            next_frame(handle, cx).await?;
+        .map_err(|e| e.to_string())??;
+        // Three frames (layout, lists that measure themselves, images), a
+        // settle pause, then one more. A frame can fail to come while AppKit
+        // still reports the new window as covered; then order it front again
+        // and retry, up to 8 waits.
+        let mut frames = 0;
+        let mut waits = 0;
+        let mut settled = false;
+        while frames < 4 {
+            if waits == 8 {
+                return Err(format!("only {frames} of 4 frames within 8 waits"));
+            }
+            waits += 1;
+            if frames == 3 && !settled {
+                cx.background_executor().timer(options.settle).await;
+                settled = true;
+            }
+            match next_frame(handle, cx).await {
+                Ok(()) => frames += 1,
+                Err(_) => {
+                    let _ = cx.update(|cx| {
+                        handle.update(cx, |_, window, _| capture::order_front(window))
+                    });
+                }
+            }
         }
-        cx.background_executor().timer(options.settle).await;
-        next_frame(handle, cx).await?;
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;
@@ -299,7 +319,7 @@ async fn shoot(
     result
 }
 
-/// Resolves after the window draws its next frame (or fails after 5 s).
+/// Resolves after the window draws its next frame (or fails after 2 s).
 async fn next_frame(handle: AnyWindowHandle, cx: &mut AsyncApp) -> Result<(), String> {
     let (tx, rx) = futures::channel::oneshot::channel();
     cx.update(|cx| {
@@ -311,10 +331,10 @@ async fn next_frame(handle: AnyWindowHandle, cx: &mut AsyncApp) -> Result<(), St
         })
     })
     .map_err(|e| e.to_string())?;
-    let timeout = cx.background_executor().timer(Duration::from_secs(5));
+    let timeout = cx.background_executor().timer(Duration::from_secs(2));
     futures::pin_mut!(timeout);
     match futures::future::select(rx, timeout).await {
         futures::future::Either::Left((Ok(()), _)) => Ok(()),
-        _ => Err("no frame within 5 s".into()),
+        _ => Err("no frame within 2 s".into()),
     }
 }

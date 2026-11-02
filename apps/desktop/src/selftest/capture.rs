@@ -5,9 +5,8 @@ use std::{path::Path, process::Command};
 
 use gpui::Window;
 
-/// The window server number of this window (`-[NSWindow windowNumber]`).
 #[cfg(target_os = "macos")]
-pub fn window_number(window: &Window) -> Result<isize, String> {
+fn ns_window(window: &Window) -> Result<*mut objc2::runtime::AnyObject, String> {
     use objc2::{msg_send, runtime::AnyObject};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 
@@ -17,13 +16,39 @@ pub fn window_number(window: &Window) -> Result<isize, String> {
     };
     let view = appkit.ns_view.as_ptr().cast::<AnyObject>();
     // SAFETY: GPUI's AppKit handle points at the window's live content NSView;
-    // `window` and `windowNumber` are plain getters on the main thread.
+    // `window` is a plain getter on the main thread.
+    let ns_window: *mut AnyObject = unsafe { msg_send![view, window] };
+    if ns_window.is_null() {
+        return Err("the view has no window".into());
+    }
+    Ok(ns_window)
+}
+
+/// Puts the window above other apps' windows without activating this app or
+/// taking focus. A fully covered window gets no frames (GPUI stops its display
+/// link while AppKit reports it occluded), and the capture would be stale.
+#[cfg(target_os = "macos")]
+pub fn order_front(window: &Window) -> Result<(), String> {
+    let ns_window = ns_window(window)?;
+    // SAFETY: a live NSWindow on the main thread.
     unsafe {
-        let ns_window: *mut AnyObject = msg_send![view, window];
-        if ns_window.is_null() {
-            return Err("the view has no window".into());
-        }
-        let number: isize = msg_send![ns_window, windowNumber];
+        let _: () = objc2::msg_send![ns_window, orderFrontRegardless];
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn order_front(_window: &Window) -> Result<(), String> {
+    Ok(())
+}
+
+/// The window server number of this window (`-[NSWindow windowNumber]`).
+#[cfg(target_os = "macos")]
+pub fn window_number(window: &Window) -> Result<isize, String> {
+    let ns_window = ns_window(window)?;
+    // SAFETY: `windowNumber` is a plain getter on a live NSWindow.
+    unsafe {
+        let number: isize = objc2::msg_send![ns_window, windowNumber];
         if number <= 0 {
             return Err(format!("window number {number} is not on screen"));
         }
