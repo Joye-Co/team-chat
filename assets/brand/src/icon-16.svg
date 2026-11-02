@@ -1,0 +1,9 @@
+<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+<!-- Pixel-fitted drawing for 16 px only: 1 px brackets on the pixel grid, 4 px shapes, no shadow. -->
+<defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#e9e9ee"/></linearGradient></defs>
+<rect x="1" y="1" width="14" height="14" rx="3.25" fill="url(#b)"/>
+<rect x="1.5" y="1.5" width="13" height="13" rx="2.75" fill="none" stroke="#000" stroke-opacity=".18"/>
+<path d="M2 2h4v1H3v6H2z M14 14h-4v-1h3V7h1z" fill="#2c2c30"/>
+<circle cx="6" cy="6" r="2" fill="#1a84f8"/>
+<rect x="8" y="7" width="4" height="4" rx="1" fill="#56565c"/>
+</svg>

@@ -1,0 +1,12 @@
+<svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
+<!-- Pixel-fitted drawing for 32 px (16 pt @2x and 32 pt @1x): 3 px brackets and 1 px gaps on the pixel grid. -->
+<defs><linearGradient id="b" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff"/><stop offset="1" stop-color="#e9e9ee"/></linearGradient>
+<linearGradient id="a" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b9bff"/><stop offset="1" stop-color="#0a74f0"/></linearGradient></defs>
+<rect x="3" y="3.5" width="26" height="26" rx="6" fill="#000" fill-opacity=".12"/>
+<rect x="3" y="3" width="26" height="26" rx="6" fill="url(#b)"/>
+<rect x="3.5" y="3.5" width="25" height="25" rx="5.5" fill="none" stroke="#000" stroke-opacity=".14"/>
+<path d="M6.5 7H10a1.5 1.5 0 0 1 0 3H8v8.5a1.5 1.5 0 0 1-3 0v-10A1.5 1.5 0 0 1 6.5 7z" fill="#2c2c30"/>
+<path d="M25.5 25H22a1.5 1.5 0 0 1 0-3h2v-8.5a1.5 1.5 0 0 1 3 0v10a1.5 1.5 0 0 1-1.5 1.5z" fill="#2c2c30"/>
+<circle cx="12.5" cy="14.5" r="3.5" fill="url(#a)"/>
+<rect x="17" y="14" width="6" height="6" rx="1.75" fill="#56565c"/>
+</svg>

@@ -1,0 +1,10 @@
+<svg width="656" height="448" viewBox="184 288 656 448" xmlns="http://www.w3.org/2000/svg">
+<!-- The bare mark 「 ● ■ 」 from icon.svg, without the body, for the login view (dark appearance). -->
+<defs><linearGradient id="acm" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3b9bff"/><stop offset="1" stop-color="#0a74f0"/></linearGradient></defs>
+<g fill="none" stroke="#f2f2f5" stroke-width="60" stroke-linecap="round" stroke-linejoin="round">
+  <path d="M 306 318 H 214 V 581.84"/>
+  <path d="M 718 706 H 810 V 442.16"/>
+</g>
+<circle cx="402" cy="476" r="92" fill="url(#acm)"/>
+<rect x="532" y="458" width="180" height="180" rx="50" fill="#9a9aa1"/>
+</svg>

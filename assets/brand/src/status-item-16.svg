@@ -1,0 +1,6 @@
+<svg width="16" height="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
+<!-- Menu bar template at 1x: 1 px brackets and 4 px shapes on the pixel grid. -->
+<path d="M1 3h4v1H2v6H1z M14 13h-4v-1h3V6h1z" fill="#000"/>
+<circle cx="5" cy="7" r="2" fill="#000"/>
+<rect x="8" y="7" width="4" height="4" rx="1" fill="#000"/>
+</svg>
