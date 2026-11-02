@@ -638,6 +638,25 @@ scene_opener!(open_notifications, Page::Notifications);
 scene_opener!(open_cost, Page::Cost);
 scene_opener!(open_about, Page::About);
 
+/// 我的资料 after saving an empty name: the field error state.
+pub fn open_profile_error(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, Page::Profile, false, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            let profile = view.read(cx).profile().clone();
+            profile.update(cx, |p, cx| {
+                p.set_values(" ", "", window, cx);
+                p.save(window, cx);
+            });
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

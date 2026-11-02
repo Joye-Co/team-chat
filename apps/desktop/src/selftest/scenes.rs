@@ -124,6 +124,24 @@ pub const SCENES: &[Scene] = &[
         open: settings_scenes::open_about,
     },
     Scene {
+        name: "settings-profile-error",
+        about: "Settings: 我的资料 with the error of an empty name",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: settings_scenes::open_profile_error,
+    },
+    Scene {
+        name: "settings-about-dev",
+        about: "Settings: 关于 with the developer view on",
+        start: Start::SignedIn,
+        setup: |services, cx| {
+            services
+                .nav
+                .update(cx, |nav, cx| nav.set_developer_view(true, cx))
+        },
+        open: settings_scenes::open_about,
+    },
+    Scene {
         name: "update",
         about: "The quiet banner of a new version above the 话题",
         start: Start::SignedIn,
