@@ -11,7 +11,8 @@
 #   --upload-only  only upload the existing dist/<name>-<version>.dmg to the server
 #                  (retry after the endpoint was missing or the upload failed)
 # Env: CHAT_API_BASE overrides the server URL. The admin secret is read from
-#      ~/.config/team-chat/<env>/admin-secret and is never printed.
+#      ~/.config/team-chat/<env>/admin-secret (TEAM_CHAT_CONFIG_DIR overrides
+#      ~/.config/team-chat) and is never printed.
 set -euo pipefail
 . "$(dirname "$0")/lib.sh"
 
@@ -28,7 +29,7 @@ while [ $# -gt 0 ]; do
     --notes=*) NOTES="${1#*=}"; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
     --upload-only) UPLOAD_ONLY=1; shift ;;
-    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
     -*) die "unknown option: $1" ;;
     *) [ -z "$VERSION" ] || die "more than one version given"; VERSION="$1"; shift ;;
   esac
@@ -44,7 +45,7 @@ need git jq curl shasum base64
 NAME="$(product name)"
 TAG="v$VERSION"
 DMG="$DIST/$NAME-$VERSION.dmg"
-SECRET_FILE="$HOME/.config/team-chat/$ENV_NAME/admin-secret"
+SECRET_FILE="${TEAM_CHAT_CONFIG_DIR:-$HOME/.config/team-chat}/$ENV_NAME/admin-secret"
 
 server_base() {
   local base="${CHAT_API_BASE:-}"
@@ -154,9 +155,11 @@ fi
 
 need cargo
 log "setting version $VERSION"
-set_workspace_version "$VERSION"
 restore() { git checkout --quiet -- Cargo.toml Cargo.lock 2>/dev/null || true; }
 trap 'restore' ERR
+set_workspace_version "$VERSION"
+cargo_env
+cargo update --workspace --offline --manifest-path "$ROOT/Cargo.toml"
 
 "$ROOT/scripts/build-dmg.sh"
 "$ROOT/scripts/test-dmg.sh" "$DMG"
