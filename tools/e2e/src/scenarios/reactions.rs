@@ -105,7 +105,8 @@ async fn run(c: &mut Ctx) -> Result<()> {
     // The log has one event per change: B 👍, A 👍, A ✅, B 👍 off.
     let mut raw = RawWs::connect(&h.base, a.token()).await?;
     let (events, _) = raw.fetch_all(&g).await?;
-    let changes: Vec<(String, bool)> = events
+    // Changes of different emoji may interleave; one emoji's changes keep their order.
+    let mut changes: Vec<(String, bool)> = events
         .iter()
         .filter_map(|e| serde_json::from_value::<chat_core::proto::Event>(e.clone()).ok())
         .filter_map(|e| match e.data {
@@ -113,13 +114,23 @@ async fn run(c: &mut Ctx) -> Result<()> {
             _ => None,
         })
         .collect();
+    let thumbs: Vec<bool> = changes
+        .iter()
+        .filter(|(e, _)| e == "👍")
+        .map(|(_, on)| *on)
+        .collect();
+    check!(
+        thumbs == [true, true, false],
+        "👍 changes out of order: {thumbs:?}"
+    );
+    changes.sort();
     check!(
         changes
             == vec![
-                ("👍".to_string(), true),
-                ("👍".to_string(), true),
                 ("✅".to_string(), true),
-                ("👍".to_string(), false)
+                ("👍".to_string(), false),
+                ("👍".to_string(), true),
+                ("👍".to_string(), true)
             ],
         "stored changes: {changes:?}"
     );

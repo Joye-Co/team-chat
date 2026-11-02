@@ -583,7 +583,17 @@ impl Session {
             }
         };
         let now = Instant::now();
+        // One reaction change per message and emoji on the wire at a time, so
+        // a quick add then remove reaches the server in that order.
+        let mut reacting: std::collections::HashSet<(String, String)> = Default::default();
         for item in items {
+            if let OutboxOp::React {
+                message_id, emoji, ..
+            } = &item.op
+                && !reacting.insert((message_id.clone(), emoji.clone()))
+            {
+                continue;
+            }
             if item.state != OutboxState::Pending || self.inflight_outbox.contains(&item.id) {
                 continue;
             }
