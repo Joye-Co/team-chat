@@ -974,6 +974,51 @@ pub struct FollowedTopic {
 }
 
 
+/// Card types (docs/protocol.md "Cards"). The schema is the protocol crate's,
+/// so readers keep its `CardBlock::Unknown` for block types added later.
+pub mod card {
+    pub use chat_core::proto::{
+        ActionStyle, Card, CardAction, CardBlock, CardField, CardListItem, CardListStatus,
+        CardStatus, CardTone, LinkTarget,
+    };
+}
+
+/// One press of a card button (a `card.actioned` event).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardPress {
+    /// Who pressed.
+    pub actor_id: MemberId,
+    pub action_id: String,
+    /// The button's label when it was pressed, if the provider saw that card
+    /// version (a bot often removes the buttons after a press).
+    pub label: Option<String>,
+    pub at: Millis,
+}
+
+/// My latest press of a button on one card, while it is not answered yet or
+/// after the server refused it. A press that went through is a [`CardPress`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardPressState {
+    pub action_id: String,
+    pub phase: CardPressPhase,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardPressPhase {
+    /// Queued or sent, no answer yet (also while offline).
+    Sending,
+    Failed(CardPressError),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CardPressError {
+    /// The button or the card no longer exists.
+    Gone,
+    /// I may not press it.
+    Forbidden,
+    Other,
+}
+
 /// The source of all chat state for the views.
 ///
 /// Rules for implementations:
@@ -1316,6 +1361,39 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// Returns the report id.
     fn send_diagnostics(&self, _description: String) -> AdminReply<String> {
         reply_now(Err(AdminError::Unsupported))
+    }
+
+    // --- cards (docs/protocol.md "Cards"; all have defaults) ---
+
+    /// The card of a card message, from memory. Called on every frame for
+    /// each visible card, so it must be cheap. The same `Arc` comes back
+    /// while the card does not change.
+    fn card(&self, _group_id: &str, _message_id: &str) -> Option<Arc<card::Card>> {
+        None
+    }
+    /// Every press of the card's buttons, oldest first. Cheap, like `card`.
+    fn card_presses(&self, _group_id: &str, _message_id: &str) -> Vec<CardPress> {
+        Vec::new()
+    }
+    /// My unanswered or refused press on the card, if any.
+    fn card_press_state(&self, _group_id: &str, _message_id: &str) -> Option<CardPressState> {
+        None
+    }
+    /// Presses a card button (`card.action`). Emits `Change::Messages` for
+    /// the topic when the press state, the presses or the card change.
+    fn press_card_action(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _action_id: &str,
+    ) {
+    }
+    /// A local copy of a card image (`fileId` of a ready image file of the
+    /// group). `None` until it is downloaded; the provider starts the download
+    /// and emits `Change::Messages` for `topic_id` when the file is there.
+    fn card_image(&self, _group_id: &str, _topic_id: &str, _file_id: &str) -> Option<PathBuf> {
+        None
     }
 
     // --- changes ---

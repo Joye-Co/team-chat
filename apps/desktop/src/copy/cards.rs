@@ -1,0 +1,25 @@
+//! Cards in the timeline: buttons, presses and block labels.
+
+crate::copy! {
+    PRESSED = "{name} 点了「{action}」 · {time}",
+    PRESSED_EARLIER = "之前还有 {n} 次操作",
+    PRESS_REMOVED_ACTION = "已移除的按钮",
+    SOMEONE = "某位成员",
+    SENDING = "正在发送…",
+    PRESS_FAILED = "「{action}」没有成功，请再试一次",
+    PRESS_GONE = "「{action}」已失效",
+    PRESS_FORBIDDEN = "你不能进行「{action}」",
+    TABLE_MORE = "展开其余 {n} 行",
+    TABLE_LESS = "收起",
+    LIST_TODO = "未开始",
+    LIST_IN_PROGRESS = "进行中",
+    LIST_DONE = "完成",
+    LIST_FAILED = "失败",
+    LIST_SKIPPED = "跳过",
+    IMAGE = "图片",
+    IMAGE_LOADING = "图片加载中…",
+    OPEN_TOPIC = "打开话题",
+    OPEN_ARTIFACT = "打开产出",
+    OPEN_LINK = "在浏览器中打开",
+    ARTIFACT_LATER = "产出窗口即将推出",
+}

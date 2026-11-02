@@ -9,6 +9,7 @@
 //! typed here: use `{product}` and fill it with `env!("PRODUCT_NAME")`.
 
 pub mod artifacts;
+pub mod cards;
 pub mod common;
 pub mod composer;
 pub mod connection;
@@ -62,6 +63,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "timeline",
         entries: timeline::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "cards",
+        entries: cards::ENTRIES,
         developer: false,
     },
     Section {
