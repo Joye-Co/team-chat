@@ -584,16 +584,11 @@ impl Render for LoginView {
                                     .child(self.render_boxes(&input, focused, code_error, cx))
                                     .when_some(error, |el, e| {
                                         el.child(
-                                            div()
-                                                .absolute()
-                                                .top_full()
-                                                .left_0()
-                                                .right_0()
-                                                .child(
-                                                    ui::field_help(e, true, cx)
-                                                        .pt(space::S4)
-                                                        .one_line(),
-                                                ),
+                                            div().absolute().top_full().left_0().right_0().child(
+                                                ui::field_help(e, true, cx)
+                                                    .pt(space::S4)
+                                                    .one_line(),
+                                            ),
                                         )
                                     }),
                             )

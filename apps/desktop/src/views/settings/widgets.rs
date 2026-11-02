@@ -549,7 +549,11 @@ pub fn choice(
         .children(options.iter().enumerate().map(|(ix, label)| {
             let on = ix == selected;
             let pick = on_pick.clone();
-            let rest = if on { k.overlay } else { gpui::transparent_black() };
+            let rest = if on {
+                k.overlay
+            } else {
+                gpui::transparent_black()
+            };
             let fg = match (on, disabled) {
                 (true, false) => k.text_1,
                 (true, true) | (false, false) => k.text_2,
