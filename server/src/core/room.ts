@@ -1250,6 +1250,14 @@ export class GroupRoom extends DurableObject<Env> {
             );
             for (const importer of eventImporters) importer(r, this.sql);
             for (const w of eventWriters) w(r, this.sql);
+            // A member added later starts with the history before its join read (memberAdded).
+            if (r.type === "group.memberAdded" && typeof (r.data as { memberId?: unknown })?.memberId === "string") {
+              this.sql.exec(
+                "UPDATE room_members SET joined_seq = ? WHERE member_id = ?",
+                r.seq,
+                (r.data as { memberId: string }).memberId,
+              );
+            }
             this.lastSeq = r.seq;
             imported++;
           }

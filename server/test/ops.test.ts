@@ -73,6 +73,7 @@ async function roomTables(gid: string) {
       mentions: q("SELECT * FROM mentions ORDER BY member_id, seq, message_id"),
       topicStates: q("SELECT * FROM topic_states ORDER BY member_id, topic_id"),
       prefs: q("SELECT * FROM member_prefs ORDER BY member_id"),
+      joined: q("SELECT member_id, joined_seq FROM room_members ORDER BY member_id"),
     };
   });
 }
@@ -95,6 +96,15 @@ async function readArchive(key: string): Promise<any[]> {
     .split("\n")
     .filter((l) => l !== "")
     .map((l) => JSON.parse(l));
+}
+
+/** Adds a member through the HTTP route; returns the seq of its group.memberAdded event. */
+async function addMember(gid: string, by: TestMember, memberId: string): Promise<number> {
+  const r = await api(`/v1/groups/${gid}/members`, { method: "POST", token: by.token, body: { memberId } });
+  expect(r.status, JSON.stringify(r.body)).toBe(200);
+  const { events } = await roomTables(gid);
+  const added = events.filter((e: any) => e.type === "group.memberAdded" && JSON.parse(e.data).memberId === memberId);
+  return added.at(-1)!.seq as number;
 }
 
 /** A group that exists in D1 with the same members, whose room was never used: a fresh restore target. */
@@ -203,9 +213,11 @@ describe("daily archive", () => {
 
 describe("restore", () => {
   it("rebuilds an empty room from the archive, identical to the original", async () => {
-    const [a, b] = await Promise.all([createMember(), createMember()]);
+    const [a, b, joiner] = await Promise.all([createMember(), createMember(), createMember()]);
     const gid = await createGroup(a, [b.id]);
     await populate(gid, a, b, 2);
+    // A member added later: the history before its join counts as read, also after a restore.
+    const joinedAt = await addMember(gid, a, joiner.id);
     await runArchive(env, { skipD1: true });
     await populate(gid, a, b, 1);
     // State outside the log: a mute preference and a read position.
@@ -216,10 +228,11 @@ describe("restore", () => {
     await runArchive(env, { skipD1: true });
     const original = await roomTables(gid);
     expect(original.prefs).toHaveLength(1);
+    expect(original.joined).toContainEqual({ member_id: joiner.id, joined_seq: joinedAt });
     const keys = await archivedKeys(`${GROUP_PREFIX}${gid}/`);
     expect(keys).toHaveLength(2);
 
-    const target = await emptyGroupLike([a.id, b.id]);
+    const target = await emptyGroupLike([a.id, b.id, joiner.id]);
     let total = 0;
     for (const key of keys) {
       const bytes = new Uint8Array(await (await env.FILES.get(key))!.arrayBuffer());
@@ -570,9 +583,11 @@ describe("archive runs", () => {
   });
 
   it("moves archive files above a point-in-time restore point aside and archives the new events", async () => {
-    const [a, b] = await Promise.all([createMember(), createMember()]);
+    const [a, b, joiner] = await Promise.all([createMember(), createMember(), createMember()]);
     const gid = await createGroup(a, [b.id]);
     await populate(gid, a, b, 2);
+    // A member added later: the history before its join counts as read, also after a restore.
+    const joinedAt = await addMember(gid, a, joiner.id);
     await runArchive(env, { skipD1: true });
     const n = (await roomTables(gid)).events.length;
     const { supersedeAfter } = await import("../src/ops/archive");
