@@ -134,6 +134,10 @@ impl TimelineView {
             .then(|| self.render_steps(message, cx))
             .flatten();
 
+        let edited = message.edited_at.is_some() && !deleted;
+        // The mark follows the last line (§7.5, U12): inside the body text
+        // when it can, on its own line only after a code block or a table.
+        let mut mark_inline = false;
         let body: Option<AnyElement> = if deleted {
             Some(
                 div()
@@ -157,23 +161,37 @@ impl TimelineView {
         } else if message.body.is_empty() {
             None
         } else if model::is_jumbo(&message.body) {
+            // The edited mark sits right of the emoji, on its baseline.
+            mark_inline = true;
             Some(
                 div()
-                    .type_role(theme::type_scale::EMOJI)
-                    .child(message.body.trim().to_string())
+                    .flex()
+                    .items_baseline()
+                    .child(
+                        div()
+                            .type_role(theme::type_scale::EMOJI)
+                            .child(message.body.trim().to_string()),
+                    )
+                    .when(edited, |el| {
+                        el.child(
+                            div()
+                                .ml(space::S4)
+                                .t_meta()
+                                .text_color(colors.text_3)
+                                .child(t::EDITED),
+                        )
+                    })
                     .into_any_element(),
             )
         } else {
-            Some(
-                markdown::message_body(
-                    ElementId::Name(format!("body-{key}").into()),
-                    message.body.clone(),
-                    &markdown::mention_targets(&self.members, self.me.as_deref()),
-                )
-                .w_full()
-                .text_color(colors.text_1)
-                .into_any_element(),
-            )
+            let (view, inline) = markdown::message_body_marked(
+                ElementId::Name(format!("body-{key}").into()),
+                message.body.clone(),
+                &markdown::mention_targets(&self.members, self.me.as_deref()),
+                edited,
+            );
+            mark_inline = inline;
+            Some(view.w_full().text_color(colors.text_1).into_any_element())
         };
         // Sending (§7.5, §12): after 400 ms the body dims to 60 % with a
         // 14 pt spinner after it, for at least 500 ms. A normal ack is
@@ -212,7 +230,7 @@ impl TimelineView {
             .into_any_element()
         });
 
-        let marks = (message.edited_at.is_some() && !deleted).then(|| {
+        let marks = (edited && !mark_inline).then(|| {
             div()
                 .t_meta()
                 .text_color(colors.text_3)
@@ -508,7 +526,7 @@ impl TimelineView {
             })
             .collect::<Vec<_>>();
         // Like Slack, the add pill shows on the hovered message (or while its
-        // picker is open); it keeps its place so the row never reflows.
+        // picker is open); it keeps its place so the line never reflows.
         let show_add = self.hovered.as_deref() == Some(key)
             || self.reacting.as_ref() == Some(&(key.to_string(), true));
         let add = self.reaction_picker(
@@ -519,13 +537,24 @@ impl TimelineView {
                 .named(t::ADD_REACTION),
             cx,
         );
+        // The add pill rides with the last reaction in one unbreakable
+        // group, so the hidden pill never wraps onto a blank line of its own.
+        let mut pills = pills;
+        let last = pills.pop();
         div()
             .mt(space::S6)
             .flex()
             .flex_wrap()
             .gap(space::S6)
             .children(pills)
-            .child(div().when(!show_add, |el| el.invisible()).child(add))
+            .child(
+                div()
+                    .flex()
+                    .flex_none()
+                    .gap(space::S6)
+                    .children(last)
+                    .child(div().when(!show_add, |el| el.invisible()).child(add)),
+            )
             .into_any_element()
     }
 
@@ -675,7 +704,11 @@ impl TimelineView {
                 div()
                     .relative()
                     .t_display()
-                    .text_color(if untitled { colors.text_2 } else { colors.text_1 })
+                    .text_color(if untitled {
+                        colors.text_2
+                    } else {
+                        colors.text_1
+                    })
                     .line_clamp(2)
                     .opacity(fade.title)
                     .child(title)

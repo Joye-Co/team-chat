@@ -11,19 +11,23 @@ mod source;
 use std::hash::{Hash, Hasher};
 
 use gpui::{
-    App, ElementId, InteractiveElement as _, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, Styled as _, Window, div, prelude::FluentBuilder as _,
+    App, ElementId, InteractiveElement as _, Overflow, ParentElement as _, SharedString,
+    StatefulInteractiveElement as _, StyleRefinement, Styled as _, WhiteSpace, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     clipboard::Clipboard,
     text::{
         InlineElement, InlineRenderContext, MarkdownNode, MarkdownParseContext, MarkdownPlugin,
-        TextView, markdown_ast,
+        TextView, TextViewStyle, markdown_ast,
     },
 };
 
 pub use source::MentionTarget;
-use source::{AFTER_MARK, MENTION_ME_SCHEME, MENTION_SCHEME, link_mentions, normalize_fences};
+use source::{
+    AFTER_MARK, EDITED_SCHEME, MENTION_ME_SCHEME, MENTION_SCHEME, append_edited_mark,
+    link_mentions, normalize_fences,
+};
 
 use crate::{
     copy::timeline as t,
@@ -90,13 +94,33 @@ pub fn message_body(
     text: impl Into<SharedString>,
     mentions: &[MentionTarget],
 ) -> TextView {
+    message_body_marked(id, text, mentions, false).0
+}
+
+/// [`message_body`] with the `（已编辑）` mark at the end of the last line
+/// when `edited`. The flag says whether the mark went inline; when it is
+/// `false` for an edited body (it ends in a code block or a table) the
+/// caller draws the mark on its own line.
+pub fn message_body_marked(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    mentions: &[MentionTarget],
+    edited: bool,
+) -> (TextView, bool) {
     let text: SharedString = text.into();
     let source = link_mentions(&normalize_fences(&text), mentions);
-    TextView::markdown(id, source)
+    let marked = edited
+        .then(|| append_edited_mark(&source, t::EDITED))
+        .flatten();
+    let inline = marked.is_some();
+    let source = marked.unwrap_or(source);
+    let view = TextView::markdown(id, source)
         .selectable(true)
         .text_size(crate::theme::type_scale::MESSAGE.0)
         .line_height(crate::theme::type_scale::MESSAGE.1)
+        .style(body_style())
         .plugin(MentionPlugin)
+        .plugin(EditedPlugin)
         .code_block_actions(|code, _window, _cx| {
             let text = code.code();
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -111,7 +135,69 @@ pub fn message_body(
             if let Some(url) = safe_link(url) {
                 cx.open_url(url);
             }
-        })
+        });
+    (view, inline)
+}
+
+/// Tables and code blocks in a body (§15): table columns take their content
+/// width and the table scrolls sideways once it is wider than the message;
+/// code never wraps and scrolls sideways; the code block's copy button sits in
+/// its own top strip, clear of the first line.
+fn body_style() -> TextViewStyle {
+    let mut table = StyleRefinement::default();
+    table.overflow.x = Some(Overflow::Scroll);
+    let mut code = StyleRefinement::default().pt(px(36.));
+    code.overflow.x = Some(Overflow::Scroll);
+    code.text.white_space = Some(WhiteSpace::Nowrap);
+    TextViewStyle::default().table(table).code_block(code)
+}
+
+/// Renders the `（已编辑）` link that [`append_edited_mark`] puts after the
+/// last line: `meta` 12/16 `text-3`, 4 pt after the text, on the line's
+/// baseline. It is not a link.
+struct EditedPlugin;
+
+impl MarkdownPlugin for EditedPlugin {
+    fn name(&self) -> &str {
+        "edited"
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        _: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::Link(link) = node else {
+            return None;
+        };
+        if link.url != EDITED_SCHEME {
+            return None;
+        }
+        Some(MarkdownNode::new("edited", ()).text(t::EDITED))
+    }
+
+    fn render_inline(
+        &self,
+        node: &MarkdownNode,
+        context: &InlineRenderContext,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Option<InlineElement> {
+        node.data::<()>()?;
+        let k = theme::colors(cx);
+        let size = theme::type_scale::META.0;
+        let text_system = window.text_system();
+        let font_id = text_system.resolve_font(&context.text_style().font());
+        let ascent = text_system.ascent(font_id, size);
+        let descent = text_system.descent(font_id, size).abs();
+        let mark = div()
+            .ml(theme::space::S4)
+            .text_size(size)
+            .line_height(ascent + descent)
+            .text_color(k.text_3)
+            .child(node.as_text().to_string());
+        Some(InlineElement::new(mark).with_baseline(ascent))
+    }
 }
 
 /// A mention in a body.

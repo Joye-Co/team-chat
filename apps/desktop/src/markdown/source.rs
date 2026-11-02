@@ -20,6 +20,45 @@ pub const AFTER_MARK: &str = "#after=";
 
 const FENCE: &str = "```";
 
+/// Link scheme of the inline `（已编辑）` mark (see [`append_edited_mark`]).
+pub const EDITED_SCHEME: &str = "edited:";
+
+/// `source` (after [`normalize_fences`]) with the edited mark as an inline
+/// link at the end of its last line, so `（已编辑）` follows the last line
+/// (DESIGN.md §7.5, U12). `None` when the body ends in a block that cannot
+/// take inline text (a code block, a table, a rule or a setext underline):
+/// the caller then puts the mark on its own line.
+pub fn append_edited_mark(source: &str, label: &str) -> Option<String> {
+    let mut in_fence = false;
+    let mut last = None;
+    for line in source.lines() {
+        if line.trim_start().starts_with(FENCE) {
+            in_fence = !in_fence;
+            last = Some(line);
+            continue;
+        }
+        if !line.trim().is_empty() {
+            last = Some(line);
+        }
+    }
+    let last = last?;
+    let t = last.trim();
+    let block_end = in_fence
+        || t.starts_with(FENCE)
+        || t.starts_with('|')
+        || last.starts_with("    ")
+        || last.starts_with('\t')
+        || t.starts_with('<')
+        || t.chars().all(|c| matches!(c, '-' | '=' | '*' | '_' | ' '));
+    if block_end {
+        return None;
+    }
+    let body = source.trim_end();
+    // A trailing backslash would escape the mark's bracket.
+    let sep = if body.ends_with('\\') { "\\ " } else { " " };
+    Some(format!("{body}{sep}[{label}](<{EDITED_SCHEME}>)"))
+}
+
 /// Full-width punctuation that CoreText compresses at the end of a run.
 fn is_full_width_mark(c: char) -> bool {
     gpui::LineWrapper::is_no_start_char(c) && c != '…' && c != '‥' && c != '·'
@@ -226,6 +265,24 @@ mod tests {
             normalize_fences("```\nlet a = 1;```"),
             "```\nlet a = 1;\n```"
         );
+    }
+
+    #[test]
+    fn edited_mark_follows_the_last_line() {
+        let m = |s: &str| append_edited_mark(s, "（已编辑）");
+        assert_eq!(
+            m("周五下午 4 点 demo").as_deref(),
+            Some("周五下午 4 点 demo [（已编辑）](<edited:>)")
+        );
+        assert_eq!(
+            m("第一段\n\n- 一\n- 二\n").as_deref(),
+            Some("第一段\n\n- 一\n- 二 [（已编辑）](<edited:>)")
+        );
+        assert_eq!(m("看\n```\nlet a = 1;\n```"), None);
+        assert_eq!(m("```\nlet a = 1;"), None);
+        assert_eq!(m("| a | b |\n| - | - |\n| 1 | 2 |"), None);
+        assert_eq!(m("标题\n==="), None);
+        assert_eq!(m("   "), None);
     }
 
     #[test]
