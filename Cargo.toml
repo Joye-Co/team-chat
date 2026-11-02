@@ -20,3 +20,7 @@ chat-protocol = { path = "crates/chat-protocol" }
 chat-core = { path = "crates/chat-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# gpui-pre with CJK line-break rules and measured truncation; see docs/ARCHITECTURE.md.
+[patch.crates-io]
+gpui-pre = { path = "third_party/gpui-pre" }
