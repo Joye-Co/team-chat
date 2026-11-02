@@ -5,6 +5,9 @@
     "": {
       "name": "team-chat",
     },
+    "ops/restore": {
+      "name": "@chat/ops-restore",
+    },
     "packages/bot-sdk": {
       "name": "@chat/bot-sdk",
       "dependencies": {
@@ -52,6 +55,8 @@
   },
   "packages": {
     "@chat/bot-sdk": ["@chat/bot-sdk@workspace:packages/bot-sdk"],
+
+    "@chat/ops-restore": ["@chat/ops-restore@workspace:ops/restore"],
 
     "@chat/protocol": ["@chat/protocol@workspace:packages/protocol"],
 

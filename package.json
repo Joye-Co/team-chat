@@ -3,7 +3,8 @@
   "private": true,
   "workspaces": [
     "packages/*",
-    "server"
+    "server",
+    "ops/*"
   ],
   "scripts": {
     "gen:schema": "bun run --cwd packages/protocol gen:schema",
