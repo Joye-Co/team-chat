@@ -178,6 +178,64 @@ pub fn excerpt(body: &str, max_chars: usize) -> String {
     }
 }
 
+/// A Markdown format of the format bar.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Format {
+    /// Inline marks around the selection (`**`, `_`, `~~`, `` ` ``).
+    Wrap(&'static str),
+    /// `[text](url)` with `url` selected.
+    Link,
+    /// A prefix at the start of the selection's first line (`- `, `> `).
+    Line(&'static str),
+}
+
+/// One edit to the text: replace `range` with `insert`, then select
+/// `select` (byte offsets in the new text) or leave the caret after it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FormatEdit {
+    pub range: std::ops::Range<usize>,
+    pub insert: String,
+    pub select: Option<std::ops::Range<usize>>,
+}
+
+/// The edit that applies `format` to the selection `range` (`selected` is
+/// its text). With nothing selected, inline marks go around an empty
+/// selection and the caret lands between them.
+pub fn format_edit(
+    text: &str,
+    range: std::ops::Range<usize>,
+    selected: &str,
+    format: Format,
+) -> FormatEdit {
+    match format {
+        Format::Wrap(mark) => {
+            let start = range.start + mark.len();
+            FormatEdit {
+                insert: format!("{mark}{selected}{mark}"),
+                select: Some(start..start + selected.len()),
+                range,
+            }
+        }
+        Format::Link => {
+            let url_start = range.start + selected.len() + 3;
+            FormatEdit {
+                insert: format!("[{selected}](url)"),
+                select: Some(url_start..url_start + 3),
+                range,
+            }
+        }
+        Format::Line(prefix) => {
+            let line_start = text[..range.start].rfind('\n').map_or(0, |i| i + 1);
+            let caret = range.end + prefix.len();
+            FormatEdit {
+                range: line_start..line_start,
+                insert: prefix.to_string(),
+                select: Some(caret..caret),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -301,5 +359,21 @@ mod tests {
     fn excerpt_is_one_short_line() {
         assert_eq!(excerpt("第一行\n第二行", 20), "第一行 第二行");
         assert_eq!(excerpt("abcdef", 3), "abc…");
+    }
+
+    #[test]
+    fn format_edits_wrap_link_and_prefix() {
+        let e = format_edit("ab cd", 3..5, "cd", Format::Wrap("**"));
+        assert_eq!(
+            (e.range, e.insert.as_str(), e.select),
+            (3..5, "**cd**", Some(5..7))
+        );
+        let e = format_edit("x", 1..1, "", Format::Link);
+        assert_eq!((e.insert.as_str(), e.select), ("[](url)", Some(4..7)));
+        let e = format_edit("a\nbc", 3..3, "", Format::Line("- "));
+        assert_eq!(
+            (e.range, e.insert.as_str(), e.select),
+            (2..2, "- ", Some(5..5))
+        );
     }
 }

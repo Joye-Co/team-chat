@@ -25,7 +25,7 @@ use gpui::{
     relative,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _,
+    Disableable as _, Selectable as _, Sizable as _,
     input::{
         Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Paste, Textarea, TextareaState,
     },
@@ -88,6 +88,12 @@ pub struct ComposerView {
     too_long: bool,
     /// Files the last paste or drop could not add (folders, over 100 MB).
     rejected: Vec<String>,
+    /// The emoji picker is open.
+    emoji_open: bool,
+    /// The format bar is shown (the `Aa` toggle).
+    format_open: bool,
+    /// Bounds of the composer box in the window, for the @ list's anchor.
+    anchor: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -95,7 +101,9 @@ impl ComposerView {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .auto_grow(2, 12)
+                // Two lines empty; the box grows to about 40 % of the topic
+                // view in the smallest window (§7.2), then scrolls inside.
+                .auto_grow(2, 10)
                 .submit_on_enter(true)
                 .placeholder(c::PLACEHOLDER)
         });
@@ -125,10 +133,33 @@ impl ComposerView {
             typing: model::TypingThrottle::default(),
             too_long: false,
             rejected: Vec::new(),
+            emoji_open: false,
+            format_open: false,
+            anchor: Default::default(),
             _subscriptions: subscriptions,
         };
         this.sync_key(window, cx);
         this
+    }
+
+    /// Focuses the field with the caret at the end and opens the @ list for
+    /// a draft that ends in `@query` (screenshot scenes).
+    pub fn preview_mention(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.text(cx);
+        let len = text.len();
+        self.input.update(cx, |state, cx| {
+            state.focus(window, cx);
+            state.set_selected_range(len..len, cx);
+        });
+        self.update_mention(&text, cx);
+        cx.notify();
+    }
+
+    /// Opens the format bar and the emoji picker (screenshot scenes).
+    pub fn preview_tools(&mut self, cx: &mut Context<Self>) {
+        self.format_open = true;
+        self.emoji_open = true;
+        cx.notify();
     }
 
     /// The draft key the navigation points at.
@@ -187,16 +218,38 @@ impl ComposerView {
     }
 
     fn update_placeholder(&self, window: &mut Window, cx: &mut Context<Self>) {
-        let placeholder = if self.editing.is_some() {
-            c::PLACEHOLDER_EDIT
-        } else if self.key.as_ref().is_some_and(|k| k.topic_id.is_none()) {
-            c::PLACEHOLDER_NEW_TOPIC
-        } else {
-            c::PLACEHOLDER
-        };
+        let placeholder = self.placeholder();
         self.input.update(cx, |state, cx| {
             state.set_placeholder(placeholder, window, cx)
         });
+    }
+
+    /// The placeholder names the destination (§7.2): `回复「title」`, or
+    /// `在「群」发起新话题，第一行是标题`.
+    fn placeholder(&self) -> String {
+        let provider = &self.services.provider;
+        let Some(key) = &self.key else {
+            return c::PLACEHOLDER.to_string();
+        };
+        if self.editing.is_some() {
+            return c::PLACEHOLDER_EDIT.to_string();
+        }
+        match &key.topic_id {
+            Some(t) => match provider.topic(&key.group_id, t) {
+                Some(topic) => fill(
+                    c::PLACEHOLDER_REPLY,
+                    &[(
+                        "title",
+                        &model::excerpt(&crate::views::sidebar::topic_line(&topic.title), 30),
+                    )],
+                ),
+                None => c::PLACEHOLDER.to_string(),
+            },
+            None => match provider.groups().into_iter().find(|g| g.id == key.group_id) {
+                Some(group) => fill(c::PLACEHOLDER_NEW_IN, &[("group", &group.name)]),
+                None => c::PLACEHOLDER_NEW_TOPIC.to_string(),
+            },
+        }
     }
 
     fn save_text(&self, cx: &Context<Self>) {
@@ -247,7 +300,7 @@ impl ComposerView {
                 format!(
                     "{}：{}",
                     fill(c::QUOTING, &[("name", &name)]),
-                    model::excerpt(&m.body, 40)
+                    model::excerpt(&strip_marks(&m.body), 40)
                 )
             }
             None => fill(c::QUOTING, &[("name", c::UNKNOWN_MEMBER)]),
@@ -645,6 +698,17 @@ impl ComposerView {
     }
 }
 
+/// Text without Markdown emphasis marks, for one-line previews.
+fn strip_marks(body: &str) -> String {
+    body.replace("**", "")
+        .replace("~~", "")
+        .replace('`', "")
+        .lines()
+        .map(|l| l.trim_start_matches(['#', '>', ' ']))
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
 /// Files and images on the clipboard (a copied Finder file, a screenshot).
 fn clipboard_files(entries: &[ClipboardEntry]) -> Vec<NewFile> {
     let mut files = Vec::new();
@@ -664,10 +728,116 @@ fn clipboard_files(entries: &[ClipboardEntry]) -> Vec<NewFile> {
     files
 }
 
+/// Emoji in the picker: the reactions a team uses most.
+const EMOJI: &[&str] = &[
+    "👍", "👌", "🙏", "👏", "🎉", "✅", "❌", "👀", "🤔", "😂", "😅", "🙂", "😮", "😢", "🔥", "💯",
+    "🚀", "⚠️", "📌", "💡", "☕", "🐛", "🛠️", "📎",
+];
+
+/// A Markdown format the format bar and ⌘B / ⌘I / ⌘⇧X apply.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Format {
+    Bold,
+    Italic,
+    Strike,
+    Link,
+    Numbered,
+    Bulleted,
+    Quote,
+    Code,
+}
+
+impl Format {
+    const ALL: [Format; 8] = [
+        Format::Bold,
+        Format::Italic,
+        Format::Strike,
+        Format::Link,
+        Format::Numbered,
+        Format::Bulleted,
+        Format::Quote,
+        Format::Code,
+    ];
+
+    fn glyph(self) -> Lucide {
+        match self {
+            Format::Bold => Lucide::Bold,
+            Format::Italic => Lucide::Italic,
+            Format::Strike => Lucide::Strikethrough,
+            Format::Link => Lucide::Link,
+            Format::Numbered => Lucide::ListOrdered,
+            Format::Bulleted => Lucide::List,
+            Format::Quote => Lucide::Quote,
+            Format::Code => Lucide::Code,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Format::Bold => c::BOLD,
+            Format::Italic => c::ITALIC,
+            Format::Strike => c::STRIKE,
+            Format::Link => c::LINK,
+            Format::Numbered => c::NUMBERED,
+            Format::Bulleted => c::BULLETED,
+            Format::Quote => c::QUOTE_BLOCK,
+            Format::Code => c::CODE,
+        }
+    }
+}
+
 impl ComposerView {
+    /// Applies a format to the selection: inline marks wrap it, block
+    /// formats prefix its first line.
+    fn apply_format(&mut self, format: Format, window: &mut Window, cx: &mut Context<Self>) {
+        let text = self.text(cx);
+        let range = self.input.read(cx).selected_range();
+        let range = range.start.min(text.len())..range.end.min(text.len());
+        let selected = text.get(range.clone()).unwrap_or_default().to_string();
+        let edit = model::format_edit(&text, range, &selected, model_format(format));
+        self.input.update(cx, |state, cx| {
+            state.focus(window, cx);
+            state.set_selected_range(edit.range.clone(), cx);
+            state.replace(edit.insert.clone(), window, cx);
+            if let Some(caret) = edit.select.clone() {
+                state.set_selected_range(caret, cx);
+            }
+        });
+        self.on_text_changed(window, cx);
+    }
+
+    fn insert_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |state, cx| {
+            state.focus(window, cx);
+            state.replace(text.to_string(), window, cx);
+        });
+        self.on_text_changed(window, cx);
+    }
+
+    fn on_format_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let k = &event.keystroke;
+        if !k.modifiers.platform || k.modifiers.control || k.modifiers.alt {
+            return;
+        }
+        let format = match (k.key.as_str(), k.modifiers.shift) {
+            ("b", false) => Format::Bold,
+            ("i", false) => Format::Italic,
+            ("x", true) => Format::Strike,
+            _ => return,
+        };
+        cx.stop_propagation();
+        self.apply_format(format, window, cx);
+    }
+
     fn render_chip(
         &self,
         id: ElementId,
+        glyph: Lucide,
         text: String,
         on_remove: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
@@ -678,87 +848,157 @@ impl ComposerView {
             .items_center()
             .gap(space::S6)
             .max_w(px(360.))
-            .h(px(26.))
+            .h(px(28.))
             .pl(space::S8)
-            .pr(space::S4)
-            .rounded(theme::radius::MD)
-            .bg(colors.fill_field)
-            .t_callout()
+            .pr(space::S2)
+            .rounded(theme::radius::SM)
+            .bg(colors.field)
+            .t_small()
             .text_color(colors.text_2)
-            .child(div().min_w(px(0.)).truncate().child(text))
+            .child(ui::icon(glyph, theme::icon::CHIP, colors.text_3))
+            .child(div().min_w(px(0.)).one_line().child(text))
             .child(
                 ui::icon_button(id, Lucide::X)
-                    .xsmall()
+                    .with_size(px(24.))
+                    .rounded(theme::radius::SM)
+                    .icon(gpui_component::Icon::new(Lucide::X).size(theme::icon::CHIP))
                     .tooltip(c::REMOVE)
                     .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
             )
     }
 
-    fn render_mentions(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+    /// Left edge of the @ list inside the composer: 12 pt left of the `@`
+    /// being typed (§7.2), kept inside the composer.
+    fn mention_left(&self, window: &mut Window, cx: &mut Context<Self>) -> gpui::Pixels {
+        let anchor = self.anchor.get();
+        let Some(popup) = &self.mention else {
+            return px(0.);
+        };
+        let Some((caret, _)) = self.input.read(cx).cursor_layout() else {
+            return px(0.);
+        };
+        let typed: SharedString = format!("@{}", popup.query.text).into();
+        let style = window.text_style();
+        let run = gpui::TextRun {
+            len: typed.len(),
+            font: style.font(),
+            color: style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let width = window
+            .text_system()
+            .shape_line(typed, theme::type_scale::BODY.0, &[run], None)
+            .width;
+        let at = caret.origin.x - width - anchor.origin.x - space::S12;
+        let max = (anchor.size.width - theme::size::MENTION_POPUP_WIDTH).max(px(0.));
+        at.max(px(0.)).min(max)
+    }
+
+    fn render_mentions(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<impl IntoElement> {
         let popup = self.mention.as_ref()?;
         let colors = theme::colors(cx);
+        let left = self.mention_left(window, cx);
         let rows = popup.results.iter().enumerate().map(|(i, m)| {
-            div()
-                .id(ElementId::Name(SharedString::from(format!(
-                    "mention-{}",
-                    m.id
-                ))))
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .h(px(32.))
-                .px(space::S6)
-                .rounded(theme::radius::SM)
-                .when(i == popup.selected, |el| el.bg(colors.fill_active))
-                .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.elevated))
-                .child(div().flex_none().t_ui().medium().child(m.name.clone()))
-                .when_some(m.role.clone(), |el, role| {
-                    el.child(
-                        div()
-                            .min_w(px(0.))
-                            .t_callout()
-                            .text_color(colors.text_2)
-                            .truncate()
-                            .child(role),
-                    )
-                })
-                .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(i, window, cx)))
+            let active = i == popup.selected;
+            ui::popup_row(
+                ElementId::Name(SharedString::from(format!("mention-{}", m.id))),
+                active,
+                cx,
+            )
+            .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.overlay))
+            .child(div().flex_none().child(m.name.clone()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .t_small()
+                    .text_color(colors.text_3)
+                    .one_line()
+                    .children(m.role.clone()),
+            )
+            .when(active, |el| el.child(ui::return_hint(cx)))
+            .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(i, window, cx)))
         });
         Some(
-            div()
+            ui::mention_surface(cx)
+                .id("mention-popup")
                 .absolute()
-                .left(px(0.))
+                .left(left)
                 .bottom(relative(1.))
                 .mb(space::S8)
-                .w(px(300.))
-                .rounded(theme::radius::LG)
-                .bg(colors.elevated)
-                .shadow(colors.shadow(theme::Elevation::Popover))
-                .flex()
-                .flex_col()
+                .overflow_y_scroll()
                 .child(
                     div()
-                        .px(space::S10)
-                        .pt(space::S8)
-                        .pb(space::S4)
-                        .t_section()
-                        .text_color(colors.text_3)
-                        .child(crate::copy::nav::SECTION_MEMBERS),
-                )
-                .child(div().px(px(5.)).pb(px(5.)).flex().flex_col().children(rows))
-                .child(ui::hairline(cx))
-                .child(
-                    div()
+                        .flex_none()
                         .h(px(28.))
                         .px(space::S10)
                         .flex()
                         .items_center()
-                        .gap(space::S12)
-                        .child(ui::KbdHint::new(&["up", "down"]).label(c::HINT_SELECT))
-                        .child(ui::KbdHint::new(&["enter"]).label(c::HINT_MENTION))
-                        .child(ui::KbdHint::new(&["escape"]).label(crate::copy::common::CLOSE)),
-                ),
+                        .t_meta_medium()
+                        .text_color(colors.text_3)
+                        .child(crate::copy::nav::SECTION_MEMBERS),
+                )
+                .children(rows),
         )
+    }
+
+    fn render_emoji(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
+        if !self.emoji_open {
+            return None;
+        }
+        let colors = theme::colors(cx);
+        Some(
+            ui::menu_surface(cx)
+                .id("emoji-picker")
+                .absolute()
+                .left(px(72.))
+                .bottom(relative(1.))
+                .mb(space::S8)
+                .w(px(8. * 36. + 8.))
+                .flex_row()
+                .flex_wrap()
+                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                    this.emoji_open = false;
+                    cx.notify();
+                }))
+                .children(EMOJI.iter().enumerate().map(|(i, e)| {
+                    div()
+                        .id(("emoji", i))
+                        .size(px(36.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(theme::radius::SM)
+                        .cursor_pointer()
+                        .text_size(px(20.))
+                        .hover(|el| el.bg(colors.hover))
+                        .active(|el| el.bg(colors.pressed))
+                        .child(*e)
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            this.emoji_open = false;
+                            this.insert_text(e, window, cx);
+                        }))
+                })),
+        )
+    }
+}
+
+fn model_format(f: Format) -> model::Format {
+    match f {
+        Format::Bold => model::Format::Wrap("**"),
+        Format::Italic => model::Format::Wrap("_"),
+        Format::Strike => model::Format::Wrap("~~"),
+        Format::Code => model::Format::Wrap("`"),
+        Format::Link => model::Format::Link,
+        Format::Numbered => model::Format::Line("1. "),
+        Format::Bulleted => model::Format::Line("- "),
+        Format::Quote => model::Format::Line("> "),
     }
 }
 
@@ -768,10 +1008,12 @@ impl Render for ComposerView {
         let enabled = self.key.is_some();
         let editing = self.editing.is_some();
         let new_topic = !editing && self.key.as_ref().is_some_and(|k| k.topic_id.is_none());
-        let title_line = new_topic.then(|| match model::topic_title(&self.last_text) {
-            Some(title) => fill(c::NEW_TOPIC_TITLE, &[("title", &title)]),
-            None => c::NEW_TOPIC_NO_TITLE.to_string(),
-        });
+        // The placeholder already says the first line is the title; once
+        // there is text, the line shows the title it makes.
+        let title_line = new_topic
+            .then(|| model::topic_title(&self.last_text))
+            .flatten()
+            .map(|title| fill(c::NEW_TOPIC_TITLE, &[("title", &title)]));
         let quote = (!editing).then(|| self.quote.clone()).flatten();
         let files = if editing {
             Vec::new()
@@ -784,6 +1026,7 @@ impl Render for ComposerView {
         if let Some(q) = quote {
             chips = chips.child(self.render_chip(
                 "quote-remove".into(),
+                Lucide::TextQuote,
                 q.text,
                 |this, cx| this.remove_quote(cx),
                 cx,
@@ -793,6 +1036,7 @@ impl Render for ComposerView {
             let id = file.id.clone();
             chips = chips.child(self.render_chip(
                 ElementId::Name(SharedString::from(format!("file-remove-{}", file.id))),
+                Lucide::Paperclip,
                 file.name,
                 move |this, cx| this.remove_file(&id, cx),
                 cx,
@@ -807,7 +1051,7 @@ impl Render for ComposerView {
             if editing {
                 crate::copy::common::SAVE
             } else {
-                c::SEND
+                c::SEND_HINT
             },
             cx,
         )
@@ -827,6 +1071,7 @@ impl Render for ComposerView {
                 .capture_action(cx.listener(Self::on_down))
                 .capture_action(cx.listener(Self::on_escape))
                 .capture_action(cx.listener(Self::on_paste))
+                .capture_key_down(cx.listener(Self::on_format_key))
                 .child(
                     // XSmall drops the editor's own inset; the shell pads the
                     // text 12 top and 14 at the sides (DESIGN.md §7.2).
@@ -836,24 +1081,71 @@ impl Render for ComposerView {
                         .p_0()
                         .t_body()
                         .disabled(!enabled),
-                )
-                .children(self.render_mentions(cx)),
+                ),
         )
         .focused(focused && enabled)
+        .disabled(!enabled)
         .tool(
             ui::composer_tool("attach", Lucide::Plus, c::ATTACH)
                 .disabled(!enabled || editing)
                 .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
         )
+        .tool(
+            ui::composer_tool("mention", Lucide::AtSign, c::MENTION)
+                .disabled(!enabled)
+                .on_click(cx.listener(|this, _, window, cx| this.insert_text("@", window, cx))),
+        )
+        .tool(
+            ui::composer_tool("emoji", Lucide::FaceSlightlySmiling, c::EMOJI)
+                .disabled(!enabled)
+                .when(self.emoji_open, |b| b.selected(true))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.emoji_open = !this.emoji_open;
+                    cx.notify();
+                })),
+        )
+        .tool(
+            ui::composer_tool("format", Lucide::Type, c::FORMAT)
+                .disabled(!enabled)
+                .when(self.format_open, |b| b.selected(true))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.format_open = !this.format_open;
+                    cx.notify();
+                })),
+        )
         .send(send);
+        if self.format_open && enabled {
+            shell =
+                shell.format_bar(
+                    Format::ALL
+                        .iter()
+                        .map(|&f| {
+                            ui::composer_tool(
+                                ElementId::Name(format!("fmt-{f:?}").into()),
+                                f.glyph(),
+                                f.label(),
+                            )
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                this.apply_format(f, window, cx)
+                            }))
+                            .into_any_element()
+                        })
+                        .collect(),
+                );
+        }
         if editing {
             shell = shell.above(
                 div()
                     .flex()
+                    .items_center()
                     .gap(space::S8)
                     .t_small()
                     .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
-                    .child(div().text_color(colors.text_2).child(c::EDIT_HINT)),
+                    .child(
+                        ui::text_button("cancel-edit", crate::copy::common::CANCEL, cx).on_click(
+                            cx.listener(|this, _, window, cx| this.cancel_edit(window, cx)),
+                        ),
+                    ),
             );
         }
         if let Some(line) = title_line {
@@ -861,7 +1153,7 @@ impl Render for ComposerView {
                 div()
                     .t_small()
                     .text_color(colors.text_2)
-                    .truncate()
+                    .one_line()
                     .child(line),
             );
         }
@@ -871,7 +1163,7 @@ impl Render for ComposerView {
         if self.too_long {
             shell = shell.above(
                 div()
-                    .t_small()
+                    .t_meta()
                     .text_color(colors.danger_text)
                     .child(c::TOO_LONG),
             );
@@ -879,12 +1171,13 @@ impl Render for ComposerView {
         for line in &self.rejected {
             shell = shell.above(
                 div()
-                    .t_small()
+                    .t_meta()
                     .text_color(colors.danger_text)
                     .child(line.clone()),
             );
         }
 
+        let anchor = self.anchor.clone();
         div()
             .id("composer")
             .flex_none()
@@ -896,6 +1189,18 @@ impl Render for ComposerView {
                 cx.listener(|this, paths: &ExternalPaths, _, cx| this.on_drop_paths(paths, cx)),
             )
             .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(colors.hover))
-            .child(shell)
+            .child(
+                div()
+                    .relative()
+                    .w_full()
+                    .child(shell)
+                    .child(
+                        gpui::canvas(move |bounds, _, _| anchor.set(bounds), |_, _, _, _| {})
+                            .absolute()
+                            .size_full(),
+                    )
+                    .children(self.render_mentions(window, cx))
+                    .children(self.render_emoji(cx)),
+            )
     }
 }

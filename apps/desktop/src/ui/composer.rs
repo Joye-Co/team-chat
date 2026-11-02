@@ -34,6 +34,8 @@ pub struct ComposerShell {
     above: Vec<AnyElement>,
     /// The blocking slab attached to the top of the box (offline, quota).
     slab: Option<AnyElement>,
+    /// The format bar: a 36 pt row at the top of the box (§7.2).
+    format_bar: Option<AnyElement>,
     tools: Vec<AnyElement>,
     send: Option<AnyElement>,
     max_text_height: Option<Pixels>,
@@ -50,6 +52,7 @@ impl ComposerShell {
             disabled: false,
             above: Vec::new(),
             slab: None,
+            format_bar: None,
             tools: Vec::new(),
             send: None,
             max_text_height: None,
@@ -74,6 +77,20 @@ impl ComposerShell {
 
     pub fn slab(mut self, el: impl IntoElement) -> Self {
         self.slab = Some(el.into_any_element());
+        self
+    }
+
+    /// The format bar's buttons (use [`composer_tool`]); shown at the top of
+    /// the box with a 0.5 pt `sep` under it.
+    pub fn format_bar(mut self, buttons: Vec<AnyElement>) -> Self {
+        self.format_bar = Some(
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S2)
+                .children(buttons)
+                .into_any_element(),
+        );
         self
     }
 
@@ -154,6 +171,17 @@ impl RenderOnce for ComposerShell {
                     .cursor_text()
                     .flex()
                     .flex_col()
+                    .children(self.format_bar.map(|bar| {
+                        div()
+                            .flex_none()
+                            .h(size::FORMAT_BAR)
+                            .px(space::S8)
+                            .flex()
+                            .items_center()
+                            .border_b(theme::HAIRLINE)
+                            .border_color(k.sep)
+                            .child(bar)
+                    }))
                     .when(!self.above.is_empty(), |el| {
                         el.child(
                             div()

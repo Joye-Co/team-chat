@@ -163,6 +163,8 @@ pub mod size {
     pub const COMPOSER_MIN: Pixels = px(96.);
     pub const COMPOSER_TEXT_MIN: Pixels = px(44.);
     pub const COMPOSER_TOOLBAR: Pixels = px(40.);
+    /// The composer's format bar (§7.2).
+    pub const FORMAT_BAR: Pixels = px(36.);
     /// The composer grows with its text up to this share of the topic view.
     pub const COMPOSER_MAX_SHARE: f32 = 0.4;
     pub const CHIP: Pixels = px(22.);
