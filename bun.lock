@@ -37,6 +37,7 @@
       "name": "@chat/server",
       "dependencies": {
         "@chat/protocol": "workspace:*",
+        "@chat/search": "workspace:*",
         "zod": "^4.6.7",
       },
       "devDependencies": {

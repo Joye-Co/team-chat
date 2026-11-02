@@ -3,3 +3,4 @@
 import "./files";
 import "./notify";
 import "./ops";
+import "./search";

@@ -34,6 +34,7 @@ import {
   editExtensions,
   eventDecorators,
   eventImporters,
+  eventWriters,
   messageExtensions,
   roomMigrations,
   roomRpcHandlers,
@@ -289,6 +290,9 @@ export class GroupRoom extends DurableObject<Env> {
           d.messageId ?? null,
           JSON.stringify(d.data),
         );
+        for (const w of eventWriters) {
+          w({ seq, type: d.type, at, actorId: d.actorId, topicId: d.topicId, messageId: d.messageId, data: d.data }, this.sql);
+        }
         this.lastSeq = seq;
         const event = { seq, groupId, at, actorId: d.actorId, type: d.type, data: d.data } as Event;
         events.push(event);
@@ -1066,6 +1070,7 @@ export class GroupRoom extends DurableObject<Env> {
               JSON.stringify(r.data),
             );
             for (const importer of eventImporters) importer(r, this.sql);
+            for (const w of eventWriters) w(r, this.sql);
             this.lastSeq = r.seq;
             imported++;
           }

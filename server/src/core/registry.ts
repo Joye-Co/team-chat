@@ -285,3 +285,13 @@ export const eventImporters: EventImporter[] = [];
 export function registerEventImporter(importer: EventImporter): void {
   eventImporters.push(importer);
 }
+
+/**
+ * Keeps a feature's derived room tables (e.g. a search index) in step with the log. Runs inside
+ * the commit transaction right after each event row is stored, for live writes and for imports.
+ * Must be synchronous and must not append events. Throwing aborts the write.
+ */
+export const eventWriters: EventImporter[] = [];
+export function registerEventWriter(writer: EventImporter): void {
+  eventWriters.push(writer);
+}

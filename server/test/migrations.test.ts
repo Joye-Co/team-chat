@@ -20,12 +20,12 @@ describe("Durable Object migrations", () => {
       // A feature step added later runs once, after the core steps.
       const steps = [
         ...roomMigrationSteps(),
-        { name: "search-1", up: "CREATE TABLE search_test (id TEXT PRIMARY KEY)" },
-        { name: "search-2", up: (sql: SqlStorage) => void sql.exec("INSERT INTO search_test VALUES ('x')") },
+        { name: "example-1", up: "CREATE TABLE search_test (id TEXT PRIMARY KEY)" },
+        { name: "example-2", up: (sql: SqlStorage) => void sql.exec("INSERT INTO search_test VALUES ('x')") },
       ];
-      expect(runMigrations(state.storage, steps)).toEqual(["search-1", "search-2"]);
+      expect(runMigrations(state.storage, steps)).toEqual(["example-1", "example-2"]);
       expect(runMigrations(state.storage, steps)).toEqual([]);
-      expect(appliedMigrations(state.storage)).toEqual([...registered, "search-1", "search-2"]);
+      expect(appliedMigrations(state.storage)).toEqual([...registered, "example-1", "example-2"]);
       expect(state.storage.sql.exec("SELECT count(*) AS n FROM search_test").one().n).toBe(1);
       // A failing step rolls back and is not recorded.
       const bad = [...steps, { name: "bad-1", up: "CREATE TABLE ok_t (x); SELECT * FROM missing_table" }];
