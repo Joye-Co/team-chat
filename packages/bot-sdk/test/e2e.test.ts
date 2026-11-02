@@ -402,4 +402,42 @@ describe("bot sdk e2e", () => {
   });
 });
 
+describe("bot loops", () => {
+  test("messages of other bots reach no handler unless allowBotAuthors is set", async () => {
+    const auth = { authorization: `Bearer ${ownerToken}` };
+    const taro = await post("/v1/bots", { name: "Taro", role: "test" }, auth);
+    const lis = await post("/v1/bots", { name: "Listener", role: "test" }, auth);
+    const taroBot = new Bot({ url: server.url, token: taro.token, logLevel: "warn", markRead: false });
+    const listener = new Bot({ url: server.url, token: lis.token, logLevel: "warn", markRead: false, allowBotAuthors: true });
+    const heard: string[] = [];
+    listener.onMention(async (ctx) => {
+      heard.push(ctx.message.id);
+    });
+    await taroBot.start();
+    await listener.start();
+    try {
+      await waitFor("echo knows the other bots", () =>
+        [taro.member.id, lis.member.id].every((id) => bot.members.some((m) => m.id === id)),
+      );
+      const r = await taroBot.startTopic(generalId, {
+        body: "@Echo @Listener hi",
+        mentions: [botId, lis.member.id],
+      });
+      await waitFor("listener (allowBotAuthors) hears the bot", () => heard.includes(r.message.id));
+      await new Promise((res) => setTimeout(res, 500));
+      expect(seen.mentions).not.toContain(r.message.id);
+      expect(botMessages(r.message.topicId)).toHaveLength(0);
+      // A human's message in the same topic still reaches Echo.
+      const h = await human.send({ groupId: generalId, topicId: r.message.topicId }, {
+        body: "@Echo from a human",
+        mentions: [botId],
+      });
+      await waitFor("echo answers the human", () => seen.mentions.includes(h.message.id));
+    } finally {
+      await taroBot.stop();
+      await listener.stop();
+    }
+  });
+});
+
 console.error(`bot-sdk e2e: http send ${hasHttpSend ? "on" : "off"}, files ${hasFiles ? "on" : "off"}; log ${server.logFile}`);

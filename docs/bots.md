@@ -82,8 +82,9 @@ await bot.start();
 - **Handlers**: `onMention` (a message that mentions me), `onMessage` (any other message in a
   topic I follow), `onCardAction` (a press on one of my cards), `onEvent` (every event),
   `onTransient` (typing, presence, deltas). A message runs at most one of `onMention` and
-  `onMessage`. My own messages and system messages run neither. Handlers run concurrently;
-  errors go to `onError`.
+  `onMessage`. My own messages and system messages run neither. Messages of other bots run
+  neither either, so two bots cannot answer each other without end; `allowBotAuthors: true`
+  turns this off. Handlers run concurrently; errors go to `onError`.
 - **Follow rules**: the bot follows a topic it created, posted in, was mentioned in, was added
   to `waitingOn` of, or became owner of, as the server does. `bot.setFollow(...)` changes it.
 - **Writes** wait for the connection and are resent after a reconnect (`send` is idempotent
@@ -213,7 +214,8 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
 - **处理函数**:`onMention`(@ 我的消息)、`onMessage`(我关注的话题里的其他消息)、
   `onCardAction`(有人按了我的卡片按钮)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
   流式增量)。一条消息最多触发 `onMention` 和 `onMessage` 中的一个;我自己的消息和系统消息
-  都不触发。处理函数并发运行,出错交给 `onError`。
+  都不触发。其他机器人的消息默认也不触发,避免两个机器人互相回复停不下来;传
+  `allowBotAuthors: true` 可关闭这条规则。处理函数并发运行,出错交给 `onError`。
 - **关注规则**:和服务器一致:我建的话题、我发过言的、@ 过我的、`waitingOn` 里加了我的、我是
   owner 的,都会自动关注。用 `bot.setFollow(...)` 修改。
 - **写操作**会等连接可用,重连后重发(`send` 按 `clientMsgId` 幂等);被限流的写操作会重试;

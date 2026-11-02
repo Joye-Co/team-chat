@@ -69,6 +69,12 @@ export interface BotOptions {
   requestTimeoutMs?: number;
   /** How long `stop()` waits for running handlers. Default 10 s. */
   stopTimeoutMs?: number;
+  /**
+   * Run `onMention` and `onMessage` for messages from other bots too. Default false: two bots
+   * that answer each other would loop until the rate limit stops them. Turn it on only when
+   * the handlers cannot answer a bot with a message that reaches that bot again.
+   */
+  allowBotAuthors?: boolean;
   WebSocket?: WebSocketCtor;
   fetch?: typeof fetch;
 }
@@ -1033,6 +1039,12 @@ export class Bot {
             break;
           }
           if (m.kind === "system" || m.deletedAt) break;
+          // No loops: messages of other bots reach no handler unless allowBotAuthors is set.
+          if (this.opts.allowBotAuthors !== true && this.memberMap.get(m.authorId)?.kind === "bot") {
+            if (m.mentions.includes(me)) this.follow(event.groupId, m.topicId);
+            this.scheduleRead(event.groupId);
+            break;
+          }
           const ctx = () => this.messageContext(event, catchUp);
           if (m.mentions.includes(me)) {
             this.follow(event.groupId, m.topicId);
