@@ -319,8 +319,16 @@ export class BotDesk extends DurableObject<BotsEnv> {
   // -------------------------------------------------------------------------
 
   /** A human message in a topic this bot is responsible for, or one that mentions it. */
+  /**
+   * A message for this bot, from the room's outbox. The room retries until this returns, so it
+   * throws on failure and is idempotent by message id: a message that started a run or was
+   * passed to one is not handled again.
+   */
   async onMessage(botId: string, m: TopicMessage): Promise<void> {
     this.bind(botId);
+    if (this.handledMessage(m.messageId)) return;
+    if (this.messagesInFlight.has(m.messageId)) throw new ApiError("conflict", "message is being handled");
+    this.messagesInFlight.add(m.messageId);
     try {
       const active = this.activeRun(m.topicId);
       if (active) return await this.serial(active.id, () => this.toActive(active.id, m));
@@ -328,7 +336,19 @@ export class BotDesk extends DurableObject<BotsEnv> {
       await this.start(m);
     } catch (err) {
       this.log.error("onMessage failed", { err, topicId: m.topicId });
+      throw err;
+    } finally {
+      this.messagesInFlight.delete(m.messageId);
     }
+  }
+
+  private readonly messagesInFlight = new Set<string>();
+
+  private handledMessage(messageId: string): boolean {
+    return (
+      this.sql.exec("SELECT 1 FROM runs WHERE trigger_message_id = ? LIMIT 1", messageId).toArray().length > 0 ||
+      this.sql.exec("SELECT 1 FROM inputs WHERE message_id = ? LIMIT 1", messageId).toArray().length > 0
+    );
   }
 
   private async toActive(runId: string, m: TopicMessage): Promise<void> {

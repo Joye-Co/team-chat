@@ -36,6 +36,7 @@ import {
   eventImporters,
   eventWriters,
   messageExtensions,
+  roomAlarmHandlers,
   roomMigrations,
   roomRpcHandlers,
 } from "./registry";
@@ -353,6 +354,7 @@ export class GroupRoom extends DurableObject<Env> {
       log: this.log,
       sql: this.sql,
       waitUntil: (p) => this.ctx.waitUntil(p),
+      wakeAt: (at) => this.wakeAt(at),
     };
     for (const event of events) {
       for (const hook of afterCommitHooks) {
@@ -460,7 +462,31 @@ export class GroupRoom extends DurableObject<Env> {
       commit: (fn) => this.commit(fn),
       broadcast: (frame, opts) => this.broadcast(frame, opts),
       waitUntil: (p) => this.ctx.waitUntil(p),
+      wakeAt: (at) => this.wakeAt(at),
     };
+  }
+
+  /** Sets the alarm to `at` unless it is already set earlier. */
+  private wakeAt(at: number): void {
+    this.ctx.waitUntil(
+      (async () => {
+        const cur = await this.ctx.storage.getAlarm();
+        if (cur === null || cur > at) await this.ctx.storage.setAlarm(at);
+      })().catch((err) => this.log.error("set alarm failed", { err })),
+    );
+  }
+
+  /** Feature retries (`registerRoomAlarm`). */
+  async alarm(): Promise<void> {
+    if (!this.groupId) return;
+    const room = this.roomContext();
+    for (const h of roomAlarmHandlers) {
+      try {
+        await h(room);
+      } catch (err) {
+        this.log.error("room alarm handler failed", { err });
+      }
+    }
   }
 
   // -------------------------------------------------------------------------

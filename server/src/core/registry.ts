@@ -136,6 +136,8 @@ export interface RoomContext {
   /** Sends a frame (e.g. a transient event) to the gateways of all members, or the given ones. */
   broadcast(frame: unknown, opts?: { to?: string[]; except?: string }): void;
   waitUntil(p: Promise<unknown>): void;
+  /** Wakes the room's alarm handlers (`registerRoomAlarm`) at `at` or earlier. */
+  wakeAt(at: number): void;
 }
 
 export type RoomRpcHandler = (room: RoomContext, actor: Actor | null, args: unknown) => Promise<unknown> | unknown;
@@ -144,6 +146,16 @@ export const roomRpcHandlers = new Map<string, RoomRpcHandler>();
 export function registerRoomRpc(name: string, h: RoomRpcHandler): void {
   if (roomRpcHandlers.has(name)) throw new Error(`room rpc "${name}" already registered`);
   roomRpcHandlers.set(name, h);
+}
+
+/**
+ * Runs when the room's alarm fires (set with `wakeAt`). Retries of durable feature work, such
+ * as an outbox. Errors are logged; a handler that needs another wake calls `wakeAt` again.
+ */
+export type RoomAlarmHandler = (room: RoomContext) => Promise<void> | void;
+export const roomAlarmHandlers: RoomAlarmHandler[] = [];
+export function registerRoomAlarm(h: RoomAlarmHandler): void {
+  roomAlarmHandlers.push(h);
 }
 
 export const roomMigrations: MigrationStep[] = [];
@@ -235,8 +247,13 @@ export interface HookContext {
   memberIds: string[];
   log: Logger;
   waitUntil(p: Promise<unknown>): void;
-  /** Read access to the room's SQLite (do not write from a hook; use a room RPC). */
+  /**
+   * The room's SQLite. Do not append events from a hook (use a room RPC); a feature may update
+   * its own bookkeeping tables, such as an outbox.
+   */
   sql: SqlStorage;
+  /** Wakes the room's alarm handlers (`registerRoomAlarm`) at `at` or earlier. */
+  wakeAt(at: number): void;
 }
 
 export type AfterCommitHook = (event: Event, h: HookContext) => Promise<void> | void;

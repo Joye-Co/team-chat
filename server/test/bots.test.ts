@@ -472,6 +472,51 @@ describe("runner-backed bots", () => {
     d.close();
   });
 
+  it("retry a mention whose hand-off to the bot failed, and hand it off once", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken);
+    const { c } = await Client.connect(w.human.token);
+    const room = benv.GROUP_ROOM.get(benv.GROUP_ROOM.idFromName(w.gid));
+    const outbox = () =>
+      runInDurableObject(room, (_i, state: DurableObjectState) =>
+        state.storage.sql.exec<{ attempts: number }>("SELECT attempts FROM bot_outbox").toArray(),
+      );
+    // D1 fails while the room hands the mention off (the bot lookup reads bot_runners).
+    await env.DB.exec("ALTER TABLE bot_runners RENAME TO bot_runners_down");
+    let sent: any;
+    try {
+      sent = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev fix it", mentions: [w.bot.id] });
+      for (let i = 0; !(await outbox()).some((r) => r.attempts >= 1); i++) {
+        if (i > 200) throw new Error("timed out waiting for the failed hand-off to be kept");
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    } finally {
+      await env.DB.exec("ALTER TABLE bot_runners_down RENAME TO bot_runners");
+    }
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(0);
+    // The room alarm retries (made due now) and the desk accepts: the run starts.
+    await runInDurableObject(room, (_i, state: DurableObjectState) => {
+      state.storage.sql.exec("UPDATE bot_outbox SET next_at = 0");
+    });
+    expect(await runDurableObjectAlarm(room)).toBe(true);
+    const assign = await d.next((f) => f.t === "run.assign");
+    expect(assign).toMatchObject({ botMemberId: w.bot.id, topicId: sent.message.topicId });
+    expect(await outbox()).toEqual([]);
+    // A repeated hand-off of the same message (a retry after a lost answer) starts nothing.
+    await deskOf(w.bot.id).onMessage(w.bot.id, {
+      groupId: w.gid,
+      topicId: sent.message.topicId,
+      messageId: sent.message.id,
+      authorId: w.human.id,
+      body: "@dev fix it",
+      mentioned: true,
+    });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
+    c.close();
+    d.close();
+  });
+
   it("give no new run to a machine with low disk or the wrong labels", async () => {
     const w = await world({ labels: ["gpu-only"] });
     const { d } = await Daemon.connect(w.machineToken, { labels: ["mac"] });

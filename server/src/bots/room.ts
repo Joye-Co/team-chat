@@ -1,14 +1,21 @@
 // Group room side of the bots feature: the one responsible bot per topic, `run.updated` events,
-// and the after-commit hook that sends human messages to the responsible bot's BotDesk.
+// and the hand-off of human messages and card presses to the responsible bot's BotDesk. The
+// hand-off is written to an outbox in the same transaction as the event and delivered after
+// commit; a failed delivery is retried by the room alarm until the desk accepts it.
 import type { BotRun, Event, Message } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
+  type ArchivedEvent,
   registerAfterCommit,
   registerEventImporter,
+  registerEventWriter,
+  registerRoomAlarm,
   registerRoomMigration,
   registerRoomRpc,
 } from "../core/registry";
 import { CONTEXT_MESSAGES, type ContextMessage } from "./dispatch";
+import type { Env } from "../core/env";
+import type { Logger } from "../core/logger";
 import { deskStub } from "./env";
 
 registerRoomMigration({
@@ -18,6 +25,21 @@ registerRoomMigration({
       topic_id TEXT PRIMARY KEY,
       bot_id TEXT NOT NULL,
       claimed_at INTEGER NOT NULL
+    );
+  `,
+});
+
+registerRoomMigration({
+  name: "bots-2",
+  up: `
+    CREATE TABLE bot_outbox (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      kind TEXT NOT NULL,
+      topic_id TEXT NOT NULL,
+      payload TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      next_at INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
     );
   `,
 });
@@ -102,24 +124,91 @@ export interface TopicMessage {
   mentioned: boolean;
 }
 
-registerAfterCommit(async (event: Event, h) => {
+/** Events older than this are imports (restore from the archive), not live writes: no hand-off. */
+const LIVE_WINDOW_MS = 10 * 60_000;
+/** A hand-off the desk has not accepted after this long is dropped (and logged). */
+export const HANDOFF_GIVE_UP_MS = 60 * 60_000;
+const RETRY_MAX_MS = 5 * 60_000;
+
+type OutboxCard = { botId: string; messageId: string; actionId: string; actorId: string };
+type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId"> & { mentions: string[] };
+
+type OutboxRow = {
+  id: number;
+  kind: "message" | "card";
+  topic_id: string;
+  payload: string;
+  attempts: number;
+  next_at: number;
+  created_at: number;
+};
+
+// In the commit transaction: the messages and card presses that may go to a bot.
+registerEventWriter((event: ArchivedEvent, sql) => {
+  if (event.at < Date.now() - LIVE_WINDOW_MS) return;
   if (event.type === "card.actioned") {
     const { messageId, actionId } = event.data as { messageId: string; actionId: string };
-    const row = h.sql
+    const row = sql
       .exec<{ author_id: string; topic_id: string }>("SELECT author_id, topic_id FROM messages WHERE id = ?", messageId)
       .toArray()[0];
-    if (!row || claimedBot(h.sql, row.topic_id) !== row.author_id) return;
-    await deskStub(h.env, row.author_id).cardAction(row.author_id, { groupId: h.groupId, messageId, actionId, actorId: event.actorId });
+    if (!row || claimedBot(sql, row.topic_id) !== row.author_id) return;
+    const payload: OutboxCard = { botId: row.author_id, messageId, actionId, actorId: event.actorId };
+    enqueue(sql, "card", row.topic_id, payload);
     return;
   }
   if (event.type !== "message.created") return;
   const message = (event.data as { message: Message }).message;
   if (message.kind === "system") return;
-  const claimed = claimedBot(h.sql, message.topicId);
+  const claimed = claimedBot(sql, message.topicId);
   if (claimed === message.authorId) return;
   if (!claimed && message.mentions.length === 0) return;
-  const ids = [...new Set([message.authorId, ...message.mentions])];
-  const rows = await h.env.DB.prepare(
+  const payload: OutboxMessage = {
+    topicId: message.topicId,
+    messageId: message.id,
+    authorId: message.authorId,
+    body: message.body,
+    mentions: message.mentions,
+  };
+  enqueue(sql, "message", message.topicId, payload);
+});
+
+function enqueue(sql: SqlStorage, kind: OutboxRow["kind"], topicId: string, payload: unknown): void {
+  sql.exec(
+    "INSERT INTO bot_outbox (kind, topic_id, payload, created_at) VALUES (?, ?, ?, ?)",
+    kind,
+    topicId,
+    JSON.stringify(payload),
+    Date.now(),
+  );
+}
+
+interface DeliverContext {
+  env: Env;
+  groupId: string;
+  sql: SqlStorage;
+  log: Logger;
+  wakeAt(at: number): void;
+}
+
+/** Hands one outbox row to the bot's desk. Throws when it must be tried again. */
+async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
+  if (row.kind === "card") {
+    const p = JSON.parse(row.payload) as OutboxCard;
+    await deskStub(c.env, p.botId).cardAction(p.botId, {
+      groupId: c.groupId,
+      messageId: p.messageId,
+      actionId: p.actionId,
+      actorId: p.actorId,
+    });
+    return;
+  }
+  const m = JSON.parse(row.payload) as OutboxMessage;
+  // The responsible bot now (a run may have claimed the topic since the message was written).
+  const claimed = claimedBot(c.sql, m.topicId);
+  if (claimed === m.authorId) return;
+  if (!claimed && m.mentions.length === 0) return;
+  const ids = [...new Set([m.authorId, ...m.mentions])];
+  const rows = await c.env.DB.prepare(
     `SELECT m.id, m.kind, r.member_id IS NOT NULL AS runner FROM members m
      LEFT JOIN bot_runners r ON r.member_id = m.id AND r.enabled = 1
      WHERE m.id IN (${ids.map(() => "?").join(",")}) AND m.deactivated = 0`,
@@ -128,17 +217,77 @@ registerAfterCommit(async (event: Event, h) => {
     .all<{ id: string; kind: string; runner: number }>();
   const byId = new Map(rows.results.map((r) => [r.id, r]));
   // A bot's messages never reach another bot: no loops.
-  const author = byId.get(message.authorId);
+  const author = byId.get(m.authorId);
   if (!author || author.kind !== "human") return;
-  const target = claimed ?? message.mentions.find((id) => byId.get(id)?.runner);
+  const target = claimed ?? m.mentions.find((id) => byId.get(id)?.runner);
   if (!target) return;
   const args: TopicMessage = {
-    groupId: h.groupId,
-    topicId: message.topicId,
-    messageId: message.id,
-    authorId: message.authorId,
-    body: message.body,
-    mentioned: message.mentions.includes(target),
+    groupId: c.groupId,
+    topicId: m.topicId,
+    messageId: m.messageId,
+    authorId: m.authorId,
+    body: m.body,
+    mentioned: m.mentions.includes(target),
   };
-  await deskStub(h.env, target).onMessage(target, args);
+  await deskStub(c.env, target).onMessage(target, args);
+}
+
+/** Rooms with a drain running (one per room object; the alarm and hooks share it). */
+const draining = new WeakSet<SqlStorage>();
+
+/**
+ * Delivers every due outbox row in order. A failure delays the later rows of the same topic
+ * (their order matters to the run) and schedules a retry with backoff through the alarm.
+ */
+export async function drainOutbox(c: DeliverContext): Promise<void> {
+  if (draining.has(c.sql)) return;
+  draining.add(c.sql);
+  try {
+    // Rows written while a delivery was in flight are picked up by the next pass.
+    for (let pass = 0; pass < 10; pass++) {
+      const now = Date.now();
+      const due = c.sql
+        .exec<OutboxRow>("SELECT * FROM bot_outbox WHERE next_at <= ? ORDER BY id LIMIT 100", now)
+        .toArray();
+      if (due.length === 0) break;
+      const blocked = new Set(
+        c.sql
+          .exec<{ topic_id: string }>("SELECT DISTINCT topic_id FROM bot_outbox WHERE next_at > ?", now)
+          .toArray()
+          .map((r) => r.topic_id),
+      );
+      let delivered = 0;
+      for (const row of due) {
+        if (blocked.has(row.topic_id)) continue;
+        try {
+          await deliver(c, row);
+          c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
+          delivered++;
+        } catch (err) {
+          blocked.add(row.topic_id);
+          const attempts = row.attempts + 1;
+          if (Date.now() - row.created_at > HANDOFF_GIVE_UP_MS) {
+            c.sql.exec("DELETE FROM bot_outbox WHERE id = ?", row.id);
+            c.log.error("bot hand-off dropped", { err, kind: row.kind, topicId: row.topic_id, attempts });
+            continue;
+          }
+          const wait = Math.min(1000 * 2 ** Math.min(attempts, 20), RETRY_MAX_MS);
+          c.sql.exec("UPDATE bot_outbox SET attempts = ?, next_at = ? WHERE id = ?", attempts, Date.now() + wait, row.id);
+          c.log.warn("bot hand-off failed; will retry", { err, kind: row.kind, topicId: row.topic_id, attempts });
+        }
+      }
+      if (delivered === 0) break;
+    }
+  } finally {
+    draining.delete(c.sql);
+  }
+  const next = c.sql.exec<{ at: number | null }>("SELECT MIN(next_at) AS at FROM bot_outbox").toArray()[0]?.at;
+  if (next !== null && next !== undefined) c.wakeAt(Math.max(next, Date.now() + 1000));
+}
+
+registerAfterCommit(async (event: Event, h) => {
+  if (event.type !== "message.created" && event.type !== "card.actioned") return;
+  await drainOutbox(h);
 });
+
+registerRoomAlarm((room) => drainOutbox(room));
