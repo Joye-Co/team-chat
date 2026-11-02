@@ -7,6 +7,7 @@ import {
   type Actor,
   type RoomContext,
   registerEditExtension,
+  registerEventImporter,
   registerMessageExtension,
   registerRoomMigration,
   registerRoomRpc,
@@ -364,3 +365,70 @@ function refsFromFrame(frame: Record<string, unknown>, room: RoomContext, keepEm
 
 registerMessageExtension((frame, room) => refsFromFrame(frame, room, false));
 registerEditExtension((frame, room) => refsFromFrame(frame, room, true));
+
+// ---------------------------------------------------------------------------
+// Restore from the archive
+// ---------------------------------------------------------------------------
+
+/**
+ * Rebuilds artifacts and artifact_versions from artifact.created and artifact.versionAdded:
+ * both events carry the whole 产出 and the new version, as the RPCs above write them.
+ */
+registerEventImporter((e, sql) => {
+  if (e.type !== "artifact.created" && e.type !== "artifact.versionAdded") return;
+  const data = (e.data ?? {}) as { artifact?: Artifact; version?: ArtifactVersion };
+  const a = data.artifact;
+  const v = data.version;
+  if (!a || !v) return;
+  sql.exec(
+    `INSERT INTO artifacts (id, topic_id, title, kind, current_version, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (id) DO UPDATE SET title = excluded.title, current_version = excluded.current_version,
+       updated_at = excluded.updated_at`,
+    a.id,
+    a.topicId,
+    a.title,
+    a.kind,
+    a.currentVersion,
+    a.createdBy,
+    a.createdAt,
+    a.updatedAt,
+  );
+  sql.exec(
+    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    v.artifactId,
+    v.version,
+    v.entry,
+    JSON.stringify(v.files),
+    v.note ?? null,
+    v.createdBy,
+    v.createdAt,
+  );
+});
+
+/**
+ * Restore: refills file_records from the D1 files rows of this group (status ready). Ready
+ * files have no event, so the restore tool calls this after the events. Internal only.
+ */
+registerRoomRpc("files.importRecords", (room, actor, args) => {
+  if (actor) throw new ApiError("forbidden", "internal only");
+  const { files } = args as { files: RegisterFileArgs[] };
+  for (const f of files) {
+    room.sql.exec(
+      `INSERT OR REPLACE INTO file_records (id, topic_id, name, size, mime, sha256, width, height, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      f.id,
+      f.topicId,
+      f.name,
+      f.size,
+      f.mime,
+      f.sha256,
+      f.width,
+      f.height,
+      f.createdBy,
+      f.createdAt,
+    );
+  }
+  return { rows: files.length };
+});

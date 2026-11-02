@@ -1,21 +1,25 @@
 // Admin routes for the archive and for restore. All need the X-Admin-Secret header.
-//   POST /v1/admin/archive/run                 run the daily archive now
+//   POST /v1/admin/archive/run                 run the daily archive now (goes on where the last run stopped)
+//   GET  /v1/ops/archive                       archive freshness (any member token; times only)
 //   GET  /v1/admin/archive?prefix=&cursor=     list archive objects of this env's bucket
 //   GET  /v1/admin/archive/object?key=         one archive object (gzip bytes)
 //   POST /v1/admin/import/groups/:id           gzip NDJSON of archived events -> empty GroupRoom
 //   POST /v1/admin/import/groups/:id/state     gzip JSON room state snapshot, right after the events
+//   POST /v1/admin/import/groups/:id/files     refill the room's ready-file records from D1 files
 //   GET  /v1/admin/import/d1                   row counts per D1 table (restore pre-check)
 //   POST /v1/admin/import/d1                   { table, columns, rows } -> INSERT OR IGNORE
 //   POST /v1/admin/pitr/groups/:id             { at, apply? } point-in-time recovery of one room
 //   POST /v1/admin/import/d1/done              records the D1 restore in the audit log
+//   GET  /v1/admin/revocations                 revoked tokens and machines, deleted hooks, deactivated members
+//   POST /v1/admin/revocations                 apply such a list again (after a D1 restore)
 import { z } from "zod";
 import { audit } from "../core/audit";
 import { timingSafeEqualString } from "../core/crypto";
-import { type Env, roomStub } from "../core/env";
+import { type Env, gatewayStub, roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
 import { readText } from "../core/http";
 import { type ArchivedEvent, registerRoute } from "../core/registry";
-import { runArchive } from "./archive";
+import { archiveStatus, runArchive, supersedeAfter } from "./archive";
 import { gunzip } from "./gzip";
 
 const MAX_IMPORT_BYTES = 32 * 1024 * 1024;
@@ -23,6 +27,33 @@ const MAX_IMPORT_TEXT = 256 * 1024 * 1024;
 const IMPORT_SLICE = 1000;
 const D1_IMPORT_BYTES = 8 * 1024 * 1024;
 const D1_BATCH = 200;
+const FILES_PAGE = 500;
+const PITR_MARGIN_MS = 60_000;
+const REVOCATIONS_BYTES = 4 * 1024 * 1024;
+
+const Revoked = z.object({ id: z.string().min(1).max(64), at: z.int().nonnegative() });
+const Revocations = z.object({
+  version: z.literal(1),
+  environment: z.string().max(32).optional(),
+  at: z.int().nonnegative().optional(),
+  tokens: z.array(Revoked).max(50_000),
+  machines: z.array(Revoked).max(10_000),
+  hooks: z.array(Revoked).max(10_000),
+  members: z.array(z.string().min(1).max(64)).max(10_000),
+});
+
+type FileRecordD1 = {
+  id: string;
+  topic_id: string | null;
+  name: string;
+  size: number;
+  mime: string;
+  sha256: string;
+  width: number | null;
+  height: number | null;
+  created_by: string;
+  created_at: number;
+};
 
 export async function requireAdmin(request: Request, env: Env): Promise<void> {
   const given = request.headers.get("x-admin-secret") ?? "";
@@ -104,10 +135,18 @@ export function registerOpsRoutes(): void {
       const report = await runArchive(env, { log, budgetMs: 20_000 });
       await audit(env.DB, null, {
         action: "admin.archive.run",
-        details: { files: report.files.length, events: report.events, complete: report.complete },
+        details: { files: report.files.length, events: report.events, complete: report.complete, failed: report.failed.length },
       });
       return report;
     },
+  });
+
+  // Archive freshness for the monitor (its bot token is a member token). Times only.
+  registerRoute({
+    method: "GET",
+    path: "/v1/ops/archive",
+    auth: "member",
+    handler: ({ env }) => archiveStatus(env),
   });
 
   registerRoute({
@@ -205,6 +244,44 @@ export function registerOpsRoutes(): void {
 
   registerRoute({
     method: "POST",
+    path: "/v1/admin/import/groups/:id/files",
+    auth: "none",
+    async handler({ request, env, params }) {
+      await requireAdmin(request, env);
+      const room = roomStub(env, params.id);
+      let rows = 0;
+      let after = "";
+      for (;;) {
+        const page = await env.DB.prepare(
+          `SELECT id, topic_id, name, size, mime, sha256, width, height, created_by, created_at FROM files
+           WHERE group_id = ? AND status = 'ready' AND id > ? ORDER BY id LIMIT ?`,
+        )
+          .bind(params.id, after, FILES_PAGE)
+          .all<FileRecordD1>();
+        if (page.results.length === 0) break;
+        const files = page.results.map((f) => ({
+          id: f.id,
+          topicId: f.topic_id,
+          name: f.name,
+          size: f.size,
+          mime: f.mime,
+          sha256: f.sha256,
+          width: f.width,
+          height: f.height,
+          createdBy: f.created_by,
+          createdAt: f.created_at,
+        }));
+        rows += (unwrap(await room.rpc(params.id, "files.importRecords", null, { files })) as { rows: number }).rows;
+        after = page.results[page.results.length - 1].id;
+        if (page.results.length < FILES_PAGE) break;
+      }
+      await audit(env.DB, null, { action: "admin.import.groupFiles", target: params.id, details: { rows } });
+      return { groupId: params.id, rows };
+    },
+  });
+
+  registerRoute({
+    method: "POST",
     path: "/v1/admin/pitr/groups/:id",
     auth: "none",
     async handler({ request, env, params, body }) {
@@ -212,11 +289,92 @@ export function registerOpsRoutes(): void {
       const b = await body(z.object({ at: z.int().positive(), apply: z.boolean().optional() }));
       const now = Date.now();
       if (b.at > now || b.at < now - 30 * 24 * 60 * 60 * 1000) throw new ApiError("invalid", "at must be within the last 30 days");
-      const r = unwrap(await roomStub(env, params.id).pointInTime(params.id, b.at, b.apply === true));
+      const room = roomStub(env, params.id);
+      // The restored room will write seqs after its restore point again. Take the newest seq a
+      // minute before that point (commit times are close to event times), so no seq the restore
+      // keeps is dropped from the archive; re-archiving a few identical seqs is harmless.
+      const keep = b.apply
+        ? (unwrap(await room.rpc(params.id, "ops.seqAt", null, { at: b.at - PITR_MARGIN_MS })) as { seq: number }).seq
+        : 0;
+      const r = unwrap(await room.pointInTime(params.id, b.at, b.apply === true));
+      let superseded: string[] = [];
       if (r.applied) {
-        await audit(env.DB, null, { action: "admin.pitr.group", target: params.id, details: { at: b.at, lastSeqBefore: r.lastSeq } });
+        superseded = await supersedeAfter(env, params.id, keep);
+        await audit(env.DB, null, {
+          action: "admin.pitr.group",
+          target: params.id,
+          details: { at: b.at, lastSeqBefore: r.lastSeq, archiveFrom: keep, superseded: superseded.length },
+        });
       }
-      return { groupId: params.id, ...r };
+      return { groupId: params.id, ...r, ...(r.applied ? { archiveFrom: keep, superseded } : {}) };
+    },
+  });
+
+  // Revocations: a D1 restore (Time Travel or an archive dump) goes back to a time before a
+  // token was revoked or a member deactivated, and would let a leaked credential work again.
+  // Save them before the restore and apply them again after it (docs/RUNBOOK.md).
+  registerRoute({
+    method: "GET",
+    path: "/v1/admin/revocations",
+    auth: "none",
+    async handler({ request, env }) {
+      await requireAdmin(request, env);
+      const all = async <T>(sql: string) => (await env.DB.prepare(sql).all<T>()).results;
+      return {
+        version: 1 as const,
+        environment: env.ENVIRONMENT,
+        at: Date.now(),
+        tokens: await all<{ id: string; at: number }>("SELECT id, revoked_at AS at FROM tokens WHERE revoked_at IS NOT NULL"),
+        machines: await all<{ id: string; at: number }>("SELECT id, revoked_at AS at FROM machines WHERE revoked_at IS NOT NULL"),
+        hooks: await all<{ id: string; at: number }>("SELECT id, deleted_at AS at FROM hooks WHERE deleted_at IS NOT NULL"),
+        members: (await all<{ id: string }>("SELECT id FROM members WHERE deactivated = 1")).map((m) => m.id),
+      };
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/admin/revocations",
+    auth: "none",
+    bodyLimit: REVOCATIONS_BYTES,
+    async handler({ request, env, body }) {
+      await requireAdmin(request, env);
+      const b = await body(Revocations, REVOCATIONS_BYTES);
+      const stmts: D1PreparedStatement[] = [];
+      for (const t of b.tokens) {
+        stmts.push(env.DB.prepare("UPDATE tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(t.at, t.id));
+      }
+      for (const m of b.machines) {
+        stmts.push(env.DB.prepare("UPDATE machines SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").bind(m.at, m.id));
+      }
+      for (const h of b.hooks) {
+        stmts.push(env.DB.prepare("UPDATE hooks SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL").bind(h.at, h.id));
+      }
+      for (const id of b.members) {
+        stmts.push(env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ? AND deactivated = 0").bind(id));
+      }
+      const changed: boolean[] = [];
+      for (let i = 0; i < stmts.length; i += D1_BATCH) {
+        for (const r of await env.DB.batch(stmts.slice(i, i + D1_BATCH))) changed.push((r.meta.changes ?? 0) > 0);
+      }
+      const applied = changed.filter(Boolean).length;
+      // Close the sockets that the restored credentials opened, as the live revoke does.
+      const tokenIds = b.tokens.filter((_, i) => changed[i]).map((t) => t.id);
+      const byMember = new Map<string, string[]>();
+      for (let i = 0; i < tokenIds.length; i += 50) {
+        const part = tokenIds.slice(i, i + 50);
+        const rows = await env.DB.prepare(`SELECT id, member_id FROM tokens WHERE id IN (${part.map(() => "?").join(", ")})`)
+          .bind(...part)
+          .all<{ id: string; member_id: string }>();
+        for (const r of rows.results) byMember.set(r.member_id, [...(byMember.get(r.member_id) ?? []), r.id]);
+      }
+      for (const [memberId, ids] of byMember) await gatewayStub(env, memberId).closeSockets({ tokenIds: ids, reason: "token revoked" });
+      const offset = b.tokens.length + b.machines.length + b.hooks.length;
+      for (const [i, id] of b.members.entries()) {
+        if (changed[offset + i]) await gatewayStub(env, id).closeSockets({ reason: "member deactivated" });
+      }
+      await audit(env.DB, null, { action: "admin.revocations.apply", details: { applied, from: b.environment ?? null } });
+      return { applied };
     },
   });
 

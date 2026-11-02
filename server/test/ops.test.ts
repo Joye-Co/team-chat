@@ -370,3 +370,252 @@ describe("point-in-time recovery", () => {
     expect((await api(`/v1/admin/pitr/groups/${gid}`, { body: { at: Date.now() } })).status).toBe(401);
   });
 });
+
+async function sha256(bytes: Uint8Array): Promise<string> {
+  const d = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return [...d].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function uploadFile(m: TestMember, groupId: string, text: string, name: string, mime: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const c = await api("/v1/files", { token: m.token, body: { groupId, name, size: bytes.length, mime, sha256: await sha256(bytes) } });
+  expect(c.status, JSON.stringify(c.body)).toBe(200);
+  const { SELF } = await import("cloudflare:test");
+  const put = await SELF.fetch(`${BASE}/v1/files/${c.body.file.id}/content`, {
+    method: "PUT",
+    headers: { authorization: `Bearer ${m.token}` },
+    body: bytes,
+  });
+  expect(put.status).toBe(200);
+  return c.body.file.id as string;
+}
+
+async function restoreInto(target: string, keys: string[]): Promise<void> {
+  for (const key of keys) {
+    const bytes = new Uint8Array(await (await env.FILES.get(key))!.arrayBuffer());
+    const r = await importChunk(target, bytes);
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+  }
+}
+
+describe("deleted messages and restore", () => {
+  it("scrubs a message deleted after it was archived, in R2 and in a restored room", async () => {
+    const [a, b] = await Promise.all([createMember(), createMember()]);
+    const gid = await createGroup(a, [b.id]);
+    const room = roomStub(env, gid);
+    const root = unwrap(await room.send(gid, actor(a), { t: "send", rid: "r", groupId: gid, clientMsgId: clientMsgId(), body: "话题" }));
+    const topicId = root.topic!.id;
+    const secret = unwrap(
+      await room.send(gid, actor(a), { t: "send", rid: "r", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "SECRET-PASSWORD 1" }),
+    );
+    unwrap(await room.edit(gid, actor(a), { t: "edit", rid: "r", groupId: gid, messageId: secret.message.id, body: "SECRET-PASSWORD 2" }));
+    await runArchive(env, { skipD1: true });
+    const [firstKey] = eventFiles(await archivedKeys(`${GROUP_PREFIX}${gid}/`), gid);
+    // A copy of the file as it was before the delete (e.g. fetched to a folder earlier).
+    const stale = new Uint8Array(await (await env.FILES.get(firstKey))!.arrayBuffer());
+    expect(await gunzip(stale)).toContain("SECRET-PASSWORD");
+
+    unwrap(await room.remove(gid, actor(a), secret.message.id));
+    const run = await runArchive(env, { skipD1: true });
+    expect(run.scrubbed).toEqual([firstKey]);
+    const keys = eventFiles(await archivedKeys(`${GROUP_PREFIX}${gid}/`), gid);
+    expect(keys).toHaveLength(2);
+    for (const k of keys) expect(JSON.stringify(await readArchive(k))).not.toContain("SECRET-PASSWORD");
+    // Nothing more to scrub next time.
+    expect((await runArchive(env, { skipD1: true })).scrubbed).toEqual([]);
+
+    // Restoring from the stale copy still drops the deleted text from the log and the search index.
+    const target = await emptyGroupLike([a.id, b.id]);
+    expect((await importChunk(target, stale)).status).toBe(200);
+    await restoreInto(target, keys.slice(1));
+    const restored = await roomTables(target);
+    expect(JSON.stringify(restored.events)).not.toContain("SECRET-PASSWORD");
+    expect(restored.events).toEqual((await roomTables(gid)).events);
+    const { c } = await Client.connect(a.token);
+    const found = await c.request({ t: "search", query: "SECRET", groupId: target });
+    expect(found.t, JSON.stringify(found)).toBe("searchResults");
+    expect(found.hits).toEqual([]);
+    c.close();
+  });
+});
+
+describe("产出 and files after restore", () => {
+  it("rebuilds 产出, versions and ready-file records", async () => {
+    const owner = await createMember({ level: "owner" });
+    const b = await createMember();
+    const gid = await createGroup(owner, [b.id]);
+    const room = roomStub(env, gid);
+    const root = unwrap(await room.send(gid, actor(owner), { t: "send", rid: "r", groupId: gid, clientMsgId: clientMsgId(), body: "页面" }));
+    const topicId = root.topic!.id;
+    const page = await uploadFile(owner, gid, "<h1>v1</h1>", "index.html", "text/html");
+    const page2 = await uploadFile(owner, gid, "<h1>v2</h1>", "index.html", "text/html");
+    const note = await uploadFile(owner, gid, "附件", "a.txt", "text/plain");
+    const created = await api("/v1/artifacts", {
+      token: owner.token,
+      body: { groupId: gid, topicId, title: "页面", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: page }] },
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    const artifactId = created.body.artifact.id as string;
+    const v2 = await api(`/v1/artifacts/${artifactId}/versions`, {
+      token: owner.token,
+      body: { entry: "index.html", files: [{ path: "index.html", fileId: page2 }], note: "第二版", title: "页面 2" },
+    });
+    expect(v2.status, JSON.stringify(v2.body)).toBe(200);
+    await runArchive(env, { skipD1: true });
+
+    const original = await runInDurableObject(env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(gid)), (_o, state) => ({
+      artifacts: state.storage.sql.exec("SELECT * FROM artifacts ORDER BY id").toArray(),
+      versions: state.storage.sql.exec("SELECT * FROM artifact_versions ORDER BY artifact_id, version").toArray(),
+      files: state.storage.sql.exec("SELECT * FROM file_records ORDER BY id").toArray(),
+    }));
+    expect(original.artifacts).toHaveLength(1);
+    expect(original.versions).toHaveLength(2);
+    expect(original.files).toHaveLength(3);
+
+    // Restore into an empty room; D1 (restored first in a real restore) maps the files to it.
+    const target = await emptyGroupLike([owner.id, b.id]);
+    await env.DB.prepare("UPDATE files SET group_id = ? WHERE group_id = ?").bind(target, gid).run();
+    await restoreInto(target, eventFiles(await archivedKeys(`${GROUP_PREFIX}${gid}/`), gid));
+    const filesRoute = await api(`/v1/admin/import/groups/${target}/files`, { method: "POST", headers: ADMIN });
+    expect(filesRoute.status, JSON.stringify(filesRoute.body)).toBe(200);
+    expect(filesRoute.body.rows).toBe(3);
+    expect((await api(`/v1/admin/import/groups/${target}/files`, { method: "POST" })).status).toBe(401);
+
+    const restored = await runInDurableObject(env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(target)), (_o, state) => ({
+      artifacts: state.storage.sql.exec("SELECT * FROM artifacts ORDER BY id").toArray(),
+      versions: state.storage.sql.exec("SELECT * FROM artifact_versions ORDER BY artifact_id, version").toArray(),
+      files: state.storage.sql.exec("SELECT * FROM file_records ORDER BY id").toArray(),
+    }));
+    expect(restored).toEqual(original);
+
+    // The restored room serves the 产出 and accepts the old files as attachments and versions.
+    const listed = unwrap(await roomStub(env, target).rpc(target, "artifacts.list", actor(owner), {})) as any[];
+    expect(listed.map((x) => [x.id, x.currentVersion, x.title])).toEqual([[artifactId, 2, "页面 2"]]);
+    const sent = unwrap(
+      await roomStub(env, target).send(target, actor(owner), {
+        t: "send",
+        rid: "r",
+        groupId: target,
+        topicId,
+        clientMsgId: clientMsgId(),
+        body: "旧附件",
+        attachments: [{ fileId: note, name: "a.txt", size: 6, mime: "text/plain", sha256: "x" }],
+        artifactRefs: [{ artifactId, version: 1 }],
+      } as any),
+    );
+    expect(sent.message.createdSeq).toBeGreaterThan(0);
+    const v3 = unwrap(
+      await roomStub(env, target).rpc(target, "artifacts.addVersion", actor(owner), {
+        artifactId,
+        entry: "index.html",
+        files: [{ path: "index.html", fileId: page }],
+      }),
+    ) as any;
+    expect(v3.version.version).toBe(3);
+  });
+});
+
+describe("archive runs", () => {
+  it("resumes a stopped pass after the last finished group and keeps going past a failing group", async () => {
+    const [a, b] = await Promise.all([createMember(), createMember()]);
+    await runArchive(env, { skipD1: true }); // older groups first
+    const ids: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const gid = await createGroup(a, [b.id]);
+      await populate(gid, a, b, 1);
+      ids.push(gid);
+    }
+    // Budget spent: every run finishes one group, and the next run goes on after it.
+    const seen: string[] = [];
+    let runs = 0;
+    for (; runs < 500; runs++) {
+      const r = await runArchive(env, { skipD1: true, budgetMs: -1 });
+      expect(r.groups).toBe(1);
+      seen.push(...r.files.map((k) => parseGroupFileKey(k)?.groupId).filter((x): x is string => !!x));
+      if (r.complete) break;
+    }
+    expect(runs).toBeLessThan(500);
+    for (const g of ids) expect(seen).toContain(g);
+    const status = await api("/v1/ops/archive", { token: a.token });
+    expect(status.status).toBe(200);
+    expect(status.body.lastCompleteAt).toEqual(expect.any(Number));
+    expect((await api("/v1/ops/archive")).status).toBe(401);
+
+    // A group with no new events and today's state: no state rewrite.
+    const quiet = await runArchive(env, { skipD1: true });
+    expect(quiet.files.filter((k) => ids.some((g) => k.includes(g)))).toEqual([]);
+
+    // One group fails (its state export throws): the later groups are still archived.
+    for (const g of ids) await populate(g, a, b, 1);
+    const failing = ids[0];
+    const realPut = env.FILES.put.bind(env.FILES);
+    const spy = vi.spyOn(env.FILES, "put");
+    spy.mockImplementation(((key: string, ...rest: any[]) => {
+      if (key.includes(failing)) return Promise.reject(new Error("r2 down"));
+      return (realPut as any)(key, ...rest);
+    }) as any);
+    const before = (await api("/v1/ops/archive", { token: a.token })).body.lastCompleteAt;
+    const r = await runArchive(env, { skipD1: true });
+    spy.mockRestore();
+    expect(r.failed).toEqual([failing]);
+    expect(r.complete).toBe(true);
+    for (const g of ids.slice(1)) expect(r.files.some((k) => k.includes(g))).toBe(true);
+    const after = (await api("/v1/ops/archive", { token: a.token })).body;
+    expect(after.lastCompleteAt).toBe(before);
+    expect(after.lastRun).toMatchObject({ complete: true, failed: 1 });
+    // The next run archives the failed group from its last seq.
+    const retry = await runArchive(env, { skipD1: true });
+    expect(retry.failed).toEqual([]);
+    expect(retry.files.some((k) => parseGroupFileKey(k)?.groupId === failing)).toBe(true);
+  });
+
+  it("moves archive files above a point-in-time restore point aside and archives the new events", async () => {
+    const [a, b] = await Promise.all([createMember(), createMember()]);
+    const gid = await createGroup(a, [b.id]);
+    await populate(gid, a, b, 2);
+    await runArchive(env, { skipD1: true });
+    const n = (await roomTables(gid)).events.length;
+    const { supersedeAfter } = await import("../src/ops/archive");
+    const keep = 3;
+    const moved = await supersedeAfter(env, gid, keep, 1234);
+    expect(moved).toEqual([groupFileKey(gid, 1, n)]);
+    const keys = eventFiles(await archivedKeys(`${GROUP_PREFIX}${gid}/`), gid);
+    expect(keys).toEqual([groupFileKey(gid, 1, keep)]);
+    expect((await readArchive(keys[0])).map((e) => e.seq)).toEqual([1, 2, 3]);
+    expect(await env.FILES.head(`${GROUP_PREFIX}${gid}/superseded/1234/${groupFileKey(gid, 1, n).split("/").pop()}`)).not.toBeNull();
+    const row = await env.DB.prepare("SELECT last_seq FROM ops_archive WHERE group_id = ?").bind(gid).first<{ last_seq: number }>();
+    expect(row?.last_seq).toBe(keep);
+    // The next run archives from the restore point again.
+    const r = await runArchive(env, { skipD1: true });
+    expect(eventFiles(r.files, gid)).toEqual([groupFileKey(gid, keep + 1, n)]);
+  });
+});
+
+describe("revocations", () => {
+  it("lists revocations and applies them again after a D1 restore brings a token back", async () => {
+    const owner = await createMember({ level: "owner" });
+    const leaked = await createMember();
+    const gone = await createMember();
+    const rev = await api("/v1/tokens/revoke", { token: owner.token, body: { memberId: leaked.id, all: true } });
+    expect(rev.status, JSON.stringify(rev.body)).toBe(200);
+    expect((await api("/v1/me", { token: leaked.token })).status).toBe(401);
+    await env.DB.prepare("UPDATE members SET deactivated = 1 WHERE id = ?").bind(gone.id).run();
+    const saved = await api("/v1/admin/revocations", { headers: ADMIN });
+    expect(saved.status).toBe(200);
+    expect(saved.body.tokens.map((t: any) => t.id)).toContain(leaked.tokenId);
+    expect(saved.body.members).toContain(gone.id);
+    expect((await api("/v1/admin/revocations", {})).status).toBe(401);
+
+    // A restore to a point before the revoke: the token works again.
+    await env.DB.prepare("UPDATE tokens SET revoked_at = NULL WHERE id = ?").bind(leaked.tokenId).run();
+    await env.DB.prepare("UPDATE members SET deactivated = 0 WHERE id = ?").bind(gone.id).run();
+    expect((await api("/v1/me", { token: leaked.token })).status).toBe(200);
+    const applied = await api("/v1/admin/revocations", { headers: ADMIN, body: saved.body });
+    expect(applied.status, JSON.stringify(applied.body)).toBe(200);
+    expect(applied.body.applied).toBe(2);
+    expect((await api("/v1/me", { token: leaked.token })).status).toBe(401);
+    expect((await api("/v1/me", { token: gone.token })).status).toBe(401);
+    // Idempotent.
+    expect((await api("/v1/admin/revocations", { headers: ADMIN, body: saved.body })).body.applied).toBe(0);
+  });
+});

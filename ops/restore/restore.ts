@@ -13,7 +13,7 @@
 //   bun ops/restore/restore.ts fetch <source> --out <folder>      copy the archive to a folder
 //
 // Order for a whole environment: D1 first (members, tokens, groups), then every group's events,
-// then its room state. The target must have its D1 migrations applied and no members (or pass
+// then its room state, then its ready-file records (from the restored D1 files table). The target must have its D1 migrations applied and no members (or pass
 // --resume to go on with a restore that stopped).
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -99,7 +99,7 @@ export async function restoreGroup(
   target: AdminApi,
   groupId: string,
   opts: { date?: string } = {},
-): Promise<{ groupId: string; files: number; imported: number; lastSeq: number; stateRows: number }> {
+): Promise<{ groupId: string; files: number; imported: number; lastSeq: number; stateRows: number; fileRows: number }> {
   const keys = await source.list(`archive/groups/${groupId}/`);
   const files = keys
     .map((k) => ({ k, p: parseGroupFileKey(k) }))
@@ -131,7 +131,13 @@ export async function restoreGroup(
     });
     stateRows = r.rows;
   }
-  return { groupId, files: files.length, imported, lastSeq, stateRows };
+  // Ready-file records (attachments and 产出 files) have no event: refill them from D1.
+  let fileRows = 0;
+  if (files.length > 0) {
+    const r = await target.json<{ rows: number }>(`/v1/admin/import/groups/${groupId}/files`, { method: "POST" });
+    fileRows = r.rows;
+  }
+  return { groupId, files: files.length, imported, lastSeq, stateRows, fileRows };
 }
 
 export async function restoreEnv(

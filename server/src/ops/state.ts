@@ -65,3 +65,22 @@ registerRoomRpc("ops.importState", (room, actor, args) => {
   }
   return { rows };
 });
+
+/** created_seq of messages, for rewriting archive files that hold a since-deleted message. */
+registerRoomRpc("ops.messageSeqs", (room, actor, args) => {
+  if (actor) throw new ApiError("forbidden", "internal only");
+  const { ids } = args as { ids: string[] };
+  const out: Record<string, number> = {};
+  for (const id of ids) {
+    const r = room.sql.exec<{ s: number }>("SELECT created_seq AS s FROM messages WHERE id = ?", id).toArray()[0];
+    if (r) out[id] = r.s;
+  }
+  return out;
+});
+
+/** The newest seq stored at or before `at` (ms), for a point-in-time restore of the archive. */
+registerRoomRpc("ops.seqAt", (room, actor, args) => {
+  if (actor) throw new ApiError("forbidden", "internal only");
+  const { at } = args as { at: number };
+  return { seq: room.sql.exec<{ s: number | null }>("SELECT max(seq) AS s FROM events WHERE at <= ?", at).one().s ?? 0 };
+});
