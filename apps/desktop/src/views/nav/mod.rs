@@ -277,6 +277,18 @@ fn dm_with(groups: &[GroupSummary], member_id: &str) -> Option<GroupId> {
         .map(|g| g.id.clone())
 }
 
+/// Opens a topic in the main window (a link in a card). Does nothing before
+/// [`install`].
+pub fn open_topic(group_id: GroupId, topic_id: TopicId, cx: &mut App) {
+    if cx.try_global::<NavGlobal>().is_none() {
+        return;
+    }
+    let services = services_of(cx);
+    services
+        .nav
+        .update(cx, |nav, cx| nav.open_topic(group_id, topic_id, cx));
+}
+
 /// Opens the DM with a member, asking the provider to create it when needed.
 pub fn open_dm_with(member_id: MemberId, cx: &mut App) {
     let services = services_of(cx);

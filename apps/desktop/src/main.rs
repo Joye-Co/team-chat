@@ -18,6 +18,9 @@
 //!       capture every scene's window in each theme; see `selftest/mod.rs`.
 //!   desktop --selftest-nav --report <path>
 //!       drive the navigation actions and dialogs (views/nav/selftest.rs).
+//!   desktop --selftest-cards --report <path> [--shots <dir>]
+//!       draw every sample card in light and dark mode, press buttons through
+//!       the fake provider and check the result (views/cards/selftest.rs).
 //!   desktop --selftest-timeline <n> --report <path>
 //!       open a topic with n generated messages, scroll it top to bottom by
 //!       code and write frame times (see views/timeline/selftest.rs).
@@ -71,6 +74,8 @@ struct Args {
     selftest_smoke: bool,
     selftest_nav: bool,
     selftest_timeline: Option<usize>,
+    selftest_cards: bool,
+    shots: Option<PathBuf>,
     report: Option<PathBuf>,
     signed_out: bool,
     fake: bool,
@@ -93,6 +98,8 @@ fn parse_args() -> Result<Args, String> {
                         .ok_or("--selftest-timeline needs a message count")?,
                 )
             }
+            "--selftest-cards" => args.selftest_cards = true,
+            "--shots" => args.shots = Some(it.next().ok_or("--shots needs a folder")?.into()),
             "--report" => args.report = Some(it.next().ok_or("--report needs a path")?.into()),
             "--signed-out" => args.signed_out = true,
             "--fake" => args.fake = true,
@@ -112,7 +119,10 @@ fn parse_args() -> Result<Args, String> {
             other => return Err(format!("unknown argument: {other}")),
         }
     }
-    if (args.selftest_smoke || args.selftest_nav || args.selftest_timeline.is_some())
+    if (args.selftest_smoke
+        || args.selftest_nav
+        || args.selftest_cards
+        || args.selftest_timeline.is_some())
         && args.report.is_none()
     {
         return Err("a self-test needs --report <path>".into());
@@ -177,8 +187,10 @@ fn main() {
             || args.signed_out
             || args.selftest_smoke
             || args.selftest_nav
+            || args.selftest_cards
             || args.selftest_timeline.is_some();
-        let core = (!fake_data).then(|| provider::CoreProvider::new(provider::ProviderConfig::app()));
+        let core =
+            (!fake_data).then(|| provider::CoreProvider::new(provider::ProviderConfig::app()));
         let provider: Arc<dyn ChatProvider> = if let Some(n) = args.selftest_timeline {
             views::timeline::selftest::provider(n)
         } else if let Some(core) = &core {
@@ -193,7 +205,7 @@ fn main() {
         // The smoke test leaves the menu bar alone; the nav test checks the item.
         views::nav::install(
             services.clone(),
-            !args.selftest_smoke && args.selftest_timeline.is_none(),
+            !args.selftest_smoke && !args.selftest_cards && args.selftest_timeline.is_none(),
             cx,
         );
         views::search::install(cx);
@@ -209,6 +221,14 @@ fn main() {
 
         if let Some(n) = args.selftest_timeline {
             views::timeline::selftest::run(services, n, args.report.clone().unwrap(), cx);
+        } else if args.selftest_cards {
+            views::cards::selftest::run(
+                services,
+                args.report.clone().unwrap(),
+                args.shots.clone(),
+                finish,
+                cx,
+            );
         } else if args.selftest_nav {
             views::nav::selftest::run(services, args.report.clone().unwrap(), finish, cx);
         } else if args.selftest_smoke {

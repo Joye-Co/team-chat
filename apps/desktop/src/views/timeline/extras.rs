@@ -57,6 +57,12 @@ pub trait MessageExtra: Sync {
         Placement::BelowBody
     }
 
+    /// True when this extra shows the message in place of its Markdown body
+    /// (a card message, whose body is only the plain-text fallback).
+    fn hides_body(&self, _message: &Message, _ctx: &ExtrasContext) -> bool {
+        false
+    }
+
     /// The element to show for `message`, or `None`. Deleted messages are
     /// never passed in.
     fn render(
@@ -71,6 +77,7 @@ pub trait MessageExtra: Sync {
 /// Every extra, in display order within its placement.
 pub static REGISTRY: &[&dyn MessageExtra] = &[
     &QuoteExtra,
+    &crate::views::cards::CardExtra,
     &crate::views::files::extra::AttachmentsExtra,
     &crate::views::artifacts::extra::ArtifactRefsExtra,
 ];
@@ -91,6 +98,11 @@ pub fn render(
         .filter(|extra| extra.placement() == placement)
         .filter_map(|extra| extra.render(message, ctx, window, cx))
         .collect()
+}
+
+/// True when an extra shows `message` in place of its body.
+pub fn hides_body(message: &Message, ctx: &ExtrasContext) -> bool {
+    message.deleted_at.is_none() && REGISTRY.iter().any(|extra| extra.hides_body(message, ctx))
 }
 
 /// The quoted message above the body: author and the first line.

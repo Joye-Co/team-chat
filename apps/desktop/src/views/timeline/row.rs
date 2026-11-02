@@ -56,6 +56,7 @@ impl TimelineView {
         };
         let above = extras::render(extras::Placement::AboveBody, &message, &ctx, window, cx);
         let below = extras::render(extras::Placement::BelowBody, &message, &ctx, window, cx);
+        let body_hidden = extras::hides_body(&message, &ctx);
 
         let body: AnyElement = if deleted {
             div()
@@ -66,6 +67,8 @@ impl TimelineView {
                 .into_any_element()
         } else if let Some(input) = editing {
             self.render_editor(&input, cx)
+        } else if body_hidden {
+            div().into_any_element()
         } else if message.body.is_empty() && message.streaming {
             div()
                 .text_sm()

@@ -2,6 +2,7 @@
 //! Shared small pieces (avatar, badge, status chip, time text) live here.
 
 pub mod artifacts;
+pub mod cards;
 pub mod composer;
 pub mod connection_banner;
 pub mod files;

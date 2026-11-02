@@ -47,6 +47,7 @@ struct State {
     now: Millis,
     muted: HashSet<GroupId>,
     saved_navigation: Option<SavedNavigation>,
+    cards: crate::views::cards::samples::FakeCards,
 }
 
 fn now_ms() -> Millis {
@@ -112,8 +113,10 @@ impl State {
             now,
             muted: HashSet::new(),
             saved_navigation: None,
+            cards: Default::default(),
         };
         s.fill_sample();
+        s.fill_cards();
         if signed_in {
             s.sign_in("https://chat.example.invalid".into());
         }
@@ -275,6 +278,33 @@ impl State {
             .or_default()
             .push(message.clone());
         message
+    }
+
+    /// The card sample topic (`views::cards::samples`).
+    fn fill_cards(&mut self) {
+        use crate::views::cards::samples as cs;
+        let samples = cs::samples();
+        let messages: Vec<(&str, &str, i64)> = samples
+            .iter()
+            .map(|s| (s.author, s.card.title.as_str(), s.minutes_ago * MIN))
+            .collect();
+        self.add_topic(
+            cs::GROUP,
+            cs::TOPIC,
+            cs::TOPIC_TITLE,
+            TopicStatus::InProgress,
+            &[],
+            None,
+            &messages,
+            0,
+        );
+        let ids: Vec<MessageId> = self.messages[&(cs::GROUP.to_string(), cs::TOPIC.to_string())]
+            .iter()
+            .map(|m| m.id.clone())
+            .collect();
+        for (id, sample) in ids.iter().zip(&samples) {
+            self.cards.add(id, sample, self.now);
+        }
     }
 
     fn last_message_mut(&mut self, group_id: &str, topic_id: &str) -> &mut Message {
@@ -1146,7 +1176,9 @@ impl ChatProvider for FakeProvider {
                 if let Some(m) = list.iter_mut().find(|m| m.id == message_id) {
                     m.body.clear();
                     m.deleted_at = Some(now_ms());
-                    return Some(t.clone());
+                    let topic = t.clone();
+                    s.cards.remove(message_id);
+                    return Some(topic);
                 }
             }
             None
@@ -1457,6 +1489,45 @@ impl ChatProvider for FakeProvider {
 
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {
         self.send_diagnostics_fake(description)
+    }
+
+    fn card(&self, _group_id: &str, message_id: &str) -> Option<Arc<card::Card>> {
+        self.with(|s| s.cards.card(message_id))
+    }
+
+    fn card_presses(&self, _group_id: &str, message_id: &str) -> Vec<CardPress> {
+        self.with(|s| s.cards.presses(message_id))
+    }
+
+    fn card_press_state(&self, _group_id: &str, message_id: &str) -> Option<CardPressState> {
+        self.with(|s| s.cards.state(message_id))
+    }
+
+    fn press_card_action(&self, group_id: &str, topic_id: &str, message_id: &str, action_id: &str) {
+        use crate::views::cards::samples::FakeOutcome;
+        let changed = self.with(|s| {
+            let now = now_ms();
+            match s.cards.press(message_id, action_id, ME, now) {
+                FakeOutcome::Ignored => false,
+                FakeOutcome::Refused => true,
+                FakeOutcome::Edited => {
+                    if let Some(m) = s
+                        .messages
+                        .get_mut(&(group_id.to_string(), topic_id.to_string()))
+                        .and_then(|list| list.iter_mut().find(|m| m.id == message_id))
+                    {
+                        m.edited_at = Some(now);
+                    }
+                    true
+                }
+            }
+        });
+        if changed {
+            self.emit(vec![Change::Messages {
+                group_id: group_id.into(),
+                topic_id: topic_id.into(),
+            }]);
+        }
     }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
