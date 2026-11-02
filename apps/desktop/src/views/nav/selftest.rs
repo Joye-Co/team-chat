@@ -371,19 +371,45 @@ pub mod scenes {
     }
 
     /// The sheet that adds members to the first 群.
+    /// Opens the 群 with the fewest members and its newest 话题, so the
+    /// add-members sheet over it has people to add.
+    pub fn open_smallest_group(services: &Services, cx: &mut App) {
+        let Some(group) = services
+            .provider
+            .groups()
+            .into_iter()
+            .filter(|g| g.kind == crate::data::GroupKind::Group)
+            .min_by_key(|g| g.member_ids.len())
+        else {
+            return;
+        };
+        let topic = services.provider.topics(&group.id).into_iter().next();
+        services.nav.update(cx, |nav, cx| {
+            nav.open_group(group.id.clone(), cx);
+            if let Some(t) = topic {
+                nav.open_topic(group.id.clone(), t.id, cx);
+            }
+        });
+    }
+
     pub fn add_members(
         services: Services,
         content: Size<Pixels>,
         cx: &mut App,
     ) -> Result<AnyWindowHandle, String> {
         over_main(services, content, cx, |services, window, cx| {
-            // The 群 with the fewest members, so the list has people to add.
+            // The 群 open in the sidebar, as when its menu's 添加成员 is
+            // used on the selected row.
+            let open = match services.nav.read(cx).place.clone() {
+                Some(crate::app::Place::Group(id)) => Some(id),
+                _ => None,
+            };
             let group = services
                 .provider
                 .groups()
                 .into_iter()
                 .filter(|g| g.kind == crate::data::GroupKind::Group)
-                .min_by_key(|g| g.member_ids.len());
+                .find(|g| Some(&g.id) == open.as_ref());
             if let Some(g) = group {
                 super::super::dialogs::open_add_members(services, g.id, g.name, window, cx);
             }
