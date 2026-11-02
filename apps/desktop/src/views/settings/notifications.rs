@@ -231,7 +231,7 @@ impl Render for NotificationsPage {
         div()
             .flex()
             .flex_col()
-            .children(widgets::status_line(&self.status, cx).map(|l| l.pb(space::S12)))
+            .children(widgets::status_line("status", &self.status, cx).map(|l| l.pb(space::S12)))
             .child(table(Some(group_header), group_rows, s::NO_GROUPS, cx))
             .child(widgets::footnote(s::NOTIFICATIONS_HINT, cx))
             .child(div().h(space::S24))

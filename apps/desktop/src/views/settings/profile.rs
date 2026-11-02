@@ -308,10 +308,12 @@ impl Render for ProfilePage {
                                     .disabled(!signed_in || self.avatar.busy())
                                     .on_click(cx.listener(|this, _, _, cx| this.choose_avatar(cx))),
                             )
-                            .child(match widgets::status_line(&self.avatar, cx) {
-                                Some(line) => line,
-                                None => widgets::hint(s::AVATAR_HINT, cx),
-                            }),
+                            .child(
+                                match widgets::status_line("avatar-status", &self.avatar, cx) {
+                                    Some(line) => line,
+                                    None => widgets::hint(s::AVATAR_HINT, cx),
+                                },
+                            ),
                     ),
             )
             // Name and 岗位 save on blur and on Return (§8.4).
@@ -349,7 +351,7 @@ impl Render for ProfilePage {
                             .child(match role_error {
                                 Some(e) => ui::field_help(e, true, cx),
                                 None => div().pt(space::S6).child(
-                                    match widgets::status_line(&self.save, cx) {
+                                    match widgets::status_line("save-status", &self.save, cx) {
                                         Some(line) => line,
                                         None => widgets::hint(s::PROFILE_SAVE_HINT, cx),
                                     },

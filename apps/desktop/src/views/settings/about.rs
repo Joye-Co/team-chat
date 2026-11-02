@@ -182,7 +182,7 @@ impl Render for AboutPage {
                     .items_start()
                     .gap(space::S12)
                     .child(div().flex_1().min_w_0().pt(space::S2).child(
-                        match widgets::status_line(&self.status, cx) {
+                        match widgets::status_line("status", &self.status, cx) {
                             Some(line) => line,
                             None => widgets::hint(s::DIAGNOSTICS_HINT, cx),
                         },

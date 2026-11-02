@@ -460,7 +460,10 @@ impl Render for MembersPage {
             .child(
                 div()
                     .pt(space::S16)
-                    .children(widgets::status_line(&self.status, cx).map(|l| l.pb(space::S8)))
+                    .children(
+                        widgets::status_line("members-status", &self.status, cx)
+                            .map(|l| l.pb(space::S8)),
+                    )
                     .child(table),
             )
             .child(widgets::footnote(
@@ -646,7 +649,11 @@ impl Render for InviteForm {
                 ),
                 cx,
             ))
-            .children(widgets::status_line(&self.status, cx))
+            .children(widgets::status_line(
+                "member-dialog-status",
+                &self.status,
+                cx,
+            ))
             .child(
                 div()
                     .flex()
@@ -954,7 +961,7 @@ impl Render for BotForm {
                     cx,
                 ))
             })
-            .children(widgets::status_line(&self.status, cx))
+            .children(widgets::status_line("member-edit-status", &self.status, cx))
             .child(
                 div()
                     .flex()

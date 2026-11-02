@@ -302,10 +302,12 @@ pub fn hint(text: impl Into<SharedString>, cx: &App) -> Div {
 }
 
 /// The result of a request: 12/16, `danger-text` for an error, `text-3`
-/// otherwise; with a 14 pt spinner while busy.
-pub fn status_line(status: &Status, cx: &App) -> Option<Div> {
+/// otherwise; with a 14 pt spinner while busy. The spinner waits 400 ms and
+/// then stays at least 500 ms (§12), so a fast save shows only its result.
+/// `id` is stable for the line.
+pub fn status_line(id: impl Into<ElementId>, status: &Status, cx: &App) -> Option<Div> {
     let k = theme::colors(cx);
-    let line = |text: SharedString, color| {
+    let line = move |text: SharedString, color| {
         div()
             .flex()
             .items_center()
@@ -314,9 +316,15 @@ pub fn status_line(status: &Status, cx: &App) -> Option<Div> {
             .text_color(color)
             .child(text)
     };
-    match status {
-        Status::Idle => None,
-        Status::Busy(text) => Some(
+    let (text, color, failed) = match status {
+        Status::Idle => return None,
+        Status::Busy(text) => (text.clone(), k.text_3, false),
+        Status::Done(text) => (text.clone(), k.text_3, false),
+        Status::Failed(text) => (text.clone(), k.danger_text, true),
+    };
+    let busy = status.busy();
+    let gate = crate::ui::motion::busy_gate(id, busy, move |shown| {
+        if shown {
             div()
                 .flex()
                 .items_center()
@@ -326,15 +334,23 @@ pub fn status_line(status: &Status, cx: &App) -> Option<Div> {
                         .with_size(theme::icon::CHIP)
                         .color(k.text_3),
                 )
-                .child(line(text.clone(), k.text_3)),
-        ),
-        Status::Done(text) => Some(line(text.clone(), k.text_3)),
-        Status::Failed(text) => Some(line(text.clone(), k.danger_text).child(crate::ui::icon(
-            Lucide::CircleAlert,
-            theme::icon::CHIP,
-            k.danger,
-        ))),
-    }
+                .child(line(text, color))
+                .into_any_element()
+        } else if busy {
+            div().into_any_element()
+        } else if failed {
+            line(text, color)
+                .child(crate::ui::icon(
+                    Lucide::CircleAlert,
+                    theme::icon::CHIP,
+                    k.danger,
+                ))
+                .into_any_element()
+        } else {
+            line(text, color).into_any_element()
+        }
+    });
+    Some(div().child(gate))
 }
 
 /// An inline load error (§8.5): `circle-alert` in `danger`, the message in

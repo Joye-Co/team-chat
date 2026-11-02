@@ -326,7 +326,8 @@ impl Render for MachinesPage {
             .flex_col()
             .when(self.machines.is_some(), |el| {
                 el.children(failed.and_then(|text| {
-                    widgets::status_line(&Status::Failed(text), cx).map(|l| l.pb(space::S8))
+                    widgets::status_line("load-status", &Status::Failed(text), cx)
+                        .map(|l| l.pb(space::S8))
                 }))
             })
             .child(body)
@@ -518,7 +519,7 @@ impl Render for MachineForm {
                 &self.labels,
                 cx,
             ))
-            .children(widgets::status_line(&self.status, cx))
+            .children(widgets::status_line("status", &self.status, cx))
             .child(
                 div()
                     .flex()
