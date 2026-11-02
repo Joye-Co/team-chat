@@ -229,6 +229,18 @@ impl LoginView {
         self.rejected = Some(value);
     }
 
+    /// Opens the server field and moves the focus into it with the whole
+    /// URL selected, as a macOS field does when it takes the focus.
+    fn open_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.server_open = true;
+        self.server.update(cx, |st, cx| {
+            let end = st.value().len();
+            st.focus(window, cx);
+            st.set_selected_range(0..end, cx);
+        });
+        cx.notify();
+    }
+
     fn input(&self, cx: &gpui::App) -> CodeInput {
         CodeInput::parse(&self.code.read(cx).value())
     }
@@ -244,15 +256,15 @@ impl LoginView {
     ) {
         self.code
             .update(cx, |st, cx| st.set_value(code.to_string(), window, cx));
-        self.server_open = server_open;
-        // An open server field has the focus, as after `使用其他服务器`.
-        let focus = if server_open {
-            self.server.read(cx).focus_handle(cx)
+        // An open server field has the focus and its URL selected, as after
+        // `使用其他服务器`.
+        if server_open {
+            self.open_server_field(window, cx);
         } else {
-            self.code.read(cx).focus_handle(cx)
-        };
-        focus.focus(window, cx);
-        cx.notify();
+            self.server_open = false;
+            self.code.read(cx).focus_handle(cx).focus(window, cx);
+            cx.notify();
+        }
     }
 
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -472,9 +484,7 @@ impl Render for LoginView {
         let server_url = self.server.read(cx).value().to_string();
         let host: SharedString = server_host(&server_url).to_string().into();
         let open_server = cx.listener(|this, _, window, cx| {
-            this.server_open = true;
-            this.server.read(cx).focus_handle(cx).focus(window, cx);
-            cx.notify();
+            this.open_server_field(window, cx);
         });
         // The built-in server is not worth a line of its own (U39): a quiet
         // `使用其他服务器` opens the field. A custom server shows its host.
@@ -564,10 +574,29 @@ impl Render for LoginView {
                                     .w_full()
                                     .child(ui::field_label(l::CODE_LABEL, cx)),
                             )
-                            .child(self.render_boxes(&input, focused, code_error, cx))
-                            .when_some(error, |el, e| {
-                                el.child(div().w_full().child(ui::field_help(e, true, cx)))
-                            })
+                            // The error hangs in the 24 pt above `加入` (4 pt,
+                            // a 16 pt line, 4 pt), so nothing moves when it
+                            // shows.
+                            .child(
+                                div()
+                                    .relative()
+                                    .w_full()
+                                    .child(self.render_boxes(&input, focused, code_error, cx))
+                                    .when_some(error, |el, e| {
+                                        el.child(
+                                            div()
+                                                .absolute()
+                                                .top_full()
+                                                .left_0()
+                                                .right_0()
+                                                .child(
+                                                    ui::field_help(e, true, cx)
+                                                        .pt(space::S4)
+                                                        .one_line(),
+                                                ),
+                                        )
+                                    }),
+                            )
                             .child(
                                 div().pt(space::S24).w_full().child(
                                     ui::button(
