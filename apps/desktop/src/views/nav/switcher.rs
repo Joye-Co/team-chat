@@ -17,7 +17,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Icon, WindowExt as _,
+    ActiveTheme as _, Icon, WindowExt as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     input::{Input, InputEvent, InputState},
 };
@@ -30,7 +30,11 @@ use crate::{
     },
     theme::{self, Type as _, size, space, type_scale},
     ui::{self, GroupGlyph, Kbd, KbdHint, Lucide, MemberAvatar, RowSurface, StatusChip},
-    views::{search::plain::plain_with_ranges, sidebar::topic_line, topic_list::list_time},
+    views::{
+        search::plain::plain_with_ranges,
+        sidebar::{edge_fade, scroll_edges, topic_line, watch_scroll_edges},
+        topic_list::list_time,
+    },
 };
 
 gpui::actions!(
@@ -53,6 +57,9 @@ const SWITCHER_FOOTER: Pixels = px(40.);
 /// Space above the first and below the last child of the list.
 const LIST_PAD_TOP: Pixels = space::S4;
 const LIST_PAD_BOTTOM: Pixels = space::S8;
+/// How much of the next row shows above the bottom padding when more rows
+/// follow: with the padding, the 24 pt of the bottom fade.
+const PEEK: Pixels = px(16.);
 
 /// The switcher's keys (call once at start-up).
 pub fn bind_keys(cx: &mut App) {
@@ -772,6 +779,8 @@ impl Switcher {
 impl Render for Switcher {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        let edges = scroll_edges(&self.scroll);
+        watch_scroll_edges(&self.scroll, edges, window, cx);
         let query = self.text(cx);
         // Children of the scroll area, with the scroll index of the active row.
         let mut children: Vec<AnyElement> = Vec::new();
@@ -822,7 +831,16 @@ impl Render for Switcher {
             - SWITCHER_FOOTER
             - LIST_PAD_TOP
             - LIST_PAD_BOTTOM;
-        let list_h = whole_rows_height(&heights, max_rows.max(size::SWITCHER_HIT_ROW));
+        let max_rows = max_rows.max(size::SWITCHER_HIT_ROW);
+        let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
+        // When more rows follow, the list ends on whole rows plus the top of
+        // the next one (16 pt and the bottom padding) under a 24 pt fade, so
+        // the cut reads as "more below" (Slack).
+        let list_h = if total > max_rows {
+            whole_rows_height(&heights, max_rows - PEEK) + PEEK
+        } else {
+            whole_rows_height(&heights, max_rows)
+        };
         let scope_token = self.scope.as_ref().map(|(_, name)| {
             let k = theme::colors(cx);
             Button::new("switcher-scope")
@@ -858,8 +876,14 @@ impl Render for Switcher {
             .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
             .on_action(cx.listener(|this, _: &OpenSelected, window, cx| this.confirm(window, cx)))
+            // Cmd+F scopes the search to the current 群; scoped, it removes
+            // the scope again (the footer names what it does).
             .on_action(cx.listener(|this, _: &ScopeToGroup, window, cx| {
-                let group = crate::views::search::current_group(&this.services, cx);
+                let group = if this.scope.is_some() {
+                    None
+                } else {
+                    crate::views::search::current_group(&this.services, cx)
+                };
                 this.set_scope(group, window, cx);
             }))
             // Backspace in an empty query removes the scope token.
@@ -905,27 +929,37 @@ impl Render for Switcher {
             )
             .child(
                 div()
-                    .id("switcher-list")
+                    .relative()
                     .flex_none()
-                    .when(!empty, |el| el.h(list_h + LIST_PAD_TOP + LIST_PAD_BOTTOM))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .pt(LIST_PAD_TOP)
-                    .px(space::S8)
-                    .pb(LIST_PAD_BOTTOM)
-                    .flex()
-                    .flex_col()
-                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, _| {
-                        // Over a label or the padding: remember where the
-                        // pointer is, so the next move counts as a move.
-                        this.pointer.get_or_insert(e.position);
-                    }))
-                    .children(children)
-                    .when(empty, |el| {
-                        el.child(div().h(px(160.)).child(ui::EmptyState::new(
-                            Lucide::SearchX,
-                            nav::QUICK_SWITCH_EMPTY,
-                        )))
+                    .child(
+                        div()
+                            .id("switcher-list")
+                            .flex_none()
+                            .when(!empty, |el| el.h(list_h + LIST_PAD_TOP + LIST_PAD_BOTTOM))
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .pt(LIST_PAD_TOP)
+                            .px(space::S8)
+                            .pb(LIST_PAD_BOTTOM)
+                            .flex()
+                            .flex_col()
+                            .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, _| {
+                                // Over a label or the padding: remember where the
+                                // pointer is, so the next move counts as a move.
+                                this.pointer.get_or_insert(e.position);
+                            }))
+                            .children(children)
+                            .when(empty, |el| {
+                                el.child(div().h(px(160.)).child(ui::EmptyState::new(
+                                    Lucide::SearchX,
+                                    nav::QUICK_SWITCH_EMPTY,
+                                )))
+                            }),
+                    )
+                    // More rows follow below the cut (§7.7 scroll edges),
+                    // faded from the dialog surface.
+                    .when(edges.1, |el| {
+                        el.child(edge_fade(false, cx.theme().background))
                     }),
             )
             .child(
@@ -942,7 +976,11 @@ impl Render for Switcher {
                     .text_color(k.text_3)
                     .child(KbdHint::new(&["up", "down"]).label(nav::SWITCHER_SELECT))
                     .child(KbdHint::new(&["enter"]).label(nav::SWITCHER_OPEN))
-                    .child(KbdHint::new(&["cmd-f"]).label(nav::SWITCHER_IN_GROUP)),
+                    .child(KbdHint::new(&["cmd-f"]).label(if self.scope.is_some() {
+                        search_copy::SCOPE_REMOVE
+                    } else {
+                        nav::SWITCHER_IN_GROUP
+                    })),
             )
     }
 }
