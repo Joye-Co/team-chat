@@ -1,0 +1,14 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 42,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "group.memberRemoved",
+    "data": {
+      "memberId": "01JBX0ALICE0000000000000AB"
+    }
+  }
+}

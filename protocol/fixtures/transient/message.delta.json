@@ -1,0 +1,11 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "message.delta",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "messageId": "01JBX0MSG000000000000000AF",
+    "append": "正在生成… 🧠"
+  }
+}

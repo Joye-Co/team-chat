@@ -1,0 +1,8 @@
+{
+  "kind": "RevokeTokensRequest",
+  "valid": true,
+  "value": {
+    "memberId": "01JBX0BOT000000000000000AC",
+    "all": true
+  }
+}

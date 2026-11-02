@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "no topicId: starts a topic, title defaults",
+  "value": {
+    "t": "send",
+    "rid": "r1",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "新话题的第一条消息 🎉"
+  }
+}

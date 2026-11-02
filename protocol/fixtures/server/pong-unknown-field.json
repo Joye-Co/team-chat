@@ -1,0 +1,12 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "unknown fields are ignored on read and dropped on write",
+  "value": {
+    "t": "pong",
+    "serverTime": 1762128000000
+  },
+  "normalized": {
+    "t": "pong"
+  }
+}

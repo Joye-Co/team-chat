@@ -1,0 +1,8 @@
+{
+  "kind": "RedeemRequest",
+  "valid": true,
+  "value": {
+    "inviteCode": "ABCD-EFGH-JKMN",
+    "deviceName": "Alice 的 MacBook Pro"
+  }
+}

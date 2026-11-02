@@ -1,5 +1,10 @@
 {
   "name": "team-chat",
   "private": true,
-  "workspaces": ["packages/*", "server"]
+  "workspaces": ["packages/*", "server"],
+  "scripts": {
+    "gen:schema": "bun run --cwd packages/protocol gen:schema",
+    "gen:fixtures": "bun run --cwd packages/protocol gen:fixtures",
+    "test:protocol": "bun run --cwd packages/protocol test"
+  }
 }

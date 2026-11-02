@@ -1,0 +1,9 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "missing client",
+  "value": {
+    "t": "hello",
+    "protocol": 1
+  }
+}

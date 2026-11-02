@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-unauthorized",
+    "ok": false,
+    "error": {
+      "code": "unauthorized",
+      "message": "unauthorized"
+    }
+  }
+}

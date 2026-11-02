@@ -1,0 +1,7 @@
+{
+  "kind": "CreateBotRequest",
+  "valid": true,
+  "value": {
+    "name": "builder"
+  }
+}

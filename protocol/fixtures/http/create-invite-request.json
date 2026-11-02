@@ -1,0 +1,10 @@
+{
+  "kind": "CreateInviteRequest",
+  "valid": true,
+  "value": {
+    "name": "小王",
+    "kind": "human",
+    "level": "member",
+    "role": "后端工程师"
+  }
+}

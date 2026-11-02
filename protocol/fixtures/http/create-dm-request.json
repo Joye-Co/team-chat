@@ -1,0 +1,7 @@
+{
+  "kind": "CreateDmRequest",
+  "valid": true,
+  "value": {
+    "memberId": "01JBX0ALICE0000000000000AB"
+  }
+}

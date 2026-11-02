@@ -1,0 +1,17 @@
+{
+  "kind": "CreateBotResponse",
+  "valid": true,
+  "description": "token is a fake placeholder",
+  "value": {
+    "member": {
+      "id": "01JBX0BOT000000000000000AC",
+      "kind": "bot",
+      "name": "代码助手 🤖",
+      "role": null,
+      "level": "member",
+      "avatarUrl": null,
+      "deactivated": true
+    },
+    "token": "tc_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
+  }
+}

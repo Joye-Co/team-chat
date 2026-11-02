@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-rate_limited",
+    "ok": false,
+    "error": {
+      "code": "rate_limited",
+      "message": "rate_limited"
+    }
+  }
+}

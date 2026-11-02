@@ -1,0 +1,10 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "result omitted",
+  "value": {
+    "t": "ack",
+    "rid": "r3",
+    "ok": true
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "CreateGroupRequest",
+  "valid": false,
+  "description": "wrong type for memberIds",
+  "value": {
+    "name": "x",
+    "memberIds": "abc"
+  }
+}

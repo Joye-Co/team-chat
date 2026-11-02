@@ -1,0 +1,15 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "bot starts a streaming reply with an empty body",
+  "value": {
+    "t": "send",
+    "rid": "r3",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "",
+    "mentions": [],
+    "streaming": true
+  }
+}

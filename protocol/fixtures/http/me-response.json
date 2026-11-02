@@ -1,0 +1,13 @@
+{
+  "kind": "MeResponse",
+  "valid": true,
+  "value": {
+    "id": "01JBX0OWNER0000000000000AA",
+    "kind": "human",
+    "name": "Joye",
+    "role": "产品负责人",
+    "level": "owner",
+    "avatarUrl": "https://example.com/a/joye.png",
+    "deactivated": false
+  }
+}

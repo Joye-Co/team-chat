@@ -1,0 +1,23 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "unknown fields are ignored on read and dropped on write",
+  "value": {
+    "t": "send",
+    "rid": "r14",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "hi",
+    "attachments": [],
+    "priority": 3
+  },
+  "normalized": {
+    "t": "send",
+    "rid": "r14",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "hi"
+  }
+}

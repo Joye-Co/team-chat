@@ -1,0 +1,10 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "presence",
+    "memberId": "01JBX0BOT000000000000000AC",
+    "online": true,
+    "at": 1762128000000
+  }
+}

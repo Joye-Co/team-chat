@@ -1,0 +1,30 @@
+{
+  "kind": "MembersResponse",
+  "valid": true,
+  "value": [
+    {
+      "id": "01JBX0OWNER0000000000000AA",
+      "kind": "human",
+      "name": "Joye",
+      "role": "产品负责人",
+      "level": "owner",
+      "avatarUrl": "https://example.com/a/joye.png",
+      "deactivated": false
+    },
+    {
+      "id": "01JBX0ALICE0000000000000AB",
+      "kind": "human",
+      "name": "Alice",
+      "level": "member"
+    },
+    {
+      "id": "01JBX0BOT000000000000000AC",
+      "kind": "bot",
+      "name": "代码助手 🤖",
+      "role": null,
+      "level": "member",
+      "avatarUrl": null,
+      "deactivated": true
+    }
+  ]
+}

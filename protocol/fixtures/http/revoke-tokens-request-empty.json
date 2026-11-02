@@ -1,0 +1,6 @@
+{
+  "kind": "RevokeTokensRequest",
+  "valid": true,
+  "description": "revoke the calling token",
+  "value": {}
+}

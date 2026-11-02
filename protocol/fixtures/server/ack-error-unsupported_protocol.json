@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-unsupported_protocol",
+    "ok": false,
+    "error": {
+      "code": "unsupported_protocol",
+      "message": "unsupported_protocol"
+    }
+  }
+}

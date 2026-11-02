@@ -1,0 +1,29 @@
+{
+  "kind": "BootstrapResponse",
+  "valid": true,
+  "description": "token is a fake placeholder",
+  "value": {
+    "token": "tc_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    "member": {
+      "id": "01JBX0OWNER0000000000000AA",
+      "kind": "human",
+      "name": "Joye",
+      "role": "产品负责人",
+      "level": "owner",
+      "avatarUrl": "https://example.com/a/joye.png",
+      "deactivated": false
+    },
+    "group": {
+      "id": "01JBX0GENERAL000000000000A",
+      "kind": "group",
+      "name": "General",
+      "memberIds": [
+        "01JBX0OWNER0000000000000AA",
+        "01JBX0ALICE0000000000000AB",
+        "01JBX0BOT000000000000000AC"
+      ],
+      "createdBy": "01JBX0OWNER0000000000000AA",
+      "createdAt": 1762128000000
+    }
+  }
+}

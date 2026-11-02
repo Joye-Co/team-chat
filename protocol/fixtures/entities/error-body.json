@@ -1,0 +1,8 @@
+{
+  "kind": "ErrorBody",
+  "valid": true,
+  "value": {
+    "code": "rate_limited",
+    "message": "慢一点 🐢"
+  }
+}

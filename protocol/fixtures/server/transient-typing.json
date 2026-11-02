@@ -1,0 +1,14 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "transient",
+    "event": {
+      "type": "typing",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "memberId": "01JBX0ALICE0000000000000AB",
+      "at": 1762128000000
+    }
+  }
+}

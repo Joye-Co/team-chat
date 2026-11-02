@@ -1,0 +1,11 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "missing required field clientMsgId",
+  "value": {
+    "t": "send",
+    "rid": "r1",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "body": "hi"
+  }
+}

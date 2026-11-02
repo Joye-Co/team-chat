@@ -1,0 +1,14 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "unknown error code",
+  "value": {
+    "t": "ack",
+    "rid": "r1",
+    "ok": false,
+    "error": {
+      "code": "teapot",
+      "message": "x"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "limit at 500",
+  "value": {
+    "t": "fetch",
+    "rid": "r10",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "afterSeq": 0,
+    "limit": 500
+  }
+}

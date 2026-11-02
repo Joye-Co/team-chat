@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "unknown topic status",
+  "value": {
+    "t": "topic.update",
+    "rid": "r1",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "status": "archived"
+  }
+}

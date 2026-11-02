@@ -1,0 +1,7 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "ping"
+  }
+}

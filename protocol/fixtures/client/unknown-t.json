@@ -1,0 +1,9 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "unknown frame type",
+  "value": {
+    "t": "subscribe",
+    "groupId": "01JBX0GENERAL000000000000A"
+  }
+}

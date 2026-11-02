@@ -1,0 +1,10 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "negative seq",
+  "value": {
+    "t": "read",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "seq": -1
+  }
+}

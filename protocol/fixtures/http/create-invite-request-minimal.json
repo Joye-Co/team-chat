@@ -1,0 +1,9 @@
+{
+  "kind": "CreateInviteRequest",
+  "valid": true,
+  "value": {
+    "name": "Ops",
+    "kind": "bot",
+    "level": "owner"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r4",
+    "ok": false,
+    "error": {
+      "code": "forbidden",
+      "message": "只有作者可以编辑"
+    }
+  }
+}

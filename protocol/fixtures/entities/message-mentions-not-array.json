@@ -1,0 +1,16 @@
+{
+  "kind": "Message",
+  "valid": false,
+  "description": "wrong type for mentions",
+  "value": {
+    "id": "01JBX0MSG000000000000000AE",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "authorId": "01JBX0OWNER0000000000000AA",
+    "body": "大家好 👋\n\n- [ ] 写测试\n- [x] **合并** `main`\n\n@Alice 请看一下",
+    "mentions": "01JBX0ALICE0000000000000AB",
+    "createdSeq": 41,
+    "createdAt": 1762128005000
+  }
+}

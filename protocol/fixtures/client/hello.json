@@ -1,0 +1,16 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "hello",
+    "protocol": 1,
+    "client": {
+      "name": "desktop",
+      "version": "0.1.0"
+    },
+    "cursors": {
+      "01JBX0GENERAL000000000000A": 42,
+      "01JBX0DM00000000000000000B": 0
+    }
+  }
+}

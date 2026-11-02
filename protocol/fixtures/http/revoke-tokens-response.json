@@ -1,0 +1,7 @@
+{
+  "kind": "RevokeTokensResponse",
+  "valid": true,
+  "value": {
+    "revoked": 2
+  }
+}

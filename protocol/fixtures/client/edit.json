@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "edit",
+    "rid": "r5",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AF",
+    "body": "最终答案 ✅",
+    "streaming": false
+  }
+}

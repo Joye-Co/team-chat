@@ -1,0 +1,10 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "ok false without error",
+  "value": {
+    "t": "ack",
+    "rid": "r1",
+    "ok": false
+  }
+}

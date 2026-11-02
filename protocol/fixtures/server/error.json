@@ -1,0 +1,11 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "error",
+    "error": {
+      "code": "unsupported_protocol",
+      "message": "protocol 2 is not supported"
+    }
+  }
+}

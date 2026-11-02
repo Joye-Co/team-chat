@@ -1,0 +1,8 @@
+{
+  "kind": "CreateBotRequest",
+  "valid": true,
+  "value": {
+    "name": "Reviewer 🔍",
+    "role": "代码审查"
+  }
+}

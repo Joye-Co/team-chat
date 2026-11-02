@@ -1,0 +1,15 @@
+{
+  "kind": "Group",
+  "valid": true,
+  "value": {
+    "id": "01JBX0DM00000000000000000B",
+    "kind": "dm",
+    "name": "Alice",
+    "memberIds": [
+      "01JBX0OWNER0000000000000AA",
+      "01JBX0ALICE0000000000000AB"
+    ],
+    "createdBy": "01JBX0ALICE0000000000000AB",
+    "createdAt": 1762128001000
+  }
+}

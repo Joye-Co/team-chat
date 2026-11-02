@@ -1,0 +1,14 @@
+{
+  "kind": "Event",
+  "valid": false,
+  "description": "missing shared field seq",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128000000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "group.updated",
+    "data": {
+      "name": "x"
+    }
+  }
+}

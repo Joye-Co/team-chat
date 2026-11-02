@@ -1,0 +1,9 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "unknown frame type",
+  "value": {
+    "t": "kick",
+    "reason": "bye"
+  }
+}

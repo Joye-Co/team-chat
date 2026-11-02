@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-too_large",
+    "ok": false,
+    "error": {
+      "code": "too_large",
+      "message": "too_large"
+    }
+  }
+}

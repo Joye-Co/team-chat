@@ -1,0 +1,10 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "wrong type for ok",
+  "value": {
+    "t": "ack",
+    "rid": "r1",
+    "ok": "true"
+  }
+}

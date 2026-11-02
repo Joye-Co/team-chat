@@ -1,0 +1,16 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "other fields omitted",
+  "value": {
+    "t": "directory",
+    "members": [
+      {
+        "id": "01JBX0ALICE0000000000000AB",
+        "kind": "human",
+        "name": "Alice",
+        "level": "member"
+      }
+    ]
+  }
+}

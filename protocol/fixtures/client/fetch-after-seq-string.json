@@ -1,0 +1,11 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "wrong type for afterSeq",
+  "value": {
+    "t": "fetch",
+    "rid": "r1",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "afterSeq": "0"
+  }
+}

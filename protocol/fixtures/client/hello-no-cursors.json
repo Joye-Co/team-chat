@@ -1,0 +1,13 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "cursors omitted",
+  "value": {
+    "t": "hello",
+    "protocol": 1,
+    "client": {
+      "name": "daemon",
+      "version": "0.1.0"
+    }
+  }
+}

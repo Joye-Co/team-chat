@@ -1,0 +1,25 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "unknown fields are ignored on read and dropped on write",
+  "value": {
+    "id": "01JBX0ALICE0000000000000AB",
+    "kind": "human",
+    "name": "Alice",
+    "level": "member",
+    "futureField": {
+      "nested": [
+        1,
+        2,
+        3
+      ]
+    },
+    "theme": "dark"
+  },
+  "normalized": {
+    "id": "01JBX0ALICE0000000000000AB",
+    "kind": "human",
+    "name": "Alice",
+    "level": "member"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "missing hasMore",
+  "value": {
+    "t": "page",
+    "rid": "r1",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "events": [],
+    "lastSeq": 0
+  }
+}

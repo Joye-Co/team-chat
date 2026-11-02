@@ -1,0 +1,11 @@
+{
+  "kind": "CreateGroupRequest",
+  "valid": true,
+  "value": {
+    "name": "前端小组",
+    "memberIds": [
+      "01JBX0ALICE0000000000000AB",
+      "01JBX0BOT000000000000000AC"
+    ]
+  }
+}

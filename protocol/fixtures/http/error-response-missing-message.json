@@ -1,0 +1,10 @@
+{
+  "kind": "ErrorResponse",
+  "valid": false,
+  "description": "missing message",
+  "value": {
+    "error": {
+      "code": "internal"
+    }
+  }
+}

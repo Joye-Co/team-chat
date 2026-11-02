@@ -1,0 +1,11 @@
+{
+  "kind": "TransientEvent",
+  "valid": false,
+  "description": "wrong type for online",
+  "value": {
+    "type": "presence",
+    "memberId": "01JBX0BOT000000000000000AC",
+    "online": "yes",
+    "at": 1762128000000
+  }
+}

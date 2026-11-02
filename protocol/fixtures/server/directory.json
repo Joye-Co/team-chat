@@ -1,0 +1,49 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "directory",
+    "members": [
+      {
+        "id": "01JBX0OWNER0000000000000AA",
+        "kind": "human",
+        "name": "Joye",
+        "role": "产品负责人",
+        "level": "owner",
+        "avatarUrl": "https://example.com/a/joye.png",
+        "deactivated": false
+      },
+      {
+        "id": "01JBX0BOT000000000000000AC",
+        "kind": "bot",
+        "name": "代码助手 🤖",
+        "role": null,
+        "level": "member",
+        "avatarUrl": null,
+        "deactivated": true
+      }
+    ],
+    "groups": [
+      {
+        "group": {
+          "id": "01JBX0DM00000000000000000B",
+          "kind": "dm",
+          "name": "Alice",
+          "memberIds": [
+            "01JBX0OWNER0000000000000AA",
+            "01JBX0ALICE0000000000000AB"
+          ],
+          "createdBy": "01JBX0ALICE0000000000000AB",
+          "createdAt": 1762128001000
+        },
+        "lastSeq": 0,
+        "readSeq": 0,
+        "unread": 0,
+        "mentions": 0
+      }
+    ],
+    "removedGroupIds": [
+      "01JBX0GENERAL000000000000A"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-not_found",
+    "ok": false,
+    "error": {
+      "code": "not_found",
+      "message": "not_found"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "fetch",
+    "rid": "r11",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "afterSeq": 40
+  }
+}

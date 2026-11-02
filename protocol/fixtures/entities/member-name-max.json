@@ -1,0 +1,11 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "name at 64 characters",
+  "value": {
+    "id": "01JBX0ALICE0000000000000AB",
+    "kind": "human",
+    "name": "名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名",
+    "level": "member"
+  }
+}

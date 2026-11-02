@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-internal",
+    "ok": false,
+    "error": {
+      "code": "internal",
+      "message": "internal"
+    }
+  }
+}

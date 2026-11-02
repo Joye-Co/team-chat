@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-conflict",
+    "ok": false,
+    "error": {
+      "code": "conflict",
+      "message": "conflict"
+    }
+  }
+}

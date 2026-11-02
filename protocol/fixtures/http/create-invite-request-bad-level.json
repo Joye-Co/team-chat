@@ -1,0 +1,10 @@
+{
+  "kind": "CreateInviteRequest",
+  "valid": false,
+  "description": "unknown level",
+  "value": {
+    "name": "x",
+    "kind": "human",
+    "level": "admin"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "ack",
+    "rid": "r-invalid",
+    "ok": false,
+    "error": {
+      "code": "invalid",
+      "message": "invalid"
+    }
+  }
+}

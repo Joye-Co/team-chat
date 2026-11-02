@@ -1,0 +1,6 @@
+{
+  "kind": "BootstrapRequest",
+  "valid": false,
+  "description": "missing ownerName",
+  "value": {}
+}

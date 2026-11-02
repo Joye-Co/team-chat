@@ -1,0 +1,14 @@
+{
+  "kind": "RedeemResponse",
+  "valid": true,
+  "description": "token is a fake placeholder",
+  "value": {
+    "token": "tc_BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB",
+    "member": {
+      "id": "01JBX0ALICE0000000000000AB",
+      "kind": "human",
+      "name": "Alice",
+      "level": "member"
+    }
+  }
+}

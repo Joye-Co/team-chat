@@ -1,0 +1,23 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "wrong type for members",
+  "value": {
+    "t": "welcome",
+    "protocol": 1,
+    "me": {
+      "id": "01JBX0ALICE0000000000000AB",
+      "kind": "human",
+      "name": "Alice",
+      "level": "member"
+    },
+    "members": {
+      "id": "01JBX0ALICE0000000000000AB",
+      "kind": "human",
+      "name": "Alice",
+      "level": "member"
+    },
+    "groups": [],
+    "serverTime": 1762128000000
+  }
+}
