@@ -91,6 +91,27 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: open_settings,
     },
+    Scene {
+        name: "update",
+        about: "The quiet banner of a new version above the 话题",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::updater::preview::open_available,
+    },
+    Scene {
+        name: "update-dl",
+        about: "The update banner while the new version downloads",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::updater::preview::open_downloading,
+    },
+    Scene {
+        name: "update-manual",
+        about: "The update banner when the app cannot be replaced",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::updater::preview::open_manual,
+    },
 ];
 
 pub fn find(name: &str) -> Option<&'static Scene> {

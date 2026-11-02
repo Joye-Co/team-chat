@@ -13,6 +13,7 @@
 
 pub mod banner;
 pub mod install;
+pub mod preview;
 pub mod selftest;
 pub mod version;
 
