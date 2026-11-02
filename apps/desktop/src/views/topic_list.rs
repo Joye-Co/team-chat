@@ -1,36 +1,33 @@
-//! The middle column: the topics of the selected 群 (or the 待办 list), with
-//! title, status chip, last activity (relative, in Chinese), unread count and
-//! my mention marker; a status filter; and the 新话题 button.
-//! Rows have one height, so the list is a `uniform_list` and scales to many topics.
+//! The middle column (DESIGN.md §7.6, §8.1): the topics of the selected 群
+//! (or the 待办 list) under a 92 pt header band (the 52 pt title row with
+//! the 新话题 button, then the 40 pt tabs 全部 · 未读 · 等我). Each topic is a
+//! 68 pt two-line row: the responsible member's avatar, title and time, the
+//! preview `作者：内容` and one trailing element. Rows have one height, so the
+//! list is a `uniform_list` and scales to many topics.
 
 use std::{collections::HashMap, time::Duration};
 
 use chrono::{DateTime, Datelike, Local, TimeZone};
 use gpui::{
-    Context, ElementId, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
+    Context, ElementId, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
     uniform_list,
 };
-use gpui_component::{
-    Sizable as _,
-    menu::ContextMenuExt as _,
-    tab::{Tab, TabBar},
-    tooltip::Tooltip,
-};
+use gpui_component::{menu::ContextMenuExt as _, tooltip::Tooltip};
 
 use crate::{
     app::{Changes, Place, Services},
     copy::{common, fill, nav, realtime as r},
     data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
-    theme::{self, Type as _, space},
-    ui::{self, BadgeKind, CountBadge, Lucide, StatusChip},
-    views::{sidebar::topic_line, topic_menu},
+    theme::{self, Type as _, size, space},
+    ui::{self, BadgeKind, CountBadge, Lucide, RowSurface, StatusChip},
+    views::{
+        sidebar::{hangs, topic_line},
+        topic_menu,
+    },
 };
 
-/// Height of one topic row: 9 + 18 + 4 + 18 + 10 (§5.3) plus the 2 pt inset.
-const TOPIC_ROW_HEIGHT: gpui::Pixels = px(61.);
-
-/// The filter above the topics of a group (DESIGN.md §5.3): 全部, 未读, 待办.
+/// The tabs above the topics of a group (DESIGN.md §8.1): 全部, 未读, 等我.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum TopicFilter {
     #[default]
@@ -66,8 +63,8 @@ impl TopicFilter {
     }
 }
 
-/// The time of a topic row (DESIGN.md §12): today `14:32`, yesterday `昨天`,
-/// this week `周一`, this year `11月2日`, older `2025年12月31日`.
+/// The time of a topic row (DESIGN.md §8.2): today `14:32`, yesterday `昨天`,
+/// within 7 days `周一`, this year `10/28`, older `24/12/31`.
 pub fn list_time(at: Millis, now: DateTime<Local>) -> String {
     // A missing (zero) timestamp shows nothing, never 1970年1月1日.
     if at <= 0 {
@@ -93,22 +90,9 @@ pub fn list_time(at: Millis, now: DateTime<Local>) -> String {
         ];
         names[then.weekday().num_days_from_monday() as usize].to_string()
     } else if then.year() == now.year() {
-        fill(
-            common::MONTH_DAY,
-            &[
-                ("m", &then.month().to_string()),
-                ("d", &then.day().to_string()),
-            ],
-        )
+        format!("{}/{}", then.month(), then.day())
     } else {
-        fill(
-            nav::YEAR_MONTH_DAY,
-            &[
-                ("y", &then.year().to_string()),
-                ("m", &then.month().to_string()),
-                ("d", &then.day().to_string()),
-            ],
-        )
+        then.format("%y/%m/%d").to_string()
     }
 }
 
@@ -172,8 +156,10 @@ pub struct TopicListView {
     /// Who is typing, per topic of the shown rows.
     typing: HashMap<TopicId, Vec<MemberId>>,
     filter: TopicFilter,
-    /// The filter of each 群, remembered while the app runs (§13.3).
+    /// The filter of each 群, remembered while the app runs.
     filters: HashMap<GroupId, TopicFilter>,
+    /// Row previews by topic, with the `last_seq` they were made at.
+    previews: HashMap<TopicId, (u64, String)>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -225,6 +211,7 @@ impl TopicListView {
             typing: HashMap::new(),
             filter: TopicFilter::All,
             filters: HashMap::new(),
+            previews: HashMap::new(),
             _subscriptions: subscriptions,
         };
         this.refresh(cx);
@@ -350,54 +337,267 @@ impl TopicListView {
         self.rows.len()
     }
 
-    fn filter_bar(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
-        let me = self.services.me();
-        let selected = TopicFilter::ALL
+    /// The preview of a topic (§7.6): `作者：内容` of its newest message,
+    /// Markdown stripped. Cached by the topic's `last_seq`.
+    fn preview(&mut self, group_id: &str, topic: &Topic) -> String {
+        if let Some((seq, text)) = self.previews.get(&topic.id)
+            && *seq == topic.last_seq
+        {
+            return text.clone();
+        }
+        let window = self.services.provider.messages(group_id, &topic.id, 1);
+        let text = window
+            .messages
             .iter()
-            .position(|f| *f == self.filter)
-            .unwrap_or(0);
-        let view = cx.entity().downgrade();
-        div().flex_none().px(space::S12).pb(space::S8).child(
-            TabBar::new("topic-filter")
-                .segmented()
-                .small()
-                .w_full()
-                .selected_index(selected)
-                .children(TopicFilter::ALL.into_iter().map(|f| {
-                    let n = self
-                        .all
+            .rev()
+            .find(|m| !m.body.trim().is_empty())
+            .map(|m| {
+                let who = self
+                    .members
+                    .iter()
+                    .find(|x| x.id == m.author_id)
+                    .map(|x| topic_line(&x.name))
+                    .unwrap_or_default();
+                let body = plain_preview(&m.body);
+                if who.is_empty() {
+                    body
+                } else {
+                    format!("{who}{}{body}", nav::PREVIEW_SEP)
+                }
+            })
+            .unwrap_or_default();
+        self.previews
+            .insert(topic.id.clone(), (topic.last_seq, text.clone()));
+        text
+    }
+
+    /// The 40 pt tab band (§8.1): 全部 · 未读 n · 等我 n, gap 24, 16 pt left,
+    /// the active tab underlined on the bottom hairline.
+    fn tabs(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = theme::colors(cx);
+        let me = self.services.me();
+        let is_group = matches!(self.place, Some(Place::Group(_)));
+        let filters: &[TopicFilter] = if is_group {
+            &TopicFilter::ALL
+        } else {
+            &[TopicFilter::All]
+        };
+        div()
+            .flex_none()
+            .h(theme::HEADER_SECOND_ROW)
+            .px(space::S16)
+            .flex()
+            .gap(space::S24)
+            .border_b(theme::HAIRLINE)
+            .border_color(k.sep)
+            .children(filters.iter().map(|&f| {
+                let n = if f == TopicFilter::All {
+                    0
+                } else {
+                    self.all
                         .iter()
                         .filter(|r| f.keeps(&r.topic, me.as_deref()))
-                        .count() as u32;
-                    Tab::new().flex_1().child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S4)
-                            .child(f.label())
-                            .child(
-                                div()
-                                    .t_caption()
-                                    .font_weight(gpui::FontWeight::NORMAL)
-                                    .tnum()
-                                    .text_color(colors.text_3)
-                                    .child(CountBadge::text(n, BadgeKind::Unread)),
-                            ),
-                    )
-                }))
-                .on_click(move |ix, _, cx| {
-                    if let Some(f) = TopicFilter::ALL.get(*ix).copied() {
-                        let _ = view.update(cx, |this, cx| this.set_filter(f, cx));
-                    }
-                }),
-        )
+                        .count() as u32
+                };
+                let active = f == self.filter || !is_group;
+                ui::tab(
+                    ElementId::Name(SharedString::from(format!("topic-tab-{}", f.label()))),
+                    f.label(),
+                    n,
+                    active,
+                    cx,
+                )
+                .on_click(cx.listener(move |this, _, _, cx| this.set_filter(f, cx)))
+            }))
     }
+
+    /// One topic row (§7.6).
+    fn topic_row(
+        &self,
+        ix: usize,
+        row: &Row,
+        selected: bool,
+        now: DateTime<Local>,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let k = theme::colors(cx);
+        let me = self.services.me();
+        let topic = &row.topic;
+        let unread = topic.unread > 0 || topic.mentions > 0;
+        let lead_id = topic.owner_id.as_ref().unwrap_or(&topic.created_by);
+        let lead = self.members.iter().find(|m| &m.id == lead_id);
+        let waits_on_me = me
+            .as_deref()
+            .is_some_and(|me| topic.waiting_on.iter().any(|m| m == me))
+            && matches!(
+                topic.status,
+                TopicStatus::WaitingAnswer | TopicStatus::WaitingReview
+            );
+        let chip = StatusChip::for_topic(topic, me.as_deref(), &self.members);
+        // Exactly one trailing element, by priority (§7.6, §9.1).
+        let trailing = if waits_on_me {
+            chip.map(|c| c.into_any_element())
+        } else if topic.mentions > 0 {
+            Some(CountBadge::new(topic.mentions, BadgeKind::Mention).into_any_element())
+        } else if let Some(c) = chip {
+            Some(c.into_any_element())
+        } else if topic.unread > 0 {
+            Some(CountBadge::new(topic.unread, BadgeKind::Unread).into_any_element())
+        } else {
+            None
+        };
+        let title = topic_line(&topic.title);
+        let (title, untitled) = if title.is_empty() {
+            (nav::UNTITLED.to_string(), true)
+        } else {
+            (title, false)
+        };
+        let hang = !untitled && hangs(&title);
+        let tip = SharedString::from(title.clone());
+        let preview = match self.typing_text(&topic.id) {
+            Some(t) => t,
+            None => {
+                let text = self
+                    .previews
+                    .get(&topic.id)
+                    .map(|(_, t)| t.clone())
+                    .unwrap_or_default();
+                match (&row.group_name, text.is_empty()) {
+                    (Some(g), true) => g.clone(),
+                    _ => text,
+                }
+            }
+        };
+        let (g, t) = (row.group_id.clone(), topic.id.clone());
+        let menu_services = self.services.clone();
+        let menu_topic = topic.clone();
+        let menu_group = row.group_id.clone();
+        div()
+            .w_full()
+            .h(size::TOPIC_ROW)
+            .px(space::S8)
+            .child(
+                ui::list_row(
+                    ElementId::NamedInteger(SharedString::from("topic-row"), ix as u64),
+                    RowSurface::Content,
+                    selected,
+                    cx,
+                )
+                .relative()
+                .size_full()
+                .items_start()
+                .pt(space::S12)
+                .pb(space::S12)
+                .pl(px(18.))
+                .pr(space::S10)
+                .gap(space::S12)
+                .when(unread && !selected, |el| {
+                    el.child(ui::unread_dot(cx).absolute().left(px(5.)).top(px(16.)))
+                })
+                .child(
+                    ui::MemberAvatar::new(lead, size::AVATAR_MESSAGE)
+                        .on(if selected { k.selected } else { k.content })
+                        .selected(selected),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .mt(px(-2.))
+                        .flex()
+                        .flex_col()
+                        .gap(space::S4)
+                        .child(
+                            div()
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .gap(space::S8)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.))
+                                        .t_ui()
+                                        .medium()
+                                        .one_line()
+                                        .when(unread || selected, |el| el.semibold())
+                                        .text_color(if untitled { k.text_2 } else { k.text_1 })
+                                        .when(hang, |el| el.ml(px(-7.)))
+                                        .child(title),
+                                )
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .t_meta()
+                                        .tnum()
+                                        .text_color(k.text_3)
+                                        .child(list_time(topic.last_activity_at, now)),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .h(px(20.))
+                                .flex()
+                                .items_center()
+                                .gap(space::S8)
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w(px(0.))
+                                        .t_small()
+                                        .text_color(k.text_2)
+                                        .one_line()
+                                        .child(preview),
+                                )
+                                .children(trailing),
+                        ),
+                )
+                .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    let (g, t) = (g.clone(), t.clone());
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.open_topic(g, t, cx));
+                }))
+                .context_menu(move |menu, window, cx| {
+                    let topic = menu_services
+                        .provider
+                        .topic(&menu_group, &menu_topic.id)
+                        .unwrap_or_else(|| menu_topic.clone());
+                    topic_menu::build(menu, &menu_services, &menu_group, &topic, window, cx)
+                }),
+            )
+            .into_any_element()
+    }
+}
+
+/// A one-line preview of a message body: Markdown marks and line breaks
+/// removed.
+pub fn plain_preview(body: &str) -> String {
+    let mut out = String::new();
+    for line in body.lines() {
+        let line = line
+            .trim()
+            .trim_start_matches(['#', '>', '-', '*', '+'])
+            .trim();
+        if line.starts_with("```") || line.is_empty() {
+            continue;
+        }
+        if !out.is_empty() {
+            out.push(' ');
+        }
+        out.push_str(line);
+        if out.chars().count() > 200 {
+            break;
+        }
+    }
+    let out: String = out.chars().filter(|c| !matches!(c, '*' | '`')).collect();
+    topic_line(&out)
 }
 
 impl Render for TopicListView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
+        let k = theme::colors(cx);
         let is_group = matches!(self.place, Some(Place::Group(_)));
         let empty_text = match &self.place {
             None => Some((nav::SELECT_GROUP, None)),
@@ -410,51 +610,24 @@ impl Render for TopicListView {
             Some(Place::Group(_)) if self.rows.is_empty() => Some((nav::FILTER_EMPTY, None)),
             _ => None,
         };
-        let sub = if is_group {
-            let members = match &self.place {
-                Some(Place::Group(g)) => self
-                    .services
-                    .provider
-                    .groups()
-                    .into_iter()
-                    .find(|x| &x.id == g)
-                    .map(|x| x.member_ids.len())
-                    .unwrap_or(0),
-                _ => 0,
-            };
-            Some(format!(
-                "{} · {}",
-                fill(nav::MEMBER_COUNT, &[("n", &members.to_string())]),
-                fill(nav::TOPIC_COUNT, &[("n", &self.all.len().to_string())])
-            ))
-        } else {
-            None
-        };
+        // Title row (§8.1): 52 pt, padding 0 10 0 16, the 群 name `title`
+        // 16/24, then the 32 pt 新话题 icon button.
         let header = ui::toolbar_band("topic-list-toolbar")
-            .px(space::S16)
+            .pl(space::S16)
+            .pr(space::S10)
             .gap(space::S8)
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .child(div().t_title().one_line().child(self.title.clone()))
-                    .when_some(sub, |el, sub| {
-                        el.child(
-                            div()
-                                .type_role(theme::type_scale::CAPTION)
-                                .tnum()
-                                .text_color(colors.text_2)
-                                .one_line()
-                                .child(sub),
-                        )
-                    }),
+                    .t_title()
+                    .one_line()
+                    .child(self.title.clone()),
             )
             .when(is_group, |el| {
                 el.child(
                     ui::icon_button("new-topic", Lucide::SquarePen)
-                        .tooltip(nav::NEW_TOPIC)
+                        .tooltip(nav::NEW_TOPIC_TIP)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))
                         })),
@@ -462,7 +635,6 @@ impl Render for TopicListView {
             });
 
         let selected = self.services.nav.read(cx).topic.clone();
-        let me = self.services.me();
         let now = Local::now();
         let empty_icon = match &self.place {
             Some(Place::Todo) => Lucide::CircleCheck,
@@ -478,183 +650,48 @@ impl Render for TopicListView {
                         .when_some(hint, |el, hint| el.description(hint)),
                 )
                 .into_any_element(),
-            None => uniform_list(
-                "topic-rows",
-                self.rows.len(),
-                cx.processor(move |this, range: std::ops::Range<usize>, _window, cx| {
-                    let colors = theme::colors(cx);
-                    let is_sel = |ix: usize| {
-                        this.rows.get(ix).is_some_and(|row| {
-                            selected.as_ref() == Some(&(row.group_id.clone(), row.topic.id.clone()))
-                        })
-                    };
-                    range
-                        .filter_map(|ix| this.rows.get(ix).cloned().map(|row| (ix, row)))
-                        .map(|(ix, row)| {
-                            let is_selected = is_sel(ix);
-                            // The hairline under a row hides next to the selected row.
-                            let separator =
-                                !is_selected && !is_sel(ix + 1) && ix + 1 < this.rows.len();
-                            let chip =
-                                StatusChip::for_topic(&row.topic, me.as_deref(), &this.members);
-                            let (g, t) = (row.group_id.clone(), row.topic.id.clone());
-                            let unread = row.topic.unread > 0;
-                            let badge = if row.topic.mentions > 0 {
-                                Some(CountBadge::new(row.topic.mentions, BadgeKind::Mention))
-                            } else if unread {
-                                Some(CountBadge::new(row.topic.unread, BadgeKind::Unread))
-                            } else {
-                                None
-                            };
-                            let title = topic_line(&row.topic.title);
-                            let (title, untitled) = if title.is_empty() {
-                                (nav::UNTITLED.to_string(), true)
-                            } else {
-                                (title, false)
-                            };
-                            let tip = SharedString::from(title.clone());
-                            let typing = this.typing_text(&row.topic.id);
-                            let menu_services = this.services.clone();
-                            let menu_topic = row.topic.clone();
-                            let menu_group = row.group_id.clone();
-                            div()
-                                .id(ElementId::NamedInteger(
-                                    SharedString::from("topic-row"),
-                                    ix as u64,
-                                ))
-                                .w_full()
-                                .h(TOPIC_ROW_HEIGHT)
-                                .px(space::S8)
-                                .pt(px(2.))
-                                .child(
-                                    div()
-                                        .relative()
-                                        .size_full()
-                                        .rounded(theme::radius::ROW)
-                                        .pt(px(9.))
-                                        .pb(space::S10)
-                                        .pl(space::S20)
-                                        .pr(space::S10)
-                                        .flex()
-                                        .flex_col()
-                                        .gap(space::S4)
-                                        .when(is_selected, |el| el.bg(colors.fill_selected))
-                                        .when(unread, |el| {
-                                            el.child(
-                                                div()
-                                                    .absolute()
-                                                    .left(space::S6)
-                                                    .top(px(14.))
-                                                    .size(space::S8)
-                                                    .rounded_full()
-                                                    .bg(colors.accent),
-                                            )
-                                        })
-                                        .child(
-                                            div()
-                                                .flex()
-                                                .items_center()
-                                                .gap(space::S8)
-                                                .child(
-                                                    div()
-                                                        .flex_1()
-                                                        .min_w(px(0.))
-                                                        .t_ui()
-                                                        .medium()
-                                                        .one_line()
-                                                        .when(unread, |el| el.semibold())
-                                                        .when(untitled, |el| {
-                                                            el.text_color(colors.text_2)
-                                                        })
-                                                        .child(title),
-                                                )
-                                                .child(
-                                                    div()
-                                                        .flex_none()
-                                                        .t_callout()
-                                                        .tnum()
-                                                        .text_color(colors.text_2)
-                                                        .child(list_time(
-                                                            row.topic.last_activity_at,
-                                                            now,
-                                                        )),
-                                                ),
-                                        )
-                                        .child(
-                                            div()
-                                                .h(px(18.))
-                                                .flex()
-                                                .items_center()
-                                                .gap(space::S6)
-                                                .t_callout()
-                                                .text_color(colors.text_2)
-                                                .children(chip)
-                                                .child(div().flex_1().min_w(px(0.)).one_line().map(
-                                                    |el| {
-                                                        match typing {
-                                                            Some(text) => el
-                                                                .text_color(colors.accent_text)
-                                                                .child(text),
-                                                            None => {
-                                                                el.children(row.group_name.clone())
-                                                            }
-                                                        }
-                                                    },
-                                                ))
-                                                .children(badge),
-                                        )
-                                        .when(separator, |el| {
-                                            el.child(
-                                                div()
-                                                    .absolute()
-                                                    .bottom(px(0.))
-                                                    .left(space::S20)
-                                                    .right(space::S10)
-                                                    .h(theme::HAIRLINE)
-                                                    .bg(colors.sep),
-                                            )
-                                        }),
-                                )
-                                .tooltip(move |window, cx| {
-                                    Tooltip::new(tip.clone()).build(window, cx)
-                                })
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    let (g, t) = (g.clone(), t.clone());
-                                    this.services
-                                        .nav
-                                        .update(cx, |nav, cx| nav.open_topic(g, t, cx));
-                                }))
-                                .context_menu(move |menu, window, cx| {
-                                    let topic = menu_services
-                                        .provider
-                                        .topic(&menu_group, &menu_topic.id)
-                                        .unwrap_or_else(|| menu_topic.clone());
-                                    topic_menu::build(
-                                        menu,
-                                        &menu_services,
-                                        &menu_group,
-                                        &topic,
-                                        window,
-                                        cx,
-                                    )
-                                })
-                        })
-                        .collect::<Vec<_>>()
-                }),
-            )
-            .flex_1()
-            .into_any_element(),
+            None => {
+                // Fill the previews of the rows before they draw.
+                let rows = self.rows.clone();
+                for r in &rows {
+                    self.preview(&r.group_id, &r.topic);
+                }
+                div()
+                    .flex_1()
+                    .min_h(px(0.))
+                    .pt(space::S8)
+                    .flex()
+                    .flex_col()
+                    .child(
+                        uniform_list(
+                            "topic-rows",
+                            self.rows.len(),
+                            cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
+                                range
+                                    .filter_map(|ix| {
+                                        this.rows.get(ix).cloned().map(|row| (ix, row))
+                                    })
+                                    .map(|(ix, row)| {
+                                        let sel = selected.as_ref()
+                                            == Some(&(row.group_id.clone(), row.topic.id.clone()));
+                                        this.topic_row(ix, &row, sel, now, cx)
+                                    })
+                                    .collect::<Vec<_>>()
+                            }),
+                        )
+                        .flex_1(),
+                    )
+                    .into_any_element()
+            }
         };
 
         div()
             .size_full()
             .flex()
             .flex_col()
-            .bg(colors.content)
+            .bg(k.content)
             .child(header)
-            .when(is_group && !self.all.is_empty(), |el| {
-                el.child(self.filter_bar(cx))
-            })
+            .when(self.place.is_some(), |el| el.child(self.tabs(cx)))
             .child(body)
     }
 }
@@ -688,8 +725,8 @@ mod tests {
         assert_eq!(list_time(at(D::hours(13)), now), "昨天");
         assert_eq!(list_time(at(D::days(2)), now), "周一");
         assert_eq!(list_time(at(D::days(6)), now), "周四");
-        assert_eq!(list_time(at(D::days(30)), now), "5月18日");
-        assert_eq!(list_time(at(D::days(400)), now), "2025年5月13日");
+        assert_eq!(list_time(at(D::days(30)), now), "5/18");
+        assert_eq!(list_time(at(D::days(400)), now), "25/05/13");
         assert_eq!(list_time(0, now), "");
     }
 
