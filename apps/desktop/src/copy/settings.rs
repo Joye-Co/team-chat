@@ -12,7 +12,7 @@ crate::copy! {
     PAGE_MACHINES = "机器",
     PAGE_NOTIFICATIONS = "通知",
     PAGE_COST = "成本",
-    PAGE_ABOUT = "关于",
+    PAGE_GENERAL = "通用",
 
     // 个人
     PROFILE = "我的资料",
@@ -160,7 +160,7 @@ crate::copy! {
     COMING_SOON = "即将推出",
     COST_HINT = "以后会在这里看到每个自动成员花了多少钱。",
 
-    // 关于
+    // 通用
     ABOUT = "关于",
     SERVER = "服务器",
     DIAGNOSTICS = "诊断",

@@ -1,5 +1,5 @@
-//! 关于: version, server, update status, 发送诊断, and the developer-view
-//! switch.
+//! 通用: the about card (version, update status, server), 发送诊断, and the
+//! developer-view switch.
 
 use gpui::Focusable as _;
 use gpui::{
@@ -134,6 +134,7 @@ impl Render for AboutPage {
         div()
             .flex()
             .flex_col()
+            .child(widgets::section_label(s::ABOUT, true, cx))
             .child(widgets::table_of(
                 None,
                 vec![

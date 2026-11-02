@@ -30,19 +30,32 @@ pub struct ProfilePage {
     /// The values the inputs were last filled from, to keep edits on refresh.
     shown: Option<(String, String)>,
     save: Status,
+    /// A form check that failed, shown under its own field (§7.1).
+    field_error: Option<FieldError>,
     avatar: Status,
     _subscriptions: Vec<Subscription>,
 }
 
-/// Checks the profile form. Returns the trimmed name and 岗位 or an error.
-pub fn validate(name: &str, role: &str) -> Result<(String, Option<String>), String> {
+/// The form field a check failed on.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Field {
+    Name,
+    Role,
+}
+
+/// A failed form check: the field and its message.
+pub type FieldError = (Field, String);
+
+/// Checks the profile form. Returns the trimmed name and 岗位, or the field
+/// that is wrong and why.
+pub fn validate(name: &str, role: &str) -> Result<(String, Option<String>), FieldError> {
     let name = name.trim();
     let role = role.trim();
     if name.is_empty() {
-        return Err(s::NAME_REQUIRED.to_string());
+        return Err((Field::Name, s::NAME_REQUIRED.to_string()));
     }
-    widgets::check_len(name, NAME_MAX)?;
-    widgets::check_len(role, ROLE_MAX)?;
+    widgets::check_len(name, NAME_MAX).map_err(|e| (Field::Name, e))?;
+    widgets::check_len(role, ROLE_MAX).map_err(|e| (Field::Role, e))?;
     Ok((
         name.to_string(),
         (!role.is_empty()).then(|| role.to_string()),
@@ -73,6 +86,7 @@ impl ProfilePage {
             role,
             shown: None,
             save: Status::Idle,
+            field_error: None,
             avatar: Status::Idle,
             _subscriptions: subscriptions,
         };
@@ -91,6 +105,16 @@ impl ProfilePage {
         match e {
             InputEvent::PressEnter { .. } => self.save(window, cx),
             InputEvent::Blur if self.edited(cx) => self.save(window, cx),
+            // The error goes once the field is fixed.
+            InputEvent::Change if self.field_error.is_some() => {
+                let name = self.name.read(cx).value().to_string();
+                let role = self.role.read(cx).value().to_string();
+                let still = validate(&name, &role).err();
+                if still.as_ref().map(|e| e.0) != self.field_error.as_ref().map(|e| e.0) {
+                    self.field_error = still;
+                    cx.notify();
+                }
+            }
             _ => {}
         }
     }
@@ -149,6 +173,11 @@ impl ProfilePage {
         &self.save
     }
 
+    /// The form check that failed, if any.
+    pub fn field_error(&self) -> Option<&FieldError> {
+        self.field_error.as_ref()
+    }
+
     pub fn save(&mut self, _window: &mut Window, cx: &mut Context<Self>) {
         if self.save.busy() {
             return;
@@ -158,11 +187,13 @@ impl ProfilePage {
         let (name, role) = match validate(&name, &role) {
             Ok(v) => v,
             Err(e) => {
-                self.save = Status::Failed(e.into());
+                self.save = Status::Idle;
+                self.field_error = Some(e);
                 cx.notify();
                 return;
             }
         };
+        self.field_error = None;
         self.save = Status::Busy(s::SAVING.into());
         cx.notify();
         let reply = self.services.provider.update_profile(name, role);
@@ -244,7 +275,14 @@ impl Render for ProfilePage {
         let colors = theme::colors(cx);
         let me = self.me();
         let signed_in = me.is_some();
-        let save_error = matches!(self.save, Status::Failed(_));
+        let error_of = |field: Field| {
+            self.field_error
+                .as_ref()
+                .filter(|(f, _)| *f == field)
+                .map(|(_, e)| e.clone())
+        };
+        let name_error = error_of(Field::Name);
+        let role_error = error_of(Field::Role);
         div()
             .flex()
             .flex_col()
@@ -283,13 +321,20 @@ impl Render for ProfilePage {
                     .flex()
                     .flex_col()
                     .gap(space::S16)
-                    .child(widgets::field(
-                        s::NAME,
-                        ui::TextField::new("profile-name", &self.name, ui::FieldKind::Form)
-                            .error(save_error)
-                            .disabled(!signed_in),
-                        cx,
-                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(widgets::field(
+                                s::NAME,
+                                ui::TextField::new("profile-name", &self.name, ui::FieldKind::Form)
+                                    .error(name_error.is_some())
+                                    .disabled(!signed_in),
+                                cx,
+                            ))
+                            // The error of a field sits 6 pt under it (§7.1).
+                            .children(name_error.map(|e| ui::field_help(e, true, cx))),
+                    )
                     .child(
                         div()
                             .flex()
@@ -297,15 +342,19 @@ impl Render for ProfilePage {
                             .child(widgets::field(
                                 s::ROLE,
                                 ui::TextField::new("profile-role", &self.role, ui::FieldKind::Form)
+                                    .error(role_error.is_some())
                                     .disabled(!signed_in),
                                 cx,
                             ))
-                            .child(div().pt(space::S6).child(
-                                match widgets::status_line(&self.save, cx) {
-                                    Some(line) => line,
-                                    None => widgets::hint(s::PROFILE_SAVE_HINT, cx),
-                                },
-                            )),
+                            .child(match role_error {
+                                Some(e) => ui::field_help(e, true, cx),
+                                None => div().pt(space::S6).child(
+                                    match widgets::status_line(&self.save, cx) {
+                                        Some(line) => line,
+                                        None => widgets::hint(s::PROFILE_SAVE_HINT, cx),
+                                    },
+                                ),
+                            }),
                     ),
             )
             // Sign out, then the danger row on its own (U40).
@@ -384,8 +433,14 @@ mod tests {
             validate("小王", " 设计 "),
             Ok(("小王".to_string(), Some("设计".to_string())))
         );
-        assert!(validate("  ", "x").is_err());
-        assert!(validate(&"长".repeat(65), "").is_err());
-        assert!(validate("a", &"长".repeat(65)).is_err());
+        assert_eq!(validate("  ", "x").map_err(|e| e.0), Err(Field::Name));
+        assert_eq!(
+            validate(&"长".repeat(65), "").map_err(|e| e.0),
+            Err(Field::Name)
+        );
+        assert_eq!(
+            validate("a", &"长".repeat(65)).map_err(|e| e.0),
+            Err(Field::Role)
+        );
     }
 }

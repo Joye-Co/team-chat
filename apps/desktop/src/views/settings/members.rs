@@ -31,16 +31,23 @@ use crate::{
     ui::{self, ButtonSpec as _, Lucide},
 };
 
-/// Members in list order: active people first, then active bot members, then
-/// deactivated members; by name inside each part.
-pub fn sorted(mut members: Vec<Member>) -> Vec<Member> {
-    members.sort_by(|a, b| {
-        (a.deactivated, a.is_bot(), a.name.to_lowercase()).cmp(&(
-            b.deactivated,
-            b.is_bot(),
-            b.name.to_lowercase(),
-        ))
-    });
+/// Members in list order: me, the other owners, the other people, then bot
+/// members, then deactivated members; by name inside each part.
+pub fn sorted(mut members: Vec<Member>, me: Option<&str>) -> Vec<Member> {
+    let rank = |m: &Member| {
+        if m.deactivated {
+            4
+        } else if m.is_bot() {
+            3
+        } else if me == Some(m.id.as_str()) {
+            0
+        } else if m.level == MemberLevel::Owner {
+            1
+        } else {
+            2
+        }
+    };
+    members.sort_by_cached_key(|m| (rank(m), m.name.trim().to_lowercase()));
     members
 }
 
@@ -196,10 +203,11 @@ impl MembersPage {
         let id = m.id.clone();
         let page = cx.entity().downgrade();
         // A bot's live state wins over presence (§8.4): 工作中, 等人回答.
-        let live = m
-            .is_bot()
-            .then(|| StatusBoard::status(cx, m))
-            .unwrap_or_default();
+        let live = if m.is_bot() {
+            StatusBoard::status(cx, m)
+        } else {
+            CharacterStatus::default()
+        };
         let (dot, status_text) = if m.deactivated {
             (None, common::MEMBER_DEACTIVATED)
         } else if live == CharacterStatus::Working {
@@ -390,7 +398,7 @@ impl Render for MembersPage {
         let owner = i_am_owner(&self.services);
         let me = self.services.me();
         let query = self.search.read(cx).value().trim().to_lowercase();
-        let members: Vec<Member> = sorted(self.services.provider.members())
+        let members: Vec<Member> = sorted(self.services.provider.members(), me.as_deref())
             .into_iter()
             .filter(|m| {
                 query.is_empty()
@@ -965,6 +973,11 @@ pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> En
 mod tests {
     use super::*;
 
+    fn owner(mut m: Member) -> Member {
+        m.level = MemberLevel::Owner;
+        m
+    }
+
     fn m(id: &str, name: &str, bot: bool, off: bool) -> Member {
         Member {
             id: id.into(),
@@ -984,14 +997,21 @@ mod tests {
     }
 
     #[test]
-    fn order_people_bots_then_deactivated() {
-        let list = sorted(vec![
-            m("1", "Zed", false, true),
-            m("2", "bot b", true, false),
-            m("3", "amy", false, false),
-            m("4", "Bob", false, false),
-        ]);
+    fn order_me_owners_people_bots_then_deactivated() {
+        let list = sorted(
+            vec![
+                m("1", "Zed", false, true),
+                m("2", "bot b", true, false),
+                m("3", "amy", false, false),
+                m("4", "Bob", false, false),
+                owner(m("5", "Yan", false, false)),
+                owner(m("6", "Wu", false, false)),
+                owner(m("7", "Ace bot", true, false)),
+                m("8", "Cara", false, false),
+            ],
+            Some("5"),
+        );
         let ids: Vec<_> = list.iter().map(|m| m.id.as_str()).collect();
-        assert_eq!(ids, vec!["3", "4", "2", "1"]);
+        assert_eq!(ids, vec!["5", "6", "3", "4", "8", "7", "2", "1"]);
     }
 }

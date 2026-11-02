@@ -1,5 +1,6 @@
-//! The settings window (Cmd+,): 个人, 成员, 机器, 通知, 成本 and 关于 (with
-//! diagnostics and the developer-view switch). One window at a time: opening
+//! The settings window (Cmd+,): 个人, 成员, 机器, 通知, 成本 and 通用 (the
+//! about card with the version and update, diagnostics and the
+//! developer-view switch). One window at a time: opening
 //! it again brings the open one to the front.
 //!
 //! Pages read snapshots from the provider and start requests that answer
@@ -34,7 +35,8 @@ pub use members::MembersPage;
 pub use notifications::NotificationsPage;
 pub use profile::ProfilePage;
 
-/// The pages, in sidebar order.
+/// The pages, in sidebar order. `About` is the 通用 page (its slug stays
+/// `about` for the self-tests and screenshot scenes).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Page {
     Profile,
@@ -62,7 +64,7 @@ impl Page {
             Page::Machines => s::PAGE_MACHINES,
             Page::Notifications => s::PAGE_NOTIFICATIONS,
             Page::Cost => s::PAGE_COST,
-            Page::About => s::PAGE_ABOUT,
+            Page::About => s::PAGE_GENERAL,
         }
     }
 
@@ -98,6 +100,8 @@ pub struct SettingsView {
     machines: Entity<MachinesPage>,
     notifications: Entity<NotificationsPage>,
     about: Entity<AboutPage>,
+    /// The page scroll, so a scene can show the end of a long page.
+    scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -124,6 +128,7 @@ impl SettingsView {
             machines,
             notifications,
             about,
+            scroll: gpui::ScrollHandle::new(),
             _subscriptions: vec![theme::follow_system(window, cx)],
         };
         this.select(page, cx);
@@ -135,11 +140,19 @@ impl SettingsView {
     }
 
     pub fn select(&mut self, page: Page, cx: &mut Context<Self>) {
+        if page != self.page {
+            self.scroll.set_offset(gpui::point(px(0.), px(0.)));
+        }
         self.page = page;
         if page == Page::Machines {
             self.machines.update(cx, |m, cx| m.refresh(cx));
         }
         cx.notify();
+    }
+
+    /// Scrolls the page to its end (the footnote under a long table).
+    pub fn scroll_to_end(&self) {
+        self.scroll.scroll_to_bottom();
     }
 
     pub fn members(&self) -> &Entity<MembersPage> {
@@ -195,7 +208,7 @@ impl Page {
             Page::Machines => Lucide::Monitor,
             Page::Notifications => Lucide::Bell,
             Page::Cost => Lucide::ChartColumn,
-            Page::About => Lucide::Info,
+            Page::About => Lucide::Settings,
         }
     }
 
@@ -284,6 +297,7 @@ impl Render for SettingsView {
                             .id("settings-page")
                             .size_full()
                             .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
                             .child(widgets::page(
                                 self.page.title(),
                                 self.page_actions(cx),

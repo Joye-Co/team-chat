@@ -113,9 +113,10 @@ async fn settled<V: 'static>(
     r.unwrap_or_else(|| Err("timed out".into()))
 }
 
+/// `XXXX-XXXX` (or the earlier `XXXX-XXXX-XXXX`).
 fn invite_code_shape(code: &str) -> bool {
     let parts: Vec<&str> = code.split('-').collect();
-    parts.len() == 3
+    matches!(parts.len(), 2 | 3)
         && parts
             .iter()
             .all(|p| p.len() == 4 && p.chars().all(|c| c.is_ascii_alphanumeric()))
@@ -634,6 +635,22 @@ scene_opener!(open_notifications, Page::Notifications);
 scene_opener!(open_cost, Page::Cost);
 scene_opener!(open_about, Page::About);
 
+/// 成员 scrolled to its end: the last rows and the footnote under the table.
+pub fn open_members_end(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = super::open_window(services, Page::Members, false, cx)?;
+    handle
+        .update(cx, |_, window, _| {
+            // After the first layout, when the page knows its height.
+            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_end());
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
 /// 我的资料 after saving an empty name: the field error state.
 pub fn open_profile_error(
     services: Services,
@@ -721,8 +738,10 @@ mod tests {
 
     #[test]
     fn invite_codes_are_checked() {
+        assert!(invite_code_shape("ABCD-EFGH"));
         assert!(invite_code_shape("ABCD-EFGH-1234"));
-        assert!(!invite_code_shape("ABCDEFGH1234"));
+        assert!(!invite_code_shape("ABCDEFGH"));
+        assert!(!invite_code_shape("ABC-EFGH"));
         assert!(!invite_code_shape("ABC-EFGH-1234"));
     }
 }
