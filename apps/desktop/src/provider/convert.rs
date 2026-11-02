@@ -7,7 +7,7 @@ use chat_core::{
 
 use crate::data::{
     GroupKind, GroupSummary, Member, MemberKind, MemberLevel, Message, SendState, Topic,
-    TopicStatus,
+    TopicStatus, clean_name,
 };
 
 /// Prefix of the id of a topic that exists only as a queued first message.
@@ -37,7 +37,7 @@ pub fn member(m: &proto::Member, online: bool) -> Member {
             PMemberKind::Human => MemberKind::Human,
             PMemberKind::Bot => MemberKind::Bot,
         },
-        name: m.name.clone(),
+        name: clean_name(&m.name),
         role: m.role().map(str::to_string),
         level: match m.level {
             PLevel::Owner => MemberLevel::Owner,
@@ -83,8 +83,8 @@ pub fn group(row: &GroupRow, me: &str, name_of: impl Fn(&str) -> Option<String>)
         .then(|| g.member_ids.iter().find(|id| *id != me).cloned())
         .flatten();
     let name = match (&dm_peer, g.name.trim().is_empty()) {
-        (Some(peer), _) => name_of(peer).unwrap_or_else(|| g.name.clone()),
-        _ => g.name.clone(),
+        (Some(peer), _) => name_of(peer).unwrap_or_else(|| clean_name(&g.name)),
+        _ => clean_name(&g.name),
     };
     GroupSummary {
         id: g.id.clone(),
@@ -289,6 +289,14 @@ mod tests {
         assert_eq!(topic_title(Some("T"), "a"), "T");
         let long = "长".repeat(100);
         assert_eq!(topic_title(None, &long).chars().count(), 80);
+    }
+
+    #[test]
+    fn names_lose_extra_spaces() {
+        // break-ui CATALOG: a pasted name never indents or gaps in a view.
+        assert_eq!(clean_name("  Sam   Lee "), "Sam Lee");
+        assert_eq!(clean_name("王\u{3000}一鸣\t"), "王 一鸣");
+        assert_eq!(clean_name("Jo"), "Jo");
     }
 
     #[test]

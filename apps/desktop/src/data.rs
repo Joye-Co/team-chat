@@ -58,6 +58,13 @@ impl Member {
     }
 }
 
+/// A name as views show it: no leading or trailing space and one space
+/// between words (`"  Sam   Lee "` → `"Sam Lee"`). Providers apply it at the
+/// data boundary, so no view sees a raw name.
+pub fn clean_name(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum GroupKind {
     Group,

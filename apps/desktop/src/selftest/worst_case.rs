@@ -82,8 +82,10 @@ fn pick<T: Copy>(list: &[T], i: usize) -> T {
     list[i % list.len()]
 }
 
+/// A worst-case member as a provider gives it: the raw name goes through
+/// the same `clean_name` as server data (`provider::convert`).
 fn member(mut m: Member, i: usize) -> Member {
-    m.name = pick(NAMES, i).to_string();
+    m.name = clean_name(pick(NAMES, i));
     m.role = pick(ROLES, i).map(str::to_string);
     m
 }
