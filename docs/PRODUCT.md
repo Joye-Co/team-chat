@@ -89,7 +89,8 @@ Every bot's look is a character from Joye's jojo-friends family (his private per
 the source or the art elsewhere). A bot's avatar shows its live state with the character's
 status signal: idle, working, needs-input, success, error, offline. The main bot is Jojo. The
 other bots and their duties are copied from the team's Notion roster (团队名册) for now; Joye
-will adjust them. The roster lives in `docs/BOTS.md` and `assets/bots/roster.json`.
+will adjust them. The roster lives in [`docs/ROSTER.md`](ROSTER.md) and `assets/bots/roster.json` (named
+ROSTER, not BOTS, because macOS file names ignore case and `docs/bots.md` exists).
 
 | Bot | Character | 岗位 | Level | Reports to | Duties (from Notion) |
 | --- | --- | --- | --- | --- | --- |
