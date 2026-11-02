@@ -1,5 +1,6 @@
 // Diagnostics uploads, app releases, update checks and the public DMG download.
 import { MAX_DIAGNOSTICS_BYTES, MAX_FILE_BYTES, ReleaseVersion, type UpdateInfo } from "@chat/protocol";
+import { z } from "zod";
 import product from "../../../product.json";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
@@ -36,6 +37,7 @@ type ReleaseRow = {
   status: "uploading" | "ready";
   created_at: number;
   published_at: number | null;
+  withdrawn_at: number | null;
 };
 
 function toUpdateInfo(r: ReleaseRow, origin: string): UpdateInfo {
@@ -52,7 +54,7 @@ function toUpdateInfo(r: ReleaseRow, origin: string): UpdateInfo {
 async function latestRelease(db: D1Database): Promise<ReleaseRow | null> {
   return db
     .prepare(
-      "SELECT * FROM releases WHERE status = 'ready' ORDER BY major DESC, minor DESC, patch DESC LIMIT 1",
+      "SELECT * FROM releases WHERE status = 'ready' AND withdrawn_at IS NULL ORDER BY major DESC, minor DESC, patch DESC LIMIT 1",
     )
     .first<ReleaseRow>();
 }
@@ -224,6 +226,32 @@ export function registerOpsRoutes(): void {
     },
   });
 
+  // Withdraw a bad release: it is no longer offered as latest (the previous ready release is)
+  // and cannot be downloaded. `{ "restore": true }` offers it again. See docs/RUNBOOK.md.
+  registerRoute({
+    method: "POST",
+    path: "/v1/admin/releases/:version/withdraw",
+    auth: "none",
+    async handler({ env, request, url, params, body }) {
+      const given = request.headers.get("x-admin-secret") ?? "";
+      const expected = env.ADMIN_SECRET ?? "";
+      const ok = await timingSafeEqualString(given, expected);
+      if (!expected || !ok) throw new ApiError("unauthorized", "invalid admin secret");
+      const b = await body(z.object({ restore: z.boolean().optional() }));
+      const row = await env.DB.prepare("SELECT * FROM releases WHERE version = ? AND status = 'ready'")
+        .bind(params.version)
+        .first<ReleaseRow>();
+      if (!row) throw new ApiError("not_found", "no such release");
+      const now = Date.now();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE releases SET withdrawn_at = ? WHERE version = ?").bind(b.restore ? null : now, row.version),
+        auditStatement(env.DB, null, { action: b.restore ? "release.restore" : "release.withdraw", target: row.version }, now),
+      ]);
+      const latest = await latestRelease(env.DB);
+      return { version: row.version, withdrawn: !b.restore, latest: latest ? toUpdateInfo(latest, url.origin) : null };
+    },
+  });
+
   registerRoute({
     method: "GET",
     path: "/v1/updates/latest",
@@ -240,7 +268,7 @@ export function registerOpsRoutes(): void {
     path: "/v1/updates/:version/download",
     auth: "member",
     async handler({ env, request, params }) {
-      const r = await env.DB.prepare("SELECT * FROM releases WHERE version = ? AND status = 'ready'")
+      const r = await env.DB.prepare("SELECT * FROM releases WHERE version = ? AND status = 'ready' AND withdrawn_at IS NULL")
         .bind(params.version)
         .first<ReleaseRow>();
       if (!r) throw new ApiError("not_found", "no such release");
@@ -249,7 +277,8 @@ export function registerOpsRoutes(): void {
   });
 
   // Public: anyone with an invite code that has not expired (used or not). The code is never
-  // logged: the request log records only the path, and this handler logs nothing.
+  // logged: the request log records only the path, this handler logs nothing, and Workers
+  // invocation logs (which store the full URL) are off in server/wrangler.jsonc.
   registerRoute({
     method: "GET",
     path: "/download",

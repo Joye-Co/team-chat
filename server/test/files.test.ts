@@ -514,4 +514,25 @@ describe("releases and updates", () => {
     }
     expect(limited).toBe(5);
   });
+
+  it("withdraws a bad release so the previous one is offered again", async () => {
+    const { member } = await setup();
+    expect((await publish("7.0.0", enc.encode("good"))).status).toBe(200);
+    expect((await publish("7.0.1", enc.encode("crashes"))).status).toBe(200);
+    expect((await api("/v1/updates/latest", { token: member.token })).body.version).toBe("7.0.1");
+    const withdraw = (body: unknown, secret = "test-admin-secret") =>
+      api("/v1/admin/releases/7.0.1/withdraw", { headers: { "x-admin-secret": secret }, body });
+    expect((await withdraw({}, "wrong")).status).toBe(401);
+    const w = await withdraw({});
+    expect(w.status, JSON.stringify(w.body)).toBe(200);
+    expect(w.body).toMatchObject({ version: "7.0.1", withdrawn: true, latest: { version: "7.0.0" } });
+    expect((await api("/v1/updates/latest", { token: member.token })).body.version).toBe("7.0.0");
+    expect((await raw("/v1/updates/7.0.1/download", { token: member.token })).status).toBe(404);
+    expect((await publish("7.0.1", enc.encode("again"))).status).toBe(409);
+    const back = await withdraw({ restore: true });
+    expect(back.body).toMatchObject({ withdrawn: false, latest: { version: "7.0.1" } });
+    expect((await api("/v1/admin/releases/9.9.9/withdraw", { headers: { "x-admin-secret": "test-admin-secret" }, body: {} })).status).toBe(404);
+    const audit = await env.DB.prepare("SELECT count(*) AS n FROM audit WHERE action IN ('release.withdraw', 'release.restore')").first<{ n: number }>();
+    expect(audit?.n).toBe(2);
+  });
 });
