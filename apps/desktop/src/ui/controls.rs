@@ -9,7 +9,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Icon, Sizable as _,
+    Disableable as _, Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
     input::{Input, InputState},
 };
@@ -18,7 +18,7 @@ use crate::{
     theme::{self, Type as _, size, space, type_scale},
     ui::{
         chip::Kbd,
-        icons::{Lucide, icon},
+        icons::{Lucide, button_glyph, icon},
     },
 };
 
@@ -149,7 +149,7 @@ pub fn secondary_button(
 pub fn icon_button(id: impl Into<ElementId>, name: Lucide) -> Button {
     Button::new(id)
         .ghost()
-        .icon(Icon::new(name).size(theme::icon::HEADER))
+        .icon(button_glyph(name, theme::icon::HEADER, size::ICON_BUTTON))
         .with_size(size::ICON_BUTTON)
         .rounded(theme::radius::MD)
 }
@@ -159,7 +159,7 @@ pub fn icon_button(id: impl Into<ElementId>, name: Lucide) -> Button {
 pub fn icon_button_sm(id: impl Into<ElementId>, name: Lucide) -> Button {
     Button::new(id)
         .ghost()
-        .icon(Icon::new(name).size(theme::icon::ROW))
+        .icon(button_glyph(name, theme::icon::ROW, size::ICON_BUTTON_SM))
         .with_size(size::ICON_BUTTON_SM)
         .rounded(theme::radius::SM)
 }

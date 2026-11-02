@@ -12,13 +12,13 @@ use gpui::{
     RenderOnce, SharedString, Styled, Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{
-    Disableable as _, Icon, Sizable as _,
+    Disableable as _, Sizable as _,
     button::{Button, ButtonVariants as _},
 };
 
 use crate::{
     theme::{self, Type as _, size, space},
-    ui::icons::Lucide,
+    ui::icons::{Lucide, button_glyph},
 };
 
 /// The horizontal inset gpui-component's `Textarea` keeps at `xsmall`.
@@ -233,7 +233,7 @@ pub fn composer_tool(
 ) -> Button {
     Button::new(id)
         .ghost()
-        .icon(Icon::new(name).size(theme::icon::HEADER))
+        .icon(button_glyph(name, theme::icon::HEADER, size::ICON_BUTTON))
         .with_size(size::ICON_BUTTON)
         .rounded(theme::radius::MD)
         .tooltip(tooltip.into())
@@ -249,7 +249,11 @@ pub fn send_button(
 ) -> Button {
     let k = theme::colors(cx);
     let b = Button::new(id)
-        .icon(Icon::new(Lucide::ArrowUp).size(theme::icon::HEADER))
+        .icon(button_glyph(
+            Lucide::ArrowUp,
+            theme::icon::HEADER,
+            size::ICON_BUTTON,
+        ))
         .with_size(size::ICON_BUTTON)
         .rounded(theme::radius::MD)
         .tooltip(tooltip.into());

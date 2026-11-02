@@ -103,10 +103,17 @@ impl AssetSource for AppAssets {
         if let Some(bytes) = crate::characters::assets::load(path) {
             return Ok(Some(Cow::Borrowed(bytes)));
         }
-        if let Some(bytes) = ExtraIcons.load(path)? {
-            return Ok(Some(bytes));
+        if let Some(rest) = path.strip_prefix(FIT_PREFIX) {
+            return self.load_fitted(rest);
         }
-        gpui_kit::assets::Assets.load(path)
+        let bytes = match ExtraIcons.load(path)? {
+            Some(bytes) => Some(bytes),
+            None => gpui_kit::assets::Assets.load(path)?,
+        };
+        Ok(bytes.map(|b| match path.starts_with("icons/") {
+            true => Cow::Owned(thin_stroke(&b)),
+            false => b,
+        }))
     }
 
     fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
@@ -117,6 +124,63 @@ impl AssetSource for AppAssets {
         paths.dedup();
         Ok(paths)
     }
+}
+
+impl AppAssets {
+    /// `fit/<glyph>/<drawn>/icons/<name>.svg`: the icon drawn in a box of
+    /// `drawn` pt with its 24-unit glyph at `glyph` pt (sizes in tenths).
+    fn load_fitted(&self, rest: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+        let mut parts = rest.splitn(3, '/');
+        let (Some(glyph), Some(drawn), Some(source)) = (parts.next(), parts.next(), parts.next())
+        else {
+            return Ok(None);
+        };
+        let (Ok(glyph), Ok(drawn)) = (glyph.parse::<f32>(), drawn.parse::<f32>()) else {
+            return Ok(None);
+        };
+        let Some(bytes) = self.load(source)? else {
+            return Ok(None);
+        };
+        let svg = String::from_utf8_lossy(&bytes);
+        // The 24-unit glyph takes `glyph` of `drawn`: widen the viewBox
+        // around its center. The stroke scales with it, as in the mockups.
+        let side = 24. * drawn / glyph;
+        let at = -(side - 24.) / 2.;
+        let fitted = svg.replacen(
+            "viewBox=\"0 0 24 24\"",
+            &format!("viewBox=\"{at:.3} {at:.3} {side:.3} {side:.3}\""),
+            1,
+        );
+        Ok(Some(Cow::Owned(fitted.into_bytes())))
+    }
+}
+
+const FIT_PREFIX: &str = "fit/";
+
+/// Lucide draws at stroke 2; the design uses 1.75 (§4.3), in viewBox units
+/// like the mockups (`kit.mjs`), so an 18 pt glyph has a 1.31 pt line.
+fn thin_stroke(svg: &[u8]) -> Vec<u8> {
+    String::from_utf8_lossy(svg)
+        .replacen("stroke-width=\"2\"", "stroke-width=\"1.75\"", 1)
+        .into_bytes()
+}
+
+/// The icon of a gpui-component `Button` of side `button`, with its glyph
+/// at `glyph` pt. The button always draws its icon at 75 % of its side
+/// (24 in a 32 pt button), so the glyph comes in a widened viewBox that
+/// puts the 24-unit Lucide glyph at `glyph` (18 in a 32 pt button, §4.2).
+pub fn button_glyph(name: Lucide, glyph: Pixels, button: Pixels) -> Icon {
+    Icon::empty().path(button_glyph_path(name, glyph, button))
+}
+
+fn button_glyph_path(name: Lucide, glyph: Pixels, button: Pixels) -> String {
+    let drawn = button * 0.75;
+    format!(
+        "{FIT_PREFIX}{:.1}/{:.1}/{}",
+        f32::from(glyph),
+        f32::from(drawn),
+        name.path()
+    )
 }
 
 /// A Lucide icon at a size and color.
@@ -143,10 +207,19 @@ mod tests {
             Lucide::Ellipsis,
         ] {
             let path = name.path();
-            assert!(
-                AppAssets.load(&path).unwrap().is_some(),
-                "missing icon {path}"
-            );
+            let svg = AppAssets.load(&path).unwrap().expect("icon loads");
+            let svg = std::str::from_utf8(&svg).unwrap().to_string();
+            assert!(svg.contains("stroke-width=\"1.75\""), "{path}");
         }
+    }
+
+    #[test]
+    fn button_glyphs_put_the_glyph_at_its_size() {
+        let path = button_glyph_path(Lucide::Bell, gpui::px(18.), gpui::px(32.));
+        let svg = AppAssets.load(&path).unwrap().unwrap();
+        let svg = std::str::from_utf8(&svg).unwrap().to_string();
+        // Drawn at 24 pt: the glyph is 18 pt when the viewBox is 32 units.
+        assert!(svg.contains("viewBox=\"-4.000 -4.000 32.000 32.000\""), "{svg}");
+        assert!(svg.contains("stroke-width=\"1.75\""));
     }
 }

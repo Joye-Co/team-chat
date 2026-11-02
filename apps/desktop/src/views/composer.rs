@@ -861,7 +861,7 @@ impl ComposerView {
                 ui::icon_button(id, Lucide::X)
                     .with_size(px(24.))
                     .rounded(theme::radius::SM)
-                    .icon(gpui_component::Icon::new(Lucide::X).size(theme::icon::CHIP))
+                    .icon(ui::button_glyph(Lucide::X, theme::icon::CHIP, px(24.)))
                     .tooltip(c::REMOVE)
                     .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
             )
@@ -1071,7 +1071,11 @@ impl Render for ComposerView {
             cx,
         )
         .when(editing, |b| {
-            b.icon(gpui_component::Icon::new(Lucide::Check).size(theme::icon::HEADER))
+            b.icon(ui::button_glyph(
+                Lucide::Check,
+                theme::icon::HEADER,
+                theme::size::ICON_BUTTON,
+            ))
         })
         .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
 
