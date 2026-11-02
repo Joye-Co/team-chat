@@ -12,10 +12,7 @@ use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement,
     StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    Disableable as _, WindowExt as _,
-    button::{Button, ButtonVariant},
-};
+use gpui_component::{Disableable as _, WindowExt as _, button::ButtonVariant};
 
 use super::part_id;
 use crate::{
@@ -148,7 +145,8 @@ fn press_of(action: &CardAction, message: &Message, provider: &Arc<dyn ChatProvi
 }
 
 /// A card button: `md`, 32 pt (§7.10). Primary, secondary or danger by the
-/// action's style.
+/// action's style. The other buttons are disabled at once; the spinner shows only when the answer takes longer
+/// than 400 ms (§12).
 fn button(
     action: &CardAction,
     message: &Message,
@@ -156,7 +154,7 @@ fn button(
     sending: Option<&str>,
     quiet: bool,
     cx: &App,
-) -> Button {
+) -> AnyElement {
     let id = ElementId::Name(part_id(message, format_args!("action-{}", action.id)).into());
     let kind = match action.style.unwrap_or_default() {
         ActionStyle::Primary => ui::ButtonKind::Primary,
@@ -164,12 +162,29 @@ fn button(
         ActionStyle::Default => ui::ButtonKind::Secondary,
         ActionStyle::Danger => ui::ButtonKind::Danger,
     };
-    let loading = sending == Some(action.id.as_str());
-    let press = press_of(action, message, provider);
-    ui::button(id, action.label.clone(), kind, ui::ButtonSize::Md, cx)
+    let pressed = sending == Some(action.id.as_str());
+    let make = |loading: bool| {
+        let press = press_of(action, message, provider);
+        ui::button(
+            id.clone(),
+            action.label.clone(),
+            kind,
+            ui::ButtonSize::Md,
+            cx,
+        )
         .loading(loading)
-        .disabled(sending.is_some() && !loading)
-        .on_click(move |_, window, cx| press.run(window, cx))
+        .disabled(sending.is_some() && !pressed)
+        // A second press while the first one is in flight does nothing.
+        .when(!pressed, |b| {
+            b.on_click(move |_, window, cx| press.run(window, cx))
+        })
+    };
+    let (idle, busy) = (make(false), make(true));
+    let gate = ElementId::Name(part_id(message, format_args!("busy-{}", action.id)).into());
+    ui::motion::busy_gate(gate, pressed, move |shown| {
+        if shown { busy } else { idle }.into_any_element()
+    })
+    .into_any_element()
 }
 
 /// One answer of an ask card (§7.10): a 40 pt row on `opt-bg`, radius 8, a
