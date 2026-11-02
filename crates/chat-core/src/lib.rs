@@ -1,8 +1,18 @@
 //! Client core without UI: local cache, sync engine and the server connection.
 //!
-//! The UI builds a [`Client`] from a [`ClientConfig`], calls [`Client::start`], reads the
-//! cache through the synchronous query methods, and listens to [`ClientUpdate`] values.
-//! No method that the UI calls waits for the network.
+//! ```ignore
+//! let cfg = ClientConfig::new(base_url, token, data_dir);   // data_dir holds cache.sqlite3
+//! let client = Client::new(cfg)?;                          // opens the cache, builds the runtime
+//! let mut updates = client.subscribe();                    // ClientUpdate stream
+//! client.start();                                          // connects in the background
+//! let groups = client.groups()?;                           // synchronous cache reads
+//! let id = client.send_message(&group_id, &topic_id, "hi", vec![])?;   // queued, returns at once
+//! ```
+//!
+//! Reads never wait for the network; writes go to the outbox and are resent with the
+//! same `clientMsgId` until acked. On wake from sleep or a network change, call
+//! [`Client::reconnect_now`]. Before a client exists (sign-in), run
+//! [`HttpClient::redeem`] on [`background`] and keep the token in a [`TokenStore`].
 
 pub mod backoff;
 pub mod client;
