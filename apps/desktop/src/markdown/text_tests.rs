@@ -92,6 +92,30 @@ fn no_line_starts_with_closing_or_ends_with_opening_punctuation(cx: &mut TestApp
 }
 
 #[gpui::test]
+fn paths_break_after_a_slash_and_never_before_it(cx: &mut TestAppContext) {
+    let vcx = cx.add_empty_window();
+    vcx.update(|window, _| {
+        // The break goes after `/`: no line starts with `/`.
+        assert_eq!(
+            wrap(window, "apps/desktop/src/data.rs", 16.),
+            ["apps/desktop/", "src/data.rs"]
+        );
+        assert_eq!(
+            wrap(window, "改动 apps/desktop/src/data.rs", 18.),
+            ["改动 apps/desktop/", "src/data.rs"]
+        );
+        // A URL keeps `//` together and breaks after a path slash.
+        assert_eq!(
+            wrap(window, "https://example.com/api/v1", 20.),
+            ["https://example.com/", "api/v1"]
+        );
+        for line in wrap(window, "server/src/alerts/rule_0.rs", 9.) {
+            assert!(!line.starts_with('/'), "{line}");
+        }
+    });
+}
+
+#[gpui::test]
 fn truncation_trims_punctuation_and_short_word_cuts(cx: &mut TestAppContext) {
     let vcx = cx.add_empty_window();
     vcx.update(|window, cx| {

@@ -78,7 +78,11 @@ impl LineWrapper {
                             continue;
                         }
 
-                        if Self::is_word_char(c) {
+                        if Self::breaks_after_slash(prev_c, c) && first_non_whitespace_ix.is_some()
+                        {
+                            last_candidate_ix = ix;
+                            last_candidate_width = width;
+                        } else if Self::is_word_char(c) {
                             if prev_c == ' ' && c != ' ' && first_non_whitespace_ix.is_some() {
                                 last_candidate_ix = ix;
                                 last_candidate_width = width;
@@ -443,7 +447,10 @@ impl LineWrapper {
 
             let char_width = self.width_for_char(c);
 
-            if Self::is_word_char(c) {
+            if Self::breaks_after_slash(prev_c, c) && first_non_whitespace_ix.is_some() {
+                last_candidate_ix = ix;
+                last_candidate_width = width;
+            } else if Self::is_word_char(c) {
                 if prev_c == ' ' && first_non_whitespace_ix.is_some() {
                     last_candidate_ix = ix;
                     last_candidate_width = width;
@@ -519,7 +526,15 @@ impl LineWrapper {
     /// CJK line-breaking rule (kinsoku): no line starts with closing
     /// punctuation and no line ends with opening punctuation.
     pub fn may_break_between(prev: char, next: char) -> bool {
-        !Self::is_no_start_char(next) && !Self::is_no_end_char(prev)
+        next != '/' && !Self::is_no_start_char(next) && !Self::is_no_end_char(prev)
+    }
+
+    /// Paths and URLs break after a `/`, never before it, as browsers do:
+    /// `apps/desktop/` then `src/data.rs`, not `apps/desktop` then
+    /// `/src/data.rs`. A run of slashes (`https://`) stays together, and
+    /// the kinsoku rule still holds for the character after the slash.
+    pub fn breaks_after_slash(prev: char, next: char) -> bool {
+        prev == '/' && next != '/' && next != ' ' && next != '\n' && !Self::is_no_start_char(next)
     }
 
     /// Closing punctuation that must not start a line.
@@ -575,8 +590,8 @@ impl LineWrapper {
         // Closing punctuation never starts a line (UAX #14 LB13: no break
         // before `!`, `)`, `]`, `}`, closing quotes or an ellipsis) — `plz!`,
         // `see)`, `quoted”` wrap as one word instead of orphaning the mark on
-        // the next line. `/` and `?` stay break opportunities so long paths
-        // and URLs (`a/b`, `foo?b=2`) can wrap.
+        // the next line. `?` stays a break opportunity and `/` breaks after
+        // it ([`Self::breaks_after_slash`]), so long paths and URLs wrap.
         matches!(c, '!' | ')' | ']' | '}' | '"' | '”' | '»' | '…') ||
         // `⋯` character is special used in Zed, to keep this at the end of the line.
         matches!(c, '⋯') ||
