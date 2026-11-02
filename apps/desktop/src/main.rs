@@ -8,6 +8,8 @@
 //!       topic, write a JSON report (first_frame_ms, ...) and exit. Exit code 0
 //!       on success, 1 on failure or timeout. `--hold-ms <n>` keeps the window
 //!       open n ms after the first frame (for a screenshot with `screencapture`).
+//!   desktop --screenshot <dir> [--theme light|dark|both] [--scenes ...] [--worst-case]
+//!       capture every scene's window in each theme; see `selftest/mod.rs`.
 
 // The skeleton defines API that the timeline, composer, navigation and
 // chat-core tracks use; unused parts are not warnings yet.
@@ -20,6 +22,7 @@ mod data;
 mod drafts;
 #[allow(dead_code)]
 mod fake;
+mod selftest;
 #[allow(dead_code)]
 mod theme;
 #[allow(dead_code)]
@@ -75,6 +78,10 @@ fn parse_args() -> Result<Args, String> {
 
 fn main() {
     let started = Instant::now();
+    // `--screenshot` and other self-tests in `selftest/` parse their own arguments.
+    if let Some(code) = selftest::main_if_requested() {
+        std::process::exit(code);
+    }
     let args = match parse_args() {
         Ok(args) => args,
         Err(error) => {

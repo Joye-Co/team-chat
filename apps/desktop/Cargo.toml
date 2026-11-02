@@ -20,3 +20,8 @@ gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] 
 
 [build-dependencies]
 serde_json.workspace = true
+
+# The screenshot self-test reads the NSWindow number (src/selftest/capture.rs).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+raw-window-handle = "0.6"
