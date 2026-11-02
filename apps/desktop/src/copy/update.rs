@@ -25,4 +25,5 @@ crate::copy! {
     BANNER_DOWNLOADING = "正在下载 {version}",
     BANNER_PERCENT = "{percent}%",
     BANNER_MANUAL = "需要手动安装新版本",
+    BANNER_MANUAL_DETAIL = "安装盘已在访达中打开",
 }

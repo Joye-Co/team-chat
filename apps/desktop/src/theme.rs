@@ -187,7 +187,7 @@ pub mod size {
     pub const SETTINGS_ROW: Pixels = px(60.);
     pub const OPTION_ROW: Pixels = px(40.);
     pub const PANEL_ROW: Pixels = px(40.);
-    pub const BANNER: Pixels = px(48.);
+    pub const BANNER: Pixels = px(52.);
     pub const TOAST: Pixels = px(44.);
     /// Avatars (§4.3).
     pub const AVATAR_MESSAGE: Pixels = px(36.);

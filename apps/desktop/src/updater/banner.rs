@@ -1,12 +1,11 @@
-//! The quiet update banner above the topic view, and the 关于 section of settings.
+//! The quiet update banner above the sidebar footer, and the about card of 通用 in settings.
 //! Both render [`Updater`] state and call its commands; nothing here touches the network.
 
 use gpui::{
-    App, Context, Entity, InteractiveElement as _, IntoElement, ParentElement, Render,
-    StatefulInteractiveElement as _, Styled, Subscription, Window, div, img,
-    prelude::FluentBuilder as _, px,
+    App, Context, Entity, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
+    img, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Sizable as _, button::Button, spinner::Spinner, tooltip::Tooltip};
+use gpui_component::{Sizable as _, button::Button, spinner::Spinner};
 
 use super::{Failure, Phase, Updater, version};
 use crate::{
@@ -128,7 +127,10 @@ fn banner_lines(phase: &Phase, text: String) -> (String, Option<String>) {
                 Some(fill(u::BANNER_PERCENT, &[("percent", &pct)])),
             )
         }
-        Phase::Manual(_) => (u::BANNER_MANUAL.to_string(), Some(text)),
+        Phase::Manual(_) => (
+            u::BANNER_MANUAL.to_string(),
+            Some(u::BANNER_MANUAL_DETAIL.to_string()),
+        ),
         Phase::Failed { .. } => (text, None),
         _ => (text, None),
     }
@@ -167,91 +169,52 @@ impl Render for UpdateBanner {
             .iter()
             .map(|a| action_button(*a, "update-banner", &updater, cx))
             .collect();
-        // One row: glyph, the two lines, the actions. The download bar is an
-        // inset track along the bottom edge, inside the card's radius.
-        let card = div()
-            .id("update-banner")
-            .relative()
-            .flex_none()
-            .w_full()
-            .min_h(theme::size::BANNER)
-            .pl(space::S12)
-            .pr(space::S6)
-            .py(space::S6)
-            .rounded(theme::radius::MD)
-            .bg(colors.raised)
-            .border_1()
-            .border_color(colors.border)
-            .flex()
-            .items_center()
-            .gap(space::S10)
-            .when(manual, |el| {
-                el.tooltip(move |window, cx| Tooltip::new(text.clone()).build(window, cx))
-            })
-            .map(|el| {
-                if busy {
+        // The download bar follows the percent on the detail line: a 3 pt
+        // inset track.
+        let detail = detail.map(|d| {
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(crate::views::banners::detail_text(d))
+                .when_some(progress, |el, pct| {
                     el.child(
-                        Spinner::new()
-                            .with_size(theme::icon::ROW)
-                            .color(colors.text_2),
-                    )
-                } else {
-                    el.child(icon(glyph, theme::icon::ROW, glyph_color))
-                }
-            })
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .child(
                         div()
-                            .t_small()
-                            .medium()
-                            .tnum()
-                            .text_color(colors.text_1)
-                            .one_line()
-                            .child(title),
+                            .flex_1()
+                            .h(px(3.))
+                            .rounded(px(1.5))
+                            .bg(colors.field)
+                            .child(
+                                div()
+                                    .h_full()
+                                    .rounded(px(1.5))
+                                    .bg(colors.accent)
+                                    .w(gpui::relative((pct / 100.).clamp(0., 1.))),
+                            ),
                     )
-                    .children(detail.map(|d| {
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S8)
-                            .t_meta()
-                            .tnum()
-                            .text_color(colors.text_3)
-                            .child(div().min_w(px(0.)).one_line().child(d))
-                            // The download bar follows the percent on the
-                            // detail line: a 3 pt inset track.
-                            .when_some(progress, |el, pct| {
-                                el.child(
-                                    div()
-                                        .flex_1()
-                                        .h(px(3.))
-                                        .rounded(px(1.5))
-                                        .bg(colors.field)
-                                        .child(
-                                            div()
-                                                .h_full()
-                                                .rounded(px(1.5))
-                                                .bg(colors.accent)
-                                                .w(gpui::relative((pct / 100.).clamp(0., 1.))),
-                                        ),
-                                )
-                            })
-                    })),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(space::S2)
-                    .children(actions),
-            );
-        crate::views::banners::place(card).into_any_element()
+                })
+                .into_any_element()
+        });
+        let glyph = if busy {
+            Spinner::new()
+                .with_size(theme::icon::ROW)
+                .color(colors.text_2)
+                .into_any_element()
+        } else {
+            icon(glyph, theme::icon::ROW, glyph_color).into_any_element()
+        };
+        crate::views::banners::Card {
+            id: "update-banner",
+            glyph,
+            title: title.into(),
+            detail,
+            actions: actions.into_iter().map(|b| b.into_any_element()).collect(),
+            // The manual steps are a paragraph: the card shows the short
+            // form and the tooltip the whole of it.
+            tooltip: manual.then(|| text.into()),
+        }
+        .render(cx)
+        .into_any_element()
     }
 }
 

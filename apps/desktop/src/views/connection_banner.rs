@@ -2,7 +2,7 @@
 //! connecting, reconnecting (with the next retry) or offline. Hidden when
 //! online or signed out.
 
-use gpui::{Context, IntoElement, Render, Subscription, Window, div, prelude::FluentBuilder as _};
+use gpui::{Context, IntoElement, Render, Subscription, Window, div};
 use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
 
 use crate::{
@@ -78,27 +78,37 @@ impl Render for ConnectionBanner {
         // the sidebar footer. Never red: being offline is not an error the
         // user made, and messages still queue.
         let can_retry = !matches!(state, ConnectionState::Connecting);
-        crate::views::banners::place(ui::Banner::new(Lucide::WifiOff, title).detail(detail).when(
-            can_retry,
-            |b| {
-                b.action(
-                    ui::button(
-                        "reconnect-now",
-                        c::RECONNECT,
-                        ui::ButtonKind::Ghost,
-                        ui::ButtonSize::Sm,
-                        cx,
-                    )
-                    .custom(
-                        ButtonCustomVariant::new(cx)
-                            .foreground(theme::colors(cx).accent_text)
-                            .hover(theme::colors(cx).hover)
-                            .active(theme::colors(cx).pressed),
-                    )
-                    .on_click(cx.listener(|this, _, _, _| this.services.provider.reconnect_now())),
+        let colors = theme::colors(cx);
+        let actions = if can_retry {
+            vec![
+                ui::button(
+                    "reconnect-now",
+                    c::RECONNECT,
+                    ui::ButtonKind::Ghost,
+                    ui::ButtonSize::Sm,
+                    cx,
                 )
-            },
-        ))
+                .custom(
+                    ButtonCustomVariant::new(cx)
+                        .foreground(colors.accent_text)
+                        .hover(colors.hover)
+                        .active(colors.pressed),
+                )
+                .on_click(cx.listener(|this, _, _, _| this.services.provider.reconnect_now()))
+                .into_any_element(),
+            ]
+        } else {
+            Vec::new()
+        };
+        crate::views::banners::Card {
+            id: "connection-banner",
+            glyph: ui::icon(Lucide::WifiOff, theme::icon::ROW, colors.text_2).into_any_element(),
+            title: title.into(),
+            detail: Some(crate::views::banners::detail_text(detail)),
+            actions,
+            tooltip: None,
+        }
+        .render(cx)
         .into_any_element()
     }
 }
