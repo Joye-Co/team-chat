@@ -10,7 +10,7 @@
 //!   rows, as real data does. Ids stay the same, so navigation still works.
 //! - [`Empty`] is signed in with no 群, 话题 or messages.
 
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::{UnboundedReceiver, unbounded};
 
@@ -77,6 +77,57 @@ const FILE_TITLES: &[&str] = &[
     "设计评审结论",
     "a.md",
 ];
+
+const ATTACHMENT_NAMES: &[&str] = &[
+    "Q3-Board-Deck-FINAL-revised-v12-approved-by-legal-and-finance-2026-11-03.pdf",
+    "a",
+    "产品设计与前端体验改进讨论组第四季度冲刺复盘纪要（定稿）.docx",
+    "IMG_20250914_183022_HDR_portrait_edited_edited.HEIC",
+];
+
+const PLAN_TEXTS: &[&str] = &[
+    "把登录页、设置窗口和侧边栏的所有颜色、间距、圆角与动效统一到主题令牌里，并在浅色和深色模式下逐屏截图核对，最后提交评审",
+    "1",
+    "Verify https://example.com/workspaces/acme/projects/q3-launch/docs/9f8e7d6c5b4a?tab=comments",
+];
+
+const MACHINE_NAMES: &[&str] = &[
+    "joye-macbook-pro-m4-max-16-inch-2026.local",
+    "m",
+    "构建机 · 北京机房 · 第三排",
+];
+
+const MACHINE_LABELS: &[&str] = &[
+    "gpu",
+    "macos",
+    "arm64",
+    "xcode-16",
+    "ios-simulator",
+    "long-running",
+    "customer-feedback-from-enterprise-onboarding",
+];
+
+/// Eight reactions: every member, one, a ZWJ emoji, and counts past 99.
+fn worst_reactions(ids: &[MemberId]) -> Vec<Reaction> {
+    let take = |n: usize| ids.iter().take(n).cloned().collect::<Vec<_>>();
+    let many: Vec<MemberId> = (0..120).map(|i| format!("m-many-{i}")).collect();
+    [
+        ("👍", ids.to_vec()),
+        ("👩🏽‍💻", take(1)),
+        ("🎉", take(3)),
+        ("✅", take(2)),
+        ("🚀", many),
+        ("❤️", ids.to_vec()),
+        ("😂", ids.to_vec()),
+        ("👀", ids.to_vec()),
+    ]
+    .into_iter()
+    .map(|(emoji, member_ids)| Reaction {
+        emoji: emoji.into(),
+        member_ids,
+    })
+    .collect()
+}
 
 fn pick<T: Copy>(list: &[T], i: usize) -> T {
     list[i % list.len()]
@@ -295,6 +346,7 @@ impl ChatProvider for WorstCase {
     }
     fn messages(&self, group_id: &str, topic_id: &str, limit: usize) -> MessageWindow {
         let mut window = self.inner.messages(group_id, topic_id, limit);
+        let ids: Vec<MemberId> = self.inner.members().into_iter().map(|m| m.id).collect();
         let len = window.messages.len();
         for (i, m) in window.messages.iter_mut().enumerate() {
             // Every other message from the newest one up, so the visible end
@@ -302,6 +354,12 @@ impl ChatProvider for WorstCase {
             let from_end = len - 1 - i;
             if from_end.is_multiple_of(2) && m.deleted_at.is_none() && !m.streaming {
                 m.body = pick(BODIES, from_end / 2).to_string();
+            }
+            for (j, a) in m.attachments.iter_mut().enumerate() {
+                a.name = pick(ATTACHMENT_NAMES, from_end + j).to_string();
+            }
+            if from_end == 1 && m.deleted_at.is_none() {
+                m.reactions = worst_reactions(&ids);
             }
         }
         window
@@ -355,6 +413,247 @@ impl ChatProvider for WorstCase {
     }
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         self.inner.subscribe()
+    }
+
+    // Everything else goes to the fake provider, so cards, runs, files,
+    // drafts, search and machines are on screen under --worst-case too;
+    // the values a view renders are rewritten as above.
+    fn topic(&self, group_id: &str, topic_id: &str) -> Option<Topic> {
+        self.topics_of(group_id)
+            .into_iter()
+            .find(|t| t.id == topic_id)
+    }
+    fn topic_files(&self, group_id: &str, topic_id: &str) -> Vec<TopicFile> {
+        self.inner
+            .topic_files(group_id, topic_id)
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut f)| {
+                f.file.name = pick(ATTACHMENT_NAMES, i).to_string();
+                f
+            })
+            .collect()
+    }
+    fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
+        self.inner
+            .runs(group_id, topic_id)
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut r)| {
+                r.machine_name = r.machine_name.map(|_| pick(MACHINE_NAMES, i).to_string());
+                for (j, item) in r.plan.iter_mut().enumerate() {
+                    if j.is_multiple_of(2) {
+                        item.text = pick(PLAN_TEXTS, j / 2).to_string();
+                    }
+                }
+                r
+            })
+            .collect()
+    }
+    fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
+        let mut rx = self.inner.machines();
+        match rx.try_recv() {
+            Ok(Some(Ok(list))) => reply_now(Ok(list
+                .into_iter()
+                .enumerate()
+                .map(|(i, mut m)| {
+                    m.name = pick(MACHINE_NAMES, i).to_string();
+                    if i == 0 {
+                        m.labels = MACHINE_LABELS.iter().map(|s| s.to_string()).collect();
+                    }
+                    m
+                })
+                .collect())),
+            Ok(Some(Err(e))) => reply_now(Err(e)),
+            _ => rx,
+        }
+    }
+    fn sign_out(&self, wipe_cache: bool) {
+        self.inner.sign_out(wipe_cache)
+    }
+    fn reconnect_now(&self) {
+        self.inner.reconnect_now()
+    }
+    fn retry_send(&self, group_id: &str, client_msg_id: &str) {
+        self.inner.retry_send(group_id, client_msg_id)
+    }
+    fn react(&self, group_id: &str, topic_id: &str, message_id: &str, emoji: &str, on: bool) {
+        self.inner.react(group_id, topic_id, message_id, emoji, on)
+    }
+    fn discard_send(&self, group_id: &str, client_msg_id: &str) {
+        self.inner.discard_send(group_id, client_msg_id)
+    }
+    fn draft(&self, key: &DraftKey) -> Draft {
+        self.inner.draft(key)
+    }
+    fn save_draft_text(&self, key: &DraftKey, body: String, mentions: Vec<MemberId>) {
+        self.inner.save_draft_text(key, body, mentions)
+    }
+    fn set_quote(&self, key: &DraftKey, quote_of: Option<MessageId>) {
+        self.inner.set_quote(key, quote_of)
+    }
+    fn attach_files(&self, key: &DraftKey, files: Vec<NewFile>) {
+        self.inner.attach_files(key, files)
+    }
+    fn remove_file(&self, key: &DraftKey, file_id: &str) {
+        self.inner.remove_file(key, file_id)
+    }
+    fn clear_draft(&self, key: &DraftKey) {
+        self.inner.clear_draft(key)
+    }
+    fn send_with_files(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+    ) -> ClientMsgId {
+        self.inner.send_with_files(request, key, files)
+    }
+    fn start_topic_with_files(
+        &self,
+        request: StartTopicRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+    ) -> ClientMsgId {
+        self.inner.start_topic_with_files(request, key, files)
+    }
+    fn take_rejected_files(&self, key: &DraftKey) -> Vec<RejectedFile> {
+        self.inner.take_rejected_files(key)
+    }
+    fn file_transfer(&self, key: &str) -> Option<TransferState> {
+        self.inner.file_transfer(key)
+    }
+    fn cached_file(&self, file: &FileAttachment) -> Option<PathBuf> {
+        self.inner.cached_file(file)
+    }
+    fn thumbnail(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Option<PathBuf> {
+        self.inner.thumbnail(group_id, topic_id, file)
+    }
+    fn fetch_file(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Reply<PathBuf> {
+        self.inner.fetch_file(group_id, topic_id, file)
+    }
+    fn cancel_download(&self, file: &FileAttachment) {
+        self.inner.cancel_download(file)
+    }
+    fn refresh_artifacts(&self, group_id: &str, topic_id: &str) {
+        self.inner.refresh_artifacts(group_id, topic_id)
+    }
+    fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
+        self.inner.artifact(artifact_id)
+    }
+    fn request_artifact(&self, group_id: &str, topic_id: &str, artifact_id: &str) {
+        self.inner.request_artifact(group_id, topic_id, artifact_id)
+    }
+    fn open_artifact_version(
+        &self,
+        artifact_id: &str,
+        version: Option<u32>,
+    ) -> Reply<ArtifactFolder> {
+        self.inner.open_artifact_version(artifact_id, version)
+    }
+    fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
+        self.inner.create_artifact(request)
+    }
+    fn create_group(&self, request: CreateGroupRequest) {
+        self.inner.create_group(request)
+    }
+    fn open_dm(&self, member_id: &str) {
+        self.inner.open_dm(member_id)
+    }
+    fn leave_group(&self, group_id: &str) {
+        self.inner.leave_group(group_id)
+    }
+    fn group_muted(&self, group_id: &str) -> bool {
+        self.inner.group_muted(group_id)
+    }
+    fn set_group_muted(&self, group_id: &str, muted: bool) {
+        self.inner.set_group_muted(group_id, muted)
+    }
+    fn saved_navigation(&self) -> Option<SavedNavigation> {
+        self.inner.saved_navigation()
+    }
+    fn save_navigation(&self, navigation: SavedNavigation) {
+        self.inner.save_navigation(navigation)
+    }
+    fn topic_read_seq(&self, group_id: &str, topic_id: &str) -> Option<u64> {
+        self.inner.topic_read_seq(group_id, topic_id)
+    }
+    fn topic_following(&self, group_id: &str, topic_id: &str) -> bool {
+        self.inner.topic_following(group_id, topic_id)
+    }
+    fn set_topic_following(&self, group_id: &str, topic_id: &str, follow: bool) {
+        self.inner.set_topic_following(group_id, topic_id, follow)
+    }
+    fn set_topic_owner(&self, group_id: &str, topic_id: &str, owner: Option<MemberId>) {
+        self.inner.set_topic_owner(group_id, topic_id, owner)
+    }
+    fn search(&self, query: SearchQuery) -> SearchReply {
+        self.inner.search(query)
+    }
+    fn run_process(&self, run_id: &str) -> RunProcess {
+        self.inner.run_process(run_id)
+    }
+    fn follow_run(&self, run_id: &str) {
+        self.inner.follow_run(run_id)
+    }
+    fn download_run_session(&self, run_id: &str, dir: PathBuf) -> SessionDownload {
+        self.inner.download_run_session(run_id, dir)
+    }
+    fn update_profile(&self, name: String, role: Option<String>) -> AdminReply<Member> {
+        self.inner.update_profile(name, role)
+    }
+    fn upload_avatar(&self, path: PathBuf) -> AdminReply<Member> {
+        self.inner.upload_avatar(path)
+    }
+    fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {
+        self.inner.create_invite(request)
+    }
+    fn set_member_level(&self, member_id: &str, level: MemberLevel) -> AdminReply<Member> {
+        self.inner.set_member_level(member_id, level)
+    }
+    fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {
+        self.inner.set_member_deactivated(member_id, deactivated)
+    }
+    fn create_bot_member(
+        &self,
+        name: String,
+        role: Option<String>,
+        runner: Option<RunnerSetup>,
+    ) -> AdminReply<BotCreated> {
+        self.inner.create_bot_member(name, role, runner)
+    }
+    fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
+        self.inner.create_machine(name, labels)
+    }
+    fn group_prefs(&self, group_id: &str) -> GroupPrefs {
+        self.inner.group_prefs(group_id)
+    }
+    fn set_group_prefs(
+        &self,
+        group_id: &str,
+        muted: Option<bool>,
+        notify: Option<NotifyLevel>,
+    ) -> AdminReply<()> {
+        self.inner.set_group_prefs(group_id, muted, notify)
+    }
+    fn send_diagnostics(&self, description: String) -> AdminReply<String> {
+        self.inner.send_diagnostics(description)
+    }
+    fn card(&self, group_id: &str, message_id: &str) -> Option<Arc<card::Card>> {
+        self.inner.card(group_id, message_id)
+    }
+    fn card_presses(&self, group_id: &str, message_id: &str) -> Vec<CardPress> {
+        self.inner.card_presses(group_id, message_id)
+    }
+    fn card_press_state(&self, group_id: &str, message_id: &str) -> Option<CardPressState> {
+        self.inner.card_press_state(group_id, message_id)
+    }
+    fn press_card_action(&self, group_id: &str, topic_id: &str, message_id: &str, action_id: &str) {
+        self.inner
+            .press_card_action(group_id, topic_id, message_id, action_id)
+    }
+    fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
+        self.inner.card_image(group_id, topic_id, file_id)
     }
 }
 
@@ -427,5 +726,50 @@ impl ChatProvider for Empty {
     fn set_typing(&self, _group_id: &str, _topic_id: &str) {}
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         unbounded().1
+    }
+    // The account and settings stay those of the fake provider.
+    fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
+        self.inner.machines()
+    }
+    fn sign_out(&self, wipe_cache: bool) {
+        self.inner.sign_out(wipe_cache)
+    }
+    fn reconnect_now(&self) {
+        self.inner.reconnect_now()
+    }
+    fn create_group(&self, request: CreateGroupRequest) {
+        self.inner.create_group(request)
+    }
+    fn open_dm(&self, member_id: &str) {
+        self.inner.open_dm(member_id)
+    }
+    fn update_profile(&self, name: String, role: Option<String>) -> AdminReply<Member> {
+        self.inner.update_profile(name, role)
+    }
+    fn upload_avatar(&self, path: PathBuf) -> AdminReply<Member> {
+        self.inner.upload_avatar(path)
+    }
+    fn create_invite(&self, request: InviteRequest) -> AdminReply<InviteCreated> {
+        self.inner.create_invite(request)
+    }
+    fn set_member_level(&self, member_id: &str, level: MemberLevel) -> AdminReply<Member> {
+        self.inner.set_member_level(member_id, level)
+    }
+    fn set_member_deactivated(&self, member_id: &str, deactivated: bool) -> AdminReply<Member> {
+        self.inner.set_member_deactivated(member_id, deactivated)
+    }
+    fn create_bot_member(
+        &self,
+        name: String,
+        role: Option<String>,
+        runner: Option<RunnerSetup>,
+    ) -> AdminReply<BotCreated> {
+        self.inner.create_bot_member(name, role, runner)
+    }
+    fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
+        self.inner.create_machine(name, labels)
+    }
+    fn send_diagnostics(&self, description: String) -> AdminReply<String> {
+        self.inner.send_diagnostics(description)
     }
 }
