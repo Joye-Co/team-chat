@@ -343,7 +343,8 @@ impl Client {
 
     /// HTTP client with this client's token.
     pub fn http(&self) -> HttpClient {
-        self.http.clone()
+        let token = self.shared.token.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        self.http.with_token(Some(token))
     }
 
     pub fn store(&self) -> &Store {
