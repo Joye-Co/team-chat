@@ -326,3 +326,41 @@ fn pending_files_become_chips_and_go_with_the_message(cx: &mut TestAppContext) {
     assert!(h.provider.draft(&key).files.is_empty());
     assert!(h.view.update(cx, |this, _| this.files.is_empty()));
 }
+
+#[gpui::test]
+fn emoji_tool_toggles_the_picker_and_esc_closes_it(cx: &mut TestAppContext) {
+    let (h, cx) = open(cx, Some(TOPIC));
+    let click = |x: f32| {
+        let at = gpui::point(gpui::px(x), gpui::px(10.));
+        gpui::ClickEvent::Mouse(gpui::MouseClickEvent {
+            down: gpui::MouseDownEvent {
+                position: at,
+                ..Default::default()
+            },
+            up: gpui::MouseUpEvent {
+                position: at,
+                ..Default::default()
+            },
+        })
+    };
+    let open_now = |cx: &mut VisualTestContext| h.view.update(cx, |this, _| this.emoji_open);
+    h.view
+        .update(cx, |this, cx| this.toggle_emoji(&click(5.), cx));
+    assert!(open_now(cx));
+    // A second press on the tool: the picker's mouse-down-out closes it
+    // first, and the click on mouse up must not open it again.
+    h.view.update(cx, |this, cx| {
+        this.emoji_open = false;
+        this.emoji_closed_at = Some(gpui::point(gpui::px(5.), gpui::px(10.)));
+        this.toggle_emoji(&click(5.), cx);
+    });
+    assert!(!open_now(cx));
+    // A press elsewhere closed it before; the tool opens it again.
+    h.view.update(cx, |this, cx| {
+        this.emoji_closed_at = Some(gpui::point(gpui::px(300.), gpui::px(10.)));
+        this.toggle_emoji(&click(5.), cx);
+    });
+    assert!(open_now(cx));
+    cx.simulate_keystrokes("escape");
+    assert!(!open_now(cx));
+}

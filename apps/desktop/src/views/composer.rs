@@ -90,6 +90,8 @@ pub struct ComposerView {
     rejected: Vec<String>,
     /// The emoji picker is open.
     emoji_open: bool,
+    /// Where the press that closed the emoji picker from outside went down.
+    emoji_closed_at: Option<gpui::Point<gpui::Pixels>>,
     /// The format bar is shown (the `Aa` toggle).
     format_open: bool,
     /// Bounds of the composer box in the window, for the @ list's anchor.
@@ -134,6 +136,7 @@ impl ComposerView {
             too_long: false,
             rejected: Vec::new(),
             emoji_open: false,
+            emoji_closed_at: None,
             format_open: false,
             anchor: Default::default(),
             _subscriptions: subscriptions,
@@ -485,11 +488,28 @@ impl ComposerView {
         }
     }
 
+    /// The emoji tool: opens the picker, or closes it. A press on the tool
+    /// while the picker is open already closed it on mouse down.
+    fn toggle_emoji(&mut self, e: &gpui::ClickEvent, cx: &mut Context<Self>) {
+        let closed_by_this_press = match (e, self.emoji_closed_at.take()) {
+            (gpui::ClickEvent::Mouse(m), Some(at)) => m.down.position == at,
+            _ => false,
+        };
+        if !closed_by_this_press {
+            self.emoji_open = !self.emoji_open;
+        }
+        cx.notify();
+    }
+
     fn on_escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<Self>) {
         if self.composing(window, cx) {
             return;
         }
-        if self.mention.take().is_some() {
+        if self.emoji_open {
+            self.emoji_open = false;
+            cx.stop_propagation();
+            cx.notify();
+        } else if self.mention.take().is_some() {
             cx.stop_propagation();
             cx.notify();
         } else if self.editing.is_some() {
@@ -967,8 +987,11 @@ impl ComposerView {
                 .w(ui::emoji::picker_width())
                 .flex_row()
                 .flex_wrap()
-                .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                .on_mouse_down_out(cx.listener(|this, e: &gpui::MouseDownEvent, _, cx| {
+                    // A press on the emoji tool closes here; its click then
+                    // must not open the picker again.
                     this.emoji_open = false;
+                    this.emoji_closed_at = Some(e.position);
                     cx.notify();
                 }))
                 .children(ui::emoji::EMOJI.iter().enumerate().map(|(i, e)| {
@@ -1100,9 +1123,8 @@ impl Render for ComposerView {
             ui::composer_tool("emoji", Lucide::FaceSlightlySmiling, c::EMOJI)
                 .disabled(!enabled)
                 .when(self.emoji_open, |b| b.selected(true))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.emoji_open = !this.emoji_open;
-                    cx.notify();
+                .on_click(cx.listener(|this, e: &gpui::ClickEvent, _, cx| {
+                    this.toggle_emoji(e, cx);
                 })),
         )
         .tool(
