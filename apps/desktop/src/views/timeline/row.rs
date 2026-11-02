@@ -150,6 +150,7 @@ impl TimelineView {
             div()
                 .relative()
                 .flex_none()
+                .size(theme::AVATAR_SIZE)
                 .child(member_avatar(author.as_ref(), theme::AVATAR_SIZE, cx))
                 .when_some(online, |el, online| {
                     el.child(
