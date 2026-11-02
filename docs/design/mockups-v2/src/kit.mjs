@@ -60,18 +60,20 @@ const charCache = new Map();
  * `fit` crops the art to its visible bounds (the idle pose, so a status change does not move it),
  * square by the larger side and centered: every character then fills the same box (DESIGN §7.9).
  */
-export function character(id, status = "idle", size = 32, { fit = false } = {}) {
+export function character(id, status = "idle", size = 32, { fit = false, fill = 1 } = {}) {
   const file = SIZES.find((s) => s >= size) ?? 128;
   const small = size <= 40;
-  const key = `${id}/${status}-${file}-${small}-${fit}`;
+  const key = `${id}/${status}-${file}-${small}-${fit}-${fill}`;
   if (!charCache.has(key)) {
     let svg = readFileSync(join(REPO, `apps/desktop/assets/characters/${id}/${status}-${file}.svg`), "utf8");
     if (small) svg = smallArt(svg);
     const b = BOXES[`${id}__idle`];
     if (fit && b) {
-      const side = Math.max(b[2], b[3]);
+      // The art's larger side takes `fill` of the box; its painted center sits at the box center,
+      // 2 % above the middle so the face line lands near 46-48 % of the tile (§7.9).
+      const side = Math.max(b[2], b[3]) / fill;
       const x = b[0] + b[2] / 2 - side / 2;
-      const y = b[1] + b[3] / 2 - side / 2;
+      const y = b[1] + b[3] / 2 - side * 0.48;
       svg = svg.replace(/viewBox="[^"]*"/, `viewBox="${x.toFixed(1)} ${y.toFixed(1)} ${side.toFixed(1)} ${side.toFixed(1)}"`);
     }
     charCache.set(key, `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
@@ -93,29 +95,41 @@ export function initials(name, size = 36) {
   return (a + b).toUpperCase();
 }
 
-/** One soft tint per bot, picked by a stable hash of the character id (DESIGN §2.6). */
-const tint = (id) => (([...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 6) + 1);
+/**
+ * One mid tint per bot, picked by a stable hash of the character id (DESIGN §2.6): FNV-1a 32-bit
+ * with offset basis 2166136261 XOR 91, mod 6. The seed gives the six roster bots seen together
+ * most (Pocket, Forge, Watch, Scout, Ledger, Taro) six different hues.
+ */
+const tint = (id) => {
+  let h = (2166136261 ^ 91) >>> 0;
+  for (const c of id) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return (h % 6) + 1;
+};
 
 /**
  * Member avatar (DESIGN §7.9). People: a circle (photo, or initials on the neutral fill) with a
- * presence dot. Bots: a rounded-square tile in the bot's tint with the character fitted to 78 %;
- * the shape alone says bot or person. A status pip shows while the bot works, waits or fails.
+ * presence dot. Bots: a rounded-square tile in the bot's tint with the character's painted bounds
+ * fitted to 62 % of the tile (at least 19 % inset on every side, never touching the edge); the
+ * shape alone says bot or person. A status pip shows while the bot works, waits or fails.
+ * Offline people show no dot. At 24 pt and below the dot is 8 pt with a 2 pt ring and sits on
+ * the corner (offset 3 pt), so it does not cover the initial.
  */
-export function avatar(m, size, mode, { presence = true, ring = "var(--content)", pip: showPip = true } = {}) {
+export function avatar(m, size, mode, { presence = true, ring = "var(--content)", pip: showPip = true, sel = false } = {}) {
   let inner;
   if (m.char) {
-    const art = Math.round(size * 0.78);
-    inner = `<span class="tile b${tint(m.char)}" style="border-radius:${Math.round(size * 0.25)}px">${character(m.char, m.state ?? "idle", art, { fit: true })}</span>`;
+    inner = `<span class="tile b${tint(m.char)}${sel ? " on-sel" : ""}" style="border-radius:${Math.round(size * 0.25)}px">${character(m.char, m.state ?? "idle", size, { fit: true, fill: 0.62 })}</span>`;
   } else {
     const ini = initials(m.name, size);
     const fs = size <= 24 ? 12 : Math.round(size * (ini.length > 1 ? 0.38 : 0.44));
-    inner = `<span class="mono" style="font-size:${fs}px">${esc(ini)}</span>`;
+    inner = `<span class="mono${size <= 24 ? " s" : ""}" style="font-size:${fs}px">${esc(ini)}</span>`;
   }
   const d = size >= 32 ? 10 : 8;
+  const off = size >= 32 ? -1 : -3;
+  const pos = `width:${d}px;height:${d}px;right:${off}px;bottom:${off}px;--ring:${ring}`;
   let dot = "";
-  if (presence && !m.char && m.online !== undefined) dot = `<span class="pdot ${m.online ? "on" : "off"}" style="width:${d}px;height:${d}px;--ring:${ring}"></span>`;
+  if (presence && !m.char && m.online) dot = `<span class="pdot on" style="${pos}"></span>`;
   const pip = { working: "work", "needs-input": "wait", error: "err" }[m.state];
-  if (presence && showPip && m.char && pip && size <= 36) dot = `<span class="pdot ${pip}" style="width:${d}px;height:${d}px;--ring:${ring}"></span>`;
+  if (presence && showPip && m.char && pip && size <= 36) dot = `<span class="pdot ${pip}" style="${pos}"></span>`;
   return `<span class="av ${m.char ? "bot" : "person"}" style="width:${size}px;height:${size}px">${inner}${dot}</span>`;
 }
 
@@ -140,7 +154,7 @@ const STATUS = {
  * every other status is a quiet label (glyph + word, no fill). Topic rows pass `row: true`:
  * 进行中 shows nothing there and names are dropped.
  */
-export function chip(status, { you = false, name = "", row = false, quiet = false } = {}) {
+export function chip(status, { you = false, name = "", row = false, quiet = false, whoM = null, mode = "light" } = {}) {
   if (!status || status === "open") return "";
   if (row && status === "in_progress") return "";
   const [glyph, tone, word] = STATUS[status];
@@ -150,6 +164,9 @@ export function chip(status, { you = false, name = "", row = false, quiet = fals
   // Headers and the switcher: the same words without a fill; the list row keeps the one fill.
   if (waiting && you && quiet) return `<span class="lbl-s t-quiet">${icon(glyph, 14)}<span class="cl">等你${word}</span></span>`;
   if (waiting && you) return `<span class="chip t-you">${icon(glyph, 14)}<span class="cl">等你${word}</span></span>`;
+  // Headers: the person waited on is a 20 pt avatar, never a name inside the label (§7.8);
+  // the full name is in the tooltip and the side panel.
+  if (waiting && whoM && !row) return `<span class="lbl-s t-neutral who" title="等 ${esc(name)} ${word}">${avatar(whoM, 20, mode, { presence: false })}<span class="cl">等${word}</span></span>`;
   if (waiting) {
     const label = name && !row ? `等<span class="cn">${esc(spaced(name))}</span>${word}` : `等${word}`;
     return `<span class="lbl-s t-neutral">${icon(glyph, 14)}<span class="cl">${label}</span></span>`;
@@ -162,6 +179,10 @@ export function chip(status, { you = false, name = "", row = false, quiet = fals
 export const cap = (n) => (typeof n === "number" && n > 99 ? "99+" : n);
 export const kbd = (k) => `<span class="kbd">${k}</span>`;
 export const badge = (n) => `<span class="badge">${cap(n)}</span>`;
+/** Unread count with no mention (§7.8): a neutral solid pill; red stays for @ and 卡住了. */
+export const nbadge = (n) => `<span class="badge n">${cap(n)}</span>`;
+/** A leading full-width bracket hangs its empty half-width into the margin (§10). */
+export const lead = (html) => html.replace(/^([【（「『〔［])/u, '<span class="lb">$1</span>');
 export const count = (n) => `<span class="count">${cap(n)}</span>`;
 
 /** Estimated advance of one character in em (system UI font; Han and full-width = 1). */
@@ -205,21 +226,24 @@ export function midEll(s, max = 44, keep = 12) {
 
 const BASE_CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{width:var(--pw);height:var(--ph);overflow:hidden}
-.desk{width:var(--pw);height:var(--ph);background:var(--desk);display:flex;align-items:center;justify-content:center}
+html,body{min-width:var(--pw);min-height:100vh;overflow:hidden}
+html.framed,html.framed body{background:var(--desk)}
+.desk{width:100vw;min-width:var(--pw);height:100vh;min-height:var(--ph);background:var(--desk);display:flex;align-items:center;justify-content:center}
 .frame{width:var(--w);height:var(--h);border-radius:12px;overflow:hidden;position:relative;flex:none;box-shadow:var(--shadow-window)}
-body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Apple Color Emoji",sans-serif;font-size:14px;line-height:22px;color:var(--text-1);background:var(--content);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
+:root{--font-ui:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Apple Color Emoji",sans-serif}
+body{font-family:var(--font-ui);font-size:14px;line-height:22px;color:var(--text-1);background:var(--content);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
 .i{flex:none;display:block}
 .char{display:block}
 .av{position:relative;flex:none;display:inline-flex}
 .av .mono{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;letter-spacing:0;background:var(--avatar-bg);color:var(--avatar-fg)}
-.pdot{position:absolute;right:-1px;bottom:-1px;border-radius:50%;box-shadow:0 0 0 2px var(--ring)}
+.av .mono.s{line-height:16px;padding-bottom:1px}
+.pdot{position:absolute;border-radius:50%;box-shadow:0 0 0 2px var(--ring)}
 .pdot.on{background:var(--online)}
-.pdot.off{background:var(--ring);box-shadow:inset 0 0 0 1.5px var(--text-3),0 0 0 2px var(--ring)}
 .pdot.work{background:var(--accent)}
 .pdot.wait{background:var(--you-glyph)}
 .pdot.err{background:var(--danger)}
 .tile{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tile.on-sel{box-shadow:0 0 0 1px var(--tile-ring)}
 .tile.b1{background:var(--bot-1)}.tile.b2{background:var(--bot-2)}.tile.b3{background:var(--bot-3)}.tile.b4{background:var(--bot-4)}.tile.b5{background:var(--bot-5)}.tile.b6{background:var(--bot-6)}
 .gtile{flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;font-weight:600;background:var(--tile);color:var(--text-2)}
 .chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px 0 6px;border-radius:6px;font-size:12px;line-height:16px;font-weight:500;white-space:nowrap;max-width:184px;flex:none}
@@ -236,6 +260,10 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","H
 .lbl-s.t-success,.lbl-s.t-neutral{color:var(--text-3)}
 .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--field);color:var(--text-2);font-size:12px;line-height:16px;font-weight:500;flex:none}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--badge);color:#fff;font-size:12px;line-height:16px;font-weight:600;flex:none}
+.badge.n{background:var(--count-solid)}
+.lb{margin-left:-0.5em}
+.lbl-s.who{gap:6px}
+.lbl-s.who .av{margin:0}
 .count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--count-bg);color:var(--count-text);font-size:12px;line-height:16px;font-weight:600;flex:none}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:8px;font-size:14px;line-height:20px;font-weight:500;white-space:nowrap;flex:none}
 .btn .i{margin-left:-2px}
@@ -245,6 +273,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","H
 .btn.secondary{background:var(--content);color:var(--text-1);box-shadow:inset 0 0 0 1px var(--border-strong)}
 .btn.ghost{color:var(--text-2)}
 .btn.sm{height:28px;padding:0 10px;font-size:13px;border-radius:6px}
+.btn.md{height:36px;padding:0 14px}
 .btn.lg{height:40px;padding:0 18px;font-size:15px;border-radius:10px}
 .ib{width:32px;height:32px;border-radius:8px;display:inline-flex;align-items:center;justify-content:center;color:var(--text-2);flex:none}
 .ib.sm{width:28px;height:28px;border-radius:6px}
@@ -261,7 +290,7 @@ export function page({ title, mode, width, height, css, body, frame = 0 }) {
   const ph = height + frame * 2;
   const inner = frame ? `<div class="desk"><div class="frame">${body}</div></div>` : body;
   return `<!doctype html>
-<html lang="zh-Hans" data-theme="${mode}"><head><meta charset="utf-8">
+<html lang="zh-Hans" data-theme="${mode}"${frame ? ' class="framed"' : ""}><head><meta charset="utf-8">
 <meta name="viewport" content="width=${pw}">
 <title>${esc(title)}</title>
 <style>:root{${cssVars(t)}--w:${width}px;--h:${height}px;--pw:${pw}px;--ph:${ph}px;color-scheme:${mode}}${BASE_CSS}${css}</style>
