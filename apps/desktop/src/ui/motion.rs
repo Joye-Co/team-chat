@@ -339,36 +339,6 @@ impl Element for BusyGate {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn busy_indicators_wait_then_stay() {
-        let t0 = Instant::now();
-        let ms = |n| t0 + Duration::from_millis(n);
-        let mut b = BusyTimes::default();
-        // A fast ack never shows the indicator.
-        assert_eq!(b.step(true, t0), (false, Some(ms(400))));
-        assert_eq!(b.step(true, ms(50)), (false, Some(ms(400))));
-        assert_eq!(b.step(false, ms(60)), (false, None));
-        // Slow work shows it at 400 ms and keeps it 500 ms.
-        assert_eq!(b.step(true, ms(100)), (false, Some(ms(500))));
-        assert_eq!(b.step(true, ms(500)), (true, None));
-        assert_eq!(b.step(false, ms(600)), (true, Some(ms(1000))));
-        assert_eq!(b.step(false, ms(1000)), (false, None));
-    }
-
-    #[test]
-    fn fades_run_to_the_end() {
-        let d = Duration::from_millis(200);
-        assert_eq!(fade_progress(Duration::ZERO, d), 0.0);
-        assert_eq!(fade_progress(Duration::from_millis(100), d), 0.5);
-        assert_eq!(fade_progress(Duration::from_secs(1), d), 1.0);
-        assert_eq!(fade_progress(Duration::ZERO, Duration::ZERO), 1.0);
-    }
-}
-
 /// The busy spinner (DESIGN.md §7.1, §12): gpui-component's `Spinner`, one
 /// turn per [`motion::SPINNER_TURN`] at a constant speed (a loop is linear;
 /// the library default eases each turn in and out, which reads as a
@@ -444,6 +414,31 @@ fn turn_at(elapsed: Duration) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn busy_indicators_wait_then_stay() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut b = BusyTimes::default();
+        // A fast ack never shows the indicator.
+        assert_eq!(b.step(true, t0), (false, Some(ms(400))));
+        assert_eq!(b.step(true, ms(50)), (false, Some(ms(400))));
+        assert_eq!(b.step(false, ms(60)), (false, None));
+        // Slow work shows it at 400 ms and keeps it 500 ms.
+        assert_eq!(b.step(true, ms(100)), (false, Some(ms(500))));
+        assert_eq!(b.step(true, ms(500)), (true, None));
+        assert_eq!(b.step(false, ms(600)), (true, Some(ms(1000))));
+        assert_eq!(b.step(false, ms(1000)), (false, None));
+    }
+
+    #[test]
+    fn fades_run_to_the_end() {
+        let d = Duration::from_millis(200);
+        assert_eq!(fade_progress(Duration::ZERO, d), 0.0);
+        assert_eq!(fade_progress(Duration::from_millis(100), d), 0.5);
+        assert_eq!(fade_progress(Duration::from_secs(1), d), 1.0);
+        assert_eq!(fade_progress(Duration::ZERO, Duration::ZERO), 1.0);
+    }
 
     #[test]
     fn the_spinner_turns_at_a_constant_speed() {

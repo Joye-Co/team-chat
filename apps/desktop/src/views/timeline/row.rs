@@ -17,7 +17,6 @@ use gpui_component::{
     input::Textarea,
     menu::{ContextMenuExt as _, DropdownMenu as _},
     popover::Popover,
-    spinner::Spinner,
 };
 
 use super::{TimelineView, extras, model};
@@ -201,7 +200,7 @@ impl TimelineView {
                         .when(shown, |el| {
                             el.child(
                                 div().flex_none().pb(px(3.)).child(
-                                    Spinner::new()
+                                    ui::spinner()
                                         .with_size(theme::icon::CHIP)
                                         .color(spinner_color),
                                 ),
