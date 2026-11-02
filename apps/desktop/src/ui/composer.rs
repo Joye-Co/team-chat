@@ -210,7 +210,9 @@ impl RenderOnce for ComposerShell {
                             div()
                                 .flex_none()
                                 .h(size::COMPOSER_TOOLBAR)
-                                .px(space::S8)
+                                // 8 pt from the box's outer edge (the
+                                // mockup's border is an inset ring).
+                                .px(space::S8 - theme::BORDER)
                                 .pb(space::S8)
                                 .flex()
                                 .items_end()
