@@ -80,7 +80,11 @@ State on 2026-11-03 (from `wrangler deployments list` and `wrangler d1 migration
 | e2e | 2026-11-02 23:03, version `0566745e` (main `6ec0691`) | through `0006_ops` | none |
 | staging | 2026-11-02 23:03, version `7b88d141` (main `6ec0691`) | through `0006_ops` | none |
 | production | 2026-11-02 23:10, version `966b82ac` (main `fb10286`, server code as `6ec0691`) | through `0006_ops` | none |
-| monitor | 2026-11-02 23:14, `chat-monitor` version `d5fc2c6a` | (no D1) | |
+| monitor | 2026-11-02 23:14, `chat-monitor` version `d5fc2c6a` (secrets: `bcd22be0`) | (no D1) | |
+
+First monitor checks (2026-11-02 23:25 UTC): production ok (health 230 ms, round trip 275 ms),
+staging ok (health 113 ms, round trip 289 ms), archive fresh on both. First archive pass by hand
+on 2026-11-02 23:13 UTC: production 4 groups, staging 6 groups, complete, no failure.
 
 Deploys carry no commit message, so wrangler does not record the commit; the commit in the table
 is the one the deploy was made from. No new Worker secret since the first setup. Update this table after each deploy:
