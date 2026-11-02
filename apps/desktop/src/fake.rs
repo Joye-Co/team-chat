@@ -13,7 +13,7 @@ use std::{
 
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
-use crate::data::*;
+use crate::{data::*, drafts::DraftStore};
 
 pub const ME: &str = "m-joye";
 /// The topic with 10,000 messages.
@@ -25,6 +25,7 @@ const PAGE: usize = 200;
 pub struct FakeProvider {
     state: Mutex<State>,
     subscribers: Mutex<Vec<UnboundedSender<Vec<Change>>>>,
+    drafts: DraftStore,
 }
 
 struct State {
@@ -60,6 +61,7 @@ impl FakeProvider {
         Arc::new(Self {
             state: Mutex::new(State::sample(now_ms(), true)),
             subscribers: Mutex::new(Vec::new()),
+            drafts: DraftStore::new(),
         })
     }
 
@@ -69,6 +71,7 @@ impl FakeProvider {
         Arc::new(Self {
             state: Mutex::new(State::sample(now_ms(), false)),
             subscribers: Mutex::new(Vec::new()),
+            drafts: DraftStore::new(),
         })
     }
 
@@ -1167,6 +1170,38 @@ impl ChatProvider for FakeProvider {
     }
 
     fn set_typing(&self, _group_id: &str, _topic_id: &str) {}
+
+    fn draft(&self, key: &DraftKey) -> Draft {
+        self.drafts.get(key)
+    }
+
+    fn save_draft_text(&self, key: &DraftKey, body: String, mentions: Vec<MemberId>) {
+        self.drafts.save_text(key, body, mentions);
+    }
+
+    fn set_quote(&self, key: &DraftKey, quote_of: Option<MessageId>) {
+        if self.drafts.set_quote(key, quote_of) {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+    }
+
+    fn attach_files(&self, key: &DraftKey, files: Vec<NewFile>) {
+        if self.drafts.attach(key, files) {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+    }
+
+    fn remove_file(&self, key: &DraftKey, file_id: &str) {
+        if self.drafts.remove_file(key, file_id) {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+    }
+
+    fn clear_draft(&self, key: &DraftKey) {
+        if self.drafts.clear(key) {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+    }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

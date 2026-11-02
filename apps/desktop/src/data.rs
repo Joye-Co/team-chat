@@ -10,7 +10,7 @@
 //! crates, so the UI builds without them. A real provider (chat-core) maps the
 //! wire types to these.
 
-use std::fmt;
+use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
 
@@ -345,6 +345,88 @@ pub enum Change {
     },
     /// The 待办 list.
     Todo,
+    /// The quote or pending files of one composer draft (not its text, which
+    /// only the composer writes).
+    Draft {
+        key: DraftKey,
+    },
+}
+
+/// Which composer a draft belongs to: one per topic, and one per 群 for a new
+/// topic (`topic_id: None`).
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct DraftKey {
+    pub group_id: GroupId,
+    pub topic_id: Option<TopicId>,
+}
+
+impl DraftKey {
+    pub fn topic(group_id: impl Into<GroupId>, topic_id: impl Into<TopicId>) -> Self {
+        Self {
+            group_id: group_id.into(),
+            topic_id: Some(topic_id.into()),
+        }
+    }
+
+    pub fn new_topic(group_id: impl Into<GroupId>) -> Self {
+        Self {
+            group_id: group_id.into(),
+            topic_id: None,
+        }
+    }
+}
+
+/// Id of a file waiting in a draft, made by the provider.
+pub type PendingFileId = String;
+
+/// A file or image the user pasted or dropped into the composer.
+#[derive(Clone, PartialEq, Eq)]
+pub enum NewFile {
+    /// A file on disk (dropped, or copied in Finder).
+    Path(PathBuf),
+    /// Image data from the clipboard.
+    Image {
+        /// MIME type, such as `image/png`.
+        mime: String,
+        /// File extension without the dot, such as `png`.
+        extension: String,
+        bytes: Arc<[u8]>,
+    },
+}
+
+impl fmt::Debug for NewFile {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            NewFile::Path(path) => f.debug_tuple("Path").field(path).finish(),
+            NewFile::Image { mime, bytes, .. } => f
+                .debug_struct("Image")
+                .field("mime", mime)
+                .field("len", &bytes.len())
+                .finish(),
+        }
+    }
+}
+
+/// A file waiting in a draft until the message is sent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PendingFile {
+    pub id: PendingFileId,
+    /// Shown on the chip.
+    pub name: String,
+    pub is_image: bool,
+    pub size_bytes: Option<u64>,
+    pub source: NewFile,
+}
+
+/// What the composer of one topic (or of a new topic) holds while unsent.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Draft {
+    pub body: String,
+    /// Members picked from the @ list.
+    pub mentions: Vec<MemberId>,
+    /// The message the reply quotes.
+    pub quote_of: Option<MessageId>,
+    pub files: Vec<PendingFile>,
 }
 
 /// The source of all chat state for the views.
@@ -424,6 +506,50 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn mark_read(&self, group_id: &str, topic_id: &str, seq: u64);
     /// Tells others I am typing. The provider limits it to one per 3 s per topic.
     fn set_typing(&self, group_id: &str, topic_id: &str);
+
+    // --- composer drafts ---
+    //
+    // Drafts live in the provider so they survive switching topics (and,
+    // later, restarts). The defaults keep nothing; a real provider overrides
+    // them (`crate::drafts::DraftStore` is an in-memory store to embed).
+
+    /// The draft of one composer. Empty when there is none.
+    fn draft(&self, _key: &DraftKey) -> Draft {
+        Draft::default()
+    }
+    /// Saves the text and picked mentions. Emits nothing: only the composer
+    /// writes the text.
+    fn save_draft_text(&self, _key: &DraftKey, _body: String, _mentions: Vec<MemberId>) {}
+    /// Sets or clears the quoted message (from the timeline's "quote" action).
+    /// Emits `Change::Draft`.
+    fn set_quote(&self, _key: &DraftKey, _quote_of: Option<MessageId>) {}
+    /// Adds pasted or dropped files to the draft. Emits `Change::Draft`.
+    /// The upload starts when the message is sent.
+    fn attach_files(&self, _key: &DraftKey, _files: Vec<NewFile>) {}
+    /// Removes one pending file. Emits `Change::Draft`.
+    fn remove_file(&self, _key: &DraftKey, _file_id: &str) {}
+    /// Forgets the whole draft (after a send). Emits `Change::Draft`.
+    fn clear_draft(&self, _key: &DraftKey) {}
+    /// Sends a message with pending files of the draft `key`. The default
+    /// ignores the files.
+    fn send_with_files(
+        &self,
+        request: SendRequest,
+        _key: &DraftKey,
+        _files: Vec<PendingFileId>,
+    ) -> ClientMsgId {
+        self.send(request)
+    }
+    /// Starts a topic with pending files of the draft `key`. The default
+    /// ignores the files.
+    fn start_topic_with_files(
+        &self,
+        request: StartTopicRequest,
+        _key: &DraftKey,
+        _files: Vec<PendingFileId>,
+    ) -> ClientMsgId {
+        self.start_topic(request)
+    }
 
     // --- changes ---
 

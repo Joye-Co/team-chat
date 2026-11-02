@@ -15,5 +15,8 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 serde.workspace = true
 serde_json.workspace = true
 
+[dev-dependencies]
+gpui = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] }
+
 [build-dependencies]
 serde_json.workspace = true

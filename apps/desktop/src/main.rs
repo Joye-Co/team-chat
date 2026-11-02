@@ -17,6 +17,7 @@ mod app;
 mod copy;
 #[allow(dead_code)]
 mod data;
+mod drafts;
 #[allow(dead_code)]
 mod fake;
 #[allow(dead_code)]
