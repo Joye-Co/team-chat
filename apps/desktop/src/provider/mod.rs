@@ -13,6 +13,7 @@
 //!   the app shows it when it is in the background (see `macos.rs`).
 
 pub mod app_glue;
+mod cards;
 pub mod convert;
 pub mod files;
 #[cfg(target_os = "macos")]
@@ -133,6 +134,7 @@ struct Shared {
     files: files::FilesState,
     /// Run logs and machine names for the process view (`process.rs`).
     runs: process::RunCache,
+    cards: cards::CardCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -164,6 +166,7 @@ impl CoreProvider {
                 writer: persist::Writer::new(),
                 files: files::FilesState::default(),
                 runs: process::RunCache::default(),
+                cards: cards::CardCache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -325,6 +328,7 @@ impl CoreProvider {
             s.generation
         };
         self.shared.files.reset();
+        self.shared.cards.clear();
         self.spawn_pump(generation, updates);
         self.emit(vec![
             Change::Session,
@@ -353,6 +357,7 @@ impl CoreProvider {
         };
         self.shared.drafts.clear_all();
         self.shared.files.reset();
+        self.shared.cards.clear();
         if let Some(a) = &account {
             a.client.stop();
         }
@@ -668,6 +673,11 @@ impl CoreProvider {
             }
             ClientUpdate::SendFailed(f) => {
                 tracing::warn!(kind = f.kind, code = ?f.code, "write refused");
+                if f.kind == "card_action"
+                    && let Some(a) = self.account()
+                {
+                    self.shared.cards.on_refused(&a.client, &f.id, f.code);
+                }
                 match f.topic_id {
                     Some(topic_id) => out.push(Change::Messages {
                         group_id: f.group_id,
@@ -698,8 +708,23 @@ impl CoreProvider {
             ClientUpdate::RunsChanged { group_id, topic_id } => {
                 out.push(Change::Runs { group_id, topic_id });
             }
-            ClientUpdate::GroupEvent(_)
-            | ClientUpdate::SearchResults { .. }
+            ClientUpdate::GroupEvent(ev) => {
+                if let chat_core::proto::EventData::CardActioned(d) = &ev.data
+                    && let Some(a) = self.account()
+                {
+                    let mine = ev.actor_id == a.me.id;
+                    self.shared
+                        .cards
+                        .on_actioned(&d.message_id, mine, &d.action_id);
+                    if let Some(m) = a.client.store().message(&d.message_id).ok().flatten() {
+                        out.push(Change::Messages {
+                            group_id: m.group_id,
+                            topic_id: m.topic_id,
+                        });
+                    }
+                }
+            }
+            ClientUpdate::SearchResults { .. }
             | ClientUpdate::SearchFailed { .. } => {}
         }
     }
@@ -939,6 +964,7 @@ impl ChatProvider for CoreProvider {
         } else {
             let n = limit.max(1) + extra;
             let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
+            self.shared.cards.remember(&msgs);
             let cached_more = msgs.len() > n;
             if cached_more {
                 msgs.remove(0);
@@ -1406,6 +1432,49 @@ impl ChatProvider for CoreProvider {
 
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {
         self.send_diagnostics_inner(description)
+    }
+
+    fn card(&self, _group_id: &str, message_id: &str) -> Option<Arc<crate::data::card::Card>> {
+        let a = self.account()?;
+        self.shared.cards.card(&a.client, message_id)
+    }
+
+    fn card_presses(&self, _group_id: &str, message_id: &str) -> Vec<crate::data::CardPress> {
+        match self.account() {
+            Some(a) => self.shared.cards.presses(&a.client, message_id),
+            None => Vec::new(),
+        }
+    }
+
+    fn card_press_state(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Option<crate::data::CardPressState> {
+        let a = self.account()?;
+        self.shared.cards.press_state(&a.client, message_id)
+    }
+
+    fn press_card_action(&self, group_id: &str, topic_id: &str, message_id: &str, action_id: &str) {
+        if let Some(a) = self.account() {
+            self.shared.cards.press(&a.client, message_id, action_id);
+            self.emit(vec![Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
+        }
+    }
+
+    fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
+        let a = self.account()?;
+        let this = self.clone();
+        let change = Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        };
+        self.shared
+            .cards
+            .image(&a.client, file_id, move || this.emit(vec![change]))
     }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
