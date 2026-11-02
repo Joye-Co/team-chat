@@ -126,22 +126,55 @@ export async function archiveStatus(env: Env): Promise<ArchiveStatus> {
 
 type Obj = Record<string, unknown>;
 
-/** Same change as the live delete makes to stored events (GroupRoom.removeNow). */
+/** What a delete removes from a message besides its body (core/scrub.ts and the files feature). */
+const DELETED_FIELDS = ["card", "replyTo", "reactions", "attachments", "artifactRefs"];
+
+function dropFields(o: Obj): boolean {
+  let changed = false;
+  for (const k of DELETED_FIELDS) {
+    if (k in o) {
+      delete o[k];
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+/**
+ * Same change as the live delete makes to stored events (GroupRoom.removeNow): the deleted
+ * message loses its content, and quotes of it lose their excerpt.
+ */
 export function scrubArchivedEvent(e: ArchivedEvent, ids: Set<string>): boolean {
-  if (!e.messageId || !ids.has(e.messageId)) return false;
   const d = (e.data ?? {}) as Obj;
   if (e.type === "message.created" && d.message && typeof d.message === "object") {
     const m = d.message as Obj;
-    if (m.body === "" && !("card" in m)) return false;
-    m.body = "";
-    delete m.card;
-    return true;
+    const reply = m.replyTo as Obj | undefined;
+    let changed = false;
+    if (reply && typeof reply === "object" && ids.has(reply.messageId as string) && reply.excerpt !== "") {
+      reply.excerpt = "";
+      changed = true;
+    }
+    if (!e.messageId || !ids.has(e.messageId)) return changed;
+    if (m.body !== "") {
+      m.body = "";
+      changed = true;
+    }
+    return dropFields(m) || changed;
   }
+  if (!e.messageId || !ids.has(e.messageId)) return false;
   if (e.type === "message.updated") {
-    if (d.body === "" && !("card" in d)) return false;
-    d.body = "";
-    delete d.card;
-    return true;
+    let changed = false;
+    if (d.body !== "") {
+      d.body = "";
+      changed = true;
+    }
+    for (const k of ["card", "attachments", "artifactRefs"]) {
+      if (k in d) {
+        delete d[k];
+        changed = true;
+      }
+    }
+    return changed;
   }
   return false;
 }

@@ -3,6 +3,7 @@
 // Membership is not replayed: on restore the room takes its members from D1, which is restored
 // first. Feature modules register their own importers for their tables and event types.
 import { type ArchivedEvent, registerEventImporter } from "../core/registry";
+import { scrubDeletedMessage } from "../core/scrub";
 import { setFollowing } from "../core/topicstate";
 
 const CORE_MESSAGE_KEYS = new Set([
@@ -47,19 +48,6 @@ function touch(sql: SqlStorage, topicId: string | null | undefined, seq: number,
 
 function messageTopic(sql: SqlStorage, messageId: string): string | null {
   return sql.exec<{ topic_id: string }>("SELECT topic_id FROM messages WHERE id = ?", messageId).toArray()[0]?.topic_id ?? null;
-}
-
-/** Same statements as the live delete in server/src/core/room.ts (removeNow). Keep in step. */
-export function scrubDeletedEvents(sql: SqlStorage, messageId: string): void {
-  sql.exec(
-    `UPDATE events SET data = json_remove(json_set(data, '$.message.body', ''), '$.message.card')
-     WHERE message_id = ? AND type = 'message.created'`,
-    messageId,
-  );
-  sql.exec(
-    "UPDATE events SET data = json_remove(json_set(data, '$.body', ''), '$.card') WHERE message_id = ? AND type = 'message.updated'",
-    messageId,
-  );
 }
 
 export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
@@ -167,14 +155,8 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
     }
     case "message.deleted": {
       const id = data.messageId as string;
-      sql.exec(
-        "UPDATE messages SET body = '', deleted_at = ?, streaming = 0, ext = json_remove(ext, '$.card') WHERE id = ?",
-        (data.deletedAt as number) ?? e.at,
-        id,
-      );
-      // Archive files written before the delete still hold the body: scrub the imported rows the
-      // same way the live delete does (GroupRoom.removeNow), so a restore never serves it again.
-      scrubDeletedEvents(sql, id);
+      // Same scrub as a live delete: the archive may hold the content from before the delete.
+      scrubDeletedMessage(sql, id, (data.deletedAt as number) ?? e.at);
       touch(sql, e.topicId ?? messageTopic(sql, id), e.seq);
       return;
     }
