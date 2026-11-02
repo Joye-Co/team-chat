@@ -104,9 +104,43 @@ await bot.start();
 | `http.publishHtml(...)`, `http.createArtifact`, `http.addArtifactVersion` | 产出 (V1 extension) |
 | `http.postMessage(groupId, input)` | one HTTP send (V1 extension) |
 | `history`, `typing`, `setFollow`, `pressCard` | the other frames |
+| `setPlan(target, plan)` / `ctx.setPlan(plan)` | the plan of my current run in a topic (below) |
+| `endRun(target, status, summary?)` / `ctx.endRun(status, summary?)` | end my current run |
 
 Cards, files, 产出, `topic.follow`, `waitingOn` and HTTP send are V1 protocol extensions
 (docs/protocol.md). On a server build without them the call fails with the server's error.
+
+### Show what the bot does next: the run plan
+
+A run plan is the bot's ordered to-do list. Members see it at the top of the topic's side panel
+(`{bot} 的进度`): done items with a check, the current one, items that wait for a member with
+an eye, later ones with a dashed circle. `setPlan` starts a run of the bot in the topic when it
+has none; every call replaces the whole plan (`[]` clears it). At most 30 items, each 1..200
+characters, state `done`, `current`, `waiting` or `pending`.
+
+```ts
+bot.onMention(async (ctx) => {
+  await ctx.setPlan([
+    { text: "写标题和正文", state: "current" },
+    { text: "生成 3 张配图", state: "pending" },
+    { text: "等 Joye 确认", state: "pending" },
+    { text: "周四 20:00 发出", state: "pending" },
+  ]);
+  // ... write the draft ...
+  await ctx.setPlan([
+    { text: "写标题和正文", state: "done" },
+    { text: "生成 3 张配图", state: "done" },
+    { text: "等 Joye 确认", state: "waiting" },
+    { text: "周四 20:00 发出", state: "pending" },
+  ]);
+  await ctx.updateTopic({ status: "waiting_review", waitingOn: [ctx.message.authorId], ownerId: bot.me.id });
+});
+// Later, when the post is out:
+await bot.endRun({ groupId, topicId }, "done", "已发出");
+```
+
+Runner-backed bots get `conflict` from `setPlan`: their runner sets the plan from the coding
+CLI's own to-do list (Claude Code's TodoWrite, Codex plan updates).
 
 ## 4. One-shot scripts (HTTP)
 
@@ -124,8 +158,8 @@ From TypeScript: `new HttpClient({ url, token }).postMessage(groupId, { body, cl
 
 `cd packages/bot-sdk && bun test` starts its own `wrangler dev` of `server/` on port 8795 (with
 an empty database in a temp folder), and checks mention, reply, follow, streaming, topic status,
-reconnect after a server restart, catch-up after a bot restart and handler re-runs without
-duplicates. `bun test/node-smoke.ts` runs the echo example under Node.
+reconnect after a server restart, catch-up after a bot restart, handler re-runs without
+duplicates, and run plans (set, replaced, ended). `bun test/node-smoke.ts` runs the echo example under Node.
 
 ---
 
@@ -187,7 +221,16 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
 - **流式回复**:`send` 带 `streaming: true`,每 100 毫秒合并发一次 `delta`,最后 `edit` 发完整
   正文并设 `streaming: false`。重连后会补发一次完整文本,读者不会漏内容。
 
-方法列表见英文部分的表格。卡片、文件、产出、`topic.follow`、`waitingOn` 和 HTTP 发消息是
+方法列表见英文部分的表格。
+
+**进度(运行计划)**:`ctx.setPlan([...])` 设置机器人在这个话题里当前一次运行的计划,成员在话题侧栏
+「{bot} 的进度」里看到:完成的打勾、正在做的、等成员的(眼睛)、之后的(虚线圆)。没有运行时会先
+开始一次运行;每次调用替换整个计划,`[]` 清空。最多 30 项,每项 1..200 字,状态 `done`、`current`、
+`waiting`、`pending`。完成后用 `ctx.endRun("done", "已发出")` 结束。示例见英文部分。有执行器的
+机器人调用会得到 `conflict`,它们的计划由执行器从 CLI 自己的待办列表(Claude Code 的 TodoWrite、
+Codex 的计划更新)生成。
+
+卡片、文件、产出、`topic.follow`、`waitingOn` 和 HTTP 发消息是
 V1 协议扩展(docs/protocol.md);服务器没有实现时,调用会返回服务器的错误。
 
 ## 4. 一次性脚本(HTTP)

@@ -5,6 +5,7 @@
 import { readFileSync, statSync } from "node:fs";
 import {
   type ArtifactRef,
+  type BotRun,
   type Card,
   ClientFrame,
   Event as EventSchema,
@@ -15,6 +16,8 @@ import {
   type Member,
   type Message,
   PROTOCOL_VERSION,
+  RunPlan,
+  type RunPlanItem,
   type SendResult,
   type Topic,
   type TopicState,
@@ -124,6 +127,13 @@ export interface MessageContext {
   updateTopic(change: TopicChange): Promise<Topic>;
   /** Shows "typing" in this topic. */
   typing(): void;
+  /**
+   * Sets the plan of this bot's current run in this topic, and starts the run when there is
+   * none. Each call replaces the whole plan; `[]` clears it. See `Bot.setPlan`.
+   */
+  setPlan(plan: RunPlanItem[]): Promise<BotRun>;
+  /** Ends this bot's current run in this topic (see `Bot.endRun`). */
+  endRun(status: "done" | "failed" | "cancelled", summary?: string): Promise<BotRun | null>;
 }
 
 export interface CardActionContext {
@@ -243,6 +253,8 @@ export class Bot {
   private readonly groups = new Map<string, GroupState>();
   private readonly topics = new Map<string, TopicInfo>();
   private readonly streams = new Set<StreamWriter>();
+  /** This bot's active run per topic, from `startRun` answers and `run.updated` events. */
+  private readonly currentRuns = new Map<string, string>();
   private readonly running = new Set<Promise<unknown>>();
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -477,6 +489,54 @@ export class Bot {
     if (change.ownerId !== undefined) frame.ownerId = change.ownerId;
     const r = (await this.request(frame)) as { topic: Topic };
     return r.topic;
+  }
+
+  /**
+   * Sets the plan of this bot's current run in a topic: its ordered to-do list, which members
+   * see in the topic's side panel. Starts a run when the bot has no active run there. Each
+   * call replaces the whole plan; `[]` clears it. Items: at most 30, text 1..200 characters,
+   * state `done`, `current`, `waiting` (waits for a member) or `pending`.
+   * Runner-backed bots get `conflict`: their runner sets the plan.
+   */
+  async setPlan(target: Required<Target>, plan: RunPlanItem[]): Promise<BotRun> {
+    const checked = RunPlan.safeParse(plan);
+    if (!checked.success) throw new ChatError("invalid", checked.error.issues[0]?.message ?? "invalid plan");
+    const known = this.currentRuns.get(target.topicId);
+    let run: BotRun;
+    if (known) {
+      try {
+        run = await this.http.setRunPlan(known, checked.data);
+      } catch (err) {
+        // The run ended meanwhile: start a new one with the plan.
+        if (!(err instanceof ChatError && (err.code === "conflict" || err.code === "not_found"))) throw err;
+        this.currentRuns.delete(target.topicId);
+        run = await this.http.startRun({ groupId: target.groupId, topicId: target.topicId, plan: checked.data });
+      }
+    } else {
+      run = await this.http.startRun({ groupId: target.groupId, topicId: target.topicId, plan: checked.data });
+    }
+    this.noteRun(run);
+    return run;
+  }
+
+  /** Ends this bot's current run in a topic. Returns null when it has none. */
+  async endRun(target: Required<Target>, status: "done" | "failed" | "cancelled", summary?: string): Promise<BotRun | null> {
+    const runId = this.currentRuns.get(target.topicId);
+    if (!runId) return null;
+    const run = await this.http.endRun(runId, summary === undefined ? { status } : { status, summary });
+    this.noteRun(run);
+    return run;
+  }
+
+  /** This bot's active run in a topic, as far as this process has seen. */
+  currentRun(topicId: string): string | undefined {
+    return this.currentRuns.get(topicId);
+  }
+
+  private noteRun(run: BotRun): void {
+    if (run.botId !== this.meMember?.id && this.meMember) return;
+    if (run.endedAt === undefined) this.currentRuns.set(run.topicId, run.id);
+    else if (this.currentRuns.get(run.topicId) === run.id) this.currentRuns.delete(run.topicId);
   }
 
   /** Follows or unfollows a topic on the server (V1 `topic.follow`) and locally. */
@@ -983,6 +1043,9 @@ export class Bot {
           this.scheduleRead(event.groupId);
           break;
         }
+        case "run.updated":
+          if (event.data.run.botId === me) this.noteRun(event.data.run);
+          break;
         case "card.actioned": {
           const ref = this.state.cards[event.data.messageId];
           if (!ref || event.actorId === me) break;
@@ -1051,6 +1114,8 @@ export class Bot {
       stream: (input = {}) => this.stream(target, withId(input) as SendInput & StreamOptions),
       updateTopic: (change) => this.updateTopic(m.groupId, m.topicId, change),
       typing: () => this.typing(m.groupId, m.topicId),
+      setPlan: (plan) => this.setPlan({ groupId: m.groupId, topicId: m.topicId }, plan),
+      endRun: (status, summary) => this.endRun({ groupId: m.groupId, topicId: m.topicId }, status, summary),
     };
   }
 

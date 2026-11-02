@@ -193,6 +193,50 @@ describe("bot sdk e2e", () => {
     await waitFor("reply after status", () => botMessages(topicId).length === 1);
   });
 
+  test("sets the plan of its current run; a member sees it and an update replaces it", async () => {
+    const r = await human.startTopic(generalId, "周四小红书");
+    const target = { groupId: generalId, topicId: r.message.topicId };
+    const plan1 = [
+      { text: "写标题和正文", state: "current" as const },
+      { text: "周四 20:00 发出", state: "pending" as const },
+    ];
+    const run = await bot.setPlan(target, plan1);
+    expect(run).toMatchObject({ botId, topicId: target.topicId, status: "running", plan: plan1 });
+    const seen1 = await waitFor("run.updated with the plan", () =>
+      events.find((e) => e.type === "run.updated" && e.data.run.id === run.id && e.data.run.plan?.length === 2),
+    );
+    expect(seen1.type === "run.updated" && seen1.data.run.plan).toEqual(plan1);
+    expect(bot.currentRun(target.topicId)).toBe(run.id);
+
+    // The same run; the whole plan is replaced.
+    const plan2 = [
+      { text: "写标题和正文", state: "done" as const },
+      { text: "等 Joye 确认", state: "waiting" as const },
+      { text: "周四 20:00 发出", state: "pending" as const },
+    ];
+    const again = await bot.setPlan(target, plan2);
+    expect(again.id).toBe(run.id);
+    await waitFor("replaced plan", () =>
+      events.find((e) => e.type === "run.updated" && e.data.run.id === run.id && e.data.run.plan?.length === 3),
+    );
+
+    // Bad plans fail before they are sent.
+    const err = await bot.setPlan(target, [{ text: "", state: "pending" }]).catch((e) => e);
+    expect(err).toBeInstanceOf(ChatError);
+    expect((err as ChatError).code).toBe("invalid");
+    // A member cannot set the bot's plan.
+    const denied = await human.http.setRunPlan(run.id, plan1).catch((e) => e);
+    expect((denied as ChatError).code).toBe("forbidden");
+
+    const ended = await bot.endRun(target, "done", "已排期");
+    expect(ended).toMatchObject({ id: run.id, status: "done", plan: plan2 });
+    expect(bot.currentRun(target.topicId)).toBeUndefined();
+    // After the end, a new plan starts a new run.
+    const next = await bot.setPlan(target, plan1);
+    expect(next.id).not.toBe(run.id);
+    await bot.endRun(target, "cancelled");
+  });
+
   test("starts a topic, edits and deletes its own message", async () => {
     const r = await bot.startTopic(generalId, { title: "Bot report", body: "draft" });
     expect(r.topic?.title).toBe("Bot report");

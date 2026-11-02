@@ -2,6 +2,10 @@
 // as the WebSocket connection.
 import type {
   AddArtifactVersionRequest,
+  BotRun,
+  EndRunRequest,
+  RunPlanItem,
+  StartRunRequest,
   Artifact,
   ArtifactResponse,
   ArtifactVersionResponse,
@@ -152,6 +156,44 @@ export class HttpClient {
         await new Promise((r) => setTimeout(r, Math.min(8000, 500 * 2 ** (i - 1))));
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Runs and run plans (docs/protocol.md, "Run plans")
+  // ---------------------------------------------------------------------------
+
+  /** Retries network errors, 5xx and rate limits: these calls are idempotent. */
+  private async retried<T>(fn: () => Promise<T>, attempts = 4): Promise<T> {
+    for (let i = 1; ; i++) {
+      try {
+        return await fn();
+      } catch (err) {
+        if (i >= attempts || !isRetryable(err)) throw err;
+        await new Promise((r) => setTimeout(r, Math.min(8000, 500 * 2 ** (i - 1))));
+      }
+    }
+  }
+
+  /**
+   * `POST /v1/runs`: starts a run of this bot in the topic, or returns its active run there.
+   * `plan`, when given, replaces the run's plan. Runner-backed bots get `conflict`.
+   */
+  startRun(req: StartRunRequest): Promise<BotRun> {
+    return this.retried(() => this.request<BotRun>("POST", "/v1/runs", { json: req }));
+  }
+
+  /** `PUT /v1/runs/:id/plan`: replaces the whole plan of an active run; `[]` clears it. */
+  setRunPlan(runId: string, plan: RunPlanItem[]): Promise<BotRun> {
+    return this.retried(() => this.request<BotRun>("PUT", `/v1/runs/${encodeURIComponent(runId)}/plan`, { json: { plan } }));
+  }
+
+  /** `POST /v1/runs/:id/end`: ends a run this bot started with `startRun`. */
+  endRun(runId: string, req: EndRunRequest): Promise<BotRun> {
+    return this.request<BotRun>("POST", `/v1/runs/${encodeURIComponent(runId)}/end`, { json: req });
+  }
+
+  getRun(runId: string): Promise<BotRun> {
+    return this.request<BotRun>("GET", `/v1/runs/${encodeURIComponent(runId)}`);
   }
 
   // ---------------------------------------------------------------------------
