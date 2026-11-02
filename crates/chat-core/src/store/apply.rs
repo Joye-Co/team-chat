@@ -604,6 +604,23 @@ fn apply_one(
             }
             out.group_changed = true;
         }
+        EventData::ReactionChanged(d) => {
+            let topic: Option<String> = tx
+                .query_row(
+                    "SELECT topic_id FROM messages WHERE id = ?1",
+                    [&d.message_id],
+                    |r| r.get(0),
+                )
+                .optional()?;
+            if let Some(t) = topic {
+                update_message_raw(tx, &d.message_id, |m| {
+                    let mut list = m.reactions.take().unwrap_or_default();
+                    crate::proto::apply_reaction(&mut list, &d.emoji, &ev.actor_id, d.on);
+                    m.reactions = (!list.is_empty()).then_some(list);
+                })?;
+                out.message_topics.insert(t);
+            }
+        }
         EventData::CardActioned(d) => {
             super::ext::insert_card_action(tx, ev, d)?;
             out.other_events.push(ev.clone());

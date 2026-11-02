@@ -749,6 +749,54 @@ impl Client {
         )
     }
 
+    /// Adds (`on`) or removes my reaction to a message. The cache changes when
+    /// the server's `reaction.changed` arrives; until then
+    /// [`Client::pending_reactions`] lists the change.
+    pub fn react(&self, message_id: &str, emoji: &str, on: bool) -> Result<String, ClientError> {
+        crate::proto::check_emoji("emoji", emoji).map_err(|_| ClientError::Invalid("bad emoji"))?;
+        let m = self
+            .shared
+            .store
+            .message(message_id)?
+            .ok_or(ClientError::NotFound)?;
+        self.enqueue(
+            crate::new_id(),
+            OutboxOp::React {
+                group_id: m.group_id,
+                topic_id: Some(m.topic_id),
+                message_id: message_id.into(),
+                emoji: emoji.into(),
+                on,
+            },
+        )
+    }
+
+    /// My reaction changes that the server has not confirmed yet, oldest first:
+    /// `(message id, emoji, on)`.
+    pub fn pending_reactions(
+        &self,
+        topic_id: &str,
+    ) -> Result<Vec<(String, String, bool)>, ClientError> {
+        Ok(self
+            .shared
+            .store
+            .outbox_all()?
+            .into_iter()
+            .filter_map(|item| match item.op {
+                OutboxOp::React {
+                    topic_id: Some(t),
+                    message_id,
+                    emoji,
+                    on,
+                    ..
+                } if t == topic_id && item.state == OutboxState::Pending => {
+                    Some((message_id, emoji, on))
+                }
+                _ => None,
+            })
+            .collect())
+    }
+
     /// Appends streaming text to my streaming message (no ack, not queued offline).
     pub fn send_delta(&self, group_id: &str, message_id: &str, append: &str) {
         let _ = self.cmd_tx.send(Command::Delta {

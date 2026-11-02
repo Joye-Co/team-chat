@@ -10,8 +10,8 @@ use crate::proto::{
     AckFrame, AckOutcome, CardActionFrame, ClientFrame, ClientInfo, DeleteFrame, DeltaFrame,
     DirectoryFrame, EditFrame, ErrorBody, ErrorCode, Event, FetchFrame, HelloFrame, HistoryFrame,
     HistoryRequestFrame, Message, MessageDeltaEvent, NotifyReason, PROTOCOL_VERSION, PresenceEvent,
-    ReadFrame, SearchFrame, SendFrame, SendResult, ServerFrame, TopicFollowFrame, TopicState,
-    TopicUpdateFrame, TransientEvent, TypingEvent, TypingFrame, WelcomeFrame,
+    ReactFrame, ReadFrame, SearchFrame, SendFrame, SendResult, ServerFrame, TopicFollowFrame,
+    TopicState, TopicUpdateFrame, TransientEvent, TypingEvent, TypingFrame, WelcomeFrame,
 };
 use crate::store::{ApplyOutcome, LogEntry, OutboxOp, OutboxState, PendingRead};
 use futures_util::{SinkExt, StreamExt};
@@ -686,6 +686,19 @@ impl Session {
                     action_id,
                     value: None,
                 }),
+                OutboxOp::React {
+                    group_id,
+                    message_id,
+                    emoji,
+                    on,
+                    ..
+                } => ClientFrame::React(ReactFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    message_id,
+                    emoji,
+                    on,
+                }),
             };
             if let Err(e) = self.shared.store.outbox_attempt(&item.id) {
                 warn!(error = %e, "outbox attempt");
@@ -1023,6 +1036,11 @@ impl Session {
                     group_id,
                     topic_id: Some(topic_id),
                     ..
+                }
+                | OutboxOp::React {
+                    group_id,
+                    topic_id: Some(topic_id),
+                    ..
                 } => {
                     // The UI shows a press as sending until its row is gone.
                     let _ = self.shared.store.outbox_remove(&id);
@@ -1057,6 +1075,19 @@ impl Session {
             ErrorCode::NotFound if matches!(item.op, OutboxOp::Delete { .. }) => {
                 // Already gone.
                 let _ = self.shared.store.outbox_remove(&id);
+                None
+            }
+            code if matches!(item.op, OutboxOp::React { .. }) => {
+                // A refused reaction (message deleted, bad emoji) is dropped: the
+                // timeline shows the server's list again.
+                warn!(id = %id, ?code, "reaction refused");
+                let _ = self.shared.store.outbox_remove(&id);
+                if let Some(t) = item.op.topic_id() {
+                    self.shared.emit(ClientUpdate::MessagesChanged {
+                        group_id: group_id.clone(),
+                        topic_id: t.to_string(),
+                    });
+                }
                 None
             }
             code => {

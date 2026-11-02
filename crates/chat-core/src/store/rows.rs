@@ -135,6 +135,14 @@ pub enum OutboxOp {
         message_id: String,
         action_id: String,
     },
+    /// Adds (`on`) or removes my reaction.
+    React {
+        group_id: String,
+        topic_id: Option<String>,
+        message_id: String,
+        emoji: String,
+        on: bool,
+    },
 }
 
 impl OutboxOp {
@@ -146,6 +154,7 @@ impl OutboxOp {
             OutboxOp::TopicUpdate { .. } => "topic_update",
             OutboxOp::TopicFollow { .. } => "topic_follow",
             OutboxOp::CardAction { .. } => "card_action",
+            OutboxOp::React { .. } => "react",
         }
     }
     pub fn group_id(&self) -> &str {
@@ -155,7 +164,8 @@ impl OutboxOp {
             | OutboxOp::Delete { group_id, .. }
             | OutboxOp::TopicUpdate { group_id, .. }
             | OutboxOp::TopicFollow { group_id, .. }
-            | OutboxOp::CardAction { group_id, .. } => group_id,
+            | OutboxOp::CardAction { group_id, .. }
+            | OutboxOp::React { group_id, .. } => group_id,
         }
     }
     pub fn topic_id(&self) -> Option<&str> {
@@ -163,7 +173,8 @@ impl OutboxOp {
             OutboxOp::Send { topic_id, .. }
             | OutboxOp::Edit { topic_id, .. }
             | OutboxOp::Delete { topic_id, .. }
-            | OutboxOp::CardAction { topic_id, .. } => topic_id.as_deref(),
+            | OutboxOp::CardAction { topic_id, .. }
+            | OutboxOp::React { topic_id, .. } => topic_id.as_deref(),
             OutboxOp::TopicUpdate { topic_id, .. } | OutboxOp::TopicFollow { topic_id, .. } => {
                 Some(topic_id)
             }

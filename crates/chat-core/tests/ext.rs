@@ -93,6 +93,44 @@ fn version(id: &str, v: u32) -> ArtifactVersion {
 }
 
 #[test]
+fn reaction_events_keep_the_message_reactions_in_the_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = store_with_group(dir.path());
+    let react = |seq: u64, actor: &str, emoji: &str, on: bool| {
+        ev(
+            seq,
+            G1,
+            actor,
+            EventData::ReactionChanged(ReactionChangedData {
+                message_id: "M1".into(),
+                emoji: emoji.into(),
+                on,
+            }),
+        )
+    };
+    let events = vec![
+        topic_created(1, G1, topic("T1", G1, "M1", 1)),
+        msg_created(2, message("M1", G1, "T1", ALICE, 2, "ship?")),
+        react(3, ALICE, "👍", true),
+        react(4, ME, "👍", true),
+        react(5, ME, "✅", true),
+        react(6, ALICE, "👍", false),
+        react(7, ME, "✅", false),
+    ];
+    let out = store.apply_events(G1, &events).unwrap();
+    assert_eq!(out.applied, 7);
+    assert!(out.message_topics.contains("T1"));
+    let m = store.message("M1").unwrap().unwrap();
+    assert_eq!(
+        m.reactions(),
+        &[Reaction {
+            emoji: "👍".into(),
+            member_ids: vec![ME.into()],
+        }]
+    );
+}
+
+#[test]
 fn todo_unread_artifact_events_and_card_presses_in_the_store() {
     let dir = tempfile::tempdir().unwrap();
     let store = store_with_group(dir.path());
