@@ -1,0 +1,10 @@
+{
+  "kind": "HookInRequest",
+  "valid": false,
+  "description": "topicId and topicKey exclude each other",
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "topicKey": "k",
+    "body": "x"
+  }
+}

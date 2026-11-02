@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": false,
+  "description": "unknown level",
+  "value": {
+    "level": "admin"
+  }
+}

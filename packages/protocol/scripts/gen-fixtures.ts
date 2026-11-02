@@ -3,6 +3,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { MAX_BODY_CHARS, MAX_NAME_CHARS, MAX_PAGE_LIMIT, MAX_TITLE_CHARS } from "../src/index.ts";
+import { addV1Fixtures } from "./fixtures-v1.ts";
 
 type Fixture = {
   kind: string;
@@ -225,7 +226,7 @@ add(`${c}/send-unknown-field.json`, {
   kind: "ClientFrame",
   valid: true,
   description: "unknown fields are ignored on read and dropped on write",
-  value: { t: "send", rid: "r14", groupId: ID.general, topicId: ID.topic, clientMsgId: ID.cmid, body: "hi", attachments: [], priority: 3 },
+  value: { t: "send", rid: "r14", groupId: ID.general, topicId: ID.topic, clientMsgId: ID.cmid, body: "hi", labels: [], priority: 3 },
   normalized: { t: "send", rid: "r14", groupId: ID.general, topicId: ID.topic, clientMsgId: ID.cmid, body: "hi" },
 });
 bad(`${c}/unknown-t.json`, "ClientFrame", { t: "subscribe", groupId: ID.general }, "unknown frame type");
@@ -322,6 +323,12 @@ bad("http/create-invite-request-bad-level.json", "CreateInviteRequest", { name: 
 bad("http/create-group-request-ids-not-array.json", "CreateGroupRequest", { name: "x", memberIds: "abc" }, "wrong type for memberIds");
 bad("http/ok-response-false.json", "OkResponse", { ok: false }, "ok must be true");
 bad("http/error-response-missing-message.json", "ErrorResponse", { error: { code: "internal" } }, "missing message");
+
+// ---------------------------------------------------------------------------
+// V1 extensions
+// ---------------------------------------------------------------------------
+
+addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSummary, dmSummary, ownerFull, aliceMinimal, base });
 
 // ---------------------------------------------------------------------------
 

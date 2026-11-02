@@ -1,0 +1,17 @@
+{
+  "kind": "AuditEntry",
+  "valid": true,
+  "description": "requestedBy explicitly null",
+  "value": {
+    "id": "01JBX0AUDIT0000000000000AQ",
+    "at": 1762128000000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "requestedBy": null,
+    "credential": {
+      "kind": "hook",
+      "id": "01JBX0HOOK00000000000000AN"
+    },
+    "action": "message.create",
+    "groupId": "01JBX0GENERAL000000000000A"
+  }
+}

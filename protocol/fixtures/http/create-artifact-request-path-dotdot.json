@@ -1,0 +1,18 @@
+{
+  "kind": "CreateArtifactRequest",
+  "valid": false,
+  "description": "unsafe path ../etc/passwd",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "x",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "../etc/passwd",
+        "fileId": "01JBX0FILE00000000000000AH"
+      }
+    ]
+  }
+}

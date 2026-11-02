@@ -1,0 +1,15 @@
+{
+  "kind": "Card",
+  "valid": false,
+  "description": "unknown block type is rejected on write",
+  "value": {
+    "v": 1,
+    "title": "构建",
+    "blocks": [
+      {
+        "type": "chart",
+        "data": []
+      }
+    ]
+  }
+}

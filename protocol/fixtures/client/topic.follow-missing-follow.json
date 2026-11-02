@@ -1,0 +1,11 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "missing follow",
+  "value": {
+    "t": "topic.follow",
+    "rid": "r25",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD"
+  }
+}

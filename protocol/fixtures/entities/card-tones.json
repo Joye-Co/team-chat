@@ -1,0 +1,18 @@
+{
+  "kind": "Card",
+  "valid": true,
+  "description": "action id with every allowed punctuation",
+  "value": {
+    "v": 1,
+    "title": "构建",
+    "blocks": [],
+    "tone": "danger",
+    "actions": [
+      {
+        "id": "retry.v1:a-b_c",
+        "label": "重试",
+        "style": "default"
+      }
+    ]
+  }
+}

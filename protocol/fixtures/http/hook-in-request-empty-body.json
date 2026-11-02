@@ -1,0 +1,8 @@
+{
+  "kind": "HookInRequest",
+  "valid": false,
+  "description": "an empty body without a card",
+  "value": {
+    "body": ""
+  }
+}

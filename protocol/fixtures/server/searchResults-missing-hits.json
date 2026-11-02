@@ -1,0 +1,9 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "missing hits",
+  "value": {
+    "t": "searchResults",
+    "rid": "r51"
+  }
+}

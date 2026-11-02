@@ -2,6 +2,10 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::card::Card;
+use crate::members::NotifyLevel;
+use crate::message::{ArtifactRef, FileRef, MessageKind, ReplyTo};
+use crate::reads::TopicState;
 use crate::serde_util::{non_null, nullable};
 
 /// Milliseconds since the Unix epoch, UTC.
@@ -9,21 +13,23 @@ pub type Millis = u64;
 /// Position in a group event log.
 pub type Seq = u64;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemberKind {
+    #[default]
     Human,
     Bot,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemberLevel {
     Owner,
+    #[default]
     Member,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Member {
     pub id: String,
@@ -64,14 +70,15 @@ impl Member {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum GroupKind {
+    #[default]
     Group,
     Dm,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Group {
     pub id: String,
@@ -82,19 +89,56 @@ pub struct Group {
     pub created_at: Millis,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GroupSummary {
     pub group: Group,
     pub last_seq: Seq,
     pub read_seq: Seq,
+    /// Group totals over the per-topic read positions.
     pub unread: u64,
     pub mentions: u64,
+    /// Every topic with unread > 0, mentions > 0 or following. Topics not listed have no
+    /// unread messages and are not followed.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub topics: Option<Vec<TopicState>>,
+    /// Absent means false.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub muted: Option<bool>,
+    /// Absent: `all` for a DM, `mentions` for a group; see [`GroupSummary::notify_level`].
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub notify: Option<NotifyLevel>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+impl GroupSummary {
+    pub fn is_muted(&self) -> bool {
+        self.muted.unwrap_or(false)
+    }
+    /// The effective notify level, with the default for the group kind.
+    pub fn notify_level(&self) -> NotifyLevel {
+        self.notify.unwrap_or(match self.group.kind {
+            GroupKind::Dm => NotifyLevel::All,
+            GroupKind::Group => NotifyLevel::Mentions,
+        })
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TopicStatus {
+    #[default]
     Open,
     InProgress,
     WaitingAnswer,
@@ -103,7 +147,7 @@ pub enum TopicStatus {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Topic {
     pub id: String,
@@ -115,9 +159,39 @@ pub struct Topic {
     pub root_message_id: String,
     pub last_seq: Seq,
     pub message_count: u64,
+    /// Members the topic waits on. Absent means empty.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub waiting_on: Option<Vec<String>>,
+    /// The responsible member. `None` = omitted, `Some(None)` = `null`; both mean none.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner_id: Option<Option<String>>,
+    /// `createdAt` of the newest message in the topic.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_message_at: Option<Millis>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+impl Topic {
+    pub fn waiting_on(&self) -> &[String] {
+        self.waiting_on.as_deref().unwrap_or(&[])
+    }
+    pub fn owner_id(&self) -> Option<&str> {
+        self.owner_id.as_ref().and_then(|o| o.as_deref())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
     pub id: String,
@@ -150,9 +224,49 @@ pub struct Message {
         skip_serializing_if = "Option::is_none"
     )]
     pub streaming: Option<bool>,
+    /// Absent means `text`; see [`Message::kind`].
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub kind: Option<MessageKind>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reply_to: Option<ReplyTo>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub attachments: Option<Vec<FileRef>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub artifact_refs: Option<Vec<ArtifactRef>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card: Option<Card>,
 }
 
 impl Message {
+    pub fn kind(&self) -> MessageKind {
+        self.kind.unwrap_or(MessageKind::Text)
+    }
+    pub fn attachments(&self) -> &[FileRef] {
+        self.attachments.as_deref().unwrap_or(&[])
+    }
+    pub fn artifact_refs(&self) -> &[ArtifactRef] {
+        self.artifact_refs.as_deref().unwrap_or(&[])
+    }
     pub fn edited_at(&self) -> Option<Millis> {
         self.edited_at.flatten()
     }

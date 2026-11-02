@@ -1,0 +1,13 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "inside one topic, limit at 50",
+  "value": {
+    "t": "search",
+    "rid": "r50",
+    "query": "发布",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "limit": 50
+  }
+}

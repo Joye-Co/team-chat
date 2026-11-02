@@ -1,0 +1,63 @@
+{
+  "kind": "ArtifactResponse",
+  "valid": true,
+  "description": "versions newest first",
+  "value": {
+    "artifact": {
+      "id": "01JBX0ART000000000000000AM",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "title": "发布说明",
+      "kind": "html",
+      "currentVersion": 2,
+      "createdBy": "01JBX0BOT000000000000000AC",
+      "createdAt": 1762128000000,
+      "updatedAt": 1762128060000
+    },
+    "versions": [
+      {
+        "artifactId": "01JBX0ART000000000000000AM",
+        "version": 2,
+        "entry": "index.html",
+        "files": [
+          {
+            "path": "index.html",
+            "fileId": "01JBX0FILE00000000000000AH",
+            "size": 2048,
+            "mime": "text/html"
+          },
+          {
+            "path": "assets/app.css",
+            "fileId": "01JBX0FILE00000000000000AJ",
+            "size": 512,
+            "mime": "text/css"
+          },
+          {
+            "path": "assets/图.png",
+            "fileId": "01JBX0FILE00000000000000AK",
+            "size": 9000,
+            "mime": "image/png"
+          }
+        ],
+        "note": "修正错别字",
+        "createdBy": "01JBX0BOT000000000000000AC",
+        "createdAt": 1762128060000
+      },
+      {
+        "artifactId": "01JBX0ART000000000000000AM",
+        "version": 1,
+        "entry": "index.html",
+        "files": [
+          {
+            "path": "index.html",
+            "fileId": "01JBX0FILE00000000000000AH",
+            "size": 2048,
+            "mime": "text/html"
+          }
+        ],
+        "createdBy": "01JBX0BOT000000000000000AC",
+        "createdAt": 1762128000000
+      }
+    ]
+  }
+}

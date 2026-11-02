@@ -1,0 +1,10 @@
+{
+  "kind": "HookInRequest",
+  "valid": true,
+  "value": {
+    "topicKey": "deploy:prod#42",
+    "title": "部署 prod #42",
+    "body": "开始部署",
+    "clientMsgId": "deploy-42-start"
+  }
+}

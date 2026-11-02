@@ -1,0 +1,22 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "sha256 must be 64 lowercase hex digits",
+  "value": {
+    "t": "send",
+    "rid": "r44",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "x",
+    "attachments": [
+      {
+        "fileId": "01JBX0FILE00000000000000AJ",
+        "name": "spec.pdf",
+        "size": 0,
+        "mime": "application/pdf",
+        "sha256": "ABC"
+      }
+    ]
+  }
+}

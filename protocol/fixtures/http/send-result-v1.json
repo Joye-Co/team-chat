@@ -1,0 +1,176 @@
+{
+  "kind": "SendResult",
+  "valid": true,
+  "value": {
+    "message": {
+      "id": "01JBX0MSG000000000000000AF",
+      "clientMsgId": "01JBX0CMID00000000000000AG",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "authorId": "01JBX0BOT000000000000000AC",
+      "body": "PR #128 已合并",
+      "mentions": [],
+      "createdSeq": 41,
+      "createdAt": 1762128005000,
+      "kind": "card",
+      "card": {
+        "v": 1,
+        "title": "PR #128 已合并 ✅",
+        "tone": "success",
+        "status": {
+          "label": "已合并"
+        },
+        "blocks": [
+          {
+            "type": "text",
+            "text": "**修复**登录重连的问题\n\n- 加了测试"
+          },
+          {
+            "type": "fields",
+            "fields": [
+              {
+                "label": "作者",
+                "value": "Alice"
+              },
+              {
+                "label": "分支",
+                "value": "fix/reconnect"
+              }
+            ]
+          },
+          {
+            "type": "table",
+            "columns": [
+              "检查",
+              "结果"
+            ],
+            "rows": [
+              [
+                "lint",
+                "通过"
+              ],
+              [
+                "test",
+                "通过"
+              ]
+            ]
+          },
+          {
+            "type": "list",
+            "items": [
+              {
+                "text": "写测试",
+                "status": "done"
+              },
+              {
+                "text": "发布",
+                "status": "in_progress"
+              },
+              {
+                "text": "通知"
+              }
+            ]
+          },
+          {
+            "type": "progress",
+            "value": 0.75,
+            "label": "3 / 4"
+          },
+          {
+            "type": "progress",
+            "value": 1
+          },
+          {
+            "type": "code",
+            "lang": "rust",
+            "text": "fn main() {}\n"
+          },
+          {
+            "type": "code",
+            "text": "plain"
+          },
+          {
+            "type": "image",
+            "fileId": "01JBX0FILE00000000000000AH",
+            "alt": "截图"
+          },
+          {
+            "type": "divider"
+          },
+          {
+            "type": "link",
+            "label": "在 GitHub 查看",
+            "target": {
+              "kind": "url",
+              "url": "https://github.com/Joye-Co/team-chat/pull/128"
+            }
+          },
+          {
+            "type": "link",
+            "label": "相关话题",
+            "target": {
+              "kind": "topic",
+              "groupId": "01JBX0GENERAL000000000000A",
+              "topicId": "01JBX0TOPIC0000000000000AR"
+            }
+          },
+          {
+            "type": "link",
+            "label": "发布说明",
+            "target": {
+              "kind": "artifact",
+              "artifactId": "01JBX0ART000000000000000AM",
+              "version": 2
+            }
+          },
+          {
+            "type": "link",
+            "label": "最新发布说明",
+            "target": {
+              "kind": "artifact",
+              "artifactId": "01JBX0ART000000000000000AM"
+            }
+          }
+        ],
+        "actions": [
+          {
+            "id": "approve",
+            "label": "批准",
+            "style": "primary",
+            "value": {
+              "pr": 128,
+              "ok": true
+            }
+          },
+          {
+            "id": "reject",
+            "label": "拒绝",
+            "style": "danger",
+            "confirm": "确定拒绝吗？",
+            "value": "reject"
+          },
+          {
+            "id": "later",
+            "label": "稍后"
+          }
+        ]
+      }
+    },
+    "topic": {
+      "id": "01JBX0TOPIC0000000000000AD",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "title": "发布 V1：检查清单 ✅",
+      "status": "waiting_review",
+      "createdBy": "01JBX0OWNER0000000000000AA",
+      "createdAt": 1762128000000,
+      "rootMessageId": "01JBX0MSG000000000000000AE",
+      "lastSeq": 42,
+      "messageCount": 7,
+      "waitingOn": [
+        "01JBX0ALICE0000000000000AB"
+      ],
+      "ownerId": "01JBX0BOT000000000000000AC",
+      "lastMessageAt": 1762128009000
+    }
+  }
+}

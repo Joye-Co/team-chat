@@ -1,0 +1,21 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "another device read one topic",
+  "value": {
+    "t": "reads",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "readSeq": 40,
+    "unread": 1,
+    "mentions": 0,
+    "topics": [
+      {
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "readSeq": 42,
+        "unread": 0,
+        "mentions": 0,
+        "following": true
+      }
+    ]
+  }
+}

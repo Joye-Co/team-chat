@@ -1,0 +1,13 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "whole group read",
+  "value": {
+    "t": "reads",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "readSeq": 42,
+    "unread": 0,
+    "mentions": 0,
+    "topics": []
+  }
+}

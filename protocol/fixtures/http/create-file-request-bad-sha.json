@@ -1,0 +1,12 @@
+{
+  "kind": "CreateFileRequest",
+  "valid": false,
+  "description": "uppercase hex digest",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "name": "a",
+    "size": 1,
+    "mime": "text/plain",
+    "sha256": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+  }
+}

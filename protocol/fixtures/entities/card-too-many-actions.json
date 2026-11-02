@@ -1,0 +1,56 @@
+{
+  "kind": "Card",
+  "valid": false,
+  "description": "limit: 11 actions",
+  "value": {
+    "v": 1,
+    "title": "构建",
+    "blocks": [],
+    "actions": [
+      {
+        "id": "a0",
+        "label": "x"
+      },
+      {
+        "id": "a1",
+        "label": "x"
+      },
+      {
+        "id": "a2",
+        "label": "x"
+      },
+      {
+        "id": "a3",
+        "label": "x"
+      },
+      {
+        "id": "a4",
+        "label": "x"
+      },
+      {
+        "id": "a5",
+        "label": "x"
+      },
+      {
+        "id": "a6",
+        "label": "x"
+      },
+      {
+        "id": "a7",
+        "label": "x"
+      },
+      {
+        "id": "a8",
+        "label": "x"
+      },
+      {
+        "id": "a9",
+        "label": "x"
+      },
+      {
+        "id": "a10",
+        "label": "x"
+      }
+    ]
+  }
+}

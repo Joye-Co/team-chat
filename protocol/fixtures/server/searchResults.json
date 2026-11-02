@@ -1,0 +1,34 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "searchResults",
+    "rid": "r50",
+    "hits": [
+      {
+        "groupId": "01JBX0GENERAL000000000000A",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "messageId": "01JBX0MSG000000000000000AE",
+        "authorId": "01JBX0OWNER0000000000000AA",
+        "snippet": "…准备发布 V1…",
+        "highlights": [
+          {
+            "start": 3,
+            "length": 2
+          }
+        ],
+        "createdAt": 1762128005000,
+        "seq": 41
+      },
+      {
+        "groupId": "01JBX0DM00000000000000000B",
+        "topicId": "01JBX0TOPIC0000000000000AR",
+        "messageId": "01JBX0MSG000000000000000AF",
+        "authorId": "01JBX0ALICE0000000000000AB",
+        "snippet": "发布",
+        "createdAt": 1762128000000,
+        "seq": 3
+      }
+    ]
+  }
+}

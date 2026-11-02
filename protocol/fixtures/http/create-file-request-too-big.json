@@ -1,0 +1,12 @@
+{
+  "kind": "CreateFileRequest",
+  "valid": false,
+  "description": "limit: size over 100 MB",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "name": "big.bin",
+    "size": 100000001,
+    "mime": "application/octet-stream",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}

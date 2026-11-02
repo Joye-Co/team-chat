@@ -1,0 +1,14 @@
+{
+  "kind": "FileRef",
+  "valid": true,
+  "description": "image with pixel size",
+  "value": {
+    "fileId": "01JBX0FILE00000000000000AH",
+    "name": "截图 2026-11-03.png",
+    "size": 482113,
+    "mime": "image/png",
+    "width": 1920,
+    "height": 1080,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  }
+}

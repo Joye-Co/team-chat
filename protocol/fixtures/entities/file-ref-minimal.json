@@ -1,0 +1,12 @@
+{
+  "kind": "FileRef",
+  "valid": true,
+  "description": "no pixel size, empty file",
+  "value": {
+    "fileId": "01JBX0FILE00000000000000AJ",
+    "name": "spec.pdf",
+    "size": 0,
+    "mime": "application/pdf",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}

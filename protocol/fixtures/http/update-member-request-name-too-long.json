@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": false,
+  "description": "limit: name 65 characters",
+  "value": {
+    "name": "名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名名"
+  }
+}

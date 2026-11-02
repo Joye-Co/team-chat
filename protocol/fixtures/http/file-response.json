@@ -1,0 +1,18 @@
+{
+  "kind": "FileResponse",
+  "valid": true,
+  "value": {
+    "id": "01JBX0FILE00000000000000AH",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "name": "截图 2026-11-03.png",
+    "size": 482113,
+    "mime": "image/png",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "width": 1920,
+    "height": 1080,
+    "status": "ready",
+    "createdBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000
+  }
+}

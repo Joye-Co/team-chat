@@ -1,0 +1,19 @@
+{
+  "kind": "CreateFileResponse",
+  "valid": true,
+  "value": {
+    "file": {
+      "id": "01JBX0FILE00000000000000AJ",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": null,
+      "name": "spec.pdf",
+      "size": 100000000,
+      "mime": "application/pdf",
+      "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "status": "pending",
+      "createdBy": "01JBX0ALICE0000000000000AB",
+      "createdAt": 1762128000000
+    },
+    "uploadUrl": "https://chat-api-e2e.example.workers.dev/v1/files/01JBX0FILE00000000000000AJ/content"
+  }
+}

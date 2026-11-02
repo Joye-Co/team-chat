@@ -1,0 +1,19 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "artifact version starts at 1",
+  "value": {
+    "t": "send",
+    "rid": "r45",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "x",
+    "artifactRefs": [
+      {
+        "artifactId": "01JBX0ART000000000000000AM",
+        "version": 0
+      }
+    ]
+  }
+}

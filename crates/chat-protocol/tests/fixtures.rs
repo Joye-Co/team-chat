@@ -34,7 +34,17 @@ check!(
     RevokeTokensRequest,
     CreateGroupRequest,
     AddGroupMemberRequest,
-    CreateDmRequest
+    CreateDmRequest,
+    Card,
+    CreateFileRequest,
+    CreateArtifactRequest,
+    AddArtifactVersionRequest,
+    UpdateMemberRequest,
+    UpdateGroupPrefsRequest,
+    UpdateInfo,
+    CreateHookRequest,
+    HookInRequest,
+    PostMessageRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -76,6 +86,40 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("GroupSummaryResponse", plain::<GroupSummaryResponse>),
     ("OkResponse", plain::<OkResponse>),
     ("HealthResponse", plain::<HealthResponse>),
+    // V1 extensions
+    ("TopicState", plain::<TopicState>),
+    ("Card", validated::<Card>),
+    ("FileRef", plain::<FileRef>),
+    ("FileMeta", plain::<FileMeta>),
+    ("CreateFileRequest", validated::<CreateFileRequest>),
+    ("CreateFileResponse", plain::<CreateFileResponse>),
+    ("FileResponse", plain::<FileResponse>),
+    ("Artifact", plain::<Artifact>),
+    ("ArtifactVersion", plain::<ArtifactVersion>),
+    ("CreateArtifactRequest", validated::<CreateArtifactRequest>),
+    (
+        "AddArtifactVersionRequest",
+        validated::<AddArtifactVersionRequest>,
+    ),
+    ("ArtifactVersionResponse", plain::<ArtifactVersionResponse>),
+    ("ArtifactResponse", plain::<ArtifactResponse>),
+    ("ArtifactsResponse", plain::<ArtifactsResponse>),
+    ("UpdateMemberRequest", validated::<UpdateMemberRequest>),
+    ("MemberResponse", plain::<MemberResponse>),
+    (
+        "UpdateGroupPrefsRequest",
+        validated::<UpdateGroupPrefsRequest>,
+    ),
+    ("UpdateInfo", validated::<UpdateInfo>),
+    ("DiagnosticsResponse", plain::<DiagnosticsResponse>),
+    ("Hook", plain::<Hook>),
+    ("CreateHookRequest", validated::<CreateHookRequest>),
+    ("CreateHookResponse", plain::<CreateHookResponse>),
+    ("HooksResponse", plain::<HooksResponse>),
+    ("HookInRequest", validated::<HookInRequest>),
+    ("PostMessageRequest", validated::<PostMessageRequest>),
+    ("AuditEntry", plain::<AuditEntry>),
+    ("AuditResponse", plain::<AuditResponse>),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -174,6 +218,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
     assert_eq!(
         client,
         [
+            "card.action",
             "delete",
             "delta",
             "edit",
@@ -182,7 +227,9 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "history",
             "ping",
             "read",
+            "search",
             "send",
+            "topic.follow",
             "topic.update",
             "typing"
         ]
@@ -198,11 +245,13 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "history",
             "page",
             "pong",
+            "reads",
+            "searchResults",
             "transient",
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 8);
+    assert_eq!(valid("Event", "type").len(), 11);
     assert_eq!(valid("TransientEvent", "type").len(), 3);
 }
 
@@ -233,6 +282,7 @@ fn parse_and_encode_frames() {
         body: "hi".into(),
         mentions: None,
         streaming: None,
+        ..Default::default()
     });
     assert_eq!(send.validate().unwrap_err().field, "title");
     assert!(encode_client_frame(&send).is_err());
@@ -240,4 +290,38 @@ fn parse_and_encode_frames() {
     let ping = encode_client_frame(&ClientFrame::Ping).unwrap();
     assert_eq!(ping, r#"{"t":"ping"}"#);
     assert_eq!(default_title("第一行 line\nsecond"), "第一行 line");
+}
+
+#[test]
+fn unknown_card_block_is_read_but_rejected() {
+    let card: Card = serde_json::from_str(
+        r#"{"v":1,"title":"t","blocks":[{"type":"chart","data":[1]},{"type":"divider"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(card.blocks[0], CardBlock::Unknown);
+    assert!(card.validate().is_err());
+    let progress: CardBlock = serde_json::from_str(r#"{"type":"progress","value":0.25}"#).unwrap();
+    assert_eq!(progress.progress(), Some(0.25));
+}
+
+#[test]
+fn v1_helpers() {
+    assert!(is_artifact_path("assets/图.png"));
+    for p in ["", "/a", "a/", "a//b", "../a", "a/./b", "a\\b"] {
+        assert!(!is_artifact_path(p), "{p}");
+    }
+    assert_eq!(parse_release_version("1.20.3"), Some((1, 20, 3)));
+    assert_eq!(parse_release_version("01.2.3"), None);
+    let summary: GroupSummary = serde_json::from_str(
+        r#"{"group":{"id":"g","kind":"dm","name":"A","memberIds":[],"createdBy":"a","createdAt":0},"lastSeq":0,"readSeq":0,"unread":0,"mentions":0}"#,
+    )
+    .unwrap();
+    assert_eq!(summary.notify_level(), NotifyLevel::All);
+    assert!(!summary.is_muted());
+    let post = PostMessageRequest {
+        client_msg_id: "c".into(),
+        body: "hi".into(),
+        ..Default::default()
+    };
+    assert!(post.validate().is_ok());
 }

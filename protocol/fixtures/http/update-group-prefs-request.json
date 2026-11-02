@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateGroupPrefsRequest",
+  "valid": true,
+  "value": {
+    "muted": true,
+    "notify": "none"
+  }
+}

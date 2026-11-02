@@ -1,0 +1,11 @@
+{
+  "kind": "FileRef",
+  "valid": false,
+  "description": "missing sha256",
+  "value": {
+    "fileId": "01JBX0FILE00000000000000AH",
+    "name": "a",
+    "size": 1,
+    "mime": "text/plain"
+  }
+}

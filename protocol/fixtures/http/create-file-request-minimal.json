@@ -1,0 +1,11 @@
+{
+  "kind": "CreateFileRequest",
+  "valid": true,
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "name": "notes.txt",
+    "size": 12,
+    "mime": "text/plain",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}

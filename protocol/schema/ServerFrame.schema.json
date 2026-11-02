@@ -181,6 +181,53 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "topicId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "readSeq": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unread": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "mentions": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "following": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "topicId",
+                    "readSeq",
+                    "unread",
+                    "mentions"
+                  ]
+                }
+              },
+              "muted": {
+                "type": "boolean"
+              },
+              "notify": {
+                "type": "string",
+                "enum": [
+                  "all",
+                  "mentions",
+                  "none"
+                ]
               }
             },
             "required": [
@@ -292,6 +339,30 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "waitingOn": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "ownerId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "lastMessageAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
                         }
                       },
                       "required": [
@@ -368,6 +439,30 @@
                         "blocked",
                         "done"
                       ]
+                    },
+                    "waitingOn": {
+                      "maxItems": 20,
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "ownerId": {
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "lastMessageAt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
                     }
                   },
                   "required": [
@@ -483,6 +578,487 @@
                         },
                         "streaming": {
                           "type": "boolean"
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "text",
+                            "card",
+                            "system"
+                          ]
+                        },
+                        "replyTo": {
+                          "type": "object",
+                          "properties": {
+                            "messageId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "authorId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "excerpt": {
+                              "type": "string",
+                              "maxLength": 200
+                            }
+                          },
+                          "required": [
+                            "messageId",
+                            "authorId",
+                            "excerpt"
+                          ]
+                        },
+                        "attachments": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "fileId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "size": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "mime": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 255,
+                                "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                              },
+                              "width": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "height": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "sha256": {
+                                "type": "string",
+                                "pattern": "^[0-9a-f]{64}$"
+                              }
+                            },
+                            "required": [
+                              "fileId",
+                              "name",
+                              "size",
+                              "mime",
+                              "sha256"
+                            ]
+                          }
+                        },
+                        "artifactRefs": {
+                          "maxItems": 20,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "version": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "artifactId",
+                              "version"
+                            ]
+                          }
+                        },
+                        "card": {
+                          "type": "object",
+                          "properties": {
+                            "v": {
+                              "type": "number",
+                              "const": 1
+                            },
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "tone": {
+                              "type": "string",
+                              "enum": [
+                                "neutral",
+                                "info",
+                                "success",
+                                "warning",
+                                "danger"
+                              ]
+                            },
+                            "status": {
+                              "type": "object",
+                              "properties": {
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 40
+                                }
+                              },
+                              "required": [
+                                "label"
+                              ]
+                            },
+                            "blocks": {
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "text"
+                                      },
+                                      "text": {
+                                        "type": "string",
+                                        "maxLength": 8000
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "text"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "fields"
+                                      },
+                                      "fields": {
+                                        "minItems": 1,
+                                        "maxItems": 50,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "label": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 100
+                                            },
+                                            "value": {
+                                              "type": "string",
+                                              "maxLength": 1000
+                                            }
+                                          },
+                                          "required": [
+                                            "label",
+                                            "value"
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "fields"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "table"
+                                      },
+                                      "columns": {
+                                        "minItems": 1,
+                                        "maxItems": 20,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "maxLength": 100
+                                        }
+                                      },
+                                      "rows": {
+                                        "maxItems": 200,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "maxLength": 1000
+                                          }
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "columns",
+                                      "rows"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "list"
+                                      },
+                                      "items": {
+                                        "minItems": 1,
+                                        "maxItems": 200,
+                                        "type": "array",
+                                        "items": {
+                                          "type": "object",
+                                          "properties": {
+                                            "text": {
+                                              "type": "string",
+                                              "minLength": 1,
+                                              "maxLength": 1000
+                                            },
+                                            "status": {
+                                              "type": "string",
+                                              "enum": [
+                                                "todo",
+                                                "in_progress",
+                                                "done",
+                                                "failed",
+                                                "skipped"
+                                              ]
+                                            }
+                                          },
+                                          "required": [
+                                            "text"
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "items"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "progress"
+                                      },
+                                      "value": {
+                                        "type": "number",
+                                        "minimum": 0,
+                                        "maximum": 1
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "maxLength": 200
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "value"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "code"
+                                      },
+                                      "lang": {
+                                        "type": "string",
+                                        "maxLength": 32
+                                      },
+                                      "text": {
+                                        "type": "string",
+                                        "maxLength": 32768
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "text"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "image"
+                                      },
+                                      "fileId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "alt": {
+                                        "type": "string",
+                                        "maxLength": 500
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "fileId"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "divider"
+                                      }
+                                    },
+                                    "required": [
+                                      "type"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "link"
+                                      },
+                                      "label": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 200
+                                      },
+                                      "target": {
+                                        "oneOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "url"
+                                              },
+                                              "url": {
+                                                "type": "string",
+                                                "maxLength": 2048,
+                                                "pattern": "^https?:\\/\\/[^\\s]+$"
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "url"
+                                            ]
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "topic"
+                                              },
+                                              "groupId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "topicId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "groupId",
+                                              "topicId"
+                                            ]
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "kind": {
+                                                "type": "string",
+                                                "const": "artifact"
+                                              },
+                                              "artifactId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                              },
+                                              "version": {
+                                                "type": "integer",
+                                                "exclusiveMinimum": 0,
+                                                "maximum": 9007199254740991
+                                              }
+                                            },
+                                            "required": [
+                                              "kind",
+                                              "artifactId"
+                                            ]
+                                          }
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "label",
+                                      "target"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "actions": {
+                              "maxItems": 10,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 64,
+                                    "pattern": "^[A-Za-z0-9_.:-]+$"
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "style": {
+                                    "type": "string",
+                                    "enum": [
+                                      "primary",
+                                      "default",
+                                      "danger"
+                                    ]
+                                  },
+                                  "confirm": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "value": {
+                                    "$ref": "#/$defs/__schema0"
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "label"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "v",
+                            "title",
+                            "blocks"
+                          ]
                         }
                       },
                       "required": [
@@ -555,6 +1131,457 @@
                     },
                     "streaming": {
                       "type": "boolean"
+                    },
+                    "attachments": {
+                      "maxItems": 20,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "fileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "name": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255
+                          },
+                          "size": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "mime": {
+                            "type": "string",
+                            "minLength": 3,
+                            "maxLength": 255,
+                            "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                          },
+                          "width": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "height": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "sha256": {
+                            "type": "string",
+                            "pattern": "^[0-9a-f]{64}$"
+                          }
+                        },
+                        "required": [
+                          "fileId",
+                          "name",
+                          "size",
+                          "mime",
+                          "sha256"
+                        ]
+                      }
+                    },
+                    "artifactRefs": {
+                      "maxItems": 20,
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "artifactId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "version": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "artifactId",
+                          "version"
+                        ]
+                      }
+                    },
+                    "card": {
+                      "type": "object",
+                      "properties": {
+                        "v": {
+                          "type": "number",
+                          "const": 1
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "tone": {
+                          "type": "string",
+                          "enum": [
+                            "neutral",
+                            "info",
+                            "success",
+                            "warning",
+                            "danger"
+                          ]
+                        },
+                        "status": {
+                          "type": "object",
+                          "properties": {
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 40
+                            }
+                          },
+                          "required": [
+                            "label"
+                          ]
+                        },
+                        "blocks": {
+                          "maxItems": 50,
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "text"
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "maxLength": 8000
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "text"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "fields"
+                                  },
+                                  "fields": {
+                                    "minItems": 1,
+                                    "maxItems": 50,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "label": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 100
+                                        },
+                                        "value": {
+                                          "type": "string",
+                                          "maxLength": 1000
+                                        }
+                                      },
+                                      "required": [
+                                        "label",
+                                        "value"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "fields"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "table"
+                                  },
+                                  "columns": {
+                                    "minItems": 1,
+                                    "maxItems": 20,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "string",
+                                      "maxLength": 100
+                                    }
+                                  },
+                                  "rows": {
+                                    "maxItems": 200,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "maxLength": 1000
+                                      }
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "columns",
+                                  "rows"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "list"
+                                  },
+                                  "items": {
+                                    "minItems": 1,
+                                    "maxItems": 200,
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "text": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 1000
+                                        },
+                                        "status": {
+                                          "type": "string",
+                                          "enum": [
+                                            "todo",
+                                            "in_progress",
+                                            "done",
+                                            "failed",
+                                            "skipped"
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "text"
+                                      ]
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "items"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "progress"
+                                  },
+                                  "value": {
+                                    "type": "number",
+                                    "minimum": 0,
+                                    "maximum": 1
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "maxLength": 200
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "value"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "code"
+                                  },
+                                  "lang": {
+                                    "type": "string",
+                                    "maxLength": 32
+                                  },
+                                  "text": {
+                                    "type": "string",
+                                    "maxLength": 32768
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "text"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "image"
+                                  },
+                                  "fileId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "alt": {
+                                    "type": "string",
+                                    "maxLength": 500
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "fileId"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "divider"
+                                  }
+                                },
+                                "required": [
+                                  "type"
+                                ]
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "type": {
+                                    "type": "string",
+                                    "const": "link"
+                                  },
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  },
+                                  "target": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "const": "url"
+                                          },
+                                          "url": {
+                                            "type": "string",
+                                            "maxLength": 2048,
+                                            "pattern": "^https?:\\/\\/[^\\s]+$"
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "url"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "const": "topic"
+                                          },
+                                          "groupId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "topicId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "groupId",
+                                          "topicId"
+                                        ]
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "kind": {
+                                            "type": "string",
+                                            "const": "artifact"
+                                          },
+                                          "artifactId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "version": {
+                                            "type": "integer",
+                                            "exclusiveMinimum": 0,
+                                            "maximum": 9007199254740991
+                                          }
+                                        },
+                                        "required": [
+                                          "kind",
+                                          "artifactId"
+                                        ]
+                                      }
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "type",
+                                  "label",
+                                  "target"
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        "actions": {
+                          "maxItems": 10,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 64,
+                                "pattern": "^[A-Za-z0-9_.:-]+$"
+                              },
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              },
+                              "style": {
+                                "type": "string",
+                                "enum": [
+                                  "primary",
+                                  "default",
+                                  "danger"
+                                ]
+                              },
+                              "confirm": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "value": {
+                                "$ref": "#/$defs/__schema0"
+                              }
+                            },
+                            "required": [
+                              "id",
+                              "label"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "v",
+                        "title",
+                        "blocks"
+                      ]
                     }
                   },
                   "required": [
@@ -766,7 +1793,431 @@
                 "type",
                 "data"
               ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "const": "card.actioned"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "messageId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "actionId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64,
+                      "pattern": "^[A-Za-z0-9_.:-]+$"
+                    },
+                    "value": {
+                      "$ref": "#/$defs/__schema1"
+                    }
+                  },
+                  "required": [
+                    "messageId",
+                    "actionId"
+                  ]
+                }
+              },
+              "required": [
+                "seq",
+                "groupId",
+                "at",
+                "actorId",
+                "type",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "const": "artifact.created"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "artifact": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "groupId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "topicId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "html",
+                            "file"
+                          ]
+                        },
+                        "currentVersion": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "createdBy": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "createdAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "updatedAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "groupId",
+                        "topicId",
+                        "title",
+                        "kind",
+                        "currentVersion",
+                        "createdBy",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "version": {
+                      "type": "object",
+                      "properties": {
+                        "artifactId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "version": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "entry": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        },
+                        "files": {
+                          "minItems": 1,
+                          "maxItems": 500,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "fileId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "size": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "mime": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 255,
+                                "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "fileId",
+                              "size",
+                              "mime"
+                            ]
+                          }
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "createdBy": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "createdAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "artifactId",
+                        "version",
+                        "entry",
+                        "files",
+                        "createdBy",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "artifact",
+                    "version"
+                  ]
+                }
+              },
+              "required": [
+                "seq",
+                "groupId",
+                "at",
+                "actorId",
+                "type",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "const": "artifact.versionAdded"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "artifact": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "groupId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "topicId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "kind": {
+                          "type": "string",
+                          "enum": [
+                            "html",
+                            "file"
+                          ]
+                        },
+                        "currentVersion": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "createdBy": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "createdAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "updatedAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "groupId",
+                        "topicId",
+                        "title",
+                        "kind",
+                        "currentVersion",
+                        "createdBy",
+                        "createdAt",
+                        "updatedAt"
+                      ]
+                    },
+                    "version": {
+                      "type": "object",
+                      "properties": {
+                        "artifactId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "version": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "entry": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255
+                        },
+                        "files": {
+                          "minItems": 1,
+                          "maxItems": 500,
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "path": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 255
+                              },
+                              "fileId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "size": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "mime": {
+                                "type": "string",
+                                "minLength": 3,
+                                "maxLength": 255,
+                                "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                              }
+                            },
+                            "required": [
+                              "path",
+                              "fileId",
+                              "size",
+                              "mime"
+                            ]
+                          }
+                        },
+                        "note": {
+                          "type": "string",
+                          "maxLength": 2000
+                        },
+                        "createdBy": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "createdAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "artifactId",
+                        "version",
+                        "entry",
+                        "files",
+                        "createdBy",
+                        "createdAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "artifact",
+                    "version"
+                  ]
+                }
+              },
+              "required": [
+                "seq",
+                "groupId",
+                "at",
+                "actorId",
+                "type",
+                "data"
+              ]
             }
+          ]
+        },
+        "notify": {
+          "type": "string",
+          "enum": [
+            "mention",
+            "waiting",
+            "result",
+            "message"
           ]
         }
       },
@@ -1054,6 +2505,30 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "waitingOn": {
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "ownerId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "lastMessageAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "required": [
@@ -1130,6 +2605,30 @@
                           "blocked",
                           "done"
                         ]
+                      },
+                      "waitingOn": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "ownerId": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "lastMessageAt": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
                       }
                     },
                     "required": [
@@ -1245,6 +2744,487 @@
                           },
                           "streaming": {
                             "type": "boolean"
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "text",
+                              "card",
+                              "system"
+                            ]
+                          },
+                          "replyTo": {
+                            "type": "object",
+                            "properties": {
+                              "messageId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "authorId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "excerpt": {
+                                "type": "string",
+                                "maxLength": 200
+                              }
+                            },
+                            "required": [
+                              "messageId",
+                              "authorId",
+                              "excerpt"
+                            ]
+                          },
+                          "attachments": {
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "fileId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "name": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "size": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "mime": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 255,
+                                  "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                                },
+                                "width": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "height": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "sha256": {
+                                  "type": "string",
+                                  "pattern": "^[0-9a-f]{64}$"
+                                }
+                              },
+                              "required": [
+                                "fileId",
+                                "name",
+                                "size",
+                                "mime",
+                                "sha256"
+                              ]
+                            }
+                          },
+                          "artifactRefs": {
+                            "maxItems": 20,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "artifactId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "version": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "artifactId",
+                                "version"
+                              ]
+                            }
+                          },
+                          "card": {
+                            "type": "object",
+                            "properties": {
+                              "v": {
+                                "type": "number",
+                                "const": 1
+                              },
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "tone": {
+                                "type": "string",
+                                "enum": [
+                                  "neutral",
+                                  "info",
+                                  "success",
+                                  "warning",
+                                  "danger"
+                                ]
+                              },
+                              "status": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  }
+                                },
+                                "required": [
+                                  "label"
+                                ]
+                              },
+                              "blocks": {
+                                "maxItems": 50,
+                                "type": "array",
+                                "items": {
+                                  "oneOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "text"
+                                        },
+                                        "text": {
+                                          "type": "string",
+                                          "maxLength": 8000
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "text"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "fields"
+                                        },
+                                        "fields": {
+                                          "minItems": 1,
+                                          "maxItems": 50,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "label": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 100
+                                              },
+                                              "value": {
+                                                "type": "string",
+                                                "maxLength": 1000
+                                              }
+                                            },
+                                            "required": [
+                                              "label",
+                                              "value"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "fields"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "table"
+                                        },
+                                        "columns": {
+                                          "minItems": 1,
+                                          "maxItems": 20,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "string",
+                                            "maxLength": 100
+                                          }
+                                        },
+                                        "rows": {
+                                          "maxItems": 200,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "maxLength": 1000
+                                            }
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "columns",
+                                        "rows"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "list"
+                                        },
+                                        "items": {
+                                          "minItems": 1,
+                                          "maxItems": 200,
+                                          "type": "array",
+                                          "items": {
+                                            "type": "object",
+                                            "properties": {
+                                              "text": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 1000
+                                              },
+                                              "status": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "todo",
+                                                  "in_progress",
+                                                  "done",
+                                                  "failed",
+                                                  "skipped"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "text"
+                                            ]
+                                          }
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "items"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "progress"
+                                        },
+                                        "value": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "maxLength": 200
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "value"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "code"
+                                        },
+                                        "lang": {
+                                          "type": "string",
+                                          "maxLength": 32
+                                        },
+                                        "text": {
+                                          "type": "string",
+                                          "maxLength": 32768
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "text"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "image"
+                                        },
+                                        "fileId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "alt": {
+                                          "type": "string",
+                                          "maxLength": 500
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "fileId"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "divider"
+                                        }
+                                      },
+                                      "required": [
+                                        "type"
+                                      ]
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "type": {
+                                          "type": "string",
+                                          "const": "link"
+                                        },
+                                        "label": {
+                                          "type": "string",
+                                          "minLength": 1,
+                                          "maxLength": 200
+                                        },
+                                        "target": {
+                                          "oneOf": [
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "kind": {
+                                                  "type": "string",
+                                                  "const": "url"
+                                                },
+                                                "url": {
+                                                  "type": "string",
+                                                  "maxLength": 2048,
+                                                  "pattern": "^https?:\\/\\/[^\\s]+$"
+                                                }
+                                              },
+                                              "required": [
+                                                "kind",
+                                                "url"
+                                              ]
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "kind": {
+                                                  "type": "string",
+                                                  "const": "topic"
+                                                },
+                                                "groupId": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "topicId": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                }
+                                              },
+                                              "required": [
+                                                "kind",
+                                                "groupId",
+                                                "topicId"
+                                              ]
+                                            },
+                                            {
+                                              "type": "object",
+                                              "properties": {
+                                                "kind": {
+                                                  "type": "string",
+                                                  "const": "artifact"
+                                                },
+                                                "artifactId": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "version": {
+                                                  "type": "integer",
+                                                  "exclusiveMinimum": 0,
+                                                  "maximum": 9007199254740991
+                                                }
+                                              },
+                                              "required": [
+                                                "kind",
+                                                "artifactId"
+                                              ]
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "type",
+                                        "label",
+                                        "target"
+                                      ]
+                                    }
+                                  ]
+                                }
+                              },
+                              "actions": {
+                                "maxItems": 10,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "id": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 64,
+                                      "pattern": "^[A-Za-z0-9_.:-]+$"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "style": {
+                                      "type": "string",
+                                      "enum": [
+                                        "primary",
+                                        "default",
+                                        "danger"
+                                      ]
+                                    },
+                                    "confirm": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "value": {
+                                      "$ref": "#/$defs/__schema0"
+                                    }
+                                  },
+                                  "required": [
+                                    "id",
+                                    "label"
+                                  ]
+                                }
+                              }
+                            },
+                            "required": [
+                              "v",
+                              "title",
+                              "blocks"
+                            ]
                           }
                         },
                         "required": [
@@ -1317,6 +3297,457 @@
                       },
                       "streaming": {
                         "type": "boolean"
+                      },
+                      "attachments": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "fileId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "name": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 255
+                            },
+                            "size": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "mime": {
+                              "type": "string",
+                              "minLength": 3,
+                              "maxLength": 255,
+                              "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                            },
+                            "width": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "height": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "sha256": {
+                              "type": "string",
+                              "pattern": "^[0-9a-f]{64}$"
+                            }
+                          },
+                          "required": [
+                            "fileId",
+                            "name",
+                            "size",
+                            "mime",
+                            "sha256"
+                          ]
+                        }
+                      },
+                      "artifactRefs": {
+                        "maxItems": 20,
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "artifactId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "version": {
+                              "type": "integer",
+                              "exclusiveMinimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "artifactId",
+                            "version"
+                          ]
+                        }
+                      },
+                      "card": {
+                        "type": "object",
+                        "properties": {
+                          "v": {
+                            "type": "number",
+                            "const": 1
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "tone": {
+                            "type": "string",
+                            "enum": [
+                              "neutral",
+                              "info",
+                              "success",
+                              "warning",
+                              "danger"
+                            ]
+                          },
+                          "status": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 40
+                              }
+                            },
+                            "required": [
+                              "label"
+                            ]
+                          },
+                          "blocks": {
+                            "maxItems": 50,
+                            "type": "array",
+                            "items": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "text"
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "maxLength": 8000
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "text"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "fields"
+                                    },
+                                    "fields": {
+                                      "minItems": 1,
+                                      "maxItems": 50,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "label": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 100
+                                          },
+                                          "value": {
+                                            "type": "string",
+                                            "maxLength": 1000
+                                          }
+                                        },
+                                        "required": [
+                                          "label",
+                                          "value"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "fields"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "table"
+                                    },
+                                    "columns": {
+                                      "minItems": 1,
+                                      "maxItems": 20,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "string",
+                                        "maxLength": 100
+                                      }
+                                    },
+                                    "rows": {
+                                      "maxItems": 200,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "array",
+                                        "items": {
+                                          "type": "string",
+                                          "maxLength": 1000
+                                        }
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "columns",
+                                    "rows"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "list"
+                                    },
+                                    "items": {
+                                      "minItems": 1,
+                                      "maxItems": 200,
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "text": {
+                                            "type": "string",
+                                            "minLength": 1,
+                                            "maxLength": 1000
+                                          },
+                                          "status": {
+                                            "type": "string",
+                                            "enum": [
+                                              "todo",
+                                              "in_progress",
+                                              "done",
+                                              "failed",
+                                              "skipped"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "text"
+                                        ]
+                                      }
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "items"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "progress"
+                                    },
+                                    "value": {
+                                      "type": "number",
+                                      "minimum": 0,
+                                      "maximum": 1
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "maxLength": 200
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "value"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "code"
+                                    },
+                                    "lang": {
+                                      "type": "string",
+                                      "maxLength": 32
+                                    },
+                                    "text": {
+                                      "type": "string",
+                                      "maxLength": 32768
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "text"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "image"
+                                    },
+                                    "fileId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "alt": {
+                                      "type": "string",
+                                      "maxLength": 500
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "fileId"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "divider"
+                                    }
+                                  },
+                                  "required": [
+                                    "type"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "link"
+                                    },
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 200
+                                    },
+                                    "target": {
+                                      "oneOf": [
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "const": "url"
+                                            },
+                                            "url": {
+                                              "type": "string",
+                                              "maxLength": 2048,
+                                              "pattern": "^https?:\\/\\/[^\\s]+$"
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "url"
+                                          ]
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "const": "topic"
+                                            },
+                                            "groupId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "topicId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "groupId",
+                                            "topicId"
+                                          ]
+                                        },
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "kind": {
+                                              "type": "string",
+                                              "const": "artifact"
+                                            },
+                                            "artifactId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "version": {
+                                              "type": "integer",
+                                              "exclusiveMinimum": 0,
+                                              "maximum": 9007199254740991
+                                            }
+                                          },
+                                          "required": [
+                                            "kind",
+                                            "artifactId"
+                                          ]
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "label",
+                                    "target"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "actions": {
+                            "maxItems": 10,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "id": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 64,
+                                  "pattern": "^[A-Za-z0-9_.:-]+$"
+                                },
+                                "label": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 40
+                                },
+                                "style": {
+                                  "type": "string",
+                                  "enum": [
+                                    "primary",
+                                    "default",
+                                    "danger"
+                                  ]
+                                },
+                                "confirm": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                },
+                                "value": {
+                                  "$ref": "#/$defs/__schema0"
+                                }
+                              },
+                              "required": [
+                                "id",
+                                "label"
+                              ]
+                            }
+                          }
+                        },
+                        "required": [
+                          "v",
+                          "title",
+                          "blocks"
+                        ]
                       }
                     },
                     "required": [
@@ -1528,6 +3959,421 @@
                   "type",
                   "data"
                 ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "card.actioned"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "messageId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "actionId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9_.:-]+$"
+                      },
+                      "value": {
+                        "$ref": "#/$defs/__schema1"
+                      }
+                    },
+                    "required": [
+                      "messageId",
+                      "actionId"
+                    ]
+                  }
+                },
+                "required": [
+                  "seq",
+                  "groupId",
+                  "at",
+                  "actorId",
+                  "type",
+                  "data"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "artifact.created"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "artifact": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "groupId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "topicId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "html",
+                              "file"
+                            ]
+                          },
+                          "currentVersion": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "createdBy": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "updatedAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "groupId",
+                          "topicId",
+                          "title",
+                          "kind",
+                          "currentVersion",
+                          "createdBy",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      },
+                      "version": {
+                        "type": "object",
+                        "properties": {
+                          "artifactId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "version": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "entry": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255
+                          },
+                          "files": {
+                            "minItems": 1,
+                            "maxItems": 500,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "fileId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "size": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "mime": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 255,
+                                  "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "fileId",
+                                "size",
+                                "mime"
+                              ]
+                            }
+                          },
+                          "note": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "createdBy": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "artifactId",
+                          "version",
+                          "entry",
+                          "files",
+                          "createdBy",
+                          "createdAt"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "artifact",
+                      "version"
+                    ]
+                  }
+                },
+                "required": [
+                  "seq",
+                  "groupId",
+                  "at",
+                  "actorId",
+                  "type",
+                  "data"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "artifact.versionAdded"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "artifact": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "groupId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "topicId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "title": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 200
+                          },
+                          "kind": {
+                            "type": "string",
+                            "enum": [
+                              "html",
+                              "file"
+                            ]
+                          },
+                          "currentVersion": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "createdBy": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "updatedAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "groupId",
+                          "topicId",
+                          "title",
+                          "kind",
+                          "currentVersion",
+                          "createdBy",
+                          "createdAt",
+                          "updatedAt"
+                        ]
+                      },
+                      "version": {
+                        "type": "object",
+                        "properties": {
+                          "artifactId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "version": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "entry": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 255
+                          },
+                          "files": {
+                            "minItems": 1,
+                            "maxItems": 500,
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "path": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 255
+                                },
+                                "fileId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "size": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "mime": {
+                                  "type": "string",
+                                  "minLength": 3,
+                                  "maxLength": 255,
+                                  "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                                }
+                              },
+                              "required": [
+                                "path",
+                                "fileId",
+                                "size",
+                                "mime"
+                              ]
+                            }
+                          },
+                          "note": {
+                            "type": "string",
+                            "maxLength": 2000
+                          },
+                          "createdBy": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "createdAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "artifactId",
+                          "version",
+                          "entry",
+                          "files",
+                          "createdBy",
+                          "createdAt"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "artifact",
+                      "version"
+                    ]
+                  }
+                },
+                "required": [
+                  "seq",
+                  "groupId",
+                  "at",
+                  "actorId",
+                  "type",
+                  "data"
+                ]
               }
             ]
           }
@@ -1642,6 +4488,487 @@
               },
               "streaming": {
                 "type": "boolean"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "text",
+                  "card",
+                  "system"
+                ]
+              },
+              "replyTo": {
+                "type": "object",
+                "properties": {
+                  "messageId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "authorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "excerpt": {
+                    "type": "string",
+                    "maxLength": 200
+                  }
+                },
+                "required": [
+                  "messageId",
+                  "authorId",
+                  "excerpt"
+                ]
+              },
+              "attachments": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "fileId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "name": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 255
+                    },
+                    "size": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "mime": {
+                      "type": "string",
+                      "minLength": 3,
+                      "maxLength": 255,
+                      "pattern": "^[\\w.+-]+\\/[\\w.+-]+$"
+                    },
+                    "width": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "height": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "sha256": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "required": [
+                    "fileId",
+                    "name",
+                    "size",
+                    "mime",
+                    "sha256"
+                  ]
+                }
+              },
+              "artifactRefs": {
+                "maxItems": 20,
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "artifactId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "version": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "artifactId",
+                    "version"
+                  ]
+                }
+              },
+              "card": {
+                "type": "object",
+                "properties": {
+                  "v": {
+                    "type": "number",
+                    "const": 1
+                  },
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "tone": {
+                    "type": "string",
+                    "enum": [
+                      "neutral",
+                      "info",
+                      "success",
+                      "warning",
+                      "danger"
+                    ]
+                  },
+                  "status": {
+                    "type": "object",
+                    "properties": {
+                      "label": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 40
+                      }
+                    },
+                    "required": [
+                      "label"
+                    ]
+                  },
+                  "blocks": {
+                    "maxItems": 50,
+                    "type": "array",
+                    "items": {
+                      "oneOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "text"
+                            },
+                            "text": {
+                              "type": "string",
+                              "maxLength": 8000
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "text"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "fields"
+                            },
+                            "fields": {
+                              "minItems": 1,
+                              "maxItems": 50,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 100
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "maxLength": 1000
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "value"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "fields"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "table"
+                            },
+                            "columns": {
+                              "minItems": 1,
+                              "maxItems": 20,
+                              "type": "array",
+                              "items": {
+                                "type": "string",
+                                "maxLength": 100
+                              }
+                            },
+                            "rows": {
+                              "maxItems": 200,
+                              "type": "array",
+                              "items": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "maxLength": 1000
+                                }
+                              }
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "columns",
+                            "rows"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "list"
+                            },
+                            "items": {
+                              "minItems": 1,
+                              "maxItems": 200,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "text": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 1000
+                                  },
+                                  "status": {
+                                    "type": "string",
+                                    "enum": [
+                                      "todo",
+                                      "in_progress",
+                                      "done",
+                                      "failed",
+                                      "skipped"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "text"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "items"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "progress"
+                            },
+                            "value": {
+                              "type": "number",
+                              "minimum": 0,
+                              "maximum": 1
+                            },
+                            "label": {
+                              "type": "string",
+                              "maxLength": 200
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "value"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "code"
+                            },
+                            "lang": {
+                              "type": "string",
+                              "maxLength": 32
+                            },
+                            "text": {
+                              "type": "string",
+                              "maxLength": 32768
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "text"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "image"
+                            },
+                            "fileId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "alt": {
+                              "type": "string",
+                              "maxLength": 500
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "fileId"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "divider"
+                            }
+                          },
+                          "required": [
+                            "type"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "const": "link"
+                            },
+                            "label": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "target": {
+                              "oneOf": [
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "url"
+                                    },
+                                    "url": {
+                                      "type": "string",
+                                      "maxLength": 2048,
+                                      "pattern": "^https?:\\/\\/[^\\s]+$"
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "url"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "topic"
+                                    },
+                                    "groupId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "topicId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "groupId",
+                                    "topicId"
+                                  ]
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "kind": {
+                                      "type": "string",
+                                      "const": "artifact"
+                                    },
+                                    "artifactId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "version": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "kind",
+                                    "artifactId"
+                                  ]
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "type",
+                            "label",
+                            "target"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "actions": {
+                    "maxItems": 10,
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 64,
+                          "pattern": "^[A-Za-z0-9_.:-]+$"
+                        },
+                        "label": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 40
+                        },
+                        "style": {
+                          "type": "string",
+                          "enum": [
+                            "primary",
+                            "default",
+                            "danger"
+                          ]
+                        },
+                        "confirm": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "value": {
+                          "$ref": "#/$defs/__schema0"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "label"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "v",
+                  "title",
+                  "blocks"
+                ]
               }
             },
             "required": [
@@ -1796,6 +5123,53 @@
                 "type": "integer",
                 "minimum": 0,
                 "maximum": 9007199254740991
+              },
+              "topics": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "topicId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "readSeq": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "unread": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "mentions": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "following": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "topicId",
+                    "readSeq",
+                    "unread",
+                    "mentions"
+                  ]
+                }
+              },
+              "muted": {
+                "type": "boolean"
+              },
+              "notify": {
+                "type": "string",
+                "enum": [
+                  "all",
+                  "mentions",
+                  "none"
+                ]
               }
             },
             "required": [
@@ -1869,6 +5243,229 @@
       "required": [
         "t"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "string",
+          "const": "reads"
+        },
+        "groupId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "readSeq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "unread": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "mentions": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "topics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "topicId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "readSeq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "unread": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "mentions": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "following": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "topicId",
+              "readSeq",
+              "unread",
+              "mentions"
+            ]
+          }
+        }
+      },
+      "required": [
+        "t",
+        "groupId",
+        "readSeq",
+        "unread",
+        "mentions",
+        "topics"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "t": {
+          "type": "string",
+          "const": "searchResults"
+        },
+        "rid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "hits": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "topicId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "messageId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authorId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "snippet": {
+                "type": "string",
+                "maxLength": 300
+              },
+              "highlights": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "start": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "length": {
+                      "type": "integer",
+                      "exclusiveMinimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "start",
+                    "length"
+                  ]
+                }
+              },
+              "createdAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "seq": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              }
+            },
+            "required": [
+              "groupId",
+              "topicId",
+              "messageId",
+              "authorId",
+              "snippet",
+              "createdAt",
+              "seq"
+            ]
+          }
+        }
+      },
+      "required": [
+        "t",
+        "rid",
+        "hits"
+      ]
     }
-  ]
+  ],
+  "$defs": {
+    "__schema0": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema0"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema0"
+          }
+        }
+      ]
+    },
+    "__schema1": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/__schema1"
+          }
+        },
+        {
+          "type": "object",
+          "propertyNames": {
+            "type": "string"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/__schema1"
+          }
+        }
+      ]
+    }
+  }
 }

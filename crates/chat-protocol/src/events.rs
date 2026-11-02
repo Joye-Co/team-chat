@@ -5,8 +5,11 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::card::Card;
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
-use crate::serde_util::non_null;
+use crate::files::ArtifactEventData;
+use crate::message::{ArtifactRef, FileRef};
+use crate::serde_util::{any_value, non_null, nullable};
 
 /// One stored event. The shared fields sit next to `type` and `data` on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +50,12 @@ pub enum EventData {
     GroupMemberAdded(GroupMemberChangeData),
     #[serde(rename = "group.memberRemoved")]
     GroupMemberRemoved(GroupMemberChangeData),
+    #[serde(rename = "card.actioned")]
+    CardActioned(CardActionedData),
+    #[serde(rename = "artifact.created")]
+    ArtifactCreated(ArtifactEventData),
+    #[serde(rename = "artifact.versionAdded")]
+    ArtifactVersionAdded(ArtifactEventData),
 }
 
 impl EventData {
@@ -60,6 +69,9 @@ impl EventData {
             Self::GroupUpdated(_) => "group.updated",
             Self::GroupMemberAdded(_) => "group.memberAdded",
             Self::GroupMemberRemoved(_) => "group.memberRemoved",
+            Self::CardActioned(_) => "card.actioned",
+            Self::ArtifactCreated(_) => "artifact.created",
+            Self::ArtifactVersionAdded(_) => "artifact.versionAdded",
         }
     }
 }
@@ -70,7 +82,7 @@ pub struct TopicCreatedData {
     pub topic: Topic,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicUpdatedData {
     pub topic_id: String,
@@ -86,6 +98,27 @@ pub struct TopicUpdatedData {
         skip_serializing_if = "Option::is_none"
     )]
     pub status: Option<TopicStatus>,
+    /// Present = the new `waitingOn` (replaces the old list).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub waiting_on: Option<Vec<String>>,
+    /// Present = the new owner; `Some(None)` = cleared.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub owner_id: Option<Option<String>>,
+    /// Present when the server recomputed it (for example after a delete).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_message_at: Option<Millis>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,13 +127,47 @@ pub struct MessageCreatedData {
     pub message: Message,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageUpdatedData {
     pub message_id: String,
     pub body: String,
     pub edited_at: Millis,
     pub streaming: bool,
+    /// Present = replaced with this value; absent = unchanged.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub attachments: Option<Vec<FileRef>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub artifact_refs: Option<Vec<ArtifactRef>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card: Option<Card>,
+}
+
+/// Data of `card.actioned`. The event's `actorId` is the member who pressed.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CardActionedData {
+    pub message_id: String,
+    pub action_id: String,
+    /// The action's `value`.
+    #[serde(
+        default,
+        deserialize_with = "any_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub value: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -1,0 +1,11 @@
+{
+  "kind": "Card",
+  "valid": false,
+  "description": "unknown tone",
+  "value": {
+    "v": 1,
+    "title": "构建",
+    "blocks": [],
+    "tone": "pink"
+  }
+}

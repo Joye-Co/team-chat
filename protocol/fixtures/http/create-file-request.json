@@ -1,0 +1,14 @@
+{
+  "kind": "CreateFileRequest",
+  "valid": true,
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "name": "截图 2026-11-03.png",
+    "size": 482113,
+    "mime": "image/png",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "width": 1920,
+    "height": 1080
+  }
+}

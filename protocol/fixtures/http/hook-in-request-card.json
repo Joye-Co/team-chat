@@ -1,0 +1,13 @@
+{
+  "kind": "HookInRequest",
+  "valid": true,
+  "description": "card only, into a topic",
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "card": {
+      "v": 1,
+      "title": "构建",
+      "blocks": []
+    }
+  }
+}

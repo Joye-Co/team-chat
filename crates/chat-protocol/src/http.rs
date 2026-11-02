@@ -196,3 +196,90 @@ impl CreateDmRequest {
         check_id("memberId", &self.member_id)
     }
 }
+
+/// `PATCH /v1/members/:id` and `PUT /v1/members/:id/avatar`
+pub type MemberResponse = Member;
+
+/// `POST /v1/groups/:id/messages`: the `send` frame without `t`, `rid` and `groupId`.
+/// Response: [`crate::SendResult`].
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PostMessageRequest {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub topic_id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub title: Option<String>,
+    pub client_msg_id: String,
+    pub body: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub mentions: Option<Vec<String>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub streaming: Option<bool>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reply_to: Option<crate::ReplyToRef>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub attachments: Option<Vec<crate::FileRef>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub artifact_refs: Option<Vec<crate::ArtifactRef>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card: Option<crate::Card>,
+}
+
+impl PostMessageRequest {
+    /// The same checks as a `send` frame.
+    pub fn validate(&self) -> Validation {
+        self.clone()
+            .into_send_frame("r".into(), "g".into())
+            .validate()
+    }
+
+    /// The equivalent `send` frame.
+    pub fn into_send_frame(self, rid: String, group_id: String) -> crate::ClientFrame {
+        crate::ClientFrame::Send(crate::SendFrame {
+            rid,
+            group_id,
+            topic_id: self.topic_id,
+            title: self.title,
+            client_msg_id: self.client_msg_id,
+            body: self.body,
+            mentions: self.mentions,
+            streaming: self.streaming,
+            reply_to: self.reply_to,
+            attachments: self.attachments,
+            artifact_refs: self.artifact_refs,
+            card: self.card,
+        })
+    }
+}

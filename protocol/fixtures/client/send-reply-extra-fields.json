@@ -1,0 +1,29 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "the client sends only replyTo.messageId; other replyTo fields are dropped",
+  "value": {
+    "t": "send",
+    "rid": "r42",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "同意",
+    "replyTo": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "authorId": "01JBX0OWNER0000000000000AA",
+      "excerpt": "大家好 👋"
+    }
+  },
+  "normalized": {
+    "t": "send",
+    "rid": "r42",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "同意",
+    "replyTo": {
+      "messageId": "01JBX0MSG000000000000000AE"
+    }
+  }
+}

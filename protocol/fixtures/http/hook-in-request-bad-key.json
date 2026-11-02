@@ -1,0 +1,9 @@
+{
+  "kind": "HookInRequest",
+  "valid": false,
+  "description": "topic key with a space",
+  "value": {
+    "topicKey": "a key",
+    "body": "x"
+  }
+}

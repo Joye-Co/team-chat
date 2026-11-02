@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateGroupPrefsRequest",
+  "valid": false,
+  "description": "unknown notify level",
+  "value": {
+    "notify": "loud"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "CreateHookRequest",
+  "valid": true,
+  "value": {
+    "name": "GitHub",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "kind": "github"
+  }
+}

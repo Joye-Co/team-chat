@@ -1,0 +1,17 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "ack of topic.follow: result is a TopicState",
+  "value": {
+    "t": "ack",
+    "rid": "r23",
+    "ok": true,
+    "result": {
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "readSeq": 40,
+      "unread": 2,
+      "mentions": 1,
+      "following": true
+    }
+  }
+}

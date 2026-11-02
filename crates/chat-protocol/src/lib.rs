@@ -11,20 +11,42 @@
 //! Parse a server frame with [`parse_server_frame`]; encode a client frame with
 //! [`encode_client_frame`], which runs [`ClientFrame::validate`] first.
 
+pub mod audit;
+pub mod card;
+pub mod diagnostics;
 pub mod entities;
 pub mod errors;
 pub mod events;
+pub mod files;
 pub mod frames;
+pub mod hooks;
 pub mod http;
 pub mod limits;
+pub mod members;
+pub mod message;
+pub mod reads;
+pub mod search;
 mod serde_util;
+pub mod topic;
+pub mod updates;
 
+pub use audit::*;
+pub use card::*;
+pub use diagnostics::*;
 pub use entities::*;
 pub use errors::*;
 pub use events::*;
+pub use files::*;
 pub use frames::*;
+pub use hooks::*;
 pub use http::*;
 pub use limits::*;
+pub use members::*;
+pub use message::*;
+pub use reads::*;
+pub use search::*;
 pub use serde_util::{ProtocolV1, True};
+pub use topic::*;
+pub use updates::*;
 
 pub const PROTOCOL_VERSION: u32 = 1;

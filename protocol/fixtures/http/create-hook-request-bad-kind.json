@@ -1,0 +1,10 @@
+{
+  "kind": "CreateHookRequest",
+  "valid": false,
+  "description": "unknown hook kind",
+  "value": {
+    "name": "x",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "kind": "gitlab"
+  }
+}

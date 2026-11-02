@@ -93,6 +93,9 @@ Event = { seq: number, groupId: string, at: number, actorId: string } & (
 )
 ```
 
+V1 adds `card.actioned`, `artifact.created` and `artifact.versionAdded`, and new optional fields
+on several entities, frames and events: see [V1 extensions](#v1-extensions).
+
 Transient events are delivered once, have no `seq` and are never stored:
 
 ```ts
@@ -199,3 +202,402 @@ log records `group.memberAdded` / `group.memberRemoved`.
   SHA-256 digest, single use, expires after 7 days.
 - Bootstrap: the first owner is made with `POST /v1/admin/bootstrap`, protected by the
   `ADMIN_SECRET` Worker secret. It also makes a group called "General".
+
+# V1 extensions
+
+Everything below is additive: the protocol stays version 1, every new field is optional, and
+old clients ignore fields and frames they do not know. Each area has its own Zod module in
+`packages/protocol/src/<area>.ts` and its own Rust module in `crates/chat-protocol/src/`.
+"Absent means X" below is the default a reader applies; writers may omit a field that has its
+default value. Unless a rule says otherwise, a frame that breaks a rule gets `ack` with
+`ok: false` and code `invalid` (bad value), `forbidden` (not allowed), `not_found` (unknown id or
+not a member of the group) or `too_large`.
+
+## Topics: waitingOn, owner, follow
+
+Module: `topic.ts` / `topic.rs`.
+
+```ts
+Topic += {
+  waitingOn?: string[]          // member ids the topic waits on; absent = []; at most 20
+  ownerId?: string | null       // the one responsible member; absent or null = none
+  lastMessageAt?: number        // createdAt of the newest non-deleted message
+}
+{ t: "topic.update", ..., waitingOn?: string[], ownerId?: string | null }
+  // present = replace the whole list / set the owner; null clears the owner
+topic.updated data += { waitingOn?: string[], ownerId?: string | null, lastMessageAt?: number }
+  // present = changed to this value
+{ t: "topic.follow", rid, groupId, topicId, follow: boolean }   // ack.result = TopicState
+```
+
+Rules:
+
+- Any group member may send `topic.update`. Every id in `waitingOn` and `ownerId` must be a
+  current member of the group (`invalid` otherwise). Duplicates in `waitingOn` are removed.
+- The server sets `ownerId` to the creator when it creates a topic. A bot that takes the work
+  sets itself as owner with `topic.update`.
+- The server does not emit `topic.updated` per message. Clients set `lastMessageAt` from each
+  `message.created` (its `createdAt`). When the newest message is deleted the server emits
+  `topic.updated` with the recomputed `lastMessageAt` (omitted when no message is left).
+- Status chips (PRODUCT.md) use `status` together with `waitingOn`.
+- `topic.follow` sets my follow state for one topic; the server answers with my `TopicState` and
+  sends a `reads` frame to my other connections. Auto-follow: the server sets `following` to true
+  when I create the topic, post in it, am mentioned in it, am added to its `waitingOn`, or become
+  its owner. An explicit unfollow stays until the next of these.
+
+## Read positions per topic
+
+Module: `reads.ts` / `reads.rs`.
+
+```ts
+TopicState = {
+  topicId: string
+  readSeq: number       // messages of this topic with createdSeq <= readSeq are read
+  unread: number        // unread messages in this topic not written by me
+  mentions: number      // of those, the ones that mention me
+  following?: boolean   // absent = false
+}
+GroupSummary += { topics?: TopicState[] }
+{ t: "read", groupId, seq, topicId?: string }                       // client, no ack
+{ t: "reads", groupId, readSeq, unread, mentions, topics: TopicState[] }   // server
+```
+
+Rules:
+
+- The effective read position of a topic is `max(group readSeq, topic readSeq)`. Unread counts
+  `message.created` events in the topic with `createdSeq` above that position, not written by me,
+  not deleted and with `kind` not `system`. `mentions` counts the unread ones that mention me.
+- `read` without `topicId` moves the group `readSeq` forward to `seq` (all topics up to `seq`
+  are read). With `topicId` it moves only that topic's position forward to `seq`; the group
+  `readSeq` does not change. Positions never move back; a `seq` above the group's `lastSeq` is
+  cut to `lastSeq`.
+- `GroupSummary.unread` and `.mentions` are group totals: the sums over all topics.
+  `GroupSummary.readSeq` is the group cursor.
+- `GroupSummary.topics` (in `welcome`, `directory` and `GET /v1/groups`) lists every topic with
+  `unread > 0`, `mentions > 0` or `following`. A topic that is not listed has no unread
+  messages, no mentions and is not followed.
+- After a `read` or `topic.follow` changes my state, the server sends `reads` to every connection
+  of mine (all devices, the sender too). `topics` holds only the topics that changed; for a
+  group-wide read it may be empty, and the client then sets every topic's unread and mentions to
+  0 for topics with `lastSeq <= readSeq`. The totals in `reads` are always the new group totals.
+- Between `reads` frames, clients count new `message.created` events themselves with the rule
+  above. The server is the source of truth on the next `welcome`, `directory` or `reads`.
+
+## Messages: quotes, attachments, cards
+
+Module: `message.ts` / `message.rs`.
+
+```ts
+MessageKind = "text" | "card" | "system"
+ReplyTo = { messageId: string, authorId: string, excerpt: string }   // excerpt <= 200 code points
+FileRef = { fileId, name, size, mime, width?, height?, sha256 }       // name 1..255, sha256 = 64 lowercase hex
+ArtifactRef = { artifactId: string, version: number }                // version >= 1
+
+Message += {
+  kind?: MessageKind            // absent = "text"
+  replyTo?: ReplyTo
+  attachments?: FileRef[]       // at most 20; absent = []
+  artifactRefs?: ArtifactRef[]  // at most 20; absent = []
+  card?: Card                   // present exactly when kind = "card"
+}
+{ t: "send", ..., replyTo?: { messageId }, attachments?: FileRef[], artifactRefs?: ArtifactRef[], card?: Card }
+{ t: "edit", ..., attachments?: FileRef[], artifactRefs?: ArtifactRef[], card?: Card }
+  // present = replace; absent = keep
+message.updated data += { attachments?, artifactRefs?, card? }   // present = replaced with this value
+```
+
+Rules:
+
+- `kind` is not sent by clients. The server sets `card` when `send` has a card, `text`
+  otherwise. Only the server makes `system` messages (for example member joins).
+- For a card message `body` is the plain-text fallback that old clients, notifications and search
+  use. When `body` is empty the server stores the card title as `body`.
+- `replyTo`: the client sends only `messageId` (other fields are dropped). The message must be in
+  the same group and not deleted. The server fills `authorId` and `excerpt` (the first 200 code
+  points of the quoted body, or of the card title).
+- `attachments`: each `fileId` must be a `ready` file of the same group (`invalid` otherwise).
+  The server stores its own record for name, size, mime, width, height and sha256 and ignores the
+  client's values for those fields.
+- `artifactRefs`: each must name an existing 产出 of the same group and an existing version.
+- `edit` with `card` is allowed only on a card message and only for its author. `edit` cannot
+  change `kind` or `replyTo`.
+
+## Cards
+
+Module: `card.ts` / `card.rs`.
+
+```ts
+Card = {
+  v: 1
+  title: string                                // 1..200
+  tone?: "neutral" | "info" | "success" | "warning" | "danger"   // absent = "neutral"
+  status?: { label: string }                   // 1..40
+  blocks: CardBlock[]                          // at most 50
+  actions?: CardAction[]                       // at most 10, ids unique
+}
+CardBlock =
+  | { type: "text", text }                                     // Markdown, <= 8000
+  | { type: "fields", fields: { label, value }[] }             // 1..50; label 1..100, value <= 1000
+  | { type: "table", columns: string[], rows: string[][] }     // 1..20 columns (<= 100 each),
+                                                               // <= 200 rows, one cell per column (<= 1000)
+  | { type: "list", items: { text, status? }[] }               // 1..200; text 1..1000;
+                                                               // status: todo | in_progress | done | failed | skipped
+  | { type: "progress", value: number, label? }                // value 0..1; label <= 200
+  | { type: "code", lang?, text }                              // lang <= 32, text <= 32768
+  | { type: "image", fileId, alt? }                            // a ready image file of the group; alt <= 500
+  | { type: "divider" }
+  | { type: "link", label, target }                            // label 1..200
+LinkTarget =
+  | { kind: "url", url }                                       // http:// or https:// only, <= 2048
+  | { kind: "topic", groupId, topicId }
+  | { kind: "artifact", artifactId, version? }                 // absent version = current
+CardAction = {
+  id: string            // 1..64 of [A-Za-z0-9_.:-]
+  label: string         // 1..40
+  style?: "primary" | "default" | "danger"     // absent = "default"
+  confirm?: string      // 1..200; the client asks this question before it sends the action
+  value?: JSON          // any JSON, at most 4 KiB as JSON text
+}
+{ t: "card.action", rid, groupId, messageId, actionId, value?: JSON }   // ack, no result
+card.actioned (stored event) data: { messageId, actionId, value?: JSON }  // actorId = presser
+```
+
+Rules:
+
+- A card is at most 64 KiB: the UTF-8 length of its JSON text. Larger cards get `too_large`.
+- Readers render an unknown block type as nothing (Rust: `CardBlock::Unknown`) so new block
+  types can be added; the server rejects unknown block types on write.
+- Text is Markdown only in `text` blocks; every other string is plain text.
+- `card.action`: any group member may press. The message must be a card message that is not
+  deleted, and `actionId` must exist in its current card (`not_found` otherwise). `value` in the
+  frame is ignored in V1: the event carries the action's own `value`. At most one press per
+  member per message per second (`rate_limited`).
+- The card's author (usually a bot) gets the `card.actioned` event like every member and reacts,
+  usually by an `edit` with a new card (for example without the actions, or with a new status).
+
+## Files
+
+Module: `files.ts` / `files.rs`. All endpoints need a member token; the member must be in the
+file's group.
+
+| Method and path | Body | Response |
+| --- | --- | --- |
+| `POST /v1/files` | `CreateFileRequest { groupId, topicId?, name, size, mime, sha256, width?, height? }` | `CreateFileResponse { file: FileMeta, uploadUrl }` |
+| `PUT /v1/files/:id/content` | raw bytes | `FileMeta` with `status: "ready"` |
+| `GET /v1/files/:id` | | `FileMeta` |
+| `GET /v1/files/:id/content` | | the bytes; supports `Range` (206) |
+| `PUT /v1/members/:id/avatar` | raw image bytes | `Member` (new `avatarUrl`) |
+| `GET /v1/members/:id/avatar` | | the image |
+
+```ts
+FileMeta = { id, groupId, topicId?: string | null, name, size, mime, sha256, width?, height?,
+             status: "pending" | "ready", createdBy, createdAt }
+```
+
+Rules:
+
+- `size` is at most 100,000,000 bytes (100 MB; the Workers request body limit, so not 100 MiB).
+  `mime` is `type/subtype`. `width`/`height` are pixels, for images only.
+- `uploadUrl` is the absolute URL of `PUT /v1/files/:id/content`; send it with the same bearer
+  token. Only the file's creator may upload, once (`conflict` when already `ready`). The server
+  checks that the body length equals `size` and its SHA-256 equals `sha256` (`invalid`
+  otherwise, and the file stays `pending`). A `pending` file is deleted after 24 hours.
+- Downloads send `Content-Type` from `mime`, `X-Content-Type-Options: nosniff`, and
+  `Content-Disposition: attachment` except for `image/png`, `image/jpeg`, `image/gif` and
+  `image/webp`. Files are never served as `text/html` inline from the API origin.
+- Avatars: self or an owner; `image/png`, `image/jpeg` or `image/webp`, at most 1 MiB. The server
+  sets `avatarUrl` to `/v1/members/:id/avatar?v=<n>` (absolute) and pushes a `directory` frame with
+  the member. Reading an avatar needs a member token.
+
+## 产出 (artifacts)
+
+Module: `files.ts` / `files.rs`. A 产出 is made from uploaded files (`POST /v1/files` first).
+
+```ts
+Artifact = { id, groupId, topicId, title, kind: "html" | "file", currentVersion, createdBy, createdAt, updatedAt }
+ArtifactVersion = { artifactId, version, entry, files: { path, fileId, size, mime }[], note?, createdBy, createdAt }
+```
+
+| Method and path | Body | Response |
+| --- | --- | --- |
+| `POST /v1/artifacts` | `CreateArtifactRequest { groupId, topicId, title, kind, entry, files: { path, fileId }[], note? }` | `ArtifactVersionResponse { artifact, version }` (version 1) |
+| `POST /v1/artifacts/:id/versions` | `AddArtifactVersionRequest { entry, files, note?, title? }` | `ArtifactVersionResponse` |
+| `GET /v1/artifacts?groupId=&topicId=` | | `Artifact[]` (topicId optional), newest `updatedAt` first |
+| `GET /v1/artifacts/:id` | | `ArtifactResponse { artifact, versions }`, newest version first |
+| `GET /v1/artifacts/:id/versions/:v/files/*path` | | the file bytes |
+
+Rules:
+
+- Any member of the group may create a 产出 or add a version. `title` 1..200; `note` <= 2000.
+- `files`: 1..500 entries; each `fileId` is a `ready` file of the same group; paths are unique,
+  1..255 characters, relative: split by `/`, no empty, `.` or `..` segment, no `\` or NUL.
+  `entry` must be one of the paths. For kind `file` there is exactly one file and `entry` is
+  its path. For kind `html` the `entry` file has mime `text/html`.
+- `size` and `mime` in a version come from the file records.
+- The group log records `artifact.created { artifact, version }` and
+  `artifact.versionAdded { artifact, version }` (`actorId` = who made it), so clients update
+  the side panel from events.
+- File responses for an `html` 产出 send `Content-Security-Policy: sandbox; default-src 'none';
+  img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline';
+  font-src 'self' data:` and `nosniff`. The desktop window loads them through its own scheme with
+  no network (see crates/artifact-view); the CSP protects browsers that open the URL.
+
+## Members and preferences
+
+Module: `members.ts` / `members.rs`.
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated? }` | `Member` |
+| `PATCH /v1/groups/:id/prefs` | group member, for self | `UpdateGroupPrefsRequest { muted?, notify? }` | `GroupSummary` |
+
+```ts
+NotifyLevel = "all" | "mentions" | "none"
+GroupSummary += { muted?: boolean, notify?: NotifyLevel }
+  // absent: muted false; notify "all" for a DM, "mentions" for a group
+```
+
+Rules:
+
+- `role` is at most 64 characters; `null` clears it. The server answers `conflict` when the
+  change would leave no active owner. Deactivating a member revokes its tokens and closes its
+  connections. Every change is audited and pushed to every connection as `directory` with the
+  changed `members`.
+- Prefs are per member. The server pushes the new `GroupSummary` to my other connections as a
+  `directory` frame.
+
+## Notifications
+
+Module: `members.ts` / `members.rs`. The server decides; clients only show what it marks.
+
+```ts
+NotifyReason = "mention" | "waiting" | "result" | "message"
+{ t: "event", event, notify?: NotifyReason }    // present = show a notification
+```
+
+The member gateway sets `notify` per receiving member on live `event` frames only (never on
+`page`). No notification for an event whose `actorId` is me, in a muted group, or when my level
+is `none`. Otherwise, the first rule that matches wins:
+
+1. `mention`: `message.created` that mentions me.
+2. `waiting`: `topic.updated` whose `waitingOn` now includes me and did not before.
+3. `result`: in a topic I follow, `topic.updated` to status `done`, or `artifact.created` /
+   `artifact.versionAdded`.
+4. `message`: `message.created` (kind not `system`) when my level is `all` (the DM default).
+
+Streaming messages notify once, on `message.created`. A client may still skip showing a
+notification while the topic is open and the window is focused. New reasons may be added later;
+clients treat an unknown reason as `message` (Rust readers get a parse error on an unknown value,
+so the server adds a reason only together with a client release).
+
+## Search
+
+Module: `search.ts` / `search.rs`.
+
+```ts
+{ t: "search", rid, query, groupId?, topicId?, limit? }
+  // query 1..200; topicId needs groupId; limit 1..50, default 20
+{ t: "searchResults", rid, hits: SearchHit[] }   // best match first
+SearchHit = { groupId, topicId, messageId, authorId, snippet, highlights?: { start, length }[], createdAt, seq }
+```
+
+Rules: only groups I am a member of; without `groupId` all of mine. Deleted messages are not
+found. `snippet` is plain text (<= 300 code points) around the match; `highlights` are code-point
+ranges in it. `seq` is the message's `createdSeq`. Errors come as an `ack` with `ok: false` and
+the same `rid`. Search matches Chinese two-character words (packages/search).
+
+## Updates and downloads
+
+Module: `updates.ts` / `updates.rs`.
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/updates/latest` | member | | `UpdateInfo`; 404 when no release exists |
+| `GET /v1/updates/:version/download` | member | | the DMG (`Range` supported) |
+| `PUT /v1/admin/releases/:version` | header `X-Admin-Secret` | raw DMG; headers `X-Sha256` (hex), `X-Release-Notes` (base64 of UTF-8 Markdown) | `UpdateInfo` |
+| `GET /download?code=<invite code>` | anyone with a valid invite code | | the latest DMG |
+
+```ts
+UpdateInfo = { version, notes, size, sha256, publishedAt, downloadUrl }
+  // version "MAJOR.MINOR.PATCH" without leading zeros; notes Markdown <= 20,000; downloadUrl absolute
+```
+
+Rules: latest = the highest version by numeric comparison. A `PUT` of an existing version is
+`conflict`. The server checks the body's SHA-256 against `X-Sha256` (`invalid` otherwise) and
+the body is at most 100 MB. `GET /download` accepts an invite code that is not expired (used or
+not), is rate limited per IP, answers 404 with a plain-text body for a bad code, and sends
+`Content-Disposition: attachment; filename="<slug>-<version>.dmg"`. Logs must redact the `code`
+query parameter. Every publish is audited.
+
+## Diagnostics
+
+Module: `diagnostics.ts` / `diagnostics.rs`.
+
+`POST /v1/diagnostics` (member): body is gzip of UTF-8 text, `Content-Type: application/gzip`,
+at most 5 MiB compressed (`too_large`). Response `DiagnosticsResponse { id }`. The client removes
+tokens, invite codes and secrets before upload. `GET /v1/diagnostics/:id` (owner) returns the
+gzip body. At most 10 uploads per member per hour.
+
+## Integrations
+
+Module: `hooks.ts` / `hooks.rs`.
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/hooks` | owner | `CreateHookRequest { name, groupId, topicId?, kind: "generic" \| "github" }` | `CreateHookResponse { hook, url, secret }` |
+| `GET /v1/hooks` | owner | | `Hook[]` |
+| `DELETE /v1/hooks/:id` | owner | | `{ ok: true }` |
+| `POST /v1/hooks/:id/in` | header `X-Hook-Secret` | `HookInRequest` | `SendResult` |
+| `POST /v1/hooks/:id/github` | header `X-Hub-Signature-256` | GitHub webhook JSON | `{ ok: true }` |
+| `POST /v1/groups/:id/messages` | group member | `PostMessageRequest` | `SendResult` |
+
+```ts
+Hook = { id, name, kind, groupId, topicId?: string | null, memberId, createdBy, createdAt, lastUsedAt?: number | null }
+HookInRequest = { topicId?, topicKey?, title?, body?, card?, clientMsgId? }
+  // topicId and topicKey exclude each other; body (non-empty) or card is required
+  // topicKey: 1..128 of [A-Za-z0-9_.:#/-]
+PostMessageRequest = send frame without t, rid and groupId
+  // { topicId?, title?, clientMsgId, body, mentions?, streaming?, replyTo?, attachments?, artifactRefs?, card? }
+```
+
+Rules:
+
+- Creating a hook makes a bot member (`kind: "bot"`, name = hook name, level `member`) that is
+  added to the group; `Hook.memberId` is that member and its posts carry that `authorId`.
+  Deleting the hook deactivates that member. `url` is the absolute URL of `/in` (generic) or
+  `/github` (github). A generic hook rejects `/github` and the reverse (`not_found`).
+- `secret` is `whk_` + 43 base64url characters, shown only in the create response. Because GitHub
+  signs with the raw secret, the server stores it encrypted with a Worker secret, not as a digest.
+  Comparisons are constant-time. A wrong secret or signature is `unauthorized`.
+- `/in` topic choice: `topicId` (a topic of the hook's group); else `topicKey` (the first post
+  with a new key starts a topic titled `title`, later posts go to that topic; keys are per hook);
+  else the hook's `topicId`; else a new topic. `clientMsgId` dedupes per hook as for `send`.
+- `/github` handles `pull_request`, `pull_request_review`, `check_suite`, `workflow_run` and
+  `ping`; others answer `{ ok: true }` and are dropped. One topic per pull request with topic key
+  `github:<owner>/<repo>#<number>`; CI results go to the topic of the pull request of their head
+  commit, else to `github:<owner>/<repo>@<branch>`. Posts are card messages.
+- `POST /v1/groups/:id/messages` runs exactly the `send` path (same checks, idempotency and
+  events) for bots and scripts. Hook and HTTP posts are rate limited per credential.
+
+## Audit
+
+Module: `audit.ts` / `audit.rs`.
+
+`GET /v1/audit?limit=&before=` (owner): `AuditResponse { entries, hasMore }`, newest first.
+`limit` 1..200 (default 50); `before` is an entry id (entries older than it).
+
+```ts
+AuditEntry = {
+  id, at
+  actorId: string | null         // the member whose credential made the write; null = admin secret
+  requestedBy?: string | null    // the member who asked, when a bot acted for someone
+  credential: { kind: "token" | "admin" | "hook" | "invite", id?: string }   // record id, never the secret
+  action: string                 // e.g. member.update, hook.create, release.publish
+  target?: { kind: string, id: string }
+  groupId?: string
+  details?: Record<string, JSON> // what changed, e.g. { level: ["member", "owner"] }; secrets removed
+}
+```
+
+Every HTTP write and every admin action is audited. Message writes over WebSocket are in the group
+log and are not repeated in the audit log.

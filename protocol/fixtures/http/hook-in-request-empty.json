@@ -1,0 +1,8 @@
+{
+  "kind": "HookInRequest",
+  "valid": false,
+  "description": "body or card is required",
+  "value": {
+    "topicKey": "k"
+  }
+}

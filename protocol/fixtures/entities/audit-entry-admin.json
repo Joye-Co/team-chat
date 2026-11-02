@@ -1,0 +1,17 @@
+{
+  "kind": "AuditEntry",
+  "valid": true,
+  "description": "admin secret: no actor",
+  "value": {
+    "id": "01JBX0AUDIT0000000000000AQ",
+    "at": 1762128000000,
+    "actorId": null,
+    "credential": {
+      "kind": "admin"
+    },
+    "action": "release.publish",
+    "details": {
+      "version": "1.2.10"
+    }
+  }
+}

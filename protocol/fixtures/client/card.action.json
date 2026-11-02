@@ -1,0 +1,15 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "card.action",
+    "rid": "r30",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AF",
+    "actionId": "approve",
+    "value": {
+      "pr": 128,
+      "ok": true
+    }
+  }
+}

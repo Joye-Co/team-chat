@@ -1,0 +1,31 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "description": "card and references replaced",
+  "value": {
+    "seq": 42,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0BOT000000000000000AC",
+    "type": "message.updated",
+    "data": {
+      "messageId": "01JBX0MSG000000000000000AF",
+      "body": "CI 失败",
+      "editedAt": 1762128009000,
+      "streaming": false,
+      "card": {
+        "v": 1,
+        "title": "构建",
+        "blocks": [],
+        "tone": "danger"
+      },
+      "attachments": [],
+      "artifactRefs": [
+        {
+          "artifactId": "01JBX0ART000000000000000AM",
+          "version": 2
+        }
+      ]
+    }
+  }
+}

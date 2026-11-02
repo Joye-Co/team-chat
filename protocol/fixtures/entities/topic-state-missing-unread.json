@@ -1,0 +1,10 @@
+{
+  "kind": "TopicState",
+  "valid": false,
+  "description": "missing unread",
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "readSeq": 1,
+    "mentions": 0
+  }
+}

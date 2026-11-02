@@ -1,0 +1,30 @@
+{
+  "kind": "PostMessageRequest",
+  "valid": true,
+  "value": {
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "构建完成",
+    "mentions": [
+      "01JBX0ALICE0000000000000AB"
+    ],
+    "replyTo": {
+      "messageId": "01JBX0MSG000000000000000AE"
+    },
+    "attachments": [
+      {
+        "fileId": "01JBX0FILE00000000000000AJ",
+        "name": "spec.pdf",
+        "size": 0,
+        "mime": "application/pdf",
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    ],
+    "artifactRefs": [
+      {
+        "artifactId": "01JBX0ART000000000000000AM",
+        "version": 2
+      }
+    ]
+  }
+}

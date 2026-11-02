@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "empty actionId",
+  "value": {
+    "t": "card.action",
+    "rid": "r33",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AF",
+    "actionId": ""
+  }
+}

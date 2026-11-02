@@ -1,0 +1,10 @@
+{
+  "kind": "CreateHookRequest",
+  "valid": true,
+  "value": {
+    "name": "部署",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "kind": "generic"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "kind": "Topic",
+  "valid": true,
+  "description": "empty waitingOn, owner explicitly cleared",
+  "value": {
+    "id": "01JBX0TOPIC0000000000000AD",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "title": "发布 V1：检查清单 ✅",
+    "status": "in_progress",
+    "createdBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "rootMessageId": "01JBX0MSG000000000000000AE",
+    "lastSeq": 42,
+    "messageCount": 7,
+    "waitingOn": [],
+    "ownerId": null
+  }
+}

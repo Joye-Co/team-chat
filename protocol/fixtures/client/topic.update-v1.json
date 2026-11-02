@@ -1,0 +1,15 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "topic.update",
+    "rid": "r20",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "status": "waiting_review",
+    "waitingOn": [
+      "01JBX0OWNER0000000000000AA"
+    ],
+    "ownerId": "01JBX0BOT000000000000000AC"
+  }
+}

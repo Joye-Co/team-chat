@@ -1,0 +1,11 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "description": "owner changes every field",
+  "value": {
+    "name": "小王",
+    "role": "前端工程师",
+    "level": "owner",
+    "deactivated": false
+  }
+}

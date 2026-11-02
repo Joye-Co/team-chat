@@ -1,0 +1,14 @@
+{
+  "kind": "AddArtifactVersionRequest",
+  "valid": false,
+  "description": "unsafe entry path",
+  "value": {
+    "entry": "../index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JBX0FILE00000000000000AH"
+      }
+    ]
+  }
+}

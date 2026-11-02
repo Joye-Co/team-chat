@@ -1,0 +1,12 @@
+{
+  "kind": "CreateFileRequest",
+  "valid": false,
+  "description": "mime without subtype",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "name": "a",
+    "size": 1,
+    "mime": "text",
+    "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  }
+}

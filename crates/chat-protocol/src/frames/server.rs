@@ -6,10 +6,14 @@ use serde::{Deserialize, Serialize};
 use crate::entities::{GroupSummary, Member, Message, Millis, Seq, Topic};
 use crate::errors::ErrorBody;
 use crate::events::{Event, TransientEvent};
+use crate::members::NotifyReason;
+use crate::reads::ReadsFrame;
+use crate::search::SearchResultsFrame;
 use crate::serde_util::{ProtocolV1, any_value, non_null};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "t")]
+#[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 pub enum ServerFrame {
     #[serde(rename = "welcome")]
     Welcome(WelcomeFrame),
@@ -29,6 +33,10 @@ pub enum ServerFrame {
     Error(ErrorFrame),
     #[serde(rename = "pong")]
     Pong,
+    #[serde(rename = "reads")]
+    Reads(ReadsFrame),
+    #[serde(rename = "searchResults")]
+    SearchResults(SearchResultsFrame),
 }
 
 impl ServerFrame {
@@ -44,6 +52,8 @@ impl ServerFrame {
             Self::Directory(_) => "directory",
             Self::Error(_) => "error",
             Self::Pong => "pong",
+            Self::Reads(_) => "reads",
+            Self::SearchResults(_) => "searchResults",
         }
     }
 }
@@ -62,6 +72,13 @@ pub struct WelcomeFrame {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EventFrame {
     pub event: Event,
+    /// Present = show a notification for this event, for this reason.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub notify: Option<NotifyReason>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -91,6 +108,16 @@ pub enum AckOutcome {
 impl AckFrame {
     pub fn is_ok(&self) -> bool {
         matches!(self.outcome, AckOutcome::Ok { .. })
+    }
+
+    /// Decodes `result` as `T`, for example a [`crate::TopicState`] for `topic.follow`.
+    pub fn result_as<T: serde::de::DeserializeOwned>(
+        &self,
+    ) -> Option<Result<T, serde_json::Error>> {
+        match &self.outcome {
+            AckOutcome::Ok { result: Some(v) } => Some(serde_json::from_value(v.clone())),
+            _ => None,
+        }
     }
 
     /// Decodes `result` as the answer to a `send` frame.

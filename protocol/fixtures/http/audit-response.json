@@ -1,0 +1,43 @@
+{
+  "kind": "AuditResponse",
+  "valid": true,
+  "value": {
+    "entries": [
+      {
+        "id": "01JBX0AUDIT0000000000000AQ",
+        "at": 1762128000000,
+        "actorId": "01JBX0BOT000000000000000AC",
+        "requestedBy": "01JBX0ALICE0000000000000AB",
+        "credential": {
+          "kind": "token",
+          "id": "01JBX0TOKEN0000000000000AT"
+        },
+        "action": "member.update",
+        "target": {
+          "kind": "member",
+          "id": "01JBX0ALICE0000000000000AB"
+        },
+        "details": {
+          "level": [
+            "member",
+            "owner"
+          ],
+          "note": null
+        }
+      },
+      {
+        "id": "01JBX0AUDIT0000000000000AQ",
+        "at": 1762128000000,
+        "actorId": null,
+        "credential": {
+          "kind": "admin"
+        },
+        "action": "release.publish",
+        "details": {
+          "version": "1.2.10"
+        }
+      }
+    ],
+    "hasMore": true
+  }
+}

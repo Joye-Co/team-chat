@@ -1,0 +1,11 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "limit: 51 hits",
+  "value": {
+    "t": "search",
+    "rid": "r53",
+    "query": "x",
+    "limit": 51
+  }
+}

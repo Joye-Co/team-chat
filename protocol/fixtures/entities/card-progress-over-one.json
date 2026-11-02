@@ -1,0 +1,15 @@
+{
+  "kind": "Card",
+  "valid": false,
+  "description": "limit: progress above 1",
+  "value": {
+    "v": 1,
+    "title": "构建",
+    "blocks": [
+      {
+        "type": "progress",
+        "value": 1.5
+      }
+    ]
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "kind": "AddArtifactVersionRequest",
+  "valid": true,
+  "value": {
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JBX0FILE00000000000000AH"
+      },
+      {
+        "path": "assets/app.css",
+        "fileId": "01JBX0FILE00000000000000AJ"
+      },
+      {
+        "path": "assets/图.png",
+        "fileId": "01JBX0FILE00000000000000AK"
+      }
+    ],
+    "note": "修正错别字",
+    "title": "发布说明 v2"
+  }
+}

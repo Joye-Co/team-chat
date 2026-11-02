@@ -1,0 +1,9 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "searchResults",
+    "rid": "r51",
+    "hits": []
+  }
+}

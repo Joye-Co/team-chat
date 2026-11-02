@@ -1,0 +1,12 @@
+{
+  "kind": "ServerFrame",
+  "valid": false,
+  "description": "missing topics",
+  "value": {
+    "t": "reads",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "readSeq": 40,
+    "unread": 0,
+    "mentions": 0
+  }
+}

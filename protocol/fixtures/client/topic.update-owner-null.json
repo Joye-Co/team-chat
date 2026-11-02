@@ -1,0 +1,13 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "clear owner and waitingOn",
+  "value": {
+    "t": "topic.update",
+    "rid": "r21",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "ownerId": null,
+    "waitingOn": []
+  }
+}

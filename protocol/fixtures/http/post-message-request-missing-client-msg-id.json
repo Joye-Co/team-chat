@@ -1,0 +1,8 @@
+{
+  "kind": "PostMessageRequest",
+  "valid": false,
+  "description": "missing clientMsgId",
+  "value": {
+    "body": "x"
+  }
+}

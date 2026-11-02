@@ -9,7 +9,7 @@
     "topicId": "01JBX0TOPIC0000000000000AD",
     "clientMsgId": "01JBX0CMID00000000000000AG",
     "body": "hi",
-    "attachments": [],
+    "labels": [],
     "priority": 3
   },
   "normalized": {

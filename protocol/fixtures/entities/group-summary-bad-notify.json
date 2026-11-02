@@ -1,0 +1,24 @@
+{
+  "kind": "GroupSummary",
+  "valid": false,
+  "description": "unknown notify level",
+  "value": {
+    "group": {
+      "id": "01JBX0GENERAL000000000000A",
+      "kind": "group",
+      "name": "General",
+      "memberIds": [
+        "01JBX0OWNER0000000000000AA",
+        "01JBX0ALICE0000000000000AB",
+        "01JBX0BOT000000000000000AC"
+      ],
+      "createdBy": "01JBX0OWNER0000000000000AA",
+      "createdAt": 1762128000000
+    },
+    "lastSeq": 42,
+    "readSeq": 40,
+    "unread": 2,
+    "mentions": 1,
+    "notify": "some"
+  }
+}

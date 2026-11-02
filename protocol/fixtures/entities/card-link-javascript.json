@@ -1,0 +1,19 @@
+{
+  "kind": "Card",
+  "valid": false,
+  "description": "only http and https links",
+  "value": {
+    "v": 1,
+    "title": "构建",
+    "blocks": [
+      {
+        "type": "link",
+        "label": "x",
+        "target": {
+          "kind": "url",
+          "url": "javascript:alert(1)"
+        }
+      }
+    ]
+  }
+}

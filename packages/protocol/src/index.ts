@@ -2,40 +2,64 @@
 // executable source of truth. Objects strip unknown fields on read.
 import { z } from "zod";
 
-export const PROTOCOL_VERSION = 1 as const;
+import {
+  Body,
+  ClientMsgId,
+  Count,
+  eventBase,
+  Id,
+  Limit,
+  MAX_BODY_CHARS,
+  MAX_FRAME_BYTES,
+  MAX_NAME_CHARS,
+  MAX_TITLE_CHARS,
+  MemberLevel,
+  Millis,
+  Name,
+  PROTOCOL_VERSION,
+  Rid,
+  Seq,
+  Title,
+} from "./common.ts";
+import { CardActionedEvent, CardActionFrame } from "./card.ts";
+import {
+  AddArtifactVersionRequest,
+  ArtifactCreatedEvent,
+  ArtifactResponse,
+  ArtifactsResponse,
+  ArtifactVersionAddedEvent,
+  ArtifactVersionResponse,
+  CreateFileRequest,
+  CreateFileResponse,
+  CreateArtifactRequest,
+  FileMeta,
+  FileResponse,
+  Artifact,
+  ArtifactVersion,
+} from "./files.ts";
+import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
+import { editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
+import { Card } from "./card.ts";
+import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, UpdateMemberRequest } from "./members.ts";
+import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
+import { SearchFrame, SearchResultsFrame } from "./search.ts";
+import { TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
+import { UpdateInfo } from "./updates.ts";
+import { DiagnosticsResponse } from "./diagnostics.ts";
+import { AuditResponse, AuditEntry } from "./audit.ts";
 
-// ---------------------------------------------------------------------------
-// Limits
-// ---------------------------------------------------------------------------
-
-/** Max message body length, in Unicode code points (zod v4 counts code points). */
-export const MAX_BODY_CHARS = 32_768;
-/** Max topic title length, in Unicode code points. */
-export const MAX_TITLE_CHARS = 200;
-/** Max `limit` for `fetch` and `history`. */
-export const MAX_PAGE_LIMIT = 500;
-/** Max size of one WebSocket frame, in bytes. */
-export const MAX_FRAME_BYTES = 1_048_576;
-/** Member display name length range. */
-export const MIN_NAME_CHARS = 1;
-export const MAX_NAME_CHARS = 64;
-/** Default topic title: first line of body, cut to this many characters. */
-export const DEFAULT_TITLE_CHARS = 80;
-
-// ---------------------------------------------------------------------------
-// Primitives
-// ---------------------------------------------------------------------------
-
-const Id = z.string().min(1);
-const ClientMsgId = z.string().min(1).max(64);
-/** Milliseconds since the Unix epoch, UTC. */
-const Millis = z.int().nonnegative();
-const Seq = z.int().nonnegative();
-const Rid = z.string().min(1);
-const Name = z.string().min(MIN_NAME_CHARS).max(MAX_NAME_CHARS);
-const Body = z.string().max(MAX_BODY_CHARS);
-const Title = z.string().min(1).max(MAX_TITLE_CHARS);
-const Limit = z.int().min(1).max(MAX_PAGE_LIMIT);
+export * from "./common.ts";
+export * from "./topic.ts";
+export * from "./reads.ts";
+export * from "./card.ts";
+export * from "./message.ts";
+export * from "./files.ts";
+export * from "./members.ts";
+export * from "./search.ts";
+export * from "./updates.ts";
+export * from "./diagnostics.ts";
+export * from "./hooks.ts";
+export * from "./audit.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -44,8 +68,6 @@ const Limit = z.int().min(1).max(MAX_PAGE_LIMIT);
 export const MemberKind = z.enum(["human", "bot"]);
 export type MemberKind = z.infer<typeof MemberKind>;
 
-export const MemberLevel = z.enum(["owner", "member"]);
-export type MemberLevel = z.infer<typeof MemberLevel>;
 
 export const Member = z.object({
   id: Id,
@@ -77,6 +99,8 @@ export const GroupSummary = z.object({
   readSeq: Seq,
   unread: z.int().nonnegative(),
   mentions: z.int().nonnegative(),
+  ...groupSummaryReadFields,
+  ...groupSummaryPrefFields,
 });
 export type GroupSummary = z.infer<typeof GroupSummary>;
 
@@ -100,6 +124,7 @@ export const Topic = z.object({
   rootMessageId: Id,
   lastSeq: Seq,
   messageCount: z.int().nonnegative(),
+  ...topicFields,
 });
 export type Topic = z.infer<typeof Topic>;
 
@@ -116,6 +141,7 @@ export const Message = z.object({
   editedAt: Millis.nullable().optional(),
   deletedAt: Millis.nullable().optional(),
   streaming: z.boolean().optional(),
+  ...messageFields,
 });
 export type Message = z.infer<typeof Message>;
 
@@ -139,12 +165,6 @@ export type ErrorBody = z.infer<typeof ErrorBody>;
 // Group event log
 // ---------------------------------------------------------------------------
 
-const eventBase = {
-  seq: z.int().positive(),
-  groupId: Id,
-  at: Millis,
-  actorId: Id,
-};
 
 export const TopicCreatedEvent = z.object({
   ...eventBase,
@@ -158,6 +178,7 @@ export const TopicUpdatedEvent = z.object({
     topicId: Id,
     title: Title.optional(),
     status: TopicStatus.optional(),
+    ...topicUpdatedFields,
   }),
 });
 export const MessageCreatedEvent = z.object({
@@ -173,6 +194,7 @@ export const MessageUpdatedEvent = z.object({
     body: Body,
     editedAt: Millis,
     streaming: z.boolean(),
+    ...messageUpdatedFields,
   }),
 });
 export const MessageDeletedEvent = z.object({
@@ -205,6 +227,9 @@ export const Event = z.discriminatedUnion("type", [
   GroupUpdatedEvent,
   GroupMemberAddedEvent,
   GroupMemberRemovedEvent,
+  CardActionedEvent,
+  ArtifactCreatedEvent,
+  ArtifactVersionAddedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -260,6 +285,7 @@ export const SendFrame = z.object({
   body: Body,
   mentions: z.array(Id).optional(),
   streaming: z.boolean().optional(),
+  ...sendFields,
 });
 export const EditFrame = z.object({
   t: z.literal("edit"),
@@ -268,6 +294,7 @@ export const EditFrame = z.object({
   messageId: Id,
   body: Body,
   streaming: z.boolean().optional(),
+  ...editFields,
 });
 export const DeltaFrame = z.object({
   t: z.literal("delta"),
@@ -288,6 +315,7 @@ export const TopicUpdateFrame = z.object({
   topicId: Id,
   title: Title.optional(),
   status: TopicStatus.optional(),
+  ...topicUpdateFields,
 });
 export const TypingFrame = z.object({
   t: z.literal("typing"),
@@ -298,6 +326,7 @@ export const ReadFrame = z.object({
   t: z.literal("read"),
   groupId: Id,
   seq: Seq,
+  ...readFields,
 });
 export const FetchFrame = z.object({
   t: z.literal("fetch"),
@@ -328,6 +357,9 @@ export const ClientFrame = z.discriminatedUnion("t", [
   FetchFrame,
   HistoryRequestFrame,
   PingFrame,
+  TopicFollowFrame,
+  CardActionFrame,
+  SearchFrame,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 export type ClientFrameType = ClientFrame["t"];
@@ -353,7 +385,7 @@ export const WelcomeFrame = z.object({
   groups: z.array(GroupSummary),
   serverTime: Millis,
 });
-export const EventFrame = z.object({ t: z.literal("event"), event: Event });
+export const EventFrame = z.object({ t: z.literal("event"), event: Event, ...eventFrameFields });
 export const TransientFrame = z.object({
   t: z.literal("transient"),
   event: TransientEvent,
@@ -407,6 +439,8 @@ export const ServerFrame = z.discriminatedUnion("t", [
   DirectoryFrame,
   ErrorFrame,
   PongFrame,
+  ReadsFrame,
+  SearchResultsFrame,
 ]);
 export type ServerFrame = z.infer<typeof ServerFrame>;
 export type ServerFrameType = ServerFrame["t"];
@@ -485,6 +519,13 @@ export type OkResponse = z.infer<typeof OkResponse>;
 export const HealthResponse = z.object({ ok: z.literal(true), version: z.string() });
 export type HealthResponse = z.infer<typeof HealthResponse>;
 
+/** `POST /v1/groups/:id/messages`: the `send` frame without `t`, `rid` and `groupId`. Response: `SendResult`. */
+export const PostMessageRequest = SendFrame.omit({ t: true, rid: true, groupId: true });
+export type PostMessageRequest = z.infer<typeof PostMessageRequest>;
+
+/** `PATCH /v1/members/:id` and `PUT /v1/members/:id/avatar` */
+export const MemberResponse = Member;
+
 // ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
@@ -522,6 +563,34 @@ export const schemas = {
   GroupSummaryResponse,
   OkResponse,
   HealthResponse,
+  // V1 extensions
+  TopicState,
+  Card,
+  FileRef,
+  FileMeta,
+  CreateFileRequest,
+  CreateFileResponse,
+  FileResponse,
+  Artifact,
+  ArtifactVersion,
+  CreateArtifactRequest,
+  AddArtifactVersionRequest,
+  ArtifactVersionResponse,
+  ArtifactResponse,
+  ArtifactsResponse,
+  UpdateMemberRequest,
+  MemberResponse,
+  UpdateGroupPrefsRequest,
+  UpdateInfo,
+  DiagnosticsResponse,
+  Hook,
+  CreateHookRequest,
+  CreateHookResponse,
+  HooksResponse,
+  HookInRequest,
+  PostMessageRequest,
+  AuditEntry,
+  AuditResponse,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

@@ -1,0 +1,20 @@
+{
+  "kind": "CreateHookResponse",
+  "valid": true,
+  "description": "secret is a fake placeholder",
+  "value": {
+    "hook": {
+      "id": "01JBX0HOOK00000000000000AN",
+      "name": "GitHub",
+      "kind": "github",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": null,
+      "memberId": "01JBX0HOOKBOT00000000000AP",
+      "createdBy": "01JBX0OWNER0000000000000AA",
+      "createdAt": 1762128000000,
+      "lastUsedAt": 1762131600000
+    },
+    "url": "https://chat-api-e2e.example.workers.dev/v1/hooks/01JBX0HOOK00000000000000AN/github",
+    "secret": "whk_DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
+  }
+}

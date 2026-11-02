@@ -1,0 +1,16 @@
+{
+  "kind": "Card",
+  "valid": false,
+  "description": "action id with a space",
+  "value": {
+    "v": 1,
+    "title": "构建",
+    "blocks": [],
+    "actions": [
+      {
+        "id": "a b",
+        "label": "x"
+      }
+    ]
+  }
+}

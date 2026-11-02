@@ -1,0 +1,13 @@
+{
+  "kind": "MemberResponse",
+  "valid": true,
+  "value": {
+    "id": "01JBX0OWNER0000000000000AA",
+    "kind": "human",
+    "name": "Joye",
+    "role": "产品负责人",
+    "level": "owner",
+    "avatarUrl": "https://chat-api-e2e.example.workers.dev/v1/members/01JBX0OWNER0000000000000AA/avatar?v=3",
+    "deactivated": false
+  }
+}

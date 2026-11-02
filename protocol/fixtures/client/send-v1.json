@@ -1,0 +1,32 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "send",
+    "rid": "r40",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "见附件",
+    "replyTo": {
+      "messageId": "01JBX0MSG000000000000000AE"
+    },
+    "attachments": [
+      {
+        "fileId": "01JBX0FILE00000000000000AH",
+        "name": "截图 2026-11-03.png",
+        "size": 482113,
+        "mime": "image/png",
+        "width": 1920,
+        "height": 1080,
+        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    ],
+    "artifactRefs": [
+      {
+        "artifactId": "01JBX0ART000000000000000AM",
+        "version": 2
+      }
+    ]
+  }
+}
