@@ -45,7 +45,10 @@ fn windows(cx: &mut App) -> &mut ArtifactWindows {
 }
 
 /// The version list of the title bar: newest first.
-fn version_items(provider: &Arc<dyn ChatProvider>, artifact_id: &str) -> (String, Vec<(u32, String)>) {
+fn version_items(
+    provider: &Arc<dyn ChatProvider>,
+    artifact_id: &str,
+) -> (String, Vec<(u32, String)>) {
     match provider.artifact(artifact_id) {
         Some(d) => {
             let items = d
@@ -55,7 +58,10 @@ fn version_items(provider: &Arc<dyn ChatProvider>, artifact_id: &str) -> (String
                     let label = match v.note.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
                         Some(note) => {
                             let short: String = note.chars().take(40).collect();
-                            fill(ca::VERSION_ITEM_NOTE, &[("n", &v.version.to_string()), ("note", &short)])
+                            fill(
+                                ca::VERSION_ITEM_NOTE,
+                                &[("n", &v.version.to_string()), ("note", &short)],
+                            )
                         }
                         None => fill(ca::VERSION_ITEM, &[("n", &v.version.to_string())]),
                     };
@@ -70,7 +76,12 @@ fn version_items(provider: &Arc<dyn ChatProvider>, artifact_id: &str) -> (String
 
 /// Opens a 产出 at `version` (`None` = current), or brings its window to
 /// the front and switches the version.
-pub fn open_artifact(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: Option<u32>, cx: &mut App) {
+pub fn open_artifact(
+    provider: &Arc<dyn ChatProvider>,
+    artifact_id: &str,
+    version: Option<u32>,
+    cx: &mut App,
+) {
     #[cfg(target_os = "macos")]
     if let Some(win) = windows(cx).open.get(artifact_id)
         && !win.is_closed()
@@ -135,7 +146,14 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
             win.focus();
             return;
         }
-        open_window(provider.clone(), folder.artifact_id.clone(), title, spec, items, cx);
+        open_window(
+            provider.clone(),
+            folder.artifact_id.clone(),
+            title,
+            spec,
+            items,
+            cx,
+        );
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -220,7 +238,10 @@ fn open_window_with(
         Ok(w) => w,
         Err(e) => {
             tracing::warn!(error = %e, "cannot open the 产出 window");
-            notify_error(fill(ca::OPEN_FAILED, &[("reason", error_text(FileError::Other))]), cx);
+            notify_error(
+                fill(ca::OPEN_FAILED, &[("reason", error_text(FileError::Other))]),
+                cx,
+            );
             return;
         }
     };
@@ -280,7 +301,10 @@ fn ask_to_open_link(url: String) {
             let alert = NSAlert::new(mtm);
             alert.setAlertStyle(NSAlertStyle::Warning);
             alert.setMessageText(&NSString::from_str(ca::LINK_TITLE));
-            alert.setInformativeText(&NSString::from_str(&fill(ca::LINK_DETAIL, &[("url", &url)])));
+            alert.setInformativeText(&NSString::from_str(&fill(
+                ca::LINK_DETAIL,
+                &[("url", &url)],
+            )));
             alert.addButtonWithTitle(&NSString::from_str(ca::LINK_OPEN));
             alert.addButtonWithTitle(&NSString::from_str(ca::LINK_CANCEL));
             alert.runModal() == NSAlertFirstButtonReturn

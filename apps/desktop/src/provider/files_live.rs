@@ -106,8 +106,13 @@ fn files_live() {
         name: name.clone(),
         member_ids: vec![me_b.clone()],
     });
-    let g = wait("group made", || a.groups().into_iter().find(|x| x.name == name)).id;
-    wait("B sees the group", || b.groups().into_iter().find(|x| x.id == g));
+    let g = wait("group made", || {
+        a.groups().into_iter().find(|x| x.name == name)
+    })
+    .id;
+    wait("B sees the group", || {
+        b.groups().into_iter().find(|x| x.id == g)
+    });
 
     // A folder is refused at attach time with a reason.
     let new_key = DraftKey::new_topic(g.clone());
@@ -154,17 +159,32 @@ fn files_live() {
     // The pending id follows the send to the real topic.
     let sent = wait("topic message acked", || {
         find(&a, &g, &pending_topic, |m| {
-            !m.id.is_empty() && m.attachments.len() == 2 && m.attachments.iter().all(|f| f.is_uploaded())
+            !m.id.is_empty()
+                && m.attachments.len() == 2
+                && m.attachments.iter().all(|f| f.is_uploaded())
         })
     });
     let t = a.resolve_topic(&pending_topic);
     assert!(!t.starts_with("pending:"), "real topic id after the ack");
-    let image = sent.attachments.iter().find(|f| f.is_image()).unwrap().clone();
+    let image = sent
+        .attachments
+        .iter()
+        .find(|f| f.is_image())
+        .unwrap()
+        .clone();
     assert_eq!((image.width, image.height), (Some(1600), Some(800)));
-    let doc = sent.attachments.iter().find(|f| !f.is_image()).unwrap().clone();
+    let doc = sent
+        .attachments
+        .iter()
+        .find(|f| !f.is_image())
+        .unwrap()
+        .clone();
     assert_eq!(doc.name, "说明.txt");
     assert_eq!(doc.size, text.len() as u64);
-    assert!(a.file_transfer(&upload_key(&job, 0)).is_none(), "job forgotten after the send");
+    assert!(
+        a.file_transfer(&upload_key(&job, 0)).is_none(),
+        "job forgotten after the send"
+    );
 
     // B downloads the text file and gets a thumbnail of the image.
     let on_b = wait("B sees the files", || find(&b, &g, &t, |m| m.id == sent.id));
@@ -201,7 +221,9 @@ fn files_live() {
     );
     a.clear_draft(&key);
     wait("upload failed", || {
-        find(&a, &g, &t, |m| m.client_msg_id == cid && m.send_state == SendState::Failed)
+        find(&a, &g, &t, |m| {
+            m.client_msg_id == cid && m.send_state == SendState::Failed
+        })
     });
     assert_eq!(
         a.file_transfer(&upload_key(&cid, 0)),
@@ -242,29 +264,42 @@ fn files_live() {
     // B sees both cards, the list, and opens each version.
     let card = wait("B sees the 产出 message", || {
         find(&b, &g, &t, |m| {
-            m.artifact_refs.iter().any(|r| r.artifact_id == created.artifact_id && r.version == 2)
+            m.artifact_refs
+                .iter()
+                .any(|r| r.artifact_id == created.artifact_id && r.version == 2)
         })
     });
     assert!(!card.body.is_empty());
     b.request_artifact(&g, &t, &created.artifact_id);
     let detail = wait("B has the 产出", || {
-        b.artifact(&created.artifact_id).filter(|d| d.versions.len() == 2)
+        b.artifact(&created.artifact_id)
+            .filter(|d| d.versions.len() == 2)
     });
     assert_eq!(detail.summary.version, 2);
     wait("B lists it", || {
-        b.artifacts(&g, &t).into_iter().find(|x| x.id == created.artifact_id)
+        b.artifacts(&g, &t)
+            .into_iter()
+            .find(|x| x.id == created.artifact_id)
     });
     let current = block(b.open_artifact_version(&created.artifact_id, None)).expect("open current");
     assert!(current.is_page);
     assert_eq!(current.entry, "index.html");
-    assert!(std::fs::read_to_string(current.dir.join("index.html")).unwrap().contains("v2"));
+    assert!(
+        std::fs::read_to_string(current.dir.join("index.html"))
+            .unwrap()
+            .contains("v2")
+    );
     assert_eq!(
         std::fs::read_to_string(current.dir.join("css/app.css")).unwrap(),
         "p{color:red}"
     );
     let first = block(b.open_artifact_version(&created.artifact_id, Some(1))).expect("open v1");
     assert_eq!(first.version, 1);
-    assert!(std::fs::read_to_string(first.dir.join("index.html")).unwrap().contains("v1"));
+    assert!(
+        std::fs::read_to_string(first.dir.join("index.html"))
+            .unwrap()
+            .contains("v1")
+    );
 
     let _ = std::fs::remove_dir_all(&base);
 }

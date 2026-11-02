@@ -75,7 +75,12 @@ pub struct NewGroupForm {
 }
 
 impl NewGroupForm {
-    fn new(services: Services, mode: FormMode, window: &mut Window, cx: &mut Context<Self>) -> Self {
+    fn new(
+        services: Services,
+        mode: FormMode,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Self {
         let name =
             cx.new(|cx| InputState::new(window, cx).placeholder(nav::GROUP_NAME_PLACEHOLDER));
         let filter =
@@ -163,9 +168,9 @@ impl NewGroupForm {
                     .services
                     .provider
                     .add_group_members(group_id, self.selected.clone());
-                futures::FutureExt::boxed_local(async move {
-                    r.await.unwrap_or(Err(AdminError::Other))
-                })
+                futures::FutureExt::boxed_local(
+                    async move { r.await.unwrap_or(Err(AdminError::Other)) },
+                )
             }
         };
         self.busy = true;
@@ -341,7 +346,7 @@ impl Render for NewGroupForm {
                         )
                         .loading(self.busy)
                         .disabled_fill(!ready, cx)
-                            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
+                        .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                     ),
             )
     }
@@ -396,10 +401,15 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
 }
 
 /// Opens the dialog that adds members to a 群 (from the 群 menu).
-pub fn open_add_members(services: Services, group_id: GroupId, name: String, window: &mut Window, cx: &mut App) {
-    let form = cx.new(|cx| {
-        NewGroupForm::new(services, FormMode::AddMembers { group_id }, window, cx)
-    });
+pub fn open_add_members(
+    services: Services,
+    group_id: GroupId,
+    name: String,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let form =
+        cx.new(|cx| NewGroupForm::new(services, FormMode::AddMembers { group_id }, window, cx));
     let first = Cell::new(true);
     let title = fill(nav::ADD_MEMBERS_TITLE, &[("name", &name)]);
     window.open_dialog(cx, move |dialog, window, cx| {
@@ -411,7 +421,13 @@ pub fn open_add_members(services: Services, group_id: GroupId, name: String, win
         dialog
             .close_button(false)
             .p(space::S20)
-            .title(div().t_title().pb(space::S8).one_line().child(title.clone()))
+            .title(
+                div()
+                    .t_title()
+                    .pb(space::S8)
+                    .one_line()
+                    .child(title.clone()),
+            )
             .child(form.clone())
     });
 }

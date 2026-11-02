@@ -58,7 +58,11 @@ fn make_dmg(src: &Path, out: &Path) {
 }
 
 fn version_of(app: &Path) -> String {
-    plist_value(&app.join("Contents/Info.plist"), "CFBundleShortVersionString").unwrap()
+    plist_value(
+        &app.join("Contents/Info.plist"),
+        "CFBundleShortVersionString",
+    )
+    .unwrap()
 }
 
 struct Fixture {
@@ -117,12 +121,21 @@ fn bundle_paths() {
         bundle_from_exe(Path::new("/Applications/X.app/Contents/MacOS/X")),
         Some(PathBuf::from("/Applications/X.app"))
     );
-    assert_eq!(bundle_from_exe(Path::new("/tmp/target/debug/desktop")), None);
+    assert_eq!(
+        bundle_from_exe(Path::new("/tmp/target/debug/desktop")),
+        None
+    );
     assert_eq!(bundle_from_exe(Path::new("/a/X/Contents/MacOS/X")), None);
     assert_eq!(bundle_from_exe(Path::new("X")), None);
     let b = Path::new("/Applications/X.app");
-    assert_eq!(staging_path(b, "1.2.3"), Path::new("/Applications/.X.app.update-1.2.3"));
-    assert_eq!(old_path(b, "1.2.3"), Path::new("/Applications/.X.app.old-1.2.3"));
+    assert_eq!(
+        staging_path(b, "1.2.3"),
+        Path::new("/Applications/.X.app.update-1.2.3")
+    );
+    assert_eq!(
+        old_path(b, "1.2.3"),
+        Path::new("/Applications/.X.app.old-1.2.3")
+    );
 }
 
 #[test]
@@ -148,7 +161,10 @@ fn swap_then_finish_on_launch() {
     };
     write_marker(&marker, &m).unwrap();
     // The old process (or another copy) does not clean up.
-    assert_eq!(finish_on_launch(&marker, Some(&bundle), "1.0.0"), Finish::NotForMe);
+    assert_eq!(
+        finish_on_launch(&marker, Some(&bundle), "1.0.0"),
+        Finish::NotForMe
+    );
     assert_eq!(
         finish_on_launch(&marker, Some(&dir.join("Other.app")), "2.0.0"),
         Finish::NotForMe
@@ -157,10 +173,16 @@ fn swap_then_finish_on_launch() {
     // A leftover staging folder is removed at start.
     let stale = staging_path(&bundle, "9.9.9");
     std::fs::create_dir_all(stale.join("Contents")).unwrap();
-    assert_eq!(finish_on_launch(&marker, Some(&bundle), "2.0.0"), Finish::RemovedOld);
+    assert_eq!(
+        finish_on_launch(&marker, Some(&bundle), "2.0.0"),
+        Finish::RemovedOld
+    );
     assert!(!old.exists() && !marker.exists() && !stale.exists());
     assert_eq!(version_of(&bundle), "2.0.0");
-    assert_eq!(finish_on_launch(&marker, Some(&bundle), "2.0.0"), Finish::NoMarker);
+    assert_eq!(
+        finish_on_launch(&marker, Some(&bundle), "2.0.0"),
+        Finish::NoMarker
+    );
 }
 
 #[test]
@@ -180,11 +202,17 @@ fn marker_never_removes_other_paths() {
         },
     )
     .unwrap();
-    assert_eq!(finish_on_launch(&marker, Some(&bundle), "2.0.0"), Finish::RemovedOld);
+    assert_eq!(
+        finish_on_launch(&marker, Some(&bundle), "2.0.0"),
+        Finish::RemovedOld
+    );
     assert!(precious.exists());
     // A damaged marker is dropped.
     std::fs::write(&marker, b"{not json").unwrap();
-    assert_eq!(finish_on_launch(&marker, Some(&bundle), "2.0.0"), Finish::NoMarker);
+    assert_eq!(
+        finish_on_launch(&marker, Some(&bundle), "2.0.0"),
+        Finish::NoMarker
+    );
     assert!(!marker.exists());
 }
 
@@ -209,7 +237,12 @@ fn install_from_dmg_and_relaunch() {
     let exe = f.installed.join("Contents/MacOS/Fake");
     let mut env_arg = OsString::from("UPDATER_TEST_OUT=");
     env_arg.push(&out);
-    let argv = vec!["/usr/bin/env".into(), env_arg, exe.into(), "--after-update".into()];
+    let argv = vec![
+        "/usr/bin/env".into(),
+        env_arg,
+        exe.into(),
+        "--after-update".into(),
+    ];
     relaunch(app.id(), &Launch::Exec(argv)).unwrap();
     std::thread::sleep(Duration::from_millis(500));
     assert!(!out.exists(), "launched before the old process exited");
@@ -243,7 +276,10 @@ fn install_refuses_bad_input_and_keeps_the_running_bundle() {
     p.bundle_id = "co.example.someone-else".into();
     p.version = "1.2.0".into();
     assert!(matches!(install(&p), Err(InstallError::BadImage(_))));
-    for leftover in [staging_path(&f.installed, "1.1.0"), old_path(&f.installed, "1.1.0")] {
+    for leftover in [
+        staging_path(&f.installed, "1.1.0"),
+        old_path(&f.installed, "1.1.0"),
+    ] {
         assert!(!leftover.exists(), "{leftover:?}");
     }
     assert_eq!(version_of(&f.installed), "1.0.0");
@@ -256,6 +292,9 @@ fn install_refuses_bad_input_and_keeps_the_running_bundle() {
     p.bundle_id = "co.example.someone-else".into();
     let result = install(&p);
     std::fs::set_permissions(&apps, std::fs::Permissions::from_mode(0o755)).unwrap();
-    assert!(matches!(result, Err(InstallError::NotWritable)), "{result:?}");
+    assert!(
+        matches!(result, Err(InstallError::NotWritable)),
+        "{result:?}"
+    );
     assert_eq!(version_of(&f.installed), "1.0.0");
 }

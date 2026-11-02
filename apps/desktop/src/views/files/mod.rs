@@ -191,10 +191,7 @@ pub fn open_kind(name: &str, path: &Path) -> OpenKind {
         .unwrap_or_default();
     if is_html(name) && is_html(&on_disk) {
         OpenKind::Page
-    } else if opens_unsafely(name)
-        || opens_unsafely(&on_disk)
-        || is_html(name)
-        || is_html(&on_disk)
+    } else if opens_unsafely(name) || opens_unsafely(&on_disk) || is_html(name) || is_html(&on_disk)
     {
         OpenKind::Reveal
     } else {

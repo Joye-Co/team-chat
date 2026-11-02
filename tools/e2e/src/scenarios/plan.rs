@@ -42,7 +42,12 @@ async fn run(c: &mut Ctx) -> Result<()> {
     let g = h.group(&a, "plan", &[&b, &k]).await?;
     let ca = h.client(&a, "a", None)?;
     ca.ready(&[&g]).await?;
-    ca.c.start_topic(&g, Some("周四小红书"), "@bot 写一条小红书", vec![k.id.clone()])?;
+    ca.c.start_topic(
+        &g,
+        Some("周四小红书"),
+        "@bot 写一条小红书",
+        vec![k.id.clone()],
+    )?;
     let topic = ca
         .wait(WAIT, "the topic", |cl| {
             cl.topics(&g, 10)
@@ -89,9 +94,18 @@ async fn run(c: &mut Ctx) -> Result<()> {
         })
         .await
         .context("start run")?;
-    check!(started.status == RunStatus::Running, "new run is {:?}", started.status);
+    check!(
+        started.status == RunStatus::Running,
+        "new run is {:?}",
+        started.status
+    );
     let (run, ms1) = seen(Some(plan1.clone()), "the first plan").await?;
-    check!(run.id == started.id, "member sees run {} not {}", run.id, started.id);
+    check!(
+        run.id == started.id,
+        "member sees run {} not {}",
+        run.id,
+        started.id
+    );
     check!(run.bot_id == k.id, "the run's bot is {}", run.bot_id);
 
     // Starting again returns the same run.
@@ -102,20 +116,34 @@ async fn run(c: &mut Ctx) -> Result<()> {
             plan: None,
         })
         .await?;
-    check!(again.id == started.id, "a second start made run {}", again.id);
+    check!(
+        again.id == started.id,
+        "a second start made run {}",
+        again.id
+    );
 
     // An update replaces the whole plan.
     let t = Instant::now();
-    bot.set_run_plan(&started.id, &SetRunPlanRequest { plan: plan2.clone() })
-        .await
-        .context("set plan")?;
+    bot.set_run_plan(
+        &started.id,
+        &SetRunPlanRequest {
+            plan: plan2.clone(),
+        },
+    )
+    .await
+    .context("set plan")?;
     let (_, _) = seen(Some(plan2.clone()), "the replaced plan").await?;
     let ms2 = t.elapsed().as_secs_f64() * 1000.0;
 
     // Only the run's bot sets its plan.
     match h
         .http(&a)
-        .set_run_plan(&started.id, &SetRunPlanRequest { plan: plan1.clone() })
+        .set_run_plan(
+            &started.id,
+            &SetRunPlanRequest {
+                plan: plan1.clone(),
+            },
+        )
         .await
     {
         Err(ApiError::Server { status: 403, .. }) => {}
@@ -136,8 +164,13 @@ async fn run(c: &mut Ctx) -> Result<()> {
     bot.set_run_plan(&started.id, &SetRunPlanRequest { plan: vec![] })
         .await?;
     seen(None, "the cleared plan").await?;
-    bot.set_run_plan(&started.id, &SetRunPlanRequest { plan: plan2.clone() })
-        .await?;
+    bot.set_run_plan(
+        &started.id,
+        &SetRunPlanRequest {
+            plan: plan2.clone(),
+        },
+    )
+    .await?;
     seen(Some(plan2.clone()), "the plan again").await?;
     let ended = bot
         .end_run(
@@ -148,14 +181,22 @@ async fn run(c: &mut Ctx) -> Result<()> {
             },
         )
         .await?;
-    check!(ended.plan.as_ref() == Some(&plan2), "the ended run lost its plan");
+    check!(
+        ended.plan.as_ref() == Some(&plan2),
+        "the ended run lost its plan"
+    );
     ca.wait(WAIT, "the ended run", |cl| {
         let run = cl.runs(&topic).ok()?.into_iter().next()?;
         (run.status == RunStatus::Done).then_some(())
     })
     .await?;
     match bot
-        .set_run_plan(&started.id, &SetRunPlanRequest { plan: plan1.clone() })
+        .set_run_plan(
+            &started.id,
+            &SetRunPlanRequest {
+                plan: plan1.clone(),
+            },
+        )
         .await
     {
         Err(ApiError::Server { status: 409, .. }) => {}

@@ -177,7 +177,10 @@ impl CoreProvider {
             if let Err(e) = &r {
                 tracing::warn!(error = %e, "create group refused");
             }
-            let _ = tx.send(r.map(|g| g.group.id).map_err(|e| super::settings::api_error(&e)));
+            let _ = tx.send(
+                r.map(|g| g.group.id)
+                    .map_err(|e| super::settings::api_error(&e)),
+            );
         });
         rx
     }
@@ -194,7 +197,10 @@ impl CoreProvider {
             if let Err(e) = &r {
                 tracing::warn!(error = %e, "open dm refused");
             }
-            let _ = tx.send(r.map(|g| g.group.id).map_err(|e| super::settings::api_error(&e)));
+            let _ = tx.send(
+                r.map(|g| g.group.id)
+                    .map_err(|e| super::settings::api_error(&e)),
+            );
         });
         rx
     }

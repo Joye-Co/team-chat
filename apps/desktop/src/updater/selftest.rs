@@ -113,7 +113,11 @@ fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> R
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("check: {e}"))?
         .ok_or("check: no update offered to 0.0.1")?;
-    step(steps, "check", serde_json::json!({ "version": info.version, "size": info.size }));
+    step(
+        steps,
+        "check",
+        serde_json::json!({ "version": info.version, "size": info.size }),
+    );
     let same = futures::executor::block_on(client.check_update(&info.version))
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("check same: {e}"))?;
@@ -130,7 +134,10 @@ fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> R
         c.fetch_add(1, Ordering::Relaxed);
         l.store(p.done, Ordering::Relaxed);
     });
-    let dmg = workdir.join("updates").join(format!("{}-{}.dmg", env!("PRODUCT_NAME"), info.version));
+    let dmg =
+        workdir
+            .join("updates")
+            .join(format!("{}-{}.dmg", env!("PRODUCT_NAME"), info.version));
     let path = futures::executor::block_on(client.download_update(info.clone(), &dmg, progress))
         .map_err(|e| e.to_string())?
         .map_err(|e| format!("download: {e}"))?;
@@ -165,7 +172,11 @@ fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> R
     let marker = install::install(&plan).map_err(|e| format!("install: {e}"))?;
     install::check_bundle(&bundle, env!("PRODUCT_BUNDLE_ID"), &info.version)
         .map_err(|e| format!("installed bundle: {e}"))?;
-    step(steps, "install", serde_json::json!({ "old_kept": marker.old.exists() }));
+    step(
+        steps,
+        "install",
+        serde_json::json!({ "old_kept": marker.old.exists() }),
+    );
 
     // 4. Relaunch after the stand-in app process exits.
     let out = workdir.join("started.txt");

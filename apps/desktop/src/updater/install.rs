@@ -259,11 +259,8 @@ impl Mount {
     /// Mounts `dmg` read-only at a new private folder, hidden from Finder, without
     /// opening a window.
     pub fn attach(dmg: &Path) -> Result<Mount, InstallError> {
-        let point = std::env::temp_dir().join(format!(
-            "update-mount-{}-{}",
-            std::process::id(),
-            unique()
-        ));
+        let point =
+            std::env::temp_dir().join(format!("update-mount-{}-{}", std::process::id(), unique()));
         std::fs::create_dir_all(&point)?;
         let mut last = String::new();
         // hdiutil sometimes fails with "resource busy" while another image mounts.
@@ -272,7 +269,13 @@ impl Mount {
                 std::thread::sleep(Duration::from_secs(1));
             }
             let out = Command::new("/usr/bin/hdiutil")
-                .args(["attach", "-nobrowse", "-readonly", "-noautoopen", "-noverify"])
+                .args([
+                    "attach",
+                    "-nobrowse",
+                    "-readonly",
+                    "-noautoopen",
+                    "-noverify",
+                ])
                 .arg("-mountpoint")
                 .arg(&point)
                 .arg(dmg)

@@ -448,8 +448,10 @@ impl Updater {
                 Ok((marker, plan)) => {
                     tracing::info!(version = %marker.version, "update installed, relaunching");
                     let _ = std::fs::remove_file(&plan.dmg);
-                    match install::relaunch(std::process::id(), &install::Launch::Open(marker.bundle))
-                    {
+                    match install::relaunch(
+                        std::process::id(),
+                        &install::Launch::Open(marker.bundle),
+                    ) {
                         Ok(()) => cx.quit(),
                         Err(e) => {
                             // The new bundle is in place; the next start uses it.
@@ -514,7 +516,11 @@ impl Updater {
 
     /// "知道了" on the manual-install banner.
     pub fn dismiss(&mut self, cx: &mut Context<Self>) {
-        if let Phase::Manual(info) | Phase::Failed { info: Some(info), .. } = &self.phase {
+        if let Phase::Manual(info)
+        | Phase::Failed {
+            info: Some(info), ..
+        } = &self.phase
+        {
             self.postponed = Some((info.version.clone(), Instant::now()));
             self.phase = Phase::Available(info.clone());
             cx.notify();

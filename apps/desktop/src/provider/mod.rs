@@ -49,10 +49,10 @@ use crate::{
     data::{
         ArtifactDetail, ArtifactFolder, ArtifactSummary, Change, ChatProvider, ClientMsgId,
         ConnectionState, CreateGroupRequest, CreatedArtifact, Draft, DraftKey, FileAttachment,
-        GroupId, GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId, MessageWindow,
-        NewArtifactRequest, NewFile, PendingFileId, RejectedFile, Reply, SavedNavigation,
-        SendRequest, SessionState, StartTopicRequest, TodoItem, Topic, TopicFile, TopicStatus,
-        TransferState,
+        GroupId, GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId,
+        MessageWindow, NewArtifactRequest, NewFile, PendingFileId, RejectedFile, Reply,
+        SavedNavigation, SendRequest, SessionState, StartTopicRequest, TodoItem, Topic, TopicFile,
+        TopicStatus, TransferState,
     },
     drafts::DraftStore,
 };
@@ -239,7 +239,10 @@ impl CoreProvider {
     pub fn reconnect_now_inner(&self) {
         let (generation, unreadable) = {
             let s = self.state();
-            (s.generation, s.connection == Some(ConnectionState::TokenUnreadable))
+            (
+                s.generation,
+                s.connection == Some(ConnectionState::TokenUnreadable),
+            )
         };
         if unreadable && let Some(a) = self.account() {
             tracing::info!("reading the saved token again");

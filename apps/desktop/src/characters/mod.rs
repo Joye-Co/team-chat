@@ -74,7 +74,11 @@ pub fn bundled_size(size: Pixels) -> u32 {
 /// The asset path of one bundled image, for example
 /// `characters/o03/needs-input-24.svg`.
 #[cfg(test)]
-pub fn image_path(character: CharacterId, status: CharacterStatus, size: Pixels) -> gpui::SharedString {
+pub fn image_path(
+    character: CharacterId,
+    status: CharacterStatus,
+    size: Pixels,
+) -> gpui::SharedString {
     format!(
         "characters/{}/{}-{}.svg",
         character.as_str(),

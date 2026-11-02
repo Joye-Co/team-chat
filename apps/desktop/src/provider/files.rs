@@ -33,10 +33,11 @@ use super::{CoreProvider, convert, lock};
 use crate::{
     copy::{artifacts as ca, fill},
     data::{
-        ArtifactDetail, ArtifactFolder, ChatProvider as _, ArtifactKind, ArtifactSummary, ArtifactVersionInfo, Change,
-        CreatedArtifact, DraftKey, FileAttachment, FileError, MAX_FILE_BYTES, Message, NewArtifactRequest,
-        NewFile, PendingFile, PendingFileId, RejectedFile, Reply, SendState, Topic, TopicFile,
-        TopicStatus, TransferState, create_key, download_key, upload_key,
+        ArtifactDetail, ArtifactFolder, ArtifactKind, ArtifactSummary, ArtifactVersionInfo, Change,
+        ChatProvider as _, CreatedArtifact, DraftKey, FileAttachment, FileError, MAX_FILE_BYTES,
+        Message, NewArtifactRequest, NewFile, PendingFile, PendingFileId, RejectedFile, Reply,
+        SendState, Topic, TopicFile, TopicStatus, TransferState, create_key, download_key,
+        upload_key,
     },
 };
 
@@ -186,7 +187,9 @@ pub fn html_title(html: &str) -> Option<String> {
 }
 
 /// What a picked file or folder becomes: kind, files, entry and default title.
-pub fn plan_artifact(path: &Path) -> Result<(PKind, Vec<LocalArtifactFile>, String, String), FileError> {
+pub fn plan_artifact(
+    path: &Path,
+) -> Result<(PKind, Vec<LocalArtifactFile>, String, String), FileError> {
     let meta = std::fs::metadata(path).map_err(|_| FileError::Unreadable)?;
     let is_html = |p: &str| {
         let l = p.to_ascii_lowercase();
@@ -226,7 +229,10 @@ pub fn plan_artifact(path: &Path) -> Result<(PKind, Vec<LocalArtifactFile>, Stri
                 f
             })
             .collect();
-        let local = files.iter().find(|f| f.path == entry).map(|f| f.local.clone());
+        let local = files
+            .iter()
+            .find(|f| f.path == entry)
+            .map(|f| f.local.clone());
         let title = local
             .and_then(|p| std::fs::read(p).ok())
             .and_then(|b| html_title(&String::from_utf8_lossy(&b[..b.len().min(64 * 1024)])))
@@ -282,7 +288,9 @@ pub fn make_thumbnail(source: &Path, dest: &Path) -> Option<PathBuf> {
     let thumb = img.thumbnail(THUMB_MAX_PX, THUMB_MAX_PX);
     std::fs::create_dir_all(dest.parent()?).ok()?;
     let part = dest.with_extension(format!("part-{}", chat_core::new_id()));
-    thumb.save_with_format(&part, image::ImageFormat::Png).ok()?;
+    thumb
+        .save_with_format(&part, image::ImageFormat::Png)
+        .ok()?;
     std::fs::rename(&part, dest).ok()?;
     Some(dest.to_path_buf())
 }
@@ -304,8 +312,7 @@ impl CoreProvider {
             i.transfers.insert(key.to_string(), state);
             let now = Instant::now();
             let due = !running
-                || i
-                    .last_emit
+                || i.last_emit
                     .get(key)
                     .is_none_or(|t| now.duration_since(*t) >= PROGRESS_EVERY);
             if due {
@@ -345,12 +352,11 @@ impl CoreProvider {
                             error,
                         }),
                     },
-                    NewFile::Image { bytes, .. } if bytes.len() as u64 > MAX_FILE_BYTES => {
-                        rejected.push(RejectedFile {
+                    NewFile::Image { bytes, .. } if bytes.len() as u64 > MAX_FILE_BYTES => rejected
+                        .push(RejectedFile {
                             name: String::new(),
                             error: FileError::TooLarge,
-                        })
-                    }
+                        }),
                     NewFile::Image { .. } => accepted.push(f),
                 }
             }
@@ -373,7 +379,11 @@ impl CoreProvider {
     }
 
     pub(super) fn take_rejected_inner(&self, key: &DraftKey) -> Vec<RejectedFile> {
-        self.files().inner().rejected.remove(key).unwrap_or_default()
+        self.files()
+            .inner()
+            .rejected
+            .remove(key)
+            .unwrap_or_default()
     }
 
     // ------------------------------------------------------------------
@@ -444,7 +454,12 @@ impl CoreProvider {
     }
 
     fn job(&self, id: &str) -> Option<UploadJob> {
-        self.files().inner().jobs.iter().find(|j| j.id == id).cloned()
+        self.files()
+            .inner()
+            .jobs
+            .iter()
+            .find(|j| j.id == id)
+            .cloned()
     }
 
     fn update_job(&self, id: &str, f: impl FnOnce(&mut UploadJob)) {
@@ -516,7 +531,14 @@ impl CoreProvider {
                 continue;
             }
             let key = upload_key(id, index);
-            self.set_transfer(&key, TransferState::Running { done: 0, total: file.size }, Some((&group_id, &view_topic)));
+            self.set_transfer(
+                &key,
+                TransferState::Running {
+                    done: 0,
+                    total: file.size,
+                },
+                Some((&group_id, &view_topic)),
+            );
             let (path, temp) = match &file.source {
                 NewFile::Path(p) => (p.clone(), false),
                 NewFile::Image {
@@ -532,7 +554,11 @@ impl CoreProvider {
                     })
                     .await;
                     if written.is_err() {
-                        self.set_transfer(&key, TransferState::Failed(FileError::Unreadable), Some((&group_id, &view_topic)));
+                        self.set_transfer(
+                            &key,
+                            TransferState::Failed(FileError::Unreadable),
+                            Some((&group_id, &view_topic)),
+                        );
                         return Err(FileError::Unreadable);
                     }
                     (path, true)
@@ -540,7 +566,11 @@ impl CoreProvider {
             };
             let p = path.clone();
             if let Err(error) = super::tokio_blocking(move || check_local_file(&p)).await {
-                self.set_transfer(&key, TransferState::Failed(error), Some((&group_id, &view_topic)));
+                self.set_transfer(
+                    &key,
+                    TransferState::Failed(error),
+                    Some((&group_id, &view_topic)),
+                );
                 return Err(error);
             }
             // A pending topic has no server id yet; the file belongs to the group.
@@ -593,7 +623,11 @@ impl CoreProvider {
                 Err(e) => {
                     tracing::warn!(error = %e, "upload failed");
                     let error = file_error(&e);
-                    self.set_transfer(&key, TransferState::Failed(error), Some((&group_id, &view_topic)));
+                    self.set_transfer(
+                        &key,
+                        TransferState::Failed(error),
+                        Some((&group_id, &view_topic)),
+                    );
                     return Err(error);
                 }
             }
@@ -621,11 +655,19 @@ impl CoreProvider {
             tokio::time::sleep(Duration::from_millis(250)).await;
         };
         let job = current(self).ok_or(FileError::Other)?;
-        let attachments: Vec<proto::FileRef> = job.files.iter().filter_map(|f| f.uploaded.clone()).collect();
+        let attachments: Vec<proto::FileRef> = job
+            .files
+            .iter()
+            .filter_map(|f| f.uploaded.clone())
+            .collect();
         let title = if topic_id.is_none() {
             Some(convert::topic_title(job.title.as_deref(), &job.body))
                 .filter(|t| !t.is_empty())
-                .or_else(|| attachments.first().map(|f| f.name.chars().take(80).collect()))
+                .or_else(|| {
+                    attachments
+                        .first()
+                        .map(|f| f.name.chars().take(80).collect())
+                })
         } else {
             None
         };
@@ -733,7 +775,13 @@ impl CoreProvider {
 
     /// My messages that wait for uploads into this topic (`view_topic` is
     /// the id the view asked for, `real` the resolved one).
-    pub(super) fn job_messages(&self, group_id: &str, view_topic: &str, real: &str, me: &str) -> Vec<Message> {
+    pub(super) fn job_messages(
+        &self,
+        group_id: &str,
+        view_topic: &str,
+        real: &str,
+        me: &str,
+    ) -> Vec<Message> {
         let i = self.files().inner();
         i.jobs
             .iter()
@@ -807,7 +855,12 @@ impl CoreProvider {
     }
 
     /// The thumbnail of a cached image; makes it in the background the first time.
-    pub(super) fn thumbnail_inner(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Option<PathBuf> {
+    pub(super) fn thumbnail_inner(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<PathBuf> {
         if !file.is_image() {
             return None;
         }
@@ -828,7 +881,11 @@ impl CoreProvider {
             i.transfers.insert(key.clone(), TransferState::Queued);
         }
         let this = self.clone();
-        let (sha, g, t) = (file.sha256.clone(), group_id.to_string(), topic_id.to_string());
+        let (sha, g, t) = (
+            file.sha256.clone(),
+            group_id.to_string(),
+            topic_id.to_string(),
+        );
         std::thread::spawn(move || {
             let made = make_thumbnail(&source, &dest);
             let mut i = this.files().inner();
@@ -838,7 +895,8 @@ impl CoreProvider {
                     i.transfers.remove(&key);
                 }
                 None => {
-                    i.transfers.insert(key, TransferState::Failed(FileError::Other));
+                    i.transfers
+                        .insert(key, TransferState::Failed(FileError::Other));
                 }
             }
             drop(i);
@@ -850,7 +908,12 @@ impl CoreProvider {
         None
     }
 
-    pub(super) fn fetch_file_inner(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Reply<PathBuf> {
+    pub(super) fn fetch_file_inner(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        file: &FileAttachment,
+    ) -> Reply<PathBuf> {
         let (tx, rx) = oneshot::channel();
         if !file.is_uploaded() {
             let _ = tx.send(Err(FileError::NotFound));
@@ -871,20 +934,35 @@ impl CoreProvider {
             let start = !i.downloads.contains_key(&sha);
             let d = i.downloads.entry(sha.clone()).or_default();
             d.waiters.push(tx);
-            d.topics.insert((group_id.to_string(), topic_id.to_string()));
+            d.topics
+                .insert((group_id.to_string(), topic_id.to_string()));
             start
         };
         if !start {
             return rx;
         }
-        self.set_transfer(&key, TransferState::Running { done: 0, total: file.size }, Some((group_id, topic_id)));
+        self.set_transfer(
+            &key,
+            TransferState::Running {
+                done: 0,
+                total: file.size,
+            },
+            Some((group_id, topic_id)),
+        );
         let this = self.clone();
         let progress = {
             let this = self.clone();
             let key = key.clone();
             let (g, t) = (group_id.to_string(), topic_id.to_string());
             Arc::new(move |p: Progress| {
-                this.set_transfer(&key, TransferState::Running { done: p.done, total: p.total }, Some((&g, &t)));
+                this.set_transfer(
+                    &key,
+                    TransferState::Running {
+                        done: p.done,
+                        total: p.total,
+                    },
+                    Some((&g, &t)),
+                );
             }) as chat_core::files::ProgressFn
         };
         let handle = a.client.download_file(convert::to_file_ref(file), progress);
@@ -1050,12 +1128,21 @@ impl CoreProvider {
 
     pub(super) fn request_artifact_inner(&self, group_id: &str, topic_id: &str, artifact_id: &str) {
         let Some(a) = self.account() else { return };
-        if !self.files().inner().requested.insert(artifact_id.to_string()) {
+        if !self
+            .files()
+            .inner()
+            .requested
+            .insert(artifact_id.to_string())
+        {
             return;
         }
         let handle = a.client.load_artifact(artifact_id);
         let this = self.clone();
-        let (g, t, id) = (group_id.to_string(), topic_id.to_string(), artifact_id.to_string());
+        let (g, t, id) = (
+            group_id.to_string(),
+            topic_id.to_string(),
+            artifact_id.to_string(),
+        );
         chat_core::background().spawn(async move {
             match handle.await {
                 Ok(Ok(row)) => {
@@ -1094,7 +1181,11 @@ impl CoreProvider {
         }
     }
 
-    pub(super) fn open_artifact_version_inner(&self, artifact_id: &str, version: Option<u32>) -> Reply<ArtifactFolder> {
+    pub(super) fn open_artifact_version_inner(
+        &self,
+        artifact_id: &str,
+        version: Option<u32>,
+    ) -> Reply<ArtifactFolder> {
         let (tx, rx) = oneshot::channel();
         let Some(a) = self.account() else {
             let _ = tx.send(Err(FileError::SignedOut));
@@ -1145,7 +1236,10 @@ impl CoreProvider {
         rx
     }
 
-    pub(super) fn create_artifact_inner(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
+    pub(super) fn create_artifact_inner(
+        &self,
+        request: NewArtifactRequest,
+    ) -> Reply<CreatedArtifact> {
         let (tx, rx) = oneshot::channel();
         let Some(a) = self.account() else {
             let _ = tx.send(Err(FileError::SignedOut));
@@ -1158,7 +1252,11 @@ impl CoreProvider {
         }
         let key = create_key(&request.topic_id);
         let (g, view_topic) = (request.group_id.clone(), request.topic_id.clone());
-        self.set_transfer(&key, TransferState::Running { done: 0, total: 0 }, Some((&g, &view_topic)));
+        self.set_transfer(
+            &key,
+            TransferState::Running { done: 0, total: 0 },
+            Some((&g, &view_topic)),
+        );
         let this = self.clone();
         chat_core::background().spawn(async move {
             let result = async {
@@ -1184,7 +1282,11 @@ impl CoreProvider {
                         d.2 = p.total;
                         let sum = (d.0 + p.done).min(total);
                         drop(d);
-                        this.set_transfer(&key, TransferState::Running { done: sum, total }, Some((&g, &t)));
+                        this.set_transfer(
+                            &key,
+                            TransferState::Running { done: sum, total },
+                            Some((&g, &t)),
+                        );
                     }) as chat_core::files::ProgressFn
                 };
                 let is_new = request.artifact_id.is_none();
@@ -1211,7 +1313,10 @@ impl CoreProvider {
                 let body = if is_new {
                     fill(ca::NEW_BODY, &[("title", &title)])
                 } else {
-                    fill(ca::VERSION_BODY, &[("title", &title), ("n", &version.to_string())])
+                    fill(
+                        ca::VERSION_BODY,
+                        &[("title", &title), ("n", &version.to_string())],
+                    )
                 };
                 // The topic keeps a message that points to the 产出.
                 if let Err(e) = a.client.send(chat_core::SendRequest {
@@ -1332,7 +1437,10 @@ fn job_message(j: &UploadJob, view_topic: &str, me: &str) -> Message {
 fn job_topic(j: &UploadJob, me: &str) -> Topic {
     let title = convert::topic_title(j.title.as_deref(), &j.body);
     let title = if title.is_empty() {
-        j.files.first().map(|f| f.name.chars().take(80).collect()).unwrap_or_default()
+        j.files
+            .first()
+            .map(|f| f.name.chars().take(80).collect())
+            .unwrap_or_default()
     } else {
         title
     };
@@ -1399,14 +1507,22 @@ mod tests {
         paths.sort();
         assert_eq!(paths, ["assets/app.js", "index.html"]);
         assert_eq!(
-            files.iter().find(|f| f.path == "index.html").unwrap().mime.as_deref(),
+            files
+                .iter()
+                .find(|f| f.path == "index.html")
+                .unwrap()
+                .mime
+                .as_deref(),
             Some("text/html")
         );
 
         let empty = dir.join("assets");
         assert_eq!(plan_artifact(&empty).unwrap_err(), FileError::NoPage);
         let (kind, _, entry, title) = plan_artifact(&dir.join("assets/app.js")).unwrap();
-        assert_eq!((kind, entry.as_str(), title.as_str()), (PKind::File, "app.js", "app.js"));
+        assert_eq!(
+            (kind, entry.as_str(), title.as_str()),
+            (PKind::File, "app.js", "app.js")
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -1429,10 +1545,18 @@ mod tests {
             .save(&big)
             .unwrap();
         let thumb = make_thumbnail(&big, &dir.join("t/big.png")).unwrap();
-        assert_eq!(chat_core::files::image_size(&thumb), Some((THUMB_MAX_PX, 320)));
+        assert_eq!(
+            chat_core::files::image_size(&thumb),
+            Some((THUMB_MAX_PX, 320))
+        );
         let small = dir.join("small.png");
-        image::RgbImage::from_pixel(10, 10, image::Rgb([0, 0, 0])).save(&small).unwrap();
-        assert_eq!(make_thumbnail(&small, &dir.join("t/small.png")), Some(small));
+        image::RgbImage::from_pixel(10, 10, image::Rgb([0, 0, 0]))
+            .save(&small)
+            .unwrap();
+        assert_eq!(
+            make_thumbnail(&small, &dir.join("t/small.png")),
+            Some(small)
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

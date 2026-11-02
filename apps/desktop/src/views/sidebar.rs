@@ -396,17 +396,17 @@ impl Sidebar {
                     ),
                 )
                 .separator()
-                    .item(menu_item(Lucide::LogOut, nav::LEAVE_GROUP, true).on_click(
-                        move |_, window, cx| {
-                            super::nav::dialogs::confirm_leave(
-                                services.clone(),
-                                g.id.clone(),
-                                g.name.clone(),
-                                window,
-                                cx,
-                            );
-                        },
-                    ))
+                .item(menu_item(Lucide::LogOut, nav::LEAVE_GROUP, true).on_click(
+                    move |_, window, cx| {
+                        super::nav::dialogs::confirm_leave(
+                            services.clone(),
+                            g.id.clone(),
+                            g.name.clone(),
+                            window,
+                            cx,
+                        );
+                    },
+                ))
             } else {
                 menu
             }

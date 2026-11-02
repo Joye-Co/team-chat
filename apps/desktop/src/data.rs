@@ -295,7 +295,10 @@ pub enum FileError {
 pub enum TransferState {
     /// Waiting for its turn.
     Queued,
-    Running { done: u64, total: u64 },
+    Running {
+        done: u64,
+        total: u64,
+    },
     Done,
     Failed(FileError),
 }
@@ -1070,7 +1073,6 @@ pub struct FollowedTopic {
     pub topic: Topic,
 }
 
-
 /// Card types (docs/protocol.md "Cards"). The schema is the protocol crate's,
 /// so readers keep its `CardBlock::Unknown` for block types added later.
 pub mod card {
@@ -1292,13 +1294,23 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// A small image (at most 640 px) of a cached image file, for inline
     /// previews. `None` while it is not cached or being made; the provider
     /// emits `Change::Messages` for the topic when it is ready. Cheap.
-    fn thumbnail(&self, _group_id: &str, _topic_id: &str, _file: &FileAttachment) -> Option<PathBuf> {
+    fn thumbnail(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _file: &FileAttachment,
+    ) -> Option<PathBuf> {
         None
     }
     /// Downloads a file into the cache (or finds it there). Progress is in
     /// `file_transfer(download_key(file))`; the provider emits
     /// `Change::Messages` for the topic while it runs and when it ends.
-    fn fetch_file(&self, _group_id: &str, _topic_id: &str, _file: &FileAttachment) -> Reply<PathBuf> {
+    fn fetch_file(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _file: &FileAttachment,
+    ) -> Reply<PathBuf> {
         reply_err(FileError::Other)
     }
     /// Cancels a running download of `file`: the partial file is removed and
@@ -1320,7 +1332,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// `Change::Messages` and `Change::Artifacts` for its topic.
     fn request_artifact(&self, _group_id: &str, _topic_id: &str, _artifact_id: &str) {}
     /// Puts a version (`None` = the current one) of a 产出 on disk.
-    fn open_artifact_version(&self, _artifact_id: &str, _version: Option<u32>) -> Reply<ArtifactFolder> {
+    fn open_artifact_version(
+        &self,
+        _artifact_id: &str,
+        _version: Option<u32>,
+    ) -> Reply<ArtifactFolder> {
         reply_err(FileError::Other)
     }
     /// Uploads a file or folder as a new 产出 or a new version, and posts a

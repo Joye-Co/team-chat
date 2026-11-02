@@ -289,9 +289,8 @@ impl MembersPage {
                         let (page, member) = (page.clone(), member.clone());
                         menu.item(PopupMenuItem::new(s::CHANGE_CHARACTER).on_click(
                             move |_, window, cx| {
-                                let services = page
-                                    .read_with(cx, |this, _| this.services.clone())
-                                    .ok();
+                                let services =
+                                    page.read_with(cx, |this, _| this.services.clone()).ok();
                                 if let Some(services) = services {
                                     open_character(services, &member, window, cx);
                                 }
@@ -1109,7 +1108,11 @@ impl Render for CharacterForm {
                     let _ = page.update(cx, |this, cx| this.pick(c, window, cx));
                 },
             ))
-            .children(widgets::status_line("member-character-status", &self.status, cx))
+            .children(widgets::status_line(
+                "member-character-status",
+                &self.status,
+                cx,
+            ))
             .child(
                 div().flex().justify_end().child(
                     ui::secondary_button("member-character-cancel", common::CANCEL, cx)

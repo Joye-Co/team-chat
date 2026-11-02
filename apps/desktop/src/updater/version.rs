@@ -33,9 +33,7 @@ pub fn postponed(
     for_how_long: Duration,
 ) -> bool {
     match postponed {
-        Some((v, at)) => {
-            !is_newer(version, v) && now.saturating_duration_since(*at) < for_how_long
-        }
+        Some((v, at)) => !is_newer(version, v) && now.saturating_duration_since(*at) < for_how_long,
         None => false,
     }
 }
@@ -93,7 +91,16 @@ mod tests {
     #[test]
     fn malformed_versions() {
         // A bad candidate is never offered.
-        for bad in ["", "1.2", "1.2.3.4", "01.2.3", "1.2.3-beta", "v1.2.3", " 1.2.3", "a.b.c"] {
+        for bad in [
+            "",
+            "1.2",
+            "1.2.3.4",
+            "01.2.3",
+            "1.2.3-beta",
+            "v1.2.3",
+            " 1.2.3",
+            "a.b.c",
+        ] {
             assert!(!is_newer(bad, "0.0.1"), "{bad:?}");
             assert_eq!(parse(bad), None, "{bad:?}");
         }
@@ -108,7 +115,12 @@ mod tests {
         let now = Instant::now();
         let day = Duration::from_secs(24 * 3600);
         let p = ("1.2.0".to_string(), now);
-        assert!(postponed("1.2.0", Some(&p), now + Duration::from_secs(60), day));
+        assert!(postponed(
+            "1.2.0",
+            Some(&p),
+            now + Duration::from_secs(60),
+            day
+        ));
         assert!(!postponed("1.2.0", Some(&p), now + day, day));
         assert!(!postponed("1.2.1", Some(&p), now, day));
         assert!(!postponed("1.2.0", None, now, day));

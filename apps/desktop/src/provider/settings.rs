@@ -15,9 +15,9 @@ use chat_core::{
 
 use super::{CoreProvider, convert};
 use crate::data::{
-    AdminError, AdminReply, BotCreated, CharacterId, GroupKind, GroupPrefs, InviteCreated, InviteRequest,
-    MachineCreated, MachineInfo, Member, MemberKind, MemberLevel, NotifyLevel, RunnerSetup,
-    SecretText, reply_now,
+    AdminError, AdminReply, BotCreated, CharacterId, GroupKind, GroupPrefs, InviteCreated,
+    InviteRequest, MachineCreated, MachineInfo, Member, MemberKind, MemberLevel, NotifyLevel,
+    RunnerSetup, SecretText, reply_now,
 };
 
 /// Largest avatar the server takes.
