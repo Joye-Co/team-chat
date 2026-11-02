@@ -1,0 +1,10 @@
+{
+  "kind": "CreateBotRequest",
+  "valid": true,
+  "description": "bot with a character",
+  "value": {
+    "name": "Tata",
+    "role": "产品负责人",
+    "character": "o03"
+  }
+}

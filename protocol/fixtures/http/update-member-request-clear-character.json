@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "description": "clear the character",
+  "value": {
+    "character": null
+  }
+}

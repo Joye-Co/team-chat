@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": false,
+  "description": "unknown character id",
+  "value": {
+    "character": "o99"
+  }
+}

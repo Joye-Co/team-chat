@@ -3,6 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::characters::CharacterId;
 use crate::entities::MemberLevel;
 use crate::limits::{Validation, check_chars, check_name};
 use crate::serde_util::{non_null, nullable};
@@ -36,6 +37,13 @@ pub struct UpdateMemberRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub deactivated: Option<bool>,
+    /// Owner only. `Some(None)` = `null` clears the character.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub character: Option<Option<CharacterId>>,
 }
 
 impl UpdateMemberRequest {

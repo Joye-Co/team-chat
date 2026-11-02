@@ -22,6 +22,7 @@ import {
   Title,
 } from "./common.ts";
 import { CardActionedEvent, CardActionFrame } from "./card.ts";
+import { CharacterId } from "./characters.ts";
 import {
   AddArtifactVersionRequest,
   ArtifactCreatedEvent,
@@ -61,6 +62,7 @@ import {
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
 
 export * from "./common.ts";
+export * from "./characters.ts";
 export * from "./topic.ts";
 export * from "./reads.ts";
 export * from "./card.ts";
@@ -91,6 +93,8 @@ export const Member = z.object({
   level: MemberLevel,
   avatarUrl: z.string().nullable().optional(),
   deactivated: z.boolean().optional(),
+  /** jojo-friends character id; absent or null = no character (initial avatar). */
+  character: CharacterId.nullable().optional(),
 });
 export type Member = z.infer<typeof Member>;
 
@@ -502,7 +506,7 @@ export type CreateInviteRequest = z.infer<typeof CreateInviteRequest>;
 export const CreateInviteResponse = z.object({ code: z.string(), expiresAt: Millis });
 export type CreateInviteResponse = z.infer<typeof CreateInviteResponse>;
 
-export const CreateBotRequest = z.object({ name: Name, role: z.string().optional() });
+export const CreateBotRequest = z.object({ name: Name, role: z.string().optional(), character: CharacterId.optional() });
 export type CreateBotRequest = z.infer<typeof CreateBotRequest>;
 export const CreateBotResponse = z.object({ member: Member, token: z.string() });
 export type CreateBotResponse = z.infer<typeof CreateBotResponse>;

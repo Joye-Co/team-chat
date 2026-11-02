@@ -289,6 +289,7 @@ impl HttpClient {
         let body = CreateBotRequest {
             name: name.to_string(),
             role: role.map(str::to_string),
+            character: None,
         };
         self.call(Method::POST, "/v1/bots", Some(&body), true).await
     }

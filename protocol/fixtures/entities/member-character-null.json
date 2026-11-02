@@ -1,0 +1,12 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "character null = no character",
+  "value": {
+    "id": "01JBX0ALICE0000000000000AB",
+    "kind": "human",
+    "name": "Alice",
+    "level": "member",
+    "character": null
+  }
+}

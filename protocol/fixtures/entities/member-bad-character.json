@@ -1,0 +1,12 @@
+{
+  "kind": "Member",
+  "valid": false,
+  "description": "character is not one of the 26 known ids",
+  "value": {
+    "id": "01JBX0ALICE0000000000000AB",
+    "kind": "human",
+    "name": "Alice",
+    "level": "member",
+    "character": "o21"
+  }
+}

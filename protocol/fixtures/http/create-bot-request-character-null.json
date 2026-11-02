@@ -1,0 +1,9 @@
+{
+  "kind": "CreateBotRequest",
+  "valid": false,
+  "description": "character may be omitted, not null",
+  "value": {
+    "name": "Tata",
+    "character": null
+  }
+}

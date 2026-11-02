@@ -1,0 +1,9 @@
+{
+  "kind": "CreateBotRequest",
+  "valid": false,
+  "description": "unknown character id",
+  "value": {
+    "name": "Tata",
+    "character": "tata"
+  }
+}

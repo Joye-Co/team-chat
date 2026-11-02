@@ -26,7 +26,11 @@ Member = {
   level: "owner" | "member"    // owner = full admin
   avatarUrl?: string | null
   deactivated?: boolean
+  character?: CharacterId | null // the avatar's jojo-friends character; absent or null = none
 }
+
+CharacterId = "jojo" | "h02" | "h03" | "h04" | "h05" | "h06"
+            | "o01" | "o02" | ... | "o20"   // the 26 jojo-friends ids, lower case
 
 Group = {
   id: string
@@ -182,7 +186,7 @@ JSON. Errors use HTTP status codes and the body `{ error: { code, message } }`.
 | `GET /v1/me` | member | | `Member` |
 | `GET /v1/members` | member | | `Member[]` |
 | `POST /v1/invites` | owner | `{ name, kind, level, role? }` | `{ code, expiresAt }` |
-| `POST /v1/bots` | owner | `{ name, role? }` | `{ member, token }` |
+| `POST /v1/bots` | owner | `{ name, role?, character? }` | `{ member, token }` |
 | `POST /v1/tokens/revoke` | owner, or the token's member | `{ memberId?, all? }` | `{ revoked }` |
 | `GET /v1/groups` | member | | `GroupSummary[]` |
 | `POST /v1/groups` | member | `{ name, memberIds }` | `GroupSummary` (creator is added) |
@@ -448,7 +452,7 @@ Module: `members.ts` / `members.rs`.
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
-| `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated? }` | `Member` |
+| `PATCH /v1/members/:id` | owner: every field; self: `name`, `role` | `UpdateMemberRequest { name?, role?: string \| null, level?, deactivated?, character?: CharacterId \| null }` | `Member` |
 | `PATCH /v1/groups/:id/prefs` | group member, for self | `UpdateGroupPrefsRequest { muted?, notify? }` | `GroupSummary` |
 
 ```ts
@@ -463,6 +467,12 @@ Rules:
   change would leave no active owner. Deactivating a member revokes its tokens and closes its
   connections. Every change is audited and pushed to every connection as `directory` with the
   changed `members`.
+- `character` is owner only (`unauthorized` for a member, also on self); `null` clears it. Only
+  the 26 jojo-friends ids are accepted (`invalid` otherwise); a new id is a protocol change,
+  because clients bundle the images and reject unknown ids. Clients draw the character with the
+  member's live status (idle, working, needs-input, success, error, offline); members without
+  one keep their initial avatar. `welcome`, `directory`, `GET /v1/members` and `GET /v1/me`
+  carry it.
 - Prefs are per member. The server pushes the new `GroupSummary` to my other connections as a
   `directory` frame.
 

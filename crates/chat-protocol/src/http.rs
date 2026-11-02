@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::characters::CharacterId;
 use crate::entities::{Group, GroupSummary, Member, MemberKind, MemberLevel, Millis};
 use crate::errors::ErrorBody;
 use crate::limits::{MAX_NAME_CHARS, Validation, check_chars, check_id, check_ids, check_name};
@@ -76,6 +77,12 @@ pub struct CreateBotRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub role: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub character: Option<CharacterId>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

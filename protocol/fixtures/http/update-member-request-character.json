@@ -1,0 +1,9 @@
+{
+  "kind": "UpdateMemberRequest",
+  "valid": true,
+  "description": "owner sets character and role",
+  "value": {
+    "character": "o05",
+    "role": "幕僚长"
+  }
+}

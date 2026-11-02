@@ -134,6 +134,10 @@ ok("entities/member-full.json", "Member", ownerFull, "every field set, Chinese r
 ok("entities/member-minimal.json", "Member", aliceMinimal, "optional fields omitted");
 ok("entities/member-bot-nulls.json", "Member", botNulls, "bot with explicit nulls and emoji name");
 ok("entities/member-name-max.json", "Member", { ...aliceMinimal, name: "名".repeat(MAX_NAME_CHARS) }, "name at 64 characters");
+ok("entities/member-bot-character.json", "Member", { ...botNulls, role: "主助手", level: "owner", character: "jojo" }, "bot with a jojo-friends character");
+ok("entities/member-character-null.json", "Member", { ...aliceMinimal, character: null }, "character null = no character");
+bad("entities/member-bad-character.json", "Member", { ...aliceMinimal, character: "o21" }, "character is not one of the 26 known ids");
+bad("entities/member-character-uppercase.json", "Member", { ...aliceMinimal, character: "JOJO" }, "character ids are lower case");
 ok("entities/group.json", "Group", general);
 ok("entities/group-dm.json", "Group", dm);
 ok("entities/group-summary.json", "GroupSummary", generalSummary);
@@ -308,6 +312,9 @@ ok("http/create-invite-request-minimal.json", "CreateInviteRequest", { name: "Op
 ok("http/create-invite-response.json", "CreateInviteResponse", { code: "WXYZ-2345-6789", expiresAt: T0 + 7 * 86_400_000 }, "code is a fake placeholder");
 ok("http/create-bot-request.json", "CreateBotRequest", { name: "Reviewer 🔍", role: "代码审查" });
 ok("http/create-bot-request-minimal.json", "CreateBotRequest", { name: "builder" });
+ok("http/create-bot-request-character.json", "CreateBotRequest", { name: "Tata", role: "产品负责人", character: "o03" }, "bot with a character");
+bad("http/create-bot-request-bad-character.json", "CreateBotRequest", { name: "Tata", character: "tata" }, "unknown character id");
+bad("http/create-bot-request-character-null.json", "CreateBotRequest", { name: "Tata", character: null }, "character may be omitted, not null");
 ok("http/create-bot-response.json", "CreateBotResponse", { member: botNulls, token: "tc_CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC" }, "token is a fake placeholder");
 ok("http/revoke-tokens-request.json", "RevokeTokensRequest", { memberId: ID.bot, all: true });
 ok("http/revoke-tokens-request-empty.json", "RevokeTokensRequest", {}, "revoke the calling token");

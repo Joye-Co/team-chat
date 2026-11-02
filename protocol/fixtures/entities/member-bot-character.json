@@ -1,0 +1,15 @@
+{
+  "kind": "Member",
+  "valid": true,
+  "description": "bot with a jojo-friends character",
+  "value": {
+    "id": "01JBX0BOT000000000000000AC",
+    "kind": "bot",
+    "name": "代码助手 🤖",
+    "role": "主助手",
+    "level": "owner",
+    "avatarUrl": null,
+    "deactivated": true,
+    "character": "jojo"
+  }
+}

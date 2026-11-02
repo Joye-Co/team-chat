@@ -14,6 +14,7 @@
 pub mod audit;
 pub mod bots;
 pub mod card;
+pub mod characters;
 pub mod diagnostics;
 pub mod entities;
 pub mod errors;
@@ -35,6 +36,7 @@ pub mod updates;
 pub use audit::*;
 pub use bots::*;
 pub use card::*;
+pub use characters::*;
 pub use diagnostics::*;
 pub use entities::*;
 pub use errors::*;

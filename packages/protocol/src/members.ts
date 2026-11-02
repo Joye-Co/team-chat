@@ -1,6 +1,7 @@
 // V1 member changes, group notification preferences and the server's notify decision.
 // See docs/protocol.md, "Members and preferences" and "Notifications".
 import { z } from "zod";
+import { CharacterId } from "./characters.ts";
 import { MemberLevel, Name } from "./common.ts";
 
 /** `PATCH /v1/members/:id`. Owner: every field. Self: `name` and `role` only. */
@@ -10,6 +11,8 @@ export const UpdateMemberRequest = z.object({
   role: z.string().max(64).nullable().optional(),
   level: MemberLevel.optional(),
   deactivated: z.boolean().optional(),
+  /** Owner only. null clears the character. */
+  character: CharacterId.nullable().optional(),
 });
 export type UpdateMemberRequest = z.infer<typeof UpdateMemberRequest>;
 

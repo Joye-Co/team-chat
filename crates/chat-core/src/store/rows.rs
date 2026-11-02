@@ -236,6 +236,7 @@ pub(crate) fn member_from_row(r: &Row<'_>) -> rusqlite::Result<Member> {
         level: enum_from(r.get(4)?)?,
         avatar_url: avatar_url.map(Some),
         deactivated: Some(deactivated),
+        character: None,
     })
 }
 

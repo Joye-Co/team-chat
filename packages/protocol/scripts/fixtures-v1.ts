@@ -215,6 +215,9 @@ export function addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSum
   ok("http/update-member-request.json", "UpdateMemberRequest", { name: "小王", role: "前端工程师", level: "owner", deactivated: false }, "owner changes every field");
   ok("http/update-member-request-clear-role.json", "UpdateMemberRequest", { role: null }, "clear the role");
   ok("http/update-member-request-empty.json", "UpdateMemberRequest", {}, "no change");
+  ok("http/update-member-request-character.json", "UpdateMemberRequest", { character: "o05", role: "幕僚长" }, "owner sets character and role");
+  ok("http/update-member-request-clear-character.json", "UpdateMemberRequest", { character: null }, "clear the character");
+  bad("http/update-member-request-bad-character.json", "UpdateMemberRequest", { character: "o99" }, "unknown character id");
   bad("http/update-member-request-bad-level.json", "UpdateMemberRequest", { level: "admin" }, "unknown level");
   bad("http/update-member-request-name-too-long.json", "UpdateMemberRequest", { name: "名".repeat(65) }, "limit: name 65 characters");
   bad("http/update-member-request-empty-name.json", "UpdateMemberRequest", { name: "" }, "limit: empty name");

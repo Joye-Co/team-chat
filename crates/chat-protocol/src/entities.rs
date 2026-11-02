@@ -3,6 +3,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::card::Card;
+use crate::characters::CharacterId;
 use crate::members::NotifyLevel;
 use crate::message::{ArtifactRef, FileRef, MessageKind, ReplyTo};
 use crate::reads::TopicState;
@@ -56,9 +57,20 @@ pub struct Member {
         skip_serializing_if = "Option::is_none"
     )]
     pub deactivated: Option<bool>,
+    /// jojo-friends character. `None` = omitted, `Some(None)` = `null`.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub character: Option<Option<CharacterId>>,
 }
 
 impl Member {
+    pub fn character(&self) -> Option<CharacterId> {
+        self.character.flatten()
+    }
+
     pub fn role(&self) -> Option<&str> {
         self.role.as_ref().and_then(|r| r.as_deref())
     }
