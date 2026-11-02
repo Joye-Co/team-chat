@@ -255,6 +255,7 @@ async fn run(
                             Pending::Prompt => {
                                 last_stop = r["stopReason"].as_str().unwrap_or("end_turn").to_string();
                                 for ev in norm.end_turn(&last_stop) { let _ = emit.send(ev); }
+                                super::codex::take_late_input(&mut control, &mut queued, &emit);
                                 if last_stop != "cancelled" && !queued.is_empty() {
                                     let text = queued.drain(..).collect::<Vec<_>>().join("\n\n");
                                     send_prompt(&mut p, &mut ids, &mut pending, &mut norm, &emit, session.as_deref().unwrap_or_default(), &text).await;

@@ -402,6 +402,7 @@ async fn run(
                         }
                         if method == "turn/completed" {
                             active_turn = None;
+                            take_late_input(&mut control, &mut queued, &emit);
                             if !queued.is_empty() {
                                 let text = queued.drain(..).collect::<Vec<_>>().join("\n\n");
                                 let id = ids.next();
@@ -471,5 +472,19 @@ async fn run(
         session_id: thread_id,
         session_file,
         usage: norm.usage,
+    }
+}
+
+/// Input that arrived while the last turn was ending still gets a turn.
+pub(crate) fn take_late_input(
+    control: &mut mpsc::UnboundedReceiver<Control>,
+    queued: &mut VecDeque<String>,
+    emit: &Emit,
+) {
+    while let Ok(c) = control.try_recv() {
+        if let Control::Input { input_id, text } = c {
+            let _ = emit.send(RunEvent::InputAccepted { input_id });
+            queued.push_back(text);
+        }
     }
 }

@@ -320,7 +320,14 @@ async fn run(
                     let _ = emit.send(ev);
                 }
                 if v["type"] == "result" && norm.open_turns() == 0 {
-                    break;
+                    let mut late = VecDeque::new();
+                    super::codex::take_late_input(&mut control, &mut late, &emit);
+                    if late.is_empty() { break; }
+                    for text in late {
+                        for ev in norm.queue_turn() { let _ = emit.send(ev); }
+                        if p.write_json(&user_line(&text)).await.is_err() { exited_early = true; break; }
+                    }
+                    if exited_early { break; }
                 }
             }
             c = control.recv(), if control_open => {
