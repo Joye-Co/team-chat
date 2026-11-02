@@ -411,6 +411,11 @@ fn apply(t: &mut Theme, dark: bool) {
 /// System font (SF Pro); Core Text falls back to PingFang SC for Han and to
 /// Apple Color Emoji for emoji.
 pub const FONT_FAMILY: &str = ".SystemUIFont";
+/// Weight 500 as drawn: font-kit reads SF Medium's Core Text weight (0.23)
+/// as about 530, and its CSS matching sends an exact 500 down to Regular
+/// when no face is exactly 500. Just above 500 picks the closest heavier
+/// face, Medium.
+pub const MEDIUM_WEIGHT: FontWeight = FontWeight(501.);
 pub const MONO_FONT_FAMILY: &str = "Menlo";
 
 /// The closed type scale (§3): size and line height of each style. There is
@@ -505,8 +510,7 @@ pub trait Type: Styled + Sized {
     }
     /// 12 / 16, 500: chips, kbd, role tags, field labels of tables.
     fn t_meta_medium(self) -> Self {
-        self.type_role(type_scale::META)
-            .font_weight(FontWeight::MEDIUM)
+        self.type_role(type_scale::META).font_weight(MEDIUM_WEIGHT)
     }
     /// 12 / 16, 600: badges and sidebar section headers.
     fn t_section(self) -> Self {
@@ -521,7 +525,7 @@ pub trait Type: Styled + Sized {
     /// 20 / 28, 500, tabular figures: invite code boxes.
     fn t_code_entry(self) -> Self {
         self.type_role(type_scale::CODE_ENTRY)
-            .font_weight(FontWeight::MEDIUM)
+            .font_weight(MEDIUM_WEIGHT)
             .font_features(tabular())
     }
     /// Older name of [`Type::t_heading`].
@@ -541,7 +545,7 @@ pub trait Type: Styled + Sized {
         self.t_meta_medium()
     }
     fn medium(self) -> Self {
-        self.font_weight(FontWeight::MEDIUM)
+        self.font_weight(MEDIUM_WEIGHT)
     }
     fn semibold(self) -> Self {
         self.font_weight(FontWeight::SEMIBOLD)
