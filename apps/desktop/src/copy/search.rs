@@ -18,6 +18,9 @@ crate::copy! {
     UNKNOWN_GROUP = "未知的群",
     UNKNOWN_TOPIC = "未知的话题",
     OPEN_HINT = "↑↓ 选择 · 回车打开 · Esc 关闭",
+    HINT_SELECT = "选择",
+    HINT_OPEN = "打开",
+    HINT_CLOSE = "关闭",
     MENU_SEARCH_GROUP = "在当前群搜索…",
     MENU_SEARCH_ALL = "在全部群搜索…",
 }

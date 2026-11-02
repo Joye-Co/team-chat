@@ -23,7 +23,8 @@ use crate::{
     app::{Place, Services},
     copy::search as s,
     data::GroupId,
-    theme,
+    theme::{self, Type as _, space},
+    ui,
 };
 
 pub use results::SearchDelegate;
@@ -110,27 +111,42 @@ impl Render for SearchDialog {
             })
             .child(Tab::new().label(s::SCOPE_GROUP).disabled(!has_group))
             .child(Tab::new().label(s::SCOPE_ALL));
+        // §7.12 switcher layout: the scope, the query, 60 pt hits, and a
+        // 40 pt footer with kbd hints.
         div()
             .flex()
             .flex_col()
             .w_full()
-            .child(div().px(px(12.)).pt(px(12.)).flex().child(tabs))
+            .child(div().px(space::S12).pt(space::S12).flex().child(tabs))
             .child(
                 List::new(&self.list)
                     .search_placeholder(s::PLACEHOLDER)
+                    .large()
+                    .p(space::S4)
                     .h(px(440.)),
             )
             .child(
                 div()
-                    .px(px(12.))
-                    .py(px(8.))
+                    .h(px(40.))
+                    .px(space::S16)
                     .flex()
-                    .border_t_1()
-                    .border_color(colors.border)
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(div().flex_1().child(footer))
-                    .child(s::OPEN_HINT),
+                    .items_center()
+                    .gap(space::S16)
+                    .border_t(theme::HAIRLINE)
+                    .border_color(colors.sep)
+                    .t_meta()
+                    .text_color(colors.text_3)
+                    .child(div().flex_1().tnum().child(footer))
+                    .child(ui::KbdHint::new(&["up", "down"]).label(s::HINT_SELECT))
+                    .child(ui::KbdHint::new(&["enter"]).label(s::HINT_OPEN))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::S6)
+                            .child(ui::Kbd::new("esc"))
+                            .child(s::HINT_CLOSE),
+                    ),
             )
     }
 }

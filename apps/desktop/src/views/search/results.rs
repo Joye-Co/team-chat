@@ -4,8 +4,8 @@
 use std::{collections::HashMap, ops::Range, time::Duration};
 
 use gpui::{
-    App, Context, FontWeight, HighlightStyle, IntoElement, ParentElement, Styled, StyledText, Task,
-    Window, div, prelude::FluentBuilder as _, px,
+    App, Context, HighlightStyle, IntoElement, ParentElement, Styled, StyledText, Task, Window,
+    div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     IndexPath, WindowExt as _,
@@ -14,10 +14,11 @@ use gpui_component::{
 
 use crate::{
     app::Services,
-    copy::{dev, fill, nav as navcopy, search as s},
+    copy::{dev, fill, search as s},
     data::{GroupId, Member, SearchError, SearchHit, SearchQuery},
-    theme,
-    views::{avatar, time_text},
+    theme::{self, Type as _, space},
+    ui,
+    views::time_text,
 };
 
 /// Wait this long after the last key before asking the server.
@@ -26,7 +27,7 @@ const DEBOUNCE: Duration = Duration::from_millis(180);
 const LIMIT: u32 = 50;
 /// Longest query the protocol accepts, in characters.
 const MAX_QUERY: usize = 200;
-const ROW_HEIGHT: f32 = 56.;
+const ROW_HEIGHT: f32 = 60.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -249,82 +250,96 @@ impl ListDelegate for SearchDelegate {
         let topic = self.topic_title(&hit);
         let author = self.member(&hit.author_id).cloned();
         let snippet = hit.snippet.replace(['\n', '\r'], " ");
+        // §7.12: every match gets one mark, `hl-bg`, text color unchanged.
         let style = HighlightStyle {
-            background_color: Some(colors.search_highlight),
-            font_weight: Some(FontWeight::SEMIBOLD),
+            background_color: Some(colors.hl_bg),
             ..Default::default()
         };
         let highlights: Vec<_> = byte_ranges(&snippet, &hit.highlights)
             .into_iter()
             .map(|r| (r, style))
             .collect();
-        let place = div()
+        // Line 1: the author 14/500, ` · 群名 · 话题` 13 `text-3`, the time
+        // at the right. Line 2: the snippet 13/20 `text-2`.
+        let title = div()
+            .h(px(20.))
             .flex()
             .items_center()
-            .gap(px(4.))
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(navcopy::GROUP_MARK)
+            .gap(space::S4)
             .child(
                 div()
                     .flex_none()
-                    .max_w(px(180.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(group),
+                    .max_w(px(160.))
+                    .t_ui()
+                    .medium()
+                    .text_color(colors.text_1)
+                    .one_line()
+                    .child(author.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
             )
-            .child(navcopy::TOPIC_MARK)
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(topic),
+                    .t_small()
+                    .text_color(colors.text_3)
+                    .one_line()
+                    .child(format!("· {group} · {topic}")),
             )
             .when(developer, |el| {
-                el.child(div().flex_none().child(fill(
-                    dev::SEARCH_HIT,
-                    &[("id", &hit.message_id), ("seq", &hit.seq.to_string())],
-                )))
+                el.child(
+                    div()
+                        .flex_none()
+                        .t_meta()
+                        .text_color(colors.text_3)
+                        .child(fill(
+                            dev::SEARCH_HIT,
+                            &[("id", &hit.message_id), ("seq", &hit.seq.to_string())],
+                        )),
+                )
             })
-            .child(div().flex_none().child(time_text(hit.created_at)));
-        let line = div()
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .text_sm()
-            .child(avatar(author.as_ref(), px(18.), cx))
             .child(
                 div()
                     .flex_none()
-                    .text_color(colors.muted_foreground)
-                    .child(author.map(|m| m.name).unwrap_or_default()),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(StyledText::new(snippet).with_highlights(highlights)),
+                    .t_meta()
+                    .tnum()
+                    .text_color(colors.text_3)
+                    .child(time_text(hit.created_at)),
             );
+        let line = div()
+            .t_small()
+            .text_color(colors.text_2)
+            .one_line()
+            .child(StyledText::new(snippet).with_highlights(highlights));
+        let selected = self.selected == Some(ix.row);
         Some(
             ListItem::new(ix.row)
-                .selected(self.selected == Some(ix.row))
+                .when(selected, |el| el.bg(colors.selected))
+                .rounded(theme::radius::MD)
+                .px(space::S12)
+                .py_0()
                 .child(
                     div()
                         .h(px(ROW_HEIGHT))
                         .w_full()
                         .flex()
-                        .flex_col()
-                        .justify_center()
-                        .gap(px(4.))
-                        .child(place)
-                        .child(line),
+                        .items_center()
+                        .gap(space::S12)
+                        .child(div().flex_none().size(px(24.)).child(
+                            ui::MemberAvatar::new(author.as_ref(), px(24.)).on(if selected {
+                                colors.selected
+                            } else {
+                                colors.overlay
+                            }),
+                        ))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w(px(0.))
+                                .flex()
+                                .flex_col()
+                                .child(title)
+                                .child(line),
+                        ),
                 ),
         )
     }
@@ -348,9 +363,9 @@ impl ListDelegate for SearchDelegate {
             .flex()
             .items_center()
             .justify_center()
-            .p(px(24.))
-            .text_sm()
-            .text_color(theme::colors(cx).muted_foreground)
+            .p(space::S24)
+            .t_small()
+            .text_color(theme::colors(cx).text_3)
             .child(text)
     }
 
