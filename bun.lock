@@ -5,6 +5,16 @@
     "": {
       "name": "team-chat",
     },
+    "ops/monitor": {
+      "name": "@chat/monitor",
+      "devDependencies": {
+        "@cloudflare/vitest-plugin": "^1.4.12",
+        "@cloudflare/workers-types": "^5.20261102.1",
+        "typescript": "^7.0.2",
+        "vitest": "~4.1.12",
+        "wrangler": "^4.156.1",
+      },
+    },
     "ops/restore": {
       "name": "@chat/ops-restore",
     },
@@ -55,6 +65,8 @@
   },
   "packages": {
     "@chat/bot-sdk": ["@chat/bot-sdk@workspace:packages/bot-sdk"],
+
+    "@chat/monitor": ["@chat/monitor@workspace:ops/monitor"],
 
     "@chat/ops-restore": ["@chat/ops-restore@workspace:ops/restore"],
 
