@@ -1,7 +1,9 @@
-//! Navigation dialogs: new 群 (name and members), start a DM (member picker),
-//! and the confirmation before leaving a 群.
+//! Navigation dialogs (DESIGN.md §7.12): new 群 (name and members), start a
+//! DM (member picker), and the alert before leaving a 群. Dialogs are 440
+//! wide with 20 pt padding, a `title` 16/24, 40 pt form fields with labels
+//! above, and `md` buttons at the bottom right.
 
-use std::{cell::Cell, collections::HashSet, rc::Rc};
+use std::{cell::Cell, collections::HashSet};
 
 use gpui::{
     App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
@@ -10,22 +12,18 @@ use gpui::{
 };
 use gpui_component::{
     WindowExt as _,
-    button::{Button, ButtonVariant, ButtonVariants as _},
+    button::ButtonVariant,
     checkbox::Checkbox,
-    command::{Command, CommandItem, CommandState},
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
 };
 
 use crate::{
     app::{Place, Services},
     copy::{common, fill, nav},
     data::{CreateGroupRequest, GroupId, Member, MemberId},
-    theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    theme::{self, Type as _, size, space},
+    ui::{self, ButtonSpec as _, FieldKind, Lucide},
 };
-
-/// Width of a sheet (DESIGN.md §5.5).
-const SHEET_WIDTH: gpui::Pixels = px(420.);
 
 /// Members I can add to a group or DM: everyone but me and deactivated members.
 pub fn pickable_members(members: &[Member], me: Option<&str>) -> Vec<Member> {
@@ -126,19 +124,29 @@ impl NewGroupForm {
 
 impl Render for NewGroupForm {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let colors = theme::colors(cx);
+        let k = theme::colors(cx);
         let query = self.filter.read(cx).value().trim().to_lowercase();
+        let named = !self.name.read(cx).value().trim().is_empty();
         let selected: HashSet<&str> = self.selected.iter().map(|s| s.as_str()).collect();
-        let rows: Vec<_> = self
-            .members
-            .iter()
-            .filter(|m| query.is_empty() || m.name.to_lowercase().contains(&query))
-            .map(|m| {
-                let id = m.id.clone();
-                let checked = selected.contains(m.id.as_str());
-                member_row(m, colors.elevated, cx)
-                    .h(px(32.))
+        let rows: Vec<_> =
+            self.members
+                .iter()
+                .filter(|m| query.is_empty() || m.name.to_lowercase().contains(&query))
+                .map(|m| {
+                    let id = m.id.clone();
+                    let id2 = m.id.clone();
+                    let checked = selected.contains(m.id.as_str());
+                    // A 40 pt row (§7.12): the whole row toggles the checkbox.
+                    ui::list_row(
+                        gpui::SharedString::from(format!("pick-row-{}", m.id)),
+                        ui::RowSurface::Overlay,
+                        false,
+                        cx,
+                    )
+                    .h(size::POPUP_ROW)
                     .px(space::S8)
+                    .gap(space::S10)
+                    .child(member_row(m, k.overlay, cx))
                     .child(
                         div().flex_none().child(
                             Checkbox::new(gpui::SharedString::from(format!("pick-{}", m.id)))
@@ -148,128 +156,123 @@ impl Render for NewGroupForm {
                                 })),
                         ),
                     )
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        let on = !this.selected.contains(&id2);
+                        this.toggle(&id2, on, cx)
+                    }))
                     .into_any_element()
-            })
-            .collect();
+                })
+                .collect();
         let empty = rows.is_empty();
         div()
             .flex()
             .flex_col()
             .t_ui()
-            .child(div().medium().pb(space::S6).child(nav::GROUP_NAME_LABEL))
-            .child(Input::new(&self.name))
-            .when_some(self.error, |el, e| {
-                el.child(
-                    div()
-                        .pt(space::S6)
-                        .t_callout()
-                        .text_color(colors.danger_text)
-                        .child(e),
-                )
-            })
+            .child(ui::field_label(nav::GROUP_NAME_LABEL, cx))
+            .child(
+                ui::TextField::new("new-group-name", &self.name, FieldKind::Form)
+                    .error(self.error.is_some()),
+            )
+            .when_some(self.error, |el, e| el.child(ui::field_help(e, true, cx)))
             .child(
                 div()
                     .pt(space::S16)
-                    .pb(space::S6)
+                    .pb(space::S8)
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(div().medium().child(nav::PICK_MEMBERS))
                     .child(
                         div()
-                            .t_callout()
-                            .tnum()
-                            .text_color(colors.text_2)
-                            .child(fill(
-                                nav::SELECTED_COUNT,
-                                &[("n", &self.selected.len().to_string())],
-                            )),
-                    ),
+                            .t_small()
+                            .medium()
+                            .text_color(k.text_2)
+                            .child(nav::PICK_MEMBERS),
+                    )
+                    .child(div().t_meta().tnum().text_color(k.text_3).child(fill(
+                        nav::SELECTED_COUNT,
+                        &[("n", &self.selected.len().to_string())],
+                    ))),
             )
-            .child(Input::new(&self.filter).prefix(ui::icon(
-                Lucide::Search,
-                theme::icon::BUTTON,
-                colors.text_2,
-            )))
+            .child(ui::TextField::new(
+                "new-group-filter",
+                &self.filter,
+                FieldKind::SearchBordered,
+            ))
             .child(
                 div()
                     .id("new-group-members")
                     .mt(space::S8)
-                    .h(px(224.))
+                    .mx(px(-8.))
+                    .h(px(240.))
                     .overflow_y_scroll()
                     .children(rows)
                     .when(empty, |el| {
                         el.child(
                             div()
+                                .h(size::POPUP_ROW)
                                 .px(space::S8)
-                                .py(space::S8)
-                                .t_callout()
-                                .text_color(colors.text_2)
+                                .flex()
+                                .items_center()
+                                .t_small()
+                                .text_color(k.text_2)
                                 .child(nav::NO_MEMBERS_MATCH),
                         )
                     }),
             )
             .child(
                 div()
-                    .pt(space::S16)
+                    .pt(space::S20)
                     .flex()
                     .justify_end()
                     .gap(space::S8)
                     .child(
-                        Button::new("new-group-cancel")
-                            .label(common::CANCEL)
+                        ui::secondary_button("new-group-cancel", common::CANCEL, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     )
                     .child(
-                        Button::new("new-group-create")
-                            .primary()
-                            .label(nav::CREATE)
+                        ui::primary_button("new-group-create", nav::CREATE, cx)
+                            .disabled_fill(!named, cx)
                             .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
                     ),
             )
     }
 }
 
-/// One member in a picker: avatar, name and 岗位. The 岗位 shrinks first
-/// (DESIGN.md §12); `surface` is what the avatar's rings sit on.
+/// One member in a picker: a 24 avatar, the name `ui` 14 and the 岗位 13
+/// `text-3`. The 岗位 shrinks first; `surface` is what the avatar sits on.
 fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
-    let colors = theme::colors(cx);
+    let k = theme::colors(cx);
     div()
-        .w_full()
+        .flex_1()
+        .min_w(px(0.))
         .flex()
         .items_center()
-        .gap(space::S8)
+        .gap(space::S10)
         .child(
             div().flex_none().child(
-                ui::MemberAvatar::new(Some(m), px(24.))
+                ui::MemberAvatar::new(Some(m), size::AVATAR_ROW)
                     .presence(Some(m))
                     .on(surface),
             ),
         )
         .child(
             div()
-                .flex_1()
+                .flex_shrink(1.)
                 .min_w(px(0.))
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .child(
-                    div()
-                        .flex_shrink(1.)
-                        .min_w(px(0.))
-                        .one_line()
-                        .child(m.name.clone()),
-                )
-                .children(m.role.clone().map(|r| {
-                    div()
-                        .flex_shrink(2.)
-                        .min_w(px(0.))
-                        .t_callout()
-                        .text_color(colors.text_2)
-                        .one_line()
-                        .child(r)
-                })),
+                .t_ui()
+                .text_color(k.text_1)
+                .one_line()
+                .child(m.name.clone()),
         )
+        .children(m.role.clone().map(|r| {
+            div()
+                .flex_shrink(2.)
+                .min_w(px(0.))
+                .t_small()
+                .text_color(k.text_3)
+                .one_line()
+                .child(r)
+        }))
 }
 
 /// Opens the new-group dialog.
@@ -283,60 +286,177 @@ pub fn open_new_group(services: Services, window: &mut Window, cx: &mut App) {
             handle.focus(window, cx);
         }
         dialog
-            .w(SHEET_WIDTH)
-            .title(div().t_title().child(nav::NEW_GROUP))
+            .close_button(false)
+            .p(space::S20)
+            .title(div().t_title().pb(space::S8).child(nav::NEW_GROUP))
             .child(form.clone())
     });
 }
 
+/// The member picker that starts a DM (§7.12): a 36 pt search field, 40 pt
+/// rows, Up and Down move, Enter opens or starts the DM.
+pub struct DmPicker {
+    filter: Entity<InputState>,
+    focus: gpui::FocusHandle,
+    members: Vec<Member>,
+    active: usize,
+    scroll: gpui::ScrollHandle,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl gpui::Focusable for DmPicker {
+    fn focus_handle(&self, _: &App) -> gpui::FocusHandle {
+        self.focus.clone()
+    }
+}
+
+impl DmPicker {
+    fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let filter =
+            cx.new(|cx| InputState::new(window, cx).placeholder(nav::START_DM_PLACEHOLDER));
+        let me = services.me();
+        let members = pickable_members(&services.provider.members(), me.as_deref());
+        let subscriptions = vec![cx.subscribe_in(
+            &filter,
+            window,
+            |this, _, event: &InputEvent, _window, cx| match event {
+                InputEvent::Change => {
+                    this.active = 0;
+                    cx.notify();
+                }
+                _ => {}
+            },
+        )];
+        Self {
+            filter,
+            focus: cx.focus_handle(),
+            members,
+            active: 0,
+            scroll: gpui::ScrollHandle::new(),
+            _subscriptions: subscriptions,
+        }
+    }
+
+    fn shown(&self, cx: &App) -> Vec<Member> {
+        let query = self.filter.read(cx).value().trim().to_lowercase();
+        self.members
+            .iter()
+            .filter(|m| query.is_empty() || m.name.to_lowercase().contains(&query))
+            .cloned()
+            .collect()
+    }
+
+    fn select(&mut self, delta: isize, cx: &mut Context<Self>) {
+        let n = self.shown(cx).len() as isize;
+        if n > 0 {
+            self.active = (self.active as isize + delta).rem_euclid(n) as usize;
+            cx.notify();
+        }
+    }
+
+    fn confirm(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let member = self.shown(cx).get(self.active).map(|m| m.id.clone());
+        if let Some(id) = member {
+            window.close_dialog(cx);
+            super::open_dm_with(id, cx);
+        }
+    }
+}
+
+impl Render for DmPicker {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = theme::colors(cx);
+        let shown = self.shown(cx);
+        if self.active >= shown.len() {
+            self.active = 0;
+        }
+        if !shown.is_empty() {
+            self.scroll.scroll_to_item(self.active);
+        }
+        let rows: Vec<_> = shown
+            .iter()
+            .enumerate()
+            .map(|(ix, m)| {
+                let active = ix == self.active;
+                ui::list_row(
+                    gpui::SharedString::from(format!("dm-row-{}", m.id)),
+                    ui::RowSurface::Overlay,
+                    active,
+                    cx,
+                )
+                .h(size::POPUP_ROW)
+                .px(space::S10)
+                .gap(space::S10)
+                .child(member_row(
+                    m,
+                    if active { k.selected } else { k.overlay },
+                    cx,
+                ))
+                .when(active, |el| el.child(ui::return_hint(cx)))
+                .on_click(cx.listener(move |this, _, window, cx| {
+                    this.active = ix;
+                    this.confirm(window, cx)
+                }))
+                .into_any_element()
+            })
+            .collect();
+        let empty = rows.is_empty();
+        div()
+            .key_context(super::switcher::CONTEXT)
+            .track_focus(&self.focus)
+            .on_action(
+                cx.listener(|this, _: &super::switcher::SelectPrevious, _, cx| this.select(-1, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &super::switcher::SelectNext, _, cx| this.select(1, cx)),
+            )
+            .on_action(
+                cx.listener(|this, _: &super::switcher::OpenSelected, window, cx| {
+                    this.confirm(window, cx)
+                }),
+            )
+            .flex()
+            .flex_col()
+            .child(ui::TextField::new(
+                "start-dm-filter",
+                &self.filter,
+                FieldKind::SearchBordered,
+            ))
+            .child(
+                div()
+                    .id("start-dm-members")
+                    .mt(space::S8)
+                    .mx(px(-8.))
+                    .h(px(320.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.scroll)
+                    .children(rows)
+                    .when(empty, |el| {
+                        el.child(
+                            div()
+                                .h(px(160.))
+                                .child(ui::EmptyState::new(Lucide::SearchX, nav::NO_MEMBERS_MATCH)),
+                        )
+                    }),
+            )
+    }
+}
+
 /// Opens the member picker; confirming opens or starts the DM.
 pub fn open_start_dm(services: Services, window: &mut Window, cx: &mut App) {
-    let me = services.me();
-    let members = Rc::new(pickable_members(
-        &services.provider.members(),
-        me.as_deref(),
-    ));
-    let state = cx.new(|cx| CommandState::new(window, cx));
+    let picker = cx.new(|cx| DmPicker::new(services, window, cx));
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
         let dialog = crate::ui::SheetExt::sheet(dialog);
         if first.replace(false) {
-            state.update(cx, |s, cx| s.focus(window, cx));
+            let handle = picker.read(cx).filter.read(cx).focus_handle(cx);
+            handle.focus(window, cx);
         }
-        let items = members.iter().map(|m| {
-            let m2 = m.clone();
-            CommandItem::new()
-                .label(m.name.clone())
-                .child(move |_, cx| {
-                    // CommandItem adds 6 pt above and below: a 40 pt row.
-                    member_row(&m2, theme::colors(cx).elevated, cx)
-                        .h(px(28.))
-                        .t_ui()
-                })
-        });
-        let members = members.clone();
-        let command = Command::new(&state)
-            .placeholder(nav::START_DM_PLACEHOLDER)
-            .bordered(false)
-            .max_h(px(360.))
-            .items(items)
-            .empty(|_, _, _| {
-                div()
-                    .h(px(160.))
-                    .child(ui::EmptyState::new(Lucide::SearchX, nav::NO_MEMBERS_MATCH))
-            })
-            .on_confirm(move |ix, window, cx| {
-                let member = members.get(ix.row).map(|m| m.id.clone());
-                window.close_dialog(cx);
-                if let Some(id) = member {
-                    super::open_dm_with(id, cx);
-                }
-            });
         dialog
-            .w(SHEET_WIDTH)
             .close_button(false)
-            .p_0()
-            .child(command)
+            .p(space::S20)
+            .title(div().t_title().pb(space::S8).child(nav::START_DM))
+            .child(picker.clone())
     });
 }
 
