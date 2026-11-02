@@ -92,7 +92,8 @@ fn parse_args() -> Result<Args, String> {
         }
     }
     if (args.selftest_smoke || args.selftest_nav || args.selftest_timeline.is_some())
-        && args.report.is_none() {
+        && args.report.is_none()
+    {
         return Err("a self-test needs --report <path>".into());
     }
     Ok(args)
