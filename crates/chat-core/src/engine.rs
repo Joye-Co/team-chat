@@ -294,11 +294,10 @@ impl Session {
                     break;
                 }
             }
-            if write_err.is_none() {
-                if let Err(e) = sink.flush().await {
+            if write_err.is_none()
+                && let Err(e) = sink.flush().await {
                     write_err = Some(e.to_string());
                 }
-            }
             if let Some(e) = write_err {
                 break SessionEnd::Reconnect { reason: format!("write: {e}"), immediate: false };
             }
@@ -352,11 +351,10 @@ impl Session {
             }
             return None;
         }
-        if let Some(d) = self.pong_deadline {
-            if now >= d {
+        if let Some(d) = self.pong_deadline
+            && now >= d {
                 return Some(SessionEnd::Reconnect { reason: "pong timeout".into(), immediate: false });
             }
-        }
         if now >= self.next_ping {
             self.out.push(ClientFrame::Ping);
             self.next_ping = now + self.ping_interval;
@@ -538,9 +536,7 @@ impl Session {
             // Parsed by `parse_incoming` into `Incoming::Event` and `Incoming::Page`.
             ServerFrame::Event(_) | ServerFrame::Page(_) => {}
             ServerFrame::History(HistoryFrame { rid, group_id, topic_id, messages, has_more }) => {
-                if self.pending.remove(&rid).is_none() {
-                    return None;
-                }
+                self.pending.remove(&rid)?;
                 self.history_inflight.remove(&topic_id);
                 let msgs: Vec<Message> = messages.into_iter().filter(|m| m.topic_id == topic_id).collect();
                 if let Err(e) = self.shared.store.insert_history(&topic_id, &msgs, has_more) {
@@ -550,9 +546,7 @@ impl Session {
                 self.shared.emit(ClientUpdate::HistoryLoaded { group_id, topic_id, has_more });
             }
             ServerFrame::Ack(AckFrame { rid, outcome }) => {
-                let Some((p, _)) = self.pending.remove(&rid) else {
-                    return None;
-                };
+                let (p, _) = self.pending.remove(&rid)?;
                 let (ok, result, error) = match outcome {
                     AckOutcome::Ok { result } => (true, result, None),
                     AckOutcome::Err { error } => (false, None, Some(error)),
@@ -656,11 +650,12 @@ impl Session {
             Ok(Some(i)) => i,
             // Already removed: its event arrived first, or the UI discarded it.
             _ => {
-                if ok {
-                    if let Some(r) = result.and_then(|v| serde_json::from_value::<SendResult>(v).ok()) {
-                        let _ = self.shared.store.ack_send(&id, &r);
-                    }
-                }
+                if ok
+                    && let Some(r) = result.and_then(|v| serde_json::from_value::<SendResult>(v).ok())
+                        && r.message.client_msg_id == id {
+                            let _ = self.shared.store.ack_send(&id, &r);
+                            self.emit_sent(id, r);
+                        }
                 return None;
             }
         };
@@ -675,20 +670,7 @@ impl Session {
                             if let Err(e) = self.shared.store.ack_send(&id, &r) {
                                 warn!(error = %e, "store ack");
                             }
-                            let topic_id = r.message.topic_id.clone();
-                            if r.topic.is_some() || item.op.topic_id().is_none() {
-                                self.shared.emit(ClientUpdate::TopicsChanged { group_id: group_id.clone() });
-                            }
-                            self.shared.emit(ClientUpdate::MessagesChanged {
-                                group_id: group_id.clone(),
-                                topic_id: topic_id.clone(),
-                            });
-                            self.shared.emit(ClientUpdate::Sent {
-                                client_msg_id: id,
-                                message_id: r.message.id,
-                                topic_id,
-                                duplicate: r.duplicate.unwrap_or(false),
-                            });
+                            self.emit_sent(id, r);
                         }
                         None => {
                             warn!(id = %id, "send ack without a valid result");
@@ -736,6 +718,19 @@ impl Session {
                 None
             }
         }
+    }
+
+    fn emit_sent(&self, client_msg_id: String, r: SendResult) {
+        let group_id = r.message.group_id.clone();
+        let topic_id = r.message.topic_id.clone();
+        self.shared.emit(ClientUpdate::TopicsChanged { group_id: group_id.clone() });
+        self.shared.emit(ClientUpdate::MessagesChanged { group_id, topic_id: topic_id.clone() });
+        self.shared.emit(ClientUpdate::Sent {
+            client_msg_id,
+            message_id: r.message.id,
+            topic_id,
+            duplicate: r.duplicate.unwrap_or(false),
+        });
     }
 
     fn on_transient(&mut self, ev: TransientEvent) {

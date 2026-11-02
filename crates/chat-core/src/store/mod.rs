@@ -40,6 +40,7 @@ struct Inner {
 
 /// One entry of a group log as received.
 #[derive(Debug, Clone, PartialEq)]
+#[allow(clippy::large_enum_variant)] // Known is the common case; boxing it costs an allocation per event.
 pub enum LogEntry {
     Known(Event),
     /// An event type this client does not know (added by a newer server). It keeps
