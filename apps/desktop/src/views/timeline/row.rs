@@ -145,7 +145,22 @@ impl TimelineView {
         let gutter = if grouped {
             div().w(theme::AVATAR_SIZE).flex_none().into_any_element()
         } else {
-            member_avatar(author.as_ref(), theme::AVATAR_SIZE, cx).into_any_element()
+            // Presence dot at the bottom left (the bot mark is at the right).
+            let online = author.as_ref().map(|m| m.online);
+            div()
+                .relative()
+                .flex_none()
+                .child(member_avatar(author.as_ref(), theme::AVATAR_SIZE, cx))
+                .when_some(online, |el, online| {
+                    el.child(
+                        div()
+                            .absolute()
+                            .bottom(px(-1.))
+                            .left(px(-1.))
+                            .child(crate::views::presence_dot(online, cx)),
+                    )
+                })
+                .into_any_element()
         };
 
         let menu_message = message.clone();

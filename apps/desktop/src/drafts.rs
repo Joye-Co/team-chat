@@ -102,6 +102,21 @@ impl DraftStore {
     pub fn clear(&self, key: &DraftKey) -> bool {
         self.with(|i| i.drafts.remove(key).is_some())
     }
+
+    /// Every draft (for persistence), in no order.
+    pub fn entries(&self) -> Vec<(DraftKey, Draft)> {
+        self.with(|i| {
+            i.drafts
+                .iter()
+                .map(|(k, d)| (k.clone(), d.clone()))
+                .collect()
+        })
+    }
+
+    /// Forgets every draft (sign-out, another account).
+    pub fn clear_all(&self) {
+        self.with(|i| i.drafts.clear())
+    }
 }
 
 impl Inner {

@@ -16,6 +16,7 @@ pub mod login;
 pub mod nav;
 pub mod notify;
 pub mod panel;
+pub mod realtime;
 pub mod settings;
 pub mod timeline;
 
@@ -76,6 +77,11 @@ pub const SECTIONS: &[Section] = &[
     Section {
         name: "panel",
         entries: panel::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "realtime",
+        entries: realtime::ENTRIES,
         developer: false,
     },
     Section {

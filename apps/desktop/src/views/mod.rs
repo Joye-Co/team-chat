@@ -10,6 +10,7 @@ pub mod side_panel;
 pub mod sidebar;
 pub mod timeline;
 pub mod topic_list;
+pub mod topic_menu;
 
 use chrono::{Datelike, Local, TimeZone};
 use gpui::{App, Div, IntoElement, ParentElement, Pixels, Styled, div, px};

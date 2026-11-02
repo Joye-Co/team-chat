@@ -3,7 +3,7 @@
 //! my mention marker; a status filter; and the 新话题 button.
 //! Rows have one height, so the list is a `uniform_list` and scales to many topics.
 
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 use chrono::{DateTime, Datelike, Local, TimeZone};
 use gpui::{
@@ -14,14 +14,15 @@ use gpui::{
 use gpui_component::{
     Sizable as _,
     button::{Button, ButtonVariants as _},
+    menu::ContextMenuExt as _,
 };
 
 use crate::{
     app::{Changes, Place, Services},
-    copy::{common, fill, nav},
-    data::{Change, GroupId, Member, Millis, Topic, TopicStatus},
+    copy::{common, fill, nav, realtime as r},
+    data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
     theme,
-    views::{count_badge, status_chip},
+    views::{count_badge, status_chip, topic_menu},
 };
 
 /// The status filter above the topics of a group.
@@ -122,6 +123,8 @@ pub struct TopicListView {
     all: Vec<Row>,
     rows: Vec<Row>,
     members: Vec<Member>,
+    /// Who is typing, per topic of the shown rows.
+    typing: HashMap<TopicId, Vec<MemberId>>,
     filter: TopicFilter,
     _subscriptions: Vec<Subscription>,
 }
@@ -138,6 +141,12 @@ impl TopicListView {
                 });
                 if relevant {
                     this.refresh(cx);
+                    cx.notify();
+                } else if changes.any(|c| match c {
+                    Change::Typing { group_id, .. } => this.shows_group(group_id),
+                    _ => false,
+                }) {
+                    this.refresh_typing();
                     cx.notify();
                 }
             }),
@@ -165,6 +174,7 @@ impl TopicListView {
             all: Vec::new(),
             rows: Vec::new(),
             members: Vec::new(),
+            typing: HashMap::new(),
             filter: TopicFilter::All,
             _subscriptions: subscriptions,
         };
@@ -216,6 +226,48 @@ impl TopicListView {
             }
         }
         self.apply_filter();
+        self.refresh_typing();
+    }
+
+    /// The rows show topics of this group.
+    fn shows_group(&self, group_id: &str) -> bool {
+        match &self.place {
+            Some(Place::Group(g)) => g == group_id,
+            Some(Place::Todo) => self.all.iter().any(|r| r.group_id == group_id),
+            None => false,
+        }
+    }
+
+    fn refresh_typing(&mut self) {
+        let p = &self.services.provider;
+        self.typing = self
+            .all
+            .iter()
+            .filter_map(|r| {
+                let who = p.typing(&r.group_id, &r.topic.id);
+                (!who.is_empty()).then(|| (r.topic.id.clone(), who))
+            })
+            .collect();
+    }
+
+    /// "{name} 正在输入…" for a topic, when someone types in it.
+    fn typing_text(&self, topic_id: &str) -> Option<String> {
+        match self.typing.get(topic_id)?.as_slice() {
+            [] => None,
+            [one] => {
+                let name = self
+                    .members
+                    .iter()
+                    .find(|m| &m.id == one)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_default();
+                Some(fill(r::TOPIC_TYPING, &[("name", &name)]))
+            }
+            many => Some(fill(
+                r::TOPIC_TYPING_MANY,
+                &[("n", &many.len().to_string())],
+            )),
+        }
     }
 
     fn apply_filter(&mut self) {
@@ -350,6 +402,10 @@ impl Render for TopicListView {
                             let (g, t) = (row.group_id.clone(), row.topic.id.clone());
                             let unread = count_badge(row.topic.unread, false, cx);
                             let mentioned = row.topic.mentions > 0;
+                            let typing = this.typing_text(&row.topic.id);
+                            let menu_services = this.services.clone();
+                            let menu_topic = row.topic.clone();
+                            let menu_group = row.group_id.clone();
                             div()
                                 .id(ElementId::NamedInteger(
                                     SharedString::from("topic-row"),
@@ -417,12 +473,16 @@ impl Render for TopicListView {
                                             )
                                         })
                                         .child(div().flex_1())
-                                        .child(
-                                            div().flex_none().child(relative_time(
+                                        .child(match typing {
+                                            Some(text) => div()
+                                                .flex_none()
+                                                .text_color(colors.accent)
+                                                .child(text),
+                                            None => div().flex_none().child(relative_time(
                                                 row.topic.last_activity_at,
                                                 now,
                                             )),
-                                        ),
+                                        }),
                                 )
                                 .on_click(cx.listener(move |this, _, _, cx| {
                                     let (g, t) = (g.clone(), t.clone());
@@ -430,6 +490,20 @@ impl Render for TopicListView {
                                         .nav
                                         .update(cx, |nav, cx| nav.open_topic(g, t, cx));
                                 }))
+                                .context_menu(move |menu, window, cx| {
+                                    let topic = menu_services
+                                        .provider
+                                        .topic(&menu_group, &menu_topic.id)
+                                        .unwrap_or_else(|| menu_topic.clone());
+                                    topic_menu::build(
+                                        menu,
+                                        &menu_services,
+                                        &menu_group,
+                                        &topic,
+                                        window,
+                                        cx,
+                                    )
+                                })
                         })
                         .collect::<Vec<_>>()
                 }),

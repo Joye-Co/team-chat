@@ -32,23 +32,24 @@ use std::{
 
 use gpui::{
     AnyElement, Context, Entity, EventEmitter, FollowMode, InteractiveElement, IntoElement,
-    ListAlignment, ListState, ParentElement, Pixels, Render, Styled, Subscription, Window, div,
-    list, prelude::FluentBuilder as _, px,
+    ListAlignment, ListOffset, ListState, ParentElement, Pixels, Render, Styled, Subscription,
+    Window, div, list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
     button::{Button, ButtonVariants as _},
     input::TextareaState,
+    menu::DropdownMenu as _,
 };
 
 use crate::{
     app::{Changes, Services},
-    copy::{fill, timeline as t},
+    copy::{fill, realtime as r, timeline as t},
     data::{
         Change, GroupId, Member, MemberLevel, Message, MessageId, SessionState, Topic, TopicId,
     },
     theme,
-    views::status_chip,
+    views::{status_chip, topic_menu},
 };
 
 use model::ListOp;
@@ -113,6 +114,10 @@ pub struct TimelineView {
     older_requested: bool,
     /// The first unread message when the topic opened.
     divider_key: Option<String>,
+    /// Unread messages when the topic opened (the jump button's count).
+    unread_at_open: u32,
+    /// The divider was on screen once, so the jump button is gone.
+    unread_seen: bool,
     /// Messages that arrived while the user was scrolled up.
     new_below: usize,
     list: ListState,
@@ -173,6 +178,8 @@ impl TimelineView {
             wanted: WINDOW,
             older_requested: false,
             divider_key: None,
+            unread_at_open: 0,
+            unread_seen: false,
             new_below: 0,
             list,
             visible_end,
@@ -195,12 +202,18 @@ impl TimelineView {
     }
 
     fn open_topic(&mut self, open: Option<(GroupId, TopicId)>, cx: &mut Context<Self>) {
+        // Hold enough messages that the first unread one is in the window
+        // (up to the most the window keeps while following the tail).
+        let unread = open
+            .as_ref()
+            .and_then(|(g, t)| self.services.provider.topic(g, t))
+            .map_or(0, |t| t.unread);
         self.open = open;
         self.messages.clear();
         self.list.reset(0);
         self.list.set_follow_mode(FollowMode::Tail);
         self.visible_end.set(0);
-        self.wanted = WINDOW;
+        self.wanted = (unread as usize + 10).clamp(WINDOW, WINDOW + PAGE);
         self.has_older = false;
         self.provider_len = 0;
         self.provider_has_older = false;
@@ -211,10 +224,49 @@ impl TimelineView {
         self.editing = None;
         self.refresh(cx);
         let me = self.me.clone();
-        self.divider_key = self
-            .topic
+        let read_seq = self
+            .open
             .as_ref()
-            .and_then(|topic| model::first_unread_key(&self.messages, topic.unread, me.as_deref()));
+            .and_then(|(g, t)| self.services.provider.topic_read_seq(g, t));
+        self.divider_key = self.topic.as_ref().and_then(|topic| match read_seq {
+            Some(seq) if topic.unread > 0 => {
+                model::first_unread_after(&self.messages, seq, self.has_older, me.as_deref())
+            }
+            Some(_) => None,
+            None => model::first_unread_key(&self.messages, topic.unread, me.as_deref()),
+        });
+        self.unread_at_open = self.topic.as_ref().map_or(0, |t| t.unread);
+        self.unread_seen = self.divider_key.is_none();
+    }
+
+    /// Scrolls so the first unread message (the divider) is at the top.
+    fn jump_to_first_unread(&mut self) {
+        if let Some(ix) = self.divider_key.as_deref().and_then(|k| self.row_index(k)) {
+            self.list.scroll_to(ListOffset {
+                item_ix: ix,
+                offset_in_item: px(0.),
+            });
+        }
+        self.unread_seen = true;
+    }
+
+    /// The divider is above the visible rows (the jump button shows).
+    fn first_unread_above(&mut self) -> bool {
+        if self.unread_seen {
+            return false;
+        }
+        let Some(ix) = self.divider_key.as_deref().and_then(|k| self.row_index(k)) else {
+            self.unread_seen = true;
+            return false;
+        };
+        match self.list.item_is_above_viewport(ix) {
+            Some(true) => true,
+            Some(false) => {
+                self.unread_seen = true;
+                false
+            }
+            None => false,
+        }
     }
 
     /// A provider change for this topic: refresh now, or within
@@ -437,6 +489,10 @@ impl TimelineView {
 
     fn render_header(&self, topic: &Topic, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
+        let following = self
+            .services
+            .provider
+            .topic_following(&topic.group_id, &topic.id);
         div()
             .h(px(48.))
             .flex_none()
@@ -458,6 +514,9 @@ impl TimelineView {
                 status_chip(topic, self.me.as_deref(), &self.members, cx),
                 |el, chip| el.child(chip),
             )
+            .when_some(topic_menu::owner_text(topic, &self.members), |el, text| {
+                el.child(topic_menu::header_label(text, cx))
+            })
             .child(
                 div()
                     .text_xs()
@@ -468,6 +527,26 @@ impl TimelineView {
                     )),
             )
             .child(div().flex_1())
+            .when(following, |el| {
+                el.child(topic_menu::header_label(r::FOLLOWING, cx))
+            })
+            .child({
+                let services = self.services.clone();
+                let (g, tid) = (topic.group_id.clone(), topic.id.clone());
+                Button::new("topic-status")
+                    .small()
+                    .ghost()
+                    .label(r::STATUS_MENU)
+                    .dropdown_menu(move |menu, window, cx| {
+                        // Read the topic again: the menu shows the newest state.
+                        match services.provider.topic(&g, &tid) {
+                            Some(topic) => {
+                                topic_menu::build(menu, &services, &g, &topic, window, cx)
+                            }
+                            None => menu,
+                        }
+                    })
+            })
             .child(
                 Button::new("toggle-panel")
                     .small()
@@ -552,6 +631,28 @@ impl Render for TimelineView {
                     })),
             )
         });
+        let jump_unread = self.first_unread_above().then(|| {
+            div()
+                .absolute()
+                .top(px(8.))
+                .left_0()
+                .right_0()
+                .flex()
+                .justify_center()
+                .child(
+                    Button::new("jump-unread")
+                        .small()
+                        .primary()
+                        .label(fill(
+                            r::JUMP_UNREAD,
+                            &[("n", &self.unread_at_open.to_string())],
+                        ))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.jump_to_first_unread();
+                            cx.notify();
+                        })),
+                )
+        });
         let loading = (self.provider_loading && self.has_older).then(|| {
             div()
                 .absolute()
@@ -578,6 +679,7 @@ impl Render for TimelineView {
                     .min_h(px(0.))
                     .child(timeline)
                     .children(loading)
+                    .children(jump_unread)
                     .children(jump),
             )
             .child(

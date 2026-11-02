@@ -16,6 +16,10 @@ pub mod app_glue;
 pub mod convert;
 #[cfg(target_os = "macos")]
 pub mod macos;
+pub mod persist;
+mod realtime;
+#[cfg(test)]
+mod realtime_live;
 pub mod selftest_live;
 pub mod session;
 
@@ -26,15 +30,15 @@ use std::{
     time::Duration,
 };
 
-use chat_core::{Client, ClientConfig, ClientUpdate, TopicPatch, proto::NotifyReason};
+use chat_core::{Client, ClientConfig, ClientUpdate, TopicPatch};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use crate::{
-    copy::{fill, notify as n},
     data::{
-        ArtifactSummary, Change, ChatProvider, ClientMsgId, ConnectionState, Draft, DraftKey,
-        GroupKind, GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId, MessageWindow, NewFile, SendRequest, SessionState,
-        StartTopicRequest, TodoItem, TodoReason, Topic, TopicStatus,
+        ArtifactSummary, Change, ChatProvider, ClientMsgId, ConnectionState, CreateGroupRequest,
+        Draft, DraftKey, GroupSummary, LoginError, LoginRequest, Member, MemberId, MessageId,
+        MessageWindow, NewFile, SavedNavigation, SendRequest, SessionState, StartTopicRequest,
+        TodoItem, Topic, TopicStatus,
     },
     drafts::DraftStore,
 };
@@ -102,6 +106,8 @@ struct State {
     deferred: Vec<(String, ClientMsgId, SendRequest)>,
     /// Acks seen: clientMsgId -> message id (self-tests read it).
     acked: HashMap<String, String>,
+    /// The place of the main window, kept in `ui-state.json`.
+    navigation: Option<SavedNavigation>,
 }
 
 struct Shared {
@@ -110,6 +116,7 @@ struct Shared {
     subscribers: Mutex<Vec<UnboundedSender<Vec<Change>>>>,
     notices: Mutex<Option<UnboundedSender<Notice>>>,
     drafts: DraftStore,
+    writer: persist::Writer,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -138,6 +145,7 @@ impl CoreProvider {
                 subscribers: Mutex::new(Vec::new()),
                 notices: Mutex::new(None),
                 drafts: DraftStore::new(),
+                writer: persist::Writer::new(),
             }),
         });
         if provider.shared.config.restore {
@@ -281,6 +289,7 @@ impl CoreProvider {
             .filter(|m| m.id == saved.member.id)
             .unwrap_or_else(|| saved.member.clone());
         let updates = client.subscribe();
+        self.load_ui_state(&dir);
         let generation = {
             let mut s = self.state();
             s.generation += 1;
@@ -323,8 +332,10 @@ impl CoreProvider {
             s.loading_older.clear();
             s.aliases.clear();
             s.deferred.clear();
+            s.navigation = None;
             s.account.take()
         };
+        self.shared.drafts.clear_all();
         if let Some(a) = &account {
             a.client.stop();
         }
@@ -555,7 +566,12 @@ impl CoreProvider {
                 out.push(Change::Connection);
             }
             ClientUpdate::DirectoryChanged => {
-                out.extend([Change::Members, Change::Groups, Change::Todo, Change::Session]);
+                out.extend([
+                    Change::Members,
+                    Change::Groups,
+                    Change::Todo,
+                    Change::Session,
+                ]);
             }
             ClientUpdate::GroupChanged { group_id } => {
                 out.extend([Change::Groups, Change::Todo, Change::Topics { group_id }]);
@@ -606,10 +622,9 @@ impl CoreProvider {
                     if is_root {
                         s.aliases.insert(pending.clone(), topic_id.clone());
                     }
-                    let (ready, rest): (Vec<_>, Vec<_>) =
-                        std::mem::take(&mut s.deferred)
-                            .into_iter()
-                            .partition(|(p, _, _)| *p == pending);
+                    let (ready, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut s.deferred)
+                        .into_iter()
+                        .partition(|(p, _, _)| *p == pending);
                     s.deferred = rest;
                     ready
                 };
@@ -645,19 +660,15 @@ impl CoreProvider {
             }
             ClientUpdate::CaughtUp => out.extend([Change::Groups, Change::Todo]),
             ClientUpdate::Notify(n) => {
-                if let Some(notice) = self.notice(
-                    n.reason,
-                    &n.group_id,
-                    n.topic_id.as_deref(),
-                    n.message_id.as_deref(),
-                )
-                    && let Some(tx) = lock(&self.shared.notices).as_ref()
-                {
+                let notice = self.notice_from(&n);
+                if let Some(tx) = lock(&self.shared.notices).as_ref() {
                     let _ = tx.unbounded_send(notice);
                 }
             }
+            ClientUpdate::ArtifactsChanged { group_id, topic_id } => {
+                out.push(Change::Artifacts { group_id, topic_id });
+            }
             ClientUpdate::GroupEvent(_)
-            | ClientUpdate::ArtifactsChanged { .. }
             | ClientUpdate::RunsChanged { .. }
             | ClientUpdate::SearchResults { .. }
             | ClientUpdate::SearchFailed { .. } => {}
@@ -667,60 +678,6 @@ impl CoreProvider {
     fn group_of_topic(&self, topic_id: &str) -> Option<String> {
         let a = self.account()?;
         a.client.store().topic_group(topic_id).ok().flatten()
-    }
-
-    fn notice(
-        &self,
-        reason: NotifyReason,
-        group_id: &str,
-        topic_id: Option<&str>,
-        message_id: Option<&str>,
-    ) -> Option<Notice> {
-        let a = self.account()?;
-        let store = a.client.store();
-        let group = self.groups().into_iter().find(|g| g.id == group_id)?;
-        let message = message_id.and_then(|id| store.message(id).ok().flatten());
-        let topic = topic_id.and_then(|t| store.topic(t).ok().flatten());
-        let author = message
-            .as_ref()
-            .and_then(|m| store.member(&m.author_id).ok().flatten())
-            .map(|m| m.name)
-            .unwrap_or_default();
-        let excerpt = |s: &str| -> String {
-            let one: String = s.split_whitespace().collect::<Vec<_>>().join(" ");
-            let mut out: String = one.chars().take(180).collect();
-            if one.chars().count() > 180 {
-                out.push('…');
-            }
-            out
-        };
-        let topic_title = topic.as_ref().map(|t| t.topic.title.clone()).unwrap_or_default();
-        let body_text = message.as_ref().map(|m| excerpt(&m.body)).unwrap_or_default();
-        let (title, body) = match reason {
-            NotifyReason::Mention => (
-                fill(n::MENTION_TITLE, &[("name", &author), ("group", &group.name)]),
-                body_text,
-            ),
-            NotifyReason::Waiting => (
-                fill(n::WAITING_TITLE, &[("group", &group.name)]),
-                topic_title,
-            ),
-            NotifyReason::Result => (
-                fill(n::RESULT_TITLE, &[("group", &group.name)]),
-                topic_title,
-            ),
-            NotifyReason::Message if group.kind == GroupKind::Dm => (author, body_text),
-            NotifyReason::Message => (
-                fill(n::MESSAGE_TITLE, &[("name", &author), ("group", &group.name)]),
-                body_text,
-            ),
-        };
-        Some(Notice {
-            title,
-            body,
-            group_id: group_id.to_string(),
-            topic_id: topic_id.map(str::to_string),
-        })
     }
 
     fn send_now(&self, req: SendRequest) -> ClientMsgId {
@@ -835,7 +792,10 @@ impl ChatProvider for CoreProvider {
     fn member(&self, id: &str) -> Option<Member> {
         let a = self.account()?;
         let m = a.client.member(id).ok().flatten()?;
-        Some(convert::member(&m, m.id == a.me.id || a.client.is_online(id)))
+        Some(convert::member(
+            &m,
+            m.id == a.me.id || a.client.is_online(id),
+        ))
     }
 
     fn groups(&self) -> Vec<GroupSummary> {
@@ -890,32 +850,7 @@ impl ChatProvider for CoreProvider {
     }
 
     fn todo(&self) -> Vec<TodoItem> {
-        let Some(a) = self.account() else {
-            return Vec::new();
-        };
-        let me = a.me.id.clone();
-        let mut out = Vec::new();
-        for g in self.groups() {
-            for row in a.client.topics(&g.id, TOPIC_LIMIT).unwrap_or_default() {
-                let topic = convert::topic(&row);
-                let reason = if topic.status != TopicStatus::Done && topic.waiting_on.contains(&me)
-                {
-                    TodoReason::WaitingOnMe
-                } else if topic.mentions > 0 {
-                    TodoReason::Mentioned
-                } else {
-                    continue;
-                };
-                out.push(TodoItem {
-                    group_id: g.id.clone(),
-                    group_name: g.name.clone(),
-                    topic,
-                    reason,
-                });
-            }
-        }
-        out.sort_by(|x, y| y.topic.last_activity_at.cmp(&x.topic.last_activity_at));
-        out
+        self.todo_items()
     }
 
     fn messages(&self, group_id: &str, topic_id: &str, limit: usize) -> MessageWindow {
@@ -1054,9 +989,7 @@ impl ChatProvider for CoreProvider {
             let cid = chat_core::new_id();
             let group_id = request.group_id.clone();
             let topic_id = request.topic_id.clone();
-            self.state()
-                .deferred
-                .push((real, cid.clone(), request));
+            self.state().deferred.push((real, cid.clone(), request));
             self.emit(vec![Change::Messages { group_id, topic_id }]);
             return cid;
         }
@@ -1070,8 +1003,11 @@ impl ChatProvider for CoreProvider {
         let Some(a) = self.account() else {
             return String::new();
         };
-        let title = Some(convert::topic_title(request.title.as_deref(), &request.body))
-            .filter(|t| !t.is_empty());
+        let title = Some(convert::topic_title(
+            request.title.as_deref(),
+            &request.body,
+        ))
+        .filter(|t| !t.is_empty());
         let result = a.client.send(chat_core::SendRequest {
             group_id: request.group_id.clone(),
             topic_id: None,
@@ -1181,11 +1117,12 @@ impl ChatProvider for CoreProvider {
 
     fn save_draft_text(&self, key: &DraftKey, body: String, mentions: Vec<MemberId>) {
         self.shared.drafts.save_text(key, body, mentions);
+        self.draft_changed(key, false);
     }
 
     fn set_quote(&self, key: &DraftKey, quote_of: Option<MessageId>) {
         if self.shared.drafts.set_quote(key, quote_of) {
-            self.emit(vec![Change::Draft { key: key.clone() }]);
+            self.draft_changed(key, true);
         }
     }
 
@@ -1196,8 +1133,52 @@ impl ChatProvider for CoreProvider {
 
     fn clear_draft(&self, key: &DraftKey) {
         if self.shared.drafts.clear(key) {
-            self.emit(vec![Change::Draft { key: key.clone() }]);
+            self.draft_changed(key, true);
         }
+    }
+
+    fn create_group(&self, request: CreateGroupRequest) {
+        self.create_group_inner(request);
+    }
+
+    fn open_dm(&self, member_id: &str) {
+        self.open_dm_inner(member_id);
+    }
+
+    fn leave_group(&self, group_id: &str) {
+        self.leave_group_inner(group_id);
+    }
+
+    fn group_muted(&self, group_id: &str) -> bool {
+        self.group_muted_inner(group_id)
+    }
+
+    fn set_group_muted(&self, group_id: &str, muted: bool) {
+        self.set_group_muted_inner(group_id, muted);
+    }
+
+    fn saved_navigation(&self) -> Option<SavedNavigation> {
+        self.saved_navigation_inner()
+    }
+
+    fn save_navigation(&self, navigation: SavedNavigation) {
+        self.save_navigation_inner(navigation);
+    }
+
+    fn topic_read_seq(&self, _group_id: &str, topic_id: &str) -> Option<u64> {
+        self.topic_read_seq_inner(topic_id)
+    }
+
+    fn topic_following(&self, _group_id: &str, topic_id: &str) -> bool {
+        self.topic_following_inner(topic_id)
+    }
+
+    fn set_topic_following(&self, _group_id: &str, topic_id: &str, follow: bool) {
+        self.set_topic_following_inner(topic_id, follow);
+    }
+
+    fn set_topic_owner(&self, _group_id: &str, topic_id: &str, owner: Option<MemberId>) {
+        self.set_topic_owner_inner(topic_id, owner);
     }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {

@@ -51,6 +51,29 @@ pub fn first_unread_key(messages: &[Message], unread: u32, me: Option<&str>) -> 
     None
 }
 
+/// Key of the first unread message: the oldest message after my read
+/// position that someone else wrote and that is not deleted. When every
+/// message of the window is unread and older ones exist, the first unread
+/// message is older than the window: the divider goes on the first row.
+pub fn first_unread_after(
+    messages: &[Message],
+    read_seq: u64,
+    has_older: bool,
+    me: Option<&str>,
+) -> Option<String> {
+    let first = messages.iter().find(|m| {
+        m.created_seq > read_seq && m.deleted_at.is_none() && Some(m.author_id.as_str()) != me
+    })?;
+    let all_unread = messages
+        .iter()
+        .filter(|m| m.created_seq > 0)
+        .all(|m| m.created_seq > read_seq);
+    if all_unread && has_older {
+        return messages.first().map(|m| key(m).to_string());
+    }
+    Some(key(first).to_string())
+}
+
 /// One change to the GPUI list state.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ListOp {

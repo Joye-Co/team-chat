@@ -25,10 +25,13 @@ use std::{
 use block2::RcBlock;
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use objc2::{
-    AnyThread, MainThreadMarker, define_class, msg_send, rc::Retained,
+    AnyThread, MainThreadMarker, define_class, msg_send,
+    rc::Retained,
     runtime::{Bool, NSObject, NSObjectProtocol, ProtocolObject},
 };
-use objc2_app_kit::{NSApplication, NSRequestUserAttentionType, NSWorkspace, NSWorkspaceDidWakeNotification};
+use objc2_app_kit::{
+    NSApplication, NSRequestUserAttentionType, NSWorkspace, NSWorkspaceDidWakeNotification,
+};
 use objc2_foundation::{NSBundle, NSError, NSNotification, NSString};
 use objc2_user_notifications::{
     UNAuthorizationOptions, UNMutableNotificationContent, UNNotification,
@@ -62,7 +65,11 @@ fn on_click(identifier: &str) {
     if group.is_empty() {
         return;
     }
-    if let Some(tx) = click_slot().lock().unwrap_or_else(|e| e.into_inner()).as_ref() {
+    if let Some(tx) = click_slot()
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
         let _ = tx.unbounded_send((group.to_string(), topic.to_string()));
     }
 }
@@ -239,9 +246,7 @@ pub fn watch_system(on_change: Arc<dyn Fn(&'static str) + Send + Sync>) {
                     tracing::info!(up = now.len(), "network changed");
                     last = now;
                     on_change("network");
-                } else if wall_gap > mono_gap + Duration::from_secs(10)
-                    || wall_gap > TICK * 10
-                {
+                } else if wall_gap > mono_gap + Duration::from_secs(10) || wall_gap > TICK * 10 {
                     on_change("clock");
                 }
             }

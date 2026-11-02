@@ -606,6 +606,23 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// Stores the place of the main window locally (not on the server).
     fn save_navigation(&self, _navigation: SavedNavigation) {}
 
+    // --- per-topic state (all have defaults) ---
+
+    /// My read position in a topic: messages with `created_seq <= seq` are
+    /// read. `None` when the provider does not track it; views then place the
+    /// new-messages divider from `Topic::unread`.
+    fn topic_read_seq(&self, _group_id: &str, _topic_id: &str) -> Option<u64> {
+        None
+    }
+    /// I follow this topic: its results (status 完成, a new 产出) notify me.
+    fn topic_following(&self, _group_id: &str, _topic_id: &str) -> bool {
+        false
+    }
+    /// Follows or unfollows a topic. Emits `Change::Topics`.
+    fn set_topic_following(&self, _group_id: &str, _topic_id: &str, _follow: bool) {}
+    /// Sets or clears the one responsible member. Emits `Change::Topics`.
+    fn set_topic_owner(&self, _group_id: &str, _topic_id: &str, _owner: Option<MemberId>) {}
+
     // --- changes ---
 
     /// A new stream of change batches. Each call gives a new receiver; all
