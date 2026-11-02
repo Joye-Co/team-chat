@@ -1,5 +1,6 @@
 //! The menu bar item (NSStatusItem through objc2; GPUI has no API for it).
-//! It shows whether there is unread work, and a click opens the main window.
+//! A 16 pt template of the icon's brackets and circle; a dot at the top right
+//! when something waits on you (DESIGN.md §13.16). A click opens the main window.
 //! AppKit calls the click target on the main thread inside GPUI's run loop;
 //! the target only sends on a channel that a GPUI task drains.
 
@@ -9,11 +10,25 @@ use futures::{
 };
 use gpui::{App, Global};
 use objc2::{
-    DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send, rc::Retained,
-    runtime::AnyObject, sel,
+    AllocAnyThread, DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send,
+    rc::Retained, runtime::AnyObject, sel,
 };
 use objc2_app_kit::{NSImage, NSStatusBar, NSStatusItem, NSVariableStatusItemLength};
-use objc2_foundation::{NSObject, NSObjectProtocol, NSString};
+use objc2_foundation::{NSData, NSObject, NSObjectProtocol, NSSize, NSString};
+
+/// The brand's template images (assets/brand/menubar), drawn at 2x and shown at 16 pt.
+const ICON: &[u8] = include_bytes!("../../../../../assets/brand/menubar/StatusItemTemplate@2x.png");
+const ICON_WAITING: &[u8] =
+    include_bytes!("../../../../../assets/brand/menubar/StatusItemWaitingTemplate@2x.png");
+
+fn template_image(png: &[u8], description: &NSString) -> Option<Retained<NSImage>> {
+    let data = NSData::with_bytes(png);
+    let image = NSImage::initWithData(NSImage::alloc(), &data)?;
+    image.setSize(NSSize::new(16., 16.));
+    image.setTemplate(true);
+    image.setAccessibilityDescription(Some(description));
+    Some(image)
+}
 
 use crate::{
     app::{Changes, Services},
@@ -134,27 +149,16 @@ fn update(services: &Services, cx: &mut App) {
     } else {
         nav::STATUS_ITEM_NONE.to_string()
     };
-    let symbol = if unread > 0 || mentions > 0 {
-        "bubble.left.and.bubble.right.fill"
-    } else {
-        "bubble.left.and.bubble.right"
-    };
     let tooltip = NSString::from_str(&tooltip);
-    let image = NSImage::imageWithSystemSymbolName_accessibilityDescription(
-        &NSString::from_str(symbol),
-        Some(&tooltip),
-    );
-    if let Some(image) = &image {
-        image.setTemplate(true);
-    }
-    button.setImage(image.as_deref());
-    // The count is a number, not a word; the tooltip says what it means.
-    let title = match (mentions, unread) {
-        (0, 0) => String::new(),
-        (0, n) => format!(" {n}"),
-        (n, _) => format!(" @{n}"),
+    // The dot says that something waits; the tooltip says what.
+    let png = if unread > 0 || mentions > 0 {
+        ICON_WAITING
+    } else {
+        ICON
     };
-    button.setTitle(&NSString::from_str(&title));
+    let image = template_image(png, &tooltip);
+    button.setImage(image.as_deref());
+    button.setTitle(&NSString::from_str(""));
     button.setToolTip(Some(&tooltip));
 }
 

@@ -4,7 +4,9 @@
 
 use std::{cell::Cell, rc::Rc};
 
-use gpui::{App, AppContext as _, ParentElement, Styled, Window, div, prelude::FluentBuilder as _, px};
+use gpui::{
+    App, AppContext as _, ParentElement, Styled, Window, div, prelude::FluentBuilder as _, px,
+};
 use gpui_component::{
     WindowExt as _,
     command::{Command, CommandGroup, CommandItem, CommandState},
@@ -30,10 +32,13 @@ pub fn display(sections: Vec<(Section, Vec<Entry>)>) -> Vec<(&'static str, Vec<E
             _ => others.extend(items),
         }
     }
-    [(nav::SECTION_TOPICS, topics), (nav::SECTION_GROUPS_MEMBERS, others)]
-        .into_iter()
-        .filter(|(_, e)| !e.is_empty())
-        .collect()
+    [
+        (nav::SECTION_TOPICS, topics),
+        (nav::SECTION_GROUPS_MEMBERS, others),
+    ]
+    .into_iter()
+    .filter(|(_, e)| !e.is_empty())
+    .collect()
 }
 
 /// What an entry opens.
@@ -65,7 +70,6 @@ pub enum Section {
     Topics,
     Members,
 }
-
 
 /// The switcher's entries in display order; empty sections are left out.
 pub fn entries(provider: &dyn ChatProvider, me: Option<&str>) -> Vec<(Section, Vec<Entry>)> {
@@ -180,9 +184,11 @@ fn row(
             (_, Some(m)) => div()
                 .flex_none()
                 .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.elevated)),
-            (Target::Group(g), _) => div()
-                .flex_none()
-                .child(ui::GroupTile::new(g.clone(), entry.label.clone(), px(24.))),
+            (Target::Group(g), _) => {
+                div()
+                    .flex_none()
+                    .child(ui::GroupTile::new(g.clone(), entry.label.clone(), px(24.)))
+            }
             _ => tile(Lucide::Hash),
         };
         let (label, untitled) = match &entry.topic {
@@ -262,9 +268,10 @@ pub fn open(services: Services, window: &mut Window, cx: &mut App) {
             .max_h(px(420.))
             .bordered(false)
             .empty(|_, _, _| {
-                div()
-                    .h(px(160.))
-                    .child(ui::EmptyState::new(Lucide::SearchX, nav::QUICK_SWITCH_EMPTY))
+                div().h(px(160.)).child(ui::EmptyState::new(
+                    Lucide::SearchX,
+                    nav::QUICK_SWITCH_EMPTY,
+                ))
             })
             .footer(|_, _, cx| {
                 let colors = theme::colors(cx);
@@ -280,13 +287,15 @@ pub fn open(services: Services, window: &mut Window, cx: &mut App) {
                     .child(KbdHint::new(&["enter"]).label(nav::SWITCHER_OPEN))
             });
         for (heading, items) in sections.iter() {
-            command = command.group(
-                CommandGroup::new().label(*heading).items(items.iter().map(|e| {
-                    CommandItem::new()
-                        .label(e.label.clone())
-                        .child(row(e, me.clone(), members.clone()))
-                })),
-            );
+            command = command.group(CommandGroup::new().label(*heading).items(items.iter().map(
+                |e| {
+                    CommandItem::new().label(e.label.clone()).child(row(
+                        e,
+                        me.clone(),
+                        members.clone(),
+                    ))
+                },
+            )));
         }
         let sections = sections.clone();
         let services = services.clone();

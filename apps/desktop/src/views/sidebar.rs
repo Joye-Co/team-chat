@@ -19,7 +19,9 @@ use gpui_component::{
 use crate::{
     app::{Changes, Place, Services},
     copy::{common, fill, nav, search as search_copy},
-    data::{Change, ConnectionState, GroupId, GroupKind, GroupSummary, Member, TodoItem, TodoReason},
+    data::{
+        Change, ConnectionState, GroupId, GroupKind, GroupSummary, Member, TodoItem, TodoReason,
+    },
     theme::{self, Type as _, space},
     ui::{self, BadgeKind, CountBadge, GroupTile, KbdHint, Lucide, MemberAvatar, SectionHeader},
     views::{
@@ -132,11 +134,16 @@ impl Sidebar {
                 .child(
                     MemberAvatar::new(peer, px(20.))
                         .presence(peer)
-                        .on(if selected { colors.sidebar } else { colors.sidebar }),
+                        .on(if selected {
+                            colors.sidebar
+                        } else {
+                            colors.sidebar
+                        }),
                 )
                 .into_any_element(),
-            GroupKind::Group => GroupTile::new(group.id.clone(), group.name.clone(), px(20.))
-                .into_any_element(),
+            GroupKind::Group => {
+                GroupTile::new(group.id.clone(), group.name.clone(), px(20.)).into_any_element()
+            }
         };
         let trailing = if group.mentions > 0 {
             Some(CountBadge::new(group.mentions, BadgeKind::Mention).into_any_element())
@@ -202,8 +209,8 @@ impl Sidebar {
                 if g.kind == GroupKind::Group {
                     // A hairline before the destructive item, its text in
                     // `danger-text` (DESIGN.md §13.14).
-                    menu.separator()
-                        .item(destructive_item(Lucide::LogOut, nav::LEAVE_GROUP).on_click(
+                    menu.separator().item(
+                        destructive_item(Lucide::LogOut, nav::LEAVE_GROUP).on_click(
                             move |_, window, cx| {
                                 dialogs::confirm_leave(
                                     services.clone(),
@@ -213,7 +220,8 @@ impl Sidebar {
                                     cx,
                                 );
                             },
-                        ))
+                        ),
+                    )
                 } else {
                     menu
                 }
@@ -232,17 +240,19 @@ impl Sidebar {
         };
         let reason = match item.reason {
             TodoReason::Mentioned => nav::TODO_REASON_MENTIONED.to_string(),
-            TodoReason::WaitingOnMe => {
-                status_chip_text(&item.topic, me.as_deref(), &self.members)
-                    .unwrap_or_else(|| nav::TODO_REASON_WAITING.to_string())
-            }
+            TodoReason::WaitingOnMe => status_chip_text(&item.topic, me.as_deref(), &self.members)
+                .unwrap_or_else(|| nav::TODO_REASON_WAITING.to_string()),
         };
         let context = format!("{} · {}", item.group_name, reason);
         let (g, t) = (item.group_id.clone(), item.topic.id.clone());
         let selected = self.services.nav.read(cx).topic.as_ref() == Some(&(g.clone(), t.clone()));
         let title = topic_line(&item.topic.title);
         let untitled = title.is_empty();
-        let title = if untitled { nav::UNTITLED.to_string() } else { title };
+        let title = if untitled {
+            nav::UNTITLED.to_string()
+        } else {
+            title
+        };
         let tip = title.clone();
         div()
             .id(ElementId::NamedInteger("todo-row".into(), ix as u64))
@@ -338,41 +348,45 @@ impl Render for Sidebar {
             .pt(space::S6)
             .pb(space::S6)
             .rounded(theme::radius::MD)
-            .when(place == Some(Place::Todo), |el| el.bg(colors.sidebar_selected))
+            .when(place == Some(Place::Todo), |el| {
+                el.bg(colors.sidebar_selected)
+            })
             .child(
-                SectionHeader::new(nav::TODO).trailing(
-                    div()
-                        .when(todo_count > 0, |el| {
-                            el.child(CountBadge::new(todo_count, BadgeKind::Todo))
-                        }),
-                ),
+                SectionHeader::new(nav::TODO).trailing(div().when(todo_count > 0, |el| {
+                    el.child(CountBadge::new(todo_count, BadgeKind::Todo))
+                })),
             )
             .on_click(cx.listener(|this, _, _, cx| {
                 this.services.nav.update(cx, |nav, cx| nav.open_todo(cx))
             }));
 
-        let groups_header = div().mx(space::S10).px(space::S8).pt(space::S14).pb(space::S6).child(
-            SectionHeader::new(nav::GROUPS).trailing(
-                Button::new("sidebar-new")
-                    .ghost()
-                    .xsmall()
-                    .icon(gpui_component::Icon::new(Lucide::Plus))
-                    .tooltip(nav::NEW_MENU)
-                    .dropdown_menu(|menu, _, _| {
-                        menu.min_w(MENU_WIDTH)
-                            .menu_with_icon(
-                                nav::MENU_NEW_GROUP,
-                                gpui_component::Icon::new(Lucide::UsersRound),
-                                Box::new(NewGroup),
-                            )
-                            .menu_with_icon(
-                                nav::MENU_START_DM,
-                                gpui_component::Icon::new(Lucide::UserPlus),
-                                Box::new(StartDm),
-                            )
-                    }),
-            ),
-        );
+        let groups_header = div()
+            .mx(space::S10)
+            .px(space::S8)
+            .pt(space::S14)
+            .pb(space::S6)
+            .child(
+                SectionHeader::new(nav::GROUPS).trailing(
+                    Button::new("sidebar-new")
+                        .ghost()
+                        .xsmall()
+                        .icon(gpui_component::Icon::new(Lucide::Plus))
+                        .tooltip(nav::NEW_MENU)
+                        .dropdown_menu(|menu, _, _| {
+                            menu.min_w(MENU_WIDTH)
+                                .menu_with_icon(
+                                    nav::MENU_NEW_GROUP,
+                                    gpui_component::Icon::new(Lucide::UsersRound),
+                                    Box::new(NewGroup),
+                                )
+                                .menu_with_icon(
+                                    nav::MENU_START_DM,
+                                    gpui_component::Icon::new(Lucide::UserPlus),
+                                    Box::new(StartDm),
+                                )
+                        }),
+                ),
+            );
 
         let empty_state = div().h(px(240.)).child(
             ui::EmptyState::new(Lucide::UsersRound, nav::NO_GROUPS)
@@ -415,7 +429,11 @@ impl Render for Sidebar {
                 .flex()
                 .items_center()
                 .gap(space::S8)
-                .child(MemberAvatar::new(Some(&me), px(26.)).presence(Some(&me)).on(colors.sidebar))
+                .child(
+                    MemberAvatar::new(Some(&me), px(26.))
+                        .presence(Some(&me))
+                        .on(colors.sidebar),
+                )
                 .child(
                     div()
                         .flex_1()
@@ -453,9 +471,10 @@ impl Render for Sidebar {
             .child(ui::toolbar_band("sidebar-toolbar"))
             .when_some(connection, |el, text| {
                 el.child(
-                    div().mx(space::S10).mb(space::S8).child(
-                        ui::Band::new(Lucide::WifiOff, text).compact(),
-                    ),
+                    div()
+                        .mx(space::S10)
+                        .mb(space::S8)
+                        .child(ui::Band::new(Lucide::WifiOff, text).compact()),
                 )
             })
             .child(
@@ -526,10 +545,7 @@ impl Render for Sidebar {
                                 .items_center()
                                 .t_callout()
                                 .text_color(colors.text_2)
-                                .child(fill(
-                                    nav::TODO_ALL,
-                                    &[("n", &self.todo.len().to_string())],
-                                ))
+                                .child(fill(nav::TODO_ALL, &[("n", &self.todo.len().to_string())]))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.services.nav.update(cx, |nav, cx| nav.open_todo(cx))
                                 })),

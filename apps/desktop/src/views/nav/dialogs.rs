@@ -186,10 +186,11 @@ impl Render for NewGroupForm {
                             )),
                     ),
             )
-            .child(
-                Input::new(&self.filter)
-                    .prefix(ui::icon(Lucide::Search, theme::icon::BUTTON, colors.text_2)),
-            )
+            .child(Input::new(&self.filter).prefix(ui::icon(
+                Lucide::Search,
+                theme::icon::BUTTON,
+                colors.text_2,
+            )))
             .child(
                 div()
                     .id("new-group-members")
@@ -239,9 +240,11 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
         .items_center()
         .gap(space::S8)
         .child(
-            div()
-                .flex_none()
-                .child(ui::MemberAvatar::new(Some(m), px(24.)).presence(Some(m)).on(surface)),
+            div().flex_none().child(
+                ui::MemberAvatar::new(Some(m), px(24.))
+                    .presence(Some(m))
+                    .on(surface),
+            ),
         )
         .child(
             div()
@@ -250,7 +253,13 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
                 .flex()
                 .items_center()
                 .gap(space::S8)
-                .child(div().flex_shrink(1.).min_w(px(0.)).one_line().child(m.name.clone()))
+                .child(
+                    div()
+                        .flex_shrink(1.)
+                        .min_w(px(0.))
+                        .one_line()
+                        .child(m.name.clone()),
+                )
                 .children(m.role.clone().map(|r| {
                     div()
                         .flex_shrink(2.)
@@ -294,18 +303,17 @@ pub fn open_start_dm(services: Services, window: &mut Window, cx: &mut App) {
         if first.replace(false) {
             state.update(cx, |s, cx| s.focus(window, cx));
         }
-        let items =
-            members.iter().map(|m| {
-                let m2 = m.clone();
-                CommandItem::new()
-                    .label(m.name.clone())
-                    .child(move |_, cx| {
-                        // CommandItem adds 6 pt above and below: a 40 pt row.
-                        member_row(&m2, theme::colors(cx).elevated, cx)
-                            .h(px(28.))
-                            .t_ui()
-                    })
-            });
+        let items = members.iter().map(|m| {
+            let m2 = m.clone();
+            CommandItem::new()
+                .label(m.name.clone())
+                .child(move |_, cx| {
+                    // CommandItem adds 6 pt above and below: a 40 pt row.
+                    member_row(&m2, theme::colors(cx).elevated, cx)
+                        .h(px(28.))
+                        .t_ui()
+                })
+        });
         let members = members.clone();
         let command = Command::new(&state)
             .placeholder(nav::START_DM_PLACEHOLDER)

@@ -110,7 +110,7 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
             dialog_opens(handle, Box::new(StartDm), cx).await,
         );
 
-        // The keyboard path: Cmd+K, then Enter picks the first 群.
+        // The keyboard path: Cmd+K, Down, then Enter picks the second entry.
         key(handle, "cmd-k", cx);
         pause(cx).await;
         let open = handle
@@ -123,14 +123,22 @@ pub fn run(services: Services, report: PathBuf, finish: Finish, cx: &mut App) {
             .update(cx, |_, window, cx| window.has_active_dialog(cx))
             .unwrap_or(true);
         let _ = handle.update(cx, |_, window, cx| window.close_all_dialogs(cx));
-        let expected = super::switcher::entries(provider.as_ref(), services.me().as_deref())
-            .into_iter()
-            .flat_map(|(_, e)| e)
-            .nth(1)
-            .map(|e| e.target);
-        let place = cx.update(|cx| services.nav.read(cx).place.clone());
+        // The palette shows 话题 first, then 群和成员 (DESIGN.md §13.12).
+        let expected = super::switcher::display(super::switcher::entries(
+            provider.as_ref(),
+            services.me().as_deref(),
+        ))
+        .into_iter()
+        .flat_map(|(_, e)| e)
+        .nth(1)
+        .map(|e| e.target);
+        let (place, topic) = cx.update(|cx| {
+            let nav = services.nav.read(cx);
+            (nav.place.clone(), nav.topic.clone())
+        });
         let picked = match expected {
             Some(super::switcher::Target::Group(g)) => place == Some(Place::Group(g)),
+            Some(super::switcher::Target::Topic(g, t)) => topic == Some((g, t)),
             _ => false,
         };
         check("cmd_k_opens_switcher", open);

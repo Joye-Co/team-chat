@@ -714,7 +714,11 @@ mod tests {
             || (t.waiting_on.iter().any(|m| m == ME) && t.status != TopicStatus::Done)));
         // Every 待办 entry of the sidebar is in the 待办 filter of its 群.
         for item in p.todo() {
-            assert!(TopicFilter::Todo.keeps(&item.topic, me), "{}", item.topic.title);
+            assert!(
+                TopicFilter::Todo.keeps(&item.topic, me),
+                "{}",
+                item.topic.title
+            );
         }
         // Signed out: nothing waits on me, mentions still count.
         assert!(
