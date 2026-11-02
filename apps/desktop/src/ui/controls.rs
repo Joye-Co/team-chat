@@ -346,15 +346,83 @@ impl RenderOnce for TextField {
 /// gpui-component paints a placeholder in the theme's `muted_foreground`,
 /// which this app sets to `text-2` for secondary text, so placeholders read
 /// as typed text. The input copies the theme colors into its state while it
-/// renders, so the theme carries `placeholder` for that call only. Every
-/// input in the app renders through here.
-pub fn placeholder_input(input: impl RenderOnce, window: &mut Window, cx: &mut App) -> AnyElement {
-    let placeholder = theme::colors(cx).placeholder;
-    let theme = gpui_component::Theme::global_mut(cx);
-    let saved = std::mem::replace(&mut theme.muted_foreground, placeholder);
-    let element = input.render(window, cx).into_any_element();
-    gpui_component::Theme::global_mut(cx).muted_foreground = saved;
-    element
+/// renders, so the theme carries `placeholder` while the input lays out.
+/// A `Textarea` renders into an `Input` that renders only at layout, so the
+/// swap wraps the layout, not the builder call. Every input in the app
+/// renders through here.
+pub fn placeholder_input(input: impl IntoElement, _: &mut Window, cx: &mut App) -> AnyElement {
+    PlaceholderScope {
+        child: input.into_any_element(),
+        placeholder: theme::colors(cx).placeholder,
+    }
+    .into_any_element()
+}
+
+/// Lays out its child with the theme's `muted_foreground` set to the
+/// `placeholder` token (see [`placeholder_input`]).
+struct PlaceholderScope {
+    child: AnyElement,
+    placeholder: Hsla,
+}
+
+impl IntoElement for PlaceholderScope {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl gpui::Element for PlaceholderScope {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (gpui::LayoutId, ()) {
+        let theme = gpui_component::Theme::global_mut(cx);
+        let saved = std::mem::replace(&mut theme.muted_foreground, self.placeholder);
+        let layout = self.child.request_layout(window, cx);
+        gpui_component::Theme::global_mut(cx).muted_foreground = saved;
+        (layout, ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<Pixels>,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _: Option<&gpui::GlobalElementId>,
+        _: Option<&gpui::InspectorElementId>,
+        _: gpui::Bounds<Pixels>,
+        _: &mut (),
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.child.paint(window, cx);
+    }
 }
 
 /// The label above a form field: `small` 13/20 500 `text-2`, 8 pt above the
@@ -381,7 +449,7 @@ pub fn field_help(text: impl Into<SharedString>, error: bool, cx: &App) -> gpui:
 }
 
 /// A select trigger in a table row (§7.4): 36 x 120, `content` + 1 pt
-/// `border`, radius 8, `ui` 14 text, a trailing `chevrons-up-down` 14.
+/// `border`, radius 8, `ui` 14/400 `text-1` text, a trailing `chevrons-up-down` 14.
 /// Open the menu from its click handler.
 pub fn select_trigger(
     id: impl Into<ElementId>,
