@@ -171,7 +171,7 @@ impl FakeProvider {
             return reply_now(Err(AdminError::Invalid));
         }
         let code = fake_code(self.next_id());
-        let download = format!("{}/download?code={code}", self.server_url());
+        let download = format!("{}/download#code={code}", self.server_url());
         reply_now(Ok(InviteCreated {
             code: SecretText::new(code),
             download_url: SecretText::new(download),

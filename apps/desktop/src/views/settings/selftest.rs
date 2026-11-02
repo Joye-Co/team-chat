@@ -317,7 +317,7 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
             let link = c.download_url.expose();
             if !invite_code_shape(c.code.expose()) {
                 Err("code shape".to_string())
-            } else if !link.contains("/download?code=") || !link.ends_with(c.code.expose()) {
+            } else if !link.contains("/download#code=") || !link.ends_with(c.code.expose()) {
                 Err("download link".to_string())
             } else {
                 Ok(())

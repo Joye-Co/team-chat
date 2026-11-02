@@ -276,30 +276,72 @@ export function registerOpsRoutes(): void {
     },
   });
 
-  // Public: anyone with an invite code that has not expired (used or not). The code is never
-  // logged: the request log records only the path, this handler logs nothing, and Workers
-  // invocation logs (which store the full URL) are off in server/wrangler.jsonc.
+  // Public: anyone with an invite code that has not expired (used or not). Invite links carry
+  // the code in the URL fragment (`/download#code=...`), which browsers never send, so no request
+  // log (ours or the Workers invocation log) sees it: GET serves a small page that POSTs the code.
+  // Workers invocation logs (which store the full URL) are also off in server/wrangler.jsonc.
   registerRoute({
     method: "GET",
     path: "/download",
     auth: "none",
     async handler({ env, request, url }) {
-      const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
-      const key = `download:${await sha256Hex(ip)}`;
-      if (!(await rateHit(env.DB, key, DOWNLOAD_RATE.windowMs, DOWNLOAD_RATE.max))) {
-        return plain(429, "Too many requests. Try again later.\n");
-      }
-      const code = normalizeInviteCode(url.searchParams.get("code") ?? "");
-      if (code.length !== INVITE_CODE_LENGTH && code.length !== LEGACY_INVITE_CODE_LENGTH) {
-        return plain(404, "Invite code not found or expired.\n");
-      }
-      const invite = await env.DB.prepare("SELECT id FROM invites WHERE code_hash = ? AND expires_at > ?")
-        .bind(await sha256Hex(code), Date.now())
-        .first<{ id: string }>();
-      if (!invite) return plain(404, "Invite code not found or expired.\n");
-      const r = await latestRelease(env.DB);
-      if (!r) return plain(404, "No release yet.\n");
-      return serveRelease(request, env, r);
+      // Links made before the fragment form keep working.
+      if (url.searchParams.has("code")) return downloadFor(env, request, url.searchParams.get("code") ?? "");
+      return new Response(DOWNLOAD_PAGE, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "referrer-policy": "no-referrer",
+          "x-content-type-options": "nosniff",
+          "content-security-policy": `default-src 'none'; script-src '${await downloadScriptHash()}'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'`,
+        },
+      });
     },
   });
+
+  registerRoute({
+    method: "POST",
+    path: "/download",
+    auth: "none",
+    async handler({ env, request }) {
+      const text = new TextDecoder().decode(await readBytes(request, 1024));
+      return downloadFor(env, request, new URLSearchParams(text).get("code") ?? "");
+    },
+  });
+}
+
+/** Rate limited per IP; the code is never logged (this function logs nothing). */
+async function downloadFor(env: Env, request: Request, raw: string): Promise<Response> {
+  const ip = request.headers.get("cf-connecting-ip") ?? "unknown";
+  const key = `download:${await sha256Hex(ip)}`;
+  if (!(await rateHit(env.DB, key, DOWNLOAD_RATE.windowMs, DOWNLOAD_RATE.max))) {
+    return plain(429, "Too many requests. Try again later.\n");
+  }
+  const code = normalizeInviteCode(raw.slice(0, 64));
+  if (code.length !== INVITE_CODE_LENGTH && code.length !== LEGACY_INVITE_CODE_LENGTH) {
+    return plain(404, "Invite code not found or expired.\n");
+  }
+  const invite = await env.DB.prepare("SELECT id FROM invites WHERE code_hash = ? AND expires_at > ?")
+    .bind(await sha256Hex(code), Date.now())
+    .first<{ id: string }>();
+  if (!invite) return plain(404, "Invite code not found or expired.\n");
+  const r = await latestRelease(env.DB);
+  if (!r) return plain(404, "No release yet.\n");
+  return serveRelease(request, env, r);
+}
+
+/** Reads the code from the fragment (or an old query link), drops it from the address bar, posts it. */
+const DOWNLOAD_SCRIPT = `(function(){var h=new URLSearchParams(location.hash.slice(1)),q=new URLSearchParams(location.search),c=h.get("code")||q.get("code")||"";history.replaceState(null,"",location.pathname);if(!c){document.getElementById("m").textContent="Invite code not found or expired.";return}var f=document.createElement("form");f.method="POST";f.action="/download";var i=document.createElement("input");i.type="hidden";i.name="code";i.value=c;f.appendChild(i);document.body.appendChild(f);f.submit()})();`;
+
+const DOWNLOAD_PAGE =
+  '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Download</title>' +
+  `<p id="m">Downloading…</p><script>${DOWNLOAD_SCRIPT}</script>`;
+
+let scriptHash: Promise<string> | null = null;
+/** CSP source of the page script (only this script may run). */
+function downloadScriptHash(): Promise<string> {
+  scriptHash ??= crypto.subtle
+    .digest("SHA-256", new TextEncoder().encode(DOWNLOAD_SCRIPT))
+    .then((d) => `sha256-${btoa(String.fromCharCode(...new Uint8Array(d)))}`);
+  return scriptHash;
 }

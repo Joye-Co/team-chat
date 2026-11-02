@@ -499,7 +499,30 @@ describe("releases and updates", () => {
     expect(bad.status).toBe(404);
     expect((await raw("/download?code=AAAA-BBBB", { headers: ip })).status).toBe(404);
     expect(bad.headers.get("content-type")).toContain("text/plain");
-    expect((await raw("/download", { headers: ip })).status).toBe(404);
+
+    // Links carry the code in the fragment: GET without a code is a page that posts it.
+    const page = await raw("/download", { headers: ip });
+    expect(page.status).toBe(200);
+    expect(page.headers.get("content-type")).toContain("text/html");
+    const csp = page.headers.get("content-security-policy") ?? "";
+    expect(csp).toMatch(/script-src 'sha256-[A-Za-z0-9+/=]+'/);
+    const html = await page.text();
+    expect(html).toContain('location.hash');
+    const script = html.slice(html.indexOf("<script>") + 8, html.indexOf("</script>"));
+    const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", enc.encode(script)));
+    expect(csp).toContain(`'sha256-${btoa(String.fromCharCode(...digest))}'`);
+    const post = (code: string) =>
+      raw("/download", {
+        method: "POST",
+        headers: { ...ip, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ code }).toString(),
+      });
+    const posted = await post(code);
+    expect(posted.status).toBe(200);
+    expect(await posted.text()).toBe("the dmg");
+    const wrong = await post("AAAA-BBBB");
+    expect(wrong.status).toBe(404);
+    await wrong.arrayBuffer();
 
     await env.DB.prepare("UPDATE invites SET expires_at = ? WHERE created_by = ?").bind(Date.now() - 1, owner.id).run();
     expect((await raw(`/download?code=${code}`, { headers: ip })).status).toBe(404);

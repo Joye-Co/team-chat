@@ -974,7 +974,8 @@ pub struct InviteRequest {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct InviteCreated {
     pub code: SecretText,
-    /// `<server>/download?code=<code>`: the latest DMG for this invitee.
+    /// `<server>/download#code=<code>`: the latest DMG for this invitee. The code is in the
+    /// fragment, which browsers never send, so no server log sees it.
     pub download_url: SecretText,
     pub expires_at: Millis,
 }

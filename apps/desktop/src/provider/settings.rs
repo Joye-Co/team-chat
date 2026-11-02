@@ -266,7 +266,7 @@ impl CoreProvider {
                 .await
                 .map_err(|e| api_error(&e))?;
             let download = format!(
-                "{}/download?code={}",
+                "{}/download#code={}",
                 server_url.trim_end_matches('/'),
                 urlencode(&r.code)
             );
