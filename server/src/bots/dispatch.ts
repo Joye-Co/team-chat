@@ -1,0 +1,234 @@
+// Pure rules of the bots feature: machine choice, health gating, approval answers, prompt and
+// progress text. No I/O here, so the rules are easy to test.
+import type { BotRunner, CliInfo, Health, Machine, MachineInfo } from "@chat/protocol";
+
+/** Lease the server gives each run; heartbeats and run frames renew it. */
+export const LEASE_MS = 10 * 60_000;
+/** No run event for this long: the topic is set to blocked with one note. */
+export const STALL_MS = 10 * 60_000;
+/** A machine whose last heartbeat is older than this is not healthy (3 heartbeats). */
+export const HEARTBEAT_STALE_MS = 90_000;
+/** The link closes when nothing arrives for this long. */
+export const LINK_IDLE_MS = 90_000;
+/** Resend run.assign when neither accept nor reject came. */
+export const ASSIGN_RETRY_MS = 30_000;
+/** Below this much free disk a machine takes no new runs. */
+export const MIN_FREE_DISK_BYTES = 5 * 1024 ** 3;
+/** The daemon cancels a run after this; status "timeout". */
+export const MAX_RUN_MS = 2 * 60 * 60_000;
+/** Longest progress message body we stream (the message body limit is 32,768). */
+export const MAX_PROGRESS_CHARS = 30_000;
+/** Longest result message body. */
+export const MAX_RESULT_CHARS = 30_000;
+/** Messages of the topic given to the CLI as context. */
+export const CONTEXT_MESSAGES = 30;
+
+/** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
+export const TEXT = {
+  ack: "收到，我来处理。",
+  noMachine: "现在没有空闲的电脑能接手，请稍后再 @我。",
+  lost: "卡住了：处理中断了（电脑离线太久），这次没有完成。需要的话请再 @我。",
+  stalled: "卡住了：10 分钟没有进展。",
+  progress: "进行中…",
+  done: "完成了。",
+  failed: (why: string) => (why ? `没有完成：${why}` : "没有完成。"),
+  cancelled: "已停止，没有完成。",
+  approval: (title: string, detail?: string) =>
+    `需要你确认：${title}${detail ? `\n\n${detail}` : ""}\n\n回复「同意」或「拒绝」。`,
+  approve: "同意",
+  deny: "拒绝",
+} as const;
+
+export interface MachineView {
+  id: string;
+  name: string;
+  /** Owner labels and daemon labels. */
+  labels: string[];
+  revoked: boolean;
+  connected: boolean;
+  lastHeartbeatAt?: number;
+  info?: MachineInfo;
+  health?: Health;
+  clis?: CliInfo[];
+  runningRuns: string[];
+}
+
+export function mergeLabels(owner: string[], daemon: string[] | undefined): string[] {
+  return [...new Set([...owner, ...(daemon ?? [])])].sort();
+}
+
+/** Connected, a recent heartbeat, enough free disk. */
+export function isHealthy(m: MachineView, now: number): boolean {
+  if (m.revoked || !m.connected || !m.health || m.lastHeartbeatAt === undefined) return false;
+  if (now - m.lastHeartbeatAt > HEARTBEAT_STALE_MS) return false;
+  return m.health.diskFreeBytes >= MIN_FREE_DISK_BYTES;
+}
+
+/** The machine has every label the bot asks for. */
+export function labelsMatch(required: string[], have: string[]): boolean {
+  const set = new Set(have);
+  return required.every((l) => set.has(l));
+}
+
+export function hasRuntime(m: MachineView, runtime: string): boolean {
+  return (m.clis ?? []).some((c) => c.runtime === runtime && c.available);
+}
+
+function activeRuns(m: MachineView): number {
+  return Math.max(m.health?.activeRuns ?? 0, m.runningRuns.length);
+}
+
+/** Machines that can take a new run of this bot, best first. */
+export function candidates(
+  machines: MachineView[],
+  runner: Pick<BotRunner, "labels" | "runtime">,
+  now: number,
+  exclude: string[] = [],
+): MachineView[] {
+  return machines
+    .filter(
+      (m) =>
+        !exclude.includes(m.id) &&
+        isHealthy(m, now) &&
+        labelsMatch(runner.labels, m.labels) &&
+        hasRuntime(m, runner.runtime) &&
+        activeRuns(m) < Math.max(1, m.info?.maxParallelRuns ?? 1),
+    )
+    .sort((a, b) => activeRuns(a) - activeRuns(b) || (a.health?.load1 ?? 0) - (b.health?.load1 ?? 0) || a.id.localeCompare(b.id));
+}
+
+export function pickMachine(
+  machines: MachineView[],
+  runner: Pick<BotRunner, "labels" | "runtime">,
+  now: number,
+  exclude: string[] = [],
+): MachineView | null {
+  return candidates(machines, runner, now, exclude)[0] ?? null;
+}
+
+export function toMachine(m: MachineView, createdBy: string, createdAt: number, now: number): Machine {
+  const out: Machine = {
+    id: m.id,
+    name: m.name,
+    labels: m.labels,
+    createdBy,
+    createdAt,
+    connected: m.connected,
+    healthy: isHealthy(m, now),
+    runningRuns: m.runningRuns,
+  };
+  if (m.revoked) out.revoked = true;
+  if (m.lastHeartbeatAt !== undefined) out.lastHeartbeatAt = m.lastHeartbeatAt;
+  if (m.info) {
+    out.daemonVersion = m.info.daemonVersion;
+    out.os = m.info.os;
+    out.arch = m.info.arch;
+    out.maxParallelRuns = m.info.maxParallelRuns;
+  }
+  if (m.health) out.health = m.health;
+  if (m.clis) out.clis = m.clis;
+  return out;
+}
+
+/** "同意" / "拒绝" (and a few common forms) answer a pending approval; anything else is input. */
+export function approvalDecision(body: string): "approve" | "deny" | null {
+  const t = body
+    .replace(/@\S+/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/[。.!！,，\s]+$/u, "");
+  if (["同意", "可以", "批准", "好", "好的", "行", "approve", "yes", "y", "ok"].includes(t)) return "approve";
+  if (["拒绝", "不同意", "不行", "不可以", "不要", "deny", "no", "n"].includes(t)) return "deny";
+  return null;
+}
+
+/** Cuts text to at most `max` code points. */
+export function cut(text: string, max: number): string {
+  const cps = [...text];
+  return cps.length <= max ? text : `${cps.slice(0, Math.max(0, max - 1)).join("")}…`;
+}
+
+export function firstLine(text: string, max = 280): string {
+  const line = text.split(/\r?\n/).find((l) => l.trim() !== "") ?? "";
+  return cut(line.trim(), max);
+}
+
+export interface ContextMessage {
+  authorId: string;
+  body: string;
+}
+
+/** The full prompt for the CLI: who it is, the topic's recent messages, and the request. */
+export function buildPrompt(opts: {
+  botName: string;
+  title: string;
+  messages: ContextMessage[];
+  names: Map<string, string>;
+  request: ContextMessage;
+  followUps?: ContextMessage[];
+}): string {
+  const name = (id: string) => opts.names.get(id) ?? id;
+  const lines = [
+    `You are ${opts.botName}, a member of a team chat. You were asked to work in the topic "${opts.title}".`,
+    "Your final answer is posted into the topic as is, so keep it short and in the language of the request.",
+    "",
+    "Recent messages of the topic, oldest first:",
+    ...opts.messages.map((m) => `${name(m.authorId)}: ${m.body}`),
+    "",
+    `Request from ${name(opts.request.authorId)}:`,
+    opts.request.body,
+  ];
+  for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
+  return lines.join("\n");
+}
+
+/**
+ * Progress text as one append-only stream. Deltas append; the final text of an item replaces
+ * its deltas, so only the part the deltas missed is appended (gaps happen when the daemon drops
+ * deltas offline). Tool calls show as one short line.
+ */
+export class Progress {
+  constructor(
+    public text: string,
+    public items: Record<string, string>,
+    public full: boolean,
+  ) {}
+  private pending = "";
+
+  private push(s: string): void {
+    if (this.full || s === "") return;
+    if ([...this.text].length + [...s].length > MAX_PROGRESS_CHARS) {
+      this.full = true;
+      s = "\n…";
+    }
+    this.text += s;
+    this.pending += s;
+  }
+
+  delta(itemId: string, text: string): void {
+    this.items[itemId] = (this.items[itemId] ?? "") + text;
+    this.push(text);
+  }
+
+  message(itemId: string, text: string): void {
+    const had = this.items[itemId] ?? "";
+    this.items[itemId] = text;
+    if (text.startsWith(had)) this.push(text.slice(had.length));
+    else this.push(`\n${text}`);
+    this.push("\n\n");
+    // The item is complete; its text is no longer needed.
+    delete this.items[itemId];
+  }
+
+  tool(title: string): void {
+    const sep = this.text === "" || this.text.endsWith("\n") ? "" : "\n";
+    this.push(`${sep}· ${cut(title.replace(/\s+/g, " ").trim(), 200)}\n`);
+  }
+
+  /** Text appended since the last call. */
+  take(): string {
+    const p = this.pending;
+    this.pending = "";
+    return p;
+  }
+}

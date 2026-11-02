@@ -18,10 +18,15 @@
   "durable_objects": {
     "bindings": [
       { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
-      { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+      { "name": "GROUP_ROOM", "class_name": "GroupRoom" },
+      { "name": "BOT_DESK", "class_name": "BotDesk" },
+      { "name": "MACHINE_LINK", "class_name": "MachineLink" }
     ]
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["MemberGateway", "GroupRoom"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["MemberGateway", "GroupRoom"] },
+    { "tag": "v2-bots", "new_sqlite_classes": ["BotDesk", "MachineLink"] }
+  ],
   "env": {
     "e2e": {
       "name": "chat-api-e2e",
@@ -35,7 +40,9 @@
       "durable_objects": {
         "bindings": [
           { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
-          { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+          { "name": "GROUP_ROOM", "class_name": "GroupRoom" },
+          { "name": "BOT_DESK", "class_name": "BotDesk" },
+          { "name": "MACHINE_LINK", "class_name": "MachineLink" }
         ]
       }
     },
@@ -51,7 +58,9 @@
       "durable_objects": {
         "bindings": [
           { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
-          { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+          { "name": "GROUP_ROOM", "class_name": "GroupRoom" },
+          { "name": "BOT_DESK", "class_name": "BotDesk" },
+          { "name": "MACHINE_LINK", "class_name": "MachineLink" }
         ]
       }
     },
@@ -67,7 +76,9 @@
       "durable_objects": {
         "bindings": [
           { "name": "MEMBER_GATEWAY", "class_name": "MemberGateway" },
-          { "name": "GROUP_ROOM", "class_name": "GroupRoom" }
+          { "name": "GROUP_ROOM", "class_name": "GroupRoom" },
+          { "name": "BOT_DESK", "class_name": "BotDesk" },
+          { "name": "MACHINE_LINK", "class_name": "MachineLink" }
         ]
       }
     }

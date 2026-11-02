@@ -4,6 +4,7 @@ import { handleFetch, handleScheduled } from "./core/worker";
 
 export { GroupRoom } from "./core/room";
 export { MemberGateway } from "./core/gateway";
+export { BotDesk, MachineLink } from "./bots";
 export type { Env } from "./core/env";
 
 export default {
