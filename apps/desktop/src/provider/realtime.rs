@@ -340,9 +340,5 @@ impl CoreProvider {
 
 fn excerpt(s: &str) -> String {
     let one = s.split_whitespace().collect::<Vec<_>>().join(" ");
-    let mut out: String = one.chars().take(NOTICE_BODY_CHARS).collect();
-    if one.chars().count() > NOTICE_BODY_CHARS {
-        out.push('…');
-    }
-    out
+    crate::markdown::clip(&one, NOTICE_BODY_CHARS)
 }

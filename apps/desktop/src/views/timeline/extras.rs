@@ -174,11 +174,7 @@ pub fn quote_preview(body: &str) -> String {
         .map(|l| l.trim().trim_start_matches(['#', '>', '-', '*', '`', ' ']))
         .find(|l| !l.is_empty())
         .unwrap_or_default();
-    let mut out: String = line.chars().take(QUOTE_CHARS).collect();
-    if line.chars().count() > QUOTE_CHARS {
-        out.push('…');
-    }
-    out
+    crate::markdown::clip(line, QUOTE_CHARS)
 }
 
 #[cfg(test)]

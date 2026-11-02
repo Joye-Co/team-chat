@@ -501,12 +501,12 @@ impl LineWrapper {
 
     /// CJK line-breaking rule (kinsoku): no line starts with closing
     /// punctuation and no line ends with opening punctuation.
-    pub(crate) fn may_break_between(prev: char, next: char) -> bool {
+    pub fn may_break_between(prev: char, next: char) -> bool {
         !Self::is_no_start_char(next) && !Self::is_no_end_char(prev)
     }
 
     /// Closing punctuation that must not start a line.
-    pub(crate) fn is_no_start_char(c: char) -> bool {
+    pub fn is_no_start_char(c: char) -> bool {
         matches!(
             c,
             '，' | '。' | '、' | '；' | '：' | '？' | '！' | '）' | '」' | '』' | '】' | '》' | '〉'
@@ -516,7 +516,7 @@ impl LineWrapper {
     }
 
     /// Opening punctuation that must not end a line.
-    pub(crate) fn is_no_end_char(c: char) -> bool {
+    pub fn is_no_end_char(c: char) -> bool {
         matches!(
             c,
             '（' | '「' | '『' | '【' | '《' | '〈' | '〔' | '〖' | '｛' | '［' | '“' | '‘' | '(' | '['
@@ -599,7 +599,7 @@ impl LineWrapper {
 /// four characters or a version number the cut split (`Joye Huang…`, never
 /// `Joye Huang（…` or `v0.9.…`). Keeps the plain cut when that would leave
 /// nothing.
-pub(crate) fn trim_before_affix(text: &str, cut: usize) -> &str {
+pub fn trim_before_affix(text: &str, cut: usize) -> &str {
     fn is_trimmed(c: char) -> bool {
         c.is_whitespace()
             || c.is_ascii_punctuation()

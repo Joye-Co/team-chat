@@ -23,13 +23,7 @@ const OUTPUT_LINES: usize = 12;
 
 /// Cuts `text` to `max` characters.
 pub fn clip(text: &str, max: usize) -> String {
-    if text.chars().count() <= max {
-        text.to_string()
-    } else {
-        let mut out: String = text.chars().take(max).collect();
-        out.push('…');
-        out
-    }
+    crate::markdown::clip(text, max)
 }
 
 /// The first `n` lines and how many lines were left out.

@@ -169,13 +169,7 @@ pub fn last_editable<'a>(messages: &'a [Message], me: &str) -> Option<&'a Messag
 /// A short one-line excerpt of a quoted body.
 pub fn excerpt(body: &str, max_chars: usize) -> String {
     let line: String = body.split_whitespace().collect::<Vec<_>>().join(" ");
-    if line.chars().count() <= max_chars {
-        line
-    } else {
-        let mut cut: String = line.chars().take(max_chars).collect();
-        cut.push('…');
-        cut
-    }
+    crate::markdown::clip(&line, max_chars)
 }
 
 /// A Markdown format of the format bar.

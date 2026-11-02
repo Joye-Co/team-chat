@@ -38,6 +38,20 @@ pub fn safe_link(url: &str) -> Option<&str> {
     Some(url)
 }
 
+/// `text` cut to at most `max_chars` characters, ending in `…` when cut.
+///
+/// The one truncation rule for text cut by length (placeholders, excerpts,
+/// long logs): the ellipsis is U+2026 and gpui's `trim_before_affix` drops
+/// trailing punctuation, opening brackets and a Latin word cut to under four
+/// characters before it (DESIGN.md §15). Text cut to a width uses
+/// `Type::one_line`, which runs the same rule on measured text.
+pub fn clip(text: &str, max_chars: usize) -> String {
+    match text.char_indices().nth(max_chars) {
+        None => text.to_string(),
+        Some((cut, _)) => format!("{}…", gpui::trim_before_affix(text, cut)),
+    }
+}
+
 /// A selectable Markdown view of one message body. `id` must be stable for
 /// the message (its parsed state is kept under it while the row is visible).
 pub fn message_body(id: impl Into<ElementId>, text: impl Into<SharedString>) -> TextView {
@@ -86,3 +100,6 @@ mod tests {
         assert_eq!(safe_link("http:"), None);
     }
 }
+
+#[cfg(test)]
+mod text_tests;
