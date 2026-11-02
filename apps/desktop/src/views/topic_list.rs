@@ -21,7 +21,10 @@ use crate::{
     data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
     theme::{self, Type as _, size, space},
     ui::{self, BadgeKind, CountBadge, Lucide, RowSurface, StatusChip},
-    views::{sidebar::topic_line, topic_menu},
+    views::{
+        sidebar::{edge_fade, scroll_edges, topic_line, watch_scroll_edges},
+        topic_menu,
+    },
 };
 
 /// The tabs above the topics of a group (DESIGN.md §8.1): 全部, 未读, 等我.
@@ -157,6 +160,7 @@ pub struct TopicListView {
     filters: HashMap<GroupId, TopicFilter>,
     /// Row previews by topic, with the `last_seq` they were made at.
     previews: HashMap<TopicId, (u64, String)>,
+    scroll: gpui::UniformListScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -209,6 +213,7 @@ impl TopicListView {
             filter: TopicFilter::All,
             filters: HashMap::new(),
             previews: HashMap::new(),
+            scroll: gpui::UniformListScrollHandle::new(),
             _subscriptions: subscriptions,
         };
         this.refresh(cx);
@@ -574,8 +579,11 @@ pub fn plain_preview(body: &str) -> String {
 }
 
 impl Render for TopicListView {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        let base = self.scroll.0.borrow().base_handle.clone();
+        let edges = scroll_edges(&base);
+        watch_scroll_edges(&base, edges, window, cx);
         let is_group = matches!(self.place, Some(Place::Group(_)));
         let empty_text = match &self.place {
             None => Some((nav::SELECT_GROUP, None)),
@@ -634,6 +642,8 @@ impl Render for TopicListView {
                 for r in &rows {
                     self.preview(&r.group_id, &r.topic);
                 }
+                // Rows cut by an edge fade from `content` (§7.7 scroll
+                // edges), as in the sidebar.
                 div()
                     .flex_1()
                     .min_h(px(0.))
@@ -641,23 +651,39 @@ impl Render for TopicListView {
                     .flex()
                     .flex_col()
                     .child(
-                        uniform_list(
-                            "topic-rows",
-                            self.rows.len(),
-                            cx.processor(move |this, range: std::ops::Range<usize>, _, cx| {
-                                range
-                                    .filter_map(|ix| {
-                                        this.rows.get(ix).cloned().map(|row| (ix, row))
-                                    })
-                                    .map(|(ix, row)| {
-                                        let sel = selected.as_ref()
-                                            == Some(&(row.group_id.clone(), row.topic.id.clone()));
-                                        this.topic_row(ix, &row, sel, now, cx)
-                                    })
-                                    .collect::<Vec<_>>()
-                            }),
-                        )
-                        .flex_1(),
+                        div()
+                            .relative()
+                            .flex_1()
+                            .min_h(px(0.))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                uniform_list(
+                                    "topic-rows",
+                                    self.rows.len(),
+                                    cx.processor(
+                                        move |this, range: std::ops::Range<usize>, _, cx| {
+                                            range
+                                                .filter_map(|ix| {
+                                                    this.rows.get(ix).cloned().map(|row| (ix, row))
+                                                })
+                                                .map(|(ix, row)| {
+                                                    let sel = selected.as_ref()
+                                                        == Some(&(
+                                                            row.group_id.clone(),
+                                                            row.topic.id.clone(),
+                                                        ));
+                                                    this.topic_row(ix, &row, sel, now, cx)
+                                                })
+                                                .collect::<Vec<_>>()
+                                        },
+                                    ),
+                                )
+                                .track_scroll(&self.scroll)
+                                .flex_1(),
+                            )
+                            .when(edges.0, |el| el.child(edge_fade(true, k.content)))
+                            .when(edges.1, |el| el.child(edge_fade(false, k.content))),
                     )
                     .into_any_element()
             }

@@ -23,6 +23,7 @@ use crate::{
     data::{CreateGroupRequest, GroupId, Member, MemberId},
     theme::{self, Type as _, size, space},
     ui::{self, ButtonSpec as _, FieldKind, Lucide},
+    views::sidebar::{edge_fade, scroll_edges, watch_scroll_edges},
 };
 
 /// Members I can add to a group or DM: everyone but me and deactivated members.
@@ -58,6 +59,7 @@ pub struct NewGroupForm {
     /// In pick order.
     selected: Vec<MemberId>,
     error: Option<&'static str>,
+    scroll: gpui::ScrollHandle,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -95,6 +97,7 @@ impl NewGroupForm {
             members,
             selected: Vec::new(),
             error: None,
+            scroll: gpui::ScrollHandle::new(),
             _subscriptions: subscriptions,
         }
     }
@@ -123,8 +126,10 @@ impl NewGroupForm {
 }
 
 impl Render for NewGroupForm {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        let edges = scroll_edges(&self.scroll);
+        watch_scroll_edges(&self.scroll, edges, window, cx);
         let query = self.filter.read(cx).value().trim().to_lowercase();
         let named = !self.name.read(cx).value().trim().is_empty();
         let selected: HashSet<&str> = self.selected.iter().map(|s| s.as_str()).collect();
@@ -199,25 +204,37 @@ impl Render for NewGroupForm {
                 FieldKind::SearchBordered,
             ))
             .child(
+                // Rows cut by an edge fade from the dialog surface (§7.7
+                // scroll edges), as in the sidebar and the switcher.
                 div()
-                    .id("new-group-members")
+                    .relative()
                     .mt(space::S8)
                     .mx(px(-8.))
-                    .h(px(240.))
-                    .overflow_y_scroll()
-                    .children(rows)
-                    .when(empty, |el| {
-                        el.child(
-                            div()
-                                .h(size::POPUP_ROW)
-                                .px(space::S8)
-                                .flex()
-                                .items_center()
-                                .t_small()
-                                .text_color(k.text_2)
-                                .child(nav::NO_MEMBERS_MATCH),
-                        )
-                    }),
+                    // Five and a half 40 pt rows: the half row and the fade show that
+                    // more members follow.
+                    .h(px(220.))
+                    .child(
+                        div()
+                            .id("new-group-members")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .children(rows)
+                            .when(empty, |el| {
+                                el.child(
+                                    div()
+                                        .h(size::POPUP_ROW)
+                                        .px(space::S8)
+                                        .flex()
+                                        .items_center()
+                                        .t_small()
+                                        .text_color(k.text_2)
+                                        .child(nav::NO_MEMBERS_MATCH),
+                                )
+                            }),
+                    )
+                    .when(edges.0, |el| el.child(edge_fade(true, k.overlay)))
+                    .when(edges.1, |el| el.child(edge_fade(false, k.overlay))),
             )
             .child(
                 div()
@@ -363,8 +380,10 @@ impl DmPicker {
 }
 
 impl Render for DmPicker {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        let edges = scroll_edges(&self.scroll);
+        watch_scroll_edges(&self.scroll, edges, window, cx);
         let shown = self.shown(cx);
         if self.active >= shown.len() {
             self.active = 0;
@@ -423,20 +442,27 @@ impl Render for DmPicker {
             ))
             .child(
                 div()
-                    .id("start-dm-members")
+                    .relative()
                     .mt(space::S8)
                     .mx(px(-8.))
-                    .h(px(320.))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .children(rows)
-                    .when(empty, |el| {
-                        el.child(
-                            div()
-                                .h(px(160.))
-                                .child(ui::EmptyState::new(Lucide::SearchX, nav::NO_MEMBERS_MATCH)),
-                        )
-                    }),
+                    // Seven and a half 40 pt rows, so the cut row shows more follow.
+                    .h(px(300.))
+                    .child(
+                        div()
+                            .id("start-dm-members")
+                            .size_full()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .children(rows)
+                            .when(empty, |el| {
+                                el.child(div().h(px(160.)).child(ui::EmptyState::new(
+                                    Lucide::SearchX,
+                                    nav::NO_MEMBERS_MATCH,
+                                )))
+                            }),
+                    )
+                    .when(edges.0, |el| el.child(edge_fade(true, k.overlay)))
+                    .when(edges.1, |el| el.child(edge_fade(false, k.overlay))),
             )
     }
 }
