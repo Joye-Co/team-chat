@@ -43,6 +43,9 @@ const GROUP: usize = 4;
 const BOX: (gpui::Pixels, gpui::Pixels) = (px(42.), px(48.));
 /// The column (§8.3): 8 boxes, 6 gaps of 6 and one 18 pt dash slot = 390.
 const COLUMN: gpui::Pixels = px(390.);
+/// Under the code boxes: 6 pt and the 16 pt error line, kept even without
+/// an error so `加入` never moves (§7.1).
+const ERROR_SLOT: gpui::Pixels = px(22.);
 
 /// What the code field holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -574,26 +577,18 @@ impl Render for LoginView {
                                     .w_full()
                                     .child(ui::field_label(l::CODE_LABEL, cx)),
                             )
-                            // The error hangs in the 24 pt above `加入` (4 pt,
-                            // a 16 pt line, 4 pt), so nothing moves when it
-                            // shows.
+                            // The error slot is always there (6 pt, a 16 pt
+                            // line), so nothing moves when the error shows,
+                            // and the message belongs to the boxes: 16 pt
+                            // stay between it and `加入` (§7.1, §8.3).
+                            .child(self.render_boxes(&input, focused, code_error, cx))
                             .child(
-                                div()
-                                    .relative()
-                                    .w_full()
-                                    .child(self.render_boxes(&input, focused, code_error, cx))
-                                    .when_some(error, |el, e| {
-                                        el.child(
-                                            div().absolute().top_full().left_0().right_0().child(
-                                                ui::field_help(e, true, cx)
-                                                    .pt(space::S4)
-                                                    .one_line(),
-                                            ),
-                                        )
-                                    }),
+                                div().w_full().h(ERROR_SLOT).children(
+                                    error.map(|e| ui::field_help(e, true, cx).one_line()),
+                                ),
                             )
                             .child(
-                                div().pt(space::S24).w_full().child(
+                                div().pt(space::S16).w_full().child(
                                     ui::button(
                                         "login",
                                         if signing_in { l::SIGNING_IN } else { l::SUBMIT },
