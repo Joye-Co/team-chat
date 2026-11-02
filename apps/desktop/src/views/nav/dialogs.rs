@@ -15,6 +15,7 @@ use gpui_component::{
     button::ButtonVariant,
     checkbox::Checkbox,
     input::{InputEvent, InputState},
+    tooltip::Tooltip,
 };
 
 use crate::{
@@ -151,6 +152,10 @@ impl Render for NewGroupForm {
                     .h(size::POPUP_ROW)
                     .px(space::S8)
                     .gap(space::S10)
+                    .tooltip({
+                        let tip = member_tip(m);
+                        move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+                    })
                     .child(member_row(m, k.overlay, cx))
                     .child(
                         div().flex_none().child(
@@ -255,6 +260,14 @@ impl Render for NewGroupForm {
     }
 }
 
+/// The tooltip of a picker row: the full name and 岗位.
+fn member_tip(m: &Member) -> gpui::SharedString {
+    match &m.role {
+        Some(r) => format!("{} · {}", m.name, r).into(),
+        None => m.name.clone().into(),
+    }
+}
+
 /// One member in a picker: a 24 avatar, the name `ui` 14 and the 岗位 13
 /// `text-3`. The 岗位 shrinks first; `surface` is what the avatar sits on.
 fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
@@ -273,9 +286,11 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
             ),
         )
         .child(
+            // The name has priority: it keeps its width up to 60 % of the
+            // row, and the 岗位 takes what is left (max 160).
             div()
-                .flex_shrink(1.)
-                .min_w(px(0.))
+                .flex_shrink_0()
+                .max_w(gpui::relative(0.6))
                 .t_ui()
                 .text_color(k.text_1)
                 .one_line()
@@ -283,8 +298,9 @@ fn member_row(m: &Member, surface: gpui::Hsla, cx: &App) -> gpui::Div {
         )
         .children(m.role.clone().map(|r| {
             div()
-                .flex_shrink(2.)
+                .flex_1()
                 .min_w(px(0.))
+                .max_w(px(160.))
                 .t_small()
                 .text_color(k.text_3)
                 .one_line()
@@ -405,6 +421,10 @@ impl Render for DmPicker {
                 .h(size::POPUP_ROW)
                 .px(space::S10)
                 .gap(space::S10)
+                .tooltip({
+                    let tip = member_tip(m);
+                    move |window, cx| Tooltip::new(tip.clone()).build(window, cx)
+                })
                 .child(member_row(
                     m,
                     if active { k.selected } else { k.overlay },
