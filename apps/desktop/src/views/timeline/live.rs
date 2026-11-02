@@ -8,7 +8,7 @@
 //!   steps inline;
 //! - the typing line under the timeline, for people only.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use gpui::{
@@ -29,6 +29,25 @@ use crate::{
 const MAX_LIVE: usize = 3;
 /// Most steps an opened steps row lists.
 const MAX_STEPS: usize = 40;
+/// The pending row enters over this (§12).
+const LIVE_ENTER: Duration = theme::motion::SLOW;
+/// A pending row whose run ended stays this long before it fades (§12).
+const LIVE_HOLD: Duration = Duration::from_millis(400);
+
+/// How long a leaving pending row stays: the hold, then the exit fade. The
+/// fade is opacity, so it stays with reduce motion (§12).
+fn leave_time() -> Duration {
+    LIVE_HOLD + theme::motion::NORMAL
+}
+
+/// Opacity of a leaving pending row at `t` (0..1 of [`leave_time`]): full
+/// through the hold, then down to 0 on `ease`.
+fn leave_opacity(t: f32, ease: &impl Fn(f32) -> f32) -> f32 {
+    let total = leave_time().as_secs_f32();
+    let hold = LIVE_HOLD.as_secs_f32() / total;
+    1. - ease(((t - hold) / (1. - hold)).clamp(0., 1.))
+}
+
 /// A run whose end is this close to a bot message is that message's run.
 const RUN_MATCH_MS: Millis = 2 * 60_000;
 
@@ -306,94 +325,189 @@ impl TimelineView {
             .collect()
     }
 
-    /// The pending rows (§9.2), at most three, then one line for the rest.
-    pub(super) fn render_live(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// Follows the working runs after each refresh: a run seen for the first
+    /// time gets its enter animation (once, never again on a return to the
+    /// topic), and a run that stopped working stays as a leaving row for the
+    /// hold and the exit (§12). `quiet` (opening a topic) shows the runs that
+    /// are already there without an animation.
+    pub(super) fn track_live(&mut self, quiet: bool, cx: &mut Context<Self>) {
+        let now = Instant::now();
+        let working: Vec<BotRunSummary> = self.working_runs().into_iter().cloned().collect();
+        let gone: Vec<BotRunSummary> = self
+            .live_shown
+            .iter()
+            .filter(|r| !working.iter().any(|w| w.id == r.id))
+            .cloned()
+            .collect();
+        self.live_leaving
+            .retain(|(r, _)| !working.iter().any(|w| w.id == r.id));
+        for run in gone {
+            if !quiet && !self.live_leaving.iter().any(|(r, _)| r.id == run.id) {
+                self.live_leaving.push((run, now));
+            }
+        }
+        for run in &working {
+            self.live_entered.entry(run.id.clone()).or_insert(if quiet {
+                now - LIVE_ENTER
+            } else {
+                now
+            });
+        }
+        if self.live_entered.len() > 512 {
+            let keep: Vec<String> = working.iter().map(|r| r.id.clone()).collect();
+            self.live_entered.retain(|id, _| keep.contains(id));
+        }
+        self.live_shown = working;
+        if !self.live_leaving.is_empty() {
+            let wait = LIVE_HOLD + theme::motion::NORMAL;
+            cx.spawn(async move |this, cx| {
+                cx.background_executor().timer(wait).await;
+                let _ = this.update(cx, |this, cx| {
+                    this.live_leaving
+                        .retain(|(_, at)| at.elapsed() < leave_time());
+                    cx.notify();
+                });
+            })
+            .detach();
+        }
+    }
+
+    /// Forgets the rows of the topic that closed (switching is never
+    /// animated, §12).
+    pub(super) fn reset_live(&mut self) {
+        self.live_shown.clear();
+        self.live_leaving.clear();
+    }
+
+    /// One 28 pt pending row.
+    fn live_row(
+        &self,
+        run: &BotRunSummary,
+        now: Millis,
+        reduce: bool,
+        cx: &mut Context<Self>,
+    ) -> gpui::Div {
+        let colors = theme::colors(cx);
+        let bot = self.members.iter().find(|m| m.id == run.bot_id);
+        let name = bot.map(|m| m.name.clone()).unwrap_or_default();
+        let process = self.services.provider.run_process(&run.id);
+        let label = live_label(&process.steps).unwrap_or_else(|| t::BOT_WORKING.to_string());
+        div()
+            .h(px(28.))
+            .flex()
+            .items_center()
+            .gap(space::S12)
+            .child(
+                div()
+                    .w(theme::AVATAR_SIZE)
+                    .flex_none()
+                    .flex()
+                    .justify_center()
+                    .child(ui::MemberAvatar::new(bot, px(24.)).status(CharacterStatus::Working)),
+            )
+            .child(
+                div()
+                    .min_w(px(0.))
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .t_small()
+                    .text_color(colors.text_2)
+                    .child(
+                        div()
+                            .min_w(px(0.))
+                            .flex()
+                            .gap(space::S4)
+                            .child(
+                                div()
+                                    .flex_shrink(1.)
+                                    .min_w(px(0.))
+                                    .max_w(px(160.))
+                                    .semibold()
+                                    .text_color(colors.text_1)
+                                    .one_line()
+                                    .child(name),
+                            )
+                            // The dots follow the label at once (no gap when it is short).
+                            .child(div().flex_shrink(1.).min_w(px(0.)).one_line().child(label)),
+                    )
+                    .child(pulse_dots(colors.text_3, reduce))
+                    .when_some(run.started_at, |el, at| {
+                        el.child(
+                            div()
+                                .flex_none()
+                                .t_meta()
+                                .tnum()
+                                .text_color(colors.text_3)
+                                .child(elapsed(at, now)),
+                        )
+                    })
+                    .child(div().flex_none().text_color(colors.text_3).child("·"))
+                    .child(
+                        ui::text_button(
+                            ElementId::Name(format!("live-process-{}", run.id).into()),
+                            t::VIEW_PROCESS,
+                            cx,
+                        )
+                        .ml(-space::S6)
+                        .on_click(cx.listener(|this, _, _, cx| this.open_process(cx))),
+                    ),
+            )
+    }
+
+    /// The pending rows (§9.2), at most three, then one line for the rest,
+    /// then the rows of runs that just ended, fading out.
+    pub(super) fn render_live(
+        &self,
+        window: &mut gpui::Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let runs = self.working_runs();
-        if runs.is_empty() {
+        let reduce = cx.reduce_motion();
+        let leaving: Vec<&(BotRunSummary, Instant)> = self
+            .live_leaving
+            .iter()
+            .filter(|(r, at)| at.elapsed() < leave_time() && !runs.iter().any(|w| w.id == r.id))
+            .collect();
+        if runs.is_empty() && leaving.is_empty() {
             return None;
         }
         let colors = theme::colors(cx);
         let now = Utc::now().timestamp_millis();
-        let reduce = cx.reduce_motion();
-        let rows = runs.iter().take(MAX_LIVE).map(|run| {
-            let bot = self.members.iter().find(|m| m.id == run.bot_id);
-            let name = bot.map(|m| m.name.clone()).unwrap_or_default();
-            let process = self.services.provider.run_process(&run.id);
-            let label = live_label(&process.steps).unwrap_or_else(|| t::BOT_WORKING.to_string());
-            let row = div()
-                .h(px(28.))
-                .flex()
-                .items_center()
-                .gap(space::S12)
-                .child(
-                    div()
-                        .w(theme::AVATAR_SIZE)
-                        .flex_none()
-                        .flex()
-                        .justify_center()
-                        .child(
-                            ui::MemberAvatar::new(bot, px(24.)).status(CharacterStatus::Working),
-                        ),
+        let mut rows: Vec<AnyElement> = Vec::new();
+        for run in runs.iter().take(MAX_LIVE) {
+            let row = self.live_row(run, now, reduce, cx);
+            // Enter: 200 ms opacity + a 6 pt rise, opacity only with reduce
+            // motion (§12), and only the first time the run shows: the
+            // animation state lives in the element, so a row is wrapped only
+            // while its first 200 ms last, never again on a return.
+            let fresh = self
+                .live_entered
+                .get(&run.id)
+                .is_some_and(|at| at.elapsed() < LIVE_ENTER);
+            rows.push(if fresh {
+                ui::motion::enter(
+                    ElementId::Name(format!("live-enter-{}", run.id).into()),
+                    LIVE_ENTER,
+                    row,
+                    |el, t| el.relative().top(theme::motion::RISE * (1. - t)),
+                    cx,
                 )
-                .child(
-                    div()
-                        .min_w(px(0.))
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .t_small()
-                        .text_color(colors.text_2)
-                        .child(
-                            div()
-                                .min_w(px(0.))
-                                .flex()
-                                .gap(space::S4)
-                                .child(
-                                    div()
-                                        .flex_shrink(1.)
-                                        .min_w(px(0.))
-                                        .max_w(px(160.))
-                                        .semibold()
-                                        .text_color(colors.text_1)
-                                        .one_line()
-                                        .child(name),
-                                )
-                                // The dots follow the label at once (no gap when it is short).
-                                .child(div().flex_shrink(1.).min_w(px(0.)).one_line().child(label)),
-                        )
-                        .child(pulse_dots(colors.text_3, reduce))
-                        .when_some(run.started_at, |el, at| {
-                            el.child(
-                                div()
-                                    .flex_none()
-                                    .t_meta()
-                                    .tnum()
-                                    .text_color(colors.text_3)
-                                    .child(elapsed(at, now)),
-                            )
-                        })
-                        .child(div().flex_none().text_color(colors.text_3).child("·"))
-                        .child(
-                            ui::text_button(
-                                ElementId::Name(format!("live-process-{}", run.id).into()),
-                                t::VIEW_PROCESS,
-                                cx,
-                            )
-                            .ml(-space::S6)
-                            .on_click(cx.listener(|this, _, _, cx| this.open_process(cx))),
-                        ),
-                );
-            // Enter: 200 ms opacity + a 6 pt rise; opacity only with reduce
-            // motion (§12).
-            ui::motion::enter(
-                ElementId::Name(format!("live-enter-{}", run.id).into()),
-                theme::motion::SLOW,
-                row,
-                |el, t| el.relative().top(theme::motion::RISE * (1. - t)),
-                cx,
-            )
-        });
+            } else {
+                row.into_any_element()
+            });
+        }
         let more = runs.len().saturating_sub(MAX_LIVE);
+        let ease = theme::motion::out_fn();
+        for (run, at) in leaving {
+            // Exit: a 400 ms hold, then 160 ms opacity on the out curve; the
+            // fade stays with reduce motion (§12). The opacity comes from the
+            // clock, not a GPUI animation, which would snap under reduce motion.
+            let t = (at.elapsed().as_secs_f32() / leave_time().as_secs_f32()).min(1.);
+            let row = self.live_row(run, now, reduce, cx);
+            rows.push(row.opacity(leave_opacity(t, &ease)).into_any_element());
+            window.request_animation_frame();
+        }
         Some(
             div()
                 .flex_none()
@@ -510,6 +624,16 @@ impl TimelineView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_leaving_row_holds_then_fades() {
+        let linear = |t: f32| t;
+        assert_eq!(leave_time(), Duration::from_millis(560));
+        assert_eq!(leave_opacity(0., &linear), 1.);
+        assert_eq!(leave_opacity(0.7, &linear), 1.);
+        assert!((leave_opacity(0.85, &linear) - 0.525).abs() < 0.01);
+        assert_eq!(leave_opacity(1., &linear), 0.);
+    }
 
     #[test]
     fn durations_read_as_minutes_and_seconds() {

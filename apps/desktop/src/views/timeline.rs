@@ -713,7 +713,7 @@ impl Render for TimelineView {
                     .children(jump_unread)
                     .children(jump),
             )
-            .children(self.render_live(cx))
+            .children(self.render_live(window, cx))
             .children(self.render_typing(cx))
             .children(self.probe_element())
             .into_any_element()
