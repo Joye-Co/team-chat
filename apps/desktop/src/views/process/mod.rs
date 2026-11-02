@@ -16,7 +16,7 @@ use gpui::{
 };
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     list::ListItem,
 };
 
@@ -27,7 +27,8 @@ use crate::{
         BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess, RunStatus,
         TopicId,
     },
-    theme,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
     views::{avatar, time_text},
 };
 
@@ -311,6 +312,8 @@ impl ProcessView {
         self.members.iter().find(|m| m.id == id)
     }
 
+    /// A row of the 工作记录 list (shown when the topic has more than one
+    /// run): 20 pt avatar, name, status and time.
     fn render_run_row(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> impl IntoElement {
         let colors = theme::colors(cx);
         let bot = self.member(&run.bot_id).cloned();
@@ -323,30 +326,35 @@ impl ProcessView {
             .child(
                 div()
                     .w_full()
+                    .h(px(28.))
                     .flex()
                     .items_center()
-                    .gap(px(6.))
-                    .child(avatar(bot.as_ref(), px(18.), cx))
+                    .gap(space::S8)
+                    .child(avatar(bot.as_ref(), px(20.), cx))
                     .child(
                         div()
                             .flex_1()
                             .min_w(px(0.))
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
+                            .t_ui()
+                            .text_color(colors.text_1)
+                            .one_line()
                             .child(bot.map(|b| b.name).unwrap_or_default()),
                     )
                     .child(status_badge(run.status, cx))
                     .child(
                         div()
                             .flex_none()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
+                            .t_caption()
+                            .tnum()
+                            .text_color(colors.text_3)
                             .child(when),
                     ),
             )
     }
 
+    /// The working member (§13.7): 28 pt avatar, name 13 / 600 and
+    /// `正在工作 · 用时 18 分` with a failed or stuck status in `danger-text`;
+    /// then who asked, the summary and, in the developer view, the ids.
     fn render_run_details(
         &self,
         run: &BotRunSummary,
@@ -355,10 +363,14 @@ impl ProcessView {
     ) -> impl IntoElement {
         let colors = theme::colors(cx);
         let now = chrono::Utc::now().timestamp_millis();
+        let bot = self.member(&run.bot_id).cloned();
+        let alarm = matches!(run.status, RunStatus::Failed | RunStatus::Blocked);
+        let status = div()
+            .flex_none()
+            .text_color(if alarm { colors.danger_text } else { colors.text_2 })
+            .child(status_text(run.status));
+        let duration = run_duration(run, now).map(|ms| fill(p::DURATION, &[("d", &duration_text(ms))]));
         let mut facts: Vec<String> = Vec::new();
-        if let Some(name) = run.machine_name.clone().or_else(|| run.machine_id.clone()) {
-            facts.push(fill(p::RUN_ON, &[("name", &name)]));
-        }
         if let Some(by) = run.requested_by.as_deref().and_then(|id| self.member(id)) {
             facts.push(fill(p::REQUESTED_BY, &[("name", &by.name)]));
         }
@@ -368,27 +380,68 @@ impl ProcessView {
         if let Some(at) = run.ended_at {
             facts.push(fill(p::ENDED_AT, &[("time", &time_text(at))]));
         }
-        if let Some(ms) = run_duration(run, now) {
-            facts.push(fill(p::DURATION, &[("d", &duration_text(ms))]));
-        }
         let live = run.status.is_active() && self.visible;
         div()
             .flex()
             .flex_col()
-            .gap(px(2.))
-            .py(px(6.))
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .children(facts.into_iter().map(|f| div().child(f)))
-            .when(live, |el| {
-                el.child(div().text_color(colors.accent).child(p::LIVE))
+            .gap(space::S6)
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S10)
+                    .child(avatar(bot.as_ref(), px(28.), cx))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .t_ui()
+                                    .semibold()
+                                    .text_color(colors.text_1)
+                                    .one_line()
+                                    .child(bot.map(|b| b.name).unwrap_or_default()),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S4)
+                                    .t_caption()
+                                    .font_weight(gpui::FontWeight::NORMAL)
+                                    .tnum()
+                                    .text_color(colors.text_2)
+                                    .child(status)
+                                    .when_some(duration, |el, d| {
+                                        el.child("·").child(div().min_w(px(0.)).one_line().child(d))
+                                    }),
+                            ),
+                    ),
+            )
+            .when(!facts.is_empty() || live, |el| {
+                el.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap_x(space::S8)
+                        .t_caption()
+                        .font_weight(gpui::FontWeight::NORMAL)
+                        .tnum()
+                        .text_color(colors.text_2)
+                        .children(facts.into_iter().map(|f| div().child(f)))
+                        .when(live, |el| {
+                            el.child(div().text_color(colors.accent_text).child(p::LIVE))
+                        }),
+                )
             })
             .when_some(run.summary.clone(), |el, summary| {
                 el.child(
                     div()
-                        .pt(px(4.))
-                        .text_sm()
-                        .text_color(colors.foreground)
+                        .t_ui()
+                        .text_color(colors.text_1)
                         .child(summary),
                 )
             })
@@ -397,8 +450,11 @@ impl ProcessView {
                     |t: Option<Millis>| t.map(|t| t.to_string()).unwrap_or_else(|| "-".into());
                 el.child(
                     div()
-                        .pt(px(6.))
+                        .pt(space::S4)
+                        .t_caption()
+                        .font_weight(gpui::FontWeight::NORMAL)
                         .font_family(cx.theme().mono_font_family.clone())
+                        .text_color(colors.text_2)
                         .child(div().child(fill(dev::RUN_ID, &[("id", &run.id)])))
                         .child(div().child(fill(dev::RUN_BOT, &[("id", &run.bot_id)])))
                         .child(div().child(fill(
@@ -432,6 +488,39 @@ impl ProcessView {
                         }),
                 )
             })
+    }
+
+    /// The machine box (§13.7): `fill-field`, radius 8, `monitor`, where it
+    /// runs and the elapsed time.
+    fn render_machine(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
+        let colors = theme::colors(cx);
+        let name = run.machine_name.clone().or_else(|| run.machine_id.clone())?;
+        let now = chrono::Utc::now().timestamp_millis();
+        Some(
+            div()
+                .mt(space::S12)
+                .h(px(36.))
+                .px(space::S10)
+                .rounded(theme::radius::ROW)
+                .bg(colors.fill_field)
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .t_callout()
+                .text_color(colors.text_2)
+                .child(ui::icon(Lucide::Monitor, theme::icon::BUTTON, colors.text_2))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .one_line()
+                        .child(fill(p::RUN_ON, &[("name", &name)])),
+                )
+                .children(run_duration(run, now).map(|ms| {
+                    div().flex_none().tnum().child(duration_text(ms))
+                }))
+                .into_any_element(),
+        )
     }
 
     fn render_developer_tail(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -498,31 +587,19 @@ impl ProcessView {
     }
 }
 
-/// The colored status label of a run.
-pub fn status_badge(status: RunStatus, cx: &App) -> impl IntoElement {
-    let t = cx.theme();
-    let (bg, fg) = match status {
-        RunStatus::Created => (t.muted, t.muted_foreground),
-        RunStatus::Running => (t.blue_light, t.blue),
-        RunStatus::Waiting => (t.yellow_light, t.yellow),
-        RunStatus::Blocked | RunStatus::Failed => (t.red_light, t.red),
-        RunStatus::Done => (t.green_light, t.green),
-        RunStatus::Cancelled => (t.muted, t.muted_foreground),
+/// The status of a run as a chip: the three chip weights of §2.5 (a quiet
+/// chip with a colored glyph, the `you` fill for waiting, red for stuck).
+pub fn status_badge(status: RunStatus, _cx: &App) -> impl IntoElement {
+    use crate::{data::TopicStatus as S, theme::ChipKind as K};
+    let (topic, kind) = match status {
+        RunStatus::Created => (S::Open, K::Quiet),
+        RunStatus::Running => (S::InProgress, K::Quiet),
+        RunStatus::Waiting => (S::WaitingAnswer, K::Quiet),
+        RunStatus::Blocked | RunStatus::Failed => (S::Blocked, K::Blocked),
+        RunStatus::Done => (S::Done, K::Quiet),
+        RunStatus::Cancelled => (S::Open, K::Quiet),
     };
-    let (bg, fg) = if theme::is_dark(cx) {
-        (fg.opacity(0.2), fg)
-    } else {
-        (bg, fg)
-    };
-    div()
-        .flex_none()
-        .px(px(6.))
-        .py(px(1.))
-        .rounded(px(4.))
-        .bg(bg)
-        .text_color(fg)
-        .text_xs()
-        .child(status_text(status))
+    ui::StatusChip::labeled(status_text(status), topic, kind)
 }
 
 impl Render for ProcessView {
@@ -531,33 +608,35 @@ impl Render for ProcessView {
         let developer = self.services.nav.read(cx).developer_view;
         let section = |title: &'static str| {
             div()
-                .pt(px(12.))
-                .pb(px(4.))
-                .text_xs()
-                .text_color(colors.muted_foreground)
-                .child(title)
+                .pt(space::S16)
+                .pb(space::S6)
+                .child(ui::SectionHeader::new(title))
         };
         let body = div()
             .id("process-view")
             .size_full()
             .overflow_y_scroll()
-            .px(px(12.))
-            .pb(px(16.));
+            .px(space::S16)
+            .pt(space::S12)
+            .pb(space::S16);
         if self.runs.is_empty() {
-            return body
+            return div()
+                .size_full()
                 .child(
-                    div()
-                        .pt(px(12.))
-                        .text_color(colors.muted_foreground)
-                        .child(p::EMPTY),
+                    ui::EmptyState::new(Lucide::Activity, p::EMPTY_TITLE)
+                        .description(p::EMPTY_BODY),
                 )
                 .into_any_element();
         }
-        let rows: Vec<_> = self
-            .runs
-            .iter()
-            .map(|r| self.render_run_row(r, cx).into_any_element())
-            .collect();
+        let many = self.runs.len() > 1;
+        let rows: Vec<_> = if many {
+            self.runs
+                .iter()
+                .map(|r| self.render_run_row(r, cx).into_any_element())
+                .collect()
+        } else {
+            Vec::new()
+        };
         let run = self.selected_run().cloned();
         let bot_name = run
             .as_ref()
@@ -575,39 +654,52 @@ impl Render for ProcessView {
             (None, true, true) => Some((p::NO_STEPS, false)),
             _ => None,
         };
-        body.child(section(p::RUNS))
-            .children(rows)
-            .when_some(run, |el, run| {
-                el.child(self.render_run_details(&run, developer, cx))
-                    .child(section(p::STEPS))
-                    .children(steps)
-                    .when_some(state_line, |el, (text, retry)| {
-                        el.child(
-                            div()
-                                .py(px(6.))
-                                .flex()
-                                .items_center()
-                                .gap(px(8.))
-                                .text_color(colors.muted_foreground)
-                                .child(text)
-                                .when(retry, |el| {
-                                    let id = run.id.clone();
-                                    el.child(
-                                        Button::new("process-retry")
-                                            .small()
-                                            .ghost()
-                                            .label(p::RETRY)
-                                            .on_click(cx.listener(move |this, _, _, cx| {
-                                                this.services.provider.follow_run(&id);
-                                                cx.notify();
-                                            })),
-                                    )
-                                }),
-                        )
-                    })
-                    .when(developer, |el| el.child(self.render_developer_tail(cx)))
-            })
-            .into_any_element()
+        let machine = run.as_ref().and_then(|r| self.render_machine(r, cx));
+        body.when(many, |el| {
+            el.child(div().pb(space::S6).child(ui::SectionHeader::new(p::RUNS)))
+                .children(rows)
+                .child(div().h(space::S12))
+        })
+        .when_some(run, |el, run| {
+            el.child(self.render_run_details(&run, developer, cx))
+                .child(section(p::STEPS))
+                .children(steps)
+                .when_some(state_line, |el, (text, retry)| {
+                    el.child(
+                        div()
+                            .py(space::S6)
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .t_callout()
+                            .text_color(colors.text_2)
+                            .when(retry, |el| {
+                                el.child(ui::icon(
+                                    Lucide::CircleAlert,
+                                    theme::icon::SMALL,
+                                    colors.danger,
+                                ))
+                            })
+                            .child(div().flex_1().min_w(px(0.)).child(text))
+                            .when(retry, |el| {
+                                let id = run.id.clone();
+                                el.child(
+                                    Button::new("process-retry")
+                                        .small()
+                                        .label(p::RETRY)
+                                        .shadow(colors.shadow(theme::Elevation::Control))
+                                        .on_click(cx.listener(move |this, _, _, cx| {
+                                            this.services.provider.follow_run(&id);
+                                            cx.notify();
+                                        })),
+                                )
+                            }),
+                    )
+                })
+                .children(machine)
+                .when(developer, |el| el.child(self.render_developer_tail(cx)))
+        })
+        .into_any_element()
     }
 }
 

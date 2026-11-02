@@ -1,14 +1,16 @@
 //! One element per process step, in product words.
 
 use gpui::{
-    AnyElement, App, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Hsla, IntoElement, ParentElement, Styled, div, prelude::FluentBuilder as _,
+    px,
 };
 use gpui_component::ActiveTheme as _;
 
 use crate::{
     copy::{dev, fill, process as p},
-    data::{FileChangeKind, ProcessStep, RunProcess},
-    theme,
+    data::{FileChangeKind, ProcessStep, RunProcess, RunStatus},
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
 };
 
 use super::status_text;
@@ -49,261 +51,341 @@ pub fn render_steps(
     cx: &App,
 ) -> Vec<AnyElement> {
     let start = process.steps.len().saturating_sub(MAX_STEPS);
-    process.steps[start..]
+    let parts: Vec<Step> = process.steps[start..]
         .iter()
-        .filter_map(|step| render_step(step, bot_name, developer, cx))
+        .filter_map(|step| describe(step, bot_name, developer, cx))
+        .collect();
+    let last = parts.len().saturating_sub(1);
+    parts
+        .into_iter()
+        .enumerate()
+        .map(|(i, part)| part.render(i == last, cx))
         .collect()
 }
 
-fn label(text: String, cx: &App) -> impl IntoElement {
+/// One row of the 步骤 list (§13.7): a 16 pt glyph on a 1 pt `sep-strong`
+/// connector, a 13 / 500 title, an 11 pt meta line and an optional body.
+struct Step {
+    glyph: Lucide,
+    glyph_color: Hsla,
+    title: String,
+    /// Draw the title in Menlo (commands).
+    mono_title: bool,
+    meta: Vec<(String, Hsla)>,
+    body: Vec<AnyElement>,
+}
+
+impl Step {
+    fn new(glyph: Lucide, glyph_color: Hsla, title: impl Into<String>) -> Self {
+        Self {
+            glyph,
+            glyph_color,
+            title: title.into(),
+            mono_title: false,
+            meta: Vec::new(),
+            body: Vec::new(),
+        }
+    }
+
+    fn meta(mut self, text: impl Into<String>, color: Hsla) -> Self {
+        self.meta.push((text.into(), color));
+        self
+    }
+
+    fn body(mut self, el: impl IntoElement) -> Self {
+        self.body.push(el.into_any_element());
+        self
+    }
+
+    fn render(self, last: bool, cx: &App) -> AnyElement {
+        let colors = theme::colors(cx);
+        let rail = div()
+            .w(px(16.))
+            .flex_none()
+            .flex()
+            .flex_col()
+            .items_center()
+            .child(
+                div()
+                    .h(theme::type_scale::UI.1)
+                    .flex()
+                    .items_center()
+                    .child(ui::icon(self.glyph, theme::icon::TOOLBAR, self.glyph_color)),
+            )
+            .when(!last, |el| {
+                el.child(
+                    div()
+                        .flex_1()
+                        .w(px(1.))
+                        .mt(space::S2)
+                        .bg(colors.sep_strong),
+                )
+            });
+        let title = div()
+            .t_ui()
+            .medium()
+            .text_color(colors.text_1)
+            .one_line()
+            .when(self.mono_title, |el| {
+                el.font_family(theme::MONO_FONT_FAMILY)
+                    .text_size(px(12.))
+            })
+            .child(self.title);
+        let meta = (!self.meta.is_empty()).then(|| {
+            let n = self.meta.len();
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_x(space::S4)
+                .t_caption()
+                .font_weight(gpui::FontWeight::NORMAL)
+                .tnum()
+                .children(self.meta.into_iter().enumerate().flat_map(|(i, (t, c))| {
+                    let dot = (i + 1 < n).then(|| div().text_color(colors.text_3).child("·"));
+                    std::iter::once(div().text_color(c).child(t)).chain(dot)
+                }))
+        });
+        div()
+            .flex()
+            .gap(space::S10)
+            .child(rail)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .pb(if last { space::S4 } else { space::S12 })
+                    .flex()
+                    .flex_col()
+                    .gap(space::S2)
+                    .child(title)
+                    .children(meta)
+                    .children(self.body),
+            )
+            .into_any_element()
+    }
+}
+
+/// Text of a step body: 12 / 17.
+fn text_body(text: String, color: Hsla) -> impl IntoElement {
     div()
-        .text_xs()
-        .text_color(theme::colors(cx).muted_foreground)
+        .pt(space::S2)
+        .text_size(theme::type_scale::CALLOUT.0)
+        .line_height(px(17.))
+        .text_color(color)
         .child(text)
 }
 
-fn block(cx: &App) -> gpui::Div {
-    div()
-        .py(px(6.))
-        .flex()
-        .flex_col()
-        .gap(px(2.))
-        .border_b_1()
-        .border_color(theme::colors(cx).border)
-}
-
+/// Command output and details: Menlo 11.5 on `code-bg`, radius 6.
 fn mono_box(text: String, cx: &App) -> impl IntoElement {
     let colors = theme::colors(cx);
     div()
-        .mt(px(2.))
-        .px(px(6.))
-        .py(px(4.))
-        .rounded(px(4.))
-        .bg(colors.code_background)
+        .mt(space::S4)
+        .px(space::S8)
+        .py(space::S6)
+        .rounded(theme::radius::SM)
+        .bg(colors.code_bg)
+        .text_color(colors.code_text)
         .font_family(cx.theme().mono_font_family.clone())
-        .text_xs()
+        .text_size(px(11.5))
+        .line_height(px(17.))
         .child(text)
 }
 
-fn render_step(
-    step: &ProcessStep,
-    bot_name: &str,
-    developer: bool,
-    cx: &App,
-) -> Option<AnyElement> {
-    let colors = theme::colors(cx);
-    let el =
-        match step {
-            ProcessStep::Message {
-                text,
-                from_bot,
-                streaming,
-            } => {
-                if text.trim().is_empty() && !streaming {
-                    return None;
+fn describe(step: &ProcessStep, bot_name: &str, developer: bool, cx: &App) -> Option<Step> {
+    let k = theme::colors(cx);
+    let done = |ok: Option<bool>| match ok {
+        None => (Lucide::Loader, k.accent),
+        Some(true) => (Lucide::CircleCheck, k.success),
+        Some(false) => (Lucide::CircleAlert, k.danger),
+    };
+    let step = match step {
+        ProcessStep::Message {
+            text,
+            from_bot,
+            streaming,
+        } => {
+            if text.trim().is_empty() && !streaming {
+                return None;
+            }
+            let who = if *from_bot {
+                fill(p::STEP_SAID, &[("name", bot_name)])
+            } else {
+                p::STEP_INPUT.to_string()
+            };
+            let (glyph, color) = if *streaming {
+                (Lucide::Loader, k.accent)
+            } else {
+                (Lucide::CircleCheck, k.success)
+            };
+            let step = Step::new(glyph, color, who);
+            let step = if *streaming {
+                step.meta(p::STEP_WRITING, k.text_2)
+            } else {
+                step
+            };
+            step.body(text_body(clip(text, MAX_TEXT), k.text_1))
+        }
+        ProcessStep::Reasoning { text } => {
+            if text.trim().is_empty() {
+                return None;
+            }
+            Step::new(Lucide::CircleDashed, k.text_3, p::STEP_THINKING)
+                .body(text_body(clip(text, 600), k.text_2))
+        }
+        ProcessStep::Tool {
+            title,
+            input,
+            ok,
+            output,
+            exit_code,
+        } => {
+            let (glyph, color) = done(*ok);
+            let result = match ok {
+                None => p::STEP_TOOL_RUNNING,
+                Some(true) => p::STEP_TOOL_OK,
+                Some(false) => p::STEP_TOOL_FAILED,
+            };
+            let mut step = Step::new(glyph, color, clip(title, 400))
+                .meta(p::STEP_TOOL, k.text_2)
+                .meta(
+                    result,
+                    if *ok == Some(false) {
+                        k.danger_text
+                    } else {
+                        k.text_2
+                    },
+                );
+            step.mono_title = true;
+            if let Some(code) = exit_code {
+                step = step.meta(fill(p::STEP_EXIT_CODE, &[("n", &code.to_string())]), k.text_2);
+            }
+            if developer && let Some(json) = input.clone() {
+                step = step.body(text_body(
+                    fill(dev::RUN_TOOL_INPUT, &[("json", &clip(&json, 600))]),
+                    k.text_2,
+                ));
+            }
+            if let Some(o) = output.as_deref().filter(|o| !o.trim().is_empty()) {
+                let (head, more) = head_lines(o, OUTPUT_LINES);
+                step = step.body(mono_box(clip(&head, MAX_TEXT), cx));
+                if more > 0 {
+                    step = step.body(text_body(
+                        fill(p::MORE_LINES, &[("n", &more.to_string())]),
+                        k.text_3,
+                    ));
                 }
-                let who = if *from_bot {
-                    fill(p::STEP_SAID, &[("name", bot_name)])
-                } else {
-                    p::STEP_INPUT.to_string()
-                };
-                block(cx)
-                    .child(label(who, cx))
-                    .child(div().text_sm().child(clip(text, MAX_TEXT)))
-                    .when(*streaming, |el| {
-                        el.child(label(p::STEP_WRITING.to_string(), cx))
-                    })
             }
-            ProcessStep::Reasoning { text } => {
-                if text.trim().is_empty() {
-                    return None;
-                }
-                block(cx)
-                    .child(label(p::STEP_THINKING.to_string(), cx))
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(colors.muted_foreground)
-                            .child(clip(text, 600)),
-                    )
-            }
-            ProcessStep::Tool {
-                title,
-                input,
-                ok,
-                output,
-                exit_code,
-            } => {
-                let result = match ok {
-                    None => p::STEP_TOOL_RUNNING,
-                    Some(true) => p::STEP_TOOL_OK,
-                    Some(false) => p::STEP_TOOL_FAILED,
-                };
-                let result_color = match ok {
-                    None => colors.muted_foreground,
-                    Some(true) => cx.theme().green,
-                    Some(false) => colors.danger,
-                };
-                let mut header = div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .text_xs()
-                    .child(
-                        div()
-                            .text_color(colors.muted_foreground)
-                            .child(p::STEP_TOOL),
-                    )
-                    .child(div().text_color(result_color).child(result));
-                if let Some(code) = exit_code {
-                    header = header.child(
-                        div()
-                            .text_color(colors.muted_foreground)
-                            .child(fill(p::STEP_EXIT_CODE, &[("n", &code.to_string())])),
-                    );
-                }
-                let out = output.as_deref().filter(|o| !o.trim().is_empty()).map(|o| {
-                    let (head, more) = head_lines(o, OUTPUT_LINES);
-                    (clip(&head, MAX_TEXT), more)
-                });
-                block(cx)
-                    .child(header)
-                    .child(mono_box(clip(title, 400), cx))
-                    .when_some(input.clone().filter(|_| developer), |el, json| {
-                        el.child(label(
-                            fill(dev::RUN_TOOL_INPUT, &[("json", &clip(&json, 600))]),
-                            cx,
-                        ))
-                    })
-                    .when_some(out, |el, (head, more)| {
-                        el.child(mono_box(head, cx)).when(more > 0, |el| {
-                            el.child(label(fill(p::MORE_LINES, &[("n", &more.to_string())]), cx))
-                        })
-                    })
-            }
-            ProcessStep::Files { changes } => {
-                let rows: Vec<_> = changes
-                    .iter()
-                    .take(50)
-                    .map(|c| {
-                        let kind = match c.kind {
-                            FileChangeKind::Added => p::FILE_ADDED,
-                            FileChangeKind::Modified => p::FILE_MODIFIED,
-                            FileChangeKind::Deleted => p::FILE_DELETED,
-                        };
-                        div()
-                            .flex()
-                            .gap(px(6.))
-                            .text_xs()
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_color(colors.muted_foreground)
-                                    .child(kind),
-                            )
-                            .child(
-                                div()
-                                    .min_w(px(0.))
-                                    .overflow_hidden()
-                                    .text_ellipsis()
-                                    .font_family(cx.theme().mono_font_family.clone())
-                                    .child(c.path.clone()),
-                            )
-                    })
-                    .collect();
-                block(cx)
-                    .child(label(
-                        fill(p::STEP_FILES, &[("n", &changes.len().to_string())]),
-                        cx,
-                    ))
-                    .children(rows)
-            }
-            ProcessStep::Approval {
-                title,
-                detail,
-                approved,
-            } => {
-                let state = match approved {
-                    None => p::APPROVAL_WAITING,
-                    Some(true) => p::APPROVAL_APPROVED,
-                    Some(false) => p::APPROVAL_DENIED,
-                };
-                block(cx)
-                    .child(label(p::STEP_APPROVAL.to_string(), cx))
-                    .child(div().text_sm().child(clip(title, 400)))
-                    .when_some(detail.clone(), |el, d| {
-                        el.child(mono_box(clip(&d, 1200), cx))
-                    })
-                    .child(
-                        div()
-                            .text_xs()
-                            .text_color(if approved.is_none() {
-                                cx.theme().yellow
-                            } else {
-                                colors.muted_foreground
-                            })
-                            .child(state),
-                    )
-            }
-            ProcessStep::TurnStarted => {
-                block(cx).child(label(p::STEP_TURN_STARTED.to_string(), cx))
-            }
-            ProcessStep::TurnCompleted { ok, error } => {
-                let text = if *ok {
-                    p::STEP_TURN_DONE
-                } else {
-                    p::STEP_TURN_FAILED
-                };
-                block(cx)
-                    .child(label(text.to_string(), cx))
-                    .when_some(error.clone(), |el, e| {
-                        el.child(
+            step
+        }
+        ProcessStep::Files { changes } => {
+            let rows: Vec<_> = changes
+                .iter()
+                .take(50)
+                .map(|c| {
+                    let kind = match c.kind {
+                        FileChangeKind::Added => p::FILE_ADDED,
+                        FileChangeKind::Modified => p::FILE_MODIFIED,
+                        FileChangeKind::Deleted => p::FILE_DELETED,
+                    };
+                    div()
+                        .flex()
+                        .gap(space::S6)
+                        .t_caption()
+                        .font_weight(gpui::FontWeight::NORMAL)
+                        .child(div().flex_none().text_color(k.text_2).child(kind))
+                        .child(
                             div()
-                                .text_xs()
-                                .text_color(colors.danger)
-                                .child(clip(&e, 600)),
+                                .min_w(px(0.))
+                                .overflow_hidden()
+                                .whitespace_nowrap()
+                                .text_ellipsis_start()
+                                .text_color(k.text_1)
+                                .font_family(cx.theme().mono_font_family.clone())
+                                .child(c.path.clone()),
                         )
-                    })
+                })
+                .collect();
+            let mut step = Step::new(
+                Lucide::FileCode,
+                k.text_2,
+                fill(p::STEP_FILES, &[("n", &changes.len().to_string())]),
+            );
+            for r in rows {
+                step = step.body(r);
             }
-            ProcessStep::Status { message } => {
-                if message.trim().is_empty() {
-                    return None;
-                }
-                block(cx)
-                    .child(label(p::STEP_STATUS.to_string(), cx))
-                    .child(div().text_xs().child(clip(message, 400)))
+            step
+        }
+        ProcessStep::Approval {
+            title,
+            detail,
+            approved,
+        } => {
+            let (glyph, color, state, state_color) = match approved {
+                None => (Lucide::Eye, k.glyph_wait, p::APPROVAL_WAITING, k.text_2),
+                Some(true) => (Lucide::CircleCheck, k.success, p::APPROVAL_APPROVED, k.text_2),
+                Some(false) => (Lucide::CircleAlert, k.danger, p::APPROVAL_DENIED, k.danger_text),
+            };
+            let mut step = Step::new(glyph, color, clip(title, 400))
+                .meta(p::STEP_APPROVAL, k.text_2)
+                .meta(state, state_color);
+            if let Some(d) = detail.clone() {
+                step = step.body(mono_box(clip(&d, 1200), cx));
             }
-            ProcessStep::Done {
-                status,
-                summary,
-                error,
-                duration_ms,
-            } => {
-                block(cx)
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(6.))
-                            .text_sm()
-                            .child(fill(p::STEP_DONE, &[("status", status_text(*status))]))
-                            .child(div().text_xs().text_color(colors.muted_foreground).child(
-                                fill(p::DURATION, &[("d", &super::duration_text(*duration_ms))]),
-                            )),
-                    )
-                    .when_some(summary.clone(), |el, s| {
-                        el.child(div().text_sm().child(clip(&s, MAX_TEXT)))
-                    })
-                    .when_some(error.clone(), |el, e| {
-                        el.child(
-                            div()
-                                .text_xs()
-                                .text_color(colors.danger)
-                                .child(clip(&e, 600)),
-                        )
-                    })
+            step
+        }
+        ProcessStep::TurnStarted => Step::new(Lucide::Circle, k.text_3, p::STEP_TURN_STARTED),
+        ProcessStep::TurnCompleted { ok, error } => {
+            let (glyph, color) = done(Some(*ok));
+            let text = if *ok {
+                p::STEP_TURN_DONE
+            } else {
+                p::STEP_TURN_FAILED
+            };
+            let step = Step::new(glyph, color, text);
+            match error.clone() {
+                Some(e) => step.body(text_body(clip(&e, 600), k.danger_text)),
+                None => step,
             }
-        };
-    Some(el.into_any_element())
+        }
+        ProcessStep::Status { message } => {
+            if message.trim().is_empty() {
+                return None;
+            }
+            Step::new(Lucide::CircleDot, k.text_2, p::STEP_STATUS)
+                .body(text_body(clip(message, 400), k.text_1))
+        }
+        ProcessStep::Done {
+            status,
+            summary,
+            error,
+            duration_ms,
+        } => {
+            let failed = matches!(status, RunStatus::Failed | RunStatus::Blocked);
+            let (glyph, color) = if failed {
+                (Lucide::CircleAlert, k.danger)
+            } else {
+                (Lucide::CircleCheck, k.success)
+            };
+            let mut step = Step::new(
+                glyph,
+                color,
+                fill(p::STEP_DONE, &[("status", status_text(*status))]),
+            )
+            .meta(
+                fill(p::DURATION, &[("d", &super::duration_text(*duration_ms))]),
+                k.text_2,
+            );
+            if let Some(s) = summary.clone() {
+                step = step.body(text_body(clip(&s, MAX_TEXT), k.text_1));
+            }
+            if let Some(e) = error.clone() {
+                step = step.body(text_body(clip(&e, 600), k.danger_text));
+            }
+            step
+        }
+    };
+    Some(step)
 }
 
 #[cfg(test)]
