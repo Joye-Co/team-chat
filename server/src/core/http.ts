@@ -86,6 +86,11 @@ export function compilePath(path: string): { regex: RegExp; keys: string[] } {
         keys.push(seg.slice(1));
         return "([^/]+)";
       }
+      // `*name` as the last segment matches the rest of the path, slashes included.
+      if (seg.startsWith("*")) {
+        keys.push(seg.slice(1));
+        return "(.+)";
+      }
       return seg.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     })
     .join("/");
@@ -104,9 +109,13 @@ export function matchRoute<H>(
     pathMatched = true;
     if (route.method !== method) continue;
     const params: Record<string, string> = {};
-    route.keys.forEach((k, i) => {
-      params[k] = decodeURIComponent(m[i + 1]);
-    });
+    try {
+      route.keys.forEach((k, i) => {
+        params[k] = decodeURIComponent(m[i + 1]);
+      });
+    } catch {
+      throw new ApiError("invalid", "bad path encoding");
+    }
     return { route, params };
   }
   return { route: null, pathMatched };

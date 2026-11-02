@@ -1,7 +1,7 @@
 // Extension points. Feature modules (server/src/<feature>/) call these at module load time;
 // server/src/features.ts imports every feature module so the registrations run in the Worker
 // and in both Durable Object classes (they share one module graph).
-import type { ClientFrame, Event, Member } from "@chat/protocol";
+import type { ClientFrame, Event, Member, Message } from "@chat/protocol";
 import type { z } from "zod";
 import type { AuthContext } from "./auth";
 import type { Env } from "./env";
@@ -161,6 +161,22 @@ export type MessageExtension = (
 export const messageExtensions: MessageExtension[] = [];
 export function registerMessageExtension(ext: MessageExtension): void {
   messageExtensions.push(ext);
+}
+
+/**
+ * Changes extension fields of a message at edit time. Runs inside the room before the write,
+ * with the message as stored. Return the fields to replace (merged into `messages.ext`, the
+ * Message and the `message.updated` event data), or undefined. Throw ApiError to reject.
+ */
+export type EditExtension = (
+  frame: Record<string, unknown>,
+  room: RoomContext,
+  actor: Actor,
+  message: Message,
+) => Record<string, unknown> | undefined;
+export const editExtensions: EditExtension[] = [];
+export function registerEditExtension(ext: EditExtension): void {
+  editExtensions.push(ext);
 }
 
 // ---------------------------------------------------------------------------

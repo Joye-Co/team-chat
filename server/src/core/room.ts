@@ -25,6 +25,7 @@ import {
   type RoomContext,
   type RoomTx,
   afterCommitHooks,
+  editExtensions,
   messageExtensions,
   roomMigrations,
   roomRpcHandlers,
@@ -583,15 +584,26 @@ export class GroupRoom extends DurableObject<Env> {
       if (row.author_id !== actor.id) throw new ApiError("forbidden", "only the author can edit");
       if (row.deleted_at !== null) throw new ApiError("conflict", "message is deleted");
       const streaming = row.streaming === 1 && frame.streaming === true;
+      let changed: Record<string, unknown> | undefined;
+      if (editExtensions.length > 0) {
+        const room = this.roomContext();
+        const current = this.toMessage(row);
+        for (const e of editExtensions) {
+          const add = e(frame as Record<string, unknown>, room, actor, current);
+          if (add) changed = { ...changed, ...add };
+        }
+      }
+      const ext = changed ? JSON.stringify({ ...(row.ext ? JSON.parse(row.ext) : {}), ...changed }) : row.ext;
       if (!streaming) this.dropDelta(row.id);
       const now = Date.now();
       return this.commit((tx) => {
         const seq = tx.nextSeq();
         this.sql.exec(
-          "UPDATE messages SET body = ?, edited_at = ?, streaming = ? WHERE id = ?",
+          "UPDATE messages SET body = ?, edited_at = ?, streaming = ?, ext = ? WHERE id = ?",
           frame.body,
           now,
           streaming ? 1 : 0,
+          ext,
           row.id,
         );
         tx.append({
@@ -599,7 +611,7 @@ export class GroupRoom extends DurableObject<Env> {
           actorId: actor.id,
           topicId: row.topic_id,
           messageId: row.id,
-          data: { messageId: row.id, body: frame.body, editedAt: now, streaming },
+          data: { ...changed, messageId: row.id, body: frame.body, editedAt: now, streaming },
         });
         this.touchTopic(row.topic_id, seq);
         return { message: this.toMessage(this.messageRow(row.id) as MessageRow) };
