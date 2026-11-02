@@ -21,6 +21,11 @@
 //   runner --bot <id> --runtime <r> [--labels a,b] [--repo-url <u> | --repo-path <p>]
 //          [--base-branch <b>] [--model <m>] [--env-allow A,B] [--disable]
 //                                      make a bot runner-backed (runs on a matching machine)
+//   withdraw-release --version <v> [--restore]
+//                                      stop offering a bad release (or offer it again); admin secret
+//   revocations-save [--out <file>]    save revoked tokens/machines, deleted hooks, deactivated members
+//                                      (ids and times, no secrets) before a D1 restore; admin secret
+//   revocations-apply --file <file>    apply a saved list again after a D1 restore; admin secret
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -126,7 +131,7 @@ async function call(
 async function main() {
   const { command, flags } = parseArgs(process.argv.slice(2));
   if (!command || command === "help" || flags.help) {
-    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 23).join("\n"));
+    console.log(readFileSync(new URL(import.meta.url).pathname, "utf8").split("\n").slice(1, 28).join("\n"));
     return;
   }
   const envName = (str(flags, "env") ?? "local") as EnvName;
@@ -259,6 +264,30 @@ async function main() {
       };
       const r = await call(base, "PUT", `/v1/bots/${bot}/runner`, { token: ownerToken(), body });
       console.log(`bot ${r.botId}: runtime ${r.runtime}, labels [${r.labels.join(",")}], ${r.enabled ? "enabled" : "disabled"}`);
+      return;
+    }
+    case "withdraw-release": {
+      const version = str(flags, "version", true) as string;
+      const r = await call(base, "POST", `/v1/admin/releases/${encodeURIComponent(version)}/withdraw`, {
+        adminSecret: readSecret(adminSecretPath, "admin secret"),
+        body: { restore: flags.restore === true },
+      });
+      console.log(`${r.version}: ${r.withdrawn ? "withdrawn" : "offered again"}; latest is now ${r.latest?.version ?? "(none)"}`);
+      return;
+    }
+    case "revocations-save": {
+      const r = await call(base, "GET", "/v1/admin/revocations", { adminSecret: readSecret(adminSecretPath, "admin secret") });
+      const out = str(flags, "out") ?? join(dir, `revocations-${new Date(r.at).toISOString().replace(/[:.]/g, "-")}.json`);
+      writeSecret(out, JSON.stringify(r));
+      console.log(`saved ${r.tokens.length} tokens, ${r.machines.length} machines, ${r.hooks.length} hooks, ${r.members.length} members`);
+      console.log(`revocations: ${out}`);
+      return;
+    }
+    case "revocations-apply": {
+      const file = str(flags, "file", true) as string;
+      const body = JSON.parse(readSecret(file, "revocations file"));
+      const r = await call(base, "POST", "/v1/admin/revocations", { adminSecret: readSecret(adminSecretPath, "admin secret"), body });
+      console.log(`applied ${r.applied} revocation(s) again`);
       return;
     }
     default:
