@@ -139,6 +139,155 @@ fn section(title: &'static str, cx: &App) -> gpui::Div {
         .child(div().t_section().text_color(k.text_3).child(title))
 }
 
+/// A state forced on a control, so the screenshot shows it without a
+/// pointer or a keyboard (§16: every component in all its states).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Forced {
+    Rest,
+    Hover,
+    Pressed,
+    Focus,
+    Loading,
+}
+
+const FORCED: [(Forced, &str); 5] = [
+    (Forced::Rest, "rest"),
+    (Forced::Hover, "hover"),
+    (Forced::Pressed, "pressed"),
+    (Forced::Focus, "focus"),
+    (Forced::Loading, "loading"),
+];
+
+/// The focus-visible ring of a button (§7.1): 2 pt `focus` outside a 2 pt
+/// gap. A border on a wrapper, not a shadow: a shadow shows through the
+/// clear fill of a ghost button.
+fn focus_ring(k: &theme::Colors, child: impl IntoElement) -> AnyElement {
+    div()
+        .flex_none()
+        .p(px(2.))
+        .border_2()
+        .border_color(k.focus)
+        .rounded(theme::radius::MD + px(4.))
+        .child(child)
+        .into_any_element()
+}
+
+/// The STATES section (§7.1): each button kind, the icon button and a list
+/// row at rest, hover, pressed, focus-visible and loading, drawn with the
+/// state's tokens instead of a pointer.
+fn forced_states(cx: &App) -> gpui::Div {
+    use gpui_component::ActiveTheme as _;
+    let k = theme::colors(cx);
+    let t = cx.theme();
+    let label = |text: &'static str| {
+        div()
+            .w(px(64.))
+            .flex_none()
+            .t_meta()
+            .text_color(k.text_3)
+            .child(text)
+            .into_any_element()
+    };
+    let mut lines: Vec<AnyElement> = vec![
+        row_of(
+            std::iter::once(label(""))
+                .chain(FORCED.iter().map(|(_, n)| {
+                    div()
+                        .w(px(84.))
+                        .t_meta()
+                        .text_color(k.text_3)
+                        .child(*n)
+                        .into_any_element()
+                }))
+                .collect(),
+        )
+        .into_any_element(),
+    ];
+    for (kind, name, text) in [
+        (ButtonKind::Primary, "primary", "发布"),
+        (ButtonKind::Secondary, "secondary", "修改"),
+        (ButtonKind::Ghost, "ghost", "放弃"),
+        (ButtonKind::Danger, "danger", "删除"),
+    ] {
+        let (hover, pressed) = match kind {
+            ButtonKind::Primary => (k.accent_hover, k.accent_pressed),
+            ButtonKind::Danger => (t.danger_hover, t.danger_active),
+            _ => (k.hover, k.pressed),
+        };
+        let mut line = vec![label(name)];
+        for (state, sname) in FORCED {
+            let b = ui::button(
+                SharedString::from(format!("st-{name}-{sname}")),
+                text,
+                kind,
+                ButtonSize::Md,
+                cx,
+            );
+            let b = match state {
+                Forced::Rest => b.into_any_element(),
+                Forced::Hover => b.bg(hover).into_any_element(),
+                Forced::Pressed => b.bg(pressed).into_any_element(),
+                Forced::Focus => focus_ring(&k, b),
+                Forced::Loading => b.loading(true).into_any_element(),
+            };
+            line.push(div().w(px(84.)).flex().child(b).into_any_element());
+        }
+        lines.push(row_of(line).into_any_element());
+    }
+    let mut icons = vec![label("icon")];
+    for (state, sname) in FORCED {
+        let b = ui::icon_button(SharedString::from(format!("st-icon-{sname}")), Lucide::Bell);
+        let b = match state {
+            Forced::Rest => b.into_any_element(),
+            Forced::Hover => b.bg(k.hover).into_any_element(),
+            Forced::Pressed => b.bg(k.pressed).into_any_element(),
+            Forced::Focus => focus_ring(&k, b),
+            Forced::Loading => b.loading(true).into_any_element(),
+        };
+        icons.push(div().w(px(84.)).flex().child(b).into_any_element());
+    }
+    lines.push(row_of(icons).into_any_element());
+    let mut rows = vec![label("row")];
+    for (state, sname) in FORCED {
+        let r = ui::list_row(
+            SharedString::from(format!("st-row-{sname}")),
+            RowSurface::Content,
+            false,
+            cx,
+        )
+        .w(px(70.))
+        .h(px(32.))
+        .px(space::S8)
+        .t_ui()
+        .text_color(k.text_1)
+        .child("话题");
+        let r = match state {
+            Forced::Rest => r.into_any_element(),
+            Forced::Hover => r.bg(k.hover).into_any_element(),
+            Forced::Pressed => r.bg(k.pressed).into_any_element(),
+            // Rows draw the ring inset 1 pt (§7.1).
+            Forced::Focus => r.border_2().border_color(k.focus).into_any_element(),
+            Forced::Loading => div()
+                .w(px(70.))
+                .h(px(32.))
+                .flex()
+                .items_center()
+                .px(space::S8)
+                .child(
+                    div()
+                        .w_full()
+                        .h(px(12.))
+                        .rounded(theme::radius::XS)
+                        .bg(k.field),
+                )
+                .into_any_element(),
+        };
+        rows.push(div().w(px(84.)).flex().child(r).into_any_element());
+    }
+    lines.push(row_of(rows).into_any_element());
+    div().flex().flex_col().gap(space::S12).children(lines)
+}
+
 fn row_of(children: Vec<AnyElement>) -> gpui::Div {
     div()
         .flex()
@@ -876,6 +1025,7 @@ impl Render for Gallery {
                             .flex_col()
                             .gap(space::S32)
                             .child(section("COMPOSER §7.2", cx).child(composers))
+                            .child(section("STATES §7.1", cx).child(forced_states(cx)))
                             .child(
                                 section("OVERLAYS §7.12", cx).child(
                                     div()
