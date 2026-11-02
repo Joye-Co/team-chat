@@ -36,6 +36,7 @@ Never print these files; pipe them into commands.
 | `owner-token` | token of the first owner (`Joye` on staging and production, `e2e-owner` on e2e); `admin.ts` and `tools/e2e` read this file |
 | `owner.token` | staging and production: a copy of `owner-token` |
 | `monitor-token` | staging and production: token of the monitor bot `监测` (Worker secret `MONITOR_TOKEN_<ENV>` of `chat-monitor`) |
+| `monitor-admin-secret` | production folder only: Worker secret `MONITOR_ADMIN_SECRET` of `chat-monitor`, the bearer of its `POST /test-alert` ([RUNBOOK.md](RUNBOOK.md#test-the-alert-path)) |
 | `bots/<name>.token` | staging and production: token of each roster bot ([ROSTER.md](ROSTER.md)) |
 | `joye-signin-code` | production: Joye's sign-in code (8 characters, single use, expires 7 days after it was made) |
 | `invites/实习生<n>.code`, `invites/实习生<n>.link` | production: the four intern invite codes and their download links (`/download#code=...`) |
@@ -71,7 +72,13 @@ bun run deploy:e2e        # D1 migrations, then wrangler deploy --env e2e
 bun run deploy:staging    # the same for staging
 ```
 
-Then check `/v1/health` and run `tools/e2e` against the env (below).
+The `deploy:*` scripts run `scripts/deploy-server.sh <env>`, which passes `VERSION` with
+`wrangler deploy --var`: the release version when HEAD has a release tag `v<semver>`, otherwise
+the 12-character commit (`-dirty` when `server/`, `packages/` or `protocol/` have uncommitted
+changes). `DEPLOY_VERSION=<v>` overrides it, `--print-version` shows it, `--dry-run` builds
+without uploading. The `VERSION` values in `server/wrangler.jsonc` are only for `wrangler dev`.
+
+Then check that `/v1/health` reports that version and run `tools/e2e` against the env (below).
 
 State on 2026-11-03 (from `wrangler deployments list` and `wrangler d1 migrations list`):
 
@@ -80,7 +87,7 @@ State on 2026-11-03 (from `wrangler deployments list` and `wrangler d1 migration
 | e2e | 2026-11-02 23:03, version `0566745e` (main `6ec0691`) | through `0006_ops` | none |
 | staging | 2026-11-02 23:03, version `7b88d141` (main `6ec0691`) | through `0006_ops` | none |
 | production | 2026-11-02 23:10, version `966b82ac` (main `fb10286`, server code as `6ec0691`) | through `0006_ops` | none |
-| monitor | 2026-11-02 23:14, `chat-monitor` version `d5fc2c6a` (secrets: `bcd22be0`) | (no D1) | |
+| monitor | 2026-11-02 23:33, `chat-monitor` version `7fef8b5d` (main `2830ddd`, adds `POST /test-alert`), then the secret `MONITOR_ADMIN_SECRET` | (no D1) | |
 
 First monitor checks (2026-11-02 23:25 UTC): production ok (health 230 ms, round trip 275 ms),
 staging ok (health 113 ms, round trip 289 ms), archive fresh on both. First archive pass by hand

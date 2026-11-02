@@ -11,7 +11,8 @@ command line, a log or a chat: read it from its file.
 | production | `chat-api-prod` | `chat-prod` | `chat-files-prod` | `chat-monitor` |
 
 Production URL: `https://chat-api-prod.huangdeshiou.workers.dev` (`product.json`
-`servers.production`). Monitor: `chat-monitor` (cron only, no public HTTP surface).
+`servers.production`). Monitor: `chat-monitor` (cron, plus one operator route: `POST /test-alert`,
+see [Test the alert path](#test-the-alert-path)).
 
 Secret files live in `~/.config/team-chat/<env>/` (folder mode 700, files mode 600). The full
 list is in [ENVIRONMENTS.md](ENVIRONMENTS.md#secret-files).
@@ -24,6 +25,7 @@ list is in [ENVIRONMENTS.md](ENVIRONMENTS.md#secret-files).
 | `monitor-token` | the monitor bot's token in that env (Worker secret `MONITOR_TOKEN_<ENV>` of `chat-monitor`) |
 | `bots/<name>.token` | each roster bot's token |
 | `github-hook.json` | production: URL and secret of the GitHub hook of `开发` |
+| `monitor-admin-secret` | production folder only: the Worker secret `MONITOR_ADMIN_SECRET` of `chat-monitor` (bearer of `POST /test-alert`) |
 
 In the commands below, `ADMIN=~/.config/team-chat/production/admin-secret` and the admin header
 is sent with `-H @<(printf 'x-admin-secret: %s' "$(cat $ADMIN)")`, so the secret never shows in
@@ -35,6 +37,12 @@ the process list or the shell history.
 2. Before a deploy that has a new D1 migration, save a D1 bookmark (see
    [D1 Time Travel](#d1-time-travel-restore)): `cd server && bunx wrangler d1 time-travel info chat-prod`.
 3. Staging first: `cd server && bun run deploy:staging` (applies D1 migrations, then deploys).
+   The deploy script (`scripts/deploy-server.sh`) sets the `VERSION` var that `GET /v1/health`
+   reports: the release version when HEAD has a release tag `v<semver>`, otherwise the
+   12-character commit (`-dirty` when `server/`, `packages/` or `protocol/` have uncommitted
+   changes); `DEPLOY_VERSION=<v>` overrides it. See it first with
+   `scripts/deploy-server.sh staging --print-version`; check it after with
+   `curl -s https://chat-api-staging.huangdeshiou.workers.dev/v1/health`.
 4. Wait for two green monitor checks of staging (10 minutes, no alert in the `运维` group), or run
    the end-to-end clients in `tools/e2e` against staging.
 5. Production: `cd server && bun run deploy:production`.
@@ -233,13 +241,31 @@ server version, with its D1 migrations applied.
 
 **One group** (its room lost or damaged; its D1 row and members exist in the target):
 
-1. If the room still has data, it cannot be imported over: use point-in-time recovery.
-   `restore.ts group` restores a group's archive only into the group with the same id; it has no
-   option to read one group and write another (open problem, 2026-11-03), so restoring into a
-   new group is not possible yet.
+1. If the room still has data, it cannot be imported over: use point-in-time recovery, or copy
+   the archive into another group (below).
 2. `bun ops/restore/restore.ts group --from production --from-url https://chat-api-prod.huangdeshiou.workers.dev --to production --to-url https://chat-api-prod.huangdeshiou.workers.dev --group <groupId>`
    (events, then room state, then the group's ready-file records from D1).
 3. Members reset their cache for that group (see point-in-time recovery, step 3).
+
+**One group's archive into another group** (`--from-group`): for example the room of group A
+holds damaged data you must keep for a look, or the history of a deleted or damaged group must
+come back next to it.
+
+1. Make the target group in the target env with the members who may read the copy
+   (`POST /v1/groups` as the owner, `{ "name": "<name>", "memberIds": [...] }`). Do not post in
+   it: the import needs a group with no events. Its members come from D1, not from the archive,
+   so only the members you add see the copy.
+2. `bun ops/restore/restore.ts group --from production --to production --group <targetGroupId> --from-group <sourceGroupId>`
+   (add `--date YYYY-MM-DD` for an older room state). It reads every archive file of the source
+   group, gives the target group id, and new ids to every topic, message and 产出 of the source
+   (the app keys them by id, so a copy next to its source must not reuse them), keeps the seqs,
+   then writes the events and the room state into the target. A re-run makes the same ids and
+   imports nothing twice. The answer has `fromGroup`, `imported` and `lastSeq`.
+3. Limits: attachments and 产出 are listed in the copy but do not open (404): their D1 rows and
+   file bytes in R2 belong to the source group, and the import cannot move them. Links to the
+   source in message text are not rewritten. Member read cursors of the copy start at 0 (all
+   unread). Look at attachments in the source group while it exists.
+4. The drill tests this (below).
 
 **A whole environment** (lost D1 and rooms, or a copy into a fresh env):
 
@@ -270,7 +296,12 @@ archives again, stops A, starts stack B with empty D1 and rooms (A's R2 bucket s
 the whole env from A's archive and compares members, groups, every event, every topic's history
 and every 产出 with its files as two members see them. It also checks that the late-deleted
 text is in no archive file and that B takes a new message, an old attachment and a new 产出
-version. Exit 0 means all pass; the report is `ops/restore/.drill/report.json`.
+version. Then it copies the group's archive into a new empty group (`--from-group`), runs the copy
+twice, and checks the copy: same events, topic titles and messages, no reused topic or message
+id, no source group id, the source group unchanged, and a new message in the copy continues the
+seq (`groupCopy` in the report). Exit 0 means all pass; the report is
+`ops/restore/.drill/report.json`. Other agents run local stacks at the same time: pass a free
+`--port` (the inspector uses that port plus 1000).
 
 ## Monitor alerts
 
@@ -297,6 +328,33 @@ healthy they wait in the monitor and are posted when one is back (dropped after 
 | `round trip: monitor bot is not in the probe group` | the `监测` group is missing or the bot left it | make it or add the bot again |
 | `config: service binding … is missing` | the monitor was deployed without its `services` | check `ops/monitor/wrangler.jsonc`; deploy again |
 | `backup: no complete archive yet`, `backup: last complete archive N h ago` | the daily archive did not finish a pass | Workers logs of the API for `group archive failed` or `archive run`; run the archive by hand (Daily archive) |
+
+### Test the alert path
+
+`POST /test-alert` on `chat-monitor` sends one alert card worded as a test (**【测试】<env>
+告警测试**, tone info, label 测试, "不需要处理") through the code of a real alert: it probes the
+targets as a cron run does (without recording the checks, so alert state does not change),
+picks the sink env, builds the card, mentions the people of that ops group, and posts it into the
+监测告警 topic of `运维`. Run it after a monitor deploy, after a change of the monitor bot, its
+token or the `运维` members, and once a month.
+
+```sh
+S=~/.config/team-chat/production/monitor-admin-secret
+curl -s -X POST -H @<(printf 'authorization: Bearer %s' "$(cat $S)") \
+  -H 'content-type: application/json' -d '{"sink":"staging"}' \
+  https://chat-monitor.huangdeshiou.workers.dev/test-alert
+```
+
+- `sink` is a target name from `TARGETS` (`staging` or `production`); leave the body out to use
+  the first healthy target, as for a real alert. Use `staging` unless you test production.
+- Answers: `200 {"ok":true,"sink":...}`; `401` wrong secret; `404` the Worker secret
+  `MONITOR_ADMIN_SECRET` is not set (the route is off); `429` one test per minute; `503 no_sink`
+  the chosen env failed its check (the reason is in `message`); `502 post_failed`.
+- Check the card in `运维` of that env, and that the people on call got a mention notification.
+- First time: `(umask 077; openssl rand -base64 33 | tr -d '\n=' | tr '+/' '-_' > $S)`, then
+  `cd ops/monitor && bunx wrangler secret put MONITOR_ADMIN_SECRET < $S`. Rotate the same way.
+- First run: 2026-11-02 23:34 UTC, to staging, card posted in `运维` with one
+  mention.
 
 **Daily summary** (01:00 UTC, 09:00 Beijing time): per env the status, number of checks and
 failures in 24 hours, availability and round-trip p50/p95. A missing summary means the monitor
