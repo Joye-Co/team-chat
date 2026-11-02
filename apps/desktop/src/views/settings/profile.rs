@@ -205,6 +205,7 @@ impl ProfilePage {
     fn confirm_wipe(&self, window: &mut Window, cx: &mut Context<Self>) {
         let provider = self.services.provider.clone();
         window.open_alert_dialog(cx, move |alert, _, _| {
+            let alert = crate::ui::SheetExt::sheet(alert);
             let provider = provider.clone();
             alert
                 .title(s::SIGN_OUT_WIPE_TITLE)

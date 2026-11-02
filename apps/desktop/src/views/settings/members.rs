@@ -110,6 +110,7 @@ impl MembersPage {
         let id = member.id.clone();
         let name = member.name.clone();
         window.open_alert_dialog(cx, move |alert, _, _| {
+            let alert = crate::ui::SheetExt::sheet(alert);
             let page = page.clone();
             let id = id.clone();
             alert
@@ -505,6 +506,7 @@ pub fn open_invite(services: Services, window: &mut Window, cx: &mut App) -> Ent
     let form = cx.new(|cx| InviteForm::new(services, window, cx));
     let shown = form.clone();
     window.open_dialog(cx, move |dialog, _, _| {
+        let dialog = crate::ui::SheetExt::sheet(dialog);
         dialog
             .w(px(460.))
             .title(SharedString::from(s::INVITE))
@@ -799,6 +801,7 @@ pub fn open_add_bot(services: Services, window: &mut Window, cx: &mut App) -> En
     let form = cx.new(|cx| BotForm::new(services, window, cx));
     let shown = form.clone();
     window.open_dialog(cx, move |dialog, _, _| {
+        let dialog = crate::ui::SheetExt::sheet(dialog);
         dialog
             .w(px(500.))
             .title(SharedString::from(s::ADD_BOT_MEMBER))

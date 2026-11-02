@@ -10,10 +10,12 @@ pub mod chip;
 pub mod icons;
 pub mod motion;
 pub mod parts;
+pub mod sheet;
 
 pub use avatar::{GroupTile, MemberAvatar};
 pub use chip::{BadgeKind, CountBadge, StatusChip};
 pub use icons::{AppAssets, Lucide, icon};
+pub use sheet::SheetExt;
 pub use parts::{
     Band, EmptyState, KbdHint, SectionHeader, capsule, floating, hairline, icon_button,
     text_button, toolbar_band, vhairline,

@@ -393,6 +393,7 @@ pub fn open_add_machine(
     let form = cx.new(|cx| MachineForm::new(services, window, cx));
     let shown = form.clone();
     window.open_dialog(cx, move |dialog, _, _| {
+        let dialog = crate::ui::SheetExt::sheet(dialog);
         dialog
             .w(px(560.))
             .title(SharedString::from(s::MACHINE_ADD))

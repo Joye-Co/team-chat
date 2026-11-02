@@ -165,6 +165,7 @@ impl Press {
         }
         let press = self.clone();
         window.open_alert_dialog(cx, move |dialog, _, _| {
+            let dialog = crate::ui::SheetExt::sheet(dialog);
             let press = press.clone();
             dialog
                 .title(question.clone())

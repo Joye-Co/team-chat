@@ -159,8 +159,7 @@ pub fn open_with_query(
             let list = dialog.read(cx).list().clone();
             list.update(cx, |state, cx| state.focus(window, cx));
         }
-        d.w(px(640.))
-            .margin_top(px(80.))
+        crate::ui::sheet::switcher(d)
             .close_button(false)
             .p_0()
             .child(dialog.clone())

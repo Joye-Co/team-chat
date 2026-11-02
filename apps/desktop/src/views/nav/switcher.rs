@@ -14,8 +14,8 @@ use crate::{
     app::Services,
     copy::nav,
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, TopicId},
-    theme,
-    views::avatar,
+    theme::{self, Type as _, space},
+    ui::{self, Lucide},
 };
 
 /// What an entry opens.
@@ -140,38 +140,44 @@ fn row(entry: &Entry) -> impl Fn(&mut Window, &mut App) -> gpui::Div + 'static {
     let entry = entry.clone();
     move |_, cx| {
         let colors = theme::colors(cx);
-        let lead = match (&entry.target, &entry.member) {
-            (Target::Topic(..), _) => div()
-                .w(px(20.))
-                .text_color(colors.muted_foreground)
-                .child(nav::TOPIC_MARK),
-            (_, Some(m)) => div().w(px(20.)).child(avatar(Some(m), px(20.), cx)),
-            _ => div()
-                .w(px(20.))
-                .text_color(colors.muted_foreground)
-                .child(nav::GROUP_MARK),
+        let tile = |glyph: Lucide| {
+            div()
+                .flex_none()
+                .size(px(24.))
+                .rounded(theme::radius::SM)
+                .bg(colors.fill_field)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(ui::icon(glyph, theme::icon::BUTTON, colors.text_2))
         };
+        let lead = match (&entry.target, &entry.member) {
+            (Target::Topic(..), _) => tile(Lucide::MessageSquarePlus),
+            (_, Some(m)) => div()
+                .flex_none()
+                .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.elevated)),
+            (Target::Group(g), _) => div()
+                .flex_none()
+                .child(ui::GroupTile::new(g.clone(), entry.label.clone(), px(24.))),
+            _ => tile(Lucide::Hash),
+        };
+        // CommandItem adds 6 pt above and below: 28 + 12 = the 40 pt row (§13.12).
         div()
+            .h(px(28.))
             .flex()
             .items_center()
-            .gap(px(8.))
+            .gap(space::S10)
             .w_full()
             .overflow_hidden()
+            .t_ui()
             .child(lead)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(entry.label.clone()),
-            )
+            .child(div().flex_1().min_w(px(0.)).one_line().child(entry.label.clone()))
             .children(entry.detail.clone().map(|d| {
                 div()
                     .flex_none()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
+                    .t_callout()
+                    .tnum()
+                    .text_color(colors.text_2)
                     .child(d)
             }))
     }
@@ -191,12 +197,10 @@ pub fn open(services: Services, window: &mut Window, cx: &mut App) {
             .placeholder(nav::QUICK_SWITCH_PLACEHOLDER)
             .max_h(px(420.))
             .bordered(false)
-            .empty(|_, _, cx| {
+            .empty(|_, _, _| {
                 div()
-                    .p(px(16.))
-                    .text_sm()
-                    .text_color(theme::colors(cx).muted_foreground)
-                    .child(nav::QUICK_SWITCH_EMPTY)
+                    .h(px(160.))
+                    .child(ui::EmptyState::new(Lucide::SearchX, nav::QUICK_SWITCH_EMPTY))
             });
         for (section, items) in sections.iter() {
             command = command.group(
@@ -219,9 +223,7 @@ pub fn open(services: Services, window: &mut Window, cx: &mut App) {
                 go(&services, &target, cx);
             }
         });
-        dialog
-            .w(px(560.))
-            .margin_top(px(96.))
+        crate::ui::sheet::switcher(dialog)
             .close_button(false)
             .p_0()
             .child(command)

@@ -152,6 +152,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::files::preview::open,
     },
     Scene {
+        name: "switcher",
+        about: "The Cmd+K quick switcher over the main window, with no query",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: open_switcher,
+    },
+    Scene {
         name: "search",
         about: "The search dialog with results for a Chinese query in all 群",
         start: Start::SignedIn,
@@ -262,4 +269,19 @@ pub fn open_settings(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     settings_scenes::open_profile(services, content, cx)
+}
+
+/// The main window with the quick switcher open (DESIGN.md §13.12).
+pub fn open_switcher(
+    services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let handle = open_main(services.clone(), content, cx)?;
+    handle
+        .update(cx, |_, window, cx| {
+            crate::views::nav::switcher::open(services, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
 }

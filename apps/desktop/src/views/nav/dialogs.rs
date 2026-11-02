@@ -225,6 +225,7 @@ pub fn open_new_group(services: Services, window: &mut Window, cx: &mut App) {
     let form = cx.new(|cx| NewGroupForm::new(services, window, cx));
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
+        let dialog = crate::ui::SheetExt::sheet(dialog);
         if first.replace(false) {
             let handle = form.read(cx).name.read(cx).focus_handle(cx);
             handle.focus(window, cx);
@@ -243,6 +244,7 @@ pub fn open_start_dm(services: Services, window: &mut Window, cx: &mut App) {
     let state = cx.new(|cx| CommandState::new(window, cx));
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
+        let dialog = crate::ui::SheetExt::sheet(dialog);
         if first.replace(false) {
             state.update(cx, |s, cx| s.focus(window, cx));
         }
@@ -302,6 +304,7 @@ pub fn confirm_leave(
     cx: &mut App,
 ) {
     window.open_alert_dialog(cx, move |alert, _, _| {
+        let alert = crate::ui::SheetExt::sheet(alert);
         let services = services.clone();
         let group_id = group_id.clone();
         alert
