@@ -26,7 +26,6 @@ use gpui::{
 };
 use gpui_component::{
     Disableable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
     input::{
         Enter, Escape, IndentInline, InputEvent, MoveDown, MoveUp, Paste, Textarea, TextareaState,
     },
@@ -96,7 +95,7 @@ impl ComposerView {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .auto_grow(1, 8)
+                .auto_grow(2, 12)
                 .submit_on_enter(true)
                 .placeholder(c::PLACEHOLDER)
         });
@@ -219,7 +218,10 @@ impl ComposerView {
         let draft = self.services.provider.draft(&key);
         let rejected = self.services.provider.take_rejected_files(&key);
         if !rejected.is_empty() {
-            self.rejected = rejected.iter().map(crate::views::files::rejected_text).collect();
+            self.rejected = rejected
+                .iter()
+                .map(crate::views::files::rejected_text)
+                .collect();
         }
         self.files = draft.files;
         self.quote = draft.quote_of.map(|id| self.quote_chip(&key, id));
@@ -799,128 +801,101 @@ impl Render for ComposerView {
 
         let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
         let has_text = !self.last_text.trim().is_empty() || has_chips;
-        let send = Button::new("send")
-            .icon(gpui_component::Icon::new(if editing {
-                Lucide::Check
-            } else {
-                Lucide::ArrowUp
-            }))
-            .with_size(px(28.))
-            .rounded_full()
-            .tooltip(if editing {
+        let send = ui::send_button(
+            "send",
+            has_text && enabled,
+            if editing {
                 crate::copy::common::SAVE
             } else {
                 c::SEND
-            })
-            .disabled(!enabled)
-            .map(|b| {
-                if has_text && enabled {
-                    b.primary()
-                } else {
-                    b.ghost().bg(colors.fill_pressed).text_color(colors.text_3)
-                }
-            })
-            .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
+            },
+            cx,
+        )
+        .when(editing, |b| {
+            b.icon(gpui_component::Icon::new(Lucide::Check).size(theme::icon::HEADER))
+        })
+        .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
+
+        let mut shell = ui::ComposerShell::new(
+            "composer-box",
+            div()
+                .relative()
+                .w_full()
+                .capture_action(cx.listener(Self::on_enter))
+                .capture_action(cx.listener(Self::on_tab))
+                .capture_action(cx.listener(Self::on_up))
+                .capture_action(cx.listener(Self::on_down))
+                .capture_action(cx.listener(Self::on_escape))
+                .capture_action(cx.listener(Self::on_paste))
+                .child(
+                    // XSmall drops the editor's own inset; the shell pads the
+                    // text 12 top and 14 at the sides (DESIGN.md §7.2).
+                    Textarea::new(&self.input)
+                        .appearance(false)
+                        .xsmall()
+                        .p_0()
+                        .t_body()
+                        .disabled(!enabled),
+                )
+                .children(self.render_mentions(cx)),
+        )
+        .focused(focused && enabled)
+        .tool(
+            ui::composer_tool("attach", Lucide::Plus, c::ATTACH)
+                .disabled(!enabled || editing)
+                .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
+        )
+        .send(send);
+        if editing {
+            shell = shell.above(
+                div()
+                    .flex()
+                    .gap(space::S8)
+                    .t_small()
+                    .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
+                    .child(div().text_color(colors.text_2).child(c::EDIT_HINT)),
+            );
+        }
+        if let Some(line) = title_line {
+            shell = shell.above(
+                div()
+                    .t_small()
+                    .text_color(colors.text_2)
+                    .truncate()
+                    .child(line),
+            );
+        }
+        if has_chips {
+            shell = shell.above(chips);
+        }
+        if self.too_long {
+            shell = shell.above(
+                div()
+                    .t_small()
+                    .text_color(colors.danger_text)
+                    .child(c::TOO_LONG),
+            );
+        }
+        for line in &self.rejected {
+            shell = shell.above(
+                div()
+                    .t_small()
+                    .text_color(colors.danger_text)
+                    .child(line.clone()),
+            );
+        }
 
         div()
             .id("composer")
             .flex_none()
-            .px(space::S20)
+            .px(theme::CONTENT_GUTTER)
             .pb(space::S16)
+            .pt(space::S8)
             .bg(colors.content)
             .on_drop(
                 cx.listener(|this, paths: &ExternalPaths, _, cx| this.on_drop_paths(paths, cx)),
             )
-            .child(
-                div()
-                    .id("composer-box")
-                    .rounded(theme::radius::COMPOSER)
-                    .border_1()
-                    .border_color(if focused {
-                        colors.control_border_focus
-                    } else {
-                        colors.control_border
-                    })
-                    .bg(colors.content)
-                    .pt(space::S8)
-                    .px(space::S8)
-                    .pb(space::S8)
-                    .flex()
-                    .flex_col()
-                    .gap(space::S6)
-                    .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(colors.fill_hover))
-                    .when(editing, |el| {
-                        el.child(
-                            div()
-                                .flex()
-                                .gap(space::S8)
-                                .t_callout()
-                                .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
-                                .child(div().text_color(colors.text_2).child(c::EDIT_HINT)),
-                        )
-                    })
-                    .when_some(title_line, |el, line| {
-                        el.child(
-                            div()
-                                .t_callout()
-                                .text_color(colors.text_2)
-                                .truncate()
-                                .child(line),
-                        )
-                    })
-                    .when(has_chips, |el| el.child(chips))
-                    .when(self.too_long, |el| {
-                        el.child(
-                            div()
-                                .t_callout()
-                                .text_color(colors.danger_text)
-                                .child(c::TOO_LONG),
-                        )
-                    })
-                    .children(self.rejected.iter().map(|line| {
-                        div()
-                            .t_callout()
-                            .text_color(colors.danger_text)
-                            .child(line.clone())
-                    }))
-                    .child(
-                        div()
-                            .relative()
-                            .w_full()
-                            .capture_action(cx.listener(Self::on_enter))
-                            .capture_action(cx.listener(Self::on_tab))
-                            .capture_action(cx.listener(Self::on_up))
-                            .capture_action(cx.listener(Self::on_down))
-                            .capture_action(cx.listener(Self::on_escape))
-                            .capture_action(cx.listener(Self::on_paste))
-                            .child(
-                                // XSmall keeps the editor's own inset at 4 / 2 pt;
-                                // the box padding makes up the rest (§5.4).
-                                Textarea::new(&self.input)
-                                    .appearance(false)
-                                    .xsmall()
-                                    .t_message()
-                                    .disabled(!enabled),
-                            )
-                            .children(self.render_mentions(cx)),
-                    )
-                    .child(
-                        div()
-                            .h(px(28.))
-                            .flex()
-                            .items_center()
-                            .gap(space::S12)
-                            .child(
-                                ui::icon_button("attach", Lucide::Paperclip)
-                                    .tooltip(c::ATTACH)
-                                    .disabled(!enabled || editing)
-                                    .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
-                            )
-                            .child(div().flex_1())
-                            .child(ui::KbdHint::new(&["enter"]).label(c::HINT_SEND))
-                            .child(ui::KbdHint::new(&["shift-enter"]).label(c::HINT_NEWLINE))
-                            .child(send),
-                    ),
-            )
+            .drag_over::<ExternalPaths>(move |style, _, _, _| style.bg(colors.hover))
+            .child(shell)
     }
 }

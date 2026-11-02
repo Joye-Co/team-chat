@@ -108,10 +108,12 @@ impl TimelineView {
                         colors.danger_text,
                     ))
                     .child(t::FAILED)
-                    .child(ui::text_button("retry", t::RETRY).on_click(cx.listener({
-                        let message = message.clone();
-                        move |this, _, _, _| this.retry(&message)
-                    })))
+                    .child(
+                        ui::text_button("retry", t::RETRY, cx).on_click(cx.listener({
+                            let message = message.clone();
+                            move |this, _, _, _| this.retry(&message)
+                        })),
+                    )
                     .into_any_element(),
             ),
         };
