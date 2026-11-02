@@ -16,6 +16,7 @@ use gpui_component::{
     button::{Button, ButtonVariants as _},
 };
 
+use super::NamedButton as _;
 use crate::{
     theme::{self, Type as _, size, space},
     ui::icons::{Lucide, button_glyph},
@@ -242,7 +243,7 @@ pub fn composer_tool(
         .icon(button_glyph(name, theme::icon::HEADER, size::ICON_BUTTON))
         .with_size(size::ICON_BUTTON)
         .rounded(theme::radius::MD)
-        .tooltip(tooltip.into())
+        .named(tooltip)
 }
 
 /// The send button: 32 x 32, radius 8, `arrow-up` 18. Empty: `field` fill,

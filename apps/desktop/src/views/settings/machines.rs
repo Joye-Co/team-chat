@@ -14,6 +14,7 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
+use crate::ui::NamedButton as _;
 use crate::{
     app::Services,
     copy::{common, fill, settings as s},
@@ -238,7 +239,7 @@ impl MachinesPage {
             .gap(space::S8)
             .child(
                 ui::icon_button("machines-refresh", Lucide::RotateCcw)
-                    .tooltip(s::REFRESH)
+                    .named(s::REFRESH)
                     .loading(busy)
                     .on_click(move |_, _, cx| {
                         let _ = weak.update(cx, |this, cx| this.refresh(cx));

@@ -31,6 +31,7 @@ use gpui_component::{
     },
 };
 
+use crate::ui::NamedButton as _;
 use crate::{
     app::{Changes, Services},
     copy::{composer as c, fill},
@@ -877,7 +878,7 @@ impl ComposerView {
                     .with_size(px(24.))
                     .rounded(theme::radius::SM)
                     .icon(ui::button_glyph(Lucide::X, theme::icon::CHIP, px(24.)))
-                    .tooltip(c::REMOVE)
+                    .named(c::REMOVE)
                     .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
             )
     }

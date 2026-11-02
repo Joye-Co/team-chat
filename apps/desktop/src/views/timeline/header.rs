@@ -11,6 +11,7 @@ use gpui::{
 use gpui_component::menu::DropdownMenu as _;
 
 use super::TimelineView;
+use crate::ui::NamedButton as _;
 use crate::{
     copy::{fill, realtime as r, timeline as t},
     data::{Topic, TopicStatus},
@@ -71,7 +72,7 @@ impl TimelineView {
                                 Lucide::Bell
                             },
                         )
-                        .tooltip(if following { t::UNFOLLOW } else { t::FOLLOW })
+                        .named(if following { t::UNFOLLOW } else { t::FOLLOW })
                         .on_click(move |_, _, _| {
                             services.provider.set_topic_following(&g, &tid, !following)
                         })
@@ -85,7 +86,7 @@ impl TimelineView {
                                 Lucide::PanelRight
                             },
                         )
-                        .tooltip(t::TOGGLE_PANEL)
+                        .named(t::TOGGLE_PANEL)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.services
                                 .nav
@@ -96,7 +97,7 @@ impl TimelineView {
                         let services = self.services.clone();
                         let (g, tid) = (topic.group_id.clone(), topic.id.clone());
                         ui::icon_button("topic-status", Lucide::Ellipsis)
-                            .tooltip(r::STATUS_MENU)
+                            .named(r::STATUS_MENU)
                             .dropdown_menu(move |menu, window, cx| {
                                 // Read the topic again: the menu shows the newest state.
                                 match services.provider.topic(&g, &tid) {

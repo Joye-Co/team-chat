@@ -21,6 +21,7 @@ use gpui_component::{
 };
 
 use super::{TimelineView, extras, model};
+use crate::ui::NamedButton as _;
 use crate::{
     copy::{common, fill, timeline as t},
     data::{Member, Message, SendState, Topic},
@@ -426,12 +427,12 @@ impl TimelineView {
                     message,
                     key,
                     false,
-                    tool("react", Lucide::FaceSlightlySmilingPlus).tooltip(t::ADD_REACTION),
+                    tool("react", Lucide::FaceSlightlySmilingPlus).named(t::ADD_REACTION),
                     cx,
                 ))
                 .child(
                     tool("reply", Lucide::Reply)
-                        .tooltip(t::REPLY)
+                        .named(t::REPLY)
                         .on_click(cx.listener({
                             let m = message.clone();
                             move |this, _, _, cx| this.quote(&m, cx)
@@ -441,26 +442,24 @@ impl TimelineView {
             .child({
                 let quoted = quote_markdown(&message.body);
                 tool("copy-quote", Lucide::TextQuote)
-                    .tooltip(t::COPY_QUOTE)
+                    .named(t::COPY_QUOTE)
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(quoted.clone()))
                     })
             })
-            .child(
-                tool("more", Lucide::Ellipsis)
-                    .tooltip(t::MORE)
-                    .dropdown_menu(move |menu, window, cx| {
-                        super::menu::build(
-                            menu,
-                            view.clone(),
-                            &menu_message,
-                            can_edit,
-                            can_delete,
-                            window,
-                            cx,
-                        )
-                    }),
-            )
+            .child(tool("more", Lucide::Ellipsis).named(t::MORE).dropdown_menu(
+                move |menu, window, cx| {
+                    super::menu::build(
+                        menu,
+                        view.clone(),
+                        &menu_message,
+                        can_edit,
+                        can_delete,
+                        window,
+                        cx,
+                    )
+                },
+            ))
             .into_any_element()
     }
 
@@ -518,7 +517,7 @@ impl TimelineView {
             key,
             true,
             ui::emoji::reaction_add(ElementId::Name(format!("reaction-add-{key}").into()), cx)
-                .tooltip(t::ADD_REACTION),
+                .named(t::ADD_REACTION),
             cx,
         );
         div()

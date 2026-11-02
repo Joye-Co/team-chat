@@ -8,6 +8,7 @@ use gpui::{
 use gpui_component::{Sizable as _, button::Button};
 
 use super::{Failure, Phase, Updater, version};
+use crate::ui::NamedButton as _;
 use crate::{
     copy::{fill, update as u},
     theme::{self, Type as _, space},
@@ -78,8 +79,8 @@ fn action_button(action: Action, id: &'static str, updater: &Entity<Updater>, cx
             cx,
         ),
         // The narrow card closes with an `x`; its tooltip names the action.
-        Action::Later => ui::icon_button_sm((id, 2usize), Lucide::X).tooltip(u::LATER),
-        Action::Dismiss => ui::icon_button_sm((id, 3usize), Lucide::X).tooltip(u::DISMISS),
+        Action::Later => ui::icon_button_sm((id, 2usize), Lucide::X).named(u::LATER),
+        Action::Dismiss => ui::icon_button_sm((id, 3usize), Lucide::X).named(u::DISMISS),
     };
     button.on_click(move |_, _, cx| {
         updater.update(cx, |up, cx| match action {

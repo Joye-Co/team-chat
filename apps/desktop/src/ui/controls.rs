@@ -172,8 +172,21 @@ pub fn secondary_button(
     button(id, label, ButtonKind::Secondary, ButtonSize::Md, cx)
 }
 
+/// The name of an icon-only button: its tooltip and the accessible name
+/// that VoiceOver reads (§11). gpui-component never reads the tooltip.
+pub trait NamedButton {
+    fn named(self, name: impl Into<SharedString>) -> Self;
+}
+
+impl NamedButton for Button {
+    fn named(self, name: impl Into<SharedString>) -> Self {
+        let name = name.into();
+        self.accessibility_label(name.clone()).tooltip(name)
+    }
+}
+
 /// A ghost icon button: 32 x 32, radius 8, an 18 pt glyph in `text-2` that
-/// turns `text-1` on hover (§4.2). Give it a tooltip: it is its name.
+/// turns `text-1` on hover (§4.2). Name it with [`NamedButton::named`].
 pub fn icon_button(id: impl Into<ElementId>, name: Lucide) -> Button {
     Button::new(id)
         .ghost()
@@ -508,4 +521,54 @@ pub fn select_trigger(
         .text_color(k.text_1)
         .child(div().flex_1().min_w(px(0.)).one_line().child(label.into()))
         .child(icon(Lucide::ChevronsUpDown, theme::icon::CHIP, k.text_3))
+}
+
+#[cfg(test)]
+mod tests {
+    /// Every icon-only button has an accessible name (§11): each
+    /// `icon_button(..)` chain calls `.named(..)`, never `.tooltip(..)` alone.
+    #[test]
+    fn icon_buttons_are_named() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![root];
+        let mut unnamed = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    stack.push(path);
+                    continue;
+                }
+                if path.extension().is_none_or(|e| e != "rs") || path.ends_with("controls.rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap();
+                for (ix, _) in text.match_indices("icon_button") {
+                    let rest = &text[ix..];
+                    if !(rest.starts_with("icon_button(") || rest.starts_with("icon_button_sm(")) {
+                        continue;
+                    }
+                    let chain = &rest[..rest.len().min(400)];
+                    let named = chain.find(".named(");
+                    let tooltip = chain.find(".tooltip(");
+                    // The hover toolbar builds its buttons in a closure and
+                    // names them where they are used.
+                    if named.is_none()
+                        && !chain.contains("let tool")
+                        && !rest.starts_with("icon_button(ElementId::Name(format!(\"{id}")
+                    {
+                        unnamed.push(format!("{}:{ix}", path.display()));
+                    } else if let (Some(n), Some(t)) = (named, tooltip)
+                        && t < n
+                    {
+                        unnamed.push(format!("{}:{ix}", path.display()));
+                    }
+                }
+            }
+        }
+        assert!(
+            unnamed.is_empty(),
+            "icon buttons without a name: {unnamed:?}"
+        );
+    }
 }

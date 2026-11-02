@@ -14,6 +14,7 @@ use gpui_component::{
     scroll::ScrollableElement as _,
 };
 
+use crate::ui::NamedButton as _;
 use crate::{
     characters::{CharacterId, CharacterStatus},
     copy::common,
@@ -218,19 +219,19 @@ impl Render for Gallery {
                     .child("icon")
                     .into_any_element(),
                 ui::icon_button("ib-1", Lucide::Bell)
-                    .tooltip("关注")
+                    .named("关注")
                     .into_any_element(),
                 ui::icon_button("ib-2", Lucide::PanelRight)
-                    .tooltip("话题详情")
+                    .named("话题详情")
                     .into_any_element(),
                 ui::icon_button("ib-3", Lucide::Ellipsis)
-                    .tooltip("更多")
+                    .named("更多")
                     .into_any_element(),
                 ui::icon_button("ib-4", Lucide::SquarePen)
-                    .tooltip("新话题")
+                    .named("新话题")
                     .into_any_element(),
                 ui::icon_button_sm("ib-5", Lucide::Plus)
-                    .tooltip("新建群")
+                    .named("新建群")
                     .into_any_element(),
                 ui::text_button("tb-1", "重试", cx).into_any_element(),
                 ui::text_button("tb-2", "查看过程", cx).into_any_element(),
@@ -427,7 +428,7 @@ impl Render for Gallery {
             .child(
                 SectionHeader::new("群")
                     .collapsible("sh-groups", false)
-                    .trailing(ui::icon_button_sm("sh-add", Lucide::Plus).tooltip("新建群")),
+                    .trailing(ui::icon_button_sm("sh-add", Lucide::Plus).named("新建群")),
             )
             .children(
                 [

@@ -459,8 +459,6 @@ impl Render for RootView {
     }
 }
 
-use gpui::prelude::FluentBuilder as _;
-
 /// Options of the main window. `focus: false` keeps self-tests from taking focus.
 pub fn main_window_options(focus: bool, cx: &App) -> WindowOptions {
     WindowOptions {

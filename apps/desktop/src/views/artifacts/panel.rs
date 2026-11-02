@@ -12,6 +12,7 @@ use gpui::{
 use gpui_component::{Disableable as _, notification::Notification};
 
 use super::window;
+use crate::ui::NamedButton as _;
 use crate::{
     app::{Changes, Services},
     copy::{artifacts as ca, files as f, fill, panel as p},
@@ -163,7 +164,7 @@ impl Render for TopicOutputs {
             )))
             .child(
                 ui::icon_button_sm("artifact-new", Lucide::Plus)
-                    .tooltip(ca::NEW)
+                    .named(ca::NEW)
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.pick_and_upload(None, cx))),
             );
@@ -260,7 +261,7 @@ impl Render for TopicOutputs {
                                     ))),
                                     Lucide::Plus,
                                 )
-                                .tooltip(ca::NEW_VERSION)
+                                .named(ca::NEW_VERSION)
                                 .disabled(busy)
                                 .on_click(cx.listener(
                                     move |this, _, _, cx| {

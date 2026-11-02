@@ -15,6 +15,7 @@ use gpui::{
 };
 use gpui_component::{menu::ContextMenuExt as _, tooltip::Tooltip};
 
+use crate::ui::NamedButton as _;
 use crate::{
     app::{Changes, Place, Services},
     copy::{common, fill, nav, realtime as r},
@@ -674,7 +675,7 @@ impl Render for TopicListView {
             .when(is_group, |el| {
                 el.child(
                     ui::icon_button("new-topic", Lucide::SquarePen)
-                        .tooltip(nav::NEW_TOPIC_TIP)
+                        .named(nav::NEW_TOPIC_TIP)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))
                         })),

@@ -17,6 +17,7 @@ use super::{
     AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text, open_file,
     preview_size, size_text,
 };
+use crate::ui::NamedButton as _;
 use crate::{
     copy::{files as f, fill},
     data::{ChatProvider, FileAttachment, Message, TransferState, download_key, upload_key},
@@ -407,7 +408,7 @@ pub fn file_row_in(
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
         ui::icon_button(id(part), glyph)
-            .tooltip(label)
+            .named(label)
             .disabled(running)
             .on_click(move |_, _, cx| {
                 cx.stop_propagation();
@@ -428,7 +429,7 @@ pub fn file_row_in(
         let file = file.clone();
         vec![
             ui::icon_button(id("cancel"), Lucide::X)
-                .tooltip(f::CANCEL_DOWNLOAD)
+                .named(f::CANCEL_DOWNLOAD)
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
                     provider.cancel_download(&file);

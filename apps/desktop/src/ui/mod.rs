@@ -42,8 +42,8 @@ pub use chip::{BadgeKind, ChipStyle, CountBadge, Kbd, RoleTag, StatusChip};
 pub use composer::{ComposerShell, composer_tool, send_button};
 #[allow(unused_imports)]
 pub use controls::{
-    ButtonKind, ButtonSize, ButtonSpec, FieldKind, TextField, button, field_help, field_label,
-    icon_button, icon_button_sm, placeholder_input, primary_button, secondary_button,
+    ButtonKind, ButtonSize, ButtonSpec, FieldKind, NamedButton, TextField, button, field_help,
+    field_label, icon_button, icon_button_sm, placeholder_input, primary_button, secondary_button,
     select_trigger, text_button,
 };
 pub use icons::{AppAssets, Lucide, button_glyph, icon};

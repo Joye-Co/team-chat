@@ -18,6 +18,7 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
+use crate::ui::NamedButton as _;
 use crate::{
     app::{Changes, Services},
     characters::{CharacterStatus, status::StatusBoard},
@@ -274,7 +275,7 @@ impl MembersPage {
                 ElementId::Name(format!("more-{id}").into()),
                 Lucide::Ellipsis,
             )
-            .tooltip(s::MEMBER_MORE)
+            .named(s::MEMBER_MORE)
             .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
                 let page = page.clone();
                 if deactivated {

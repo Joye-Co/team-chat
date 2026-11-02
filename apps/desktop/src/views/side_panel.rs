@@ -18,6 +18,7 @@ use gpui::{
 };
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 
+use crate::ui::NamedButton as _;
 use crate::{
     app::{Changes, MentionInComposer, Services},
     copy::{dev, fill, panel as p, process as pc},
@@ -573,7 +574,7 @@ impl SidePanel {
             .when(sub, |el| {
                 el.child(
                     ui::icon_button("panel-back", Lucide::ChevronLeft)
-                        .tooltip(p::BACK)
+                        .named(p::BACK)
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
                             this.set_tab(0, cx)
@@ -591,7 +592,7 @@ impl SidePanel {
             )
             .child(
                 ui::icon_button("panel-close", Lucide::X)
-                    .tooltip(p::CLOSE)
+                    .named(p::CLOSE)
                     .on_click(cx.listener(|this, _, _, cx| {
                         cx.stop_propagation();
                         this.services

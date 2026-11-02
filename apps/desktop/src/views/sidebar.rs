@@ -17,6 +17,7 @@ use gpui_component::{
     tooltip::Tooltip,
 };
 
+use crate::ui::NamedButton as _;
 use crate::{
     app::{Changes, Place, Services},
     copy::{common, fill, nav},
@@ -579,7 +580,7 @@ impl Render for Sidebar {
             None,
             Some(
                 ui::icon_button_sm("sidebar-new-group", Lucide::Plus)
-                    .tooltip(nav::NEW_GROUP)
+                    .named(nav::NEW_GROUP)
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewGroup), cx))
                     .into_any_element(),
             ),
@@ -592,7 +593,7 @@ impl Render for Sidebar {
             None,
             Some(
                 ui::icon_button_sm("sidebar-start-dm", Lucide::Plus)
-                    .tooltip(nav::START_DM)
+                    .named(nav::START_DM)
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(StartDm), cx))
                     .into_any_element(),
             ),
@@ -646,7 +647,7 @@ impl Render for Sidebar {
                 )
                 .child(
                     ui::icon_button("sidebar-settings", Lucide::Settings)
-                        .tooltip(crate::copy::settings::TITLE)
+                        .named(crate::copy::settings::TITLE)
                         .on_click(|_, window, cx| {
                             window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
                         }),
