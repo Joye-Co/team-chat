@@ -1,0 +1,14 @@
+//! Machine daemon: connects out to the server, runs coding CLIs for bot members and streams
+//! normalized progress back. See docs/machine-protocol.md.
+
+pub mod config;
+pub mod daemon;
+pub mod doctor;
+pub mod health;
+pub mod product;
+pub mod proto;
+pub mod run;
+pub mod runtime;
+pub mod service;
+pub mod upload;
+pub mod workspace;
