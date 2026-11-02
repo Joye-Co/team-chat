@@ -16,24 +16,52 @@ work needs. The wire contract is [protocol.md](protocol.md).
 | `crates/chat-protocol` | Rust serde types for the protocol |
 | `crates/chat-core` | Rust client core without UI: local SQLite cache, sync engine, WebSocket connection |
 | `apps/desktop` | Rust GPUI macOS app |
-| `apps/daemon` | Rust machine daemon that runs coding CLIs for bot members (V1) |
+| `apps/daemon` | Rust machine daemon that runs coding CLIs for bot members |
 | `tools/e2e` | Headless clients for end-to-end and load tests (Rust, built on chat-core) |
-| `scripts` | `build-dmg.sh` and admin helpers |
+| `crates/artifact-view` | WKWebView window for HTML artifacts (objc2) |
+| `packages/search` | CJK bigram tokenizing for SQLite FTS5 |
+| `packages/bot-sdk` | TypeScript SDK for external bots |
+| `ops/monitor` | Monitor Worker |
+| `scripts` | `build-dmg.sh`, release and admin helpers |
+| `docs/PRODUCT.md` | Product brief: interface words, screens, V1 bar |
 
 ## Server (Cloudflare)
 
-- **API Worker**: HTTP API, auth, and routing of WebSocket upgrades to the member's gateway.
+- **API Worker**: HTTP API, auth, file upload and download, webhooks, and routing of WebSocket
+  upgrades to the member's gateway. A scheduled handler runs the daily archive.
 - **MemberGateway** Durable Object, one per member: holds that member's WebSockets (several
   devices), forwards frames to group rooms, pushes events and directory updates, stores read
   cursors.
 - **GroupRoom** Durable Object, one per group: the group's event log in its own SQLite (seq,
   dedupe, topics, messages), fan-out to member gateways, unread counts, typing and presence in
-  memory only, delta coalescing for streaming bot replies.
-- **BotDesk** Durable Object, one per bot member (V1): the front desk loop.
-- **MachineLink** Durable Object, one per machine (V1): the daemon connection and task leases.
-- **D1**: members, tokens, invites, groups, group membership, audit log.
-- **R2** (V1): attachments, HTML artifacts, raw sessions, daily archives of every group log.
-- Every Durable Object is created with location hint `oc`.
+  memory only, delta coalescing for streaming bot replies. Feature modules (search, files,
+  bots, notifications) plug in through hooks.
+- **BotDesk** Durable Object, one per bot member: the front desk. It never executes commands.
+- **MachineLink** Durable Object, one per machine: the daemon connection and task leases.
+- **D1**: members, tokens, invites, groups, group membership, files and artifacts index, hooks,
+  machines, audit log.
+- **R2**: attachments, HTML artifact versions, raw sessions, releases (DMGs), diagnostics, and
+  the daily archive of every group log and of D1.
+- **Monitor Worker** (`ops/monitor`): cron health checks and a real message round trip; alerts
+  go to an ops group.
+- Every Durable Object is created with location hint `oc`. Queues are available but V1 uses
+  `ctx.waitUntil` and Durable Object alarms instead.
+
+Server code layout: `server/src/core/` (router, auth, gateway, rooms), and one folder per
+feature: `files/`, `search/`, `bots/`, `integrations/`, `ops/`, `notify/`.
+
+## Environments
+
+| Env | Worker | D1 | R2 bucket | URL |
+| --- | --- | --- | --- | --- |
+| local | `wrangler dev` | local | local | `http://127.0.0.1:<port>` |
+| e2e | `chat-api-e2e` | `chat-e2e` | `chat-files-e2e` | `https://chat-api-e2e.huangdeshiou.workers.dev` |
+| staging | `chat-api-staging` | `chat-staging` | `chat-files-staging` | `https://chat-api-staging.huangdeshiou.workers.dev` |
+| production | `chat-api-prod` | `chat-prod` | `chat-files-prod` | `https://chat-api-prod.huangdeshiou.workers.dev` |
+
+The three R2 buckets exist (made through the Cloudflare connector; the wrangler login has no R2
+scope, so do not run `wrangler r2` commands, but Worker R2 bindings work). Secret files live in
+`~/.config/team-chat/<env>/` (mode 600). Only the agents whose task says so deploy.
 
 ## Client (macOS)
 
@@ -56,10 +84,6 @@ Done when all five pass:
 4. The server runs on staging, and `tools/e2e` passes against staging.
 5. `scripts/build-dmg.sh` makes a DMG that installs and runs on another Mac.
 
-### V1: daily use by 5 people and 5 bots
+### V1: production use by 5 people and 5 bots
 
-Topics with status, DMs, @mentions, unread counts and notifications, edit and delete,
-attachments, Chinese search, presence and typing, bot members on bot tokens (same WebSocket
-protocol), the machine daemon running coding CLIs as bot members, session capture, HTML
-artifacts in a WKWebView window, a DMG on GitHub Releases, and a load test with 10 concurrent
-members that passes.
+See the V1 bar in [PRODUCT.md](PRODUCT.md#v1-production-use-by-5-people-and-5-bots).
