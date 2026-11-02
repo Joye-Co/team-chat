@@ -127,6 +127,9 @@ pub struct LoginView {
     local_error: Option<&'static str>,
     /// The last error stays until the user types again.
     show_error: bool,
+    /// The wrong code after a failed try: the next typed character or paste
+    /// starts a new code from box 1, Backspace edits it from the end.
+    rejected: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -147,7 +150,15 @@ impl LoginView {
                 |this, _, event: &InputEvent, window, cx| match event {
                     InputEvent::PressEnter { .. } => this.submit(window, cx),
                     InputEvent::Change => {
-                        let value = this.code.read(cx).value().to_string();
+                        let mut value = this.code.read(cx).value().to_string();
+                        if let Some(old) = this.rejected.take()
+                            && value.len() > old.len()
+                            && let Some(fresh) = value.strip_prefix(old.as_str())
+                        {
+                            value = fresh.to_string();
+                            this.code
+                                .update(cx, |st, cx| st.set_value(value.clone(), window, cx));
+                        }
                         if let Some(kept) = CodeInput::clamped(&value) {
                             this.code
                                 .update(cx, |st, cx| st.set_value(kept, window, cx));
@@ -179,15 +190,15 @@ impl LoginView {
                     match this.services.provider.session() {
                         SessionState::SignedOut {
                             last_error: Some(LoginError::ServerUnreachable),
-                        } => this.server_open = true,
-                        // A wrong code stays in the boxes, selected, so the
-                        // next keystroke replaces it.
+                        } => {
+                            this.server_open = true;
+                            this.server.read(cx).focus_handle(cx).focus(window, cx);
+                        }
+                        // A wrong code stays in the boxes with the caret
+                        // after it (§8.3).
                         SessionState::SignedOut {
                             last_error: Some(LoginError::BadCredential),
-                        } => {
-                            this.code.read(cx).focus_handle(cx).focus(window, cx);
-                            this.code.update(cx, |st, cx| st.select_all(window, cx));
-                        }
+                        } => this.reject_code(window, cx),
                         _ => {}
                     }
                     cx.notify();
@@ -201,8 +212,21 @@ impl LoginView {
             server_open: false,
             local_error: None,
             show_error: true,
+            rejected: None,
             _subscriptions: subscriptions,
         }
+    }
+
+    /// Keeps a wrong code in the boxes, focused, with the caret after its
+    /// last character; the next character typed or pasted starts a new code.
+    fn reject_code(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.code.read(cx).value().to_string();
+        let end = value.len();
+        self.code.update(cx, |st, cx| {
+            st.focus(window, cx);
+            st.set_selected_range(end..end, cx);
+        });
+        self.rejected = Some(value);
     }
 
     fn input(&self, cx: &gpui::App) -> CodeInput {
@@ -221,7 +245,13 @@ impl LoginView {
         self.code
             .update(cx, |st, cx| st.set_value(code.to_string(), window, cx));
         self.server_open = server_open;
-        self.code.read(cx).focus_handle(cx).focus(window, cx);
+        // An open server field has the focus, as after `使用其他服务器`.
+        let focus = if server_open {
+            self.server.read(cx).focus_handle(cx)
+        } else {
+            self.code.read(cx).focus_handle(cx)
+        };
+        focus.focus(window, cx);
         cx.notify();
     }
 
@@ -328,6 +358,8 @@ impl LoginView {
                     }
                     let active = focused && !selected && ix == cursor;
                     let ch = chars.get(ix).copied();
+                    // With all eight in, the caret sits after the last one.
+                    let caret_after = active && ch.is_some() && chars.len() == CODE_LEN;
                     row = row.child(
                         div()
                             .flex_none()
@@ -353,10 +385,29 @@ impl LoginView {
                             // chip, as selected text does in a field.
                             .children(ch.map(|c| {
                                 div()
+                                    .relative()
                                     .px(space::S6)
                                     .rounded(theme::radius::MARK)
                                     .when(selected, |el| el.bg(selection))
                                     .child(c.to_string())
+                                    .when(caret_after, |el| {
+                                        el.child(
+                                            div()
+                                                .absolute()
+                                                .top_0()
+                                                .bottom_0()
+                                                .right(px(1.))
+                                                .flex()
+                                                .items_center()
+                                                .child(
+                                                    div()
+                                                        .w(px(2.))
+                                                        .h(px(22.))
+                                                        .rounded(px(1.))
+                                                        .bg(k.accent),
+                                                ),
+                                        )
+                                    })
                             }))
                             // The caret sits in the next empty box.
                             .when(active && ch.is_none(), |el| {
