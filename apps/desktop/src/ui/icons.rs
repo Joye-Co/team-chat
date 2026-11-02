@@ -56,6 +56,13 @@ gpui_kit::assets::icon_assets!(
         FaceSlightlySmilingPlus,
         Reply,
         FileImage,
+        BellRing,
+        Bold,
+        Italic,
+        Strikethrough,
+        Link,
+        ListOrdered,
+        Quote,
     ]
 );
 

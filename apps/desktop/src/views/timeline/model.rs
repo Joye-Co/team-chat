@@ -146,6 +146,108 @@ pub fn diff(old: &[Message], new: &[Message]) -> Vec<ListOp> {
     ops
 }
 
+/// The local day of a time.
+pub fn local_day(at: Millis) -> Option<chrono::NaiveDate> {
+    use chrono::TimeZone as _;
+    chrono::Local
+        .timestamp_millis_opt(at)
+        .single()
+        .map(|t| t.date_naive())
+}
+
+/// A date divider goes above `message`: its day differs from the day of the
+/// message above it (or it is the first row).
+pub fn starts_day(prev: Option<&Message>, message: &Message) -> bool {
+    match prev {
+        None => true,
+        Some(prev) => local_day(prev.created_at) != local_day(message.created_at),
+    }
+}
+
+/// The date divider label (§8.2): `今天`, `昨天`, `周一` within a week,
+/// `10月28日 周二` this year, `2024年12月31日` before.
+pub fn day_label(day: chrono::NaiveDate, today: chrono::NaiveDate) -> String {
+    use crate::copy::{fill, timeline as t};
+    use chrono::Datelike as _;
+    const WEEKDAYS: [&str; 7] = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"];
+    let weekday = WEEKDAYS[day.weekday().num_days_from_monday() as usize];
+    let ago = (today - day).num_days();
+    if ago == 0 {
+        t::TODAY.to_string()
+    } else if ago == 1 {
+        t::YESTERDAY.to_string()
+    } else if (2..7).contains(&ago) {
+        weekday.to_string()
+    } else if day.year() == today.year() {
+        fill(
+            t::DATE_THIS_YEAR,
+            &[
+                ("m", &day.month().to_string()),
+                ("d", &day.day().to_string()),
+                ("w", weekday),
+            ],
+        )
+    } else {
+        fill(
+            t::DATE_OLDER,
+            &[
+                ("y", &day.year().to_string()),
+                ("m", &day.month().to_string()),
+                ("d", &day.day().to_string()),
+            ],
+        )
+    }
+}
+
+/// The time in a message's meta line: always `HH:MM` (§8.2; the day is in
+/// the date divider above it).
+pub fn clock(at: Millis) -> String {
+    use chrono::TimeZone as _;
+    chrono::Local
+        .timestamp_millis_opt(at)
+        .single()
+        .map(|t| t.format("%H:%M").to_string())
+        .unwrap_or_default()
+}
+
+/// A body of one to three emoji and nothing else: drawn at 32/40 (Slack).
+pub fn is_jumbo(body: &str) -> bool {
+    let body = body.trim();
+    if body.is_empty() || body.chars().count() > 24 {
+        return false;
+    }
+    let mut emoji = 0;
+    let mut chars = body.chars().peekable();
+    while let Some(c) = chars.next() {
+        if is_pictograph(c) {
+            emoji += 1;
+            // Skin tones, variation selectors and ZWJ sequences stay one emoji.
+            while let Some(&n) = chars.peek() {
+                if n == '\u{200d}' {
+                    chars.next();
+                    chars.next();
+                } else if matches!(n, '\u{fe0f}' | '\u{1f3fb}'..='\u{1f3ff}' | '\u{20e3}') {
+                    chars.next();
+                } else {
+                    break;
+                }
+            }
+        } else {
+            return false;
+        }
+    }
+    (1..=3).contains(&emoji)
+}
+
+fn is_pictograph(c: char) -> bool {
+    matches!(c,
+        '\u{1f300}'..='\u{1faff}'
+        | '\u{2600}'..='\u{27bf}'
+        | '\u{1f000}'..='\u{1f2ff}'
+        | '\u{2b00}'..='\u{2bff}'
+        | '\u{2300}'..='\u{23ff}')
+}
+
 /// Rows appended at the end by `ops` (for the jump-to-latest count).
 pub fn appended(old: &[Message], new: &[Message]) -> usize {
     match old.last() {
@@ -289,5 +391,26 @@ mod tests {
             Some("c-2")
         );
         assert_eq!(first_unread_key(&list, 9, Some("me")), None);
+    }
+
+    #[test]
+    fn day_labels_follow_the_spec() {
+        let d = |y, m, dd| chrono::NaiveDate::from_ymd_opt(y, m, dd).unwrap();
+        let today = d(2025, 11, 4);
+        assert_eq!(day_label(today, today), "今天");
+        assert_eq!(day_label(d(2025, 11, 3), today), "昨天");
+        assert_eq!(day_label(d(2025, 11, 1), today), "周六");
+        assert_eq!(day_label(d(2025, 10, 28), today), "10月28日 周二");
+        assert_eq!(day_label(d(2024, 12, 31), today), "2024年12月31日");
+    }
+
+    #[test]
+    fn jumbo_is_one_to_three_emoji_only() {
+        assert!(is_jumbo("👍👍👍"));
+        assert!(is_jumbo("🧑‍💻"));
+        assert!(is_jumbo(" ✅ "));
+        assert!(!is_jumbo("👍👍👍👍"));
+        assert!(!is_jumbo("好的👍"));
+        assert!(!is_jumbo(""));
     }
 }
