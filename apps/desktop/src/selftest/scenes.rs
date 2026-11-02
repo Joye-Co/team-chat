@@ -355,7 +355,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "topic-compose",
-        about: "The composer while reconnecting: the slab, a quote chip, the format bar and the emoji picker",
+        about: "The composer while reconnecting: the sidebar banner, a quote chip, the format bar and the emoji picker",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: crate::views::timeline::preview::open_compose,
