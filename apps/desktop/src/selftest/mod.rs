@@ -181,6 +181,7 @@ fn run(options: Options) -> i32 {
         .with_assets(crate::ui::AppAssets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
+            crate::render_text_like_the_mockups(cx);
             // No Dock icon. The app activates while it captures, so the
             // windows draw as key windows (traffic lights in color), then
             // hands the focus back to the app that had it.

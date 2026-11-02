@@ -67,10 +67,15 @@ scope, so do not run `wrangler r2` commands, but Worker R2 bindings work). Secre
 
 - GPUI plus gpui-component, built with GPUI's `runtime_shaders` feature, so a full Xcode is not
   needed to build.
-- `third_party/gpui-pre` is gpui-pre 0.3.10 with two text fixes, used through `[patch.crates-io]`:
+- `third_party/gpui-pre` is gpui-pre 0.3.10 with three text patches, used through `[patch.crates-io]`:
   CJK line breaking (no line starts with closing or ends with opening punctuation; paths and
-  URLs break after `/`, never before it, in `line_wrapper.rs` and `line_layout.rs`) and an
-  ellipsis that fits the shaped width and trims punctuation and short word cuts before `…`.
+  URLs break after `/`, never before it, in `line_wrapper.rs` and `line_layout.rs`); an
+  ellipsis that fits the shaped width and trims punctuation and short word cuts before `…`; and
+  `TextSystem::set_font_smoothing`, an app-level switch that makes the window request glyph
+  dilation 0, which the app turns off so text renders like `-webkit-font-smoothing: antialiased`.
+- `third_party/gpui-pre-apple` is gpui-pre-apple 0.3.10 with one patch, also through
+  `[patch.crates-io]`: a glyph with dilation 0 is drawn with font smoothing off (a bitmap
+  context smooths by default, which made dark text one weight heavier).
 - chat-core runs networking on a background tokio runtime. The UI renders from the local SQLite
   cache and never waits for the network.
 

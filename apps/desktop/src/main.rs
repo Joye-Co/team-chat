@@ -154,6 +154,7 @@ fn main() {
             .with_assets(gpui_kit::assets::Assets)
             .run(move |cx: &mut App| {
                 gpui_kit::init(cx);
+                render_text_like_the_mockups(cx);
                 views::settings::selftest::run(settings, finish, cx);
             });
         std::process::exit(EXIT_CODE.load(Ordering::SeqCst));
@@ -176,6 +177,7 @@ fn main() {
     application.on_reopen(views::nav::show_main_window);
     application.run(move |cx: &mut App| {
         gpui_kit::init(cx);
+        render_text_like_the_mockups(cx);
         if let Some(url) = args.live_url.clone() {
             let live = provider::selftest_live::LiveArgs {
                 url,
@@ -340,4 +342,10 @@ fn finish(path: &PathBuf, json: serde_json::Value, ok: bool, cx: &mut App) {
     cx.quit();
     // On macOS `run` does not return after `quit`, so exit with the code here.
     std::process::exit(EXIT_CODE.load(Ordering::SeqCst));
+}
+
+/// The app renders text with grayscale antialiasing and no macOS font-smoothing dilation,
+/// like the mockups (`-webkit-font-smoothing: antialiased`) and the Electron chat apps.
+pub(crate) fn render_text_like_the_mockups(cx: &mut App) {
+    cx.text_system().set_font_smoothing(false);
 }
