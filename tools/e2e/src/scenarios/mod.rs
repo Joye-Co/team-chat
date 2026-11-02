@@ -15,6 +15,7 @@ mod idempotent;
 mod load;
 mod permissions;
 mod pipeline;
+mod reactions;
 mod soak;
 mod streaming;
 
@@ -38,6 +39,7 @@ pub fn registry() -> Vec<Scenario> {
         gap::SCENARIO,
         streaming::SCENARIO,
         permissions::SCENARIO,
+        reactions::SCENARIO,
         pipeline::SCENARIO,
         load::SCENARIO,
         soak::SCENARIO,

@@ -46,6 +46,7 @@ their tokens are revoked at the end of the run.
 | `gap` | B's test hook drops one live event; the next event shows the gap and B fetches it |
 | `streaming` | A bot streams with deltas and a final edit; humans see growing text and the final body; one `message.updated` stored |
 | `permissions` | A non-member can neither read nor write (WS frames and HTTP); bad and revoked tokens get 401 |
+| `reactions` | A and B add and remove reactions; caches follow live, a repeated add stores nothing, a fresh client rebuilds the list from the log |
 | `load` | 5 humans + 5 bots in 3 groups send 100 messages each at once; all caches equal the server log; p50/p95 latency |
 | `soak` | `--minutes N` of low-rate chat with network blips and restarts (sends queued while stopped); consistency at the end |
 
