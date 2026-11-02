@@ -512,6 +512,10 @@ impl AppleTextSystemState {
                 cx.set_should_smooth_fonts(true);
                 cx.set_gray_fill_color(luminance, 1.0);
             } else {
+                // Patch (team-chat): dilation 0 means no font smoothing. A bitmap context
+                // smooths by default, which thickens dark glyphs; turn it off explicitly.
+                cx.set_allows_font_smoothing(false);
+                cx.set_should_smooth_fonts(false);
                 cx.set_gray_fill_color(0.0, 1.0);
             }
             self.fonts[params.font_id.0]
