@@ -21,49 +21,20 @@ use chrono::{Datelike, Local, TimeZone};
 use gpui::{App, Div, IntoElement, ParentElement, Pixels, Styled, div, px};
 
 use crate::{
-    copy::{self, common, fill},
+    copy::{common, fill},
     data::{Member, Millis, Topic, TopicStatus},
-    theme,
+    theme, ui,
 };
 
-/// Round avatar with the first letter of the name; bots get a small mark.
-pub fn avatar(member: Option<&Member>, size: Pixels, cx: &App) -> Div {
-    let colors = theme::colors(cx);
-    let initial: String = member
-        .and_then(|m| m.name.chars().next())
-        .map(|c| c.to_string())
-        .unwrap_or_default();
-    let is_bot = member.is_some_and(|m| m.is_bot());
-    let mut el = div()
-        .relative()
+/// The member's avatar (`ui::MemberAvatar`: people are circles, bots are
+/// rounded squares with the bot mark).
+pub fn avatar(member: Option<&Member>, size: Pixels, _cx: &App) -> Div {
+    div()
         .flex_none()
-        .size(size)
-        .rounded_full()
-        .bg(colors.accent)
-        .text_color(colors.accent_foreground)
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(size * 0.45)
-        .child(initial);
-    if is_bot {
-        el = el.child(
-            div()
-                .absolute()
-                .bottom(px(-2.))
-                .right(px(-4.))
-                .px(px(2.))
-                .rounded(px(3.))
-                .bg(colors.foreground)
-                .text_color(colors.background)
-                .text_size(px(8.))
-                .child(common::BOT_MARK),
-        );
-    }
-    el
+        .child(ui::MemberAvatar::new(member, size))
 }
 
-/// Presence dot.
+/// Presence dot (online green, else `text-3`).
 pub fn presence_dot(online: bool, cx: &App) -> Div {
     let colors = theme::colors(cx);
     div().flex_none().size(px(8.)).rounded_full().bg(if online {
@@ -73,32 +44,16 @@ pub fn presence_dot(online: bool, cx: &App) -> Div {
     })
 }
 
-/// Unread or mention count badge. `None` for zero.
-pub fn count_badge(count: u32, mention: bool, cx: &App) -> Option<Div> {
-    if count == 0 {
-        return None;
-    }
-    let colors = theme::colors(cx);
-    let text = if count > 99 {
-        copy::nav::UNREAD_MORE.to_string()
-    } else {
-        count.to_string()
-    };
-    let (bg, fg) = if mention {
-        (colors.mention, colors.mention_foreground)
-    } else {
-        (colors.badge, colors.badge_foreground)
-    };
-    Some(
-        div()
-            .flex_none()
-            .px(px(6.))
-            .rounded_full()
-            .bg(bg)
-            .text_color(fg)
-            .text_xs()
-            .child(if mention { format!("@{text}") } else { text }),
-    )
+/// Unread or mention count badge (`ui::CountBadge`). `None` for zero.
+pub fn count_badge(count: u32, mention: bool, _cx: &App) -> Option<Div> {
+    (count > 0).then(|| {
+        let kind = if mention {
+            ui::BadgeKind::Mention
+        } else {
+            ui::BadgeKind::Unread
+        };
+        div().flex_none().child(ui::CountBadge::new(count, kind))
+    })
 }
 
 /// The status chip text (docs/PRODUCT.md), or `None` for `open`.
@@ -132,21 +87,9 @@ pub fn status_chip(
     topic: &Topic,
     me: Option<&str>,
     members: &[Member],
-    cx: &App,
+    _cx: &App,
 ) -> Option<impl IntoElement> {
-    let text = status_chip_text(topic, me, members)?;
-    let (bg, fg) = theme::status_chip_colors(topic.status, cx);
-    Some(
-        div()
-            .flex_none()
-            .px(px(6.))
-            .py(px(1.))
-            .rounded(px(4.))
-            .bg(bg)
-            .text_color(fg)
-            .text_xs()
-            .child(text),
-    )
+    ui::StatusChip::for_topic(topic, me, members)
 }
 
 /// Short local time for lists and the timeline: 刚刚, N 分钟前, HH:MM, 昨天, M月D日.

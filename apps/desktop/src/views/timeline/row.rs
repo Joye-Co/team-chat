@@ -7,7 +7,7 @@ use gpui::{
     ParentElement, Pixels, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Sizable as _,
+    Sizable as _,
     button::{Button, ButtonVariants as _},
     input::Textarea,
     menu::ContextMenuExt as _,
@@ -305,54 +305,9 @@ fn new_messages_divider(color: Hsla) -> impl IntoElement {
         .child(div().flex_1().h(px(1.)).bg(color))
 }
 
-/// Round avatar with the initial on a color picked from the member id; bots
-/// get a small mark.
-pub fn member_avatar(member: Option<&Member>, size: Pixels, cx: &App) -> impl IntoElement {
-    let theme = cx.theme();
-    let palette = [
-        theme.blue,
-        theme.green,
-        theme.magenta,
-        theme.cyan,
-        theme.yellow,
-        theme.red,
-    ];
-    let color = member
-        .map(|m| palette[color_index(&m.id, palette.len())])
-        .unwrap_or(theme.muted_foreground);
-    let initial: String = member
-        .and_then(|m| m.name.chars().next())
-        .map(|c| c.to_uppercase().collect())
-        .unwrap_or_default();
-    let is_bot = member.is_some_and(|m| m.is_bot());
-    let colors = theme::colors(cx);
-    div()
-        .relative()
-        .flex_none()
-        .size(size)
-        .rounded_full()
-        .bg(color.opacity(0.85))
-        .text_color(gpui::white())
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(size * 0.45)
-        .font_weight(FontWeight::SEMIBOLD)
-        .child(initial)
-        .when(is_bot, |el| {
-            el.child(
-                div()
-                    .absolute()
-                    .bottom(px(-2.))
-                    .right(px(-4.))
-                    .px(px(2.))
-                    .rounded(px(3.))
-                    .bg(colors.foreground)
-                    .text_color(colors.background)
-                    .text_size(px(8.))
-                    .child(common::BOT_MARK),
-            )
-        })
+/// The timeline avatar (`ui::MemberAvatar`).
+pub fn member_avatar(member: Option<&Member>, size: Pixels, _cx: &App) -> impl IntoElement {
+    crate::ui::MemberAvatar::new(member, size)
 }
 
 /// A stable index into a palette of `n` colors for a member id.

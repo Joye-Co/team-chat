@@ -46,6 +46,8 @@ mod selftest;
 mod theme;
 mod updater;
 #[allow(dead_code)]
+mod ui;
+#[allow(dead_code)]
 mod views;
 
 use std::{
@@ -168,7 +170,7 @@ fn main() {
         }
     };
 
-    let application = gpui_kit::application().with_assets(gpui_kit::assets::Assets);
+    let application = gpui_kit::application().with_assets(ui::AppAssets);
     // A click on the Dock icon with no window open shows the main window again.
     application.on_reopen(views::nav::show_main_window);
     application.run(move |cx: &mut App| {

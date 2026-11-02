@@ -29,7 +29,7 @@ use std::{
 use gpui::{
     ActivationPolicy, AnyWindowHandle, App, AsyncApp, Pixels, Size, WindowAppearance, px, size,
 };
-use gpui_component::{Theme, ThemeMode};
+use gpui_component::ThemeMode;
 
 use crate::{app::Services, data::ChatProvider, fake};
 use scenes::{Scene, Start};
@@ -170,7 +170,7 @@ fn run(options: Options) -> i32 {
     let code = std::rc::Rc::new(std::cell::Cell::new(1));
     let result = code.clone();
     gpui_kit::application()
-        .with_assets(gpui_kit::assets::Assets)
+        .with_assets(crate::ui::AppAssets)
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             // No Dock icon and no activation: the user keeps working.
@@ -270,7 +270,7 @@ async fn shoot(
     let result = async {
         cx.update(|cx| {
             handle.update(cx, |_, window, cx| {
-                Theme::change(theme_mode, Some(window), cx);
+                crate::theme::set_mode(theme_mode, cx);
                 window.refresh();
                 capture::order_front(window)
             })
