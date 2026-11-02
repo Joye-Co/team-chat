@@ -37,7 +37,7 @@ function dropGroupAround(svg, at) {
  * and the question bubble read as notification badges, so they are removed. The face keeps the
  * expression; the status moves to the bottom-right pip.
  */
-function smallArt(svg) {
+export function smallArt(svg) {
   let s = svg;
   const glow = s.indexOf("-g-glow)\"");
   if (glow > 0) s = dropGroupAround(s, glow);
@@ -53,47 +53,69 @@ function smallArt(svg) {
 }
 
 const SIZES = [16, 20, 24, 32, 48, 64, 128];
+const BOXES = JSON.parse(readFileSync(join(HERE, "char-boxes.json"), "utf8"));
 const charCache = new Map();
-/** A bot's character at its live status (idle, working, needs-input, success, error, offline). */
-export function character(id, status = "idle", size = 32) {
+/**
+ * A bot's character at its live status (idle, working, needs-input, success, error, offline).
+ * `fit` crops the art to its visible bounds (the idle pose, so a status change does not move it),
+ * square by the larger side and centered: every character then fills the same box (DESIGN §7.9).
+ */
+export function character(id, status = "idle", size = 32, { fit = false } = {}) {
   const file = SIZES.find((s) => s >= size) ?? 128;
   const small = size <= 40;
-  const key = `${id}/${status}-${file}-${small}`;
+  const key = `${id}/${status}-${file}-${small}-${fit}`;
   if (!charCache.has(key)) {
     let svg = readFileSync(join(REPO, `apps/desktop/assets/characters/${id}/${status}-${file}.svg`), "utf8");
     if (small) svg = smallArt(svg);
+    const b = BOXES[`${id}__idle`];
+    if (fit && b) {
+      const side = Math.max(b[2], b[3]);
+      const x = b[0] + b[2] / 2 - side / 2;
+      const y = b[1] + b[3] / 2 - side / 2;
+      svg = svg.replace(/viewBox="[^"]*"/, `viewBox="${x.toFixed(1)} ${y.toFixed(1)} ${side.toFixed(1)} ${side.toFixed(1)}"`);
+    }
     charCache.set(key, `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`);
   }
   return `<img class="char" width="${size}" height="${size}" src="${charCache.get(key)}" alt="">`;
 }
 
-/** Initials: one character for a CJK name, two letters for a Latin name (DESIGN §7.9). */
-export function initials(name) {
-  const n = name.trim().replace(/^\p{Extended_Pictographic}(‍\p{Extended_Pictographic})*\s*/u, "");
+/**
+ * Initials (DESIGN §7.9): one character at 24 pt and below; above that, one Han character for a
+ * CJK name and two letters for a Latin name.
+ */
+export function initials(name, size = 36) {
+  const n = name.trim().replace(/^\p{Extended_Pictographic}(\u200d\p{Extended_Pictographic})*\s*/u, "");
   const chars = [...n];
   if (/[一-鿿]/.test(chars[0] ?? "")) return chars[0];
   const words = n.split(/\s+/).filter(Boolean);
   const a = [...(words[0] ?? "?")][0];
-  const b = words.length > 1 ? [...words[words.length - 1]][0] : "";
+  const b = words.length > 1 && size > 24 ? [...words[words.length - 1]][0] : "";
   return (a + b).toUpperCase();
 }
 
+/** One soft tint per bot, picked by a stable hash of the character id (DESIGN §2.6). */
+const tint = (id) => (([...id].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % 6) + 1);
+
 /**
- * Member avatar. People: neutral circle with initials and a presence dot. Bots: their character;
- * a status pip only while the bot works or waits for someone.
+ * Member avatar (DESIGN §7.9). People: a circle (photo, or initials on the neutral fill) with a
+ * presence dot. Bots: a rounded-square tile in the bot's tint with the character fitted to 78 %;
+ * the shape alone says bot or person. A status pip shows while the bot works, waits or fails.
  */
-export function avatar(m, size, mode, { presence = true, ring = "var(--content)" } = {}) {
+export function avatar(m, size, mode, { presence = true, ring = "var(--content)", pip: showPip = true } = {}) {
   let inner;
-  if (m.char) inner = character(m.char, m.state ?? "idle", size);
-  else {
-    const fs = Math.round(size * (initials(m.name).length > 1 ? 0.38 : 0.44));
-    inner = `<span class="mono" style="font-size:${fs}px">${esc(initials(m.name))}</span>`;
+  if (m.char) {
+    const art = Math.round(size * 0.78);
+    inner = `<span class="tile b${tint(m.char)}" style="border-radius:${Math.round(size * 0.25)}px">${character(m.char, m.state ?? "idle", art, { fit: true })}</span>`;
+  } else {
+    const ini = initials(m.name, size);
+    const fs = size <= 24 ? 12 : Math.round(size * (ini.length > 1 ? 0.38 : 0.44));
+    inner = `<span class="mono" style="font-size:${fs}px">${esc(ini)}</span>`;
   }
   const d = size >= 32 ? 10 : 8;
   let dot = "";
   if (presence && !m.char && m.online !== undefined) dot = `<span class="pdot ${m.online ? "on" : "off"}" style="width:${d}px;height:${d}px;--ring:${ring}"></span>`;
   const pip = { working: "work", "needs-input": "wait", error: "err" }[m.state];
-  if (presence && m.char && pip && size <= 36) dot = `<span class="pdot ${pip}" style="width:${d}px;height:${d}px;--ring:${ring}"></span>`;
+  if (presence && showPip && m.char && pip && size <= 36) dot = `<span class="pdot ${pip}" style="width:${d}px;height:${d}px;--ring:${ring}"></span>`;
   return `<span class="av ${m.char ? "bot" : "person"}" style="width:${size}px;height:${size}px">${inner}${dot}</span>`;
 }
 
@@ -118,14 +140,17 @@ const STATUS = {
  * every other status is a quiet label (glyph + word, no fill). Topic rows pass `row: true`:
  * 进行中 shows nothing there and names are dropped.
  */
-export function chip(status, { you = false, name = "", row = false } = {}) {
+export function chip(status, { you = false, name = "", row = false, quiet = false } = {}) {
   if (!status || status === "open") return "";
   if (row && status === "in_progress") return "";
   const [glyph, tone, word] = STATUS[status];
-  if ((status === "waiting_answer" || status === "waiting_review") && you) {
-    return `<span class="chip t-you">${icon(glyph, 14)}<span class="cl">等你${word}</span></span>`;
-  }
-  if (status === "waiting_answer" || status === "waiting_review") {
+  const waiting = status === "waiting_answer" || status === "waiting_review";
+  // Rows: a compact chip with no glyph, so the preview keeps the line (§7.8).
+  if (waiting && you && row) return `<span class="chip sm t-you">${status === "waiting_answer" ? "等你答" : "等你审"}</span>`;
+  // Headers and the switcher: the same words without a fill; the list row keeps the one fill.
+  if (waiting && you && quiet) return `<span class="lbl-s t-quiet">${icon(glyph, 14)}<span class="cl">等你${word}</span></span>`;
+  if (waiting && you) return `<span class="chip t-you">${icon(glyph, 14)}<span class="cl">等你${word}</span></span>`;
+  if (waiting) {
     const label = name && !row ? `等<span class="cn">${esc(spaced(name))}</span>${word}` : `等${word}`;
     return `<span class="lbl-s t-neutral">${icon(glyph, 14)}<span class="cl">${label}</span></span>`;
   }
@@ -133,9 +158,43 @@ export function chip(status, { you = false, name = "", row = false } = {}) {
   return `<span class="lbl-s t-${tone}">${icon(glyph, 14)}<span class="cl">${word}</span></span>`;
 }
 
+/** Counts above 99 render as 99+ everywhere: badges, count pills, tabs, sections (§7.8). */
+export const cap = (n) => (typeof n === "number" && n > 99 ? "99+" : n);
 export const kbd = (k) => `<span class="kbd">${k}</span>`;
-export const badge = (n) => `<span class="badge">${n}</span>`;
-export const count = (n) => `<span class="count">${n}</span>`;
+export const badge = (n) => `<span class="badge">${cap(n)}</span>`;
+export const count = (n) => `<span class="count">${cap(n)}</span>`;
+
+/** Estimated advance of one character in em (system UI font; Han and full-width = 1). */
+function adv(c) {
+  if (/[\u2E80-\u9FFF\uFF00-\uFFEF\u3000-\u303F]/.test(c)) return 1;
+  if (/\p{Extended_Pictographic}/u.test(c)) return 1.25;
+  if (/[\u200d\uFE0F]/.test(c)) return 0;
+  if (/[ilj.,:;'!|()\[\]]/.test(c)) return 0.3;
+  if (c === " ") return 0.28;
+  if (/[A-Z]/.test(c)) return 0.64;
+  if (/[mwMW]/.test(c)) return 0.86;
+  return 0.54;
+}
+/**
+ * End truncation (DESIGN §15): fits `s` in `px` at `font` px. Before the "…" it trims trailing
+ * spaces, open brackets and punctuation, so no line ends in " …", "（…" or "v0.9.…".
+ */
+export function fit(s, px, font = 14) {
+  const c = [...s];
+  const w = (a) => a.reduce((t, ch) => t + adv(ch), 0) * font;
+  if (w(c) <= px) return s;
+  const room = px - font * 0.9; // the ellipsis
+  let n = c.length;
+  while (n > 0 && w(c.slice(0, n)) > room) n--;
+  let out = c.slice(0, n).join("");
+  // A Latin word cut mid-way to under 4 characters, or a cut version number, goes whole.
+  if (/[A-Za-z0-9.]/.test(c[n] ?? "")) {
+    const part = out.match(/[A-Za-z0-9.]+$/u)?.[0] ?? "";
+    if (part && (part.length < 4 || part.includes("."))) out = out.slice(0, -part.length);
+  }
+  out = out.replace(/[\s（(【\[「“.。,，、:：·\-]+$/u, "");
+  return `${out.replace(/\s+$/u, "")}…`;
+}
 
 /** Middle ellipsis that keeps the end of a file name (DESIGN §15). */
 export function midEll(s, max = 44, keep = 12) {
@@ -146,18 +205,22 @@ export function midEll(s, max = 44, keep = 12) {
 
 const BASE_CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
-html,body{width:var(--w);height:var(--h);overflow:hidden}
+html,body{width:var(--pw);height:var(--ph);overflow:hidden}
+.desk{width:var(--pw);height:var(--ph);background:var(--desk);display:flex;align-items:center;justify-content:center}
+.frame{width:var(--w);height:var(--h);border-radius:12px;overflow:hidden;position:relative;flex:none;box-shadow:var(--shadow-window)}
 body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","Hiragino Sans GB","Apple Color Emoji",sans-serif;font-size:14px;line-height:22px;color:var(--text-1);background:var(--content);-webkit-font-smoothing:antialiased;font-variant-numeric:tabular-nums}
 .i{flex:none;display:block}
 .char{display:block}
 .av{position:relative;flex:none;display:inline-flex}
 .av .mono{width:100%;height:100%;border-radius:50%;display:flex;align-items:center;justify-content:center;font-weight:600;letter-spacing:0;background:var(--avatar-bg);color:var(--avatar-fg)}
-.pdot{position:absolute;right:-2px;bottom:-2px;border-radius:50%;box-shadow:0 0 0 2px var(--ring)}
+.pdot{position:absolute;right:-1px;bottom:-1px;border-radius:50%;box-shadow:0 0 0 2px var(--ring)}
 .pdot.on{background:var(--online)}
 .pdot.off{background:var(--ring);box-shadow:inset 0 0 0 1.5px var(--text-3),0 0 0 2px var(--ring)}
 .pdot.work{background:var(--accent)}
 .pdot.wait{background:var(--you-glyph)}
 .pdot.err{background:var(--danger)}
+.tile{width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.tile.b1{background:var(--bot-1)}.tile.b2{background:var(--bot-2)}.tile.b3{background:var(--bot-3)}.tile.b4{background:var(--bot-4)}.tile.b5{background:var(--bot-5)}.tile.b6{background:var(--bot-6)}
 .gtile{flex:none;display:inline-flex;align-items:center;justify-content:center;border-radius:6px;font-weight:600;background:var(--tile);color:var(--text-2)}
 .chip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px 0 6px;border-radius:6px;font-size:12px;line-height:16px;font-weight:500;white-space:nowrap;max-width:184px;flex:none}
 .chip .cl,.lbl-s .cl{overflow:hidden;text-overflow:ellipsis;display:inline-flex;min-width:0;white-space:nowrap}
@@ -166,15 +229,19 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","H
 .t-info{background:var(--info-bg);color:var(--info-text)}
 .t-you{background:var(--you-bg);color:var(--you-text);font-weight:600}
 .t-you .i{color:var(--you-glyph)}
+.chip.sm{height:20px;padding:0 6px;font-size:12px;line-height:16px;font-weight:600;max-width:72px;border-radius:6px}
+.lbl-s.t-quiet{color:var(--text-2)}
+.lbl-s.t-quiet .i{color:var(--you-glyph)}
 .lbl-s.t-danger{color:var(--danger-text)}
 .lbl-s.t-success,.lbl-s.t-neutral{color:var(--text-3)}
 .kbd{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 5px;border-radius:6px;background:var(--field);color:var(--text-2);font-size:12px;line-height:16px;font-weight:500;flex:none}
 .badge{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--badge);color:#fff;font-size:12px;line-height:16px;font-weight:600;flex:none}
-.count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--count-bg);color:var(--text-2);font-size:12px;line-height:16px;font-weight:600;flex:none}
+.count{display:inline-flex;align-items:center;justify-content:center;min-width:20px;height:20px;padding:0 6px;border-radius:10px;background:var(--count-bg);color:var(--count-text);font-size:12px;line-height:16px;font-weight:600;flex:none}
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:32px;padding:0 14px;border-radius:8px;font-size:14px;line-height:20px;font-weight:500;white-space:nowrap;flex:none}
 .btn .i{margin-left:-2px}
 .btn.primary{background:var(--accent);color:var(--on-accent)}
-.btn.primary.dis{opacity:.4}
+.btn.primary.dis{background:var(--disabled-bg);color:var(--disabled-text)}
+.btn.text{height:22px;padding:0 6px;border-radius:6px;font-size:13px;line-height:20px;font-weight:500;color:var(--accent-text)}
 .btn.secondary{background:var(--content);color:var(--text-1);box-shadow:inset 0 0 0 1px var(--border-strong)}
 .btn.ghost{color:var(--text-2)}
 .btn.sm{height:28px;padding:0 10px;font-size:13px;border-radius:6px}
@@ -187,13 +254,17 @@ body{font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","PingFang SC","H
 .focus{box-shadow:0 0 0 2px var(--content),0 0 0 4px var(--focus)!important}
 `;
 
-export function page({ title, mode, width, height, css, body }) {
+/** A page. `frame` presents a smaller window on a desk background so its bounds show (§8). */
+export function page({ title, mode, width, height, css, body, frame = 0 }) {
   const t = mode === "dark" ? dark : light;
+  const pw = width + frame * 2;
+  const ph = height + frame * 2;
+  const inner = frame ? `<div class="desk"><div class="frame">${body}</div></div>` : body;
   return `<!doctype html>
 <html lang="zh-Hans" data-theme="${mode}"><head><meta charset="utf-8">
-<meta name="viewport" content="width=${width}">
+<meta name="viewport" content="width=${pw}">
 <title>${esc(title)}</title>
-<style>:root{${cssVars(t)}--w:${width}px;--h:${height}px;color-scheme:${mode}}${BASE_CSS}${css}</style>
-</head><body>${body}</body></html>
+<style>:root{${cssVars(t)}--w:${width}px;--h:${height}px;--pw:${pw}px;--ph:${ph}px;color-scheme:${mode}}${BASE_CSS}${css}</style>
+</head><body>${inner}</body></html>
 `;
 }

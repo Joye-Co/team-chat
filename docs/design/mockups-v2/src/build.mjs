@@ -17,10 +17,10 @@ const both = (file, fn, extra = {}) => ["light", "dark"].map((mode) => ({ file: 
 const screens = [
   ...both("main", main),
   ...both("short-topic", short),
-  ...both("worst-case", worst, { width: 1100, height: 680 }),
+  ...both("worst-case", worst, { width: 1100, height: 680, frame: 40 }),
   ...both("switcher", switcher, { css: SWITCHER_CSS }),
-  ...both("settings-members", settings, { width: 960, height: 720, css: SETTINGS_CSS }),
-  ...both("login", login, { width: 960, height: 640, css: LOGIN_CSS }),
+  ...both("settings-members", settings, { width: 960, height: 720, frame: 40, css: SETTINGS_CSS }),
+  ...both("login", login, { width: 960, height: 640, frame: 40, css: LOGIN_CSS }),
 ];
 
 const args = process.argv.slice(2);
@@ -33,7 +33,8 @@ for (const s of screens) {
   if (only.length && !only.some((o) => s.file === o || s.file.startsWith(`${o}-`))) continue;
   const width = s.width ?? 1440;
   const height = s.height ?? 900;
-  const html = page({ title: s.file, mode: s.mode, width, height, css: MAIN_CSS + (s.css ?? ""), body: s.fn(s.mode) });
+  const frame = s.frame ?? 0;
+  const html = page({ title: s.file, mode: s.mode, width, height, frame, css: MAIN_CSS + (s.css ?? ""), body: s.fn(s.mode) });
   const htmlPath = join(OUT, `${s.file}.html`);
   writeFileSync(htmlPath, html);
   if (noPng) continue;
@@ -42,7 +43,7 @@ for (const s of screens) {
     try {
       execFileSync(CHROME, [
         "--headless=new", "--hide-scrollbars", `--force-device-scale-factor=${scale}`,
-        `--window-size=${width},${height}`, `--user-data-dir=${profile}`,
+        `--window-size=${width + frame * 2},${height + frame * 2}`, `--user-data-dir=${profile}`,
         `--screenshot=${join(OUT, `${s.file}${scale === 1 ? "" : `@${scale}x`}.png`)}`, `file://${htmlPath}`,
       ], { stdio: "ignore" });
     } finally {
