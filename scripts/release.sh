@@ -135,8 +135,7 @@ problem() {
 cd "$ROOT"
 need gh
 [ -z "$(git status --porcelain)" ] || problem "the working tree is not clean"
-branch="$(git rev-parse --abbrev-ref HEAD)"
-[ "$branch" = main ] || problem "on branch '$branch', not main"
+# Any worktree works (main may be checked out elsewhere) as long as HEAD is origin/main.
 git fetch --quiet origin main --tags || problem "git fetch origin failed"
 [ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main 2>/dev/null)" ] || problem "HEAD is not origin/main; pull or push first"
 if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null || [ -n "$(git ls-remote --tags origin "refs/tags/$TAG")" ]; then
@@ -184,7 +183,11 @@ if ! git diff --quiet -- Cargo.toml Cargo.lock; then
 fi
 trap - ERR
 git tag -a "$TAG" -m "$NAME $VERSION"
-if ! git push --quiet origin HEAD:main; then
+git fetch --quiet origin main || true
+if git merge-base --is-ancestor HEAD origin/main; then
+  # The version was set on main before; HEAD is on main already (main may have moved on).
+  log "HEAD is on origin/main already; tagging it without a release commit"
+elif ! git push --quiet origin HEAD:main; then
   git tag -d "$TAG" >/dev/null
   die "push to main was rejected (main moved). Your release commit is still local: run 'git reset --keep origin/main' if you want to drop it, then run this script again"
 fi
