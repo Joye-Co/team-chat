@@ -14,4 +14,10 @@ crate::copy! {
     SIDE_CHAT_CLOSE_HINT = "关闭",
     SIDE_CHAT_SEND = "发送",
     SIDE_CHAT_WRITING = "{name} 在想…",
+    SIDE_CHAT_SOURCES = "看了 {sources}",
+    SIDE_CHAT_SOURCE_PR = "PR #{n}",
+    SIDE_CHAT_SOURCE_PR_FILES = "PR #{n} 的 {files} 个文件",
+    SIDE_CHAT_SOURCE_ARTIFACT = "「{title}」v{version}",
+    SIDE_CHAT_SOURCES_SEP = "、",
+    SIDE_CHAT_SOURCES_LAST = "和",
 }

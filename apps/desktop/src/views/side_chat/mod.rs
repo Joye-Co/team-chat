@@ -28,7 +28,7 @@ use crate::{
     copy::{common, fill, side_chat as c},
     data::{
         Member, MemberId, Millis,
-        v2::{SideChatMessage, SideChatThread},
+        v2::{SideChatMessage, SideChatSource, SideChatThread},
     },
     theme::{self, Type as _, space},
     ui::{self, Lucide},
@@ -415,6 +415,24 @@ impl SideChat {
                 .into_any_element(),
             );
         }
+        // `看了 …`: what the answer read, when the member said.
+        if let Some(text) = sources_text(&msg.sources) {
+            body.push(
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(space::S6)
+                    .t_meta()
+                    .text_color(k.ink_3)
+                    .child(div().flex_none().mt(px(2.)).child(ui::icon(
+                        Lucide::Eye,
+                        theme::icon::TAG,
+                        k.ink_3,
+                    )))
+                    .child(div().flex_1().min_w_0().child(text))
+                    .into_any_element(),
+            );
+        }
         let suggestion = msg
             .suggestion
             .as_ref()
@@ -590,6 +608,41 @@ fn answer_blocks(body: &str) -> Vec<Block> {
     out
 }
 
+/// The source line of an answer: `看了 A`, `看了 A和B`, `看了 A、B和C`.
+fn sources_text(sources: &[SideChatSource]) -> Option<String> {
+    let parts: Vec<String> = sources
+        .iter()
+        .map(|s| match s {
+            SideChatSource::Pr {
+                number,
+                files: Some(files),
+            } => fill(
+                c::SIDE_CHAT_SOURCE_PR_FILES,
+                &[("n", &number.to_string()), ("files", &files.to_string())],
+            ),
+            SideChatSource::Pr {
+                number,
+                files: None,
+            } => fill(c::SIDE_CHAT_SOURCE_PR, &[("n", &number.to_string())]),
+            SideChatSource::Artifact { title, version } => fill(
+                c::SIDE_CHAT_SOURCE_ARTIFACT,
+                &[("title", title), ("version", &version.to_string())],
+            ),
+        })
+        .collect();
+    let (last, rest) = parts.split_last()?;
+    let list = if rest.is_empty() {
+        last.clone()
+    } else {
+        format!(
+            "{}{}{last}",
+            rest.join(c::SIDE_CHAT_SOURCES_SEP),
+            c::SIDE_CHAT_SOURCES_LAST
+        )
+    };
+    Some(fill(c::SIDE_CHAT_SOURCES, &[("sources", &list)]))
+}
+
 /// A ref chip: 24 pt, `bg`, 1 pt `line`, a file glyph, a leading file name in mono.
 fn ref_chip(label: &str, cx: &App) -> impl IntoElement {
     let k = theme::colors(cx);
@@ -726,6 +779,35 @@ impl Render for SideChat {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_source_line_joins_what_the_answer_read() {
+        assert_eq!(sources_text(&[]), None);
+        let pr = SideChatSource::Pr {
+            number: 61,
+            files: Some(12),
+        };
+        let art = SideChatSource::Artifact {
+            title: "重连测试报告".into(),
+            version: 2,
+        };
+        assert_eq!(
+            sources_text(&[pr.clone(), art.clone()]).as_deref(),
+            Some("看了 PR #61 的 12 个文件和「重连测试报告」v2")
+        );
+        assert_eq!(
+            sources_text(&[
+                SideChatSource::Pr {
+                    number: 7,
+                    files: None
+                },
+                pr,
+                art
+            ])
+            .as_deref(),
+            Some("看了 PR #7、PR #61 的 12 个文件和「重连测试报告」v2")
+        );
+    }
 
     #[test]
     fn answers_split_into_paragraphs_and_points() {

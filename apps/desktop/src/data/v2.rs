@@ -161,6 +161,15 @@ pub struct SideChatSuggestion {
     pub posted_at: Option<Millis>,
 }
 
+/// What a 单独问 answer read, for its `看了 …` line.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SideChatSource {
+    /// A PR, with its changed files when known.
+    Pr { number: u32, files: Option<u32> },
+    /// A 产出 version.
+    Artifact { title: String, version: u32 },
+}
+
 /// One message of a 单独问 aside.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SideChatMessage {
@@ -170,6 +179,9 @@ pub struct SideChatMessage {
     pub at: Millis,
     /// Short reference chips under the answer (`reconnect.ts`).
     pub refs: Vec<String>,
+    /// What the answer read (`看了 PR #61 的 12 个文件和「重连测试报告」v2`).
+    /// Empty when unknown: the line is hidden.
+    pub sources: Vec<SideChatSource>,
     pub suggestion: Option<SideChatSuggestion>,
     /// The member is still writing it.
     pub streaming: bool,

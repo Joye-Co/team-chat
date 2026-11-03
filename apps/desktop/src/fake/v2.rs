@@ -889,6 +889,7 @@ impl V2Samples {
                 body: "这个 PR 合进去有什么风险？".into(),
                 at: at(10, 31),
                 refs: Vec::new(),
+                sources: Vec::new(),
                 suggestion: None,
                 streaming: false,
             },
@@ -902,6 +903,16 @@ impl V2Samples {
                     "reconnect.ts seq 去重".into(),
                     "指数退避上限 30 秒".into(),
                     "旧客户端兼容".into(),
+                ],
+                sources: vec![
+                    SideChatSource::Pr {
+                        number: 61,
+                        files: Some(12),
+                    },
+                    SideChatSource::Artifact {
+                        title: "重连测试报告".into(),
+                        version: 2,
+                    },
                 ],
                 suggestion: Some(SideChatSuggestion {
                     text: "让 Forge 补一个多端测试".into(),
@@ -1354,6 +1365,7 @@ impl ChatProvider for V2Samples {
                 body,
                 at: chrono::Utc::now().timestamp_millis(),
                 refs: Vec::new(),
+                sources: Vec::new(),
                 suggestion: None,
                 streaming: false,
             })

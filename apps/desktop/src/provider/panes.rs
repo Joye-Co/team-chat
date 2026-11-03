@@ -18,7 +18,7 @@ use std::{
 use chat_core::{
     ClientError, SideChatRequest,
     proto::{
-        AcceptanceState, CardV2Block, Message, RunPlanState, TopicContext,
+        AcceptanceState, CardV2Block, Message, RefTarget, RunPlanState, TopicContext, TopicLink,
         machine::{RunEvent, RunLogEntry},
     },
 };
@@ -28,7 +28,7 @@ use super::{CoreProvider, lock};
 use crate::data::{
     AdminError, AdminReply, Change, Millis, SendRequest,
     v2::{
-        AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind, SideChatMessage,
+        AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind, SideChatMessage, SideChatSource,
         SideChatSuggestion, SideChatThread,
     },
 };
@@ -186,9 +186,16 @@ impl LiveEntry {
     }
 }
 
-/// Body, ref chips and suggestion of one side chat message.
-fn side_message(m: &Message, posted: &HashMap<String, Millis>) -> SideChatMessage {
+/// Body, ref chips, sources and suggestion of one side chat message. A ref to a PR or a 产出
+/// is a source (`看了 …`), with the PR's changed files from the source topic's links; other
+/// refs are chips. `posted_at` is filled in by the caller.
+fn side_message(
+    m: &Message,
+    links: &[TopicLink],
+    artifact_title: &dyn Fn(&str) -> Option<String>,
+) -> SideChatMessage {
     let mut refs: Vec<String> = Vec::new();
+    let mut sources: Vec<SideChatSource> = Vec::new();
     let mut suggestion = None;
     let mut body = m.body.clone();
     if let Some(card) = &m.card_v2 {
@@ -198,11 +205,47 @@ fn side_message(m: &Message, posted: &HashMap<String, Millis>) -> SideChatMessag
         let mut stack: Vec<&CardV2Block> = card.blocks.iter().rev().collect();
         while let Some(b) = stack.pop() {
             match b {
+                CardV2Block::Ref {
+                    target:
+                        RefTarget::Pr {
+                            number: Some(n), ..
+                        },
+                    ..
+                } => {
+                    let number = (*n).min(u32::MAX as u64) as u32;
+                    let files = links.iter().find_map(|l| match l {
+                        TopicLink::Pr(p) if p.number == *n => {
+                            p.changed_files.map(|f| f.min(u32::MAX as u64) as u32)
+                        }
+                        _ => None,
+                    });
+                    let source = SideChatSource::Pr { number, files };
+                    if !sources.contains(&source) {
+                        sources.push(source);
+                    }
+                }
+                CardV2Block::Ref {
+                    label,
+                    target:
+                        RefTarget::Artifact {
+                            artifact_id,
+                            version,
+                        },
+                    ..
+                } => {
+                    let source = SideChatSource::Artifact {
+                        title: artifact_title(artifact_id).unwrap_or_else(|| label.clone()),
+                        version: version.unwrap_or(1),
+                    };
+                    if !sources.contains(&source) {
+                        sources.push(source);
+                    }
+                }
                 CardV2Block::Ref { label, .. } => refs.push(label.clone()),
                 CardV2Block::Draft { text, .. } if suggestion.is_none() => {
                     suggestion = Some(SideChatSuggestion {
                         text: text.trim().to_string(),
-                        posted_at: posted.get(&m.id).copied(),
+                        posted_at: None,
                     })
                 }
                 CardV2Block::Group { blocks, .. } => stack.extend(blocks.iter().rev()),
@@ -216,6 +259,7 @@ fn side_message(m: &Message, posted: &HashMap<String, Millis>) -> SideChatMessag
         body,
         at: m.created_at as Millis,
         refs,
+        sources,
         suggestion,
         streaming: m.streaming.unwrap_or(false),
     }
@@ -267,13 +311,27 @@ impl CoreProvider {
             .as_ref()
             .and_then(|s| a.client.messages(s, None, SIDE_CHAT_LIMIT).ok())
             .unwrap_or_default();
-        let mut cache = lock(&self.shared.panes.inner);
-        let inner = cache.for_generation(generation);
-        thread.messages = msgs
+        let links = a.client.topic_links(&source).unwrap_or_default();
+        let title = |id: &str| {
+            a.client
+                .artifact(id)
+                .ok()
+                .flatten()
+                .map(|r| r.artifact.title)
+        };
+        let mut messages: Vec<SideChatMessage> = msgs
             .iter()
             .filter(|m| m.deleted_at.flatten().is_none())
-            .map(|m| side_message(m, &inner.posted))
+            .map(|m| side_message(m, &links, &title))
             .collect();
+        let mut cache = lock(&self.shared.panes.inner);
+        let inner = cache.for_generation(generation);
+        for m in &mut messages {
+            if let Some(s) = &mut m.suggestion {
+                s.posted_at = inner.posted.get(&m.id).copied();
+            }
+        }
+        thread.messages = messages;
         // My questions the server has not stored yet.
         let known: std::collections::HashSet<&str> =
             msgs.iter().map(|m| m.client_msg_id.as_str()).collect();
@@ -288,6 +346,7 @@ impl CoreProvider {
                 body: body.clone(),
                 at: *at,
                 refs: Vec::new(),
+                sources: Vec::new(),
                 suggestion: None,
                 streaming: false,
             }));
@@ -303,6 +362,7 @@ impl CoreProvider {
                         body: body.clone(),
                         at: item.created_at as Millis,
                         refs: Vec::new(),
+                        sources: Vec::new(),
                         suggestion: None,
                         streaming: false,
                     });
@@ -606,3 +666,4 @@ impl CoreProvider {
         rx
     }
 }
+
