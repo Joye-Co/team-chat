@@ -5,7 +5,8 @@
 # Usage: scripts/build-dmg.sh [--skip-build]
 #   --skip-build   reuse the release binary already in CARGO_TARGET_DIR
 # Env: CARGO_TARGET_DIR, DIST (default dist/), MACOS_MIN (default 13.0),
-#      DESKTOP_PACKAGE (default desktop),
+#      DESKTOP_PACKAGE (default desktop), APP_VERSION (default: the Cargo.toml version;
+#      only for local update tests, such as apps/desktop/src/updater/e2e-install-dir.sh),
 #      SIGNING_DIR (default ~/.config/team-chat/signing): key.pem and cert.pem of the
 #      self-signed code-signing certificate. When both exist, rcodesign signs the app, its
 #      daemon and the DMG with them, and the designated requirement is
@@ -25,7 +26,7 @@ skip_build=0
 for arg in "$@"; do
   case "$arg" in
     --skip-build) skip_build=1 ;;
-    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,17p' "$0"; exit 0 ;;
     *) die "unknown argument: $arg" ;;
   esac
 done
@@ -37,7 +38,7 @@ cargo_env
 NAME="$(product name)"
 BUNDLE_ID="$(product bundleId)"
 SCHEME="$(product urlScheme)"
-VERSION="$(workspace_version)"
+VERSION="${APP_VERSION:-$(workspace_version)}"
 [ -n "$VERSION" ] || die "no version in [workspace.package] of Cargo.toml"
 BUNDLE_VERSION="${VERSION%%-*}"
 MACOS_MIN="${MACOS_MIN:-13.0}"

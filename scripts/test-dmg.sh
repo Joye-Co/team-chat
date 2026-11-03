@@ -8,6 +8,7 @@
 # With the signing files of build-dmg.sh (SIGNING_DIR), the app, its daemon and the DMG
 # must be signed by that certificate, and the app's designated requirement must be
 # 'identifier "<id>" and certificate leaf = H"<sha1>"', which no build changes.
+# Env: APP_VERSION (default: the Cargo.toml version), as for build-dmg.sh.
 set -euo pipefail
 # shellcheck source=scripts/lib.sh
 . "$(dirname "$0")/lib.sh"
@@ -16,7 +17,7 @@ need jq hdiutil codesign plutil shasum
 NAME="$(product name)"
 BUNDLE_ID="$(product bundleId)"
 SCHEME="$(product urlScheme)"
-VERSION="$(workspace_version)"
+VERSION="${APP_VERSION:-$(workspace_version)}"
 DMG=""
 OTHER=""
 while [ $# -gt 0 ]; do
