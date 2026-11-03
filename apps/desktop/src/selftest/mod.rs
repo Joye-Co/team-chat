@@ -164,7 +164,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
                 env!("PRODUCT_SLUG"),
                 std::process::id()
             ));
-            crate::provider::seeded::seeded(&root, chrono::Utc::now().timestamp_millis() as u64)
+            crate::provider::seeded::seeded(&root, clock::now_ms() as u64)
         }
         // --- end provider track ---
         Start::Offline => {

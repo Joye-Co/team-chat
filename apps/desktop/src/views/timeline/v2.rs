@@ -381,7 +381,7 @@ impl TimelineView {
                     // The green check draws once, when the answer is new;
                     // a record read later shows it whole.
                     .child(div().flex_none().size(px(14.)).child(
-                        if decision_is_fresh(message.created_at, chrono::Utc::now().timestamp_millis()) {
+                        if decision_is_fresh(message.created_at, crate::selftest::clock::now_ms()) {
                             ui::motion::check_draw(
                                 ElementId::Name(format!("v2-dec-check-{}", message.id).into()),
                                 check(px(14.), k.ok),

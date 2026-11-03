@@ -220,7 +220,7 @@ pub fn breathe<E: IntoElement + Styled + 'static>(
 /// Whether an answer made at `at` is recent enough to draw its check
 /// ([`motion::JUST_ANSWERED`]); older answers show the check at rest.
 pub fn just_answered(at: crate::data::Millis) -> bool {
-    let age = chrono::Local::now().timestamp_millis() - at;
+    let age = crate::selftest::clock::now_ms() - at;
     let window = motion::JUST_ANSWERED.as_millis() as i64;
     (-window..=window).contains(&age)
 }
@@ -757,7 +757,7 @@ mod tests {
 
     #[test]
     fn only_a_recent_answer_draws_its_check() {
-        let now = chrono::Local::now().timestamp_millis();
+        let now = crate::selftest::clock::now_ms();
         assert!(just_answered(now));
         assert!(just_answered(now - 1_000));
         assert!(
