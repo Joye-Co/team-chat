@@ -806,16 +806,30 @@ pub fn decorate(
                     ],
                 )
             };
-            col = col.child(
-                meta(div())
-                    .mt(space::S6)
+            // At the block's top right, as Interact.dc.html 02 step 3 marks an inserted
+            // block: on the title row of a block that has one at its left, else on a line
+            // of its own above the block.
+            let attr = meta(div())
+                .flex_none()
+                .one_line()
+                .text_color(k.live_ink)
+                .child(text);
+            col = if titled(b) {
+                div()
+                    .relative()
                     .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .text_color(k.live_ink)
-                    .child(div().size(px(5.)).rounded_full().bg(k.live))
-                    .child(text),
-            );
+                    .flex_col()
+                    .min_w(px(0.))
+                    .child(col)
+                    .child(div().absolute().top(px(5.)).right_0().child(attr))
+            } else {
+                div()
+                    .flex()
+                    .flex_col()
+                    .min_w(px(0.))
+                    .child(div().flex().justify_end().mb(space::S4).child(attr))
+                    .child(col)
+            };
         }
         let tinted = div()
             .mx(px(-8.))
@@ -843,6 +857,14 @@ pub fn decorate(
         );
     }
     col.into_any_element()
+}
+
+/// True when a block starts with a title at its left and nothing at its right (the
+/// attribution line can share that row).
+fn titled(b: &CardV2Block) -> bool {
+    // A group's head is 28 pt: the title and an open group's summary at the left; a
+    // collapsed one puts its summary at the right.
+    matches!(b, CardV2Block::Group { collapsed, .. } if *collapsed != Some(true))
 }
 
 /// 内容变了 · 用新的: the member changed a block while I had typed in it; my text stays
