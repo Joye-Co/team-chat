@@ -1591,6 +1591,27 @@ pub fn status_chip_colors(status: TopicStatus, cx: &App) -> (Hsla, Hsla) {
     (cc.bg, cc.text)
 }
 
+// ---------------------------------------------------------------------------
+// Desk track (1.1.0 首页): appended block
+
+/// The window dots of a live terminal thumbnail on the 首页 (close,
+/// minimize, zoom), drawn on `screen` in both modes.
+pub fn screen_dots() -> [Hsla; 3] {
+    [c(0xFF5F57FF), c(0xFEBC2EFF), c(0x28C840FF)]
+}
+
+/// Desk terminal thumbnail: 10/12 mono lines, 5 apart (a miniature, not
+/// reading text), and the time each line takes to scroll by.
+pub mod desk_screen {
+    use gpui::{Pixels, px};
+    use std::time::Duration;
+    pub const HEIGHT: Pixels = px(120.);
+    pub const LINE: (Pixels, Pixels) = (px(10.), px(12.));
+    pub const LINE_GAP: Pixels = px(5.);
+    pub const TOP: Pixels = px(32.);
+    pub const SCROLL_PER_LINE: Duration = Duration::from_millis(900);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

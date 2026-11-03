@@ -76,6 +76,8 @@ gpui_kit::assets::icon_assets!(
         Command,
         ChartLine,
         // --- end rail track
+        // Desk track (1.1.0 首页): the 录屏 proof chip.
+        Play,
     ]
 );
 

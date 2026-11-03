@@ -3,7 +3,7 @@
 
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Entity, IntoElement, ParentElement, Pixels, Styled,
-    div, px,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use super::{PageView, TitleBarSpec, title_bar};
@@ -72,7 +72,11 @@ impl Pages {
             .flex()
             .flex_col()
             .bg(k.bg)
-            .child(title_bar::render(&spec, open, leading, services, cx))
+            // A page that draws its own header (首页, desk track) returns an
+            // empty spec: no title bar.
+            .when(spec != TitleBarSpec::default(), |el| {
+                el.child(title_bar::render(&spec, open, leading, services, cx))
+            })
             .child(div().flex_1().min_h(px(0.)).child(body))
             .into_any_element()
     }
