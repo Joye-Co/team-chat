@@ -704,7 +704,84 @@ impl ChatProvider for WorstCase {
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
         self.inner.card_image(group_id, topic_id, file_id)
     }
+
+    // --- panes track (1.1.0): 单独问 and 实时查看 at their worst ---
+
+    fn side_chat_default_member(&self) -> Option<MemberId> {
+        self.inner.side_chat_default_member()
+    }
+    /// The aside with a long question, an unbroken path in a ref chip and a
+    /// long suggestion.
+    fn side_chat(&self, group_id: &str, topic_id: &str, member_id: &str) -> v2::SideChatThread {
+        let mut thread = self.inner.side_chat(group_id, topic_id, member_id);
+        for m in &mut thread.messages {
+            m.body = format!("{}\n{}", m.body, PANES_LONG_TEXT);
+            m.refs.push(
+                "apps/desktop/src/views/side_chat/very/deep/folder/reconnect_with_backoff_and_dedupe.rs".into(),
+            );
+            if let Some(s) = &mut m.suggestion {
+                s.text = format!(
+                    "{}，并在 iOS、Android、Windows 和网页端各跑一遍完整的回归",
+                    s.text
+                );
+            }
+        }
+        thread
+    }
+    fn send_side_chat(&self, group_id: &str, topic_id: &str, member_id: &str, body: String) {
+        self.inner
+            .send_side_chat(group_id, topic_id, member_id, body)
+    }
+    fn post_side_chat_suggestion(&self, g: &str, t: &str, m: &str, id: &str) {
+        self.inner.post_side_chat_suggestion(g, t, m, id)
+    }
+    /// A screen with very long command and output lines and many of them.
+    fn machine_screen(&self, run_id: &str) -> Option<v2::MachineScreen> {
+        let mut screen = self.inner.machine_screen(run_id)?;
+        screen.machine_name = Some("mac-mini-office-build-runner-arm64-nightly-02.tailnet".into());
+        let step = screen.lines.last().and_then(|l| l.step);
+        let at = screen.lines.last().map(|l| l.at).unwrap_or(self.now);
+        for i in 0..30 {
+            screen.lines.push(v2::ScreenLine {
+                kind: if i % 7 == 0 {
+                    v2::ScreenLineKind::Command
+                } else if i % 11 == 5 {
+                    v2::ScreenLineKind::Error
+                } else {
+                    v2::ScreenLineKind::Output
+                },
+                text: format!("{i:02} {}", PANES_LONG_TEXT),
+                at,
+                step,
+            });
+        }
+        Some(screen)
+    }
+    fn acceptance_criteria(&self, run_id: &str) -> Vec<v2::AcceptanceItem> {
+        let mut items = self.inner.acceptance_criteria(run_id);
+        for i in &mut items {
+            i.text = format!("{}，{}", i.text, PANES_LONG_TEXT);
+            if let Some(e) = &mut i.evidence {
+                e.push_str("（第 3 次测量，取 60 秒内的最差值，Mac mini M2）");
+            }
+        }
+        items
+    }
+    fn run_step_times(&self, run_id: &str) -> Vec<Millis> {
+        self.inner.run_step_times(run_id)
+    }
+    fn take_over_run(&self, g: &str, t: &str, run_id: &str) -> AdminReply<()> {
+        self.inner.take_over_run(g, t, run_id)
+    }
+    fn hand_back_run(&self, g: &str, t: &str, run_id: &str) -> AdminReply<()> {
+        self.inner.hand_back_run(g, t, run_id)
+    }
+
+    // --- end of the panes track ---
 }
+
+/// A long run of mixed text with an unbroken token (panes track).
+const PANES_LONG_TEXT: &str = "重连后在弱网下连续切换 Wi-Fi 和蜂窝网络三十次，检查 seq_dedupe_window_after_reconnect_with_exponential_backoff_capped_at_30s 是否始终只推一次";
 
 /// Signed in as the fake provider's member, with nothing else.
 pub struct Empty {
