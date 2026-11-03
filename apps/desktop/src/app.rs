@@ -293,6 +293,10 @@ impl RootView {
     pub fn timeline(&self) -> &Entity<TimelineView> {
         &self.timeline
     }
+
+    pub fn composer(&self) -> &Entity<ComposerView> {
+        &self.composer
+    }
 }
 
 impl Render for RootView {

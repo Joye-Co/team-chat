@@ -23,7 +23,10 @@ mod focus;
 mod menu;
 mod model;
 mod row;
+pub mod scenes;
 pub mod selftest;
+
+pub(crate) use row::text_action;
 
 use std::{
     cell::Cell,
@@ -157,6 +160,16 @@ pub struct TimelineView {
     activation: Option<Subscription>,
     /// Search: scroll to a message and highlight it (`timeline/focus.rs`).
     focus: focus::FocusState,
+    /// The streaming message's key, body length and when it last grew (the
+    /// caret blinks only after 1 s without new text).
+    caret: Option<(String, usize, Instant)>,
+    /// A render is scheduled for when the caret starts blinking.
+    caret_wake: bool,
+    /// Messages from others that arrived while the topic was open, and when:
+    /// they fade in over 150 ms in place (§10).
+    arrived: Vec<(String, Instant)>,
+    /// Screenshot scenes: the row drawn as hovered.
+    preview_hover: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -219,6 +232,10 @@ impl TimelineView {
             probe: None,
             activation: None,
             focus: focus::FocusState::default(),
+            caret: None,
+            caret_wake: false,
+            arrived: Vec::new(),
+            preview_hover: None,
             _subscriptions: subscriptions,
         };
         let open = this.services.nav.read(cx).topic.clone();
@@ -226,6 +243,27 @@ impl TimelineView {
         let request = this.services.nav.read(cx).focus.clone();
         this.on_focus_request(request, cx);
         this
+    }
+
+    /// Screenshot scenes: edits my newest editable message in place, as the
+    /// menu's 编辑 does.
+    pub fn preview_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(message) = self.messages.iter().rev().find(|m| self.can_edit(m)).cloned() {
+            self.start_edit(&message, window, cx);
+        }
+    }
+
+    /// Screenshot scenes: draws the newest message of someone else as
+    /// hovered, with its toolbar.
+    pub fn preview_hover(&mut self, cx: &mut Context<Self>) {
+        let me = self.me.clone();
+        self.preview_hover = self
+            .messages
+            .iter()
+            .rev()
+            .find(|m| Some(&m.author_id) != me.as_ref() && m.deleted_at.is_none() && !m.streaming)
+            .map(|m| model::key(m).to_string());
+        cx.notify();
     }
 
     /// Number of messages in the window (for self-tests).
@@ -376,6 +414,18 @@ impl TimelineView {
             .iter()
             .filter(|m| Some(m.author_id.as_str()) != me)
             .count();
+        let had_messages = !self.messages.is_empty();
+        self.arrived
+            .retain(|(_, at)| at.elapsed() < theme::motion::FADE * 2);
+        if had_messages && appended > 0 {
+            let now = Instant::now();
+            self.arrived.extend(
+                messages[messages.len() - appended..]
+                    .iter()
+                    .filter(|m| Some(m.author_id.as_str()) != me)
+                    .map(|m| (model::key(m).to_string(), now)),
+            );
+        }
         let ops = model::diff(&self.messages, &messages);
         self.apply(&ops);
         let grew_at_top =
@@ -533,12 +583,13 @@ impl TimelineView {
                 .find(|m| m.id == id)
                 .map(|m| m.name.clone())
         };
+        // `林晓 发起 · 设计助手 负责 · 今天 10:12` (§5.4).
         let mut sub: Vec<String> = Vec::new();
         if let Some(n) = name(&topic.created_by) {
             sub.push(fill(t::STARTED_BY, &[("name", &n)]));
         }
-        if let Some(owner) = topic_menu::owner_text(topic, &self.members) {
-            sub.push(owner);
+        if let Some(owner) = topic.owner_id.as_deref().and_then(name) {
+            sub.push(fill(t::OWNED_BY, &[("name", &owner)]));
         }
         sub.push(time_text(topic.created_at));
         if following {
@@ -559,6 +610,9 @@ impl TimelineView {
         }
         let panel_open = self.services.nav.read(cx).side_panel_open;
         let title = crate::views::sidebar::topic_line(&topic.title);
+        // A missing title reads （无标题） in `text-2` (§12).
+        let untitled = title.trim().is_empty();
+        let full_title = topic.title.clone();
         ui::toolbar_band("topic-toolbar")
             .pl(space::S20)
             .pr(space::S12)
@@ -575,7 +629,21 @@ impl TimelineView {
                             .flex()
                             .items_center()
                             .gap(space::S8)
-                            .child(div().min_w(px(0.)).t_topic_title().one_line().child(title))
+                            .child(
+                                div()
+                                    .id("topic-title")
+                                    .min_w(px(0.))
+                                    .t_topic_title()
+                                    .one_line()
+                                    .when(untitled, |el| el.text_color(colors.text_2))
+                                    .child(if untitled { t::UNTITLED.to_string() } else { title })
+                                    .when(!untitled, |el| {
+                                        el.tooltip(move |window, cx| {
+                                            gpui_component::tooltip::Tooltip::new(full_title.clone())
+                                                .build(window, cx)
+                                        })
+                                    }),
+                            )
                             .children(status_chip(topic, self.me.as_deref(), &self.members, cx)),
                     )
                     .child(
@@ -605,6 +673,34 @@ impl TimelineView {
             .child(
                 ui::capsule(cx)
                     .child({
+                        let (g, tid) = (topic.group_id.clone(), topic.id.clone());
+                        ui::icon_button("topic-follow", Lucide::Bell)
+                            .w(px(32.))
+                            .h(px(28.))
+                            .rounded_full()
+                            .when(following, |b| b.bg(colors.fill_selected))
+                            .tooltip(if following { r::UNFOLLOW } else { r::FOLLOW })
+                            .on_click(cx.listener(move |this, _, _, cx| {
+                                this.services
+                                    .provider
+                                    .set_topic_following(&g, &tid, !following);
+                                cx.notify();
+                            }))
+                    })
+                    .child(
+                        ui::icon_button("toggle-panel", Lucide::PanelRight)
+                            .w(px(32.))
+                            .h(px(28.))
+                            .rounded_full()
+                            .when(panel_open, |b| b.bg(colors.fill_selected))
+                            .tooltip(t::TOGGLE_PANEL)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.services
+                                    .nav
+                                    .update(cx, |nav, cx| nav.toggle_side_panel(cx))
+                            })),
+                    )
+                    .child({
                         let services = self.services.clone();
                         let (g, tid) = (topic.group_id.clone(), topic.id.clone());
                         ui::icon_button("topic-status", Lucide::Ellipsis)
@@ -621,36 +717,31 @@ impl TimelineView {
                                     None => menu,
                                 }
                             })
-                    })
-                    .child(
-                        ui::icon_button("toggle-panel", Lucide::PanelRight)
-                            .w(px(32.))
-                            .h(px(28.))
-                            .rounded_full()
-                            .when(panel_open, |b| b.bg(colors.fill_selected))
-                            .tooltip(t::TOGGLE_PANEL)
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                this.services
-                                    .nav
-                                    .update(cx, |nav, cx| nav.toggle_side_panel(cx))
-                            })),
-                    ),
+                    }),
             )
     }
 
+    /// `陈思远 正在输入…`, `A、B 正在输入…`, `A、B 和另外 1,282 位正在输入…` (§12).
     fn typing_text(&self) -> Option<String> {
+        let name = |id: &String| {
+            self.members
+                .iter()
+                .find(|m| &m.id == id)
+                .map(|m| m.name.clone())
+                .unwrap_or_default()
+        };
         match self.typing.as_slice() {
             [] => None,
-            [one] => {
-                let name = self
-                    .members
-                    .iter()
-                    .find(|m| &m.id == one)
-                    .map(|m| m.name.clone())
-                    .unwrap_or_default();
-                Some(fill(t::TYPING_ONE, &[("name", &name)]))
-            }
-            many => Some(fill(t::TYPING_MANY, &[("n", &many.len().to_string())])),
+            [one] => Some(fill(t::TYPING_ONE, &[("name", &name(one))])),
+            [a, b] => Some(fill(t::TYPING_TWO, &[("a", &name(a)), ("b", &name(b))])),
+            [a, b, rest @ ..] => Some(fill(
+                t::TYPING_MANY,
+                &[
+                    ("a", &name(a)),
+                    ("b", &name(b)),
+                    ("n", &model::thousands(rest.len())),
+                ],
+            )),
         }
     }
 

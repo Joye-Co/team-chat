@@ -58,6 +58,34 @@ pub fn mention_query(text: &str, cursor: usize) -> Option<MentionQuery> {
     })
 }
 
+/// Rows the @ list shows (DESIGN.md §13.6).
+pub const MENTION_ROWS: usize = 5;
+
+/// Where `query` matches in `name`, ignoring case, as a byte range of `name`
+/// (the popup draws it underlined in 600).
+pub fn match_range(name: &str, query: &str) -> Option<std::ops::Range<usize>> {
+    let wanted: Vec<char> = query.chars().flat_map(char::to_lowercase).collect();
+    if wanted.is_empty() {
+        return None;
+    }
+    let starts: Vec<usize> = name.char_indices().map(|(i, _)| i).collect();
+    for &start in &starts {
+        let mut got = Vec::new();
+        let mut end = start;
+        for (i, c) in name[start..].char_indices() {
+            if got.len() >= wanted.len() {
+                break;
+            }
+            got.extend(c.to_lowercase());
+            end = start + i + c.len_utf8();
+        }
+        if got == wanted {
+            return Some(start..end);
+        }
+    }
+    None
+}
+
 /// Members for the @ list: active, not me, in the 群 when its members are
 /// known, whose name or 岗位 contains the query. Names that start with the
 /// query come first.
@@ -181,6 +209,14 @@ pub fn excerpt(body: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn match_range_ignores_case() {
+        assert_eq!(match_range("Alex Chen", "ch"), Some(5..7));
+        assert_eq!(match_range("设计助手", "助"), Some(6..9));
+        assert_eq!(match_range("小码", ""), None);
+        assert_eq!(match_range("小码", "x"), None);
+    }
     use crate::data::{MemberKind, MemberLevel};
 
     fn member(id: &str, name: &str, role: &str, kind: MemberKind) -> Member {

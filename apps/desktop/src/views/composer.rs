@@ -1,4 +1,4 @@
-//! The composer: a multi-line field that grows to 8 lines. Chinese IME works
+//! The composer: a multi-line field that grows to 7 lines. Chinese IME works
 //! through the platform input handler of gpui-component's input (marked text
 //! is underlined, the candidate window follows the cursor).
 //!
@@ -96,7 +96,7 @@ impl ComposerView {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let input = cx.new(|cx| {
             TextareaState::new(window, cx)
-                .auto_grow(1, 8)
+                .auto_grow(1, 7)
                 .submit_on_enter(true)
                 .placeholder(c::PLACEHOLDER)
         });
@@ -188,12 +188,22 @@ impl ComposerView {
     }
 
     fn update_placeholder(&self, window: &mut Window, cx: &mut Context<Self>) {
+        // `在「登录页改版」里回复` (§13.6); a long title is cut so the
+        // placeholder stays one line.
+        let topic_title = self.key.as_ref().and_then(|k| {
+            let t = k.topic_id.as_ref()?;
+            let title = self.services.provider.topic(&k.group_id, t)?.title;
+            let line = crate::views::sidebar::topic_line(&title);
+            (!line.trim().is_empty()).then(|| model::excerpt(&line, 24))
+        });
         let placeholder = if self.editing.is_some() {
-            c::PLACEHOLDER_EDIT
+            c::PLACEHOLDER_EDIT.to_string()
         } else if self.key.as_ref().is_some_and(|k| k.topic_id.is_none()) {
-            c::PLACEHOLDER_NEW_TOPIC
+            c::PLACEHOLDER_NEW_TOPIC.to_string()
+        } else if let Some(title) = topic_title {
+            fill(c::PLACEHOLDER_TOPIC, &[("title", &title)])
         } else {
-            c::PLACEHOLDER
+            c::PLACEHOLDER.to_string()
         };
         self.input.update(cx, |state, cx| {
             state.set_placeholder(placeholder, window, cx)
@@ -323,6 +333,8 @@ impl ComposerView {
             me.as_deref(),
             &query.text,
         );
+        let mut results = results;
+        results.truncate(model::MENTION_ROWS);
         if results.is_empty() {
             self.mention = None;
             return;
@@ -515,6 +527,20 @@ impl ComposerView {
         cx.notify();
     }
 
+    // --- screenshot scenes ---
+
+    /// Types `text` as the user would (the @ list opens after an `@`).
+    pub fn preview_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.set_text(text, window, cx);
+        self.update_mention(text, cx);
+        cx.notify();
+    }
+
+    /// Starts editing my last message, as Up in an empty composer does.
+    pub fn preview_edit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.start_edit(window, cx);
+    }
+
     // --- edit mode ---
 
     /// Starts editing my last message of the open topic. False when there is none.
@@ -663,39 +689,97 @@ fn clipboard_files(entries: &[ClipboardEntry]) -> Vec<NewFile> {
 }
 
 impl ComposerView {
-    fn render_chip(
-        &self,
-        id: ElementId,
-        text: String,
-        on_remove: impl Fn(&mut Self, &mut Context<Self>) + 'static,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    /// The quoted message above the text: a quote block like the timeline's
+    /// (2 pt `quote-bar`, 10 pt indent, 13 / 19 `text-2`) with an `x` (§13.6).
+    fn render_quote(&self, quote: &QuoteChip, cx: &mut Context<Self>) -> gpui::AnyElement {
         let colors = theme::colors(cx);
         div()
+            .w_full()
             .flex()
-            .items_center()
-            .gap(space::S6)
-            .max_w(px(360.))
-            .h(px(26.))
-            .pl(space::S8)
-            .pr(space::S4)
-            .rounded(theme::radius::MD)
-            .bg(colors.fill_field)
-            .t_callout()
-            .text_color(colors.text_2)
-            .child(div().min_w(px(0.)).truncate().child(text))
+            .items_start()
+            .gap(space::S8)
             .child(
-                ui::icon_button(id, Lucide::X)
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .pl(space::S10)
+                    .border_l_2()
+                    .border_color(colors.quote_bar)
+                    .type_role(theme::type_scale::QUOTE)
+                    .text_color(colors.text_2)
+                    .one_line()
+                    .child(quote.text.clone()),
+            )
+            .child(
+                ui::icon_button("quote-remove", Lucide::X)
                     .xsmall()
                     .tooltip(c::REMOVE)
-                    .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.remove_quote(cx))),
             )
+            .into_any_element()
+    }
+
+    /// A pending file: gpui-component's `Attachment` (small) with its icon,
+    /// name (middle ellipsis keeps the extension) and size, removable.
+    fn render_file(&self, file: &PendingFile, cx: &mut Context<Self>) -> gpui::AnyElement {
+        use gpui_component::attachment::{
+            Attachment, AttachmentContent, AttachmentDescription, AttachmentMedia,
+            AttachmentTitle,
+        };
+        let colors = theme::colors(cx);
+        let icon = if file.is_image {
+            Lucide::Image
+        } else {
+            Lucide::File
+        };
+        let id = file.id.clone();
+        let mut content =
+            AttachmentContent::new().title(AttachmentTitle::new(file.name.clone()));
+        if let Some(size) = file.size_bytes {
+            content = content.description(AttachmentDescription::new(
+                crate::views::files::size_text(size),
+            ));
+        }
+        Attachment::new()
+            .id(ElementId::Name(SharedString::from(format!(
+                "file-chip-{}",
+                file.id
+            ))))
+            .small()
+            .max_w(px(240.))
+            .tooltip(file.name.clone())
+            .media(AttachmentMedia::new().child(ui::icon(
+                icon,
+                theme::icon::BUTTON,
+                colors.text_2,
+            )))
+            .content(content)
+            .on_remove(cx.listener(move |this, _, _, cx| this.remove_file(&id, cx)))
+            .into_any_element()
     }
 
     fn render_mentions(&self, cx: &mut Context<Self>) -> Option<impl IntoElement> {
         let popup = self.mention.as_ref()?;
         let colors = theme::colors(cx);
+        let query = popup.query.text.clone();
         let rows = popup.results.iter().enumerate().map(|(i, m)| {
+            // The typed part of the name is underlined in 600 (§13.6).
+            let name = gpui::StyledText::new(m.name.clone()).with_highlights(
+                model::match_range(&m.name, &query).map(|range| {
+                    (
+                        range,
+                        gpui::HighlightStyle {
+                            font_weight: Some(gpui::FontWeight::SEMIBOLD),
+                            underline: Some(gpui::UnderlineStyle {
+                                thickness: px(1.),
+                                color: Some(colors.text_1),
+                                wavy: false,
+                            }),
+                            ..Default::default()
+                        },
+                    )
+                }),
+            );
             div()
                 .id(ElementId::Name(SharedString::from(format!(
                     "mention-{}",
@@ -709,14 +793,24 @@ impl ComposerView {
                 .rounded(theme::radius::SM)
                 .when(i == popup.selected, |el| el.bg(colors.fill_active))
                 .child(ui::MemberAvatar::new(Some(m), px(24.)).on(colors.elevated))
-                .child(div().flex_none().t_ui().medium().child(m.name.clone()))
-                .when_some(m.role.clone(), |el, role| {
+                .child(
+                    div()
+                        .flex_shrink(1.)
+                        .min_w(px(0.))
+                        .t_ui()
+                        .medium()
+                        .text_color(colors.text_1)
+                        .one_line()
+                        .child(name),
+                )
+                .when_some(m.role.clone().filter(|r| !r.trim().is_empty()), |el, role| {
                     el.child(
                         div()
+                            .flex_shrink(2.)
                             .min_w(px(0.))
                             .t_callout()
                             .text_color(colors.text_2)
-                            .truncate()
+                            .one_line()
                             .child(role),
                     )
                 })
@@ -758,6 +852,12 @@ impl ComposerView {
                 ),
         )
     }
+
+    /// The `@` tool: types `@` at the cursor, which opens the member list.
+    fn insert_at(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.update(cx, |state, cx| state.focus(window, cx));
+        self.input.update(cx, |state, cx| state.replace("@", window, cx));
+    }
 }
 
 impl Render for ComposerView {
@@ -777,25 +877,16 @@ impl Render for ComposerView {
             self.files.clone()
         };
         let has_chips = quote.is_some() || !files.is_empty();
-
-        let mut chips = div().flex().flex_wrap().gap(space::S6);
-        if let Some(q) = quote {
-            chips = chips.child(self.render_chip(
-                "quote-remove".into(),
-                q.text,
-                |this, cx| this.remove_quote(cx),
-                cx,
-            ));
+        let quote_block = match &quote {
+            Some(q) => Some(self.render_quote(q, cx)),
+            None => None,
+        };
+        let mut file_chips = Vec::new();
+        for f in &files {
+            file_chips.push(self.render_file(f, cx));
         }
-        for file in files {
-            let id = file.id.clone();
-            chips = chips.child(self.render_chip(
-                ElementId::Name(SharedString::from(format!("file-remove-{}", file.id))),
-                file.name,
-                move |this, cx| this.remove_file(&id, cx),
-                cx,
-            ));
-        }
+        let file_row = (!file_chips.is_empty())
+            .then(|| div().flex().flex_wrap().gap(space::S6).children(file_chips));
 
         let focused = self.input.read(cx).focus_handle(cx).is_focused(window);
         let has_text = !self.last_text.trim().is_empty() || has_chips;
@@ -842,6 +933,7 @@ impl Render for ComposerView {
                         colors.control_border
                     })
                     .bg(colors.content)
+                    // 10 / 12 / 8 with the field's own 2 / 4 pt inset (§5.4).
                     .pt(space::S8)
                     .px(space::S8)
                     .pb(space::S8)
@@ -852,26 +944,33 @@ impl Render for ComposerView {
                     .when(editing, |el| {
                         el.child(
                             div()
+                                .px(space::S4)
                                 .flex()
-                                .gap(space::S8)
+                                .items_center()
+                                .gap(space::S6)
                                 .t_callout()
-                                .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
-                                .child(div().text_color(colors.text_2).child(c::EDIT_HINT)),
+                                .semibold()
+                                .text_color(colors.text_1)
+                                .child(ui::icon(Lucide::Pencil, theme::icon::SMALL, colors.text_2))
+                                .child(c::EDITING),
                         )
                     })
                     .when_some(title_line, |el, line| {
                         el.child(
                             div()
+                                .px(space::S4)
                                 .t_callout()
                                 .text_color(colors.text_2)
-                                .truncate()
+                                .one_line()
                                 .child(line),
                         )
                     })
-                    .when(has_chips, |el| el.child(chips))
+                    .when_some(quote_block, |el, q| el.child(div().px(space::S4).child(q)))
+                    .when_some(file_row, |el, row| el.child(div().px(space::S4).child(row)))
                     .when(self.too_long, |el| {
                         el.child(
                             div()
+                                .px(space::S4)
                                 .t_callout()
                                 .text_color(colors.danger_text)
                                 .child(c::TOO_LONG),
@@ -879,6 +978,7 @@ impl Render for ComposerView {
                     })
                     .children(self.rejected.iter().map(|line| {
                         div()
+                            .px(space::S4)
                             .t_callout()
                             .text_color(colors.danger_text)
                             .child(line.clone())
@@ -909,16 +1009,44 @@ impl Render for ComposerView {
                             .h(px(28.))
                             .flex()
                             .items_center()
-                            .gap(space::S12)
+                            .gap(space::S4)
                             .child(
                                 ui::icon_button("attach", Lucide::Paperclip)
                                     .tooltip(c::ATTACH)
                                     .disabled(!enabled || editing)
                                     .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
                             )
+                            .child(
+                                ui::icon_button("mention", Lucide::AtSign)
+                                    .tooltip(c::MENTION)
+                                    .disabled(!enabled)
+                                    .on_click(cx.listener(|this, _, window, cx| {
+                                        this.insert_at(window, cx)
+                                    })),
+                            )
                             .child(div().flex_1())
-                            .child(ui::KbdHint::new(&["enter"]).label(c::HINT_SEND))
-                            .child(ui::KbdHint::new(&["shift-enter"]).label(c::HINT_NEWLINE))
+                            .child(
+                                div()
+                                    .flex()
+                                    .items_center()
+                                    .gap(space::S12)
+                                    .mr(space::S8)
+                                    .map(|el| {
+                                        if editing {
+                                            el.child(ui::KbdHint::new(&["enter"]).label(c::HINT_SAVE))
+                                                .child(
+                                                    ui::KbdHint::new(&["escape"])
+                                                        .label(c::HINT_CANCEL),
+                                                )
+                                        } else {
+                                            el.child(ui::KbdHint::new(&["enter"]).label(c::HINT_SEND))
+                                                .child(
+                                                    ui::KbdHint::new(&["shift-enter"])
+                                                        .label(c::HINT_NEWLINE),
+                                                )
+                                        }
+                                    }),
+                            )
                             .child(send),
                     ),
             )

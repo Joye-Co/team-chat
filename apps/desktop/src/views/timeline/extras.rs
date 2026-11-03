@@ -21,7 +21,7 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, div, px}
 use crate::{
     copy::timeline as t,
     data::{ChatProvider, Member, Message},
-    theme::{self, Type as _},
+    theme::{self, Type as _, space},
 };
 
 /// What an extra can read while it renders.
@@ -136,31 +136,34 @@ impl MessageExtra for QuoteExtra {
             ),
             None => (None, t::QUOTE_UNAVAILABLE.to_string()),
         };
+        // A 2 pt `quote-bar`, 10 pt indent, the author in 600 `text-1` then
+        // the text 13 / 19 `text-2` on the same line, at most 2 lines (§13.5).
+        let mut text_all = String::new();
+        let mut highlights = Vec::new();
+        if let Some(n) = name {
+            text_all.push_str(&n);
+            highlights.push((
+                0..n.len(),
+                gpui::HighlightStyle {
+                    font_weight: Some(gpui::FontWeight::SEMIBOLD),
+                    color: Some(colors.text_1),
+                    ..Default::default()
+                },
+            ));
+            text_all.push(' ');
+        }
+        text_all.push_str(&text);
         Some(
             div()
-                .mb(px(4.))
-                .pl(px(10.))
+                .mb(space::S4)
+                .pl(space::S10)
                 .border_l_2()
                 .border_color(colors.quote_bar)
-                .flex()
-                .flex_col()
                 .min_w(px(0.))
-                .children(name.map(|n| {
-                    div()
-                        .t_callout()
-                        .semibold()
-                        .text_color(colors.text_1)
-                        .one_line()
-                        .child(n)
-                }))
-                .child(
-                    div()
-                        .min_w(px(0.))
-                        .type_role(theme::type_scale::QUOTE)
-                        .text_color(colors.text_2)
-                        .line_clamp(2)
-                        .child(text),
-                )
+                .type_role(theme::type_scale::QUOTE)
+                .text_color(colors.text_2)
+                .line_clamp(2)
+                .child(gpui::StyledText::new(text_all).with_highlights(highlights))
                 .into_any_element(),
         )
     }

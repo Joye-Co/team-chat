@@ -157,10 +157,89 @@ pub fn appended(old: &[Message], new: &[Message]) -> usize {
     }
 }
 
+/// A count with thousands separators (`1,284`; §12).
+pub fn thousands(n: usize) -> String {
+    let digits = n.to_string();
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// True for a body of one to three emoji and nothing else (shown at 32 / 40,
+/// DESIGN.md §4). ZWJ sequences, skin tones, flags and keycaps count as one.
+pub fn emoji_only(body: &str) -> bool {
+    let body = body.trim();
+    if body.is_empty() {
+        return false;
+    }
+    let mut count = 0;
+    let mut joined = false;
+    let mut open_flag = false;
+    for c in body.chars() {
+        let u = c as u32;
+        match u {
+            // Zero-width joiner: the next pictograph joins this emoji.
+            0x200D => joined = true,
+            // Variation selector, skin tones, keycap, tags: modify the emoji.
+            0xFE0F | 0x1F3FB..=0x1F3FF | 0x20E3 | 0xE0020..=0xE007F => {
+                if count == 0 {
+                    return false;
+                }
+            }
+            // Regional indicators pair into one flag.
+            0x1F1E6..=0x1F1FF => {
+                if open_flag {
+                    open_flag = false;
+                } else {
+                    open_flag = true;
+                    count += 1;
+                }
+            }
+            0x1F000..=0x1FAFF | 0x2600..=0x27BF | 0x2300..=0x23FF | 0x2B00..=0x2BFF => {
+                if joined {
+                    joined = false;
+                } else {
+                    count += 1;
+                }
+            }
+            _ => return false,
+        }
+        if count > 3 {
+            return false;
+        }
+    }
+    count > 0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::data::SendState;
+
+    #[test]
+    fn thousands_groups_digits() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1_282), "1,282");
+        assert_eq!(thousands(1_000_000), "1,000,000");
+    }
+
+    #[test]
+    fn emoji_only_bodies() {
+        assert!(emoji_only("👍"));
+        assert!(emoji_only(" 👍🎉 "));
+        assert!(emoji_only("👩🏽‍💻"));
+        assert!(emoji_only("❤️"));
+        assert!(!emoji_only("👍👍👍👍"));
+        assert!(!emoji_only("好 👍"));
+        assert!(!emoji_only("1"));
+        assert!(!emoji_only(""));
+    }
 
     fn msg(id: &str, author: &str, at: Millis) -> Message {
         Message {

@@ -1,21 +1,18 @@
-//! A thin banner above the topic view while the connection is not up:
+//! A neutral band above the composer while the connection is not up:
 //! connecting, reconnecting (with the next retry) or offline. Hidden when
 //! online or signed out.
 
 use gpui::{
     Context, IntoElement, ParentElement, Render, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonVariants as _},
+    prelude::FluentBuilder as _,
 };
 
 use crate::{
     app::{Changes, Services},
     copy::{connection as c, fill},
     data::{Change, ConnectionState, SessionState},
-    theme,
+    theme::{self, space},
+    ui::{self, Lucide},
 };
 
 pub struct ConnectionBanner {
@@ -59,39 +56,31 @@ impl Render for ConnectionBanner {
         let Some(text) = banner_text(state).filter(|_| signed_in) else {
             return div().into_any_element();
         };
-        let colors = theme::colors(cx);
+        // A neutral band (DESIGN.md §11, §13.14): never red, no modal; the
+        // composer stays usable and queued messages show 发送中.
+        let icon = match state {
+            ConnectionState::Offline => Lucide::WifiOff,
+            _ => Lucide::Loader,
+        };
         let can_retry = !matches!(state, ConnectionState::Connecting);
         div()
             .flex_none()
             .w_full()
-            .px(px(16.))
-            .py(px(6.))
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .bg(colors.panel)
-            .border_b_1()
-            .border_color(colors.border)
-            .text_sm()
-            .child(div().text_color(colors.danger).child(text))
-            .child(
-                div()
-                    .flex_1()
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(c::QUEUED_HINT),
-            )
-            .when(can_retry, |el| {
-                el.child(
-                    Button::new("reconnect-now")
-                        .small()
-                        .ghost()
-                        .label(c::RECONNECT)
-                        .on_click(cx.listener(|this, _, _, _| {
-                            this.services.provider.reconnect_now()
-                        })),
+            .px(space::S20)
+            .pb(space::S8)
+            .bg(theme::colors(cx).content)
+            .child(ui::Band::new(icon, text).when(can_retry, |band| {
+                band.trailing(
+                    crate::views::timeline::text_action(
+                        "reconnect-now",
+                        c::RECONNECT,
+                        theme::colors(cx).accent_text,
+                    )
+                    .on_click(cx.listener(
+                        |this, _, _, _| this.services.provider.reconnect_now(),
+                    )),
                 )
-            })
+            }))
             .into_any_element()
     }
 }
@@ -109,7 +98,7 @@ mod tests {
                 retry_in_ms: 1500
             })
             .as_deref(),
-            Some("连接已断开，2 秒后重连")
+            Some("网络已断开，2 秒后重新连接…")
         );
         assert_eq!(
             banner_text(ConnectionState::Reconnecting {

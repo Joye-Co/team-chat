@@ -20,7 +20,14 @@ use super::{Editing, TimelineView, model};
 use crate::{
     copy::{common, timeline as t},
     data::{Message, SendState},
+    ui::Lucide,
 };
+
+/// A 14 pt menu icon (DESIGN.md §9).
+fn icon(name: Lucide) -> gpui_component::Icon {
+    use gpui::Styled as _;
+    gpui_component::Icon::new(name).size(crate::theme::icon::MENU)
+}
 
 /// The link of a message: `<scheme>://group/<g>/topic/<t>/message/<m>`.
 pub fn message_link(message: &Message) -> String {
@@ -47,24 +54,31 @@ pub(super) fn build(
     let m = message.clone();
     let quote = {
         let (view, m) = (view.clone(), m.clone());
-        PopupMenuItem::new(t::MENU_QUOTE).on_click(move |_, _, cx| {
+        PopupMenuItem::new(t::MENU_QUOTE)
+            .icon(icon(Lucide::TextQuote))
+            .on_click(move |_, _, cx| {
             let _ = view.update(cx, |this, cx| this.quote(&m, cx));
         })
     };
     let edit = {
         let (view, m) = (view.clone(), m.clone());
-        PopupMenuItem::new(t::EDIT).on_click(move |_, window, cx| {
+        PopupMenuItem::new(t::EDIT)
+            .icon(icon(Lucide::Pencil))
+            .on_click(move |_, window, cx| {
             let _ = view.update(cx, |this, cx| this.start_edit(&m, window, cx));
         })
     };
     let delete = {
         let (view, m) = (view.clone(), m.clone());
-        PopupMenuItem::new(t::DELETE)
+        PopupMenuItem::new(t::DELETE_ELLIPSIS)
+            .icon(icon(Lucide::Trash))
             .on_click(move |_, window, cx| confirm_delete(view.clone(), m.clone(), window, cx))
     };
     let copy_text = {
         let body = m.body.clone();
-        PopupMenuItem::new(t::MENU_COPY).on_click(move |_, _, cx| {
+        PopupMenuItem::new(t::MENU_COPY)
+            .icon(icon(Lucide::Copy))
+            .on_click(move |_, _, cx| {
             cx.write_to_clipboard(ClipboardItem::new_string(body.clone()))
         })
     };
@@ -76,7 +90,9 @@ pub(super) fn build(
     };
     let retry = {
         let (view, m) = (view.clone(), m.clone());
-        PopupMenuItem::new(t::RETRY).on_click(move |_, _, cx| {
+        PopupMenuItem::new(t::RETRY)
+            .icon(icon(Lucide::RotateCcw))
+            .on_click(move |_, _, cx| {
             let _ = view.update(cx, |this, _| this.retry(&m));
         })
     };
@@ -84,12 +100,12 @@ pub(super) fn build(
         .when(failed, |menu| menu.item(retry))
         .when(m.deleted_at.is_none(), |menu| menu.item(copy_text))
         .when(sent, |menu| menu.item(copy_link))
-        .when(can_edit || can_delete, |menu| menu.separator())
         .when(can_edit, |menu| menu.item(edit))
-        .when(can_delete, |menu| menu.item(delete))
+        // A hairline before the destructive item (§13.14).
+        .when(can_delete, |menu| menu.separator().item(delete))
 }
 
-fn confirm_delete(
+pub(super) fn confirm_delete(
     view: WeakEntity<TimelineView>,
     message: Message,
     window: &mut Window,

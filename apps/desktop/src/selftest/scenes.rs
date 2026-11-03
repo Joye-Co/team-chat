@@ -208,6 +208,48 @@ pub const SCENES: &[Scene] = &[
         setup: crate::views::process::preview::open_running_developer,
         open: open_main,
     },
+    Scene {
+        name: "topic-kinds",
+        about: "话题: text, Markdown, code, quote, emoji only, 新消息 divider, streaming, typing",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::scenes::open_kinds,
+    },
+    Scene {
+        name: "topic-states",
+        about: "话题: edited, deleted, pending, failed, offline; composer with a quote and files",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::scenes::open_states,
+    },
+    Scene {
+        name: "topic-mention",
+        about: "话题: the @mention popup over the composer",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::scenes::open_mention,
+    },
+    Scene {
+        name: "topic-edit",
+        about: "话题: my message edited in place",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::scenes::open_row_edit,
+    },
+    Scene {
+        name: "topic-hover",
+        about: "话题: a hovered message with its toolbar (quote, copy, more)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::scenes::open_hover,
+    },
+    Scene {
+        name: "composer-edit",
+        about: "话题: the composer editing my last message",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::scenes::open_composer_edit,
+    },
 ];
 
 pub fn find(name: &str) -> Option<&'static Scene> {
