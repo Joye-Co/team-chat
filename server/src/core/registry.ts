@@ -195,6 +195,48 @@ export function registerEditExtension(ext: EditExtension): void {
   editExtensions.push(ext);
 }
 
+/**
+ * Message write hooks (1.1: Card v2 state, causes, refs). Unlike the extensions above they may
+ * change the body, run async checks before the write, and append events inside the write's
+ * transaction. Throw ApiError to reject the write.
+ */
+export interface MessageWriteResult {
+  /** Runs in the commit transaction after the message event is appended. */
+  inTx?(tx: RoomTx, message: Message): void;
+  /** Runs after the commit (transients). */
+  after?(message: Message): void;
+}
+export interface SendDraft {
+  body: string;
+  ext: Record<string, unknown> | undefined;
+}
+export interface EditDraft {
+  body: string;
+  /** Fields replaced in `messages.ext`, the Message and the `message.updated` data. */
+  changed: Record<string, unknown>;
+}
+export interface MessageWriteHook {
+  send?(
+    frame: Record<string, unknown>,
+    room: RoomContext,
+    actor: Actor,
+    draft: SendDraft,
+  ): Promise<MessageWriteResult | undefined> | MessageWriteResult | undefined;
+  edit?(
+    frame: Record<string, unknown>,
+    room: RoomContext,
+    actor: Actor,
+    current: Message,
+    draft: EditDraft,
+  ): Promise<MessageWriteResult | undefined> | MessageWriteResult | undefined;
+  /** In the delete transaction, after `message.deleted` is appended. */
+  remove?(room: RoomContext, tx: RoomTx, message: Message, actorId: string): void;
+}
+export const messageWriteHooks: MessageWriteHook[] = [];
+export function registerMessageWriteHook(h: MessageWriteHook): void {
+  messageWriteHooks.push(h);
+}
+
 export interface DecorateContext {
   groupId: string;
   groupKind: "group" | "dm" | null;

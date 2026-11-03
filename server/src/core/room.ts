@@ -41,6 +41,8 @@ import {
   eventImporters,
   eventWriters,
   messageExtensions,
+  type MessageWriteResult,
+  messageWriteHooks,
   roomAlarmHandlers,
   roomMigrations,
   roomRpcHandlers,
@@ -806,14 +808,23 @@ export class GroupRoom extends DurableObject<Env> {
         const add = e(frame as Record<string, unknown>, room, actor);
         if (add) ext = { ...ext, ...add };
       }
-      const body = card && frame.body === "" ? frame.cardV2?.fallback || card.title : frame.body;
+      let body = card && frame.body === "" ? frame.cardV2?.fallback || card.title : frame.body;
       const context = this.sideChatContext(frame);
+      const writes: MessageWriteResult[] = [];
+      for (const h of messageWriteHooks) {
+        if (!h.send) continue;
+        const draft = { body, ext };
+        const w = await h.send(frame as Record<string, unknown>, room, actor, draft);
+        body = draft.body;
+        ext = draft.ext;
+        if (w) writes.push(w);
+      }
 
       const now = Date.now();
       const messageId = ulid(now);
       const streaming = frame.streaming === true;
 
-      return this.commit((tx) => {
+      const sent = this.commit((tx) => {
         let topicId = frame.topicId;
         let createdTopic: Topic | undefined;
         if (!topicId) {
@@ -869,11 +880,14 @@ export class GroupRoom extends DurableObject<Env> {
         const message = this.toMessage(this.messageRow(messageId) as MessageRow);
         tx.append({ type: "message.created", actorId: actor.id, topicId, messageId, data: { message } });
         this.touchTopic(topicId, seq, true);
+        for (const w of writes) w.inTx?.(tx, message);
         if (!frame.topicId) createdTopic = this.toTopic(this.topicRow(topicId) as TopicRow);
         const result: SendResult = { message };
         if (createdTopic) result.topic = createdTopic;
         return result;
       });
+      for (const w of writes) w.after?.(sent.message);
+      return sent;
     });
   }
 
@@ -894,25 +908,28 @@ export class GroupRoom extends DurableObject<Env> {
       let ext: Record<string, unknown> = row.ext ? (JSON.parse(row.ext) as Record<string, unknown>) : {};
       const changed: Record<string, unknown> = {};
       if (frame.card) changed.card = frame.card;
-      if (frame.cardV2) {
-        const stored = ext.cardV2 as CardV2 | undefined;
-        if (stored && frame.cardV2.rev <= stored.rev) throw new ApiError("conflict", "the card has a newer rev");
-        changed.cardV2 = frame.cardV2;
-        if (!frame.card) changed.card = cardV2ToV1(frame.cardV2);
-      }
       const room = this.roomContext();
       for (const e of editExtensions) {
         const add = e(frame as Record<string, unknown>, room, actor, current);
         if (add) Object.assign(changed, add);
       }
+      const merged = { ...ext, ...changed };
+      const card = (merged.card as Card | undefined) ?? null;
+      const fallback = (merged.cardV2 as CardV2 | undefined)?.fallback;
+      const draft = { body: row.kind === "card" && frame.body === "" && card ? fallback || card.title : frame.body, changed };
+      // Card v2 revs, causes and refs (cards2 feature).
+      const writes: MessageWriteResult[] = [];
+      for (const h of messageWriteHooks) {
+        if (!h.edit) continue;
+        const w = await h.edit(frame as Record<string, unknown>, room, actor, current, draft);
+        if (w) writes.push(w);
+      }
       ext = { ...ext, ...changed };
-      const card = (ext.card as Card | undefined) ?? null;
-      const fallback = (ext.cardV2 as CardV2 | undefined)?.fallback;
-      const body = row.kind === "card" && frame.body === "" && card ? fallback || card.title : frame.body;
+      const body = draft.body;
       const streaming = row.streaming === 1 && frame.streaming === true;
       if (!streaming) this.dropDelta(row.id);
       const now = Date.now();
-      return this.commit((tx) => {
+      const edited = this.commit((tx) => {
         const seq = tx.nextSeq();
         this.sql.exec(
           "UPDATE messages SET body = ?, edited_at = ?, streaming = ?, ext = ? WHERE id = ?",
@@ -930,8 +947,12 @@ export class GroupRoom extends DurableObject<Env> {
           data: { ...changed, messageId: row.id, body, editedAt: now, streaming },
         });
         this.touchTopic(row.topic_id, seq);
-        return { message: this.toMessage(this.messageRow(row.id) as MessageRow) };
+        const message = this.toMessage(this.messageRow(row.id) as MessageRow);
+        for (const w of writes) w.inTx?.(tx, message);
+        return { message };
       });
+      for (const w of writes) w.after?.(edited.message);
+      return edited;
     });
   }
 
@@ -960,6 +981,8 @@ export class GroupRoom extends DurableObject<Env> {
       if (row.deleted_at !== null) return { messageId, deletedAt: row.deleted_at };
       this.dropDelta(messageId);
       const now = Date.now();
+      const removed = this.toMessage(row);
+      const room = this.roomContext();
       return this.commit((tx) => {
         const seq = tx.nextSeq();
         // Scrub the content from the row, stored events and quotes, so the log no longer serves it.
@@ -972,6 +995,7 @@ export class GroupRoom extends DurableObject<Env> {
           data: { messageId, deletedAt: now },
         });
         this.touchTopic(row.topic_id, seq);
+        for (const h of messageWriteHooks) h.remove?.(room, tx, removed, actor.id);
         // Deleting the newest message moves the topic's last activity back.
         const topic = this.topicRow(row.topic_id);
         if (topic && topic.last_message_at !== null && row.created_at >= topic.last_message_at) {
@@ -1063,11 +1087,9 @@ export class GroupRoom extends DurableObject<Env> {
       const row = this.messageRow(messageId);
       if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found");
       const stored = row.ext ? (JSON.parse(row.ext) as { card?: Card; cardV2?: CardV2 }) : {};
-      // A v1 press on a v2 card is an answer with that action at the current rev (cards2 feature).
-      const answer = stored.cardV2 ? roomRpcHandlers.get("cards.answer") : undefined;
-      if (stored.cardV2 && answer) {
-        return (await answer(this.roomContext(), actor, { messageId, rev: stored.cardV2.rev, actionId })) as { seq: number };
-      }
+      // A v1 press on a v2 card is `card.event action.press` at the current rev (cards2 feature).
+      const press = stored.cardV2 ? roomRpcHandlers.get("cards.press") : undefined;
+      if (stored.cardV2 && press) return (await press(this.roomContext(), actor, { messageId, actionId })) as { seq: number };
       const card = stored.card;
       const action = card?.actions?.find((a) => a.id === actionId);
       if (!action) throw new ApiError("not_found", "card action not found");

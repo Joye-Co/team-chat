@@ -5,11 +5,13 @@ export class ApiError extends Error {
   constructor(
     readonly code: ErrorCode,
     message: string,
+    /** 1.1: the specific rule (`ErrorBody.reason`), e.g. `card.already_answered`. */
+    readonly reason?: string,
   ) {
     super(message);
   }
   toBody(): ErrorBody {
-    return { code: this.code, message: this.message };
+    return this.reason ? { code: this.code, message: this.message, reason: this.reason } : { code: this.code, message: this.message };
   }
 }
 
@@ -35,5 +37,22 @@ export function toErrorBody(err: unknown): ErrorBody {
 
 export function unwrap<T>(r: Result<T>): T {
   if (r.ok) return r.value;
-  throw new ApiError(r.error.code, r.error.message);
+  throw new ApiError(r.error.code, r.error.message, r.error.reason);
+}
+
+/** The `reason` of a frame that failed its schema: a named card rule, or a deferred secret input. */
+export function schemaReason(raw: Record<string, unknown>, message: string | undefined): string | undefined {
+  const m = message ? /^((?:card|interact|artifact)\.[a-z_]+):/.exec(message) : null;
+  if (m) return m[1];
+  const blocks: unknown[] = [];
+  const cardV2 = raw.cardV2 as { blocks?: unknown } | undefined;
+  if (cardV2 && Array.isArray(cardV2.blocks)) blocks.push(...cardV2.blocks);
+  if (Array.isArray(raw.ops)) for (const op of raw.ops) if (op && typeof op === "object") blocks.push((op as { block?: unknown }).block);
+  const secret = (b: unknown): boolean => {
+    if (!b || typeof b !== "object") return false;
+    const x = b as { type?: unknown; kind?: unknown; blocks?: unknown };
+    if (x.type === "input" && x.kind === "secret") return true;
+    return Array.isArray(x.blocks) && x.blocks.some(secret);
+  };
+  return blocks.some(secret) ? "card.secret_deferred" : undefined;
 }

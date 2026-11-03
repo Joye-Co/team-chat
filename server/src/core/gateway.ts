@@ -10,12 +10,13 @@ import {
   MAX_CARD_BYTES,
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
+  SERVER_FEATURES,
   type ServerFrame,
 } from "@chat/protocol";
 import { getMember, groupsOfMember, isGroupMember, listMembers, toMember, viewGroup } from "./db";
 import { type Env, gatewayStub, roomStub } from "./env";
 import type { WriteOrder } from "./room";
-import { ApiError, toErrorBody, unwrap } from "./errors";
+import { ApiError, schemaReason, toErrorBody, unwrap } from "./errors";
 import { logger as baseLogger, type Logger } from "./logger";
 import { type MigrationStep, runMigrations } from "./migrations";
 import { LIMITS, TokenBucket } from "./ratelimit";
@@ -56,7 +57,22 @@ export interface SocketState {
   /** Socket id for write order; older attachments have none (see `socketId`). */
   sid?: string;
   client?: { name: string; version: string };
+  /** `hello.features` (1.1); the 1.1 transient types go only to sockets with `interact/1`. */
+  features?: string[];
 }
+
+/** Transient types that only `interact/1` sockets get (docs/protocol.md, "Features and catalogs"). */
+export const INTERACT_TRANSIENTS = new Set(["card.event", "interaction.resolved", "artifact.event", "artifact.data", "artifact.reply"]);
+export const INTERACT_FEATURE = "interact/1";
+
+/** True when a socket with these features may get this frame. */
+function featureAllows(features: string[] | undefined, frame: unknown): boolean {
+  if (!frame || typeof frame !== "object") return true;
+  const f = frame as { t?: unknown; event?: { type?: unknown } };
+  if (f.t !== "transient" || typeof f.event?.type !== "string" || !INTERACT_TRANSIENTS.has(f.event.type)) return true;
+  return features?.includes(INTERACT_FEATURE) === true;
+}
+
 
 /** Internal headers the Worker sets after authenticating; client copies are stripped. */
 export const INTERNAL_HEADERS = {
@@ -249,7 +265,7 @@ export class MemberGateway extends DurableObject<Env> {
     text: string,
   ):
     | { ok: true; frame: Record<string, unknown> & { t: string } }
-    | { ok: false; rid?: string; error: { code: "invalid" | "too_large"; message: string } } {
+    | { ok: false; rid?: string; error: { code: "invalid" | "too_large"; message: string; reason?: string } } {
     if (text.length > MAX_FRAME_BYTES || new TextEncoder().encode(text).byteLength > MAX_FRAME_BYTES) {
       return { ok: false, error: { code: "too_large", message: "frame exceeds 1 MiB" } };
     }
@@ -285,9 +301,14 @@ export class MemberGateway extends DurableObject<Env> {
       ) {
         return { ok: false, rid, error: { code: "too_large", message: "answer exceeds 64 KiB" } };
       }
-      const issue = result.error.issues[0];
+      const issue = result.error.issues.find((i) => schemaReason({}, i.message)) ?? result.error.issues[0];
       const where = issue?.path.join(".") || "(root)";
-      return { ok: false, rid, error: { code: "invalid", message: `invalid frame: ${where} ${issue?.message ?? ""}`.trim() } };
+      const message = `invalid frame: ${where} ${issue?.message ?? ""}`.trim();
+      const reason = schemaReason(obj, issue?.message);
+      if (reason === "card.limits" && /exceeds 64 KiB/.test(issue?.message ?? "")) {
+        return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };
+      }
+      return { ok: false, rid, error: reason ? { code: "invalid", message, reason } : { code: "invalid", message } };
     }
     return { ok: true, frame: result.data as Record<string, unknown> & { t: string } };
   }
@@ -451,6 +472,10 @@ export class MemberGateway extends DurableObject<Env> {
       ws.close(4001, "unauthorized");
       return;
     }
+    if (frame.features) {
+      state.features = frame.features.slice(0, 32);
+      ws.serializeAttachment(state);
+    }
     this.syncing.set(ws, []);
     let buffered: string[] = [];
     let members: Member[];
@@ -468,6 +493,7 @@ export class MemberGateway extends DurableObject<Env> {
         members,
         groups,
         serverTime: Date.now(),
+        features: [...SERVER_FEATURES],
       });
       // Frames delivered while the directory loaded. Some may be older than welcome's lastSeq;
       // clients drop seqs they already have.
@@ -586,17 +612,29 @@ export class MemberGateway extends DurableObject<Env> {
   // RPC (rooms and the API Worker)
   // -------------------------------------------------------------------------
 
-  /** Delivers frames (events, transient events, directory) to every ready socket. */
+  /**
+   * Delivers frames (events, transient events, directory) to every ready socket. The 1.1
+   * transient types go only to sockets that sent `hello.features` with `interact/1`.
+   */
   async deliver(frames: unknown[]): Promise<number> {
-    const sockets = this.readySockets();
+    const sockets = this.readySockets().map((ws) => ({ ws, features: (ws.deserializeAttachment() as SocketState | null)?.features }));
     const texts = frames.map((f) => JSON.stringify(f));
-    for (const text of texts) {
-      for (const ws of sockets) this.sendText(ws, text);
-    }
+    frames.forEach((frame, i) => {
+      for (const s of sockets) if (featureAllows(s.features, frame)) this.sendText(s.ws, texts[i]);
+    });
     for (const [ws, buf] of this.syncing) {
-      if (ws.readyState === WebSocket.OPEN) buf.push(...texts);
+      if (ws.readyState !== WebSocket.OPEN) continue;
+      const features = (ws.deserializeAttachment() as SocketState | null)?.features;
+      frames.forEach((frame, i) => {
+        if (featureAllows(features, frame)) buf.push(texts[i]);
+      });
     }
     return sockets.length;
+  }
+
+  /** True when a ready socket of this member sent `hello.features` with this feature. */
+  async featureOnline(feature: string): Promise<boolean> {
+    return this.readySockets().some((ws) => (ws.deserializeAttachment() as SocketState | null)?.features?.includes(feature) === true);
   }
 
   /** The member's level changed: update every socket so frames use the new permissions at once. */
