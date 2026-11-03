@@ -206,6 +206,11 @@ pub fn mime_for(path: &str) -> &'static str {
         "otf" => "font/otf",
         "mp4" => "video/mp4",
         "webm" => "video/webm",
+        "mov" => "video/quicktime",
+        "m4v" => "video/x-m4v",
+        "aac" => "audio/aac",
+        "flac" => "audio/flac",
+        "vtt" => "text/vtt; charset=utf-8",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
         "ogg" => "audio/ogg",
@@ -245,6 +250,7 @@ fn error(status: u16, host: &str) -> Response {
         404 => b"not found",
         405 => b"method not allowed",
         413 => b"too large",
+        416 => b"range not satisfiable",
         _ => b"error",
     };
     response(status, host, "text/plain; charset=utf-8", Arc::from(text))
@@ -252,6 +258,76 @@ fn error(status: u16, host: &str) -> Response {
 
 /// Answers one request for `url` when the window currently shows `host`.
 pub fn serve(content: &Content, host: &str, entry: &str, method: &str, url: &str) -> Response {
+    serve_range(content, host, entry, method, url, None)
+}
+
+/// A parsed single `Range: bytes=...` request header.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ByteRange {
+    /// `bytes=a-b` or `bytes=a-` (end `None`).
+    From { start: u64, end: Option<u64> },
+    /// `bytes=-n`: the last `n` bytes.
+    Suffix(u64),
+}
+
+/// Parses a `Range` header. Returns `None` for a header this server ignores (other units,
+/// several ranges, bad syntax): the full file is then sent with status 200.
+pub fn parse_range(header: &str) -> Option<ByteRange> {
+    let spec = header.trim();
+    let rest = spec
+        .get(..6)
+        .filter(|p| p.eq_ignore_ascii_case("bytes="))
+        .map(|_| spec[6..].trim())?;
+    if rest.contains(',') {
+        return None;
+    }
+    let (a, b) = rest.split_once('-')?;
+    let (a, b) = (a.trim(), b.trim());
+    let num = |s: &str| -> Option<u64> {
+        (!s.is_empty() && s.bytes().all(|c| c.is_ascii_digit()))
+            .then(|| s.parse().ok())
+            .flatten()
+    };
+    if a.is_empty() {
+        return num(b).map(ByteRange::Suffix);
+    }
+    let start = num(a)?;
+    let end = if b.is_empty() { None } else { Some(num(b)?) };
+    if end.is_some_and(|e| e < start) {
+        return None;
+    }
+    Some(ByteRange::From { start, end })
+}
+
+/// The inclusive byte span of `range` in a file of `len` bytes, or `None` when the range
+/// cannot be satisfied (status 416).
+pub fn resolve_range(range: ByteRange, len: u64) -> Option<(u64, u64)> {
+    if len == 0 {
+        return None;
+    }
+    match range {
+        ByteRange::From { start, end } => {
+            if start >= len {
+                return None;
+            }
+            Some((start, end.unwrap_or(len - 1).min(len - 1)))
+        }
+        ByteRange::Suffix(0) => None,
+        ByteRange::Suffix(n) => Some((len.saturating_sub(n), len - 1)),
+    }
+}
+
+/// Like [`serve`], with the request's `Range` header. Media elements (`<video>`, `<audio>`)
+/// read their files in ranges; a satisfiable single range gets status 206 with only those
+/// bytes, so a large video is never read whole into memory.
+pub fn serve_range(
+    content: &Content,
+    host: &str,
+    entry: &str,
+    method: &str,
+    url: &str,
+    range: Option<&str>,
+) -> Response {
     if !method.eq_ignore_ascii_case("GET") {
         return error(405, host);
     }
@@ -265,21 +341,87 @@ pub fn serve(content: &Content, host: &str, entry: &str, method: &str, url: &str
         return error(404, host);
     };
     let mime = mime_for(&rel);
+    let range = range.and_then(parse_range);
     match content {
         Content::Memory(files) => match files.get(&rel) {
-            Some(bytes) => response(200, host, mime, bytes.clone()),
+            Some(bytes) => {
+                let len = bytes.len() as u64;
+                match range {
+                    None => full(host, mime, bytes.clone()),
+                    Some(r) => match resolve_range(r, len) {
+                        Some((a, b)) => partial(
+                            host,
+                            mime,
+                            Arc::from(&bytes[a as usize..=b as usize]),
+                            a,
+                            b,
+                            len,
+                        ),
+                        None => unsatisfiable(host, len),
+                    },
+                }
+            }
             None => error(404, host),
         },
-        Content::Folder(root) => match read_contained(root, &rel) {
-            Ok(bytes) => response(200, host, mime, bytes),
-            Err(status) => error(status, host),
-        },
+        Content::Folder(root) => {
+            let real = match open_contained(root, &rel) {
+                Ok(v) => v,
+                Err(status) => return error(status, host),
+            };
+            let (real, len) = real;
+            match range {
+                None => {
+                    if len > MAX_FILE_BYTES {
+                        return error(413, host);
+                    }
+                    match std::fs::read(&real) {
+                        Ok(bytes) => full(host, mime, Arc::from(bytes)),
+                        Err(_) => error(404, host),
+                    }
+                }
+                Some(r) => match resolve_range(r, len) {
+                    Some((a, b)) => {
+                        // One reply carries at most MAX_RANGE_BYTES; the media element asks
+                        // again for the rest.
+                        let b = b.min(a + MAX_RANGE_BYTES - 1);
+                        match read_span(&real, a, b) {
+                            Ok(bytes) => partial(host, mime, bytes, a, b, len),
+                            Err(_) => error(404, host),
+                        }
+                    }
+                    None => unsatisfiable(host, len),
+                },
+            }
+        }
     }
 }
 
-/// Reads `root/rel` only when its real path (after symlinks) stays inside `root`.
-/// `root` must already be canonical.
-fn read_contained(root: &Path, rel: &str) -> Result<Arc<[u8]>, u16> {
+/// Largest body of one 206 reply from a folder.
+pub const MAX_RANGE_BYTES: u64 = 8 * 1024 * 1024;
+
+fn full(host: &str, mime: &str, body: Arc<[u8]>) -> Response {
+    let mut r = response(200, host, mime, body);
+    r.headers.push(("Accept-Ranges", "bytes".into()));
+    r
+}
+
+fn partial(host: &str, mime: &str, body: Arc<[u8]>, a: u64, b: u64, len: u64) -> Response {
+    let mut r = response(206, host, mime, body);
+    r.headers.push(("Accept-Ranges", "bytes".into()));
+    r.headers
+        .push(("Content-Range", format!("bytes {a}-{b}/{len}")));
+    r
+}
+
+fn unsatisfiable(host: &str, len: u64) -> Response {
+    let mut r = error(416, host);
+    r.headers.push(("Content-Range", format!("bytes */{len}")));
+    r
+}
+
+/// The real path and length of `root/rel`, only when its real path (after symlinks) stays
+/// inside `root`. `root` must already be canonical.
+fn open_contained(root: &Path, rel: &str) -> Result<(PathBuf, u64), u16> {
     let real = root.join(rel).canonicalize().map_err(|_| 404u16)?;
     if !real.starts_with(root) {
         return Err(404);
@@ -288,10 +430,16 @@ fn read_contained(root: &Path, rel: &str) -> Result<Arc<[u8]>, u16> {
     if !meta.is_file() {
         return Err(404);
     }
-    if meta.len() > MAX_FILE_BYTES {
-        return Err(413);
-    }
-    std::fs::read(&real).map(Arc::from).map_err(|_| 404)
+    Ok((real, meta.len()))
+}
+
+fn read_span(path: &Path, a: u64, b: u64) -> std::io::Result<Arc<[u8]>> {
+    use std::io::{Read, Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    f.seek(SeekFrom::Start(a))?;
+    let mut buf = vec![0u8; (b - a + 1) as usize];
+    f.read_exact(&mut buf)?;
+    Ok(Arc::from(buf))
 }
 
 #[cfg(test)]
@@ -421,6 +569,65 @@ mod tests {
             serve(&c, "a-v1", "index.html", "GET", "artifact://a-v1/sub").status,
             404
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn ranges() {
+        assert_eq!(
+            parse_range("bytes=0-1"),
+            Some(ByteRange::From {
+                start: 0,
+                end: Some(1)
+            })
+        );
+        assert_eq!(
+            parse_range("BYTES= 5-"),
+            Some(ByteRange::From {
+                start: 5,
+                end: None
+            })
+        );
+        assert_eq!(parse_range("bytes=-10"), Some(ByteRange::Suffix(10)));
+        for bad in ["bytes=0-1,4-5", "items=0-1", "bytes=5-2", "bytes=a-b", "bytes=-", "bytes=+1-2"] {
+            assert_eq!(parse_range(bad), None, "{bad}");
+        }
+        assert_eq!(resolve_range(ByteRange::From { start: 2, end: Some(99) }, 10), Some((2, 9)));
+        assert_eq!(resolve_range(ByteRange::From { start: 10, end: None }, 10), None);
+        assert_eq!(resolve_range(ByteRange::Suffix(4), 10), Some((6, 9)));
+        assert_eq!(resolve_range(ByteRange::Suffix(40), 10), Some((0, 9)));
+        assert_eq!(resolve_range(ByteRange::Suffix(0), 10), None);
+
+        let header = |r: &Response, k: &str| {
+            r.headers
+                .iter()
+                .find(|(n, _)| *n == k)
+                .map(|(_, v)| v.clone())
+        };
+        let c = Content::memory([("clip.mp4".into(), (0u8..10).collect::<Vec<_>>())]);
+        let u = "artifact://a-v1/clip.mp4";
+        let r = serve_range(&c, "a-v1", "index.html", "GET", u, Some("bytes=0-1"));
+        assert_eq!((r.status, &*r.body), (206, &[0u8, 1][..]));
+        assert_eq!(header(&r, "Content-Range").as_deref(), Some("bytes 0-1/10"));
+        assert_eq!(header(&r, "Content-Length").as_deref(), Some("2"));
+        assert_eq!(header(&r, "Content-Type").as_deref(), Some("video/mp4"));
+        let r = serve_range(&c, "a-v1", "index.html", "GET", u, Some("bytes=20-"));
+        assert_eq!(r.status, 416);
+        assert_eq!(header(&r, "Content-Range").as_deref(), Some("bytes */10"));
+        let r = serve_range(&c, "a-v1", "index.html", "GET", u, None);
+        assert_eq!((r.status, r.body.len()), (200, 10));
+        assert_eq!(header(&r, "Accept-Ranges").as_deref(), Some("bytes"));
+        // A range never widens access: other origins and traversal still fail.
+        let r = serve_range(&c, "a-v1", "index.html", "GET", "artifact://a-v2/clip.mp4", Some("bytes=0-1"));
+        assert_eq!(r.status, 404);
+
+        let dir = std::env::temp_dir().join(format!("artifact-view-range-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("a.wav"), (0u8..100).collect::<Vec<_>>()).unwrap();
+        let c = Content::Folder(dir.clone()).prepared().unwrap();
+        let r = serve_range(&c, "a-v1", "index.html", "GET", "artifact://a-v1/a.wav", Some("bytes=-3"));
+        assert_eq!((r.status, &*r.body), (206, &[97u8, 98, 99][..]));
+        assert_eq!(header(&r, "Content-Range").as_deref(), Some("bytes 97-99/100"));
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
