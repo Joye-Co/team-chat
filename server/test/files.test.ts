@@ -1,4 +1,4 @@
-import { SELF, env } from "cloudflare:test";
+import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import { ArtifactResponse, ArtifactVersionResponse, FileMeta, UpdateInfo } from "@chat/protocol";
 import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
@@ -361,6 +361,66 @@ describe("产出", () => {
     await dl.arrayBuffer();
     c.close();
     o.c.close();
+  });
+
+  it("numbers concurrent versions from the current row while a bot's run check waits on D1", async () => {
+    const owner = await createMember({ level: "owner" });
+    const bot = await createMember({ kind: "bot" });
+    const groupId = await createGroup(owner, [bot.id]);
+    const { c } = await Client.connect(owner.token);
+    const topicId = await newTopic(c, groupId);
+    const page = await upload(owner, groupId, enc.encode("<h1>v</h1>"), { name: "index.html", mime: "text/html" });
+    const files = [{ path: "index.html", fileId: page.id }];
+    const created = await api("/v1/artifacts", {
+      token: owner.token,
+      body: { groupId, topicId, title: "页面", kind: "html", entry: "index.html", files },
+    });
+    expect(created.status, JSON.stringify(created.body)).toBe(200);
+    const id = created.body.artifact.id as string;
+
+    // Hold the room's bot_runs lookup until the owner's version is committed.
+    let entered!: () => void;
+    const inLookup = new Promise<void>((r) => (entered = r));
+    let release!: () => void;
+    const held = new Promise<void>((r) => (release = r));
+    const genv = env as unknown as { GROUP_ROOM: DurableObjectNamespace };
+    const room = genv.GROUP_ROOM.get(genv.GROUP_ROOM.idFromName(groupId));
+    const inDo = runInDurableObject as unknown as (stub: unknown, fn: (inst: any) => void) => Promise<void>;
+    await inDo(room, (inst: any) => {
+      const orig = inst.env;
+      const prepare = (q: string) => {
+        const st = orig.DB.prepare(q);
+        if (!q.includes("bot_runs")) return st;
+        return {
+          bind: (...args: unknown[]) => ({
+            first: async () => {
+              entered();
+              await held;
+              inst.env = orig;
+              return st.bind(...args).first();
+            },
+          }),
+        };
+      };
+      inst.env = { ...orig, DB: { ...orig.DB, prepare, batch: orig.DB.batch.bind(orig.DB) } };
+    });
+    const byBot = api(`/v1/artifacts/${id}/versions`, {
+      token: bot.token,
+      body: { entry: "index.html", files, runId: "no-such-run" },
+    });
+    await inLookup;
+    const byOwner = await api(`/v1/artifacts/${id}/versions`, { token: owner.token, body: { entry: "index.html", files, title: "成员版" } });
+    expect(byOwner.status, JSON.stringify(byOwner.body)).toBe(200);
+    expect(byOwner.body.version.version).toBe(2);
+    release();
+    const late = await byBot;
+    expect(late.status, JSON.stringify(late.body)).toBe(200);
+    expect(late.body.version.version).toBe(3);
+    // A version without a title keeps the title the owner set while the lookup waited.
+    expect(late.body.artifact).toMatchObject({ currentVersion: 3, title: "成员版" });
+    const got = ArtifactResponse.parse((await api(`/v1/artifacts/${id}`, { token: owner.token })).body);
+    expect(got.versions.map((v) => v.version)).toEqual([3, 2, 1]);
+    c.close();
   });
 });
 

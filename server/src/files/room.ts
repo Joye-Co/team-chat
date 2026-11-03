@@ -299,9 +299,12 @@ registerRoomRpc("artifacts.create", async (room, actor, args) => {
 registerRoomRpc("artifacts.addVersion", async (room, actor, args) => {
   const a = requireActor(actor);
   const given = args as VersionInput & { artifactId: string; title?: string };
+  const first = artifactRow(room, given.artifactId);
+  if (!first) throw new ApiError("not_found", "产出 not found");
+  const req = { ...given, ...(await botVersionFields(room, a, first.topic_id, given)) };
+  // Read the row again after the D1 await: another version can commit while it waits.
   const row = artifactRow(room, given.artifactId);
   if (!row) throw new ApiError("not_found", "产出 not found");
-  const req = { ...given, ...(await botVersionFields(room, a, row.topic_id, given)) };
   const files = resolveVersionFiles(room, row.kind, req);
   const now = Date.now();
   const next = row.current_version + 1;
