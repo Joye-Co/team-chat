@@ -262,7 +262,7 @@ pub enum ChartPick {
 fn with_unit(n: f64, unit: Option<&str>) -> String {
     let n = value::display_number(n);
     match unit.map(str::trim).filter(|u| !u.is_empty()) {
-        Some(u) if u == "%" => format!("{n}%"),
+        Some("%") => format!("{n}%"),
         Some(u) => format!("{n} {u}"),
         None => n,
     }
@@ -588,11 +588,11 @@ pub fn parse_diff(text: &str, default_file: Option<&str>) -> (Vec<DiffLine>, Vec
         if !in_hunk {
             continue;
         }
-        if let Some(h) = hunks.last_mut() {
-            if h.patch.len() < 1500 {
-                h.patch.push_str(raw);
-                h.patch.push('\n');
-            }
+        if let Some(h) = hunks.last_mut()
+            && h.patch.len() < 1500
+        {
+            h.patch.push_str(raw);
+            h.patch.push('\n');
         }
         let hunk = file_hunks.saturating_sub(1);
         if let Some(t) = raw.strip_prefix('-') {

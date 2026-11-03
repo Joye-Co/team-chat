@@ -549,6 +549,34 @@ pub fn ask_about(target: PartTarget, intent: RefIntent, window: &mut Window, cx:
     }
 }
 
+/// ⌘; while the 话题 composer has chips: 单独问 opens with them (改成单独问，引用一起带过去).
+/// Nothing happens when 单独问 is open already or the 话题 composer has no chips.
+pub fn carry_to_side_chat(services: &crate::app::Services, member: Option<&str>, cx: &mut App) {
+    let nav = services.nav.read(cx);
+    if matches!(nav.visible_pane(), RightPane::SideChat(_)) {
+        return;
+    }
+    let (Some((g, t)), Some(m)) = (nav.topic.clone(), member) else {
+        return;
+    };
+    let key = DraftKey::topic(g.clone(), t.clone());
+    let refs = services.provider.draft(&key).refs;
+    if refs.is_empty() {
+        return;
+    }
+    let side = (g, t, m.to_string());
+    let h = hub(cx);
+    h.update(cx, |h, cx| {
+        h.side_chat_focused = true;
+        for r in refs.iter().cloned() {
+            h.add_side(side.clone(), r, cx);
+        }
+    });
+    for i in (0..refs.len()).rev() {
+        services.provider.remove_draft_ref(&key, i);
+    }
+}
+
 /// A reference to nothing (an affordance whose part went away); [`ask_about`] ignores it.
 pub fn empty_target() -> PartTarget {
     PartTarget {

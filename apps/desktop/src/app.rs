@@ -659,6 +659,8 @@ impl Render for RootView {
             }))
             .on_action(cx.listener(|this, _: &ToggleSideChat, _, cx| {
                 let member = this.services.provider.side_chat_default_member();
+                // inc-refs: ⌘; takes the 话题 composer's chips into 单独问.
+                crate::views::refs::carry_to_side_chat(&this.services, member.as_deref(), cx);
                 this.services
                     .nav
                     .update(cx, |nav, cx| nav.toggle_side_chat(member, cx));

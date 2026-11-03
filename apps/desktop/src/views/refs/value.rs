@@ -119,7 +119,7 @@ pub fn display_number(n: f64) -> String {
         let digits = i.unsigned_abs().to_string();
         let mut out = String::new();
         for (k, c) in digits.chars().enumerate() {
-            if k > 0 && (digits.len() - k) % 3 == 0 {
+            if k > 0 && (digits.len() - k).is_multiple_of(3) {
                 out.push(',');
             }
             out.push(c);

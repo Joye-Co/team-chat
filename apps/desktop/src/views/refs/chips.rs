@@ -160,13 +160,16 @@ pub fn composer_chip(
                 .when(!lead.trim().is_empty(), |d| {
                     d.child(
                         div()
-                            .flex_none()
+                            .min_w_0()
+                            .flex_shrink(1.)
+                            .one_line()
                             .child(lead.trim_end().trim_end_matches('·').trim_end().to_string()),
                     )
                 })
+                // The part stays whole (`fit` already cut it); the lead gives way.
                 .child(
                     div()
-                        .min_w_0()
+                        .flex_none()
                         .one_line()
                         .text_color(k.ink)
                         .medium()
@@ -294,14 +297,15 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
         .when(!lead.trim().is_empty(), |d| {
             d.child(
                 div()
-                    .flex_none()
+                    .min_w_0()
+                    .flex_shrink(1.)
                     .one_line()
                     .child(lead.trim_end().to_string()),
             )
         })
         .child(
             div()
-                .min_w_0()
+                .flex_none()
                 .one_line()
                 .when(!deleted, |d| d.text_color(k.ink_2))
                 .child(part),

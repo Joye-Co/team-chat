@@ -23,6 +23,11 @@ pub const ASKED_MESSAGE: &str = "t-v2-report-refs-ask";
 /// My message with three references.
 pub const THREE_MESSAGE: &str = "t-v2-report-refs-three";
 
+/// Ledger's answer: a sentence and the weekly table (a Markdown table, `md:1`).
+pub const REPLY_BODY: &str = "B 站 10 月新增 9 个群，9 月是 10 个，少了 1 个。少在月中：`10-12` 到 `10-23` 停更了 12 天，这两周只来了 2 个群；恢复更新后一周就来了 4 个。\n\n| 周 | B 站新增群 | 更新 |\n| --- | ---: | --- |\n| 10-06 | 3 | 正常 |\n| 10-13 | 1 | 停更 |\n| 10-20 | 1 | 停更 |\n| 10-27 | 4 | 恢复 |";
+/// Ledger's answer (its Markdown table is referenceable).
+pub const REPLY_MESSAGE: &str = "t-v2-report-m6";
+
 /// The 渠道表 of the card (Refs.dc.html §01).
 pub fn channel_table() -> (Vec<String>, Vec<Vec<String>>) {
     let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
@@ -129,14 +134,7 @@ impl V2Samples {
             let mut asked = message(GROWTH, t, 5, ME, at(10, 31), "");
             asked.id = ASKED_MESSAGE.into();
             asked.mentions = vec![LEDGER.into()];
-            let reply = message(
-                GROWTH,
-                t,
-                6,
-                LEDGER,
-                at(10, 32),
-                "B 站 10 月新增 9 个群，9 月是 10 个，少了 1 个。少在月中：`10-12` 到 `10-23` 停更了 12 天，这两周只来了 2 个群；恢复更新后一周就来了 4 个。",
-            );
+            let reply = message(GROWTH, t, 6, LEDGER, at(10, 32), REPLY_BODY);
             let mut three = message(GROWTH, t, 7, ME, at(10, 40), "");
             three.id = THREE_MESSAGE.into();
             let list = d.messages.entry(t.into()).or_default();

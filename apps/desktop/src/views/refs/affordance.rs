@@ -8,9 +8,9 @@
 use std::rc::Rc;
 
 use gpui::{
-    AnyElement, App, AppContext as _, ClipboardItem, Div, ElementId, IntoElement,
-    ParentElement as _, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, ClipboardItem, Div, ElementId, InteractiveElement as _,
+    IntoElement, ParentElement as _, Stateful, StatefulInteractiveElement as _, Styled as _,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
@@ -247,4 +247,29 @@ pub fn hover_state(id: &str, cx: &App) -> (bool, bool) {
 /// Hover tracking for renderers that draw the button themselves.
 pub fn track_hover(id: String) -> impl Fn(&bool, &mut Window, &mut App) + 'static {
     move |on, window, cx| on_hover(&id, *on, window, cx)
+}
+
+/// A card header with 就这张卡提问 in its context menu (the whole card, REFS §A3).
+pub fn whole_card(header: Div, target: Option<PartTarget>, cx: &App) -> AnyElement {
+    let Some(target) = target.filter(|_| super::enabled(cx)) else {
+        return header.into_any_element();
+    };
+    let id = ElementId::Name(format!("card-head-{}", target.address()).into());
+    let (t1, t2) = (target.clone(), target);
+    header
+        .id(id)
+        .context_menu(move |m, _, _| {
+            let (a, b) = (t1.clone(), t2.clone());
+            m.item(
+                PopupMenuItem::new(c::ASK_CARD).on_click(move |_, window, cx| {
+                    ask_about(a.clone(), RefIntent::Topic, window, cx)
+                }),
+            )
+            .item(
+                PopupMenuItem::new(c::ASK_ALONE).on_click(move |_, window, cx| {
+                    ask_about(b.clone(), RefIntent::SideChat, window, cx)
+                }),
+            )
+        })
+        .into_any_element()
 }

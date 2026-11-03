@@ -25,6 +25,19 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "refs-markdown",
+        about: "引用提问 on a Markdown table: the pointer rests on 10-13 in Ledger's weekly table; 问这里 at the row's end",
+        start: Start::V2Refs,
+        setup: |s, cx| {
+            reset(cx);
+            open_report(s, cx);
+            hub(cx).update(cx, |h, _| {
+                h.forced_hover = Some(format!("{}-md:1-c1-1", r::REPLY_MESSAGE));
+            });
+        },
+        open: open_main,
+    },
+    Scene {
         name: "refs-composer",
         about: "引用提问: five reference chips in the 话题 composer (a cell, a point, a metric, a step, a 产出 element), @Ledger and the question",
         start: Start::V2Refs,

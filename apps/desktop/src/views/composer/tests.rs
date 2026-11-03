@@ -523,3 +523,46 @@ fn asking_about_a_part_adds_the_chip_and_mentions_the_author_bot(cx: &mut TestAp
         Some("@Ledger 为什么比 9 月少了？")
     );
 }
+
+#[gpui::test]
+fn cmd_semicolon_takes_the_chips_into_the_side_chat(cx: &mut TestAppContext) {
+    use crate::fake::v2::{self as d, V2Samples, refs_samples};
+    cx.update(gpui_component::init);
+    let provider = V2Samples::with_refs();
+    let dyn_provider: Arc<dyn ChatProvider> = provider.clone();
+    let services = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let keep = services.clone();
+    let (_view, cx) = cx.add_window_view(move |window, cx| {
+        let s = Services::new(dyn_provider, cx);
+        s.nav.update(cx, |nav, cx| {
+            nav.open_topic(d::GROWTH.into(), d::T_REPORT.into(), cx)
+        });
+        *keep.borrow_mut() = Some(s.clone());
+        ComposerView::new(s, window, cx)
+    });
+    let services = services.borrow().clone().unwrap();
+    let key = DraftKey::topic(d::GROWTH, d::T_REPORT);
+    let chip = crate::data::DraftRef {
+        input: refs_samples::bili_cell().input(),
+        group_id: d::GROWTH.into(),
+        topic_id: d::T_REPORT.into(),
+        lead_chars: 0,
+    };
+    provider.add_draft_ref(&key, chip);
+    cx.update(|_, cx| crate::views::refs::carry_to_side_chat(&services, Some(d::LEDGER), cx));
+    cx.run_until_parked();
+    assert!(provider.draft(&key).refs.is_empty());
+    let side = (
+        d::GROWTH.to_string(),
+        d::T_REPORT.to_string(),
+        d::LEDGER.to_string(),
+    );
+    let moved = cx.update(|_, cx| {
+        crate::views::refs::hub(cx)
+            .read(cx)
+            .side_refs
+            .get(&side)
+            .map_or(0, Vec::len)
+    });
+    assert_eq!(moved, 1);
+}
