@@ -95,6 +95,52 @@ pub fn columns(window_width: Pixels, panel_open: bool) -> Columns {
         panel_floats: false,
     }
 }
+// ---------------------------------------------------------------------------
+// Layout v3 (the v2 redesign: rail | page | pane)
+
+/// The left rail: title row, search, destinations, 话题 and the team strip.
+pub const RAIL_WIDTH: Pixels = px(260.);
+/// The title bar of every page: breadcrumb, title, state and pane buttons.
+pub const TITLE_BAR: Pixels = px(52.);
+/// The topic rail beside a 话题 page (the default pane).
+pub const TOPIC_RAIL_WIDTH: Pixels = px(320.);
+/// The 单独问 side chat pane (⌘;).
+pub const SIDE_CHAT_WIDTH: Pixels = px(380.);
+/// The 实时查看 pane: half the window, between these bounds (720 at 1440).
+pub const LIVE_PANE_SHARE: f32 = 0.5;
+pub const LIVE_PANE_MIN_WIDTH: Pixels = px(460.);
+pub const LIVE_PANE_MAX_WIDTH: Pixels = px(760.);
+/// The 产出 pane beside a 话题 page.
+pub const ARTIFACT_PANE_WIDTH: Pixels = px(440.);
+/// The 来龙去脉 rail of the 产出 page.
+pub const ARTIFACT_RAIL_WIDTH: Pixels = px(320.);
+/// The right column of the 首页 (正在做, 排队) and the 群 page (群里的决定).
+pub const DESK_SIDE_WIDTH: Pixels = px(300.);
+/// The list of the 成员 page.
+pub const MEMBERS_LIST_WIDTH: Pixels = px(480.);
+/// A page never gets narrower than this; a pane floats over it instead.
+pub const PAGE_MIN_WIDTH: Pixels = px(480.);
+/// The reading column of pages (首页 cards, the topic timeline).
+pub const PAGE_MEASURE: Pixels = px(720.);
+/// Title bar icon buttons (单独问, 产出, 电脑, 改动, rail toggle).
+pub const TITLE_BUTTON: Pixels = px(28.);
+/// Rail rows (destinations and 话题): 30 pt; group headers 26 pt.
+pub const RAIL_ROW: Pixels = px(30.);
+pub const RAIL_GROUP_ROW: Pixels = px(26.);
+/// The slot at the start of a rail row (state dot, tile, check).
+pub const RAIL_SLOT: Pixels = px(16.);
+/// The 岗位 tag after a member's name: 18 pt, radius 5.
+pub const TAG_HEIGHT: Pixels = px(18.);
+pub const TAG_RADIUS: Pixels = px(5.);
+/// A ring around a tile or circle: 3 pt out, 1.5 pt wide.
+pub const RING_GAP: Pixels = px(3.);
+pub const RING_WIDTH: Pixels = px(1.5);
+
+/// The width of the 实时查看 pane in a window `window_w` wide.
+pub fn live_pane_width(window_w: Pixels) -> Pixels {
+    (window_w * LIVE_PANE_SHARE).clamp(LIVE_PANE_MIN_WIDTH, LIVE_PANE_MAX_WIDTH)
+}
+
 pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
 pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
 pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
@@ -313,10 +359,10 @@ fn apply(t: &mut Theme, dark: bool) {
     t.border = k.border;
     t.input = k.border;
     t.ring = k.focus;
-    t.selection = p(0x1F6BFF33, 0x4C8DFF5C);
-    t.caret = k.accent;
+    t.selection = p(0x3B6EF533, 0x6B93F75C);
+    t.caret = k.ink;
     t.overlay = k.scrim;
-    t.accent = p(0x1F232914, 0xFFFFFF16);
+    t.accent = k.hover;
     t.accent_foreground = k.text_1;
 
     t.primary = k.accent;
@@ -328,11 +374,7 @@ fn apply(t: &mut Theme, dark: bool) {
     t.button_primary_active = k.accent_pressed;
     t.button_primary_foreground = k.on_accent;
 
-    let (sec, sec_h, sec_a) = (
-        p(0xFFFFFFFF, 0xFFFFFF14),
-        p(0xF6F7F9FF, 0xFFFFFF1F),
-        p(0xECEDF0FF, 0xFFFFFF29),
-    );
+    let (sec, sec_h, sec_a) = (k.bg, k.hover, k.pressed);
     t.secondary = sec;
     t.secondary_hover = sec_h;
     t.secondary_active = sec_a;
@@ -351,34 +393,34 @@ fn apply(t: &mut Theme, dark: bool) {
     t.danger = k.danger;
     t.danger_hover = p(0xD93F44FF, 0xF66A6EFF);
     t.danger_active = p(0xC2272DFF, 0xD9474CFF);
-    t.danger_foreground = k.on_accent;
+    t.danger_foreground = c(0xFFFFFFFF);
     t.button_danger = t.danger;
     t.button_danger_hover = t.danger_hover;
     t.button_danger_active = t.danger_active;
-    t.button_danger_foreground = k.on_accent;
+    t.button_danger_foreground = c(0xFFFFFFFF);
     t.success = k.success;
     t.success_hover = k.success;
     t.success_active = k.success;
-    t.success_foreground = k.on_accent;
+    t.success_foreground = c(0xFFFFFFFF);
     t.warning = k.you_glyph;
     t.warning_hover = k.you_glyph;
     t.warning_active = k.you_glyph;
-    t.warning_foreground = k.on_accent;
-    t.info = k.accent;
-    t.info_hover = k.accent_hover;
-    t.info_active = k.accent_pressed;
-    t.info_foreground = k.on_accent;
+    t.warning_foreground = c(0xFFFFFFFF);
+    t.info = k.live;
+    t.info_hover = k.live;
+    t.info_active = k.live_ink;
+    t.info_foreground = c(0xFFFFFFFF);
 
     t.colors.list = k.content;
     t.list_hover = k.hover;
-    t.list_active = p(0x1F232914, 0xFFFFFF16);
+    t.list_active = k.sel;
     t.list_active_border = clear;
     t.list_even = k.content;
     t.list_head = k.content;
 
     t.table = k.content;
     t.table_hover = k.hover;
-    t.table_active = p(0x1F232914, 0xFFFFFF16);
+    t.table_active = k.sel;
     t.table_active_border = clear;
     t.table_even = k.content;
     t.table_row_border = k.sep;
@@ -396,7 +438,7 @@ fn apply(t: &mut Theme, dark: bool) {
 
     t.sidebar = k.sidebar;
     t.sidebar_foreground = k.text_2;
-    t.sidebar_accent = p(0x1F232917, 0xFFFFFF17);
+    t.sidebar_accent = k.sel;
     t.sidebar_accent_foreground = k.text_1;
     t.sidebar_primary = k.accent;
     t.sidebar_primary_foreground = k.on_accent;
@@ -416,39 +458,39 @@ fn apply(t: &mut Theme, dark: bool) {
 
     t.switch = k.border_strong;
     t.switch_thumb = c(0xFFFFFFFF);
-    t.slider_bar = k.accent;
+    t.slider_bar = k.ink;
     t.slider_thumb = c(0xFFFFFFFF);
-    t.progress_bar = k.accent;
+    t.progress_bar = k.live;
     t.skeleton = k.field;
 
     t.scrollbar = clear;
-    t.scrollbar_thumb = p(0x1F232940, 0xFFFFFF40);
-    t.scrollbar_thumb_hover = p(0x1F232966, 0xFFFFFF66);
+    t.scrollbar_thumb = p(0x11111340, 0xFFFFFF40);
+    t.scrollbar_thumb_hover = p(0x11111366, 0xFFFFFF66);
 
     t.link = k.accent_text;
-    t.link_hover = p(0x1250BFFF, 0x94BAFFFF);
-    t.link_active = p(0x0E449FFF, 0xAECBFFFF);
+    t.link_hover = p(0x1C45B8FF, 0xAFC6FCFF);
+    t.link_active = p(0x163A9EFF, 0xC4D5FDFF);
 
-    t.blue = k.accent;
+    t.blue = k.live;
     t.blue_light = k.info_bg;
     t.yellow = k.you_text;
     t.yellow_light = k.you_bg;
     t.red = k.danger_text;
     t.red_light = k.danger_bg;
     t.green = k.success_text;
-    t.green_light = p(0x1E9E5A1F, 0x3CCB7F29);
+    t.green_light = p(0x1F9D551F, 0x3CC27A29);
     t.magenta = t.blue;
     t.magenta_light = t.blue_light;
     t.cyan = t.blue;
     t.cyan_light = t.blue_light;
 
-    t.chart_1 = k.accent;
+    t.chart_1 = k.ink;
     t.chart_2 = k.success;
     t.chart_3 = k.you_glyph;
     t.chart_4 = k.text_2;
     t.chart_5 = k.text_3;
     t.window_border = k.border;
-    t.drag_border = k.accent;
+    t.drag_border = k.live;
     t.drop_target = k.info_bg;
 
     t.font_family = FONT_FAMILY.into();
@@ -491,6 +533,8 @@ pub mod type_scale {
     pub const DISPLAY: (Pixels, Pixels) = (px(22.), px(30.));
     /// 18 / 26: the topic view title, the one primary title of the window.
     pub const HEADING: (Pixels, Pixels) = (px(18.), px(26.));
+    /// 17 / 24: v3 page titles in the title bar.
+    pub const PAGE_TITLE: (Pixels, Pixels) = (px(17.), px(24.));
     /// 16 / 24: topic list header, side panel header, dialog title.
     pub const TITLE: (Pixels, Pixels) = (px(16.), px(24.));
     /// 15 / 22: card titles.
@@ -593,6 +637,28 @@ pub trait Type: Styled + Sized {
             .font_weight(MEDIUM_WEIGHT)
             .font_features(tabular())
     }
+    /// 17 / 24, 600: the title bar of 首页, 产出, 成员 and 群 pages (v3).
+    fn t_page_title(self) -> Self {
+        self.type_role(type_scale::PAGE_TITLE)
+            .font_weight(FontWeight::SEMIBOLD)
+    }
+    /// 15 / 22, 600: the title bar of a 话题 page (v3).
+    fn t_bar_title(self) -> Self {
+        self.type_role(type_scale::CARD_TITLE)
+            .font_weight(FontWeight::SEMIBOLD)
+    }
+    /// 12 / 16 monospace with tabular figures: counts, times, sizes and
+    /// costs in v3 (`.mono`).
+    fn t_mono(self) -> Self {
+        self.type_role(type_scale::META)
+            .font_family(MONO_FONT_FAMILY)
+            .font_features(tabular())
+    }
+    /// Monospace tabular figures at the inherited size (`.mono`).
+    fn mono(self) -> Self {
+        self.font_family(MONO_FONT_FAMILY)
+            .font_features(tabular())
+    }
     /// Older name of [`Type::t_heading`].
     fn t_topic_title(self) -> Self {
         self.t_heading()
@@ -679,6 +745,31 @@ pub mod motion {
         let e = out();
         move |t| e.sample(t)
     }
+
+    // v3 motion (CONCEPT2 §5). Loops only for live signals; never animate
+    // selection, keyboard navigation, screen switches, counts or the theme.
+
+    /// First paint: cards and rows rise in one after another this far apart.
+    pub const STAGGER: Duration = Duration::from_millis(45);
+    /// At most this many items take part in a stagger; the rest come with
+    /// the last one, so a long list never waits.
+    pub const STAGGER_MAX: usize = 8;
+    /// The rise of a card or row on first paint (`tc-rise`).
+    pub const RISE_IN: Duration = Duration::from_millis(360);
+    /// Side chat and panes enter: opacity plus [`PANE_TRAVEL`] from the right.
+    pub const PANE_ENTER: Duration = Duration::from_millis(200);
+    pub const PANE_TRAVEL: gpui::Pixels = gpui::px(12.);
+    /// One breath of a live ring or a current plan dot (`tc-breathe`).
+    pub const BREATHE: Duration = Duration::from_millis(2400);
+    /// The opacity a breathing ring swings between.
+    pub const BREATHE_HIGH: f32 = 0.8;
+    pub const BREATHE_LOW: f32 = 0.25;
+    /// The check of an answered card draws in (`tc-draw`).
+    pub const CHECK_DRAW: Duration = Duration::from_millis(300);
+    /// Chart bars grow from zero once.
+    pub const BAR_GROW: Duration = Duration::from_millis(400);
+    /// The blink half-period of a live terminal cursor (`tc-blink`).
+    pub const CURSOR_BLINK: Duration = Duration::from_millis(500);
 }
 
 // ---------------------------------------------------------------------------
@@ -688,6 +779,48 @@ pub mod motion {
 /// follow the token names with `_` for `-`.
 #[derive(Clone, Copy, Debug)]
 pub struct Colors {
+    // v3 tokens (HELMET2): one field per CSS custom property, `_` for `-`.
+    /// Page background (`--bg`).
+    pub bg: Hsla,
+    /// The left rail and the topic rail (`--rail`).
+    pub rail: Hsla,
+    /// Inset fills: tags, kbd, search keys, quiet blocks (`--sunken`).
+    pub sunken: Hsla,
+    pub ink: Hsla,
+    pub ink_2: Hsla,
+    pub ink_3: Hsla,
+    pub line: Hsla,
+    pub line_2: Hsla,
+    /// Selection: grey, never an accent tint (`--sel`).
+    pub sel: Hsla,
+    /// Primary buttons: ink fill with `btn_ink` text (`--btn`).
+    pub btn: Hsla,
+    pub btn_ink: Hsla,
+    /// State: amber means "you" (needs your decision), only that.
+    pub you: Hsla,
+    pub you_ink: Hsla,
+    /// State: blue means "live" (a member works now).
+    pub live: Hsla,
+    pub live_ink: Hsla,
+    pub ok: Hsla,
+    pub ok_ink: Hsla,
+    /// State: red means a problem.
+    pub bad: Hsla,
+    pub bad_ink: Hsla,
+    /// A person's circle without a photo (`--person`).
+    pub person: Hsla,
+    /// The live screen frame (`--screen`, `--screen-ink`, `--screen-dim`).
+    pub screen: Hsla,
+    pub screen_ink: Hsla,
+    pub screen_dim: Hsla,
+    /// The initial on a bot tile (`--tile-ink`).
+    pub tile_ink: Hsla,
+    /// Placeholder tints of thumbnails (`--ph-1..3`).
+    pub ph: [Hsla; 3],
+    /// Named member tints (`--c-jojo` .. `--c-scout`), see [`MEMBER_TINTS`].
+    tints: [Hsla; 8],
+    v3_shadows: V3Shadows,
+
     // Surfaces (§2.1)
     pub sidebar: Hsla,
     pub content: Hsla,
@@ -787,6 +920,18 @@ pub struct Colors {
     pub search_highlight: Hsla,
 }
 
+/// The v3 shadow colors (`--lift`, `--btn-hi`, `--sec-hi`, `--tile-edge`,
+/// `--pop`). `None` where the token is `none` in that mode.
+#[derive(Clone, Copy, Debug)]
+struct V3Shadows {
+    lift: Option<Hsla>,
+    /// Inset highlight of a primary button, and its y offset (1 light, -1 dark).
+    btn_hi: (Hsla, f32),
+    sec_hi: Option<Hsla>,
+    tile_edge: Hsla,
+    pop: [Hsla; 2],
+}
+
 #[derive(Clone, Copy, Debug)]
 struct ShadowColors {
     /// Level 1 float: ring, drop.
@@ -800,10 +945,79 @@ impl Colors {
         self.dark
     }
 
-    /// The tint of a bot tile (§2.6): one of six by a stable hash of the
-    /// character id.
+    /// The tint of a bot tile. v3: the named member tint of `key` (see
+    /// [`Colors::member_tint`]). The v2.1 six-hue hash stays in
+    /// [`Colors::legacy_bot_tint`].
     pub fn bot_tint(&self, key: &str) -> Hsla {
+        self.member_tint(key)
+    }
+
+    /// The v2.1 tint of a bot tile: one of six by a stable hash.
+    pub fn legacy_bot_tint(&self, key: &str) -> Hsla {
         self.bots[bot_tint_index(key)]
+    }
+
+    /// The named tint of a member (`--c-<name>`): `key` is a member name, a
+    /// roster character id or any other id. Roster names and their
+    /// characters get their own tint; anything else one of the eight by a
+    /// stable hash.
+    pub fn member_tint(&self, key: &str) -> Hsla {
+        self.tints[member_tint_index(key)]
+    }
+
+    /// `--lift`: the 1 pt drop under cards and rail cards (none in dark).
+    pub fn lift(&self) -> Vec<BoxShadow> {
+        self.v3_shadows
+            .lift
+            .map(|c| vec![shadow(c, 0., 1., 2., 0., false)])
+            .unwrap_or_default()
+    }
+
+    /// `--btn-hi`: the inner highlight of a primary button.
+    pub fn btn_hi(&self) -> Vec<BoxShadow> {
+        let (c, y) = self.v3_shadows.btn_hi;
+        vec![shadow(c, 0., y, 0., 0., true)]
+    }
+
+    /// `--sec-hi`: the hairline drop under a secondary button (none in dark).
+    pub fn sec_hi(&self) -> Vec<BoxShadow> {
+        self.v3_shadows
+            .sec_hi
+            .map(|c| vec![shadow(c, 0., 1., 1., 0., false)])
+            .unwrap_or_default()
+    }
+
+    /// `--tile-edge`: the 1 pt inner edge of every bot tile.
+    pub fn tile_edge(&self) -> Vec<BoxShadow> {
+        vec![shadow(self.v3_shadows.tile_edge, 0., 0., 0., 1., true)]
+    }
+
+    /// `--pop`: popovers and the 交代或搜索 dialog.
+    pub fn pop(&self) -> Vec<BoxShadow> {
+        let [a, b] = self.v3_shadows.pop;
+        if self.dark {
+            vec![
+                shadow(a, 0., 18., 48., 0., false),
+                shadow(b, 0., 0., 0., 1., false),
+            ]
+        } else {
+            vec![
+                shadow(a, 0., 18., 48., 0., false),
+                shadow(b, 0., 2., 8., 0., false),
+            ]
+        }
+    }
+
+    /// The (mark, text) colors of a state: amber you, blue live, red
+    /// problem, green done, grey quiet.
+    pub fn state(&self, state: StateTone) -> (Hsla, Hsla) {
+        match state {
+            StateTone::You => (self.you, self.you_ink),
+            StateTone::Live => (self.live, self.live_ink),
+            StateTone::Problem => (self.bad, self.bad_ink),
+            StateTone::Done => (self.ok, self.ok_ink),
+            StateTone::Quiet => (self.ink_3, self.ink_3),
+        }
     }
 
     /// The avatar pair `(background, foreground)` of a person without a
@@ -884,6 +1098,65 @@ impl Colors {
     }
 }
 
+/// The closed set of state colors (v3): one meaning each.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum StateTone {
+    /// Amber: needs you (a decision, a review, an answer).
+    You,
+    /// Blue: a member works on it now.
+    Live,
+    /// Red: something went wrong.
+    Problem,
+    /// Green: done.
+    Done,
+    /// Grey: waits on someone else, idle, or nothing to say.
+    Quiet,
+}
+
+/// The names of the eight member tints, in `--c-*` order. A member whose
+/// name or roster character matches one of these gets that tint.
+pub const MEMBER_TINTS: [&str; 8] = [
+    "jojo", "watch", "taro", "forge", "tata", "ledger", "pocket", "scout",
+];
+
+/// The index into [`MEMBER_TINTS`] for a member name, a roster character id
+/// (`o08` is Forge) or any other key (a stable hash).
+pub fn member_tint_index(key: &str) -> usize {
+    let lower = key.trim().to_lowercase();
+    if let Some(i) = MEMBER_TINTS.iter().position(|n| *n == lower) {
+        return i;
+    }
+    // Roster characters (assets/bots/roster.json): the tint of the name.
+    const CHARACTERS: [(&str, usize); 7] = [
+        ("o11", 1),
+        ("h03", 2),
+        ("o08", 3),
+        ("o03", 4),
+        ("h02", 5),
+        ("o05", 6),
+        ("o07", 7),
+    ];
+    if let Some((_, i)) = CHARACTERS.iter().find(|(c, _)| *c == lower) {
+        return *i;
+    }
+    let mut hash: u32 = 0x811c_9dc5;
+    for byte in lower.bytes() {
+        hash ^= byte as u32;
+        hash = hash.wrapping_mul(0x0100_0193);
+    }
+    hash as usize % MEMBER_TINTS.len()
+}
+
+fn shadow(color: Hsla, x: f32, y: f32, blur: f32, spread: f32, inset: bool) -> BoxShadow {
+    BoxShadow {
+        color,
+        offset: point(px(x), px(y)),
+        blur_radius: px(blur),
+        spread_radius: px(spread),
+        inset,
+    }
+}
+
 /// Elevation levels (§5). Shadows only on floating layers.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Elevation {
@@ -924,33 +1197,55 @@ pub fn palette_index(id: &str) -> usize {
     bot_tint_index(id)
 }
 
+/// The v3 colors (HELMET2.html, the accepted v2 artboards). The v2.1 field
+/// names are kept and point at the v3 tokens, so views written before v3
+/// build and take the new look: ink primary buttons, grey selection, rail
+/// and sunken surfaces, amber only for "you", blue only for "live".
 fn build(dark: bool) -> Colors {
     let p = |l: u32, d: u32| if dark { c(d) } else { c(l) };
-    let sidebar = p(0xF2F3F5FF, 0x18181BFF);
-    let content = p(0xFFFFFFFF, 0x1F1F23FF);
-    let raised = p(0xF6F7F9FF, 0x28282DFF);
-    let overlay = p(0xFFFFFFFF, 0x34343BFF);
-    let code_bg = p(0xF4F5F7FF, 0x26262BFF);
-    let text_1 = p(0x1F2329FF, 0xEDEDF0FF);
-    let text_2 = p(0x5F6670FF, 0xA5A9B1FF);
-    let text_3 = p(0x70767FFF, 0x8A8F98FF);
-    let sep = p(0x1F232917, 0xFFFFFF14);
-    let border = p(0x1F232924, 0xFFFFFF21);
-    let border_strong = p(0x1F23293D, 0xFFFFFF38);
-    let hover = p(0x1F23290A, 0xFFFFFF0A);
-    let selected = p(0xE3ECFEFF, 0x23324FFF);
-    let pressed = p(0x1F23291F, 0xFFFFFF1F);
-    let field = p(0x1F23290E, 0xFFFFFF11);
-    let accent = p(0x1F6BFFFF, 0x2F6FEBFF);
-    let accent_text = p(0x175CD9FF, 0x7AA8FFFF);
-    let focus_border = p(0x1F6BFFFF, 0x4C8DFFFF);
-    let me_bg = p(0xFF8A002E, 0xFF9F0A38);
-    let hl_bg = p(0xFF8A002E, 0xFF9F0A3D);
-    let you_glyph = p(0xE07800FF, 0xFF9F0AFF);
-    let danger = p(0xE5484DFF, 0xF2555AFF);
-    let danger_text = p(0xC2272DFF, 0xFF7B7FFF);
-    let success = p(0x1E9E5AFF, 0x3CCB7FFF);
-    let online = p(0x1FB25AFF, 0x34C76AFF);
+    // --- v3 tokens ---
+    let bg = p(0xFFFFFFFF, 0x111113FF);
+    let rail = p(0xF7F7F8FF, 0x161618FF);
+    let sunken = p(0xF3F3F4FF, 0x1C1C1FFF);
+    let raised = p(0xFAFAFAFF, 0x151517FF);
+    let ink = p(0x111113FF, 0xF1F1F3FF);
+    let ink_2 = p(0x52525BFF, 0xA9A9B2FF);
+    let ink_3 = p(0x6E6E76FF, 0x8C8C95FF);
+    let line = p(0xEBEBEDFF, 0x252529FF);
+    let line_2 = p(0xDCDCE0FF, 0x34343AFF);
+    let hover = p(0xF0F0F2FF, 0x1D1D20FF);
+    let sel = p(0xE9E9ECFF, 0x26262AFF);
+    let btn = p(0x111113FF, 0xF1F1F3FF);
+    let btn_ink = p(0xFFFFFFFF, 0x111113FF);
+    let you = p(0xE8590CFF, 0xF27A2EFF);
+    let you_ink = p(0xB54708FF, 0xF7A26AFF);
+    let you_bg = p(0xFFF4ECFF, 0x2B1C12FF);
+    let live = p(0x3B6EF5FF, 0x6B93F7FF);
+    let live_ink = p(0x2453D1FF, 0x93B1FAFF);
+    let ok = p(0x1F9D55FF, 0x3CC27AFF);
+    let ok_ink = p(0x177245FF, 0x6AD69CFF);
+    let bad = p(0xE5484DFF, 0xF2555AFF);
+    let bad_ink = p(0xC42B30FF, 0xFF8A8EFF);
+    let person = p(0xE6E6E9FF, 0x2C2C31FF);
+    let tints = if dark {
+        [
+            0xCFC39EFF, 0xB4C6C9FF, 0xCAB9C6FF, 0xD0BDB0FF, 0xB8C1D2FF, 0xCDB9BEFF, 0xC0BED0FF,
+            0xB7C9BCFF,
+        ]
+    } else {
+        [
+            0xF3E6BFFF, 0xD8ECEFFF, 0xEFDDEBFF, 0xF6E1D3FF, 0xDCE5F7FF, 0xF4DDE3FF, 0xE4E2F4FF,
+            0xDCEFE2FF,
+        ]
+    }
+    .map(c);
+    // Translucent tints of the state colors for fills (selection of text,
+    // mentions, focus halos, soft chips).
+    let live_a = |a: u32| p(0x3B6EF500 | a, 0x6B93F700 | a);
+    let you_a = |a: u32| p(0xE8590C00 | a, 0xF27A2E00 | a);
+    let bad_a = |a: u32| p(0xE5484D00 | a, 0xF2555A00 | a);
+    let overlay = p(0xFFFFFFFF, 0x1C1C1FFF);
+    let pressed = p(0xE4E4E8FF, 0x2A2A2FFF);
     let bots = if dark {
         [
             0x6B7DA6FF, 0x62907BFF, 0xA08562FF, 0x8472A8FF, 0x6293A1FF, 0xA0717FFF,
@@ -961,102 +1256,152 @@ fn build(dark: bool) -> Colors {
         ]
     }
     .map(c);
+    let accent = btn;
+    let accent_text = live_ink;
+    let focus_border = live;
     Colors {
-        sidebar,
-        content,
+        bg,
+        rail,
+        sunken,
+        ink,
+        ink_2,
+        ink_3,
+        line,
+        line_2,
+        sel,
+        btn,
+        btn_ink,
+        you,
+        you_ink,
+        live,
+        live_ink,
+        ok,
+        ok_ink,
+        bad,
+        bad_ink,
+        person,
+        screen: p(0x16161AFF, 0x0B0B0DFF),
+        screen_ink: c(0xC9C9D1FF),
+        screen_dim: p(0x7A7A84FF, 0x6E6E78FF),
+        tile_ink: p(0x2D3272FF, 0x232858FF),
+        ph: [
+            p(0xD9D3C7FF, 0x4A463FFF),
+            p(0xC9D5D3FF, 0x3D4645FF),
+            p(0xE2D2C4FF, 0x4E463FFF),
+        ],
+        tints,
+        v3_shadows: V3Shadows {
+            lift: (!dark).then(|| c(0x1111130D)),
+            btn_hi: if dark {
+                (c(0x00000024), -1.)
+            } else {
+                (c(0xFFFFFF29), 1.)
+            },
+            sec_hi: (!dark).then(|| c(0x1111130D)),
+            tile_edge: p(0x11111312, 0x00000033),
+            pop: if dark {
+                [c(0x0000008C), c(0xFFFFFF0F)]
+            } else {
+                [c(0x11111329), c(0x1111130F)]
+            },
+        },
+
+        // --- v2.1 names on v3 tokens ---
+        sidebar: rail,
+        content: bg,
         raised,
         overlay,
-        scrim: p(0x0F111452, 0x0000008C),
-        code_bg,
-        text_1,
-        text_2,
-        text_3,
-        placeholder: p(0x9AA0A8FF, 0x6C7079FF),
-        sep,
-        border,
-        border_strong,
+        scrim: p(0x1111132E, 0x0000008C),
+        code_bg: sunken,
+        text_1: ink,
+        text_2: ink_2,
+        text_3: ink_3,
+        placeholder: p(0xA1A1A9FF, 0x6C6C75FF),
+        sep: line,
+        border: line,
+        border_strong: line_2,
         hover,
-        selected,
-        sidebar_hover: p(0x1F23290D, 0xFFFFFF0B),
-        sidebar_selected: p(0xDCE6FAFF, 0x22304BFF),
-        sel_glyph: accent_text,
+        selected: sel,
+        sidebar_hover: hover,
+        sidebar_selected: sel,
+        sel_glyph: ink,
         pressed,
-        field,
-        count_bg: p(0xE6E8ECFF, 0x3A3E46FF),
-        count_text: p(0x4B5058FF, 0xC9CDD4FF),
-        count_solid: p(0x697079FF, 0x5C6370FF),
+        field: sunken,
+        count_bg: sunken,
+        count_text: ink_2,
+        count_solid: ink_3,
         tile_ring: p(0xFFFFFFFF, 0xFFFFFF1A),
-        opt_bg: p(0xF4F5F7FF, 0x2A2D33FF),
-        opt_hover: p(0xECEEF1FF, 0x32353CFF),
-        disabled_bg: p(0x1F232914, 0xFFFFFF0F),
-        disabled_text: p(0x8A8F98FF, 0x8A8F98FF),
-        tile: p(0xEBEDF0FF, 0x34343BFF),
-        desk: p(0xE9EBEFFF, 0x0E0F12FF),
+        opt_bg: sunken,
+        opt_hover: hover,
+        disabled_bg: p(0x11111314, 0xFFFFFF0F),
+        disabled_text: p(0x8A8A92FF, 0x8A8A92FF),
+        tile: sunken,
+        desk: sunken,
         accent,
-        accent_hover: p(0x165EEBFF, 0x3D7EFFFF),
-        accent_pressed: p(0x1252CCFF, 0x2A63D4FF),
+        accent_hover: p(0x2A2A2EFF, 0xDCDCE0FF),
+        accent_pressed: p(0x000000FF, 0xC9C9CFFF),
         accent_text,
-        accent_soft: p(0x1F6BFF1A, 0x4C8DFF29),
-        on_accent: c(0xFFFFFFFF),
-        focus: p(0x1F6BFF8C, 0x4C8DFFA6),
+        accent_soft: live_a(0x1A),
+        on_accent: btn_ink,
+        focus: live_a(0x8C),
         focus_border,
-        focus_soft: p(0x1F6BFF29, 0x4C8DFF3D),
-        choice_bg: p(0x1F6BFF0F, 0x4C8DFF1F),
-        mention_bg: p(0x1F6BFF1A, 0x4C8DFF2E),
-        me_bg,
-        me_text: p(0x9A4A00FF, 0xFFB547FF),
-        hl_bg,
-        unread_dot: p(0x1F6BFFFF, 0x4C8DFFFF),
-        you_bg: p(0xFFE9D1FF, 0x4A3418FF),
-        you_text: p(0x9A4A00FF, 0xFFB547FF),
-        you_glyph,
-        you_bar: c(0xF5A623FF),
-        info_bg: p(0x1F6BFF1A, 0x4C8DFF2E),
-        info_text: accent_text,
-        danger,
-        danger_bg: p(0xE5484D1F, 0xF2555A2E),
-        danger_text,
-        success,
-        success_text: p(0x137042FF, 0x5BD893FF),
-        badge: c(0xD93A40FF),
-        online,
-        avatar_bg: p(0xE6EAF2FF, 0x364052FF),
-        avatar_fg: p(0x3E4C63FF, 0xD3DCEAFF),
+        focus_soft: live_a(0x33),
+        choice_bg: live_a(0x0F),
+        mention_bg: live_a(0x1A),
+        me_bg: you_a(0x24),
+        me_text: you_ink,
+        hl_bg: you_a(0x2E),
+        unread_dot: live,
+        you_bg,
+        you_text: you_ink,
+        you_glyph: you,
+        you_bar: you,
+        info_bg: live_a(0x1A),
+        info_text: live_ink,
+        danger: bad,
+        danger_bg: bad_a(0x1F),
+        danger_text: bad_ink,
+        success: ok,
+        success_text: ok_ink,
+        badge: bad,
+        online: ok,
+        avatar_bg: person,
+        avatar_fg: ink_2,
         bots,
         shadows: ShadowColors {
-            float: [p(0x1F23291F, 0xFFFFFF1F), p(0x0F111414, 0x00000059)],
+            float: [p(0x1111131F, 0xFFFFFF1F), p(0x11111314, 0x00000059)],
             overlay: [
-                p(0x1F232924, 0xFFFFFF29),
-                p(0x0F111438, 0x000000B3),
-                p(0x0F11140F, 0x00000000),
+                p(0x11111324, 0xFFFFFF14),
+                p(0x11111329, 0x0000008C),
+                p(0x1111130F, 0x00000000),
             ],
         },
         dark,
-        panel: content,
-        window_bg: content,
-        group: content,
+        panel: bg,
+        window_bg: bg,
+        group: bg,
         elevated: overlay,
         fill_hover: hover,
-        fill_selected: selected,
+        fill_selected: sel,
         fill_pressed: pressed,
-        fill_field: field,
-        fill_active: selected,
-        control_border: border,
+        fill_field: sunken,
+        fill_active: sel,
+        control_border: line,
         control_border_focus: focus_border,
-        quote_bar: border_strong,
-        code_text: text_1,
-        warning: you_glyph,
-        new_divider: danger,
-        glyph_progress: accent,
-        glyph_wait: you_glyph,
-        glyph_done: success,
-        background: content,
-        foreground: text_1,
-        muted_foreground: text_2,
+        quote_bar: line_2,
+        code_text: ink,
+        warning: you,
+        new_divider: bad,
+        glyph_progress: live,
+        glyph_wait: you,
+        glyph_done: ok,
+        background: bg,
+        foreground: ink,
+        muted_foreground: ink_2,
         row_hover: hover,
-        offline: text_3,
-        code_background: code_bg,
-        search_highlight: hl_bg,
+        offline: ink_3,
+        code_background: sunken,
+        search_highlight: you_a(0x2E),
     }
 }
 
@@ -1077,6 +1422,11 @@ fn high_contrast(mut k: Colors) -> Colors {
     k.sep = k.border_strong;
     k.placeholder = k.text_3;
     k.text_3 = k.text_2;
+    // v3 names of the same tokens.
+    k.line = k.line_2;
+    k.control_border = k.line_2;
+    k.ink_3 = k.ink_2;
+    k.offline = k.ink_2;
     k
 }
 
@@ -1214,6 +1564,8 @@ mod tests {
             assert_eq!(h.text_3, k.text_2);
             assert_eq!(h.placeholder, k.text_3);
             assert_eq!(h.text_1, k.text_1);
+            assert_eq!(h.line, k.line_2);
+            assert_eq!(h.ink_3, k.ink_2);
         }
     }
 
@@ -1272,20 +1624,70 @@ mod tests {
     }
 
     #[test]
-    fn dark_surfaces_step_up() {
+    fn dark_surfaces_sit_above_the_page() {
+        // v3: the page is the darkest surface; rail, raised blocks, sunken
+        // fills and popovers sit above it.
         let d = build(true);
         let l = |h: Hsla| h.l;
-        assert!(l(d.sidebar) < l(d.content));
-        assert!(l(d.content) < l(d.raised));
-        assert!(l(d.raised) < l(d.overlay));
+        assert!(l(d.bg) < l(d.raised));
+        assert!(l(d.bg) < l(d.rail));
+        assert!(l(d.rail) < l(d.sunken));
+        assert!(l(d.bg) < l(d.overlay));
     }
 
     #[test]
-    fn bot_tints_differ_for_the_roster() {
-        // DESIGN.md §2.6: this seed gives the six roster bots six hues.
-        // Pocket, Forge, Watch, Scout, Ledger, Taro.
-        let mut tints = ["o05", "o08", "o11", "o07", "h02", "h03"].map(bot_tint_index);
-        tints.sort();
-        assert_eq!(tints, [0, 1, 2, 3, 4, 5]);
+    fn roster_members_wear_their_named_tint() {
+        // Names and the roster characters they wear map to the same tint.
+        for (name, character) in [
+            ("Watch", "o11"),
+            ("Taro", "h03"),
+            ("Forge", "o08"),
+            ("Tata", "o03"),
+            ("Ledger", "h02"),
+            ("Pocket", "o05"),
+            ("Scout", "o07"),
+        ] {
+            assert_eq!(member_tint_index(name), member_tint_index(character));
+        }
+        let mut all: Vec<usize> = MEMBER_TINTS.iter().map(|n| member_tint_index(n)).collect();
+        all.dedup();
+        assert_eq!(all, (0..8).collect::<Vec<_>>());
+        assert_eq!(member_tint_index("jojo"), 0);
+        assert!(member_tint_index("m-xiaowang") < 8);
+    }
+
+    #[test]
+    fn primary_is_ink_and_selection_is_grey() {
+        for k in [build(false), build(true)] {
+            assert_eq!(k.accent, k.btn);
+            assert_eq!(k.btn, k.ink);
+            assert_eq!(k.selected, k.sel);
+            assert!(k.sel.s < 0.1, "selection has no hue");
+            assert!(contrast(k.btn_ink, k.btn) >= 12.0);
+        }
+    }
+
+    #[test]
+    fn state_colors_keep_one_meaning_each() {
+        for k in [build(false), build(true)] {
+            assert_eq!(k.state(StateTone::You).0, k.you);
+            assert_eq!(k.state(StateTone::Live).0, k.live);
+            assert_eq!(k.state(StateTone::Problem).0, k.bad);
+            assert!(contrast(k.you_ink, k.bg) >= 4.5);
+            assert!(contrast(k.live_ink, k.bg) >= 4.5);
+            assert!(contrast(k.bad_ink, k.bg) >= 4.5);
+            assert!(contrast(k.ink_3, k.rail) >= 4.5);
+        }
+    }
+
+    #[test]
+    fn shadows_follow_the_mode() {
+        assert_eq!(build(false).lift().len(), 1);
+        assert!(build(true).lift().is_empty());
+        assert!(build(true).sec_hi().is_empty());
+        for k in [build(false), build(true)] {
+            assert!(k.btn_hi()[0].inset);
+            assert!(k.tile_edge()[0].inset);
+        }
     }
 }
