@@ -172,11 +172,19 @@ pub fn derive(
         if p.rev < card.rev && !stored {
             return CardState::Superseded;
         }
-        if p.rev == card.rev && !stored {
+        // Another member's answer to this rev won the race (the first
+        // answer wins): show theirs, not my send that cannot succeed.
+        let taken = answer_for(answers, card.rev).is_some();
+        if p.rev == card.rev && !stored && !taken {
             return match p.phase {
                 CardV2SendPhase::Sending => CardState::Sending {
                     action_id: p.action_id.clone(),
                 },
+                // After `expiresAt` the server refuses every answer: a retry
+                // cannot succeed, so the card is expired.
+                CardV2SendPhase::Failed(_) if card.is_expired(now.max(0) as u64) => {
+                    CardState::Expired
+                }
                 CardV2SendPhase::Failed(error) => CardState::SendFailed {
                     action_id: p.action_id.clone(),
                     error,
@@ -352,6 +360,61 @@ mod tests {
                 0
             ),
             CardState::Answered { .. }
+        ));
+    }
+
+    #[test]
+    fn a_lost_first_answer_race_shows_who_answered() {
+        let mut c = ask(1);
+        c.ask.as_mut().unwrap().from = vec!["owners".into()];
+        let other = Viewer {
+            id: Some("m-lin"),
+            is_owner: true,
+            requester: None,
+        };
+        let won = [answer("m-joye", 1, 4)];
+        // My answer is still on its way while the winner's answer is stored.
+        let sending = pending(1, CardV2SendPhase::Sending);
+        let CardState::Answered { answer } = derive(&c, &won, Some(&sending), None, &other, 5)
+        else {
+            panic!("answered by the winner");
+        };
+        assert_eq!(answer.actor_id, "m-joye");
+        // The server refused mine with `conflict`: still the winner, no retry.
+        let refused = pending(1, CardV2SendPhase::Failed(CardPressError::Gone));
+        let s = derive(&c, &won, Some(&refused), None, &other, 5);
+        assert!(matches!(&s, CardState::Answered { answer } if answer.actor_id == "m-joye"));
+        assert!(!s.live(), "no retry after a lost race");
+        // A refusal before the winner's answer arrives can still be retried.
+        assert!(derive(&c, &[], Some(&refused), None, &other, 5).live());
+    }
+
+    #[test]
+    fn a_refusal_after_expires_at_shows_expired() {
+        let c = ask(1);
+        let refused = pending(1, CardV2SendPhase::Failed(CardPressError::Gone));
+        assert_eq!(
+            derive(&c, &[], Some(&refused), None, &JOYE, 10_000),
+            CardState::Expired
+        );
+        assert_eq!(
+            derive(&c, &[], Some(&refused), None, &JOYE, 9_999),
+            CardState::SendFailed {
+                action_id: "ok".into(),
+                error: CardPressError::Gone
+            }
+        );
+        // An answer still on its way stays on its way.
+        assert!(matches!(
+            derive(
+                &c,
+                &[],
+                Some(&pending(1, CardV2SendPhase::Sending)),
+                None,
+                &JOYE,
+                20_000
+            ),
+            CardState::Sending { .. }
         ));
     }
 

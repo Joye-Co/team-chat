@@ -96,6 +96,11 @@ fn error_of_text(code: &str) -> CardPressError {
     }
 }
 
+/// True when a `card.answered` to `rev` ends my answer `m`.
+fn answered_clears(m: &Mine, mine: bool, rev: u32) -> bool {
+    m.request.rev == rev && (mine || m.failed.is_some())
+}
+
 impl CardV2Cache {
     fn lock(&self) -> MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
@@ -152,16 +157,17 @@ impl CardV2Cache {
         list
     }
 
-    /// A `card.answered` arrived: answers are read again; my matching answer
-    /// is done.
+    /// A `card.answered` arrived: answers are read again. My answer to that
+    /// rev is done when it is mine, or when mine was refused (another
+    /// member's answer won). One still on its way stays until the server
+    /// refuses it, so the refusal is known as mine.
     pub fn on_answered(&self, message_id: &str, mine: bool, rev: u32) {
         let mut inner = self.lock();
         inner.answers.remove(message_id);
-        if mine
-            && inner
-                .mine
-                .get(message_id)
-                .is_some_and(|m| m.request.rev == rev && m.failed.is_none())
+        if inner
+            .mine
+            .get(message_id)
+            .is_some_and(|m| answered_clears(m, mine, rev))
         {
             inner.mine.remove(message_id);
         }
@@ -237,6 +243,17 @@ impl CardV2Cache {
             at,
         };
         if let Some(e) = failed {
+            // Refused after another member's answer to this rev was stored:
+            // that answer shows, and mine is done.
+            let taken = self
+                .lock()
+                .answers
+                .get(message_id)
+                .is_some_and(|a| a.iter().any(|x| x.rev == request.rev));
+            if taken {
+                self.lock().mine.remove(message_id);
+                return None;
+            }
             return Some(pending(CardV2SendPhase::Failed(e)));
         }
         match client.store().outbox_get(&outbox_id).ok().flatten() {
@@ -345,6 +362,30 @@ mod tests {
         assert_eq!(error_of(ErrorCode::Conflict), CardPressError::Gone);
         assert_eq!(error_of(ErrorCode::Forbidden), CardPressError::Forbidden);
         assert_eq!(error_of_text("rate_limited"), CardPressError::Other);
+    }
+
+    #[test]
+    fn an_answer_to_my_rev_ends_my_refused_or_stored_answer() {
+        let m = |failed| Mine {
+            request: CardV2AnswerRequest {
+                rev: 2,
+                action_id: "ok".into(),
+                inputs: None,
+                edited_values: None,
+            },
+            outbox_id: "o1".into(),
+            failed,
+            at: 1,
+        };
+        // Mine was stored.
+        assert!(answered_clears(&m(None), true, 2));
+        // Another member won and mine was refused with `conflict`.
+        assert!(answered_clears(&m(Some(CardPressError::Gone)), false, 2));
+        // Another member won while mine is still on its way: keep it until
+        // the refusal comes, so the refusal is matched to my answer.
+        assert!(!answered_clears(&m(None), false, 2));
+        // An answer to another rev does not end mine.
+        assert!(!answered_clears(&m(Some(CardPressError::Gone)), false, 3));
     }
 
     #[test]
