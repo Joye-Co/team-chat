@@ -175,7 +175,6 @@ fn header(a: &AskCard, page: &DeskPage, cx: &mut Context<DeskPage>) -> impl Into
     let member = snap.member(&a.item.from);
     let (group, topic) = snap.places.get(&a.key()).cloned().unwrap_or_default();
     let nav = services.nav.clone();
-    let (g, t) = (a.item.group_id.clone(), a.item.topic_id.clone());
     div()
         .flex()
         .items_center()
@@ -185,7 +184,9 @@ fn header(a: &AskCard, page: &DeskPage, cx: &mut Context<DeskPage>) -> impl Into
         .child(ui::MemberAvatar::new(member.as_ref(), px(20.)))
         .child(
             div()
-                .flex_none()
+                .flex_shrink(0.)
+                .max_w(NAME_MAX)
+                .one_line()
                 .t_small()
                 .medium()
                 .text_color(k.ink)
@@ -202,35 +203,74 @@ fn header(a: &AskCard, page: &DeskPage, cx: &mut Context<DeskPage>) -> impl Into
                         .child(ui::JobTag::new(r))
                 }),
         )
-        .child(
-            div()
-                .id(SharedString::from(format!("desk-path-{}", a.key())))
-                .ml(px(2.))
-                .flex_1()
-                .min_w(px(0.))
-                .one_line()
-                .cursor_pointer()
-                .child({
-                    let lead = format!("{group} / ");
-                    let end = lead.len() + topic.len();
-                    gpui::StyledText::new(format!("{lead}{topic}")).with_highlights([(
-                        lead.len()..end,
-                        gpui::HighlightStyle {
-                            color: Some(k.ink_2),
-                            ..Default::default()
-                        },
-                    )])
-                })
-                .on_click(move |_, _, cx| {
-                    let (g, t) = (g.clone(), t.clone());
-                    nav.update(cx, |nav, cx| nav.open_topic(g, t, cx));
-                }),
-        )
+        .child(path(a, group, topic, nav, cx))
         .child(div().flex_none().ml_auto().mono().child(if a.item.at > 0 {
             clock(a.item.at)
         } else {
             String::new()
         }))
+}
+
+/// The widest the asker's name gets in the header; a longer name ends with
+/// an ellipsis.
+const NAME_MAX: gpui::Pixels = px(180.);
+
+/// `群 / 话题` in two parts, as in the Card v2 header: the path takes the
+/// room up to the time, the 群 gives way first (it shrinks ten times faster,
+/// down to one character and an ellipsis, and takes at most 45 %), then the
+/// 话题 shrinks with its own ellipsis. A 群 of one or two characters never
+/// shrinks. Either part opens the 话题.
+fn path(
+    a: &AskCard,
+    group: String,
+    topic: String,
+    nav: gpui::Entity<crate::app::Navigation>,
+    cx: &App,
+) -> impl IntoElement {
+    let k = theme::colors(cx);
+    let key = a.key();
+    let part = |which: &str, text: String| {
+        let nav = nav.clone();
+        let (g, t) = (a.item.group_id.clone(), a.item.topic_id.clone());
+        div()
+            .id(SharedString::from(format!("desk-path-{which}-{key}")))
+            .min_w(px(0.))
+            .one_line()
+            .cursor_pointer()
+            .hover(|s| s.text_color(k.ink))
+            .on_click(move |_, _, cx| {
+                let (g, t) = (g.clone(), t.clone());
+                nav.update(cx, |nav, cx| nav.open_topic(g, t, cx));
+            })
+            .child(text)
+    };
+    let short = group.chars().count() <= 2;
+    let has_group = !group.trim().is_empty();
+    let has_topic = !topic.trim().is_empty();
+    div()
+        .ml(px(2.))
+        .flex_1()
+        .min_w(px(0.))
+        .flex()
+        .overflow_hidden()
+        .text_color(k.ink_3)
+        .when(has_group, |el| {
+            el.child(
+                part("group", group)
+                    .when(short, |el| el.flex_none())
+                    .when(!short, |el| {
+                        el.min_w(theme::card_v2::PATH_GROUP_MIN)
+                            .max_w(gpui::relative(0.45))
+                            .flex_shrink(10.)
+                    }),
+            )
+        })
+        .when(has_group && has_topic, |el| {
+            el.child(div().flex_none().px(space::S4).child("/"))
+        })
+        .when(has_topic, |el| {
+            el.child(part("topic", topic).flex_shrink(1.).text_color(k.ink_2))
+        })
 }
 
 fn title(a: &AskCard, page: &DeskPage, cx: &mut Context<DeskPage>) -> impl IntoElement {
