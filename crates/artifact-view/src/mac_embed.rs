@@ -160,10 +160,17 @@ impl EmbeddedArtifact {
             pass_scroll,
             autoplay,
             inspectable,
+            viewer,
+            ref_menu,
         } = options;
         // SAFETY: a plain getter on a live view.
         let parent = unsafe { host_view.superview() }.ok_or(Error::NoHostView)?;
         let state = mac::new_state(artifact_id, version, capabilities)?;
+        {
+            let mut st = state.borrow_mut();
+            st.viewer = viewer;
+            st.ref_menu = ref_menu;
+        }
         let cb: Rc<dyn Fn(ArtifactEvent)> = Rc::new(on_event);
         let controller = Controller::new(mtm, state.clone(), cb.clone());
         let config = mac::configure(mtm, &controller, autoplay);
@@ -383,7 +390,25 @@ impl EmbeddedArtifact {
 
     /// The bridge capabilities of the page that shows now.
     pub fn capabilities(&self) -> Capabilities {
-        self.state.borrow().caps
+        self.state.borrow().bridge.caps()
+    }
+
+    /// Gives the page of `version` a data snapshot: the first one answers its waiting
+    /// `getData` / `onData`, later ones go to its `onData` callbacks. False when another
+    /// version shows.
+    pub fn push_data(&self, version: u32, snap: crate::Snapshot) -> bool {
+        mac::push_data(&self.state, &self.web_view, version, snap)
+    }
+
+    /// Finishes an open `emit` / `ask` of the page of `version`. False when it is no
+    /// longer open (the host drops a late reply).
+    pub fn finish(
+        &self,
+        version: u32,
+        reply_id: &serde_json::Value,
+        result: Result<serde_json::Value, crate::Reject>,
+    ) -> bool {
+        mac::finish(&self.state, &self.web_view, version, reply_id, result)
     }
 
     /// Changes the bridge capabilities of the page that shows now.

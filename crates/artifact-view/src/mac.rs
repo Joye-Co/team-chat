@@ -31,8 +31,10 @@ use serde_json::Value;
 
 use crate::resolve::{self, Content, SCHEME};
 use crate::{
-    ArtifactEvent, Capabilities, Error, OpenOptions, Presentation, VersionItem, VersionSpec,
-    bridge, gate,
+    ArtifactEvent, Capabilities, Error, OpenOptions, Presentation, RefMenu, Reject, Snapshot,
+    VersionItem, VersionSpec, Viewer,
+    bridge::{self, Bridge, Request},
+    gate,
 };
 
 const RULE_LIST_ID: &str = "artifact-view-block-network-v1";
@@ -60,8 +62,10 @@ pub(crate) struct State {
     pub(crate) version: u32,
     pub(crate) content: Content,
     pub(crate) entry: String,
-    pub(crate) data: Value,
-    pub(crate) caps: Capabilities,
+    /// The page's bridge: capabilities, declarations, data and open requests.
+    pub(crate) bridge: Bridge,
+    pub(crate) viewer: Option<Viewer>,
+    pub(crate) ref_menu: Option<RefMenu>,
     pub(crate) max_message_bytes: usize,
     pub(crate) closed: bool,
     pub(crate) rules_ready: bool,
@@ -321,24 +325,58 @@ impl Controller {
             } else {
                 Vec::new()
             };
-            (
-                bridge::handle_limited(&raw, st.caps, &st.data, st.max_message_bytes),
-                st.version,
-                gate::recent_input(st.last_input, Instant::now()),
-            )
+            let now = Instant::now();
+            let user_action = gate::recent_input(st.last_input, now);
+            let version = st.version;
+            drop(st);
+            let outcome = self.ivars().state.borrow_mut().bridge.handle(&raw, now);
+            (outcome, version, user_action)
         };
-        if let Some(web_view) = unsafe { message.webView() } {
-            let script = NSString::from_str(&bridge::reply_script(&outcome.reply));
-            unsafe { web_view.evaluateJavaScript_completionHandler(&script, None) };
+        if let Some(reply) = &outcome.reply
+            && let Some(web_view) = unsafe { message.webView() }
+        {
+            unsafe {
+                web_view.evaluateJavaScript_completionHandler(&NSString::from_str(reply), None)
+            };
         }
-        if let Some((name, payload)) = outcome.event {
-            self.emit(ArtifactEvent::Emit {
+        let event = match outcome.request {
+            None => return,
+            Some(Request::Emit {
+                reply_id,
+                name,
+                payload,
+            }) => ArtifactEvent::Emit {
                 version,
                 name,
                 payload,
                 user_action,
-            });
-        }
+                reply_id,
+            },
+            Some(Request::Ask {
+                reply_id,
+                name,
+                payload,
+                timeout_ms,
+            }) => ArtifactEvent::Ask {
+                version,
+                reply_id,
+                name,
+                payload,
+                timeout_ms,
+                user_action,
+            },
+            Some(Request::Ref {
+                label,
+                value,
+                selector,
+            }) => ArtifactEvent::Ref {
+                version,
+                label,
+                value,
+                selector,
+            },
+        };
+        self.emit(event);
     }
 
     fn navigation_policy(&self, action: &WKNavigationAction) -> WKNavigationActionPolicy {
@@ -377,13 +415,33 @@ impl Controller {
     }
 
     pub(crate) fn load_current(&self, web_view: &WKWebView) {
-        let url = {
+        let (url, scripts) = {
             let st = self.ivars().state.borrow();
             if st.closed || !st.rules_ready {
                 return;
             }
-            format!("{SCHEME}://{}/{}", st.host, resolve::encode_path(&st.entry))
+            let init = st.bridge.init(st.viewer.as_ref(), st.ref_menu.as_ref());
+            let mut scripts = vec![bridge::page_script(&init)];
+            if st.bridge.caps().r#ref
+                && let Some(menu) = &st.ref_menu
+            {
+                scripts.push(bridge::ref_listener_script(menu));
+            }
+            (
+                format!("{SCHEME}://{}/{}", st.host, resolve::encode_path(&st.entry)),
+                scripts,
+            )
         };
+        // The bridge script carries this version's viewer, capabilities and declarations:
+        // replace the scripts before the navigation starts.
+        if let Some(ucc) = self.ivars().ucc.borrow().as_ref().and_then(|w| w.load()) {
+            let mtm = MainThreadMarker::from(self);
+            unsafe { ucc.removeAllUserScripts() };
+            add_script(mtm, &ucc, NO_NETWORK_SCRIPT, false);
+            for script in &scripts {
+                add_script(mtm, &ucc, script, true);
+            }
+        }
         if let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(&url)) {
             let request = NSURLRequest::requestWithURL(&nsurl);
             unsafe { web_view.loadRequest(&request) };
@@ -399,7 +457,8 @@ impl Controller {
             }
             st.closed = true;
             st.content = Content::memory([]);
-            st.data = Value::Null;
+            st.bridge.reset();
+            st.bridge = Bridge::new(Capabilities::NONE, Some(Vec::new()), None);
         }
         if let Some(monitor) = self.ivars().monitor.borrow_mut().take() {
             unsafe { NSEvent::removeMonitor(&monitor) };
@@ -484,6 +543,7 @@ pub(crate) fn new_state(
     if !resolve::validate_rel(&version.entry) {
         return Err(Error::InvalidEntry);
     }
+    let bridge = new_bridge(&version, caps, bridge::MAX_MESSAGE_BYTES);
     let content = version.content.prepared()?;
     Ok(Rc::new(RefCell::new(State {
         artifact_id,
@@ -491,14 +551,34 @@ pub(crate) fn new_state(
         version: version.version,
         content,
         entry: version.entry,
-        data: version.data,
-        caps,
+        bridge,
+        viewer: None,
+        ref_menu: None,
         max_message_bytes: bridge::MAX_MESSAGE_BYTES,
         closed: false,
         rules_ready: false,
         last_external: None,
         last_input: None,
     })))
+}
+
+/// A fresh bridge for one version: its declarations, and its data now (a static `data`) or
+/// later (a live version: the host pushes the first snapshot).
+fn new_bridge(spec: &VersionSpec, caps: Capabilities, max_bytes: usize) -> Bridge {
+    let initial = (!spec.live).then(|| Snapshot::new(spec.data.clone(), 0));
+    Bridge::new(caps, spec.events.clone(), initial).with_max_bytes(max_bytes)
+}
+
+fn add_script(mtm: MainThreadMarker, ucc: &WKUserContentController, source: &str, main_only: bool) {
+    unsafe {
+        let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
+            WKUserScript::alloc(mtm),
+            &NSString::from_str(source),
+            WKUserScriptInjectionTime::AtDocumentStart,
+            main_only,
+        );
+        ucc.addUserScript(&script);
+    }
 }
 
 pub(crate) struct Config {
@@ -518,13 +598,7 @@ pub(crate) fn configure(mtm: MainThreadMarker, controller: &Controller, autoplay
             Some(ProtocolObject::from_ref(controller)),
             &NSString::from_str(SCHEME),
         );
-        let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
-            WKUserScript::alloc(mtm),
-            &NSString::from_str(bridge::PAGE_SCRIPT),
-            WKUserScriptInjectionTime::AtDocumentStart,
-            true,
-        );
-        ucc.addUserScript(&script);
+        // The bridge scripts depend on the version: `load_current` adds them per load.
         ucc.addScriptMessageHandler_name(
             ProtocolObject::from_ref(controller),
             &NSString::from_str("bridge"),
@@ -666,15 +740,17 @@ pub(crate) fn switch_version(
     if !resolve::validate_rel(&spec.entry) {
         return Err(Error::InvalidEntry);
     }
+    let fresh = new_bridge(&spec, caps, state.borrow().max_message_bytes);
     let content = spec.content.prepared()?;
     let mut st = state.borrow_mut();
+    // The bridge follows the version shown: another author may grant other capabilities,
+    // and the old page's open asks end (the page reloads).
+    st.bridge.reset();
+    st.bridge = fresh;
     st.host = host;
     st.version = spec.version;
     st.content = content;
     st.entry = spec.entry;
-    st.data = spec.data;
-    // The bridge follows the version shown: another author may grant other capabilities.
-    st.caps = caps;
     // Input in the previous page does not count for this one.
     st.last_input = None;
     Ok(())
@@ -682,7 +758,53 @@ pub(crate) fn switch_version(
 
 /// Changes what the page bridge allows, for the page that shows now.
 pub(crate) fn set_capabilities(state: &RefCell<State>, caps: Capabilities) {
-    state.borrow_mut().caps = caps;
+    state.borrow_mut().bridge.set_caps(caps);
+}
+
+/// Gives the page a data snapshot (the first `GET …/data`, or a push) if it still shows
+/// `version`. False when another version shows or the page is closed.
+pub(crate) fn push_data(
+    state: &RefCell<State>,
+    web_view: &WKWebView,
+    version: u32,
+    snap: Snapshot,
+) -> bool {
+    let scripts = {
+        let mut st = state.borrow_mut();
+        if st.closed || st.version != version {
+            return false;
+        }
+        st.bridge.push_data(snap)
+    };
+    for s in scripts {
+        unsafe { web_view.evaluateJavaScript_completionHandler(&NSString::from_str(&s), None) };
+    }
+    true
+}
+
+/// Finishes an open `emit` or `ask` of the page that shows `version`. False when it is no
+/// longer open (a late reply after a timeout or reload): the host drops it.
+pub(crate) fn finish(
+    state: &RefCell<State>,
+    web_view: &WKWebView,
+    version: u32,
+    reply_id: &Value,
+    result: Result<Value, Reject>,
+) -> bool {
+    let script = {
+        let mut st = state.borrow_mut();
+        if st.closed || st.version != version {
+            return false;
+        }
+        st.bridge.finish(reply_id, result)
+    };
+    match script {
+        Some(s) => {
+            unsafe { web_view.evaluateJavaScript_completionHandler(&NSString::from_str(&s), None) };
+            true
+        }
+        None => false,
+    }
 }
 
 /// A window that shows one 产出. Main thread only. Dropping it closes the window.
@@ -715,9 +837,17 @@ impl ArtifactWindow {
             inspectable,
             max_message_bytes,
             transparent,
+            viewer,
+            ref_menu,
         } = options;
         let state = new_state(artifact_id, version, capabilities)?;
-        state.borrow_mut().max_message_bytes = max_message_bytes;
+        {
+            let mut st = state.borrow_mut();
+            st.max_message_bytes = max_message_bytes;
+            st.bridge.set_max_bytes(max_message_bytes);
+            st.viewer = viewer;
+            st.ref_menu = ref_menu;
+        }
         let controller = Controller::new(mtm, state.clone(), Rc::new(on_event));
         let config = configure(mtm, &controller, false);
         let frame = NSRect::new(
@@ -841,12 +971,22 @@ impl ArtifactWindow {
 
     /// The bridge capabilities of the page that shows now.
     pub fn capabilities(&self) -> Capabilities {
-        self.state.borrow().caps
+        self.state.borrow().bridge.caps()
     }
 
     /// Changes the bridge capabilities of the page that shows now.
     pub fn set_capabilities(&self, caps: Capabilities) {
         set_capabilities(&self.state, caps);
+    }
+
+    /// Gives the page of `version` a data snapshot (see [`push_data`]).
+    pub fn push_data(&self, version: u32, snap: Snapshot) -> bool {
+        push_data(&self.state, &self.web_view, version, snap)
+    }
+
+    /// Finishes an open `emit` / `ask` of the page of `version` (see [`finish`]).
+    pub fn finish(&self, version: u32, reply_id: &Value, result: Result<Value, Reject>) -> bool {
+        finish(&self.state, &self.web_view, version, reply_id, result)
     }
 
     pub fn is_closed(&self) -> bool {
@@ -1016,36 +1156,54 @@ mod tests {
 
     #[test]
     fn the_bridge_follows_the_version_shown() {
-        // v1 by a person: no bridge. v2 by a bot that declares events: emitEvent.
-        let state = new_state("a1".into(), spec(1), Capabilities::NONE).unwrap();
-        let bot = Capabilities {
-            get_data: false,
-            emit_event: true,
-        };
+        // v1 by a person: read only. v2 by a bot that declares an event: emit.
+        let state = new_state("a1".into(), spec(1), Capabilities::READ).unwrap();
+        let bot = Capabilities::ALL;
         state.borrow_mut().last_input = Some(Instant::now());
-        switch_version(&state, spec(2), bot).unwrap();
+        let v2 = spec(2).with_events(vec![crate::EventDecl::new(
+            "approve",
+            crate::EventKind::Emit,
+        )]);
+        switch_version(&state, v2, bot).unwrap();
         {
             let st = state.borrow();
-            assert_eq!((st.version, st.caps, st.last_input), (2, bot, None));
+            assert_eq!((st.version, st.bridge.caps(), st.last_input), (2, bot, None));
             assert_eq!(st.host, resolve::origin_host("a1", 2).unwrap());
         }
         let ask = br#"{"id":1,"method":"emitEvent","params":{"name":"approve"}}"#;
-        let st = state.borrow();
-        assert!(bridge::handle(ask, st.caps, &st.data).event.is_some());
-        drop(st);
-        // Back to the person's v1: the bridge closes again.
-        switch_version(&state, spec(1), Capabilities::NONE).unwrap();
-        let st = state.borrow();
-        assert_eq!(st.caps, Capabilities::NONE);
-        assert_eq!(
-            bridge::handle(ask, st.caps, &st.data).reply["error"]["code"],
-            "not_allowed"
-        );
-        drop(st);
+        let now = Instant::now();
+        assert!(state.borrow_mut().bridge.handle(ask, now).request.is_some());
+        // Back to the person's v1: nothing goes out again.
+        switch_version(&state, spec(1), Capabilities::READ).unwrap();
+        assert_eq!(state.borrow().bridge.caps(), Capabilities::READ);
+        let o = state.borrow_mut().bridge.handle(ask, now);
+        assert!(o.request.is_none());
+        assert!(o.reply.unwrap().contains("not_allowed"));
         // A failed switch keeps the version and capabilities it had.
         let mut bad = spec(3);
         bad.entry = "../x".into();
         assert_eq!(switch_version(&state, bad, bot), Err(Error::InvalidEntry));
-        assert_eq!(state.borrow().caps, Capabilities::NONE);
+        assert_eq!(state.borrow().bridge.caps(), Capabilities::READ);
+    }
+
+    #[test]
+    fn a_live_version_waits_for_the_host_s_first_snapshot() {
+        let state = new_state("a1".into(), spec(1).live_data(), Capabilities::READ).unwrap();
+        let get = br#"{"id":"g","method":"getData"}"#;
+        assert_eq!(state.borrow_mut().bridge.handle(get, Instant::now()).reply, None);
+        let out = state
+            .borrow_mut()
+            .bridge
+            .push_data(Snapshot::new(serde_json::json!({"n":1}), 4));
+        assert_eq!(out.len(), 1);
+        // A static version answers at once with its data.
+        let state = new_state(
+            "a1".into(),
+            spec(1).with_data(serde_json::json!([1])),
+            Capabilities::READ,
+        )
+        .unwrap();
+        let o = state.borrow_mut().bridge.handle(get, Instant::now());
+        assert!(o.reply.unwrap().contains("\"result\":[1]"));
     }
 }

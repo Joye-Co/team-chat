@@ -28,7 +28,7 @@ mod mac_embed;
 
 use std::path::PathBuf;
 
-pub use bridge::Capabilities;
+pub use bridge::{Capabilities, DataCause, EventDecl, EventKind, RefMenu, Reject, Snapshot, Viewer};
 pub use embed::{EmbedOptions, Placement, Rect};
 pub use resolve::{Content, origin_host};
 use serde_json::Value;
@@ -70,8 +70,15 @@ pub struct VersionSpec {
     pub content: Content,
     /// Relative path of the page to open, usually `index.html`.
     pub entry: String,
-    /// JSON the page reads with `getData`.
+    /// JSON the page reads with `getData` (when `live` is false).
     pub data: Value,
+    /// The host sends the first data snapshot itself (the `GET …/data` when the page
+    /// opens): `getData` and `onData` wait for it. When false, `data` is the snapshot.
+    pub live: bool,
+    /// The events the version declares. `None` puts no declaration rule on `emit`
+    /// (self-tests and the diagram renderer); `Some` lets only these names out, each with
+    /// its kind.
+    pub events: Option<Vec<EventDecl>>,
 }
 
 impl VersionSpec {
@@ -81,7 +88,20 @@ impl VersionSpec {
             content,
             entry: "index.html".into(),
             data: Value::Null,
+            live: false,
+            events: None,
         }
+    }
+
+    /// The host pushes the first snapshot (see [`VersionSpec::live`]).
+    pub fn live_data(mut self) -> Self {
+        self.live = true;
+        self
+    }
+
+    pub fn with_events(mut self, events: Vec<EventDecl>) -> Self {
+        self.events = Some(events);
+        self
     }
 
     pub fn with_data(mut self, data: Value) -> Self {
@@ -137,6 +157,10 @@ pub struct OpenOptions {
     /// The web view draws no background, so snapshots keep transparent pixels
     /// (the diagram renderer).
     pub transparent: bool,
+    /// Who looks at the page (`window.teamchat.viewer`); `None` in snapshots.
+    pub viewer: Option<Viewer>,
+    /// The ⌥-click outline and `就这里提问` menu, when the page may `ref`.
+    pub ref_menu: Option<RefMenu>,
 }
 
 impl OpenOptions {
@@ -157,6 +181,8 @@ impl OpenOptions {
             inspectable: false,
             max_message_bytes: bridge::MAX_MESSAGE_BYTES,
             transparent: false,
+            viewer: None,
+            ref_menu: None,
         }
     }
 }
@@ -169,14 +195,36 @@ pub enum ArtifactEvent {
     Loaded { version: u32 },
     /// The page could not load, or its web content process ended.
     LoadFailed { version: u32, reason: String },
-    /// The page called `emitEvent(name, payload)`. `user_action` is true when the viewer
-    /// clicked, dragged or typed in this web view at most [`gate::USER_ACTION_WINDOW`]
-    /// before; the host forwards only those events (see [`gate`]).
+    /// The page called `emit(name, payload)` (or the legacy `emitEvent`) with a declared
+    /// name. `user_action` is true when the viewer clicked, dragged or typed in this web
+    /// view at most [`gate::USER_ACTION_WINDOW`] before; the host forwards only those
+    /// events (see [`gate`]). With a `reply_id` the page waits: the host calls `finish`
+    /// with `{eventId}` or an error.
     Emit {
         version: u32,
         name: String,
         payload: Value,
         user_action: bool,
+        reply_id: Option<Value>,
+    },
+    /// The page called `ask(name, payload)` with a declared name. The host sends it, then
+    /// calls `finish(reply_id, …)` with the member's reply, or [`Reject::Timeout`] after
+    /// `timeout_ms`. Same `user_action` rule as `Emit`.
+    Ask {
+        version: u32,
+        reply_id: Value,
+        name: String,
+        payload: Value,
+        timeout_ms: u64,
+        user_action: bool,
+    },
+    /// The page pointed at one of its parts (`ref`, or ⌥-click on `data-ref-label`): the
+    /// host puts it into the viewer's composer (REFS §A7). Checked already.
+    Ref {
+        version: u32,
+        label: String,
+        value: Option<Value>,
+        selector: Option<String>,
     },
     /// The user activated a link to an `http`, `https` or `mailto` URL. The navigation was
     /// cancelled; the host may ask the user and then call [`open_external_url`].

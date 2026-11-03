@@ -682,7 +682,10 @@ mod mac {
     /// The renderer page may only emit its outcomes; it never reads 产出 data.
     const RENDERER_CAPS: Capabilities = Capabilities {
         get_data: false,
-        emit_event: true,
+        live_data: false,
+        emit: true,
+        ask: false,
+        r#ref: false,
     };
 
     /// What the renderer tells its host, on the main thread.

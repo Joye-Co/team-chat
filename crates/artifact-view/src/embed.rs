@@ -12,7 +12,7 @@
 //! parent's own coordinate system) and the frame of the web view inside that container
 //! (always the full size, offset so that the page does not move while it is clipped).
 
-use crate::{Capabilities, VersionSpec};
+use crate::{Capabilities, RefMenu, VersionSpec, Viewer};
 
 /// A rectangle in points.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -120,6 +120,10 @@ pub struct EmbedOptions {
     pub autoplay: bool,
     /// Allow Safari Web Inspector (developer view only).
     pub inspectable: bool,
+    /// Who looks at the page (`window.teamchat.viewer`).
+    pub viewer: Option<Viewer>,
+    /// The ⌥-click outline and `就这里提问` menu, when the page may `ref`.
+    pub ref_menu: Option<RefMenu>,
 }
 
 impl EmbedOptions {
@@ -133,6 +137,8 @@ impl EmbedOptions {
             pass_scroll: false,
             autoplay: false,
             inspectable: false,
+            viewer: None,
+            ref_menu: None,
         }
     }
 }
