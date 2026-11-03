@@ -202,6 +202,9 @@ pub struct RunAnswerFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_values: Option<BTreeMap<String, String>>,
     pub actor: RunActor,
+    /// The interaction's event id, which `card.patch.cause` / `send.causeEventId` name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
     /// The block the answer names, as it was at `source.rev` (the CLI has no copy of the card).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Value>,
@@ -241,6 +244,9 @@ pub struct RunInteractionFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
     pub actor: RunActor,
+    /// The interaction's event id, which `card.patch.cause` / `send.causeEventId` name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
     /// Card events: the block (or the action) as it was at `source.rev`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block: Option<Value>,

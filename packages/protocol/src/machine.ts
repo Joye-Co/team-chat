@@ -296,6 +296,8 @@ export const RunAnswerFrame = z.object({
   inputs: z.record(z.string(), z.json()).optional(),
   editedValues: z.record(z.string(), z.string()).optional(),
   actor: RunActor,
+  /** The interaction's event id, which `card.patch.cause` / `send.causeEventId` name. */
+  eventId: Id.optional(),
   /** The block the answer names, as it was at `source.rev` (the CLI has no copy of the card). */
   block: z.json().optional(),
 });
@@ -314,6 +316,8 @@ export const RunInteractionFrame = z.object({
   event: z.string().min(1).max(128),
   value: z.json().optional(),
   actor: RunActor,
+  /** The interaction's event id, which `card.patch.cause` / `send.causeEventId` name. */
+  eventId: Id.optional(),
   /** Card events: the block (or the action) as it was at `source.rev`. */
   block: z.json().optional(),
 });

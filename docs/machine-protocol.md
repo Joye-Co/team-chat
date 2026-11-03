@@ -305,10 +305,10 @@ no credentials pass through chat. The server shows the address to owners and run
 ```ts
 // server -> daemon (feature "interact"; an old daemon gets run.input with the text envelope instead)
 { t: "run.answer", runId, inputId, source: { kind: "card", messageId, askId, answerId, rev },
-  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, block? /* the block at rev */ }
+  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */ }
 { t: "run.interaction", runId, inputId,
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
-  event, value?, actor: { id, name }, block? /* card events: the block or action at rev */ }
+  event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
 RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply", body: JSON }
 // server -> daemon
@@ -344,7 +344,7 @@ neither. One request is one JSON line `{ op, body }`; the daemon sends the `outp
 `--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP a first text block of
 the first prompt; the PTY gets none.
 
-The envelope JSON holds `messageId`, `rev`, `askId`, `answerId`, `event`, `actionId`,
+The envelope JSON holds `messageId`, `rev`, `askId`, `answerId`, `eventId`, `event`, `actionId`,
 `blockId`, `value`, `inputs`, `editedValues`, `actor` and `block` (card), or `artifactId`,
 `version`, `eventId`, `event`, `value` and `actor` (page). `<` is written as `\u003c`, so the
 data cannot close the envelope. References to a part (`blockRefs`) do not change
