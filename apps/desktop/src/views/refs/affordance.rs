@@ -234,7 +234,9 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
             };
             el.child(holder.child(button))
         });
-    el.context_menu(move |m, _, _| menu(m, menu_target.clone()))
+    let focused = super::keyboard::part_focused(&spec.id, window, cx);
+    el.when(focused, |el| el.child(super::keyboard::ring(spec.radius, cx)))
+        .context_menu(move |m, _, _| menu(m, menu_target.clone()))
         .into_any_element()
 }
 

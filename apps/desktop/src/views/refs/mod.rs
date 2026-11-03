@@ -11,6 +11,7 @@
 
 pub mod affordance;
 pub mod cards;
+pub mod keyboard;
 pub mod chips;
 pub mod label;
 pub mod markdown;
@@ -258,6 +259,10 @@ pub struct RefsHub {
     pub hover: Option<(String, Instant)>,
     /// Scenes: the part whose 问这里 shows without a pointer.
     pub forced_hover: Option<String>,
+    /// The keyboard part focus: the block key and the part id (REFS §A3).
+    pub part_focus: Option<(String, String)>,
+    /// Scenes: the block that shows keyboard focus without a key press.
+    pub forced_focus: Option<String>,
 }
 
 /// What views listen to.

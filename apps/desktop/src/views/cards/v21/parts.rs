@@ -194,51 +194,12 @@ fn table_parts(b: &CardV2Block) -> bool {
 /// The cell, row and column references of a plain table block (R4: `rowKeys`, else the
 /// row index), or `None` where the affordances do not show.
 pub fn table_refs(node: &Node, b: &CardV2Block, cx: &App) -> Option<TableRefs> {
-    let CardV2Block::Table {
-        id,
-        columns,
-        rows,
-        row_keys,
-        ..
-    } = b
-    else {
-        return None;
-    };
     if !shown(node, cx) || !table_parts(b) {
         return None;
     }
-    let ctx = node.ctx;
-    let source = RefSource::Message {
-        group_id: ctx.msg.group_id.clone(),
-        topic_id: ctx.msg.topic_id.clone(),
-        message_id: ctx.msg.message_id.clone(),
-    };
-    let (columns, rows, keys) = (columns.clone(), rows.clone(), row_keys.clone());
-    let (title, block, block_id, rev) = (
-        ctx.card.title.clone(),
-        block_segment(ctx.card, b),
-        id.clone(),
-        ctx.card.rev as u64,
-    );
-    Some(TableRefs {
-        prefix: format!("{}-t-{id}", ctx.msg.message_id),
-        target: std::rc::Rc::new(move |pick| {
-            let data = refs::parts::TableData {
-                columns: &columns,
-                rows: &rows,
-                row_keys: keys.as_deref().filter(|k| k.len() == rows.len()),
-            };
-            refs::parts::table(&data, pick).map(|p| {
-                p.target(
-                    source.clone(),
-                    &title,
-                    block_id.clone(),
-                    block.as_deref(),
-                    Some(rev),
-                )
-            })
-        }),
-    })
+    refs::cards::CardParts::of(node.ctx, cx)?
+        .block(b)?
+        .table_refs()
 }
 
 /// Adds the affordances to one block (a plain table has its own per cell).
@@ -249,32 +210,37 @@ pub fn wrap(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    // Tables and the blocks with parts (items, steps, points, metrics, proofs, images)
-    // reference their parts; a whole-block 问这里 there would show a second button.
-    if !referenceable(b)
-        || !shown(node, cx)
-        || table_parts(b)
-        || crate::views::refs::cards::has_parts(b)
-    {
+    if !referenceable(b) || !shown(node, cx) {
         return el;
     }
     let ctx = node.ctx;
     let Some(id) = b.id() else { return el };
-    let whole = target(ctx, b, None, None, snapshot(b));
-    let spec = PartSpec::new(format!("{}-b-{id}", ctx.msg.message_id), move |_| {
-        whole.clone()
-    })
-    .control(control(node, b))
-    .radius(px(6.));
-    refs::affordance::part(
-        div()
-            .id(ctx.id(format!("part-{id}")))
-            .min_w(px(0.))
-            .child(el),
-        spec,
-        window,
-        cx,
-    )
+    // Tables and the blocks with parts (items, steps, points, metrics, proofs, images)
+    // reference their parts; a whole-block 问这里 there would show a second button.
+    let el = if table_parts(b) || refs::cards::has_parts(b) {
+        el
+    } else {
+        let whole = target(ctx, b, None, None, snapshot(b));
+        let spec = PartSpec::new(format!("{}-b-{id}", ctx.msg.message_id), move |_| {
+            whole.clone()
+        })
+        .control(control(node, b))
+        .radius(px(6.));
+        refs::affordance::part(
+            div()
+                .id(ctx.id(format!("part-{id}")))
+                .min_w(px(0.))
+                .child(el),
+            spec,
+            window,
+            cx,
+        )
+    };
+    // The keyboard part focus (REFS §A3: Tab, arrows, ⌥↵, ⇧⌥↵, Esc).
+    match refs::cards::CardParts::of(ctx, cx).and_then(|c| c.block(b)) {
+        Some(bp) => refs::cards::focus_run(&[bp], el, window, cx),
+        None => el,
+    }
 }
 
 #[cfg(test)]

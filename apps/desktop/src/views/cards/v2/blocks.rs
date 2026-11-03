@@ -168,6 +168,15 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
             _ => (Some(block(ctx, b, i, window, cx)), i + 1, space::S12),
         };
         if let Some(el) = el {
+            // The keyboard part focus of the block (or the run drawn together), REFS §A3.
+            let el = match CardParts::of(ctx, cx) {
+                Some(cp) => {
+                    let run: Vec<BlockParts> =
+                        blocks[i..next].iter().filter_map(|b| cp.block(b)).collect();
+                    ref_parts::focus_run(&run, el, window, cx)
+                }
+                None => el,
+            };
             out.push(div().mt(gap).min_w(px(0.)).child(el).into_any_element());
         }
         prev = Some(b);
@@ -201,7 +210,11 @@ pub(crate) fn block(
             .child(text.clone())
             .into_any_element(),
         CardV2Block::Fields { fields, .. } => fields_grid(fields, cx),
-        CardV2Block::Table { columns, rows, .. } => table(columns, rows, cx),
+        CardV2Block::Table { columns, rows, .. } => {
+            // 引用提问: cells, rows and columns (REFS §A2.2, R4).
+            let refs = block_parts(ctx, b, cx).and_then(|p| p.table_refs());
+            table_with_refs(columns, rows, refs.as_ref(), Some(window), cx)
+        }
         CardV2Block::List { items, .. } => {
             list_with(items, block_parts(ctx, b, cx).as_ref(), Some(window), cx)
         }
@@ -436,7 +449,7 @@ pub(crate) fn table_with_refs(
                 .when(total, |el| el.border_t_1().border_color(k.line_2))
                 .text_color(k.ink);
             let line = match refs {
-                Some((rf, _)) => rf.row(line, ri, cx),
+                Some((rf, w)) => rf.row(line, ri, w, cx),
                 None => line,
             };
             line.children((0..columns.len()).map(|ci| {

@@ -62,8 +62,19 @@ pub struct TableRefs {
 }
 
 impl TableRefs {
-    fn cell_id(&self, row: usize, col: usize) -> String {
+    /// The element id of a cell (also its keyboard part id).
+    pub fn cell_id(&self, row: usize, col: usize) -> String {
         format!("{}-c{row}-{col}", self.prefix)
+    }
+
+    /// The keyboard part id of a whole row (REFS §A3: ⇧ + ← or →).
+    pub fn row_id(&self, row: usize) -> String {
+        format!("{}-r{row}", self.prefix)
+    }
+
+    /// The element id of a header cell: the whole column.
+    pub fn header_id(&self, col: usize) -> String {
+        format!("{}-h{col}", self.prefix)
     }
 
     /// The cell under the pointer in `row`, and whether its 问这里 shows.
@@ -79,11 +90,15 @@ impl TableRefs {
         Some((col, h.hover_shown(id)))
     }
 
-    /// The row's look: the hover fill while one of its cells shows 问这里.
-    pub fn row(&self, el: Div, row: usize, cx: &App) -> Div {
+    /// The row's look: the hover fill while one of its cells shows 问这里, and the focus
+    /// ring while the keyboard part focus is on the whole row.
+    pub fn row(&self, el: Div, row: usize, window: &Window, cx: &App) -> Div {
         let k = theme::colors(cx);
         let shown = self.hovered_in(row, cx).is_some_and(|(_, s)| s);
-        el.relative().when(shown, |el| el.bg(k.hover))
+        let focused = super::keyboard::part_focused(&self.row_id(row), window, cx);
+        el.relative()
+            .when(shown, |el| el.bg(k.hover))
+            .when(focused, |el| el.child(super::keyboard::ring(theme::radius::MARK, cx)))
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell.
@@ -118,7 +133,7 @@ impl TableRefs {
 
     /// A header cell: the whole column.
     pub fn header(&self, el: Div, col: usize, window: &Window, cx: &App) -> AnyElement {
-        let id = format!("{}-h{col}", self.prefix);
+        let id = self.header_id(col);
         self.interactive(el, id, TablePick::Column(col), window, cx)
     }
 
@@ -147,8 +162,11 @@ impl TableRefs {
             self.target.clone(),
             self.target.clone(),
         );
+        let focused = super::keyboard::part_focused(&id, window, cx);
         el.id(ElementId::Name(id.clone().into()))
+            .relative()
             .rounded(theme::radius::MARK)
+            .when(focused, |el| el.child(super::keyboard::ring(theme::radius::MARK, cx)))
             .when(flashing, |el| el.bg(k.sel))
             .when(hovered && alt && !flashing, |el| el.bg(k.hover))
             .on_hover(super::affordance::track_hover(id))
@@ -399,7 +417,7 @@ pub fn table(
             .tnum()
             .text_color(k.text_1);
         if let Some(r) = refs {
-            line = r.row(line, ri, cx);
+            line = r.row(line, ri, window, cx);
         }
         for (ci, w) in widths.iter().enumerate() {
             let el = cell(

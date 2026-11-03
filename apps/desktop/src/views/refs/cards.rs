@@ -15,7 +15,9 @@ use gpui::{AnyElement, App, Div, Stateful, Window};
 use super::{
     PartTarget, RefSource,
     affordance::{self, Anchor, PartSpec},
-    parts::{self, Part},
+    keyboard::{NavKind, NavPart},
+    markdown::TableRefs,
+    parts::{self, Part, TablePick},
 };
 use crate::{
     data::cards_v2::{CardV2, CardV2Block, ChartKind, EvidenceState},
@@ -284,6 +286,112 @@ impl BlockParts {
         affordance::part(el, self.spec(pick).own_button(), window, cx)
     }
 
+    /// The cell, row and column references of a table block (R4: `rowKeys`, else the row
+    /// index); `None` for other blocks.
+    pub fn table_refs(&self) -> Option<TableRefs> {
+        // Only the plain table draws its cells as parts (no selection, no sort).
+        let CardV2Block::Table {
+            columns,
+            rows,
+            row_keys,
+            select: None,
+            sortable: None | Some(false),
+            ..
+        } = &self.0.1
+        else {
+            return None;
+        };
+        let cp = &self.0.0;
+        let (columns, rows, keys) = (columns.clone(), rows.clone(), row_keys.clone());
+        let (source, title, block_id, rev) = (
+            cp.source.clone(),
+            cp.card.title.clone(),
+            self.block_id().to_string(),
+            cp.card.rev as u64,
+        );
+        let block = crate::views::cards::v21::parts::block_segment(&cp.card, &self.0.1);
+        Some(TableRefs {
+            prefix: format!("{}-t-{block_id}", cp.prefix),
+            target: Rc::new(move |pick| {
+                let data = parts::TableData {
+                    columns: &columns,
+                    rows: &rows,
+                    row_keys: keys.as_deref().filter(|k| k.len() == rows.len()),
+                };
+                parts::table(&data, pick).map(|p| {
+                    p.target(
+                        source.clone(),
+                        &title,
+                        block_id.clone(),
+                        block.as_deref(),
+                        Some(rev),
+                    )
+                })
+            }),
+        })
+    }
+
+    /// The block's parts for the keyboard (REFS §A3), in source order: table cells, rows
+    /// and columns; else the parts of [`picks`]. `offset` moves them down by rows (a run
+    /// of blocks drawn together), `col` puts a one-part block in a column (a metric row).
+    pub fn nav(&self, offset: usize, col: Option<usize>) -> Vec<NavPart> {
+        if let Some(t) = self.table_refs() {
+            let CardV2Block::Table { columns, rows, .. } = &self.0.1 else {
+                return Vec::new();
+            };
+            let pick = |p: TablePick| -> Rc<dyn Fn(&App) -> PartTarget> {
+                let t = t.target.clone();
+                Rc::new(move |_| t(p).unwrap_or_else(super::empty_target))
+            };
+            let mut out = Vec::new();
+            for r in 0..rows.len() {
+                for c in 0..columns.len() {
+                    out.push(NavPart {
+                        id: t.cell_id(r, c),
+                        row: offset + r,
+                        col: c,
+                        kind: NavKind::Part,
+                        target: pick(TablePick::Cell { row: r, col: c }),
+                    });
+                }
+            }
+            out.extend((0..rows.len()).map(|r| NavPart {
+                id: t.row_id(r),
+                row: offset + r,
+                col: 0,
+                kind: NavKind::Row,
+                target: pick(TablePick::Row(r)),
+            }));
+            out.extend((0..columns.len()).map(|c| NavPart {
+                id: t.header_id(c),
+                row: offset,
+                col: c,
+                kind: NavKind::Column,
+                target: pick(TablePick::Column(c)),
+            }));
+            return out;
+        }
+        picks(&self.0.1)
+            .into_iter()
+            .map(|(p, row, c)| {
+                let me = self.clone();
+                NavPart {
+                    id: self.id(p),
+                    row: offset + row,
+                    col: col.unwrap_or(c),
+                    kind: NavKind::Part,
+                    target: Rc::new(move |_| me.target(Some(p))),
+                }
+            })
+            .collect()
+    }
+
+    /// The whole block (⇧⌥↵).
+    pub fn whole(&self) -> Rc<dyn Fn(&App) -> PartTarget> {
+        let me = self.clone();
+        Rc::new(move |_| me.target(None))
+    }
+
     /// True while the 问这里 of `pick` shows (the pointer rested on it for 300 ms).
     pub fn shown(&self, pick: Pick, cx: &App) -> bool {
         affordance::hover_state(&self.id(pick), cx).1
@@ -414,6 +522,52 @@ pub fn chart_plot_top(b: &CardV2Block) -> gpui::Pixels {
         }
         _ => gpui::px(12.),
     }
+}
+
+/// A block that takes the keyboard part focus: a referenceable leaf that is not a control
+/// (inputs keep Tab for answering) and has no focus of its own (a diagram has its nodes).
+pub fn keyboard_block(b: &CardV2Block) -> bool {
+    !(b.is_container()
+        || b.takes_input()
+        || matches!(
+            b,
+            CardV2Block::Divider { .. }
+                | CardV2Block::Buttons { .. }
+                | CardV2Block::Input { .. }
+                | CardV2Block::Unknown
+                | CardV2Block::Embed { .. }
+                | CardV2Block::Diagram { .. }
+                | CardV2Block::Draft { .. }
+                | CardV2Block::Decision { .. }
+        ))
+}
+
+/// `el` (the blocks of `run`, drawn together) as one keyboard stop with the parts of every
+/// block (REFS §A3). `el` is unchanged when no block of the run takes keyboard focus.
+pub fn focus_run(
+    run: &[BlockParts],
+    el: AnyElement,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
+    let run: Vec<&BlockParts> = run.iter().filter(|b| keyboard_block(&b.0.1)).collect();
+    let Some(first) = run.first() else {
+        return el;
+    };
+    // Metrics share a row; other runs stack.
+    let side_by_side = run
+        .iter()
+        .all(|b| matches!(b.0.1, CardV2Block::Metric { .. }));
+    let mut nav = Vec::new();
+    let mut offset = 0;
+    for (i, b) in run.iter().enumerate() {
+        let parts = b.nav(offset, side_by_side.then_some(i));
+        if !side_by_side {
+            offset = parts.iter().map(|p| p.row + 1).max().unwrap_or(offset);
+        }
+        nav.extend(parts);
+    }
+    super::keyboard::focus_block(el, first.block_key(), nav, first.whole(), window, cx)
 }
 
 /// `el` with the affordances of `pick` when `parts` is set, else `el` as it is.

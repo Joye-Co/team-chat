@@ -117,6 +117,22 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "refs-card-keyboard",
+        about: "引用提问 by keyboard (REFS §A3): Tab put focus on Forge's done plan and ↓ moved the part focus to step 2 找原因; ⌥↵ would add it, ⇧⌥↵ the whole plan, Esc leaves",
+        start: Start::V2RefParts,
+        setup: |s, cx| {
+            reset(cx);
+            v2_open_topic(s, d::DEV, d::T_RECONNECT, cx);
+            let block = format!("{}-k-plan", cards_v2::PLAN_DONE);
+            let part = format!("{}-p-plan-s1", cards_v2::PLAN_DONE);
+            hub(cx).update(cx, |h, _| {
+                h.forced_focus = Some(block.clone());
+                h.part_focus = Some((block, part));
+            });
+        },
+        open: open_main,
+    },
+    Scene {
         name: "refs-card-metric",
         about: "引用提问 on Card v2 parts: the pointer rests on the 日活 metric of 10 月的三个数; the metric lights up with 问这里 in its corner",
         start: Start::V2RefParts,

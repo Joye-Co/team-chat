@@ -327,7 +327,7 @@ fn render_table(
             .tnum()
             .text_color(colors.text_1);
         let line = match &table_refs {
-            Some(r) => r.row(line, ri, cx),
+            Some(r) => r.row(line, ri, window, cx),
             None => line,
         };
         line.children(widths.iter().enumerate().map(|(i, w)| {
