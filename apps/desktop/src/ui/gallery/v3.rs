@@ -297,10 +297,12 @@ fn motion(cx: &App) -> gpui::Div {
             div().size(px(10.)).rounded_full().bg(k.live),
             cx,
         ))
-        .child(ui::motion::check_draw(
+        // A sample answered now: its check draws.
+        .child(ui::motion::check_mark(
             "g-check",
             ui::icon(Lucide::Check, theme::icon::ROW, k.ok),
             px(16.),
+            ui::motion::just_answered(crate::selftest::clock::now_ms()),
             cx,
         ))
         .child(div().h(px(48.)).flex().items_end().gap(space::S4).children(

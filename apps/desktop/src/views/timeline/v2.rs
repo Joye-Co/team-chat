@@ -126,14 +126,6 @@ fn chip(cx: &App) -> gpui::Div {
         .text_color(k.ink_2)
 }
 
-/// A decision made this recently draws its check (CONCEPT2 motion: once,
-/// when answered); older records show it drawn.
-pub fn decision_is_fresh(at: crate::data::Millis, now: crate::data::Millis) -> bool {
-    (0..FRESH_DECISION_MS).contains(&(now - at))
-}
-
-const FRESH_DECISION_MS: i64 = 5_000;
-
 fn check(size: Pixels, color: Hsla) -> AnyElement {
     ui::icon(Lucide::Check, size, color).into_any_element()
 }
@@ -380,18 +372,18 @@ impl TimelineView {
                     .text_color(k.ink)
                     // The green check draws once, when the answer is new;
                     // a record read later shows it whole.
-                    .child(div().flex_none().size(px(14.)).child(
-                        if decision_is_fresh(message.created_at, crate::selftest::clock::now_ms()) {
-                            ui::motion::check_draw(
+                    .child(
+                        div()
+                            .flex_none()
+                            .size(px(14.))
+                            .child(ui::motion::check_mark(
                                 ElementId::Name(format!("v2-dec-check-{}", message.id).into()),
                                 check(px(14.), k.ok),
                                 px(14.),
+                                ui::motion::just_answered(message.created_at),
                                 cx,
-                            )
-                        } else {
-                            check(px(14.), k.ok)
-                        },
-                    ))
+                            )),
+                    )
                     .child(
                         div()
                             .min_w_0()
@@ -858,13 +850,6 @@ fn link_row(id: ElementId, cx: &App) -> gpui::Stateful<gpui::Div> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn only_a_new_decision_draws_its_check() {
-        assert!(decision_is_fresh(1_000, 2_000));
-        assert!(!decision_is_fresh(1_000, 1_000 + 60_000));
-        assert!(!decision_is_fresh(5_000, 1_000));
-    }
 
     #[test]
     fn a_bold_first_line_is_the_result_title() {

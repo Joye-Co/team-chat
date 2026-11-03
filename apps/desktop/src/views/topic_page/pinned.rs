@@ -192,10 +192,11 @@ impl TopicPage {
                     .bg(k.raised)
                     .t_small()
                     .text_color(k.ink)
-                    .child(ui::motion::check_draw(
+                    .child(ui::motion::check_mark(
                         ElementId::Name(format!("{id}-check").into()),
                         ui::icon(Lucide::Check, px(16.), k.ok),
                         px(16.),
+                        ui::motion::just_answered(at),
                         cx,
                     ))
                     .child(div().min_w_0().one_line().child(text))

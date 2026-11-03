@@ -262,16 +262,6 @@ pub fn check_mark(
     }))
 }
 
-/// [`check_mark`] that draws once per `id` in this session.
-pub fn check_draw(
-    id: impl Into<ElementId>,
-    glyph: impl IntoElement + 'static,
-    width: gpui::Pixels,
-    cx: &App,
-) -> AnyElement {
-    check_mark(id, glyph, width, true, cx)
-}
-
 /// A chart bar grows from zero to `height` once over [`motion::BAR_GROW`]
 /// after `delay`, once per `id` in this session. With Reduce motion it is
 /// drawn at its height.
