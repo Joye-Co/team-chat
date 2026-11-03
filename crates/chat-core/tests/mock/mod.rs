@@ -58,6 +58,9 @@ pub struct State {
     pub fail_send_body: Option<(String, ErrorCode)>,
     /// Answer every `typing` with a connection-level error frame (a frame without rid).
     pub typing_error: Option<ErrorCode>,
+    /// Broadcast the `card.answered` of a stored card event before its ack (the room fans the
+    /// event out while the gateway still waits for the RPC result).
+    pub answered_before_ack: bool,
     // Observations.
     pub client_frames: Vec<Value>,
     pub accepted: usize,
@@ -530,6 +533,18 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 "expect": {"by": "01BOT00000000000000000000A", "mode": "live", "etaMs": 2000}});
             if stored {
                 result["answerId"] = json!("AN-1");
+            }
+            if stored && s.answered_before_ack {
+                let mut d = json!({
+                    "messageId": v["messageId"], "rev": v["rev"],
+                    "actionId": v["actionId"].as_str().unwrap_or(""),
+                    "answerId": "AN-1", "event": v["event"]
+                });
+                if v["inputs"].is_object() {
+                    d["inputs"] = v["inputs"].clone();
+                }
+                let data: CardAnsweredData = serde_json::from_value(d).unwrap();
+                s.append(&gid, &me, EventData::CardAnswered(data));
             }
             send(
                 tx,

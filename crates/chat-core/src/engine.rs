@@ -117,6 +117,25 @@ pub(crate) enum LiveWrite {
     },
 }
 
+/// The ack target of a card answer or card event outbox row (`CardEventAcked`).
+fn card_live_write(id: &str, op: &OutboxOp) -> Option<LiveWrite> {
+    match op {
+        OutboxOp::CardAnswer { message_id, .. } => Some(LiveWrite::Card {
+            client_event_id: id.to_string(),
+            message_id: message_id.clone(),
+        }),
+        OutboxOp::CardEvent {
+            message_id,
+            client_event_id,
+            ..
+        } => Some(LiveWrite::Card {
+            client_event_id: client_event_id.clone(),
+            message_id: message_id.clone(),
+        }),
+        _ => None,
+    }
+}
+
 /// The error a live write gets when it never left this client.
 pub(crate) fn offline_error() -> ErrorBody {
     ErrorBody {
@@ -402,6 +421,9 @@ struct Session {
     next_rid: u64,
     pending: HashMap<String, (Pending, Instant)>,
     inflight_outbox: HashSet<String>,
+    /// Card answers and events in flight by outbox id: their ack still reaches subscribers
+    /// when my `card.answered` applied first and removed the row.
+    inflight_cards: HashMap<String, LiveWrite>,
     write_pace: WritePace,
     retry_at: HashMap<String, Instant>,
     /// `internal` answers per outbox row on this session.
@@ -453,6 +475,7 @@ impl Session {
             next_rid: 1,
             pending: HashMap::new(),
             inflight_outbox: HashSet::new(),
+            inflight_cards: HashMap::new(),
             write_pace: WritePace::new(now),
             retry_at: HashMap::new(),
             internal_failures: HashMap::new(),
@@ -1018,6 +1041,9 @@ impl Session {
             }
             debug!(id = %item.id, kind = item.op.kind(), attempts = item.attempts + 1, "outbox send");
             self.inflight_outbox.insert(item.id.clone());
+            if let Some(w) = card_live_write(&item.id, &item.op) {
+                self.inflight_cards.insert(item.id.clone(), w);
+            }
             self.out.push(frame);
             self.track(rid, Pending::Outbox { id: item.id });
         }
@@ -1367,10 +1393,18 @@ impl Session {
         error: Option<ErrorBody>,
     ) -> Option<SessionEnd> {
         self.inflight_outbox.remove(&id);
+        let inflight_card = self.inflight_cards.remove(&id);
         let item = match self.shared.store.outbox_get(&id) {
             Ok(Some(i)) => i,
             // Already removed: its event arrived first, or the UI discarded it.
             _ => {
+                if ok
+                    && result.is_some()
+                    && let Some(what) = inflight_card
+                {
+                    emit_live_ack(&self.shared, what, Ok(result));
+                    return None;
+                }
                 if ok
                     && let Some(r) =
                         result.and_then(|v| serde_json::from_value::<SendResult>(v).ok())
@@ -1385,21 +1419,7 @@ impl Session {
             }
         };
         let group_id = item.op.group_id().to_string();
-        let card_ack = match &item.op {
-            OutboxOp::CardAnswer { message_id, .. } => Some(LiveWrite::Card {
-                client_event_id: id.clone(),
-                message_id: message_id.clone(),
-            }),
-            OutboxOp::CardEvent {
-                message_id,
-                client_event_id,
-                ..
-            } => Some(LiveWrite::Card {
-                client_event_id: client_event_id.clone(),
-                message_id: message_id.clone(),
-            }),
-            _ => None,
-        };
+        let card_ack = card_live_write(&id, &item.op);
         if ok {
             if let Some(what) = card_ack.clone() {
                 // A 1.0 server acks card.answer without a result: no CardEventAcked then.

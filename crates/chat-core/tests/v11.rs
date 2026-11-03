@@ -1246,3 +1246,75 @@ async fn stored_answers_are_queued_while_offline() {
     );
     client.stop();
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_answer_is_acked_when_its_event_arrives_first() {
+    let server = MockServer::start(
+        member(ME, "me"),
+        vec![member(ME, "me"), member(BOT, "ledger")],
+    )
+    .await;
+    server.add_group(group(G1, &[ME, BOT]));
+    server.with(|s| {
+        s.answered_before_ack = true;
+        s.append(
+            G1,
+            ME,
+            EventData::TopicCreated(TopicCreatedData {
+                topic: topic("T1", G1, "M1", 1),
+            }),
+        );
+        s.append(
+            G1,
+            ME,
+            EventData::MessageCreated(MessageCreatedData {
+                message: message("M1", G1, "T1", ME, 2, "root"),
+            }),
+        );
+        s.append(
+            G1,
+            BOT,
+            EventData::MessageCreated(MessageCreatedData {
+                message: card_message("C1", 3, report_card()),
+            }),
+        );
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let client = Client::new(ClientConfig::new(server.base_url(), TOKEN, dir.path())).unwrap();
+    let mut rx = client.subscribe();
+    client.start();
+    until("card cached", || {
+        client.store().message("C1").unwrap().is_some() && client.server_has(FEATURE_INTERACT)
+    })
+    .await;
+    let answer = client
+        .send_card_event(chat_core::CardEventRequest {
+            message_id: "C1".into(),
+            rev: 1,
+            action_id: Some("send".into()),
+            event: "action.press".into(),
+            inputs: Some([("check".to_string(), json!({"value": "ok"}))].into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(answer.durable);
+    // card.answered removes the sent row before the ack comes; the ack still reaches me.
+    let ack = next(&mut rx, |u| match u {
+        ClientUpdate::CardEventAcked {
+            client_event_id,
+            result,
+            ..
+        } if *client_event_id == answer.client_event_id => Some(result.clone()),
+        _ => None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(ack.answer_id.as_deref(), Some("AN-1"));
+    assert_eq!(ack.expect.mode, ExpectMode::Live);
+    assert_eq!(
+        client.card_answers("C1").unwrap()[0].answer_id.as_deref(),
+        Some("AN-1")
+    );
+    assert!(client.pending_card_events("T1").unwrap().is_empty());
+    client.stop();
+}
