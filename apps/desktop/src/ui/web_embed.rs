@@ -22,14 +22,17 @@
 //! - gives keyboard focus back to GPUI on a click outside the page or on Esc, and blurs
 //!   GPUI's focused element when the page takes focus.
 //!
-//! The view is removed (and its page and media stopped) when the element is no longer
-//! rendered: its state is keyed element state.
+//! The page stays alive while it scrolls out of a virtualized list (inc-host track): the
+//! state is cached per window and element id, an embed that was not painted in a frame
+//! hides, and at most [`MAX_LIVE`] pages keep a native view; the least recently painted
+//! off-screen ones give theirs up and show their last snapshot when they come back, while
+//! the page loads again.
 
 use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
-use artifact_view::{ArtifactEvent, Capabilities, VersionSpec};
+use artifact_view::{ArtifactEvent, Capabilities, RefMenu, Reject, Snapshot, VersionSpec, Viewer};
 use gpui::{
-    AnyWindowHandle, App, Bounds, Context, DispatchPhase, Element, ElementId, Entity,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, DispatchPhase, Element, ElementId, Entity,
     GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _,
     IntoElement, LayoutId, MouseDownEvent, ParentElement, Pixels, Point, RenderOnce, SharedString,
     Style, Styled, Window, WindowId, div, img, point, px, relative,
@@ -46,6 +49,10 @@ pub struct WebEmbedSpec {
     pub artifact_id: String,
     pub version: VersionSpec,
     pub capabilities: Capabilities,
+    /// `window.teamchat.viewer`.
+    pub viewer: Option<Viewer>,
+    /// The ⌥-click outline and `就这里提问` menu, when the page may `ref`.
+    pub ref_menu: Option<RefMenu>,
 }
 
 impl WebEmbedSpec {
@@ -54,6 +61,8 @@ impl WebEmbedSpec {
             artifact_id: artifact_id.into(),
             version,
             capabilities: Capabilities::ALL,
+            viewer: None,
+            ref_menu: None,
         }
     }
 
@@ -61,9 +70,28 @@ impl WebEmbedSpec {
         self.capabilities = caps;
         self
     }
+
+    pub fn viewer(mut self, viewer: Option<Viewer>) -> Self {
+        self.viewer = viewer;
+        self
+    }
+
+    pub fn ref_menu(mut self, menu: Option<RefMenu>) -> Self {
+        self.ref_menu = menu;
+        self
+    }
 }
 
 type EventHandler = Rc<dyn Fn(&ArtifactEvent, &mut Window, &mut App)>;
+/// The 产出 page host's hook: every page event with the embed it came from.
+pub type HostHandler =
+    Rc<dyn Fn(&ArtifactEvent, gpui::WeakEntity<WebEmbedState>, &mut Window, &mut App)>;
+
+/// Pages that keep a native view at once, beyond the ones on screen (INTERACT §5.5,
+/// MEDIA §1: at most 2 live; off-screen ones show their snapshot).
+pub const MAX_LIVE: usize = 2;
+/// Cached embeds (with or without a native view) kept per app.
+const MAX_CACHED: usize = 24;
 
 /// A live 产出 page in the layout. See the module docs.
 #[derive(IntoElement)]
@@ -75,6 +103,7 @@ pub struct WebEmbed {
     pass_scroll: bool,
     autoplay: bool,
     on_event: Option<EventHandler>,
+    on_host: Option<HostHandler>,
 }
 
 impl WebEmbed {
@@ -88,7 +117,17 @@ impl WebEmbed {
             pass_scroll: false,
             autoplay: false,
             on_event: None,
+            on_host: None,
         }
+    }
+
+    /// Routes page events to the 产出 page host with this embed (bridge requests, loads).
+    pub fn on_host(
+        mut self,
+        f: impl Fn(&ArtifactEvent, gpui::WeakEntity<WebEmbedState>, &mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.on_host = Some(Rc::new(f));
+        self
     }
 
     pub fn height(mut self, height: Pixels) -> Self {
@@ -137,7 +176,10 @@ pub struct WebEmbedState {
     autoplay: bool,
     radius: Pixels,
     on_event: Option<EventHandler>,
+    on_host: Option<HostHandler>,
     window: Option<AnyWindowHandle>,
+    /// Not painted in the last frame: hidden, kept for when it scrolls back.
+    parked: bool,
     phase: Phase,
     /// The last picture of the page, drawn while the view hides under an overlay.
     snapshot: Option<Arc<gpui::Image>>,
@@ -173,7 +215,9 @@ impl WebEmbedState {
             autoplay: false,
             radius: px(0.),
             on_event: None,
+            on_host: None,
             window: None,
+            parked: false,
             phase: Phase::Loading,
             snapshot: None,
             hit_covered: false,
@@ -189,6 +233,70 @@ impl WebEmbedState {
 
     pub fn artifact_id(&self) -> &str {
         &self.spec.artifact_id
+    }
+
+    /// The version the page shows.
+    pub fn version(&self) -> u32 {
+        self.spec.version.version
+    }
+
+    /// True while a native page exists (on screen or parked).
+    pub fn has_native(&self) -> bool {
+        #[cfg(target_os = "macos")]
+        {
+            self.native.is_some()
+        }
+        #[cfg(not(target_os = "macos"))]
+        false
+    }
+
+    /// Gives the page of `version` a data snapshot (the 产出 page host). False when no
+    /// such page shows.
+    pub fn push_data(&self, version: u32, snap: Snapshot) -> bool {
+        #[cfg(target_os = "macos")]
+        if let Some(n) = &self.native {
+            return n.push_data(version, snap);
+        }
+        let _ = (version, snap);
+        false
+    }
+
+    /// Finishes an open `emit` / `ask` of the page of `version`. False when it is not
+    /// open any more (the host drops a late reply).
+    pub fn finish(
+        &self,
+        version: u32,
+        reply_id: &serde_json::Value,
+        result: Result<serde_json::Value, Reject>,
+    ) -> bool {
+        #[cfg(target_os = "macos")]
+        if let Some(n) = &self.native {
+            return n.finish(version, reply_id, result);
+        }
+        let _ = (version, reply_id, result);
+        false
+    }
+
+    /// Hides a page that was not painted in the last frame.
+    fn park(&mut self) {
+        if self.parked {
+            return;
+        }
+        self.parked = true;
+        self.focused = false;
+        #[cfg(target_os = "macos")]
+        if let Some(n) = &self.native {
+            n.set_hidden(true);
+        }
+    }
+
+    /// Gives up the native page (it loads again when it shows); the snapshot stays.
+    fn release_native(&mut self) {
+        #[cfg(target_os = "macos")]
+        if self.native.take().is_some() {
+            self._events = None;
+            self.phase = Phase::Loading;
+        }
     }
 
     pub fn phase(&self) -> &Phase {
@@ -273,6 +381,9 @@ impl WebEmbedState {
         self.autoplay = embed.autoplay;
         self.radius = embed.radius;
         self.on_event = embed.on_event.clone();
+        self.on_host = embed.on_host.clone();
+        self.spec.viewer = embed.spec.viewer.clone();
+        self.spec.ref_menu = embed.spec.ref_menu.clone();
         let same = self.spec.artifact_id == embed.spec.artifact_id
             && self.spec.version.version == embed.spec.version.version;
         #[cfg(target_os = "macos")]
@@ -334,12 +445,20 @@ impl WebEmbedState {
                     self.snapshot_later(cx, 0);
                 }
             }
-            ArtifactEvent::Emit { .. } => self.snapshot_later(cx, 120),
+            ArtifactEvent::Emit { .. } | ArtifactEvent::Ask { .. } => self.snapshot_later(cx, 120),
             ArtifactEvent::ExternalLink { .. }
             | ArtifactEvent::VersionSelected { .. }
+            | ArtifactEvent::Ref { .. }
             | ArtifactEvent::Closed => {}
         }
         cx.notify();
+        if let (Some(host), Some(handle)) = (self.on_host.clone(), self.window) {
+            let me = cx.weak_entity();
+            let event = event.clone();
+            cx.defer(move |cx| {
+                let _ = handle.update(cx, |_, window, cx| host(&event, me, window, cx));
+            });
+        }
         if let (Some(handler), Some(handle)) = (self.on_event.clone(), self.window) {
             cx.defer(move |cx| {
                 let _ = handle.update(cx, |_, window, cx| handler(&event, window, cx));
@@ -417,6 +536,8 @@ impl WebEmbedState {
         options.pass_scroll = self.pass_scroll;
         options.autoplay = self.autoplay;
         options.inspectable = cfg!(debug_assertions);
+        options.viewer = self.spec.viewer.clone();
+        options.ref_menu = self.spec.ref_menu.clone();
         match artifact_view::EmbeddedArtifact::attach(mtm, host, options, move |e| {
             let _ = tx.unbounded_send(e);
         }) {
@@ -445,6 +566,7 @@ impl WebEmbedState {
         cx: &mut Context<Self>,
     ) {
         self.last_bounds = Some(bounds);
+        self.parked = false;
         self.cover_covered = covers_overlap(window, visible, cx);
         #[cfg(target_os = "macos")]
         {
@@ -512,14 +634,14 @@ fn rect(b: Bounds<Pixels>) -> artifact_view::Rect {
 
 impl RenderOnce for WebEmbed {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
-        let spec = self.spec.clone();
-        let state =
-            window.use_keyed_state(self.id.clone(), cx, |_, cx| WebEmbedState::new(spec, cx));
+        let state = cached_state(&self, window, cx);
         state.update(cx, |s, _| s.sync(&self));
         let k = theme::colors(cx);
         let s = state.read(cx);
         let backdrop = match (&s.phase, s.covered(), &s.snapshot) {
-            (_, true, Some(image)) => img(image.clone()).size_full().into_any_element(),
+            (_, true, Some(image)) | (Phase::Loading, _, Some(image)) => {
+                img(image.clone()).size_full().into_any_element()
+            }
             (Phase::Failed(_), _, _) => message(ca::LOAD_FAILED, k.text_3).into_any_element(),
             (Phase::Loading, _, _) => message(ca::OPENING, k.text_3).into_any_element(),
             _ => div().into_any_element(),
@@ -621,6 +743,7 @@ impl Element for NativeSlot {
         cx: &mut App,
     ) {
         mark_painting(window, cx);
+        mark_painted(&self.state, window, cx);
         let (hitbox, visible) = (hitbox.clone(), *visible);
         self.state
             .update(cx, |s, cx| s.apply(bounds, visible, hitbox, window, cx));
@@ -653,6 +776,8 @@ struct Covers {
 struct CoverFrame {
     painting: bool,
     rects: Vec<Bounds<Pixels>>,
+    /// Frames of this window so far (the embed cache's clock).
+    count: u64,
 }
 
 impl gpui::Global for Covers {}
@@ -664,7 +789,108 @@ fn begin_frame(window: &Window, cx: &mut App) {
     if frame.painting {
         frame.painting = false;
         frame.rects.clear();
+        frame.count += 1;
     }
+}
+
+// --- the live embed cache (inc-host track) ----------------------------------------
+
+struct CacheEntry {
+    state: Entity<WebEmbedState>,
+    last_paint: u64,
+}
+
+#[derive(Default)]
+struct EmbedCache {
+    entries: HashMap<(WindowId, ElementId), CacheEntry>,
+    /// Windows with a sweep queued for the end of the frame.
+    sweeping: std::collections::HashSet<WindowId>,
+}
+
+impl gpui::Global for EmbedCache {}
+
+/// The state of one embed, kept across frames in which a virtualized list does not
+/// render it.
+fn cached_state(embed: &WebEmbed, window: &mut Window, cx: &mut App) -> Entity<WebEmbedState> {
+    let key = (window.window_handle().window_id(), embed.id.clone());
+    if let Some(e) = cx.try_global::<EmbedCache>().and_then(|c| c.entries.get(&key)) {
+        return e.state.clone();
+    }
+    let spec = embed.spec.clone();
+    let state = cx.new(|cx| WebEmbedState::new(spec, cx));
+    cx.default_global::<EmbedCache>().entries.insert(
+        key,
+        CacheEntry {
+            state: state.clone(),
+            last_paint: 0,
+        },
+    );
+    state
+}
+
+fn frame_count(window: &Window, cx: &App) -> u64 {
+    let id = window.window_handle().window_id();
+    cx.try_global::<Covers>()
+        .and_then(|c| c.windows.get(&id))
+        .map_or(0, |f| f.count)
+}
+
+/// Notes that `state` was painted in this frame and queues the end-of-frame sweep.
+fn mark_painted(state: &Entity<WebEmbedState>, window: &mut Window, cx: &mut App) {
+    let wid = window.window_handle().window_id();
+    let now = frame_count(window, cx);
+    let cache = cx.default_global::<EmbedCache>();
+    for ((w, _), e) in cache.entries.iter_mut() {
+        if *w == wid && e.state == *state {
+            e.last_paint = now;
+        }
+    }
+    if cache.sweeping.insert(wid) {
+        window.on_next_frame(move |window, cx| sweep(wid, now, window, cx));
+    }
+}
+
+/// After a frame: hides the embeds of `wid` that were not painted in it, then keeps at
+/// most [`MAX_LIVE`] native pages beyond the painted ones and at most [`MAX_CACHED`]
+/// cached embeds. Embeds of closed windows go.
+fn sweep(wid: WindowId, frame: u64, _window: &mut Window, cx: &mut App) {
+    let open: std::collections::HashSet<WindowId> =
+        cx.windows().iter().map(|w| w.window_id()).collect();
+    let mut cache = cx.remove_global::<EmbedCache>();
+    cache.sweeping.remove(&wid);
+    cache.entries.retain(|(w, _), _| open.contains(w));
+    let mut parked: Vec<(u64, (WindowId, ElementId))> = Vec::new();
+    for (key, e) in cache.entries.iter() {
+        if e.last_paint < frame {
+            if key.0 == wid {
+                e.state.update(cx, |s, _| s.park());
+            }
+            parked.push((e.last_paint, key.clone()));
+        }
+    }
+    parked.sort_by_key(|(t, _)| *t);
+    let mut live = cache
+        .entries
+        .values()
+        .filter(|e| e.state.read(cx).has_native())
+        .count();
+    let painted = cache.entries.len() - parked.len();
+    for (_, key) in &parked {
+        if live <= MAX_LIVE.max(painted) {
+            break;
+        }
+        if let Some(e) = cache.entries.get(key)
+            && e.state.read(cx).has_native()
+        {
+            e.state.update(cx, |s, _| s.release_native());
+            live -= 1;
+        }
+    }
+    let extra = cache.entries.len().saturating_sub(MAX_CACHED);
+    for (_, key) in parked.iter().take(extra) {
+        cache.entries.remove(key);
+    }
+    cx.set_global(cache);
 }
 
 fn mark_painting(window: &Window, cx: &mut App) {
@@ -768,6 +994,32 @@ impl Element for Occluder {
 
 /// The live embedded pages (self-tests).
 pub fn live(cx: &App) -> Vec<Entity<WebEmbedState>> {
+    let open: std::collections::HashSet<WindowId> =
+        cx.windows().iter().map(|w| w.window_id()).collect();
+    LIVE.with(|l| {
+        l.borrow()
+            .iter()
+            .filter_map(|w| w.upgrade())
+            .filter(|e| {
+                let s = e.read(cx);
+                !s.parked && s.window.is_none_or(|w| open.contains(&w.window_id()))
+            })
+            .collect()
+    })
+}
+
+/// Every cached embed, also the parked ones (the 产出 page host pushes data and finishes
+/// asks through them).
+pub fn all(cx: &App) -> Vec<Entity<WebEmbedState>> {
     let _ = cx;
     LIVE.with(|l| l.borrow().iter().filter_map(|w| w.upgrade()).collect())
+}
+
+/// Forgets every cached embed (self-tests start clean).
+pub fn clear_cache(cx: &mut App) {
+    if let Some(c) = cx.try_global::<EmbedCache>()
+        && !c.entries.is_empty()
+    {
+        cx.set_global(EmbedCache::default());
+    }
 }

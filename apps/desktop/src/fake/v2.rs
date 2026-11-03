@@ -1817,6 +1817,65 @@ impl ChatProvider for V2Samples {
         sent_page_events::record(artifact_id, version, name, payload);
     }
     // --- end r2-trust ---
+    // --- inc-host track: the 产出 page host on the samples ---
+    fn page_bridge(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::page_host::PageBridge> {
+        use crate::data::page_host::{PageEventDecl, PageEventKind};
+        let mut b = crate::data::page_host::default_bridge(self, artifact_id, version)?;
+        if artifact_id == ART_REPORT {
+            // 10 月数据月报: Ledger made it in a run; the page filters and asks.
+            b.runner = true;
+            b.events.extend([
+                PageEventDecl {
+                    name: "filter".into(),
+                    kind: PageEventKind::Emit,
+                    label: Some("按渠道看".into()),
+                },
+                PageEventDecl {
+                    name: "question".into(),
+                    kind: PageEventKind::Ask,
+                    label: Some("数据有问题".into()),
+                },
+            ]);
+        }
+        Some(b)
+    }
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        _kind: crate::data::page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, crate::data::page_host::PageSendError> {
+        sent_page_events::record(artifact_id, version, name, payload);
+        Ok(format!("ce-{}", sent_page_events::snapshot().len()))
+    }
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        _version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let data = (artifact_id == ART_REPORT).then(|| {
+            (
+                serde_json::json!({
+                    "channel": "全部",
+                    "weeks": ["10-06", "10-13", "10-20", "10-27"],
+                    "values": [9, 8, 10, 11],
+                    "total": 38,
+                    "delta": "+4"
+                }),
+                1,
+            )
+        });
+        let _ = tx.send(data);
+        rx
+    }
+    // --- end inc-host track ---
     fn open_artifact_version(
         &self,
         artifact_id: &str,

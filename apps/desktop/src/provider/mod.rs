@@ -34,6 +34,9 @@ pub mod persist;
 mod proof;
 // pages track: the 群, 成员 and 产出 pages.
 mod pages;
+// --- inc-host track ---
+mod page_host;
+// --- end inc-host track ---
 mod process;
 mod realtime;
 #[cfg(test)]
@@ -170,6 +173,9 @@ struct Shared {
     // --- provider track: v2 topic surfaces (provider/topic_v2.rs) ---
     topic_v2: topic_v2::TopicV2Cache,
     // --- end provider track ---
+    // --- inc-host track: acks, replies and data pushes for open 产出 pages ---
+    page_signals: page_host::PageSignals,
+    // --- end inc-host track ---
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -208,6 +214,7 @@ impl CoreProvider {
                 decisions: pages::DecisionsCache::default(),
                 page_events: pages::PageEventLog::default(),
                 topic_v2: topic_v2::TopicV2Cache::default(),
+                page_signals: page_host::PageSignals::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -618,6 +625,8 @@ impl CoreProvider {
     }
 
     fn on_update(&self, generation: u64, u: ClientUpdate, out: &mut Vec<Change>) {
+        // inc-host track: page acks, replies and data pushes go to the page host.
+        self.emit_page_signal(&u);
         match u {
             ClientUpdate::Connection(c) => {
                 use chat_core::ConnectionState as C;
@@ -2140,6 +2149,41 @@ impl ChatProvider for CoreProvider {
     }
 
     // --- end dfix-motion track ---
+
+    // --- inc-host track: the 产出 page host (provider/page_host.rs) ---
+
+    fn page_bridge(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::page_host::PageBridge> {
+        self.page_bridge_inner(artifact_id, version)
+    }
+
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        kind: crate::data::page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, crate::data::page_host::PageSendError> {
+        self.send_page_event_inner(artifact_id, version, name, kind, payload)
+    }
+
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        self.fetch_page_data_inner(artifact_id, version)
+    }
+
+    fn page_signals(&self) -> Option<UnboundedReceiver<crate::data::page_host::PageSignal>> {
+        Some(self.shared.page_signals.subscribe())
+    }
+
+    // --- end inc-host track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

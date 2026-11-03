@@ -5,10 +5,10 @@
 //! a card with 打开 (the native 产出 window). Also the list of every 产出,
 //! and the 产出 pane beside a 话题 (`pane`).
 //!
-//! Bridge capabilities follow the author: a version a bot member made that
-//! declares events may call `emitEvent`; each event goes to the bot
-//! (`artifact.event`). Nobody's page reads data through the bridge. An event
-//! goes only right after the viewer's own input in that page, and at most
+//! Bridge capabilities follow the author (R10, `views/artifacts/host.rs`): every
+//! page reads its data and may point at its parts; a version an active bot member
+//! made may `emit` and `ask` the events it declares (`artifact.event`). An event
+//! goes only right after the viewer's own input in that page, and emits at most
 //! about five per second ([`forward_page_event`]).
 
 pub mod gate_check;
@@ -19,11 +19,10 @@ use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
     rc::Rc,
-    sync::Arc,
     time::Instant,
 };
 
-use artifact_view::{ArtifactEvent, Capabilities, Content, VersionSpec, gate::EventLimiter};
+use artifact_view::{Capabilities, Reject, gate::EventLimiter};
 use gpui::{
     AnyElement, App, ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement,
     Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window,
@@ -34,7 +33,7 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use crate::{
     app::{Place, Services},
     copy::{artifact_page as c, fill},
-    data::{ArtifactDetail, ArtifactFolder, ChatProvider, FileError, Millis, TopicStatus},
+    data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
     ui::{
         self, Lucide, MemberAvatar, Ring,
@@ -81,31 +80,23 @@ impl Folders {
     }
 }
 
-/// What the page bridge of a version may do: `emitEvent` only on a version
-/// a bot member made that declares events.
+/// What the page bridge of a version may do (R10, see `artifacts::host`).
 pub fn capabilities(
     provider: &dyn crate::data::ChatProvider,
     detail: &ArtifactDetail,
     version: u32,
 ) -> Capabilities {
-    let by_bot = detail
-        .versions
-        .iter()
-        .find(|v| v.version == version)
-        .map(|v| v.created_by.clone())
-        .or_else(|| Some(detail.summary.created_by.clone()))
-        .and_then(|id| provider.member(&id))
-        .is_some_and(|m| m.is_bot());
-    let declares = !provider
-        .artifact_page_events(&detail.summary.id, version)
-        .is_empty();
-    Capabilities {
-        get_data: false,
-        emit_event: by_bot && declares,
-    }
+    crate::views::artifacts::host::capabilities_for(
+        provider
+            .page_bridge(&detail.summary.id, version)
+            .as_ref(),
+    )
 }
 
-type PendingEvent = (Arc<dyn ChatProvider>, serde_json::Value);
+use crate::views::artifacts::host::{self, PageRef};
+
+/// A waiting emit: its page and payload, and the page's request when it waits.
+type PendingEvent = (PageRef, serde_json::Value, Option<serde_json::Value>);
 
 thread_local! {
     /// Page events by `(产出, version)`, paced for every page of the app.
@@ -113,20 +104,25 @@ thread_local! {
         RefCell::new(EventLimiter::new());
     /// When the next send of waiting page events runs.
     static FLUSH_AT: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// The page request of the emit that waits per `(产出, version, name)`.
+    static QUEUED: RefCell<HashMap<(String, u32, String), (PageRef, serde_json::Value)>> =
+        RefCell::new(HashMap::new());
 }
 
-/// Sends a page event (`emitEvent`) to the bot that made the version, when
-/// the version declares `name` and the viewer used the page just before
-/// (`user_action`). Others are dropped. Events over the limit wait, and a
-/// later one of the same name replaces the waiting one, so a page can never
-/// fill the outbox or get the viewer `rate_limited`.
+/// Sends a page event (`emit` / `emitEvent`) to the bot that made the version, when
+/// the viewer used the page just before (`user_action`); the bridge already checked
+/// that the version declares `name`. Others are dropped. Events over the limit wait,
+/// and a later one of the same name replaces the waiting one (whose page request ends
+/// `rate_limited`), so a page can never fill the outbox.
+#[allow(clippy::too_many_arguments)]
 pub fn forward_page_event(
-    provider: &Arc<dyn ChatProvider>,
+    page: PageRef,
     artifact_id: &str,
     version: u32,
     name: &str,
     payload: &serde_json::Value,
     user_action: bool,
+    reply_id: Option<serde_json::Value>,
     cx: &mut App,
 ) {
     if !user_action {
@@ -136,26 +132,34 @@ pub fn forward_page_event(
             name,
             "page event without user input dropped"
         );
-        return;
-    }
-    if !provider
-        .artifact_page_events(artifact_id, version)
-        .iter()
-        .any(|n| n == name)
-    {
+        if let Some(id) = &reply_id {
+            host::finish_request(&page, version, id, Err(Reject::NotAllowed), cx);
+        }
         return;
     }
     let now_go = PAGE_EVENTS.with(|l| {
         l.borrow_mut().offer(
             (artifact_id.to_string(), version),
             name,
-            (provider.clone(), payload.clone()),
+            (page.clone(), payload.clone(), reply_id.clone()),
             Instant::now(),
         )
     });
     match now_go {
-        Some((p, payload)) => p.send_artifact_event(artifact_id, version, name, Some(payload)),
-        None => schedule_page_events(cx),
+        Some((page, payload, reply)) => {
+            host::send_emit(page, artifact_id, version, name, payload, reply, cx)
+        }
+        None => {
+            let key = (artifact_id.to_string(), version, name.to_string());
+            let old = QUEUED.with(|q| match &reply_id {
+                Some(id) => q.borrow_mut().insert(key, (page, id.clone())),
+                None => q.borrow_mut().remove(&key),
+            });
+            if let Some((p, id)) = old {
+                host::finish_request(&p, version, &id, Err(Reject::RateLimited), cx);
+            }
+            schedule_page_events(cx)
+        }
     }
 }
 
@@ -179,8 +183,9 @@ fn schedule_page_events(cx: &mut App) {
                 }
             });
             let due = PAGE_EVENTS.with(|l| l.borrow_mut().take_due(Instant::now()));
-            for ((id, version), name, (p, payload)) in due {
-                p.send_artifact_event(&id, version, &name, Some(payload));
+            for ((id, version), name, (page, payload, reply)) in due {
+                QUEUED.with(|q| q.borrow_mut().remove(&(id.clone(), version, name.clone())));
+                host::send_emit(page, &id, version, &name, payload, reply, cx);
             }
             schedule_page_events(cx);
         });
@@ -188,8 +193,8 @@ fn schedule_page_events(cx: &mut App) {
     .detach();
 }
 
-/// The live page of a version, sized `height`, forwarding declared page
-/// events to the bot that made it.
+/// The live page of a version, sized `height`, wired to the page host: data,
+/// declared events and asks to the bot that made it, refs to the composer.
 pub fn embed(
     services: &Services,
     key: &str,
@@ -197,29 +202,30 @@ pub fn embed(
     folder: &ArtifactFolder,
     height: Pixels,
     radius: Pixels,
+    cx: &App,
 ) -> WebEmbed {
     let id = detail.summary.id.clone();
-    let spec = VersionSpec::new(folder.version, Content::Folder(folder.dir.clone()))
-        .with_entry(folder.entry.clone());
-    let caps = capabilities(services.provider.as_ref(), detail, folder.version);
-    let provider = services.provider.clone();
+    let (spec, caps) = host::version_spec(
+        services.provider.as_ref(),
+        &id,
+        folder.version,
+        folder.dir.clone(),
+        folder.entry.clone(),
+    );
     WebEmbed::new(
         SharedString::from(format!("{key}-{id}")),
-        WebEmbedSpec::new(id.clone(), spec).capabilities(caps),
+        WebEmbedSpec::new(id.clone(), spec)
+            .capabilities(caps)
+            .viewer(host::viewer(services.provider.as_ref()))
+            .ref_menu(Some(host::ref_menu(cx))),
     )
     .height(height)
     .rounded(radius)
-    .on_event(move |event, _, cx| match event {
-        ArtifactEvent::Emit {
-            version,
-            name,
-            payload,
-            user_action,
-        } => forward_page_event(&provider, &id, *version, name, payload, *user_action, cx),
-        ArtifactEvent::ExternalLink { url } => {
+    .on_host(host::embed_handler(id))
+    .on_event(move |event, _, _| {
+        if let artifact_view::ArtifactEvent::ExternalLink { url } = event {
             crate::views::artifacts::window::ask_before_link(url.clone())
         }
-        _ => {}
     })
 }
 
@@ -433,6 +439,11 @@ impl ArtifactPage {
                     .ml(space::S4)
                     .child(ui::JobTag::new(kind_label(a.kind))),
             )
+            // inc-host: 已更新到 v{n} after a reload in place, or 有 v{n}.
+            .children(
+                host::notice(&a.id, shown, a.version, cx)
+                    .map(|t| div().ml(space::S4).child(host::notice_chip(t, cx))),
+            )
             .child(div().flex_1())
             .child(
                 div()
@@ -542,14 +553,27 @@ impl ArtifactPage {
                     }),
                 )
         });
+        let folder = self
+            .folders
+            .get(&self.services, &detail.summary.id, shown, cx);
+        // inc-host: a live page has the footer of what it may do and its pending band.
+        let live = matches!(&folder, Some(Ok(f)) if f.is_page);
+        let footer = live.then(|| {
+            host::page_footer(
+                &SharedString::from("artifact-page-foot"),
+                self.services.provider.as_ref(),
+                &detail.summary.id,
+                shown,
+                None,
+                cx,
+            )
+        });
         let height = window.viewport_size().height
             - theme::TITLE_BAR
             - space::S24
             - px(2.)
-            - if old { px(40.) } else { px(0.) };
-        let folder = self
-            .folders
-            .get(&self.services, &detail.summary.id, shown, cx);
+            - if old { px(40.) } else { px(0.) }
+            - if live { px(35.) } else { px(0.) };
         let body = match folder {
             Some(Ok(folder)) if folder.is_page => embed(
                 &self.services,
@@ -558,6 +582,7 @@ impl ArtifactPage {
                 &folder,
                 height,
                 px(0.),
+                cx,
             )
             .into_any_element(),
             Some(Ok(_)) | Some(Err(_)) => {
@@ -614,7 +639,8 @@ impl ArtifactPage {
                 .flex()
                 .flex_col()
                 .children(band)
-                .child(div().flex_1().min_h(px(0.)).child(body)),
+                .child(div().flex_1().min_h(px(0.)).child(body))
+                .children(footer),
             cx,
         )
     }

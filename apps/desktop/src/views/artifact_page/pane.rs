@@ -70,6 +70,7 @@ impl Render for ArtifactPane {
                 &folder,
                 height,
                 px(0.),
+                cx,
             )
             .into_any_element(),
             Some(_) => {

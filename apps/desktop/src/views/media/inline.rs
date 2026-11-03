@@ -63,6 +63,23 @@ pub fn render(spec: &InlineSpec, window: &mut Window, cx: &mut App) -> Option<An
     if !spec.kind.previews_inline() {
         return None;
     }
+    // inc-host: a live page that showed the latest version follows it (reload in place).
+    let followed;
+    let spec = if spec.kind == MediaKind::Html && spec.target.provider.is_some() {
+        let v = crate::views::artifacts::host::inline_version(
+            &spec.id,
+            &spec.key.artifact_id,
+            spec.key.version,
+            cx,
+        );
+        followed = InlineSpec {
+            key: MediaKey::new(spec.key.artifact_id.clone(), v),
+            ..spec.clone()
+        };
+        &followed
+    } else {
+        spec
+    };
     match store::get(&spec.key, cx) {
         Some(Load::Ready(media)) => Some(ready(spec, &media, window, cx)),
         Some(Load::Failed(_)) => Some(states::failed_row(spec, cx).into_any_element()),
@@ -180,30 +197,76 @@ fn open_tool(spec: &InlineSpec, suffix: &str, opening: Opening) -> gpui_componen
 // --- HTML ---------------------------------------------------------------------------
 
 fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
+    use crate::views::artifacts::host;
     let k = theme::colors(cx);
-    let embed = WebEmbed::new(
-        ElementId::Name(format!("{}-page", spec.id).into()),
-        WebEmbedSpec::new(
-            spec.key.artifact_id.clone(),
+    let id = &spec.key.artifact_id;
+    let version = spec.key.version;
+    // inc-host: the page host's bridge (capabilities by author, live data, asks, refs).
+    let page_spec = match spec.target.provider.as_deref() {
+        Some(p) => {
+            let (v, caps) =
+                host::version_spec(p, id, version, media.dir.clone(), media.entry.clone());
+            WebEmbedSpec::new(id.clone(), v)
+                .capabilities(caps)
+                .viewer(host::viewer(p))
+                .ref_menu(Some(host::ref_menu(cx)))
+        }
+        // Samples without a provider: no bridge.
+        None => WebEmbedSpec::new(
+            id.clone(),
             artifact_view::VersionSpec::new(
-                spec.key.version,
+                version,
                 artifact_view::Content::Folder(media.dir.clone()),
             )
             .with_entry(media.entry.clone()),
         )
-        // Pages from teammates get no bridge capabilities (as in the 产出 window).
         .capabilities(artifact_view::Capabilities::NONE),
+    };
+    let mut embed = WebEmbed::new(
+        ElementId::Name(format!("{}-page", spec.id).into()),
+        page_spec,
     )
     .height(px(HTML_H))
     .rounded(px(0.))
     .pass_scroll(true);
+    if spec.target.provider.is_some() {
+        embed = embed.on_host(host::embed_handler(id.clone()));
+    }
+    let latest = host::latest(id, cx).unwrap_or(version);
+    let notice = host::notice(id, version, latest, cx).map(|t| host::notice_chip(t, cx));
     let s = spec.clone();
+    let expand = div()
+        .id(ElementId::Name(format!("{}-expand", spec.id).into()))
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(space::S4)
+        .cursor_pointer()
+        .hover(|st| st.text_color(k.text_1))
+        .child(ui::icon(Lucide::ChevronDown, px(14.), k.text_3))
+        .child(cm::EXPAND)
+        .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
+    let foot = match spec.target.provider.as_deref() {
+        Some(p) => host::page_footer(
+            &spec.id,
+            p,
+            id,
+            version,
+            Some(expand.into_any_element()),
+            cx,
+        ),
+        None => footer(cx)
+            .child(expand)
+            .child(div().flex_1())
+            .child(media.file_name().to_string()),
+    };
     card(cx)
         .w(INLINE_W)
         .max_w_full()
         .child(
             card_header(Lucide::AppWindow, spec.title.clone(), cx)
                 .child(version_chip(spec.key.version, cx))
+                .children(notice)
                 .child(
                     div()
                         .flex()
@@ -216,17 +279,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
                 .child(open_tool(spec, "open", Opening::default())),
         )
         .child(div().h(px(HTML_H)).child(embed))
-        .child(
-            footer(cx)
-                .id(ElementId::Name(format!("{}-expand", spec.id).into()))
-                .cursor_pointer()
-                .hover(|st| st.text_color(k.text_1))
-                .child(ui::icon(Lucide::ChevronDown, px(14.), k.text_3))
-                .child(cm::EXPAND)
-                .child(div().flex_1())
-                .child(media.file_name().to_string())
-                .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),
-        )
+        .child(foot)
         .into_any_element()
 }
 

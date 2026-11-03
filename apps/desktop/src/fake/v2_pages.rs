@@ -445,12 +445,13 @@ mod tests {
         let p = V2Samples::new();
         let report = p.artifact(ART_REPORT).unwrap();
         let caps = crate::views::artifact_page::capabilities(p.as_ref(), &report, 3);
-        assert!(caps.emit_event);
-        assert!(!caps.get_data);
+        assert!(caps.emit && caps.ask);
+        // Every page reads its data (R10).
+        assert!(caps.get_data && caps.live_data);
         // Same author, no declared events.
         let other = p.artifact(ART_RECONNECT).unwrap();
         let caps = crate::views::artifact_page::capabilities(p.as_ref(), &other, 2);
-        assert!(!caps.emit_event);
+        assert!(!caps.emit && !caps.ask && caps.get_data);
     }
 
     #[test]

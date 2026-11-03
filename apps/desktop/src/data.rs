@@ -19,6 +19,9 @@ pub mod v2;
 // --- cards v2 track: Card v2 view types ---
 pub mod cards_v2;
 // --- end cards v2 track ---
+// --- inc-host track: 产出 page host types ---
+pub mod page_host;
+// --- end inc-host track ---
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -2169,6 +2172,46 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
 
     // --- end dfix-motion track ---
+
+    // --- inc-host track: the 产出 page host (INTERACT §5; all have defaults) ---
+
+    /// What the page of a version may do and who made it. `None` when unknown. The
+    /// default reads the 产出, its 群's members and [`ChatProvider::artifact_page_events`]
+    /// (every declared name an `emit`).
+    fn page_bridge(&self, artifact_id: &str, version: u32) -> Option<page_host::PageBridge> {
+        page_host::default_bridge(self, artifact_id, version)
+    }
+    /// Sends a page event or ask to the member that made the version (`artifact.event`)
+    /// now; never queued. The answer arrives as [`page_host::PageSignal::Acked`] with the
+    /// returned client event id.
+    fn send_page_event(
+        &self,
+        _artifact_id: &str,
+        _version: u32,
+        _name: &str,
+        _kind: page_host::PageEventKind,
+        _payload: Option<serde_json::Value>,
+    ) -> Result<String, page_host::PageSendError> {
+        Err(page_host::PageSendError::Refused)
+    }
+    /// The latest data snapshot of a version (`GET …/data`): `(data, dataRev)`, `None`
+    /// when it could not be read.
+    fn fetch_page_data(
+        &self,
+        _artifact_id: &str,
+        _version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(None);
+        rx
+    }
+    /// A new stream of page signals (acks, replies, data pushes). `None` when the provider
+    /// has none (samples).
+    fn page_signals(&self) -> Option<UnboundedReceiver<page_host::PageSignal>> {
+        None
+    }
+
+    // --- end inc-host track ---
 
     // --- changes ---
 

@@ -22,6 +22,9 @@ pub mod media;
 // --- v11/inc-diagrams ---
 pub mod diagrams;
 // --- end v11/inc-diagrams ---
+// --- inc-host track ---
+pub mod page_host;
+// --- end inc-host track ---
 pub mod nav;
 pub mod notify;
 pub mod panel;
@@ -226,6 +229,13 @@ pub const SECTIONS: &[Section] = &[
         developer: false,
     },
     // --- end v11/inc-diagrams ---
+    // --- inc-host track ---
+    Section {
+        name: "page_host",
+        entries: page_host::ENTRIES,
+        developer: false,
+    },
+    // --- end inc-host track ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.
