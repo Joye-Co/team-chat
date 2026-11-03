@@ -194,3 +194,50 @@ fn bundle_hash_is_part_of_every_key() {
         )
     );
 }
+
+// --- F9: the `{block}` segment of node chips (REFS §A2.2) ---
+
+fn fence_source(block_name: Option<&str>) -> DiagramSource {
+    DiagramSource {
+        message_id: Some("m1".into()),
+        topic_id: Some("t1".into()),
+        artifact: None,
+        block: DiagramBlock::MarkdownFence {
+            offset: 0,
+            index: Some(2),
+        },
+        block_name: block_name.map(str::to_string),
+    }
+}
+
+#[gpui::test]
+fn node_chips_omit_the_block_of_a_single_untitled_diagram(cx: &mut gpui::TestAppContext) {
+    let t = cx
+        .update(|cx| node_target(&fence_source(None), "gray", "灰度", cx))
+        .expect("a fence with an index");
+    assert_eq!(t.block_id, "md:2");
+    assert!(!t.label.contains("图"), "{}", t.label);
+    assert!(t.label.ends_with("灰度"), "{}", t.label);
+}
+
+#[gpui::test]
+fn node_chips_use_the_diagram_title(cx: &mut gpui::TestAppContext) {
+    let t = cx
+        .update(|cx| node_target(&fence_source(Some("上线流程")), "gray", "灰度", cx))
+        .expect("a fence with an index");
+    assert!(t.label.ends_with("上线流程 · 灰度"), "{}", t.label);
+}
+
+#[test]
+fn several_untitled_diagrams_are_named_by_their_type() {
+    use crate::views::refs::parts::{BlockKind, block_name};
+    assert_eq!(block_name(None, BlockKind::Diagram, 1), None);
+    assert_eq!(
+        block_name(None, BlockKind::Diagram, 2).as_deref(),
+        Some(crate::copy::refs::BLOCK_DIAGRAM)
+    );
+    assert_eq!(
+        block_name(Some("上线流程"), BlockKind::Diagram, 3).as_deref(),
+        Some("上线流程")
+    );
+}

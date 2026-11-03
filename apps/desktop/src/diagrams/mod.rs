@@ -43,6 +43,10 @@ pub struct DiagramSource {
     pub topic_id: Option<String>,
     pub artifact: Option<(String, u32)>,
     pub block: DiagramBlock,
+    /// The `{block}` segment of a node chip (REFS §A2.2): the diagram's title, else 图 when
+    /// the source has more than one diagram, else `None` (omitted). The renderer that knows
+    /// the block's neighbours builds it with `refs::parts::block_name`.
+    pub block_name: Option<String>,
 }
 
 /// The block that holds the diagram.
@@ -51,15 +55,14 @@ pub enum DiagramBlock {
     /// A ```mermaid fence of a Markdown body, by the byte offset of its opening line in the
     /// normalized body, and (inc-refs) its top-level block index `md:<index>` (REFS §A2.1).
     MarkdownFence { offset: usize, index: Option<usize> },
-    /// A Card v2 `diagram` block by its id (built by the Card v2.1 renderer track).
-    #[allow(dead_code)]
+    /// A Card v2 `diagram` block by its id.
     Card { block_id: String },
 }
 
 /// A node reference (⌥-click, 问这里, the context menu, ⌥↵): a `node` part (REFS §A2.2)
 /// handed to [`refs::ask_about`]. The label is `{source} · {block} · {node}`: the author's
 /// name (a Markdown fence), the card title (a card block) or `{title} v{n}` (a 产出); the
-/// block is the diagram's title, else 图.
+/// block is [`DiagramSource::block_name`].
 pub fn on_node_ref(
     source: DiagramSource,
     node_id: &str,
@@ -159,7 +162,7 @@ pub fn node_target(
         target_source,
         &source_label,
         block_id,
-        Some(crate::copy::diagrams::BLOCK),
+        source.block_name.as_deref(),
         card_rev,
     ))
 }

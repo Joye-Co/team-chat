@@ -70,7 +70,7 @@ pub fn label(card: &CardV2, b: &CardV2Block, part: Option<&str>) -> String {
 
 /// The `{block}` segment: the block's title, else its type name when the card has more
 /// than one block of that type, else omitted.
-fn block_segment(card: &CardV2, b: &CardV2Block) -> Option<String> {
+pub(crate) fn block_segment(card: &CardV2, b: &CardV2Block) -> Option<String> {
     let same_type = card
         .blocks
         .iter()
@@ -298,6 +298,34 @@ mod tests {
         );
         let long = "字".repeat(200);
         assert!(label(&card, m, Some(&long)).chars().count() <= refs::label::LABEL_MAX);
+    }
+
+    #[test]
+    fn diagram_blocks_take_their_title_else_the_type_name_when_there_are_several() {
+        let card = |blocks: serde_json::Value| -> CardV2 {
+            serde_json::from_value(json!({
+                "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": "done", "title": "周报",
+                "fallback": "f", "blocks": blocks
+            }))
+            .unwrap()
+        };
+        let one = card(json!([{ "id": "d", "type": "diagram", "syntax": "mermaid", "source": "graph TD\nA-->B" }]));
+        assert_eq!(block_segment(&one, one.block("d").unwrap()), None);
+        let titled = card(json!([
+            { "id": "d", "type": "diagram", "syntax": "mermaid", "title": "上线流程", "source": "graph TD\nA-->B" }
+        ]));
+        assert_eq!(
+            block_segment(&titled, titled.block("d").unwrap()).as_deref(),
+            Some("上线流程")
+        );
+        let two = card(json!([
+            { "id": "d", "type": "diagram", "syntax": "mermaid", "source": "graph TD\nA-->B" },
+            { "id": "e", "type": "diagram", "syntax": "mermaid", "source": "graph TD\nC-->D" }
+        ]));
+        assert_eq!(
+            block_segment(&two, two.block("e").unwrap()).as_deref(),
+            Some(c::PART_DIAGRAM)
+        );
     }
 
     #[test]

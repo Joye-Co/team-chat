@@ -1973,6 +1973,7 @@ pub fn diagram(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                 block: crate::diagrams::DiagramBlock::Card {
                     block_id: id.clone(),
                 },
+                block_name: super::parts::block_segment(ctx.card, b),
             },
         },
         window,

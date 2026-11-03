@@ -382,6 +382,7 @@ pub fn open(
                                     offset: 0,
                                     index: Some(0),
                                 },
+                                block_name: None,
                             },
                             return_focus: None,
                         },

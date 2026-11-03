@@ -230,6 +230,8 @@ struct DiagramNode {
     source: String,
     offset: usize,
     index: Option<usize>,
+    /// Diagrams drawn in this body (the `{block}` segment is omitted when there is one).
+    count: usize,
     message_id: String,
     topic_id: String,
 }
@@ -267,6 +269,7 @@ impl MarkdownPlugin for DiagramPlugin {
                         .iter()
                         .position(|(_, r)| r.start <= at && at < r.end.max(r.start + 1))
                         .map(|i| i + self.block_offset),
+                    count: self.allowed.len(),
                     message_id: self.message_id.clone(),
                     topic_id: self.topic_id.clone(),
                 },
@@ -293,6 +296,11 @@ impl MarkdownPlugin for DiagramPlugin {
                     offset: d.offset,
                     index: d.index,
                 },
+                block_name: crate::views::refs::parts::block_name(
+                    None,
+                    crate::views::refs::parts::BlockKind::Diagram,
+                    d.count,
+                ),
             },
         };
         div()
