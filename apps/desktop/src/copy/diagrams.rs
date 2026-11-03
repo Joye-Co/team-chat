@@ -26,5 +26,7 @@ crate::copy! {
     ERROR_UNSUPPORTED = "这种图还画不了",
     ERROR_TOO_BIG = "图太大了，只显示原文",
     ERROR_FORBIDDEN = "图里有不支持的写法",
+    ERROR_LINE = "第 {n} 行看不懂",
+    ERROR_NODES = "{n} 个节点",
     ALT = "{type}：{n} 个节点。",
 }

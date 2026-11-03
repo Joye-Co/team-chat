@@ -203,6 +203,15 @@ pub fn normalize(source: &str) -> Result<Normalized, Refusal> {
     Ok(Normalized { source, kind })
 }
 
+/// The line of the original source that line `line` (1-based) of the normalized source
+/// came from, so an error names the line the person sees.
+pub fn original_line(source: &str, line: u32) -> Option<u32> {
+    let cleaned = clean(source);
+    kept_lines(&cleaned)
+        .get(line.checked_sub(1)? as usize)
+        .map(|(n, _)| *n)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,6 +366,16 @@ mod tests {
             normalize("classDiagram\n  class callback"),
             Err(Refusal::Forbidden("callback"))
         );
+    }
+
+    #[test]
+    fn maps_normalized_lines_to_the_source_lines() {
+        let src = "flowchart LR\n  style A fill:red\n  A-->B\n  classDef x fill:red\n  B-- >C";
+        assert_eq!(original_line(src, 1), Some(1));
+        assert_eq!(original_line(src, 2), Some(3));
+        assert_eq!(original_line(src, 3), Some(5));
+        assert_eq!(original_line(src, 4), None);
+        assert_eq!(original_line(src, 0), None);
     }
 
     #[test]

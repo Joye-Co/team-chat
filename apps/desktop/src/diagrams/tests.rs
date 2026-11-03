@@ -247,7 +247,7 @@ const SCENE_SEQUENCE: &str = "sequenceDiagram\n  participant C as 客户端\n  p
 
 /// What the renderer page posts for a request: `rendered` with an SVG of `svg_bytes`, or
 /// `failed` with `reason`, run through a bridge with the renderer window's limits.
-fn page_outcome(req_id: u64, svg_bytes: usize, reason: Option<&str>) -> RenderOutcome {
+fn page_outcome(req_id: u64, svg_bytes: usize, reason: Option<(&str, &str)>) -> RenderOutcome {
     let payload = match reason {
         None => {
             let path = "<path d=\"M0 0L1 1\"/>";
@@ -257,9 +257,7 @@ fn page_outcome(req_id: u64, svg_bytes: usize, reason: Option<&str>) -> RenderOu
                     {"id":"S","label":"服务器","kind":"actor","x":380,"y":8,"w":132,"h":40},
                     {"id":"C","label":"客户端","kind":"actor","x":8,"y":8,"w":132,"h":40}]})
         }
-        Some(r) => {
-            serde_json::json!({"reqId": req_id, "reason": r, "detail": "Parse error on line 2"})
-        }
+        Some((r, d)) => serde_json::json!({"reqId": req_id, "reason": r, "detail": d}),
     };
     let name = if reason.is_some() {
         "failed"
@@ -322,10 +320,21 @@ fn a_rendered_scene_diagram_becomes_ready_with_nodes_in_source_order(
 #[gpui::test]
 fn page_failures_show_their_reason(cx: &mut gpui::TestAppContext) {
     let _dir = service_setup(cx);
-    for (i, (reason, kind)) in [
-        ("parse", ErrorKind::Failed),
-        ("too_big", ErrorKind::TooBig),
-        ("unsupported", ErrorKind::Unsupported),
+    for (i, (reason, detail, kind, hint)) in [
+        (
+            "parse",
+            "Parse error on line 2:\n...A -- > B",
+            ErrorKind::Failed,
+            Some(Hint::Line(2)),
+        ),
+        (
+            "too_big",
+            "nodes 151",
+            ErrorKind::TooBig,
+            Some(Hint::Nodes(151)),
+        ),
+        ("too_big", "size 5000x300", ErrorKind::TooBig, None),
+        ("unsupported", "pie", ErrorKind::Unsupported, None),
     ]
     .into_iter()
     .enumerate()
@@ -336,16 +345,35 @@ fn page_failures_show_their_reason(cx: &mut gpui::TestAppContext) {
             let req_id = start_next_for_test(cx).expect("a queued job");
             let RenderOutcome::Failed {
                 reason: r, detail, ..
-            } = page_outcome(req_id, 0, Some(reason))
+            } = page_outcome(req_id, 0, Some((reason, detail)))
             else {
                 panic!("not failed");
             };
             let job = take_running(req_id, cx).expect("the running job");
             fail(job, r, &detail, true, cx);
-            let Some(State::Failed(k)) = peek(&n, INLINE_SCALE, cx) else {
+            let Some(State::Failed(k, h)) = peek(&n, INLINE_SCALE, cx) else {
                 panic!("{reason}: not failed");
             };
             assert_eq!(k, kind, "{reason}");
+            assert_eq!(h, hint, "{reason}");
         });
     }
+}
+
+#[test]
+fn hints_take_numbers_only() {
+    assert_eq!(
+        Hint::of(
+            FailReason::Parse,
+            "Parse error on line 12:\n...客户端 -> > 服务器"
+        ),
+        Some(Hint::Line(12))
+    );
+    assert_eq!(Hint::of(FailReason::Parse, "Lexical error"), None);
+    assert_eq!(
+        Hint::of(FailReason::TooBig, "nodes 64"),
+        Some(Hint::Nodes(64))
+    );
+    assert_eq!(Hint::of(FailReason::TooBig, "edges"), None);
+    assert_eq!(Hint::of(FailReason::Timeout, "on line 3"), None);
 }

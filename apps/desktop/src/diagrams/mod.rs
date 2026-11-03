@@ -209,6 +209,37 @@ impl ErrorKind {
     }
 }
 
+/// What an error frame says after its reason (Refs.dc.html 状态一览): the source line the
+/// library could not read, or how many nodes a too large diagram has. Numbers only: the
+/// library's message may quote the source and stays in the log.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Hint {
+    /// 1-based line of the normalized source.
+    Line(u32),
+    Nodes(u32),
+}
+
+impl Hint {
+    /// The hint in a failure detail: `Parse error on line N` (parse) or `nodes N`
+    /// (too_big).
+    pub fn of(reason: FailReason, detail: &str) -> Option<Self> {
+        let number_after = |key: &str| -> Option<u32> {
+            let at = detail.find(key)? + key.len();
+            let digits: String = detail[at..]
+                .chars()
+                .skip_while(|c| *c == ' ')
+                .take_while(char::is_ascii_digit)
+                .collect();
+            digits.parse().ok().filter(|n| *n > 0)
+        };
+        match reason {
+            FailReason::Parse => number_after("on line").map(Hint::Line),
+            FailReason::TooBig => number_after("nodes").map(Hint::Nodes),
+            _ => None,
+        }
+    }
+}
+
 /// A rendered diagram ready to draw.
 #[derive(Clone)]
 pub struct Ready {
@@ -221,7 +252,7 @@ pub struct Ready {
 pub enum State {
     Pending,
     Ready(Ready),
-    Failed(ErrorKind),
+    Failed(ErrorKind, Option<Hint>),
 }
 
 impl State {
@@ -355,7 +386,11 @@ fn request_theme(n: &Normalized, theme: ThemeId, scale: u32, visible: bool, cx: 
         return state;
     }
     if let Some(err) = s.disk.read_err(&key) {
-        let state = State::Failed(ErrorKind::from_reason(FailReason::parse(&err.reason)));
+        let reason = FailReason::parse(&err.reason);
+        let state = State::Failed(
+            ErrorKind::from_reason(reason),
+            Hint::of(reason, &err.detail),
+        );
         s.mem.insert(key, state.clone());
         return state;
     }
@@ -437,7 +472,8 @@ fn pump(cx: &mut App) {
         {
             let s = cx.global_mut::<Service>();
             while let Some(job) = s.queue.pop_front() {
-                s.mem.insert(job.key, State::Failed(ErrorKind::Failed));
+                s.mem
+                    .insert(job.key, State::Failed(ErrorKind::Failed, None));
             }
         }
         return;
@@ -525,6 +561,7 @@ fn fail(job: Job, reason: FailReason, detail: &str, store: bool, cx: &mut App) {
         .take(120)
         .collect::<String>();
     tracing::info!(target: "diagrams", reason = reason.as_str(), detail = %first, "diagram not drawn");
+    let hint = Hint::of(reason, &first);
     if store {
         let _ = cx.global_mut::<Service>().disk.write_err(
             &job.key,
@@ -534,7 +571,11 @@ fn fail(job: Job, reason: FailReason, detail: &str, store: bool, cx: &mut App) {
             },
         );
     }
-    finish(job.key, State::Failed(ErrorKind::from_reason(reason)), cx);
+    finish(
+        job.key,
+        State::Failed(ErrorKind::from_reason(reason), hint),
+        cx,
+    );
 }
 
 fn take_running(req_id: u64, cx: &mut App) -> Option<Job> {

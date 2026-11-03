@@ -14,7 +14,7 @@ use gpui::{
 use gpui_component::{Selectable as _, Sizable as _, button::ButtonVariants as _};
 
 use super::{
-    DiagramSource, ErrorKind, INLINE_SCALE, Ready, State,
+    DiagramSource, ErrorKind, Hint, INLINE_SCALE, Ready, State,
     cache::Node,
     normalize::{self, DiagramType, Normalized},
 };
@@ -130,7 +130,7 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
     let normalized = normalize::normalize(&spec.source);
     let (state, kind) = match &normalized {
         Ok(n) => (super::request(n, INLINE_SCALE, true, cx), Some(n.kind)),
-        Err(r) => (State::Failed(ErrorKind::from_refusal(r)), None),
+        Err(r) => (State::Failed(ErrorKind::from_refusal(r), None), None),
     };
     let k = theme::colors(cx);
     let id = spec.id.clone();
@@ -156,8 +156,8 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
         (u.show_source, u.width, u.focus.is_focused(window))
     };
 
-    if let State::Failed(kind_err) = &state {
-        return error_frame(&spec, *kind_err, kind, &ui, window, cx);
+    if let State::Failed(kind_err, hint) = &state {
+        return error_frame(&spec, *kind_err, *hint, kind, &ui, window, cx);
     }
 
     let header = header(&spec, kind, &ui, normalized.as_ref().ok(), true, cx);
@@ -627,11 +627,14 @@ fn source_listing(id: &SharedString, source: &str, ui: &gpui::Entity<Ui>, cx: &A
         .into_any_element()
 }
 
-/// An error frame (REFS §B4 table): the error line in the header, the source below. Red
-/// only for 图没有画出来 (Refs.dc.html §07: 红色只用在这里).
+/// An error frame (REFS §B4 table): the reason in the header, then what it is about (the
+/// line the library could not read, or the node count of a too large diagram), the source
+/// below. Red only for 图没有画出来 (Refs.dc.html §07: 红色只用在这里); a too large
+/// diagram has its own quiet state (Refs.dc.html 状态一览: 图比较大).
 fn error_frame(
     spec: &InlineSpec,
     error: ErrorKind,
+    hint: Option<Hint>,
     kind: Option<DiagramType>,
     ui: &gpui::Entity<Ui>,
     _window: &mut Window,
@@ -641,17 +644,24 @@ fn error_frame(
     let id = spec.id.clone();
     let red = error == ErrorKind::Failed;
     let source = spec.source.clone();
-    let (border, head_bg, icon, icon_color, text_color) = if red {
-        (
+    let (border, head_bg, icon, icon_color, text_color) = match error {
+        ErrorKind::Failed => (
             k.bad.opacity(0.35),
             k.bad.opacity(0.07),
             Lucide::CircleX,
             k.bad_ink,
             k.bad_ink,
-        )
-    } else {
-        (k.line, k.raised, Lucide::Workflow, k.ink_3, k.ink)
+        ),
+        ErrorKind::TooBig => (k.line, k.sunken, Lucide::Clock, k.ink_3, k.ink_2),
+        ErrorKind::Unsupported | ErrorKind::Forbidden => {
+            (k.line, k.raised, Lucide::Workflow, k.ink_3, k.ink)
+        }
     };
+    let hint_text = hint.and_then(|h| match h {
+        Hint::Line(n) => super::normalize::original_line(&spec.source, n)
+            .map(|line| crate::copy::fill(c::ERROR_LINE, &[("n", &line.to_string())])),
+        Hint::Nodes(n) => Some(crate::copy::fill(c::ERROR_NODES, &[("n", &n.to_string())])),
+    });
     let focus = ui.read(cx).focus.clone();
     div()
         .id(ElementId::Name(format!("diagram-{id}").into()))
@@ -686,6 +696,16 @@ fn error_frame(
                         .text_color(text_color)
                         .child(error.text()),
                 )
+                .when_some(hint_text, |el, text| {
+                    el.child(
+                        div()
+                            .min_w_0()
+                            .truncate()
+                            .t_small()
+                            .text_color(k.ink_2)
+                            .child(text),
+                    )
+                })
                 .child(div().flex_1())
                 .child(
                     ui::icon_button_sm(ElementId::Name(format!("dcopy-{id}").into()), Lucide::Copy)
