@@ -192,6 +192,15 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   ok("entities/bot-run-aside.json", "BotRun", { ...run, id: "01JBX0RUN000000000000000AX", groupId: X.dm, topicId: X.side, kind: "aside", acceptance: [], usage: { inputTokens: 1, outputTokens: 2 } }, "a side chat run");
   bad("entities/bot-run-bad-acceptance.json", "BotRun", { ...run, acceptance: [{ text: "x", state: "met" }] }, "unknown acceptance state");
   ok("events/run.updated-v11.json", "Event", { ...base, actorId: ID.bot, type: "run.updated", data: { run } });
+  ok("http/set-run-acceptance-request.json", "SetRunAcceptanceRequest", { items: run.acceptance }, "replaces the run's 验收标准");
+  ok("http/set-run-acceptance-request-clear.json", "SetRunAcceptanceRequest", { items: [] }, "an empty list clears them");
+  bad("http/set-run-acceptance-request-empty-text.json", "SetRunAcceptanceRequest", { items: [{ text: "", state: "pending" }] }, "empty criterion text");
+  bad("http/set-run-acceptance-request-too-many.json", "SetRunAcceptanceRequest", { items: Array.from({ length: 21 }, (_, i) => ({ text: `c${i}`, state: "pending" })) }, "at most 20 criteria");
+  bad("http/set-run-acceptance-request-bad-url.json", "SetRunAcceptanceRequest", { items: [{ text: "x", state: "pass", evidence: { url: "ftp://x" } }] }, "evidence url must be http or https");
+  bad("http/set-run-acceptance-request-missing-items.json", "SetRunAcceptanceRequest", {}, "missing items");
+  ok("http/resume-run-request.json", "ResumeRunRequest", { note: "I fixed the config; go on from step 3." }, "a note for the CLI");
+  ok("http/resume-run-request-empty.json", "ResumeRunRequest", {}, "no note");
+  bad("http/resume-run-request-note-too-long.json", "ResumeRunRequest", { note: "x".repeat(2001) }, "note over 2000 characters");
 
   // -------------------------------------------------------------------------
   // 产出: version runId and declared events, artifact.event, artifact.evented

@@ -20026,6 +20026,85 @@
           ]
         }
       }
+    },
+    "SetRunAcceptanceRequest": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              "state": {
+                "type": "string",
+                "enum": [
+                  "pending",
+                  "pass",
+                  "fail"
+                ]
+              },
+              "evidence": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string",
+                    "maxLength": 1000
+                  },
+                  "fileId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "url": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^https?:\\/\\/[^\\s]+$"
+                  },
+                  "artifact": {
+                    "type": "object",
+                    "properties": {
+                      "artifactId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "version": {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "artifactId",
+                      "version"
+                    ]
+                  }
+                }
+              }
+            },
+            "required": [
+              "text",
+              "state"
+            ]
+          }
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "ResumeRunRequest": {
+      "type": "object",
+      "properties": {
+        "note": {
+          "type": "string",
+          "maxLength": 2000
+        }
+      }
     }
   }
 }

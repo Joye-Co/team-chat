@@ -961,18 +961,22 @@ BotRun += {
 }
 AcceptanceItem = { text /* 1..500 */, state: "pending" | "pass" | "fail",
                    evidence?: { text? /* <= 1000 */, fileId?, url?, artifact?: ArtifactRef } }
+SetRunAcceptanceRequest = { items: AcceptanceItem[] /* <= 20; [] clears */ }
+ResumeRunRequest = { note?: string /* <= 2000 */ }
 Machine += { features?: string[], takeoverUrl?: string }
 ```
 
 | Method and path | Who | Body | Response |
 | --- | --- | --- | --- |
 | `POST /v1/runs/:id/pause` | the run's requester or an owner | | `BotRun` with `pausedBy`; `conflict` when the run ended, is paused, or its machine lacks feature `pause`; audited as `run.pause` |
-| `POST /v1/runs/:id/resume` | the run's requester or an owner | `{ note?: string }` (<= 2000) | `BotRun` without `pausedBy`; `conflict` when not paused; audited as `run.resume` |
+| `POST /v1/runs/:id/resume` | the run's requester or an owner | `ResumeRunRequest` | `BotRun` without `pausedBy`; `conflict` when not paused; audited as `run.resume` |
+| `PUT /v1/runs/:id/acceptance` | the run's bot | `SetRunAcceptanceRequest` | `BotRun`; `conflict` when the run ended; an equal list stores nothing |
 
 Rules:
 
 - `usage` and `durationMs` are set when the run ends, from `run.done`. `acceptance` comes from
-  the run event `acceptance` and is stored in `run.updated` like the plan. `kind` and the
+  the run event `acceptance` (runner-backed bots) or `PUT /v1/runs/:id/acceptance` (the run's
+  bot) and is stored in `run.updated` like the plan. `kind` and the
   closed `RunStatus` are separate: a paused run keeps its status (`running`) and has `pausedBy`.
 - Pause stops the CLI's process group on the machine (machine-protocol.md `run.pause`); the
   stall detection and `maxDurationMs` stop until resume. `Machine.takeoverUrl` (owners and run

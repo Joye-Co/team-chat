@@ -66,6 +66,8 @@ import {
   StartRunRequest,
   SetRunPlanRequest,
   EndRunRequest,
+  SetRunAcceptanceRequest,
+  ResumeRunRequest,
 } from "./bots.ts";
 import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
@@ -660,6 +662,8 @@ export const schemas = {
   TopicContext,
   GroupDecision,
   DecisionsResponse,
+  SetRunAcceptanceRequest,
+  ResumeRunRequest,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

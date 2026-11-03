@@ -54,7 +54,9 @@ check!(
     EndRunRequest,
     CardV2,
     TopicLink,
-    TopicContext
+    TopicContext,
+    SetRunAcceptanceRequest,
+    ResumeRunRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -154,6 +156,8 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("TopicContext", validated::<TopicContext>),
     ("GroupDecision", plain::<GroupDecision>),
     ("DecisionsResponse", plain::<DecisionsResponse>),
+    ("SetRunAcceptanceRequest", validated::<SetRunAcceptanceRequest>),
+    ("ResumeRunRequest", validated::<ResumeRunRequest>),
 ];
 
 fn fixtures_root() -> PathBuf {

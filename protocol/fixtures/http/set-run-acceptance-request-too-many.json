@@ -1,0 +1,93 @@
+{
+  "kind": "SetRunAcceptanceRequest",
+  "valid": false,
+  "description": "at most 20 criteria",
+  "value": {
+    "items": [
+      {
+        "text": "c0",
+        "state": "pending"
+      },
+      {
+        "text": "c1",
+        "state": "pending"
+      },
+      {
+        "text": "c2",
+        "state": "pending"
+      },
+      {
+        "text": "c3",
+        "state": "pending"
+      },
+      {
+        "text": "c4",
+        "state": "pending"
+      },
+      {
+        "text": "c5",
+        "state": "pending"
+      },
+      {
+        "text": "c6",
+        "state": "pending"
+      },
+      {
+        "text": "c7",
+        "state": "pending"
+      },
+      {
+        "text": "c8",
+        "state": "pending"
+      },
+      {
+        "text": "c9",
+        "state": "pending"
+      },
+      {
+        "text": "c10",
+        "state": "pending"
+      },
+      {
+        "text": "c11",
+        "state": "pending"
+      },
+      {
+        "text": "c12",
+        "state": "pending"
+      },
+      {
+        "text": "c13",
+        "state": "pending"
+      },
+      {
+        "text": "c14",
+        "state": "pending"
+      },
+      {
+        "text": "c15",
+        "state": "pending"
+      },
+      {
+        "text": "c16",
+        "state": "pending"
+      },
+      {
+        "text": "c17",
+        "state": "pending"
+      },
+      {
+        "text": "c18",
+        "state": "pending"
+      },
+      {
+        "text": "c19",
+        "state": "pending"
+      },
+      {
+        "text": "c20",
+        "state": "pending"
+      }
+    ]
+  }
+}

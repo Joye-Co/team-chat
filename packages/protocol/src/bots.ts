@@ -78,6 +78,14 @@ export type StartRunRequest = z.infer<typeof StartRunRequest>;
 export const SetRunPlanRequest = z.object({ plan: RunPlan });
 export type SetRunPlanRequest = z.infer<typeof SetRunPlanRequest>;
 
+/** `PUT /v1/runs/:id/acceptance` (the run's bot, 1.1): replaces the 验收标准 of an active run; [] clears them. */
+export const SetRunAcceptanceRequest = z.object({ items: z.array(AcceptanceItem).max(MAX_ACCEPTANCE_ITEMS) });
+export type SetRunAcceptanceRequest = z.infer<typeof SetRunAcceptanceRequest>;
+
+/** `POST /v1/runs/:id/resume` (1.1): `note` becomes the CLI's next input when set. */
+export const ResumeRunRequest = z.object({ note: z.string().max(2000).optional() });
+export type ResumeRunRequest = z.infer<typeof ResumeRunRequest>;
+
 /** `POST /v1/runs/:id/end` (the run's bot, runs started with `POST /v1/runs` only). */
 export const EndRunRequest = z.object({
   status: z.enum(["done", "failed", "cancelled"]),

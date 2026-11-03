@@ -346,6 +346,69 @@ impl EndRunRequest {
     }
 }
 
+/// Checks the 1.1 acceptance criteria: at most 20, text 1..500, evidence within its limits.
+pub fn check_acceptance(field: &'static str, items: &[AcceptanceItem]) -> Validation {
+    if items.len() > MAX_ACCEPTANCE_ITEMS {
+        return fail(field, format!("at most {MAX_ACCEPTANCE_ITEMS} items"));
+    }
+    for item in items {
+        check_chars(field, &item.text, 1, 500)?;
+        if let Some(e) = &item.evidence {
+            if let Some(t) = &e.text {
+                check_chars(field, t, 0, 1000)?;
+            }
+            if let Some(id) = &e.file_id {
+                crate::limits::check_id(field, id)?;
+            }
+            if let Some(u) = &e.url {
+                crate::card::check_web_url(field, u)?;
+            }
+            if let Some(a) = &e.artifact {
+                crate::limits::check_id(field, &a.artifact_id)?;
+                if a.version == 0 {
+                    return fail(field, "artifact version must be positive");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `PUT /v1/runs/:id/acceptance` (the run's bot, 1.1): replaces the acceptance criteria of an
+/// active run. An empty list clears them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRunAcceptanceRequest {
+    pub items: Vec<AcceptanceItem>,
+}
+
+impl SetRunAcceptanceRequest {
+    pub fn validate(&self) -> Validation {
+        check_acceptance("items", &self.items)
+    }
+}
+
+/// `POST /v1/runs/:id/resume` (1.1): `note` becomes the CLI's next input when set.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeRunRequest {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub note: Option<String>,
+}
+
+impl ResumeRunRequest {
+    pub fn validate(&self) -> Validation {
+        match &self.note {
+            Some(n) => check_chars("note", n, 0, 2000),
+            None => Ok(()),
+        }
+    }
+}
+
 /// Data of the `run.updated` group event (`actorId` = the bot).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
