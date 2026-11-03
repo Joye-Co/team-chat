@@ -634,17 +634,20 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                             if let Some(p) = &p {
                                 forget(h, p);
                             }
-                            h.bands.insert(
-                                key,
-                                Band::Offline {
-                                    until: Instant::now() + OFFLINE_FOR,
-                                },
-                            );
+                            // `none`: the member takes no more now (a runner over its
+                            // limit, INTERACT §6.2): 现在接不了，稍后再试, not 不在线.
+                            let until = Instant::now() + OFFLINE_FOR;
+                            let (band, reject) = if ack.mode == ExpectMode::None {
+                                (Band::Busy { until }, Reject::RateLimited)
+                            } else {
+                                (Band::Offline { until }, Reject::Offline)
+                            };
+                            h.bands.insert(key, band);
                             if let Some(p) = p
                                 && let Some(id) = &p.reply_id
                                 && p.kind == PageEventKind::Ask
                             {
-                                finish(&p.page, p.version, id, Err(Reject::Offline), cx);
+                                finish(&p.page, p.version, id, Err(reject), cx);
                             }
                             refresh_at(OFFLINE_FOR, cx);
                         }
@@ -1393,6 +1396,29 @@ mod tests {
             reply("ev-1", cx);
             assert!(finished().is_empty());
             assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn a_member_that_takes_no_more_says_so_on_the_page(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            let cid = ask(PageRef::Window(ART.into()), 9, cx);
+            ack(&cid, "ev-1", ExpectMode::None, cx);
+            assert_eq!(finished(), vec![(json!(9), Err(Reject::RateLimited))]);
+            let name = author_name(host(cx).provider.clone().unwrap().as_ref(), ART, 3);
+            assert_eq!(
+                band(ART, 3, cx),
+                Some(BandView::Failed(fill(cp::PAGE_BUSY, &[("name", &name)])))
+            );
+            // Offline still says 不在线.
+            let cid = ask(PageRef::Window(ART.into()), 10, cx);
+            ack(&cid, "ev-2", ExpectMode::Offline, cx);
+            assert_eq!(finished(), vec![(json!(10), Err(Reject::Offline))]);
+            assert_eq!(
+                band(ART, 3, cx),
+                Some(BandView::Failed(fill(cp::PAGE_OFFLINE, &[("name", &name)])))
+            );
         });
     }
 
