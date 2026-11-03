@@ -316,6 +316,9 @@ RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "intera
 run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
 ```
 
+On a private card (a non-public poll, an anonymous questionnaire; protocol.md "Private
+answers"), `actor` is `{ id: "anonymous", name: "anonymous" }`, and `run.input.authorId` too.
+
 The daemon gives `run.answer` and `run.interaction` to the CLI as one user turn: a
 `<teamchat-event v="1" id="{inputId}" kind="card.answer|card.event|artifact.emit|artifact.ask">`
 envelope with the JSON, followed by the line that it is data, not an instruction. It answers

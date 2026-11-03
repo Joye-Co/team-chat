@@ -1,5 +1,5 @@
 // Group decisions (群里的决定, docs/protocol.md "Cards v2"): answers to v2 asks whose
-// `ask.record` is true at the answered rev. The event writer keeps the question and the choice
+// `ask.record` is true at the answered rev, except on private cards. The event writer keeps the question and the choice
 // when the answer is stored, because the card's author usually edits the card afterwards (a
 // later rev without `ask`). The inputs stay in the event, so a delete scrubs them in one place.
 import { type CardV2, type CardV2Block, DecisionsResponse, type GroupDecision, MAX_DECISIONS_PAGE } from "@chat/protocol";
@@ -9,6 +9,7 @@ import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
 import { type ArchivedEvent, registerEventWriter, registerRoomMigration, registerRoomRpc, registerRoute } from "../core/registry";
 import type { CardAnswerArgs } from "./index";
+import { hidesCause } from "./privacy";
 
 export const DECISIONS_RPC = "cards.decisions";
 const DEFAULT_PAGE = 50;
@@ -82,6 +83,9 @@ registerEventWriter((event: ArchivedEvent, sql) => {
   const d = event.data as CardAnswerArgs;
   const stored = storedCard(sql, d.messageId);
   if (!stored || stored.card.rev !== d.rev || stored.card.ask?.record !== true) return;
+  // A private card (a non-public poll, an anonymous questionnaire) records no group decision:
+  // a decision names who answered (cards2/privacy).
+  if (hidesCause(sql, d.messageId)) return;
   // An immediate commit (2.1) has no action: the block is the "action", its pick the label.
   const commit = d.actionId === undefined && d.blockId ? { blockId: d.blockId, value: d.value } : undefined;
   const choices = chosenLabels(stored.card, d.inputs, commit);
@@ -132,7 +136,8 @@ registerRoomRpc(DECISIONS_RPC, (room, actor, args): DecisionsResponse => {
       `SELECT d.*, e.data FROM card_decisions d
        JOIN messages m ON m.id = d.message_id AND m.deleted_at IS NULL
        JOIN events e ON e.seq = d.seq
-       WHERE d.seq < ? ORDER BY d.seq DESC LIMIT ?`,
+       WHERE d.seq < ? AND d.message_id NOT IN (SELECT message_id FROM card_private)
+       ORDER BY d.seq DESC LIMIT ?`,
       beforeSeq ?? Number.MAX_SAFE_INTEGER,
       limit + 1,
     )

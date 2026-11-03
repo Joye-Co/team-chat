@@ -25,6 +25,7 @@ import { logger as baseLogger, type Logger } from "../../core/logger";
 import { runMigrations } from "../../core/migrations";
 import type { TokenBucket } from "../../core/ratelimit";
 import type { Actor } from "../../core/registry";
+import { ANONYMOUS_ID } from "../../cards2/privacy";
 import { ROOM_REACT_RPC } from "../../reactions";
 import type { BotsEnv } from "../env";
 import { ACK_EMOJI } from "../proof";
@@ -394,6 +395,14 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     this.sql.exec("UPDATE runs SET notes = ? WHERE id = ?", n, r.id);
     r.notes = n;
     await this.post(r, `run:${r.id}:note:${n}`, body);
+  }
+
+  /**
+   * The person to mention and wait on for the run's approvals: its requester, or nobody when
+   * an answer to a private card started the run (cards2/privacy; then owners approve).
+   */
+  protected requester(r: Pick<RunRow, "requested_by">): string[] {
+    return r.requested_by === ANONYMOUS_ID ? [] : [r.requested_by];
   }
 
   protected async topic(r: RunRow, status: TopicStatus, waitingOn: string[] = []): Promise<void> {

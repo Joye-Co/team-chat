@@ -69,7 +69,8 @@ export abstract class DeskInteract extends DeskTakeover {
   /** The requester of this bot's active run in the topic (INTERACT §3.5 "requester"). */
   async requesterFor(botId: string, topicId: string): Promise<string | null> {
     this.bind(botId);
-    return this.activeRun(topicId)?.requested_by ?? null;
+    const r = this.activeRun(topicId);
+    return r ? (this.requester(r)[0] ?? null) : null;
   }
 
   // -------------------------------------------------------------------------

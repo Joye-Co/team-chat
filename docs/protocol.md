@@ -930,7 +930,8 @@ GroupDecision = { seq /* of card.answered */, messageId, topicId, rev, title, ac
                   actionLabel, choices?: string[], inputs?, editedValues?, answeredBy, answeredAt }
 ```
 
-A deleted card's decisions are not listed.
+A deleted card's decisions are not listed, nor the decisions of a private card (a non-public
+poll, an anonymous questionnaire; see "Private answers").
 - Readers are lenient: unknown block types, intents, kinds and styles read as unknown (Rust
   `Unknown`, rendered as nothing or the safe default), and a `cardV2` that does not parse is
   dropped while the v1 `card` stays. The server rejects all of these on write.
@@ -1200,6 +1201,15 @@ their own answers in full. Every other answer, `card.answered`, `card.retracted`
 card's author gets the values of `card.answered`, and for an anonymous questionnaire the other
 answers in `cardState.answers` (with `actorId: "anonymous"`); other members get neither (a poll's
 `tally` is for everyone). The derived v1 status of an answered private card is "已回答".
+
+The card's author never learns who used a private card. An SDK author gets the live
+`card.event` transient with `actorId: "anonymous"`. A runner author's run gets `run.answer`
+and `run.interaction` (and their text forms) with `actor: { id: "anonymous", name: "anonymous" }`
+and no level; a run that such an answer or event starts has `requestedBy: "anonymous"`, mentions
+nobody in its approvals and waits on nobody (owners approve). Only the group room and the
+owners' audit keep the real actor. Group decisions: a private card records none, and
+`GET /v1/groups/:id/decisions` leaves out the decisions of a card that became private (a
+decision names `answeredBy`). `ask.record` stays valid on a private card.
 
 ### Patches and resolves
 

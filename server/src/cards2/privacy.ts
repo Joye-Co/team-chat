@@ -56,6 +56,15 @@ export function hidesCause(sql: SqlStorage, eventMessageId: string): boolean {
   return privateOf(sql, eventMessageId) !== undefined;
 }
 
+/**
+ * The actor id the card's author (an SDK member or a runner's run) gets for an event on the
+ * card: `ANONYMOUS_ID` when the card is private. Only the room and the owners' audit keep the
+ * real actor.
+ */
+export function shownActor(sql: SqlStorage, messageId: string, actorId: string): string {
+  return hidesCause(sql, messageId) ? ANONYMOUS_ID : actorId;
+}
+
 /** A cause as other viewers may see it. */
 export function publicCause(sql: SqlStorage, cause: Cause, eventMessageId: string): Cause {
   return hidesCause(sql, eventMessageId) ? { ...cause, actorId: ANONYMOUS_ID } : cause;

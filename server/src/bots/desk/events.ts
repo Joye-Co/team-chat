@@ -66,7 +66,7 @@ export abstract class DeskEvents extends DeskRuns {
       this.sql.exec("UPDATE runs SET stalled = 0 WHERE id = ?", r.id);
       r.stalled = 0;
       await this.setStatus(r, r.approval_id ? "waiting" : "running");
-      await this.topic(r, r.approval_id ? "waiting_answer" : "in_progress", r.approval_id ? [r.requested_by] : []);
+      await this.topic(r, r.approval_id ? "waiting_answer" : "in_progress", r.approval_id ? this.requester(r) : []);
     } else if (r.status === "created") {
       await this.setStatus(r, "running", { started_at: now });
     }
@@ -210,12 +210,12 @@ export abstract class DeskEvents extends DeskRuns {
     };
     const cmid = `run:${r.id}:approval:${cut(approvalId, 24)}`;
     try {
-      await this.post(r, cmid, body, { card, mentions: [r.requested_by] });
+      await this.post(r, cmid, body, { card, mentions: this.requester(r) });
     } catch (err) {
       // A card the room rejects (for example an action id that is too long) falls back to text.
       this.log.warn("approval card failed", { runId: r.id, err });
       try {
-        await this.post(r, `${cmid}:text`, body, { mentions: [r.requested_by] });
+        await this.post(r, `${cmid}:text`, body, { mentions: this.requester(r) });
       } catch (err2) {
         // Nobody can be asked (for example the bot left the group): the answer is no.
         this.log.warn("approval post failed, denying", { runId: r.id, err: err2 });
@@ -230,7 +230,7 @@ export abstract class DeskEvents extends DeskRuns {
       }
     }
     await this.setStatus(r, "waiting");
-    await this.topic(r, "waiting_answer", [r.requested_by]);
+    await this.topic(r, "waiting_answer", this.requester(r));
   }
 
   /**

@@ -14,6 +14,7 @@ import {
   registerRoomRpc,
 } from "../core/registry";
 import { storedCard } from "../cards2/decisions";
+import { ANONYMOUS_ID, hidesCause } from "../cards2/privacy";
 import type { AnswerData } from "./answers";
 import { CONTEXT_MESSAGES, type ContextMessage } from "./dispatch";
 import type { Env } from "../core/env";
@@ -237,8 +238,12 @@ const RETRY_MAX_MS = 5 * 60_000;
 
 type OutboxCard = { botId: string; messageId: string; actionId: string; actorId: string };
 type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId" | "refs"> & { mentions: string[]; blockRefs?: BlockRef[] };
-/** The card as it was answered: the author may edit it before the hand-off is delivered. */
-type OutboxAnswer = { botId: string; seq: number; answer: AnswerData; actorId: string; card: CardV2 };
+/**
+ * The card as it was answered: the author may edit it before the hand-off is delivered.
+ * `anonymous`: the card is private (cards2/privacy), so the run gets no actor; the row keeps it
+ * only to check that a person answered.
+ */
+type OutboxAnswer = { botId: string; seq: number; answer: AnswerData; actorId: string; card: CardV2; anonymous?: boolean };
 
 type OutboxRow = {
   id: number;
@@ -270,6 +275,7 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     const stored = storedCard(sql, answer.messageId);
     if (!stored || stored.authorId === event.actorId) return;
     const payload: OutboxAnswer = { botId: stored.authorId, seq: event.seq, answer, actorId: event.actorId, card: stored.card };
+    if (hidesCause(sql, answer.messageId)) payload.anonymous = true;
     enqueue(sql, "answer", stored.topicId, payload);
     return;
   }
@@ -379,10 +385,10 @@ async function deliverAnswer(c: DeliverContext, row: OutboxRow): Promise<void> {
     topicId: row.topic_id,
     seq: a.seq,
     answer: a.answer,
-    actorId: a.actorId,
+    actorId: a.anonymous ? ANONYMOUS_ID : a.actorId,
     actorKind: who && !who.deactivated ? (who.kind as "human" | "bot") : null,
-    actorLevel: who && !who.deactivated ? (who.level as "owner" | "member") : null,
-    actorName: who?.name ?? a.actorId,
+    actorLevel: who && !who.deactivated && !a.anonymous ? (who.level as "owner" | "member") : null,
+    actorName: a.anonymous ? ANONYMOUS_ID : (who?.name ?? a.actorId),
     card: a.card,
   };
   await deskStub(c.env, a.botId).cardAnswer(a.botId, args);

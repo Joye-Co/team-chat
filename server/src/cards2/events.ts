@@ -22,7 +22,7 @@ import { TokenBucket } from "../core/ratelimit";
 import type { Actor, RoomContext, RoomTx } from "../core/registry";
 import { type CardEventDelivery, expectFor } from "./delivery";
 import { eventValueProblem, eventsOf, inputProblem } from "./inputs";
-import { markPrivate, privacyOf } from "./privacy";
+import { markPrivate, privacyOf, shownActor } from "./privacy";
 import { auditValue } from "../core/auditvalue";
 import {
   type Directory,
@@ -406,7 +406,7 @@ function storeAnswer(
       value: a.value,
       inputs: a.inputs,
       part: a.part,
-      actorId: actor.id,
+      actorId: shownActor(room.sql, row.id, actor.id),
       at: now,
       stored: true,
       answerId,
@@ -427,7 +427,8 @@ function liveEvent(room: RoomContext, actor: Actor, a: CardEventArgs, l: { row: 
     eventId,
     rev: a.rev,
     event: a.event,
-    actorId: actor.id,
+    // A private card's author does not learn who used it (./privacy).
+    actorId: shownActor(room.sql, row.id, actor.id),
     at: now,
   };
   if (a.blockId) transient.blockId = a.blockId;
@@ -463,7 +464,7 @@ function liveEvent(room: RoomContext, actor: Actor, a: CardEventArgs, l: { row: 
       value: a.value,
       inputs: a.inputs,
       part: a.part,
-      actorId: actor.id,
+      actorId: shownActor(room.sql, row.id, actor.id),
       at: now,
       stored: false,
     },
@@ -523,7 +524,7 @@ function retract(room: RoomContext, actor: Actor, a: CardEventArgs, l: Loaded): 
       rev: a.rev,
       event: a.event,
       value: a.value,
-      actorId: actor.id,
+      actorId: shownActor(room.sql, row.id, actor.id),
       at: now,
       stored: true,
       answerId,
