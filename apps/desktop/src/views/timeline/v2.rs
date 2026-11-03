@@ -126,6 +126,14 @@ fn chip(cx: &App) -> gpui::Div {
         .text_color(k.ink_2)
 }
 
+/// A decision made this recently draws its check (CONCEPT2 motion: once,
+/// when answered); older records show it drawn.
+pub fn decision_is_fresh(at: crate::data::Millis, now: crate::data::Millis) -> bool {
+    (0..FRESH_DECISION_MS).contains(&(now - at))
+}
+
+const FRESH_DECISION_MS: i64 = 5_000;
+
 fn check(size: Pixels, color: Hsla) -> AnyElement {
     ui::icon(Lucide::Check, size, color).into_any_element()
 }
@@ -139,6 +147,27 @@ impl TimelineView {
         self.services.nav.update(cx, |nav, cx| {
             nav.open_message(m.group_id, m.topic_id, m.id, m.created_seq, cx)
         });
+    }
+
+    /// The question a decision answered: the message it quotes, or the
+    /// latest card a member asked before it in the loaded 话题.
+    fn decision_question(&self, decision: &Message) -> Option<String> {
+        if let Some(q) = &decision.quote_of {
+            return Some(q.clone());
+        }
+        let p = &self.services.provider;
+        self.messages
+            .iter()
+            .rev()
+            .skip_while(|m| m.id != decision.id)
+            .skip(1)
+            .find(|m| {
+                m.deleted_at.is_none()
+                    && self.v2_member(&m.author_id).is_some_and(Member::is_bot)
+                    && (p.card(&m.group_id, &m.id).is_some()
+                        || p.card_v2(&m.group_id, &m.id).is_some())
+            })
+            .map(|m| m.id.clone())
     }
 
     /// The member of `id` in the open 群.
@@ -307,7 +336,7 @@ impl TimelineView {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = theme::colors(cx);
-        let see = message.quote_of.clone().map(|q| {
+        let see = self.decision_question(message).map(|q| {
             div()
                 .id(ElementId::Name(format!("v2-see-q-{}", message.id).into()))
                 .flex_none()
@@ -349,11 +378,19 @@ impl TimelineView {
                     .gap(space::S10)
                     .t_small()
                     .text_color(k.ink)
-                    .child(ui::motion::check_draw(
-                        ElementId::Name(format!("v2-dec-check-{}", message.id).into()),
-                        check(px(14.), k.ok),
-                        px(14.),
-                        cx,
+                    // The green check draws once, when the answer is new;
+                    // a record read later shows it whole.
+                    .child(div().flex_none().size(px(14.)).child(
+                        if decision_is_fresh(message.created_at, chrono::Utc::now().timestamp_millis()) {
+                            ui::motion::check_draw(
+                                ElementId::Name(format!("v2-dec-check-{}", message.id).into()),
+                                check(px(14.), k.ok),
+                                px(14.),
+                                cx,
+                            )
+                        } else {
+                            check(px(14.), k.ok)
+                        },
                     ))
                     .child(
                         div()
@@ -821,6 +858,13 @@ fn link_row(id: ElementId, cx: &App) -> gpui::Stateful<gpui::Div> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_new_decision_draws_its_check() {
+        assert!(decision_is_fresh(1_000, 2_000));
+        assert!(!decision_is_fresh(1_000, 1_000 + 60_000));
+        assert!(!decision_is_fresh(5_000, 1_000));
+    }
 
     #[test]
     fn a_bold_first_line_is_the_result_title() {
