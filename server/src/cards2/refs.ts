@@ -31,6 +31,20 @@ export function withoutPrefix(refs: BlockRef[], body: string): string {
   return body;
 }
 
+/**
+ * The body without the quote lines of `refs`. A body stored before the newest clear can hold an
+ * older label: then the first `refs.length` lines go when each is a quote line.
+ */
+function stripPrefix(refs: BlockRef[], body: string): string {
+  const out = withoutPrefix(refs, body);
+  if (out !== body || refs.length === 0) return out;
+  const lines = body.split("\n");
+  if (lines.length < refs.length || !lines.slice(0, refs.length).every((l) => l.startsWith("> ↳ "))) return body;
+  const rest = lines.slice(refs.length);
+  if (rest.length === 0) return "";
+  return rest[0] === "" ? rest.slice(1).join("\n") : body;
+}
+
 /** Checks the refs of a send and fills what the server owns. */
 export function resolveRefs(room: RoomContext, inputs: BlockRefInput[]): BlockRef[] {
   return inputs.map((r) => {
@@ -114,6 +128,24 @@ export function clearRefsTo(room: RoomContext, tx: RoomTx, source: { messageId?:
       JSON.stringify(next),
       message_id,
     );
+    // Earlier edits and clears stored the old quote lines and ref values in `message.updated`.
+    const updates = room.sql
+      .exec<{ seq: number; data: string }>("SELECT seq, data FROM events WHERE message_id = ? AND type = 'message.updated'", message_id)
+      .toArray();
+    for (const u of updates) {
+      const data = JSON.parse(u.data) as Record<string, unknown>;
+      let dirty = false;
+      if (typeof data.body === "string") {
+        const was = data.body;
+        data.body = withPrefix(next, stripPrefix(refs, was));
+        dirty = data.body !== was;
+      }
+      if (Array.isArray(data.blockRefs)) {
+        data.blockRefs = next;
+        dirty = true;
+      }
+      if (dirty) room.sql.exec("UPDATE events SET data = ? WHERE seq = ?", JSON.stringify(data), u.seq);
+    }
     const seq = tx.nextSeq();
     tx.append({
       type: "message.updated",

@@ -145,3 +145,33 @@ describe("poll answer cap", () => {
     for (const c of [ca, cb, cbot]) c.close();
   });
 });
+
+describe("refs to a deleted source", () => {
+  it("lose the label and value in earlier message.updated events of the referencing message too", async () => {
+    const { owner, gid, co, ca, cbot } = await setup();
+    const t1 = await co.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "| 姓名 | 工资 |\n| - | - |\n| 张三 | 12000 |" });
+    const t2 = await co.ok({ t: "send", groupId: gid, topicId: t1.message.topicId, clientMsgId: clientMsgId(), body: "| 部门 |\n| - |\n| 研发 |" });
+    const label = "工资表 · 张三 · 12000";
+    const refs = [
+      { messageId: t1.message.id, blockId: "md:0", label, value: { cell: 12000 } },
+      { messageId: t2.message.id, blockId: "md:0", label: "部门表 · 研发", value: { cell: "研发" } },
+    ];
+    const q = await ca.ok({ t: "send", groupId: gid, topicId: t1.message.topicId, clientMsgId: clientMsgId(), body: "这两个对得上吗？", blockRefs: refs });
+    // The second source goes first (its clear stores blockRefs with the first ref's value), then an edit.
+    await co.ok({ t: "delete", groupId: gid, messageId: t2.message.id });
+    await ca.ok({ t: "edit", groupId: gid, messageId: q.message.id, body: "对得上吗？" });
+    await co.ok({ t: "delete", groupId: gid, messageId: t1.message.id });
+    await ca.waitEvent((e) => e.type === "message.updated" && e.data.messageId === q.message.id && e.data.blockRefs?.every((r: { deleted?: boolean }) => r.deleted));
+    const page = await ca.request({ t: "fetch", groupId: gid, afterSeq: 0 });
+    const mine = page.events.filter((e: any) => e.type === "message.updated" && e.data.messageId === q.message.id);
+    expect(mine.length).toBeGreaterThanOrEqual(3);
+    const text = JSON.stringify(mine);
+    expect(text).not.toContain("张三");
+    expect(text).not.toContain("12000");
+    expect(text).not.toContain("研发");
+    for (const e of mine) expect(e.data.body.startsWith("> ↳ 原消息已删除\n> ↳ 原消息已删除")).toBe(true);
+    expect(mine.find((e: any) => e.data.body.endsWith("对得上吗？") && !e.data.body.endsWith("这两个对得上吗？"))).toBeDefined();
+    void owner;
+    for (const c of [co, ca, cbot]) c.close();
+  });
+});
