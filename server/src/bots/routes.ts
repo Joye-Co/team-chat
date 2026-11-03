@@ -146,9 +146,21 @@ export function registerBotRoutes(): void {
       const now = Date.now();
       const views = await loadMachineViews(env, { includeRevoked: true });
       const all = views.map(({ row, view }) => toMachine(view, row.created_by, row.created_at, now));
-      if ((auth as AuthContext).member.level === "owner") return all;
-      // Members see which machine ran a run, nothing about the machine itself.
+      const a = auth as AuthContext;
+      if (a.member.level === "owner") return all;
+      // Members see which machine ran a run, nothing about the machine itself; the requester of
+      // a run that runs on a machine also gets its screen sharing address (接管).
+      const mine = new Set<string>();
+      for (const m of all) {
+        if (!m.takeoverUrl) continue;
+        for (const runId of m.runningRuns) {
+          const row = await runIndex(env.DB, runId);
+          const run = row ? await deskStub(env, row.bot_id).getRun(row.bot_id, row.id) : null;
+          if (run?.requestedBy === a.memberId) mine.add(m.id);
+        }
+      }
       return all.map((m) => ({
+        ...(mine.has(m.id) ? { takeoverUrl: m.takeoverUrl } : {}),
         id: m.id,
         name: m.name,
         labels: [],

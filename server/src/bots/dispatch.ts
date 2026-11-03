@@ -130,6 +130,8 @@ export function toMachine(m: MachineView, createdBy: string, createdAt: number, 
     out.os = m.info.os;
     out.arch = m.info.arch;
     out.maxParallelRuns = m.info.maxParallelRuns;
+    if (m.info.features) out.features = m.info.features;
+    if (m.info.takeoverUrl) out.takeoverUrl = m.info.takeoverUrl;
   }
   if (m.health) out.health = m.health;
   if (m.clis) out.clis = m.clis;

@@ -32,7 +32,7 @@ class Daemon {
     });
   }
 
-  static async connect(token: string, features: string[]): Promise<Daemon> {
+  static async connect(token: string, features: string[], takeoverUrl?: string): Promise<Daemon> {
     const res = await SELF.fetch(`${BASE}/v1/machine/ws`, { headers: { upgrade: "websocket", authorization: `Bearer ${token}` } });
     if (!res.webSocket) throw new Error(`upgrade failed: ${res.status}`);
     res.webSocket.accept();
@@ -40,7 +40,7 @@ class Daemon {
     d.send({
       t: "hello",
       protocol: 1,
-      machine: { name: "mac-mini", labels: [], daemonVersion: "1.1.0", os: "macos", arch: "aarch64", maxParallelRuns: 4, features },
+      machine: { name: "mac-mini", labels: [], daemonVersion: "1.1.0", os: "macos", arch: "aarch64", maxParallelRuns: 4, features, ...(takeoverUrl ? { takeoverUrl } : {}) },
       clis: [{ runtime: "codex", kind: "codex", command: "codex", version: "0.159.0", available: true }],
       health: HEALTH,
       runs: [],
@@ -226,9 +226,16 @@ describe("1.1 runs", () => {
 
   it("pause and resume a run on a machine that can, for the requester or an owner, audited, with no stall while paused", async () => {
     const w = await world();
-    const d = await Daemon.connect(w.machineToken, ["pause"]);
+    const d = await Daemon.connect(w.machineToken, ["pause"], "vnc://mac-mini.tailnet");
     const { c } = await Client.connect(w.human.token);
     const { topicId, runId } = await startRun(w, c, d);
+    // The screen sharing address: owners and the run's requester only; features: owners only.
+    const seen = async (m: TestMember) => (await api("/v1/machines", { token: m.token })).body.find((x: any) => x.runningRuns.includes(runId) || x.takeoverUrl);
+    expect(await seen(w.owner)).toMatchObject({ features: ["pause"], takeoverUrl: "vnc://mac-mini.tailnet" });
+    const forRequester = (await api("/v1/machines", { token: w.human.token })).body.filter((x: any) => x.takeoverUrl);
+    expect(forRequester).toHaveLength(1);
+    expect(forRequester[0].features).toBeUndefined();
+    expect((await api("/v1/machines", { token: w.other.token })).body.some((x: any) => x.takeoverUrl)).toBe(false);
     const pause = (m: TestMember) => api(`/v1/runs/${runId}/pause`, { token: m.token, body: {} });
     const resume = (m: TestMember, body: unknown = {}) => api(`/v1/runs/${runId}/resume`, { token: m.token, body });
 
