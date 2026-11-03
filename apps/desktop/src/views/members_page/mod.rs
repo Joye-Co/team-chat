@@ -1619,6 +1619,15 @@ impl MembersPage {
             cx,
         )
         // The 成员 detail's own title bar holds the toggle (Members.dc.html).
+        // With nothing to show, one quiet line says what will appear here.
+        .when(cards.is_empty(), |el| {
+            el.child(
+                div().flex_1().min_h(px(160.)).child(
+                    ui::EmptyState::new(Lucide::Monitor, c::MEMBERS_WORKPLACE_EMPTY)
+                        .description(c::MEMBERS_WORKPLACE_EMPTY_LINE),
+                ),
+            )
+        })
         .child(
             div()
                 .flex()
