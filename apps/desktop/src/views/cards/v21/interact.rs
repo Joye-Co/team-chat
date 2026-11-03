@@ -13,6 +13,7 @@
 //!   block and in the band; the block stays usable (INTERACT §6.2).
 //! - A live event that comes back offline or busy puts the block back to its state before
 //!   the gesture (INTERACT §4.4) while the band says why for 4 s.
+//! - A rev that changes a block I typed in keeps my text and says 内容变了 · 用新的.
 //! - A conflict re-renders the latest rev, keeps local values whose ids still exist and
 //!   toasts 卡片刚更新了，请再看一眼 once.
 //! - A top-level block a new rev removed stays where it was and fades out (opacity only).
@@ -675,6 +676,9 @@ pub fn decorate(
     if let Some(p) = pend.as_ref().filter(|p| p.stage != Stage::Quiet) {
         col = col.child(pending_line(ctx, p, cx));
     }
+    if node.ui.drafts_kept.contains(id) {
+        col = col.child(draft_changed(ctx, id, cx));
+    }
     if let Some(n) = note {
         col = col.child(meta(div()).mt(space::S6).text_color(k.ink_2).child(fill(
             c::RESOLVED_NOTE,
@@ -731,6 +735,33 @@ pub fn decorate(
         );
     }
     col.into_any_element()
+}
+
+/// 内容变了 · 用新的: the member changed a block while I had typed in it; my text stays
+/// until I take the new one (INTERACT §4.4).
+fn draft_changed(ctx: &Ctx, id: &str, cx: &mut App) -> AnyElement {
+    let k = theme::colors(cx);
+    let (form, ui, card, block) = (ctx.form.clone(), ctx.ui.clone(), ctx.card.clone(), id.to_string());
+    meta(div())
+        .mt(space::S6)
+        .flex()
+        .items_center()
+        .gap(space::S6)
+        .text_color(k.live_ink)
+        .child(div().size(px(5.)).rounded_full().bg(k.live))
+        .child(c::DRAFT_CHANGED)
+        .child(
+            b20::quiet_button(ctx.id(format!("use-new-{id}")), c::DRAFT_USE_NEW, cx)
+                .text_color(k.ink)
+                .on_click(move |_, _, cx| {
+                    form.update(cx, |f, cx| f.use_new(&card, &block, cx));
+                    ui.update(cx, |u, cx| {
+                        u.drafts_kept.remove(&block);
+                        cx.notify();
+                    });
+                }),
+        )
+        .into_any_element()
 }
 
 /// The line at a block while its event waits: a spinner and the stage, and at the end

@@ -366,11 +366,15 @@ impl CardForm {
     /// Moves to a newer rev and keeps what the viewer chose or typed for every block that
     /// still exists (choices only when their option ids still exist). A block replaced by
     /// another type starts over.
-    pub fn rebase(&mut self, old: &CardV2, card: &CardV2, cx: &mut Context<Self>) {
+    ///
+    /// v11/pb-cards: a typed text the viewer did not change follows a block the rev
+    /// changed; an edited one stays, and its block id is returned (内容变了 · 用新的).
+    pub fn rebase(&mut self, old: &CardV2, card: &CardV2, cx: &mut Context<Self>) -> Vec<String> {
         let same_type = |id: &str| {
             matches!((old.block(id), card.block(id)), (Some(a), Some(b))
                 if a.type_name() == b.type_name())
         };
+        let changed = |id: &str| old.block(id) != card.block(id);
         let ids = |id: &str| super::super::v21::form21::option_ids(card, id);
         self.choices.retain(|k, v| {
             let base = k.split('#').next().unwrap_or(k);
@@ -381,6 +385,33 @@ impl CardForm {
             .retain(|k, _| same_type(k.split('#').next().unwrap_or(k)));
         self.other.retain(|k, _| same_type(k));
         let fresh = defaults(card);
+        // Texts of changed blocks: an untouched one takes the new text, an edited one stays.
+        let mut kept = Vec::new();
+        let touched: Vec<String> = self
+            .fields
+            .keys()
+            .filter(|k| changed(k.split('#').next().unwrap_or(k)))
+            .cloned()
+            .collect();
+        for k in touched {
+            let text = self.fields.get(&k).map(|f| f.text(cx)).unwrap_or_default();
+            let was = match self.initial.get(&k) {
+                Some(Val::Text(t)) => t.clone(),
+                _ => String::new(),
+            };
+            if text == was {
+                self.fields.remove(&k);
+                match fresh.get(&k) {
+                    Some(v) => self.initial.insert(k.clone(), v.clone()),
+                    None => self.initial.remove(&k),
+                };
+            } else {
+                let base = k.split('#').next().unwrap_or(&k).to_string();
+                if !kept.contains(&base) {
+                    kept.push(base);
+                }
+            }
+        }
         for (k, v) in fresh {
             if !self.initial.contains_key(&k) || !same_type(&k) {
                 self.initial.insert(k, v);
@@ -389,6 +420,20 @@ impl CardForm {
         self.initial
             .retain(|k, _| card.block(k.split('#').next().unwrap_or(k)).is_some());
         self.rev = card.rev;
+        cx.notify();
+        kept
+    }
+
+    /// v11/pb-cards: 用新的: drops the viewer's text of `block` for the card's new one.
+    pub fn use_new(&mut self, card: &CardV2, block: &str, cx: &mut Context<Self>) {
+        let mine = |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        self.fields.retain(|k, _| !mine(k));
+        self.initial.retain(|k, _| !mine(k));
+        for (k, v) in defaults(card) {
+            if mine(&k) {
+                self.initial.insert(k, v);
+            }
+        }
         cx.notify();
     }
 
@@ -650,5 +695,57 @@ mod tests {
         assert!(valid_date("2026-11-10"));
         assert!(!valid_date("2026-13-01"));
         assert!(!valid_date("11/10"));
+    }
+
+    // v11/pb-cards: a rev that changes a block I typed in keeps my text.
+    struct Root;
+    impl gpui::Render for Root {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+            gpui::div()
+        }
+    }
+
+    fn rev(rev: u32, note: &str, greet: &str) -> CardV2 {
+        serde_json::from_value(serde_json::json!({
+            "v": 2, "catalog": "tc.card/2.1", "rev": rev, "intent": "info", "title": "t", "fallback": "f",
+            "blocks": [
+                { "type": "input", "id": "note", "kind": "text", "label": "备注", "default": note },
+                { "type": "input", "id": "greet", "kind": "text", "label": "欢迎语", "default": greet },
+                { "type": "input", "id": "same", "kind": "text", "label": "不变", "default": "一样" }
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[gpui::test]
+    fn a_changed_block_keeps_my_typed_text_and_takes_untouched_ones(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let (_, vcx) = cx.add_window_view(|_, _| Root);
+        let old = rev(1, "旧备注", "旧欢迎");
+        let new = rev(2, "新备注", "新欢迎");
+        let form = vcx.update(|_, cx| cx.new(|_| CardForm::new(&old, None)));
+        vcx.update(|window, cx| {
+            form.update(cx, |f, cx| {
+                for id in ["note", "greet", "same"] {
+                    f.field(id, None, false, window, cx);
+                }
+            });
+            if let Some(Field::Line(s)) = form.read(cx).fields.get("note").cloned() {
+                s.update(cx, |s, cx| s.set_value("我写的", window, cx));
+            }
+        });
+        let kept = vcx.update(|_, cx| form.update(cx, |f, cx| f.rebase(&old, &new, cx)));
+        assert_eq!(kept, ["note"], "only the edited text of a changed block");
+        let text = |vcx: &mut gpui::VisualTestContext, id: &str| {
+            vcx.update(|_, cx| match form.read(cx).values(cx).get(id) {
+                Some(Val::Text(t)) => t.clone(),
+                _ => String::new(),
+            })
+        };
+        assert_eq!(text(vcx, "note"), "我写的");
+        assert_eq!(text(vcx, "greet"), "新欢迎", "untouched text follows the rev");
+        assert_eq!(text(vcx, "same"), "一样");
+        vcx.update(|_, cx| form.update(cx, |f, cx| f.use_new(&new, "note", cx)));
+        assert_eq!(text(vcx, "note"), "新备注", "用新的");
     }
 }

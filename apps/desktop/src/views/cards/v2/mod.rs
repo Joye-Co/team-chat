@@ -230,7 +230,10 @@ pub fn render(
     }
     if form_rev < card.rev && editing.is_none() {
         match seen.filter(|_| is21) {
-            Some(old) => form.update(cx, |f, cx| f.rebase(&old, &card, cx)),
+            Some(old) => {
+                let kept = form.update(cx, |f, cx| f.rebase(&old, &card, cx));
+                ui.update(cx, |u, _| u.drafts_kept = kept.into_iter().collect());
+            }
             None => form.update(cx, |f, _| f.reset(&card)),
         }
     }

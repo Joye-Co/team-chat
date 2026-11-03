@@ -139,6 +139,9 @@ pub struct CardUi {
     pub settled: HashMap<String, (BlockUi, crate::views::cards::v2::form::FormSnap)>,
     /// Live events whose optimistic state was put back, by `clientEventId`.
     pub reverted: HashSet<String>,
+    /// Blocks a new rev changed while I had typed in them: my text stays, with 内容变了 ·
+    /// 用新的 (INTERACT §4.4).
+    pub drafts_kept: HashSet<String>,
 }
 
 impl CardUi {
@@ -156,6 +159,7 @@ impl CardUi {
             hover: None,
             settled: HashMap::new(),
             reverted: HashSet::new(),
+            drafts_kept: HashSet::new(),
         }
     }
 
@@ -325,6 +329,7 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         hover: None,
         settled: HashMap::new(),
         reverted: HashSet::new(),
+        drafts_kept: ui.drafts_kept.clone(),
     };
     let node = Node {
         ctx,
