@@ -51,7 +51,7 @@ export abstract class DeskRuns extends DeskCore {
         )
           .bind(runId, botId, m.groupId, m.topicId, now)
           .run();
-        await this.ack(r);
+        await this.ack(r, m.ackMessageId);
         await this.setStatus(r, "created");
         await this.topic(r, "in_progress");
 

@@ -172,6 +172,8 @@ export interface TopicMessage {
   authorLevel?: "owner" | "member";
   body: string;
   mentioned: boolean;
+  /** The message the run's acknowledgement reacts to when `messageId` is a synthetic key. */
+  ackMessageId?: string;
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */

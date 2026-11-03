@@ -387,11 +387,9 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   }
 
   /** Acknowledges the message that started the run with a reaction (no text line). */
-  protected async ack(r: RunRow): Promise<void> {
+  protected async ack(r: RunRow, messageId = r.trigger_message_id): Promise<void> {
     try {
-      unwrap(
-        await this.room(r).rpc(r.group_id, ROOM_REACT_RPC, this.actor(), { messageId: r.trigger_message_id, emoji: ACK_EMOJI, on: true }),
-      );
+      unwrap(await this.room(r).rpc(r.group_id, ROOM_REACT_RPC, this.actor(), { messageId, emoji: ACK_EMOJI, on: true }));
     } catch (err) {
       this.log.warn("ack reaction failed", { runId: r.id, err });
     }

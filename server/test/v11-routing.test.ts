@@ -160,6 +160,9 @@ describe("answers to runner bots", () => {
     expect(assign.topicId).toBe(topicId);
     expect(assign.prompt).toContain('answered your card "周报"');
     expect(assign.prompt).toContain("Action: 再改一下 (again)");
+    // The run acknowledges on the answered card.
+    const ack = await c.waitEvent((e) => e.type === "reaction.changed" && e.data.messageId === sent.message.id);
+    expect(ack.actorId).toBe(w.bot.id);
     d.send({ t: "run.accept", runId: assign.runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
 

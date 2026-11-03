@@ -146,6 +146,7 @@ export abstract class DeskInput extends DeskStall {
         groupId: a.groupId,
         topicId: a.topicId,
         messageId: key,
+        ackMessageId: a.answer.messageId,
         authorId: a.actorId,
         authorLevel: a.actorLevel ?? undefined,
         body: a.text,
