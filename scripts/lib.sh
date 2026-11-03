@@ -70,3 +70,36 @@ bin_name() {
 write_sha256() {
   (cd "$(dirname "$1")" && shasum -a 256 "$(basename "$1")" >"$(basename "$1").sha256")
 }
+
+# Code signing (build-dmg.sh, test-dmg.sh). The key and the certificate are plain files; no
+# keychain is used.
+signing_dir() { printf '%s' "${SIGNING_DIR:-$HOME/.config/team-chat/signing}"; }
+
+# signing_mode: "cert" when the key and certificate files exist (and SIGNING is not adhoc),
+# else "adhoc".
+signing_mode() {
+  local d
+  d="$(signing_dir)"
+  if [ "${SIGNING:-}" != adhoc ] && [ -s "$d/key.pem" ] && [ -s "$d/cert.pem" ]; then echo cert; else echo adhoc; fi
+}
+
+# signing_cert_sha1: lowercase SHA-1 of the certificate (DER), as a requirement names it.
+signing_cert_sha1() {
+  openssl x509 -in "$(signing_dir)/cert.pem" -noout -fingerprint -sha1 | sed 's/.*=//; s/://g' | tr 'A-F' 'a-f'
+}
+
+# rcodesign_sign <log> <args...>: signs with the key files; the log stays quiet unless it fails.
+rcodesign_sign() {
+  local logf="$1" d
+  shift
+  d="$(signing_dir)"
+  if ! rcodesign sign --pem-file "$d/key.pem" --pem-file "$d/cert.pem" --timestamp-url none "$@" >"$logf" 2>&1; then
+    tail -n 20 "$logf" >&2
+    die "rcodesign sign failed"
+  fi
+}
+
+# designated_requirement <path>: the designated requirement text of a signed file.
+designated_requirement() {
+  codesign -d -r- "$1" 2>/dev/null | sed -n 's/^\(# \)\{0,1\}designated => //p' | head -n 1
+}

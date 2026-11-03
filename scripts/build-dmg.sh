@@ -6,9 +6,13 @@
 #   --skip-build   reuse the release binary already in CARGO_TARGET_DIR
 # Env: CARGO_TARGET_DIR, DIST (default dist/), MACOS_MIN (default 13.0),
 #      DESKTOP_PACKAGE (default desktop),
-#      SIGN_IDENTITY (default "-", ad-hoc): a code-signing identity in the keychain. Use the
-#      same identity for every release: the designated requirement of an ad-hoc signature
-#      is its cdhash, so each ad-hoc build asks again for the saved sign-in in the Keychain.
+#      SIGNING_DIR (default ~/.config/team-chat/signing): key.pem and cert.pem of the
+#      self-signed code-signing certificate. When both exist, rcodesign signs the app, its
+#      daemon and the DMG with them, and the designated requirement is
+#      'identifier "<id>" and certificate leaf = H"<sha1 of cert>"': the same for every
+#      build, so the Keychain keeps trusting the app across updates. Without them (or with
+#      SIGNING=adhoc) the signature is ad-hoc: its requirement is the cdhash, which every
+#      build changes. No keychain is read or changed.
 #
 # Files in apps/desktop/resources/ (if it exists) are copied into Contents/Resources;
 # an AppIcon.icns there replaces assets/brand/AppIcon.icns. The DMG window uses
@@ -27,7 +31,7 @@ for arg in "$@"; do
 done
 
 [ "$(uname -s)" = Darwin ] || die "build-dmg.sh runs on macOS only"
-need jq codesign hdiutil python3 shasum plutil
+need jq codesign hdiutil python3 shasum plutil xattr
 cargo_env
 
 NAME="$(product name)"
@@ -114,14 +118,27 @@ if [ -d "$ROOT/apps/desktop/resources" ]; then
   cp -R "$ROOT/apps/desktop/resources/." "$APP/Contents/Resources/"
 fi
 
-SIGN_IDENTITY="${SIGN_IDENTITY:--}"
-if [ "$SIGN_IDENTITY" = - ]; then
-  log "ad-hoc signing (set SIGN_IDENTITY to keep Keychain access across updates)"
-else
-  log "signing with a stable identity"
-fi
 xattr -cr "$APP"
-codesign --force --deep --sign "$SIGN_IDENTITY" --identifier "$BUNDLE_ID" "$APP"
+DAEMON_ID="$BUNDLE_ID.daemon"
+if [ "$(signing_mode)" = cert ]; then
+  need rcodesign csreq openssl
+  fp="$(signing_cert_sha1)"
+  log "signing with the self-signed certificate (leaf $fp)"
+  csreq -r="identifier \"$BUNDLE_ID\" and certificate leaf = H\"$fp\"" -b "$WORK/app.req"
+  csreq -r="identifier \"$DAEMON_ID\" and certificate leaf = H\"$fp\"" -b "$WORK/daemon.req"
+  DAEMON_REL="Contents/MacOS/$(product slug)-daemon"
+  rcodesign_sign "$WORK/sign-app.log" \
+    --code-requirements-file "$WORK/app.req" \
+    --code-requirements-file "$DAEMON_REL:$WORK/daemon.req" \
+    --binary-identifier "$DAEMON_REL:$DAEMON_ID" \
+    "$APP"
+  [ "$(designated_requirement "$APP")" = "identifier \"$BUNDLE_ID\" and certificate leaf = H\"$fp\"" ] ||
+    die "the app's designated requirement is not the expected one"
+else
+  log "ad-hoc signing (no key.pem and cert.pem in $(signing_dir), or SIGNING=adhoc)"
+  codesign --force --sign - --identifier "$DAEMON_ID" "$APP/Contents/MacOS/$(product slug)-daemon"
+  codesign --force --sign - --identifier "$BUNDLE_ID" "$APP"
+fi
 codesign --verify --deep --strict "$APP"
 
 log "making the DMG"
@@ -167,6 +184,12 @@ sync
 detach_rw
 hdiutil convert -quiet "$RW" -format UDZO -imagekey zlib-level=9 -ov -o "$DMG"
 hdiutil verify -quiet "$DMG"
+if [ "$(signing_mode)" = cert ]; then
+  log "signing the DMG"
+  rcodesign_sign "$WORK/sign-dmg.log" --binary-identifier "$BUNDLE_ID.dmg" "$DMG"
+  codesign --verify --strict "$DMG" || die "the DMG signature does not verify"
+  hdiutil verify -quiet "$DMG"
+fi
 write_sha256 "$DMG"
 
 log "wrote $DMG"
