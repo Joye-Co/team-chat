@@ -391,16 +391,17 @@ impl Render for DiagramViewer {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let ready = self.ready(cx);
-        if !self.fitted && ready.is_some() && self.viewport.0 > 0. {
-            if let Some(r) = &ready {
-                self.zoom = fit_zoom(
-                    r.meta.width,
-                    r.meta.height,
-                    self.viewport.0,
-                    self.viewport.1,
-                );
-                self.fitted = true;
-            }
+        if !self.fitted
+            && self.viewport.0 > 0.
+            && let Some(r) = &ready
+        {
+            self.zoom = fit_zoom(
+                r.meta.width,
+                r.meta.height,
+                self.viewport.0,
+                self.viewport.1,
+            );
+            self.fitted = true;
         }
         let entity = cx.entity();
         let measure = canvas(

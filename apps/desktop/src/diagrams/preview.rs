@@ -177,7 +177,7 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
             Msg {
                 author: "m-coder",
                 time: "10:17",
-                body: format!("正在写：\n\n```mermaid\nflowchart LR\n  x[收到] --> y[处理"),
+                body: "正在写：\n\n```mermaid\nflowchart LR\n  x[收到] --> y[处理".to_string(),
                 streaming: true,
             },
         ],

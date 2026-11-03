@@ -241,13 +241,13 @@ fn request_theme(n: &Normalized, theme: ThemeId, scale: u32, visible: bool, cx: 
         s.recent.insert(n.source.clone(), n.kind);
     }
     if let Some(state) = s.mem.get(&key).cloned() {
-        if state.is_pending() && visible {
-            if let Some(i) = s.queue.iter().position(|j| j.key == key) {
-                if let Some(mut job) = s.queue.remove(i) {
-                    job.visible = true;
-                    s.queue.push_front(job);
-                }
-            }
+        if state.is_pending()
+            && visible
+            && let Some(i) = s.queue.iter().position(|j| j.key == key)
+            && let Some(mut job) = s.queue.remove(i)
+        {
+            job.visible = true;
+            s.queue.push_front(job);
         }
         return state;
     }

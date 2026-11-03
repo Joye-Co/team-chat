@@ -371,7 +371,7 @@ impl<K: Eq + Hash + Clone, V> Lru<K, V> {
             .iter()
             .map(|(k, (t, v))| (*t, k.clone(), v.clone()))
             .collect();
-        all.sort_by(|a, b| b.0.cmp(&a.0));
+        all.sort_by_key(|e| std::cmp::Reverse(e.0));
         all.into_iter().map(|(_, k, v)| (k, v)).collect()
     }
 
