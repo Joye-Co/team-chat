@@ -38,6 +38,9 @@ struct Inner {
     cards: HashMap<String, Option<CardV2Message>>,
     answers: HashMap<String, Arc<Vec<CardV2Answer>>>,
     mine: HashMap<String, Mine>,
+    /// Messages whose queued answer was looked up in the outbox (after a restart `mine` is
+    /// empty while the outbox still holds my answer).
+    seeded: std::collections::HashSet<String>,
 }
 
 struct Mine {
@@ -172,7 +175,54 @@ impl CardV2Cache {
             .retain(|_, c| c.as_ref().is_none_or(|c| c.topic_id != topic_id));
     }
 
+    /// My answer queued before the app started: the outbox row, read once per message.
+    fn seed_from_outbox(&self, client: &Client, message_id: &str) {
+        {
+            let mut inner = self.lock();
+            if inner.mine.contains_key(message_id) || inner.seeded.contains(message_id) {
+                return;
+            }
+            if inner.seeded.len() >= MAX_ENTRIES {
+                inner.seeded.clear();
+            }
+            inner.seeded.insert(message_id.to_string());
+        }
+        let found = client
+            .store()
+            .outbox_all()
+            .unwrap_or_default()
+            .into_iter()
+            .rev()
+            .find_map(|item| match item.op {
+                chat_core::OutboxOp::CardAnswer {
+                    message_id: m,
+                    rev,
+                    action_id,
+                    inputs,
+                    edited_values,
+                    ..
+                } if m == message_id => Some(Mine {
+                    request: CardV2AnswerRequest {
+                        rev,
+                        action_id,
+                        inputs,
+                        edited_values,
+                    },
+                    outbox_id: item.id,
+                    failed: None,
+                    at: millis(item.created_at),
+                }),
+                _ => None,
+            });
+        if let Some(mine) = found {
+            let mut inner = self.lock();
+            bound(&mut inner.mine);
+            inner.mine.entry(message_id.to_string()).or_insert(mine);
+        }
+    }
+
     pub fn pending(&self, client: &Client, message_id: &str) -> Option<CardV2Pending> {
+        self.seed_from_outbox(client, message_id);
         let (request, outbox_id, failed, at) = {
             let inner = self.lock();
             let m = inner.mine.get(message_id)?;
