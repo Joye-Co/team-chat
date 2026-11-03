@@ -82,7 +82,7 @@ pub fn next(places: &[Place], current: Option<usize>, m: Move, shift: bool) -> O
         // Nothing has focus: the first part, or the last one going back.
         return match m {
             Move::Right | Move::Down => parts().map(|(i, _)| i).next(),
-            Move::Left | Move::Up => parts().map(|(i, _)| i).last(),
+            Move::Left | Move::Up => parts().map(|(i, _)| i).next_back(),
         };
     };
     let (i, p) = cur;
