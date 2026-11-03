@@ -661,12 +661,7 @@ fn player_dir(media: &Media, v: &store::Video) -> Option<PathBuf> {
         return Some(dir);
     }
     std::fs::create_dir_all(&dir).ok()?;
-    let ext = v
-        .path
-        .extension()
-        .and_then(|e| e.to_str())
-        .unwrap_or("mp4")
-        .to_ascii_lowercase();
+    let ext = media_ext(&v.path);
     let file = dir.join(format!("media.{ext}"));
     if !file.exists() && std::fs::hard_link(&v.path, &file).is_err() {
         std::fs::copy(&v.path, &file).ok()?;
@@ -675,27 +670,70 @@ fn player_dir(media: &Media, v: &store::Video) -> Option<PathBuf> {
         let _ = std::fs::copy(p, dir.join("poster.jpg"));
     }
     let duration = v.info.map_or(0., |i| i.duration);
-    let chapters: Vec<serde_json::Value> = v
-        .chapters
-        .iter()
-        .map(|c| serde_json::json!({"t": c.t, "title": c.text}))
-        .collect();
-    let html = PLAYER_HTML
-        .replace("{SRC}", &format!("media.{ext}"))
-        .replace(
-            "{POSTER}",
-            if v.poster.is_some() { "poster.jpg" } else { "" },
-        )
-        .replace("{DURATION}", &format!("{duration}"))
-        .replace(
-            "{CHAPTERS}",
-            &serde_json::Value::Array(chapters).to_string(),
-        )
-        .replace("{PLAY}", cm::VIDEO_PLAY);
+    let html = player_html(&ext, v.poster.is_some(), duration, &v.chapters);
     std::fs::write(dir.join("index.html"), html).ok()?;
     PLAYERS.with(|p| p.borrow_mut().insert(dir.clone()));
     Some(dir)
 }
+
+/// The extension of the player's copy of the video: letters and digits only (the file
+/// name comes from the member), else `mp4`.
+fn media_ext(path: &std::path::Path) -> String {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(str::to_ascii_lowercase)
+        .filter(|e| !e.is_empty() && e.len() <= 8 && e.chars().all(|c| c.is_ascii_alphanumeric()))
+        .unwrap_or_else(|| "mp4".into())
+}
+
+/// JSON that is safe inside an inline `<script>`: `<`, `>`, `&`, U+2028 and U+2029 are
+/// written as `\u` escapes, so member text (VTT cue titles) can never end the script or
+/// start markup. The value the script reads is the same.
+fn script_json(value: &serde_json::Value) -> String {
+    let mut out = String::new();
+    for c in value.to_string().chars() {
+        match c {
+            '<' => out.push_str("\\u003c"),
+            '>' => out.push_str("\\u003e"),
+            '&' => out.push_str("\\u0026"),
+            '\u{2028}' => out.push_str("\\u2028"),
+            '\u{2029}' => out.push_str("\\u2029"),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// The player page. Member text (chapter titles) goes in only as escaped JSON data, last,
+/// so no later placeholder can be filled inside it.
+fn player_html(ext: &str, poster: bool, duration: f64, chapters: &[store::Cue]) -> String {
+    let chapters = serde_json::Value::Array(
+        chapters
+            .iter()
+            .map(|c| serde_json::json!({"t": c.t, "title": c.text}))
+            .collect(),
+    );
+    let duration = if duration.is_finite() { duration } else { 0. };
+    PLAYER_HTML
+        .replace("{SRC}", &format!("media.{ext}"))
+        .replace("{POSTER}", if poster { "poster.jpg" } else { "" })
+        .replace("{DURATION}", &format!("{duration}"))
+        .replace("{PLAY}", cm::VIDEO_PLAY)
+        .replace("{CHAPTERS}", &script_json(&chapters))
+}
+
+/// The player page may only report its position (`time`); it reads no data and sends
+/// nothing to a member.
+fn player_spec(dir: PathBuf, version: u32) -> artifact_view::VersionSpec {
+    artifact_view::VersionSpec::new(version, artifact_view::Content::Folder(dir)).with_events(vec![
+        artifact_view::EventDecl::new("time", artifact_view::EventKind::Emit),
+    ])
+}
+
+const PLAYER_CAPS: artifact_view::Capabilities = artifact_view::Capabilities {
+    emit: true,
+    ..artifact_view::Capabilities::NONE
+};
 
 fn sanitize(id: &str) -> String {
     id.chars()
@@ -738,11 +776,9 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                 id(spec, "player"),
                 WebEmbedSpec::new(
                     format!("player-{}", spec.media.key.artifact_id),
-                    artifact_view::VersionSpec::new(
-                        spec.media.key.version,
-                        artifact_view::Content::Folder(dir),
-                    ),
-                ),
+                    player_spec(dir, spec.media.key.version),
+                )
+                .capabilities(PLAYER_CAPS),
             )
             .height(px(360.))
             .rounded(px(10.))
@@ -1695,7 +1731,40 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
 
 #[cfg(test)]
 mod tests {
-    use super::sections;
+    use super::{PLAYER_CAPS, media_ext, player_html, sections, store::Cue};
+
+    #[test]
+    fn chapter_text_stays_data_in_the_player_page() {
+        let cue = |t: f64, text: &str| Cue {
+            t,
+            end: t + 1.,
+            speaker: None,
+            text: text.into(),
+        };
+        let evil = "</script><script>alert(1)</script>&\u{2028}{PLAY}";
+        let html = player_html("mp4", false, 12., &[cue(0., "开场"), cue(5., evil)]);
+        // The page has its one script; the cue text cannot close it or open another.
+        assert_eq!(html.matches("<script>").count(), 1);
+        assert_eq!(html.matches("</script>").count(), 1);
+        assert!(!html.contains("alert(1)</"));
+        // The script reads the same text back.
+        let start = html.find("C=").unwrap() + 2;
+        let end = start + html[start..].find(";\n").unwrap();
+        let back: serde_json::Value = serde_json::from_str(&html[start..end]).unwrap();
+        assert_eq!(back[1]["title"], evil);
+        assert_eq!(back[0]["title"], "开场");
+    }
+
+    #[test]
+    fn the_player_only_reports_its_position() {
+        assert!(PLAYER_CAPS.emit);
+        assert!(!PLAYER_CAPS.ask && !PLAYER_CAPS.get_data && !PLAYER_CAPS.r#ref);
+        assert!(!PLAYER_CAPS.live_data);
+        let ext = |p: &str| media_ext(std::path::Path::new(p));
+        assert_eq!(ext("clip.MOV"), "mov");
+        assert_eq!(ext("clip.mp4\"><b"), "mp4");
+        assert_eq!(ext("clip"), "mp4");
+    }
 
     #[test]
     fn splits_markdown_at_headings() {
