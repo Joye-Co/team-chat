@@ -142,6 +142,9 @@ pub struct CardUi {
     /// Blocks a new rev changed while I had typed in them: my text stays, with 内容变了 ·
     /// 用新的 (INTERACT §4.4).
     pub drafts_kept: HashSet<String>,
+    /// v11/pb2-cards: the rev whose removed blocks have their fade-end redraw scheduled
+    /// (one timer per removal, not one per frame).
+    pub fade_timer: Option<u32>,
 }
 
 impl CardUi {
@@ -160,6 +163,7 @@ impl CardUi {
             settled: HashMap::new(),
             reverted: HashSet::new(),
             drafts_kept: HashSet::new(),
+            fade_timer: None,
         }
     }
 
@@ -356,6 +360,7 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         settled: HashMap::new(),
         reverted: HashSet::new(),
         drafts_kept: ui.drafts_kept.clone(),
+        fade_timer: None,
     };
     let node = Node {
         ctx,
@@ -464,15 +469,27 @@ fn fading(ctx: &Ctx, ui: &CardUi, cx: &mut App) -> Vec<(Option<String>, CardV2Bl
     if left.is_zero() {
         return Vec::new();
     }
-    let ui = ctx.ui.clone();
-    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
-        cx.background_executor()
-            .timer(left + Duration::from_millis(20))
-            .await;
-        cx.update(|cx| ui.update(cx, |_, cx| cx.notify()));
-    })
-    .detach();
+    if schedule_fade_end(&ctx.ui, d.to, cx) {
+        let ui = ctx.ui.clone();
+        cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+            cx.background_executor()
+                .timer(left + Duration::from_millis(20))
+                .await;
+            cx.update(|cx| ui.update(cx, |_, cx| cx.notify()));
+        })
+        .detach();
+    }
     d.removed.clone()
+}
+
+/// True the first time rev `rev`'s removal asks for its fade-end redraw; later frames of
+/// the same fade start no timer.
+fn schedule_fade_end(ui: &gpui::Entity<CardUi>, rev: u32, cx: &mut App) -> bool {
+    if ui.read(cx).fade_timer == Some(rev) {
+        return false;
+    }
+    ui.update(cx, |u, _| u.fade_timer = Some(rev));
+    true
 }
 
 /// A block the new rev removed, fading out where it stood (opacity only, no transforms).
@@ -952,6 +969,7 @@ pub(crate) fn question(text: &str, cx: &App) -> Div {
 #[cfg(test)]
 mod ui_tests {
     use super::*;
+    use gpui::AppContext as _;
 
     fn card(rev: u32, note: &str, other: &str) -> Arc<CardV2> {
         Arc::new(
@@ -1002,5 +1020,17 @@ mod ui_tests {
         // Once a's text is gone (用新的, or the block went), the mark goes.
         ui.keep_drafts(Vec::new(), &card(4, "新", "补二"), |_| false);
         assert!(ui.drafts_kept.is_empty());
+    }
+
+    #[gpui::test]
+    fn a_removal_starts_one_fade_timer_however_often_it_draws(cx: &mut gpui::TestAppContext) {
+        let ui = cx.update(|cx| cx.new(|_| CardUi::new(None)));
+        cx.update(|cx| {
+            assert!(schedule_fade_end(&ui, 2, cx), "the first frame of the fade");
+            for _ in 0..30 {
+                assert!(!schedule_fade_end(&ui, 2, cx), "later frames start none");
+            }
+            assert!(schedule_fade_end(&ui, 3, cx), "the next rev's removal has its own");
+        });
     }
 }
