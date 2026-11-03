@@ -14,6 +14,8 @@ pub use crate::characters::CharacterId;
 
 /// View types of the v2 screens (1.1.0).
 pub mod v2;
+/// View types of the 群, 成员 and 产出 pages (pages track).
+pub mod pages;
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -1868,6 +1870,209 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn withdraw_changes_approval(&self, _group_id: &str, _topic_id: &str) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
+
+    // --- pages track: the 群, 成员 and 产出 pages (1.1.0; all have defaults) ---
+
+    /// "Now" for the pages' elapsed times (`已 3 分钟`). Sample providers
+    /// fix it so screenshots do not depend on the hour they are taken.
+    fn clock_now(&self) -> Millis {
+        chrono::Local::now().timestamp_millis()
+    }
+    /// What a 进行中 card on the 群 page shows of a 话题. The default
+    /// previews the live terminal of an active run, else the options of the
+    /// ask that waits on me.
+    fn topic_glance(&self, group_id: &str, topic_id: &str) -> pages::TopicGlance {
+        let mut glance = pages::TopicGlance::default();
+        let live = self
+            .runs(group_id, topic_id)
+            .into_iter()
+            .filter(|r| r.status.is_active())
+            .find(|r| {
+                self.machine_screen(&r.id)
+                    .is_some_and(|s| !s.lines.is_empty())
+            });
+        if let Some(run) = live {
+            glance.preview = Some(pages::TopicPreview::Screen { run_id: run.id });
+            return glance;
+        }
+        let ask = self.pinned_ask(group_id, topic_id);
+        let card = ask
+            .as_ref()
+            .and_then(|a| a.message_id.as_deref())
+            .and_then(|m| self.card(group_id, m));
+        if let (Some(ask), Some(card)) = (ask, card) {
+            let options: Vec<pages::ChoiceOption> = card
+                .actions
+                .iter()
+                .flatten()
+                .take(2)
+                .enumerate()
+                .map(|(i, a)| pages::ChoiceOption {
+                    key: ((b'A' + i as u8) as char).to_string(),
+                    label: a.label.clone(),
+                    sketch: None,
+                })
+                .collect();
+            if options.len() == 2 && ask.kind == v2::AskKind::Choice {
+                glance.preview = Some(pages::TopicPreview::Choice { options });
+            }
+        }
+        glance
+    }
+    /// 最近完成 of a 群: 话题 done in the last seven days, newest first.
+    fn group_recent_done(&self, group_id: &str) -> Vec<pages::RecentDone> {
+        let week_ago = self.clock_now() - 7 * 24 * 3_600_000;
+        let mut out: Vec<pages::RecentDone> = self
+            .topics(group_id)
+            .into_iter()
+            .filter(|t| t.status == TopicStatus::Done && t.last_activity_at >= week_ago)
+            .map(|t| pages::RecentDone {
+                group_id: t.group_id.clone(),
+                topic_id: t.id.clone(),
+                member_id: t.owner_id.clone().unwrap_or_else(|| t.created_by.clone()),
+                title: t.title.clone(),
+                note: None,
+                at: t.last_activity_at,
+            })
+            .collect();
+        out.sort_by_key(|d| std::cmp::Reverse(d.at));
+        out
+    }
+    /// 最近的产出 of a 群, newest first.
+    fn group_artifacts(&self, group_id: &str) -> Vec<ArtifactSummary> {
+        self.all_artifacts()
+            .into_iter()
+            .filter(|(g, _)| g == group_id)
+            .map(|(_, a)| a)
+            .collect()
+    }
+    /// A small picture of a 产出's first lines for lists, when known.
+    fn artifact_thumb(&self, _artifact_id: &str) -> Option<pages::ArtifactThumb> {
+        None
+    }
+    /// True when 记一条 can add a decision to a 群 by hand.
+    fn can_record_decision(&self, _group_id: &str) -> bool {
+        false
+    }
+    /// 记一条: adds a decision to a 群 (members read it before they work).
+    fn record_decision(&self, _group_id: &str, _text: String) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The 成员 page detail beyond [`ChatProvider::member_stats`]. The
+    /// default derives this week's average time, 产出 and deliveries from
+    /// the cached runs.
+    fn member_extras(&self, member_id: &str) -> pages::MemberExtras {
+        let week_ago = self.clock_now() - 7 * 24 * 3_600_000;
+        let mut extras = pages::MemberExtras::default();
+        let mut spans = Vec::new();
+        let me = match self.session() {
+            SessionState::SignedIn { me, .. } => Some(me.id),
+            _ => None,
+        };
+        for g in self.groups() {
+            for t in self.topics(&g.id) {
+                let runs: Vec<BotRunSummary> = self
+                    .runs(&g.id, &t.id)
+                    .into_iter()
+                    .filter(|r| r.bot_id == member_id && r.created_at >= week_ago)
+                    .collect();
+                if runs.is_empty() {
+                    continue;
+                }
+                for r in &runs {
+                    if r.status == RunStatus::Done {
+                        let ms = self.run_usage(&r.id).map(|u| u.duration_ms).or_else(|| {
+                            match (r.started_at, r.ended_at) {
+                                (Some(a), Some(b)) => Some((b - a).max(0) as u64),
+                                _ => None,
+                            }
+                        });
+                        spans.extend(ms);
+                    }
+                }
+                if let Some(ch) = self.topic_changes(&g.id, &t.id) {
+                    extras.prs_this_week += 1;
+                    extras.deliveries.push(pages::Delivery {
+                        kind: pages::DeliveryKind::Pr {
+                            number: ch.number,
+                            additions: ch.additions,
+                            deletions: ch.deletions,
+                        },
+                        title: ch.title.clone(),
+                        at: runs.iter().map(|r| r.updated_at).max().unwrap_or(0),
+                        topic: Some((g.id.clone(), t.id.clone())),
+                        state: Some(match ch.state {
+                            v2::ChangeState::Merged => pages::DeliveryState::Merged,
+                            _ if t.waiting_on.iter().any(|w| Some(w) == me.as_ref()) => {
+                                pages::DeliveryState::WaitsOnMe
+                            }
+                            _ => pages::DeliveryState::Open,
+                        }),
+                    });
+                }
+                for a in self.artifacts(&g.id, &t.id) {
+                    if a.created_by == member_id && a.updated_at >= week_ago {
+                        extras.pages_this_week += 1;
+                        extras.deliveries.push(pages::Delivery {
+                            kind: pages::DeliveryKind::Artifact {
+                                artifact_id: a.id.clone(),
+                                version: a.version,
+                            },
+                            title: a.title.clone(),
+                            at: a.updated_at,
+                            topic: Some((g.id.clone(), t.id.clone())),
+                            state: None,
+                        });
+                    }
+                }
+                extras
+                    .decisions
+                    .extend(self.topic_decisions(&g.id, &t.id));
+            }
+        }
+        if !spans.is_empty() {
+            extras.avg_topic_ms = Some(spans.iter().sum::<u64>() / spans.len() as u64);
+        }
+        extras.deliveries.sort_by_key(|d| std::cmp::Reverse(d.at));
+        extras.deliveries.truncate(5);
+        extras.tools = self
+            .member_stats(member_id)
+            .map(|s| s.tools)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|name| pages::MemberTool {
+                name,
+                access: None,
+                detail: None,
+            })
+            .collect();
+        extras
+    }
+    /// 重试 on 最近的问题: asks the member to run again.
+    fn retry_member_problem(&self, _member_id: &str, _run_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 页面里的回应 of a 产出, oldest first.
+    fn artifact_responses(&self, _artifact_id: &str) -> Vec<pages::ArtifactResponse> {
+        Vec::new()
+    }
+    /// Events a version of a 产出 page may send back (`emitEvent`): only
+    /// declared names, and only on versions a bot member made.
+    fn artifact_page_events(&self, _artifact_id: &str, _version: u32) -> Vec<String> {
+        Vec::new()
+    }
+    /// Forwards an event from a 产出 page to the bot that made it
+    /// (`artifact.event`).
+    fn send_artifact_event(
+        &self,
+        _artifact_id: &str,
+        _version: u32,
+        _name: &str,
+        _payload: Option<serde_json::Value>,
+    ) {
+    }
+
+    // --- end pages track ---
 
     // --- changes ---
 
