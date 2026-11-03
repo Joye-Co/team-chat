@@ -1091,6 +1091,8 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let k = theme::colors(cx);
     // --- inc-cards21: my live event waits (blue 处理中), 2.1 words, the deadline ---
     // inc-integrate: a page event of an embed in this card waits too (the page host).
+    // v11/pb-cards: the spinner only while the author works on it, a still mark after.
+    let spins = super::v21::band::pending(ctx).map(|(p, _, _)| super::v21::interact::spins(p.stage));
     let waiting = super::v21::band::pending(ctx)
         .map(|(_, l, d)| (l, d))
         .or_else(|| super::v21::band::page_pending(ctx, cx));
@@ -1139,6 +1141,9 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .items_center()
             .gap(space::S8)
             .child(match &waiting {
+                Some(_) if spins == Some(false) => {
+                    ui::icon(Lucide::CircleAlert, px(16.), t.mark).into_any_element()
+                }
                 Some(_) => ui::motion::spinner().color(t.mark).into_any_element(),
                 None => strip_icon(ctx.state, &t, ctx, cx),
             })

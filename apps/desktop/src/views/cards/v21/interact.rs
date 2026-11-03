@@ -390,6 +390,12 @@ pub fn resolved_note(events: &[MyCardEvent], block: &str, now: Millis) -> Option
     })
 }
 
+/// True while the author may still be working on the event (a spinner); false once it
+/// will not come (no answer, offline, busy).
+pub fn spins(stage: Stage) -> bool {
+    matches!(stage, Stage::Quiet | Stage::Wait | Stage::Slow)
+}
+
 /// Words of a pending stage for the band.
 pub fn stage_words(stage: Stage, name: &str) -> String {
     let t = match stage {
