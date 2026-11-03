@@ -2,6 +2,7 @@
 // These frames never reach desktop clients, except the run log entries (`RunLogEntry`), which
 // clients read with `GET /v1/runs/:id/events`.
 import { z } from "zod";
+import { CardRev } from "./card2.ts";
 import { Id, Millis, Seq } from "./common.ts";
 import { RunPlan } from "./plan.ts";
 
@@ -250,7 +251,7 @@ export type RunAssignFrame = z.infer<typeof RunAssignFrame>;
 /** A Card v2 answer given to a run (`run.input.answer`). */
 export const RunAnswer = z.object({
   messageId: Id,
-  rev: z.int().positive(),
+  rev: CardRev,
   actionId: z.string().min(1).max(64),
   inputs: z.record(z.string(), z.json()).optional(),
   editedValues: z.record(z.string(), z.string()).optional(),

@@ -1,0 +1,17 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.input",
+    "runId": "01JBX0RUN000000000000000AU",
+    "inputId": "01JBX0INPUT0000000000000AX",
+    "text": "[card answer] ok",
+    "authorId": "01JBX0ALICE0000000000000AB",
+    "answer": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "rev": 4294967295,
+      "actionId": "ok",
+      "actorId": "01JBX0ALICE0000000000000AB"
+    }
+  }
+}

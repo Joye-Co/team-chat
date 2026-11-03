@@ -818,7 +818,7 @@ keeps holding a v1 card, so 1.0.x clients still render and press the message. **
 ```ts
 CardV2 = {
   v: 2
-  rev: number                       // >= 1; every edit sends a higher rev
+  rev: number                       // 1..4294967295; every edit sends a higher rev
   intent: "ask" | "done" | "working" | "info"
   title: string                     // 1..200
   fallback: string                  // <= 4000, plain text: old clients, notifications, search
@@ -871,6 +871,10 @@ message.updated data += { cardV2? }            // present = replaced
   inputs?: Record<blockId, JSON>, editedValues?: Record<blockId, string> }   // ack, no result
 card.answered (stored event) data: { messageId, rev, actionId, inputs?, editedValues? }  // actorId = answerer
 ```
+
+Every `rev` (the card, `card.answer`, `card.answered`, `GroupDecision` and the run input
+`answer`) is an integer from 1 to 4294967295 (2^32 - 1): clients store it as an unsigned
+32-bit integer. The server rejects a higher value (`invalid`).
 
 Rules:
 

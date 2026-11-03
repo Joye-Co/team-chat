@@ -1,7 +1,7 @@
 // 1.1 fixtures: Card v2, card answers, side chat context, run fields, artifact events and
 // topic links. Called by gen-fixtures.ts. The machine frames of 1.1 are daemon golden lines
 // (apps/daemon/tests/fixtures/machine/*.jsonl), added by fixtures-bots.ts.
-import { cardV2ToV1, MAX_CARD_V2_ACTIONS } from "../src/index.ts";
+import { cardV2ToV1, MAX_CARD_REV, MAX_CARD_V2_ACTIONS } from "../src/index.ts";
 import type { CardV2 } from "../src/index.ts";
 
 type Obj = Record<string, unknown>;
@@ -154,6 +154,14 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   ok("events/card.answered.json", "Event", { ...base, seq: 43, type: "card.answered", data: { messageId: ID.msg, rev: 1, actionId: "ship", inputs: { when: "tonight" }, editedValues: { notes: "x" } } });
   ok("events/card.answered-minimal.json", "Event", { ...base, seq: 44, type: "card.answered", data: { messageId: ID.msg, rev: 2, actionId: "later" } });
 
+  // rev is 1..MAX_CARD_REV (u32 in clients).
+  ok("entities/card2-rev-max.json", "CardV2", { ...info, rev: MAX_CARD_REV }, "the highest rev");
+  bad("entities/card2-rev-too-big.json", "CardV2", { ...info, rev: MAX_CARD_REV + 1 }, "rev is at most 4294967295");
+  ok("client/card.answer-rev-max.json", "ClientFrame", { t: "card.answer", rid: "r97", groupId: ID.general, messageId: ID.msg, rev: MAX_CARD_REV, actionId: "ok" });
+  bad("client/card.answer-rev-too-big.json", "ClientFrame", { t: "card.answer", rid: "r98", groupId: ID.general, messageId: ID.msg, rev: MAX_CARD_REV + 1, actionId: "ok" }, "rev is at most 4294967295");
+  ok("events/card.answered-rev-max.json", "Event", { ...base, seq: 47, type: "card.answered", data: { messageId: ID.msg, rev: MAX_CARD_REV, actionId: "ok" } });
+  bad("events/card.answered-rev-too-big.json", "Event", { ...base, seq: 48, type: "card.answered", data: { messageId: ID.msg, rev: MAX_CARD_REV + 1, actionId: "ok" } }, "rev is at most 4294967295");
+
   // -------------------------------------------------------------------------
   // Side chats: send.context and Topic.contextOf
   // -------------------------------------------------------------------------
@@ -263,6 +271,18 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
     seq: 53, messageId: ID.msg, topicId: ID.topic, rev: 2, title: "合并吗？", actionId: "ok", actionLabel: "好",
     answeredBy: ID.owner, answeredAt: T0,
   });
+  ok("http/group-decision-rev-max.json", "GroupDecision", { ...decision, rev: MAX_CARD_REV });
+  bad("http/group-decision-rev-too-big.json", "GroupDecision", { ...decision, rev: MAX_CARD_REV + 1 }, "rev is at most 4294967295");
+  const runAnswer = (rev: number) => ({
+    t: "run.input",
+    runId: X.run,
+    inputId: "01JBX0INPUT0000000000000AX",
+    text: "[card answer] ok",
+    authorId: ID.alice,
+    answer: { messageId: ID.msg, rev, actionId: "ok", actorId: ID.alice },
+  });
+  ok("machine/down-run.input-answer-rev-max.json", "MachineDownFrame", runAnswer(MAX_CARD_REV));
+  bad("machine/down-run.input-answer-rev-too-big.json", "MachineDownFrame", runAnswer(MAX_CARD_REV + 1), "rev is at most 4294967295");
   const { answeredBy: _who, ...anonymous } = decision;
   bad("http/group-decision-no-answerer.json", "GroupDecision", anonymous, "a decision names who answered");
   ok("http/decisions-response.json", "DecisionsResponse", { decisions: [decision], hasMore: false });

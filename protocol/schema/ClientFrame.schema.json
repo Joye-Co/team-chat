@@ -563,7 +563,7 @@
             "rev": {
               "type": "integer",
               "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 4294967295
             },
             "intent": {
               "type": "string",
@@ -3264,7 +3264,7 @@
             "rev": {
               "type": "integer",
               "exclusiveMinimum": 0,
-              "maximum": 9007199254740991
+              "maximum": 4294967295
             },
             "intent": {
               "type": "string",
@@ -5864,7 +5864,7 @@
         "rev": {
           "type": "integer",
           "exclusiveMinimum": 0,
-          "maximum": 9007199254740991
+          "maximum": 4294967295
         },
         "actionId": {
           "type": "string",

@@ -37,6 +37,10 @@ export const MAX_CHART_POINTS = 200;
 export const MAX_ASK_FROM = 20;
 /** Max UTF-8 bytes of `data` as JSON. */
 export const MAX_CARD_DATA_BYTES = 16_384;
+/** The highest card `rev`: clients store it as an unsigned 32-bit integer. */
+export const MAX_CARD_REV = 4_294_967_295;
+/** A Card v2 `rev`: 1..MAX_CARD_REV. */
+export const CardRev = z.int().positive().max(MAX_CARD_REV);
 /** Max UTF-8 bytes of `inputs` and `editedValues` of one answer, as JSON together. */
 export const MAX_CARD_ANSWER_BYTES = 65_536;
 /** Max UTF-8 bytes of an input's `default` as JSON. */
@@ -264,7 +268,7 @@ export const CardV2 = z
   .object({
     v: z.literal(CARD_V2_VERSION),
     /** 1 at first; every edit sends a higher rev. Answers name the rev they answer. */
-    rev: z.int().positive(),
+    rev: CardRev,
     intent: CardIntent,
     title: Short(200),
     /** Plain text for old clients, notifications and search; also the v1 card's first block. */
@@ -302,7 +306,7 @@ const AnswerEdits = z.record(BlockId, Text(32_768));
 const answerFields = {
   messageId: Id,
   /** The `rev` of the card the answer was made on. */
-  rev: z.int().positive(),
+  rev: CardRev,
   actionId: ActionId,
   /** Values of `decision` (option id or ids) and `input` blocks, by block id. */
   inputs: AnswerInputs.optional(),
@@ -337,7 +341,7 @@ export const GroupDecision = z.object({
   seq: Seq,
   messageId: Id,
   topicId: Id,
-  rev: z.int().positive(),
+  rev: CardRev,
   /** The card title at the answered rev: the question. */
   title: z.string().min(1).max(200),
   actionId: ActionId,

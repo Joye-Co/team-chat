@@ -97,7 +97,7 @@ KnownRun = { runId, ackedSeq: number }
 { t: "run.cancel",   runId, reason? }
 { t: "run.pause",    runId, by? }                                // 1.1, feature "pause"
 { t: "run.resume",   runId, note? /* <= 2000 */ }                // 1.1, feature "pause"
-RunAnswer = { messageId, rev, actionId, inputs?: Record<string, JSON>,
+RunAnswer = { messageId, rev /* 1..4294967295 */, actionId, inputs?: Record<string, JSON>,
               editedValues?: Record<string, string>, actorId }
 RunArtifactEvent = { artifactId, version, name, payload?: JSON, actorId }
 { t: "ack",          runId, seq }                                // cumulative: every frame <= seq is stored
