@@ -275,9 +275,15 @@ fn render_table(
     let colors = theme::colors(cx);
     // inc-refs: cells, columns and the 问这里 slot at the end of each row.
     let table_refs = refs.map(|r| r.table(columns, rows));
-    let widths: Vec<f32> = (0..columns.len())
+    let mut widths: Vec<f32> = (0..columns.len())
         .map(|i| column_width(columns, rows, i))
         .collect();
+    // Room for 问这里 after a row's name (Refs.dc.html).
+    if table_refs.is_some()
+        && let Some(w) = widths.first_mut()
+    {
+        *w += crate::views::refs::markdown::NAME_ROOM;
+    }
     let expanded = is_expanded(key, cx);
     let shown = if expanded {
         rows.len()
@@ -292,6 +298,8 @@ fn render_table(
             .flex_none()
             .px(space::S10)
             .py(space::S6)
+            .flex()
+            .items_center()
             .child(text)
     };
     let header = div()
@@ -330,14 +338,25 @@ fn render_table(
             Some(r) => r.row(line, ri, window, cx),
             None => line,
         };
+        // 问这里 after the row's name when the first column holds both (Refs.dc.html).
+        let beside = table_refs.as_ref().is_some_and(|r| {
+            let name = row.first().map(String::as_str).unwrap_or("");
+            let inner = widths.first().map(|w| w - 2. * f32::from(space::S10));
+            r.beside(name, inner, window)
+        });
         line.children(widths.iter().enumerate().map(|(i, w)| {
-            let el = cell(row.get(i).cloned().unwrap_or_default(), *w);
+            let mut el = cell(row.get(i).cloned().unwrap_or_default(), *w);
+            if i == 0 && beside {
+                el = el.children(table_refs.as_ref().and_then(|r| r.name_button(ri, 0., cx)));
+            }
             match &table_refs {
                 Some(r) => r.cell(el, ri, i, window, cx),
                 None => el.into_any_element(),
             }
         }))
-        .when_some(table_refs.as_ref(), |el, r| el.child(r.row_end(ri, cx)))
+        .when_some(table_refs.as_ref(), |el, r| {
+            el.child(r.row_end_unless(ri, beside, cx))
+        })
     });
     div()
         .flex()

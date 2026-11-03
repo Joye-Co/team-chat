@@ -425,7 +425,13 @@ pub(crate) fn table_with_refs(
                 .border_color(k.line)
                 .text_color(k.ink_3)
                 .children(columns.iter().enumerate().map(|(ci, col)| {
-                    let el = cell(ci, col, true, false);
+                    let mut el = cell(ci, col, true, false);
+                    if ci == 0
+                        && let Some((r, _)) = refs
+                    {
+                        // The first column grows: its width for 问这里 after a row's name.
+                        el = el.relative().child(r.measure(0.));
+                    }
                     match refs {
                         Some((r, w)) => r.header(el, ci, w, cx),
                         None => el.into_any_element(),
@@ -453,19 +459,31 @@ pub(crate) fn table_with_refs(
                 Some((rf, w)) => rf.row(line, ri, w, cx),
                 None => line,
             };
+            // 问这里 after the row's name when the first column holds both (Refs.dc.html).
+            let beside = refs.is_some_and(|(rf, w)| {
+                !numeric_col.first().copied().unwrap_or(false)
+                    && rf.beside(r.first().map(String::as_str).unwrap_or(""), None, w)
+            });
             line.children((0..columns.len()).map(|ci| {
-                let el = cell(
+                let mut el = cell(
                     ci,
                     r.get(ci).map(String::as_str).unwrap_or(""),
                     false,
                     total,
                 );
+                if ci == 0 && beside {
+                    el = el.children(
+                        refs.and_then(|(rf, _)| rf.name_button(ri, f32::from(space::S8), cx)),
+                    );
+                }
                 match refs {
                     Some((rf, w)) => rf.cell(el, ri, ci, w, cx),
                     None => el.into_any_element(),
                 }
             }))
-            .when_some(refs, |el, (rf, _)| el.child(rf.row_end(ri, cx)))
+            .when_some(refs, |el, (rf, _)| {
+                el.child(rf.row_end_unless(ri, beside, cx))
+            })
         }))
         .into_any_element()
 }

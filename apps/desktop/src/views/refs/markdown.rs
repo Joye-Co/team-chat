@@ -53,6 +53,20 @@ impl RefsBody {
 /// Width of the slot at the end of each row that holds 问这里.
 pub const ROW_BUTTON_SLOT: f32 = 76.;
 
+/// The gap between a row's name and its 问这里 (Refs.dc.html).
+const NAME_GAP: f32 = 10.;
+/// The width of the 问这里 button (icon, label and padding at the extra-small size).
+const ASK_PILL: f32 = 68.;
+/// The room a table with references adds to its first column, so 问这里 fits after a
+/// row's name.
+pub const NAME_ROOM: f32 = NAME_GAP + ASK_PILL;
+
+thread_local! {
+    /// The first column's inner width of each table at its last paint, by table prefix.
+    static FIRST_COL: std::cell::RefCell<std::collections::HashMap<String, f32>> =
+        std::cell::RefCell::default();
+}
+
 /// The references of one table: `target` builds the reference of a cell, row or column.
 #[derive(Clone)]
 pub struct TableRefs {
@@ -101,6 +115,95 @@ impl TableRefs {
             .when(focused, |el| {
                 el.child(super::keyboard::ring(theme::radius::MARK, cx))
             })
+    }
+
+    /// True when 问这里 of a row sits right after its name (Refs.dc.html: 「B 站 [问这里]」):
+    /// the first column holds the name, the gap and the button. `inner` is the first
+    /// column's width inside its padding; `None` takes the width the column had at its last
+    /// paint ([`TableRefs::measure`]). Else the button goes to the row's end.
+    pub fn beside(&self, name: &str, inner: Option<f32>, window: &Window) -> bool {
+        let Some(inner) =
+            inner.or_else(|| FIRST_COL.with(|m| m.borrow().get(&self.prefix).copied()))
+        else {
+            return false;
+        };
+        let style = window.text_style();
+        let run = gpui::TextRun {
+            len: name.len(),
+            font: style.font(),
+            color: style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        let w = window
+            .text_system()
+            .shape_line(
+                gpui::SharedString::from(name.to_string()),
+                theme::type_scale::SMALL.0,
+                &[run],
+                None,
+            )
+            .width;
+        f32::from(w) + NAME_GAP + ASK_PILL <= inner
+    }
+
+    /// 问这里 after the row's name, for the hovered cell of `row` (see [`TableRefs::beside`]).
+    /// Its holder has no height, so the row keeps its height when it shows. `gap`: the
+    /// cell's own gap between its children, already between the name and the button.
+    pub fn name_button(&self, row: usize, gap: f32, cx: &App) -> Option<AnyElement> {
+        let Some((col, true)) = self.hovered_in(row, cx) else {
+            return None;
+        };
+        let target = self.target.clone();
+        let id = self.cell_id(row, col);
+        Some(
+            div()
+                .flex_none()
+                .ml(px((NAME_GAP - gap).max(0.)))
+                .h(px(0.))
+                .flex()
+                .items_center()
+                .child(super::affordance::inline_button(
+                    &id,
+                    Rc::new(move |_: &App| {
+                        target(TablePick::Cell { row, col }).unwrap_or_else(super::empty_target)
+                    }),
+                    cx,
+                ))
+                .into_any_element(),
+        )
+    }
+
+    /// Records the first column's width at paint, for [`TableRefs::beside`] on a table
+    /// whose first column grows. Put it in the first header cell; `pad` is its padding.
+    pub fn measure(&self, pad: f32) -> AnyElement {
+        let prefix = self.prefix.clone();
+        gpui::canvas(
+            move |bounds, _, _| {
+                let w = f32::from(bounds.size.width) - 2. * pad;
+                FIRST_COL.with(|m| m.borrow_mut().insert(prefix.clone(), w));
+            },
+            |_, _, _, _| {},
+        )
+        .absolute()
+        .left_0()
+        .top_0()
+        .size_full()
+        .into_any_element()
+    }
+
+    /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
+    /// and centered on its height (REFS §A3), when it does not sit after the row's name.
+    pub fn row_end_unless(&self, row: usize, beside: bool, cx: &App) -> AnyElement {
+        if beside {
+            return div()
+                .ml_auto()
+                .w(px(ROW_BUTTON_SLOT))
+                .flex_none()
+                .into_any_element();
+        }
+        self.row_end(row, cx)
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
@@ -391,9 +494,14 @@ pub fn table(
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);
-    let widths: Vec<f32> = (0..columns.len())
+    let mut widths: Vec<f32> = (0..columns.len())
         .map(|i| column_width(columns, rows, i))
         .collect();
+    if refs.is_some()
+        && let Some(w) = widths.first_mut()
+    {
+        *w += NAME_ROOM;
+    }
     let cell = |text: String, width: f32, right: bool| -> Div {
         div()
             .w(px(width))
@@ -401,6 +509,7 @@ pub fn table(
             .px(space::S10)
             .py(space::S6)
             .flex()
+            .items_center()
             .when(right, |d| d.justify_end())
             .child(text)
     };
@@ -426,19 +535,28 @@ pub fn table(
         if let Some(r) = refs {
             line = r.row(line, ri, window, cx);
         }
+        // 问这里 after the row's name when the first column holds both (Refs.dc.html).
+        let name = row.first().cloned().unwrap_or_default();
+        let beside = refs.is_some_and(|r| {
+            let inner = widths.first().map(|w| w - 2. * f32::from(space::S10));
+            !right.first().copied().unwrap_or(false) && r.beside(&name, inner, window)
+        });
         for (ci, w) in widths.iter().enumerate() {
-            let el = cell(
+            let mut el = cell(
                 row.get(ci).cloned().unwrap_or_default(),
                 *w,
                 right.get(ci).copied().unwrap_or(false),
             );
+            if ci == 0 && beside {
+                el = el.children(refs.and_then(|r| r.name_button(ri, 0., cx)));
+            }
             line = line.child(match refs {
                 Some(r) => r.cell(el, ri, ci, window, cx),
                 None => el.into_any_element(),
             });
         }
         if let Some(r) = refs {
-            line = line.child(r.row_end(ri, cx));
+            line = line.child(r.row_end_unless(ri, beside, cx));
         }
         line
     });
