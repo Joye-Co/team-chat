@@ -663,6 +663,27 @@ impl ChatProvider for WorstCase {
     fn artifact_poster(&self, artifact_id: &str, version: u32) -> Option<std::path::PathBuf> {
         self.inner.artifact_poster(artifact_id, version)
     }
+    fn page_signals(&self) -> Option<UnboundedReceiver<page_host::PageSignal>> {
+        self.inner.page_signals()
+    }
+    fn artifact_responses(&self, artifact_id: &str) -> Vec<pages::ArtifactResponse> {
+        self.inner.artifact_responses(artifact_id)
+    }
+    fn file_media(&self, file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
+        self.inner.file_media(file)
+    }
+    fn artifact_media(&self, artifact_id: &str, version: u32) -> Option<chat_core::proto::MediaInfo> {
+        self.inner.artifact_media(artifact_id, version)
+    }
+    fn upload_generating(&self, key: &str) -> bool {
+        self.inner.upload_generating(key)
+    }
+    fn media_duration(&self, file: &FileAttachment) -> Option<u64> {
+        self.inner.media_duration(file)
+    }
+    fn artifact_preview(&self, artifact_id: &str, version: u32) -> Option<v2::ArtifactPreview> {
+        self.inner.artifact_preview(artifact_id, version)
+    }
     // --- end inc-host track ---
     fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
         self.inner.create_artifact(request)
@@ -889,6 +910,41 @@ impl ChatProvider for WorstCase {
         self.inner
             .withdraw_card_v2_answer(group_id, topic_id, message_id)
     }
+    // Card v2.1 events: my events, their acks and the pending, retry and drop states, so
+    // the worst-case shots show the interaction states with worst-case names.
+    fn send_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        self.inner
+            .send_card_event(group_id, topic_id, message_id, request)
+    }
+    fn card_v2_events(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        self.inner.card_v2_events(group_id, message_id)
+    }
+    fn drop_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        self.inner
+            .drop_card_event(group_id, topic_id, message_id, client_event_id)
+    }
+    fn retry_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) -> bool {
+        self.inner
+            .retry_card_event(group_id, topic_id, message_id, client_event_id)
+    }
     // --- end cards v2 track ---
 }
 
@@ -1010,5 +1066,27 @@ impl ChatProvider for Empty {
     }
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {
         self.inner.send_diagnostics(description)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The worst-case shots show the Card v2.1 interaction states: my events reach the
+    /// cards through the wrapper (they fell back to the trait's empty default before).
+    #[test]
+    fn worst_case_forwards_my_card_events() {
+        let inner = crate::fake::v2::V2Samples::new();
+        let id = crate::views::cards::v21::samples::PEND_WAIT;
+        let group = crate::fake::v2::GROWTH;
+        let mine = inner.card_v2_events(group, id);
+        assert!(!mine.is_empty(), "the sample waits on an event");
+        let worst = WorstCase::new(inner);
+        let seen = worst.card_v2_events(group, id);
+        assert_eq!(
+            seen.iter().map(|e| &e.client_event_id).collect::<Vec<_>>(),
+            mine.iter().map(|e| &e.client_event_id).collect::<Vec<_>>()
+        );
     }
 }
