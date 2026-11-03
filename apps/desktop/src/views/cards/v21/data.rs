@@ -253,7 +253,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     col.into_any_element()
 }
 
-pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
+pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Chart {
         id,
         kind,
@@ -269,6 +269,8 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     };
     let ctx = node.ctx;
     let k = theme::colors(cx);
+    // 引用提问: the points (bars) of the main series are parts (REFS §A2.2).
+    let parts = b20::block_parts(ctx, b, cx);
     let xs = x.clone().unwrap_or_default();
     let drawn = super::super::v2::chart_el(
         ctx.id(format!("chart-{id}")),
@@ -329,6 +331,18 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             ],
         ))
     });
+    let overlay = parts
+        .as_ref()
+        .filter(|_| !selectable)
+        .and_then(|p| {
+            crate::views::refs::cards::chart_overlay(
+                p,
+                crate::views::refs::cards::chart_plot_top(b),
+                m::CHART,
+                window,
+                cx,
+            )
+        });
     // The chosen and the hovered column get a quiet tint drawn under the series, so the
     // bar or point stays in sight; a clear hit layer on top takes the clicks.
     let hot = node.ui.block(id).hot;
@@ -353,6 +367,7 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .relative()
             .child(tint)
             .child(drawn)
+            .children(overlay)
             .when(selectable, |el| {
                 let emit = Emitter::of(ctx);
                 let uie = ctx.ui.clone();
@@ -374,7 +389,7 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     );
                     let (uih, blockh) = (uie.clone(), block.clone());
                     let y = values.get(i).copied().flatten();
-                    div()
+                    let col = div()
                         .id(eid(node, format!("pt-{block}-{i}")))
                         .flex_1()
                         .h_full()
@@ -428,7 +443,19 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                                 Some(part),
                                 cx,
                             );
-                        })
+                        });
+                    // A point that answers is a control: ⌥-click and the menu reference
+                    // it, a plain click still picks it.
+                    match &parts {
+                        Some(p) => crate::views::refs::affordance::part(
+                            col,
+                            p.spec(crate::views::refs::cards::Pick::Point { series: 0, x: i })
+                                .control(true),
+                            window,
+                            cx,
+                        ),
+                        None => col.into_any_element(),
+                    }
                 })))
             }),
     );
@@ -450,9 +477,10 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     out.into_any_element()
 }
 
-pub fn metric(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
+pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
-    let el = b20::metrics(&[b], cx);
+    let parts = crate::views::refs::cards::CardParts::of(ctx, cx);
+    let el = b20::metrics_with(&[b], parts.as_ref(), Some(window), cx);
     let Some(id) = b.id() else { return el };
     if !(super::interact::sends(ctx.card, b, "metric.press") && super::interact::may_emit(ctx, b)) {
         return el;

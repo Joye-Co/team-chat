@@ -10,6 +10,7 @@
 //! Every affordance hides when the server does not list `refs/1` in `welcome.features`.
 
 pub mod affordance;
+pub mod cards;
 pub mod chips;
 pub mod label;
 pub mod markdown;

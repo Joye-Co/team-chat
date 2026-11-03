@@ -249,7 +249,13 @@ pub fn wrap(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    if !referenceable(b) || !shown(node, cx) || table_parts(b) {
+    // Tables and the blocks with parts (items, steps, points, metrics, proofs, images)
+    // reference their parts; a whole-block 问这里 there would show a second button.
+    if !referenceable(b)
+        || !shown(node, cx)
+        || table_parts(b)
+        || crate::views::refs::cards::has_parts(b)
+    {
         return el;
     }
     let ctx = node.ctx;

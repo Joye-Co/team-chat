@@ -29,7 +29,16 @@ use crate::{
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
     ui::{self, Lucide},
+    views::refs::{
+        affordance::Anchor,
+        cards::{self as ref_parts, BlockParts, CardParts, Pick},
+    },
 };
+
+/// The 引用提问 parts of block `b` (REFS §A2.2), where they show.
+pub(crate) fn block_parts(ctx: &Ctx, b: &CardV2Block, cx: &App) -> Option<BlockParts> {
+    CardParts::of(ctx, cx)?.block(b)
+}
 
 /// 13/20.
 pub(crate) fn small(el: Div) -> Div {
@@ -84,7 +93,12 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
             }
             CardV2Block::Metric { .. } => {
                 let j = run_end(&|x| matches!(x, CardV2Block::Metric { .. }));
-                (Some(metrics(&blocks[i..j], cx)), j, space::S12)
+                let parts = CardParts::of(ctx, cx);
+                (
+                    Some(metrics_with(&blocks[i..j], parts.as_ref(), Some(window), cx)),
+                    j,
+                    space::S12,
+                )
             }
             CardV2Block::Evidence { .. } => {
                 let j = run_end(&|x| matches!(x, CardV2Block::Evidence { .. }));
@@ -145,7 +159,11 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
                     }
                     _ => None,
                 };
-                (Some(plan(ctx, b, progress, cx)), i + 1, space::S12)
+                (
+                    Some(plan(ctx, b, progress, Some(window), cx)),
+                    i + 1,
+                    space::S12,
+                )
             }
             _ => (Some(block(ctx, b, i, window, cx)), i + 1, space::S12),
         };
@@ -184,12 +202,24 @@ pub(crate) fn block(
             .into_any_element(),
         CardV2Block::Fields { fields, .. } => fields_grid(fields, cx),
         CardV2Block::Table { columns, rows, .. } => table(columns, rows, cx),
-        CardV2Block::List { items, .. } => list(items, cx),
+        CardV2Block::List { items, .. } => {
+            list_with(items, block_parts(ctx, b, cx).as_ref(), Some(window), cx)
+        }
         CardV2Block::Progress { value, label, .. } => {
             progress_bar(value.as_f64().unwrap_or(0.), label.as_deref(), None, cx)
         }
         CardV2Block::Code { text, .. } => code(text, cx),
-        CardV2Block::Image { file_id, alt, .. } => image(ctx, file_id, alt.as_deref(), cx),
+        CardV2Block::Image { file_id, alt, .. } => {
+            let el = image(ctx, file_id, alt.as_deref(), cx);
+            ref_parts::wrap_opt(
+                block_parts(ctx, b, cx).as_ref(),
+                Pick::Image,
+                el,
+                Anchor::Corner,
+                Some(window),
+                cx,
+            )
+        }
         CardV2Block::Divider { .. } => div().h(px(1.)).bg(k.line).into_any_element(),
         CardV2Block::Link { label, target, .. } => link(ctx, label, target, ix, cx),
         CardV2Block::Decision {
@@ -208,8 +238,10 @@ pub(crate) fn block(
         ),
         CardV2Block::Input { .. } => form_grid(ctx, &[b], window, cx),
         CardV2Block::Draft { .. } => draft_well(ctx, &[b], window, cx),
-        CardV2Block::Plan { .. } => plan(ctx, b, None, cx),
-        CardV2Block::Metric { .. } => metrics(&[b], cx),
+        CardV2Block::Plan { .. } => plan(ctx, b, None, Some(window), cx),
+        CardV2Block::Metric { .. } => {
+            metrics_with(&[b], CardParts::of(ctx, cx).as_ref(), Some(window), cx)
+        }
         CardV2Block::Chart {
             kind,
             label,
@@ -217,15 +249,28 @@ pub(crate) fn block(
             x,
             series,
             ..
-        } => super::chart::chart(
-            ctx.id(format!("chart-{ix}")),
-            *kind,
-            label.as_deref(),
-            unit.as_deref(),
-            x.as_deref().unwrap_or(&[]),
-            series,
-            cx,
-        ),
+        } => {
+            let el = super::chart::chart(
+                ctx.id(format!("chart-{ix}")),
+                *kind,
+                label.as_deref(),
+                unit.as_deref(),
+                x.as_deref().unwrap_or(&[]),
+                series,
+                cx,
+            );
+            // 引用提问: the points (bars) of the main series.
+            match block_parts(ctx, b, cx).and_then(|p| {
+                ref_parts::chart_overlay(&p, ref_parts::chart_plot_top(b), m::CHART, window, cx)
+            }) {
+                Some(overlay) => div()
+                    .relative()
+                    .child(el)
+                    .child(overlay)
+                    .into_any_element(),
+                None => el,
+            }
+        }
         CardV2Block::Diff {
             path,
             text,
@@ -412,12 +457,24 @@ pub(crate) fn table_with_refs(
 }
 
 pub(crate) fn list(items: &[CardListItem], cx: &App) -> AnyElement {
+    list_with(items, None, None, cx)
+}
+
+/// [`list`] with the 引用提问 part of each item (REFS §A2.2 `item`).
+pub(crate) fn list_with(
+    items: &[CardListItem],
+    parts: Option<&BlockParts>,
+    window: Option<&Window>,
+    cx: &App,
+) -> AnyElement {
     let k = theme::colors(cx);
+    let parts = parts.zip(window);
     small(div())
         .flex()
         .flex_col()
         .gap(space::S4)
-        .children(items.iter().map(|it| {
+        .children(items.iter().enumerate().map(|(i, it)| {
+            let pick = Pick::Item(i);
             let (glyph, color, text) = match it.status {
                 Some(CardListStatus::Done) => (Some(Lucide::Check), k.ink_3, k.ink_2),
                 Some(CardListStatus::InProgress) => (None, k.live, k.ink),
@@ -425,11 +482,13 @@ pub(crate) fn list(items: &[CardListItem], cx: &App) -> AnyElement {
                 Some(CardListStatus::Skipped) => (Some(Lucide::Minus), k.ink_3, k.ink_3),
                 Some(CardListStatus::Todo) | None => (None, k.ink_3, k.ink_2),
             };
-            div()
+            let row = div()
+                .id(SharedString::from(format!("list-item-{i}")))
                 .flex()
                 .items_center()
                 .gap(space::S10)
                 .min_h(px(24.))
+                .when(parts.is_some(), |el| el.mx(-space::S4).px(space::S4))
                 .child(
                     div().flex_none().w(px(16.)).flex().justify_center().child(
                         match (glyph, it.status) {
@@ -451,9 +510,16 @@ pub(crate) fn list(items: &[CardListItem], cx: &App) -> AnyElement {
                     div()
                         .flex_1()
                         .min_w(px(0.))
-                        .text_color(text)
-                        .child(it.text.clone()),
-                )
+                        .flex()
+                        .items_center()
+                        .gap(space::S8)
+                        .child(div().min_w(px(0.)).text_color(text).child(it.text.clone()))
+                        .children(parts.and_then(|(p, _)| p.button(pick, cx))),
+                );
+            match parts {
+                Some((p, w)) => p.wrap_own(pick, row, w, cx),
+                None => row.into_any_element(),
+            }
         }))
         .into_any_element()
 }
@@ -527,13 +593,19 @@ fn code(text: &str, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> AnyElement {
+fn image(
+    ctx: &Ctx,
+    file_id: &str,
+    alt: Option<&str>,
+    cx: &App,
+) -> gpui::Stateful<Div> {
     let k = theme::colors(cx);
     let path = ctx
         .env
         .provider
         .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file_id);
     div()
+        .id(ctx.id(format!("image-{file_id}")))
         .w(px(320.))
         .h(px(200.))
         .rounded(theme::radius::MD)
@@ -548,7 +620,6 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> AnyElement {
                     .child(meta(div()).text_color(k.ink_3).child(a.to_string()))
             }),
         })
-        .into_any_element()
 }
 
 fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> AnyElement {
@@ -1551,9 +1622,12 @@ fn plan(
     ctx: &Ctx,
     b: &CardV2Block,
     progress: Option<(f64, Option<String>)>,
+    window: Option<&Window>,
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);
+    // 引用提问: each step is a part (REFS §A2.2 `step`); 问这里 follows its text.
+    let parts = window.and_then(|w| block_parts(ctx, b, cx).map(|p| (p, w)));
     let CardV2Block::Plan { items, .. } = b else {
         return div().into_any_element();
     };
@@ -1571,6 +1645,8 @@ fn plan(
         .flex()
         .flex_col()
         .children(items.iter().enumerate().map(|(i, it)| {
+            let pick = Pick::Step(i);
+            let ask = parts.as_ref().and_then(|(p, _)| p.button(pick, cx));
             let current = it.state == RunPlanState::Current && !current_seen;
             if current {
                 current_seen = true;
@@ -1656,10 +1732,13 @@ fn plan(
                                     .text_color(k.ink_2)
                                     .child(fill(c::PLAN_WAITS_ON, &[("name", &waiting_on)])),
                             )
-                        }),
+                        })
+                        .children(ask.map(|a| div().flex_none().ml(space::S8).child(a))),
                 )
                 .children(right);
-            div()
+            let step = div()
+                .id(SharedString::from(format!("plan-step-{i}")))
+                .when(parts.is_some(), |el| el.mx(-space::S8).px(space::S8))
                 .when(current && bar.is_none(), |el| {
                     el.mx(-space::S8)
                         .px(space::S8)
@@ -1669,7 +1748,11 @@ fn plan(
                 .child(row)
                 .when_some(bar, |el, bar| {
                     el.child(div().pl(px(26.)).pb(space::S6).child(bar))
-                })
+                });
+            match &parts {
+                Some((p, w)) => p.wrap_own(pick, step, w, cx),
+                None => step.into_any_element(),
+            }
         }))
         .into_any_element()
 }
@@ -1696,11 +1779,22 @@ pub(crate) fn fmt_number(n: f64) -> String {
 }
 
 pub(crate) fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
+    metrics_with(blocks, None, None, cx)
+}
+
+/// [`metrics`] with the 引用提问 part of each metric (REFS §A2.2 `metric`).
+pub(crate) fn metrics_with(
+    blocks: &[&CardV2Block],
+    parts: Option<&CardParts>,
+    window: Option<&Window>,
+    cx: &App,
+) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .flex()
         .gap(space::S16)
         .children(blocks.iter().take(4).map(|b| {
+            let bp = parts.filter(|_| window.is_some()).and_then(|p| p.block(b));
             let CardV2Block::Metric {
                 label,
                 value,
@@ -1711,7 +1805,7 @@ pub(crate) fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 ..
             } = b
             else {
-                return div();
+                return div().into_any_element();
             };
             let v = value.as_f64().unwrap_or(0.);
             let d = delta.as_ref().and_then(|d| d.as_f64());
@@ -1741,11 +1835,18 @@ pub(crate) fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
             if matches!(better, Some(MetricBetter::Down)) && d.is_some() {
                 tail.push(c::METRIC_LOWER_BETTER.to_string());
             }
-            div()
+            let el = div()
+                .id(SharedString::from(format!(
+                    "metric-{}",
+                    b.id().unwrap_or_default()
+                )))
                 .flex_1()
                 .min_w(px(0.))
                 .flex()
                 .flex_col()
+                .when(bp.is_some(), |el| {
+                    el.mx(-space::S8).px(space::S8).my(-space::S4).py(space::S4)
+                })
                 .child(
                     meta(div())
                         .one_line()
@@ -1798,7 +1899,8 @@ pub(crate) fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                                 )
                             }),
                     )
-                })
+                });
+            ref_parts::wrap_opt(bp.as_ref(), Pick::Metric, el, Anchor::Corner, window, cx)
         }))
         .into_any_element()
 }
@@ -2009,9 +2111,12 @@ pub(crate) fn proof_chip(
 }
 
 fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut App) -> AnyElement {
-    let _ = window;
     let k = theme::colors(cx);
-    let mut thumbs: Vec<(String, Option<String>, String)> = Vec::new();
+    // 引用提问: each proof is a part (REFS §A2.2 evidence `image` / `item`).
+    let parts = CardParts::of(ctx, cx);
+    let part = |b: &CardV2Block| parts.as_ref().and_then(|p| p.block(b));
+    let window: &Window = window;
+    let mut thumbs: Vec<(String, Option<String>, String, Option<BlockParts>)> = Vec::new();
     let mut lines: Vec<AnyElement> = Vec::new();
     let mut chips: Vec<AnyElement> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
@@ -2027,9 +2132,10 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
             continue;
         };
         if let Some(f) = file_id {
-            thumbs.push((f.clone(), detail.clone(), label.clone()));
+            thumbs.push((f.clone(), detail.clone(), label.clone(), part(b)));
             continue;
         }
+        let bp = part(b);
         let glyph = match state {
             Some(EvidenceState::Pass) => Some((Lucide::Check, k.ok)),
             Some(EvidenceState::Fail) => Some((Lucide::X, k.bad)),
@@ -2038,8 +2144,8 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         // A result with a sentence of detail reads as a line; a bare count
         // as a chip.
         if let Some(d) = detail.as_ref().filter(|d| d.chars().count() > 8) {
-            lines.push(
-                div()
+            let line = div()
+                    .id(ctx.id(format!("proof-line-{i}")))
                     .flex()
                     .flex_col()
                     .gap(space::S2)
@@ -2052,19 +2158,27 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                             .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
                             .child(label.clone()),
                     )
-                    .child(meta(div()).text_color(k.ink_3).child(d.clone()))
-                    .into_any_element(),
-            );
+                    .child(meta(div()).text_color(k.ink_3).child(d.clone()));
+            lines.push(ref_parts::wrap_opt(
+                bp.as_ref(),
+                Pick::Evidence,
+                line,
+                Anchor::Corner,
+                Some(window),
+                cx,
+            ));
         } else {
             let text = match detail {
                 Some(d) => format!("{label} {d}"),
                 None => label.clone(),
             };
-            chips.push(proof_chip(
-                ctx.id(format!("proof-{i}")),
-                glyph,
-                text,
-                url.clone(),
+            let chip = proof_chip(ctx.id(format!("proof-{i}")), glyph, text, url.clone(), cx);
+            chips.push(ref_parts::wrap_opt(
+                bp.as_ref(),
+                Pick::Evidence,
+                div().id(ctx.id(format!("proof-part-{i}"))).child(chip),
+                Anchor::TopRight,
+                Some(window),
                 cx,
             ));
         }
@@ -2075,12 +2189,13 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         div()
             .flex()
             .gap(space::S8)
-            .children(thumbs.iter().take(shown).map(|(file, detail, label)| {
+            .children(thumbs.iter().take(shown).map(|(file, detail, label, bp)| {
                 let path = ctx
                     .env
                     .provider
                     .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file);
-                div()
+                let thumb = div()
+                    .id(ctx.id(format!("proof-shot-{file}")))
                     .flex_1()
                     .min_w(px(0.))
                     .h(m::THUMB)
@@ -2115,7 +2230,16 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                                     .one_line()
                                     .child(l.to_string())
                             })),
-                    })
+                    });
+                // The thumbnail clips, so the part wraps it: 问这里 sits inside its corner.
+                ref_parts::wrap_opt(
+                    bp.as_ref(),
+                    Pick::Evidence,
+                    div().id(ctx.id(format!("proof-shot-part-{file}"))).flex_1().min_w(px(0.)).child(thumb),
+                    Anchor::Corner,
+                    Some(window),
+                    cx,
+                )
             }))
             .when(more > 0, |el| {
                 el.child(

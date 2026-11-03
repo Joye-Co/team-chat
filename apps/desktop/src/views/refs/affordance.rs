@@ -32,6 +32,8 @@ pub enum Anchor {
     TopRight,
     /// At the end of a row, centered on its height (a table row, a diff line).
     RowEnd,
+    /// Inside the part, in its top-right corner (a metric: next to its label).
+    Corner,
 }
 
 /// One referenceable part.
@@ -45,9 +47,13 @@ pub struct PartSpec {
     /// answering stays the plain click; ⌥-click and the menu still work.
     pub control: bool,
     pub anchor: Anchor,
-    /// The hover look covers the part (cells and rows); off for parts with their own ring.
+    /// The hover look covers the part (cells and rows); off for parts that draw their own
+    /// hover look (a chart point's crosshair): no fill and no ring.
     pub fill: bool,
     pub radius: gpui::Pixels,
+    /// The renderer draws 问这里 itself (after a step's text, in a chart's tooltip) with
+    /// [`hover_state`] and [`inline_button`]; the part keeps the hover look and the rest.
+    pub own_button: bool,
 }
 
 impl PartSpec {
@@ -59,7 +65,13 @@ impl PartSpec {
             anchor: Anchor::TopRight,
             fill: true,
             radius: radius::SM,
+            own_button: false,
         }
+    }
+
+    pub fn own_button(mut self) -> Self {
+        self.own_button = true;
+        self
     }
 
     pub fn anchor(mut self, anchor: Anchor) -> Self {
@@ -186,7 +198,7 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
     };
     let alt = window.modifiers().alt;
     let show_button = shown && !spec.control;
-    let ring = (hovered && (alt || show_button)).then_some(k.line_2);
+    let ring = (spec.fill && hovered && (alt || show_button)).then_some(k.line_2);
     let id = spec.id.clone();
     let click_target = spec.target.clone();
     let menu_target = spec.target.clone();
@@ -207,7 +219,7 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
                 ask_about(click_target(cx), RefIntent::Topic, window, cx);
             }
         })
-        .when(show_button, |el| {
+        .when(show_button && !spec.own_button, |el| {
             let button = ask_button(ElementId::Name(format!("ask-{id}").into()), cx).on_click(
                 move |_, window, cx| {
                     cx.stop_propagation();
@@ -218,6 +230,7 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
             let holder = match spec.anchor {
                 Anchor::TopRight => holder.top(px(-11.)).right(px(-6.)),
                 Anchor::RowEnd => holder.top_0().bottom_0().right(px(8.)),
+                Anchor::Corner => holder.top(px(4.)).right(px(4.)),
             };
             el.child(holder.child(button))
         });

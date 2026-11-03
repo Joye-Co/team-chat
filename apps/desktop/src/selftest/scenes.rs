@@ -42,6 +42,9 @@ pub enum Start {
     // --- inc-refs ---
     /// The v2 sample team with the 引用提问 messages (`fake::v2::refs_samples`).
     V2Refs,
+    /// The v2 sample team with Card v2 blocks that have parts in their 话题
+    /// (`fake::v2::refs_samples::with_card_parts`).
+    V2RefParts,
     // --- end inc-refs ---
 }
 

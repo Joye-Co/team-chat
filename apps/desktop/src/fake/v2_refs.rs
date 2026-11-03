@@ -194,3 +194,28 @@ pub fn send(p: &V2Samples, request: SendRequest, refs: Vec<BlockRefInput>) -> Cl
     }]);
     cid
 }
+
+// --- pb-refs: parts of Card v2 blocks (REFS §A2.2) ---
+
+impl V2Samples {
+    /// The sample team with Card v2 messages whose blocks have parts: 10 月的三个数
+    /// (metrics and a line chart) in 增长 / 10 月数据月报, and the done plan and the
+    /// evidence strip of 断线重连后消息重复 in its 话题.
+    pub fn with_card_parts() -> Arc<Self> {
+        use crate::views::cards::v2::samples as s;
+        let p = Self::new();
+        p.with(|d| {
+            let mut add = |group: &str, topic: &str, author: &str, id: &str, when| {
+                let list = d.messages.entry(topic.into()).or_default();
+                let seq = list.iter().map(|m| m.created_seq).max().unwrap_or(0) + 1;
+                let mut m = message(group, topic, seq, author, when, "");
+                m.id = id.into();
+                list.push(m);
+            };
+            add(GROWTH, T_REPORT, LEDGER, s::METRICS, at(9, 41));
+            add(DEV, T_RECONNECT, FORGE, s::PLAN_DONE, at(10, 20));
+            add(DEV, T_RECONNECT, FORGE, s::EVIDENCE, at(10, 21));
+        });
+        p
+    }
+}

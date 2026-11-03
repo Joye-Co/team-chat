@@ -166,6 +166,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::V2Quiet => fake::v2::V2Samples::quiet(),
         // --- inc-refs
         Start::V2Refs => fake::v2::V2Samples::with_refs(),
+        Start::V2RefParts => fake::v2::V2Samples::with_card_parts(),
         // --- provider track ---
         Start::Core => {
             static SHOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);

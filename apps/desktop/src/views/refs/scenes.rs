@@ -7,6 +7,7 @@ use crate::{
     app::{RightPane, Services},
     data::{DraftKey, DraftRef},
     fake::v2::{self as d, refs_samples as r},
+    views::cards::v2::samples as cards_v2,
     selftest::scenes::{Scene, Start, open_main, v2_open_topic},
 };
 
@@ -85,6 +86,45 @@ pub const SCENES: &[Scene] = &[
             h.update(cx, |h, cx| {
                 h.side_chat_focused = true;
                 h.add_side(key, chip(&r::bili_cell()), cx);
+            });
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "refs-card-chart",
+        about: "引用提问 on Card v2 parts: the pointer rests on the 10-27 point of 日活 · 近 4 周 in 10 月的三个数; the column lights up and a tooltip with the value and 问这里 shows",
+        start: Start::V2RefParts,
+        setup: |s, cx| {
+            reset(cx);
+            open_report(s, cx);
+            hub(cx).update(cx, |h, _| {
+                h.forced_hover = Some(format!("{}-p-trend-p0-3", cards_v2::METRICS));
+            });
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "refs-card-step",
+        about: "引用提问 on Card v2 parts: the pointer rests on step 3 改去重 of Forge's done plan; the row lights up and 问这里 follows its text; the evidence strip below has a part per proof",
+        start: Start::V2RefParts,
+        setup: |s, cx| {
+            reset(cx);
+            v2_open_topic(s, d::DEV, d::T_RECONNECT, cx);
+            hub(cx).update(cx, |h, _| {
+                h.forced_hover = Some(format!("{}-p-plan-s2", cards_v2::PLAN_DONE));
+            });
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "refs-card-metric",
+        about: "引用提问 on Card v2 parts: the pointer rests on the 日活 metric of 10 月的三个数; the metric lights up with 问这里 in its corner",
+        start: Start::V2RefParts,
+        setup: |s, cx| {
+            reset(cx);
+            open_report(s, cx);
+            hub(cx).update(cx, |h, _| {
+                h.forced_hover = Some(format!("{}-p-dau-m", cards_v2::METRICS));
             });
         },
         open: open_main,
