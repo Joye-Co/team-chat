@@ -11,6 +11,9 @@
 //! wire types to these.
 
 pub use crate::characters::CharacterId;
+
+/// View types of the v2 screens (1.1.0).
+pub mod v2;
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -573,6 +576,13 @@ pub struct SavedNavigation {
     /// The selected group, or the group of the open topic.
     pub group_id: Option<GroupId>,
     pub topic_id: Option<TopicId>,
+    /// v2 (1.1.0, additive): the page when it is not a group or 话题 page:
+    /// `desk`, `members`, `artifacts` or `artifact`. `None` reads as v1.
+    pub page: Option<String>,
+    /// The member of the 成员 page.
+    pub member_id: Option<MemberId>,
+    /// The 产出 of the 产出 page.
+    pub artifact_id: Option<String>,
 }
 
 /// A message search (`search` frame). Without `group_id` it covers all my groups.
@@ -1567,6 +1577,235 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// group). `None` until it is downloaded; the provider starts the download
     /// and emits `Change::Messages` for `topic_id` when the file is there.
     fn card_image(&self, _group_id: &str, _topic_id: &str, _file_id: &str) -> Option<PathBuf> {
+        None
+    }
+
+    // --- v2 screens (1.1.0; all have defaults, see `data::v2`) ---
+
+    /// Jojo's one-line priority for the 首页, from its latest desk note.
+    fn desk_note(&self) -> Option<v2::DeskNote> {
+        None
+    }
+    /// 需要你拍板: asks addressed to me, newest first. The default lists the
+    /// 话题 that wait on me (no card); providers with cards add them.
+    fn asks_for_me(&self) -> Vec<v2::AskItem> {
+        self.todo()
+            .into_iter()
+            .filter(|t| t.reason == TodoReason::WaitingOnMe)
+            .map(|t| v2::AskItem {
+                group_id: t.group_id,
+                topic_id: t.topic.id.clone(),
+                message_id: None,
+                from: t
+                    .topic
+                    .owner_id
+                    .clone()
+                    .unwrap_or_else(|| t.topic.created_by.clone()),
+                kind: match t.topic.status {
+                    TopicStatus::WaitingReview => v2::AskKind::Review,
+                    _ => v2::AskKind::Topic,
+                },
+                title: t.topic.title.clone(),
+                at: t.topic.last_activity_at,
+            })
+            .collect()
+    }
+    /// The newest open ask for me in one 话题: the pinned decision card above
+    /// the composer.
+    fn pinned_ask(&self, group_id: &str, topic_id: &str) -> Option<v2::AskItem> {
+        self.asks_for_me()
+            .into_iter()
+            .filter(|a| a.group_id == group_id && a.topic_id == topic_id)
+            .max_by_key(|a| a.at)
+    }
+    /// 做完了 today, newest first. The default lists 话题 marked done since
+    /// local midnight, without proof.
+    fn done_today(&self) -> Vec<v2::DoneItem> {
+        let midnight = chrono::Local::now()
+            .date_naive()
+            .and_hms_opt(0, 0, 0)
+            .and_then(|t| t.and_local_timezone(chrono::Local).single())
+            .map(|t| t.timestamp_millis())
+            .unwrap_or(0);
+        let mut out: Vec<v2::DoneItem> = self
+            .groups()
+            .iter()
+            .flat_map(|g| self.topics(&g.id))
+            .filter(|t| t.status == TopicStatus::Done && t.last_activity_at >= midnight)
+            .map(|t| v2::DoneItem {
+                group_id: t.group_id.clone(),
+                topic_id: t.id.clone(),
+                member_id: t.owner_id.clone().unwrap_or_else(|| t.created_by.clone()),
+                title: t.title.clone(),
+                at: t.last_activity_at,
+                proof: Vec::new(),
+            })
+            .collect();
+        out.sort_by_key(|d| std::cmp::Reverse(d.at));
+        out
+    }
+    /// 正在做: active runs of every 话题 I can see, newest first.
+    fn active_runs(&self) -> Vec<BotRunSummary> {
+        let mut out: Vec<BotRunSummary> = self
+            .groups()
+            .iter()
+            .flat_map(|g| {
+                self.topics(&g.id)
+                    .into_iter()
+                    .flat_map(|t| self.runs(&g.id, &t.id))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|r| r.status.is_active())
+            .collect();
+        out.sort_by_key(|r| std::cmp::Reverse(r.updated_at));
+        out
+    }
+    /// 排队: work that starts later. Shown only when there is some.
+    fn queue(&self) -> Vec<v2::QueuedItem> {
+        Vec::new()
+    }
+    /// 改动 of a 话题 (its PR), when it has one.
+    fn topic_changes(&self, _group_id: &str, _topic_id: &str) -> Option<v2::TopicChanges> {
+        None
+    }
+    /// What one run used.
+    fn run_usage(&self, _run_id: &str) -> Option<v2::RunUsage> {
+        None
+    }
+    /// 用时和成本 of a 话题. The default adds up the runs' times and usage.
+    fn topic_cost(&self, group_id: &str, topic_id: &str) -> Option<v2::TopicCost> {
+        let runs = self.runs(group_id, topic_id);
+        if runs.is_empty() {
+            return None;
+        }
+        let mut cost = v2::TopicCost {
+            duration_ms: 0,
+            cost_cents: None,
+            started_at: runs.iter().filter_map(|r| r.started_at).min(),
+            ended_at: runs.iter().filter_map(|r| r.ended_at).max(),
+        };
+        for r in &runs {
+            match self.run_usage(&r.id) {
+                Some(u) => {
+                    cost.duration_ms += u.duration_ms;
+                    if let Some(c) = u.cost_cents {
+                        cost.cost_cents = Some(cost.cost_cents.unwrap_or(0) + c);
+                    }
+                }
+                None => {
+                    if let (Some(a), Some(b)) = (r.started_at, r.ended_at) {
+                        cost.duration_ms += (b - a).max(0) as u64;
+                    }
+                }
+            }
+        }
+        Some(cost)
+    }
+    /// 用到的决定: decisions a 话题 used.
+    fn topic_decisions(&self, _group_id: &str, _topic_id: &str) -> Vec<v2::Decision> {
+        Vec::new()
+    }
+    /// 群里的决定, newest first.
+    fn group_decisions(&self, _group_id: &str) -> Vec<v2::Decision> {
+        Vec::new()
+    }
+    /// The one-line purpose of a 群 under its title.
+    fn group_purpose(&self, _group_id: &str) -> Option<String> {
+        None
+    }
+    /// The member 单独问 talks to by default: Jojo, else the first bot.
+    fn side_chat_default_member(&self) -> Option<MemberId> {
+        let members = self.members();
+        members
+            .iter()
+            .find(|m| m.is_bot() && !m.deactivated && m.name.eq_ignore_ascii_case("jojo"))
+            .or_else(|| members.iter().find(|m| m.is_bot() && !m.deactivated))
+            .map(|m| m.id.clone())
+    }
+    /// My 单独问 aside with `member_id` about a 话题. Empty until I ask.
+    fn side_chat(&self, _group_id: &str, _topic_id: &str, member_id: &str) -> v2::SideChatThread {
+        v2::SideChatThread {
+            member_id: member_id.to_string(),
+            messages: Vec::new(),
+        }
+    }
+    /// Asks `member_id` privately about a 话题 (it reads the 话题 up to now).
+    /// Emits `Change::Messages` for the 话题 when the aside changes.
+    fn send_side_chat(&self, _group_id: &str, _topic_id: &str, _member_id: &str, _body: String) {}
+    /// Posts the suggestion of an aside answer into the 话题 (only on press).
+    fn post_side_chat_suggestion(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _member_id: &str,
+        _message_id: &str,
+    ) {
+    }
+    /// 实时查看: the terminal of a run rebuilt from its tool events.
+    fn machine_screen(&self, _run_id: &str) -> Option<v2::MachineScreen> {
+        None
+    }
+    /// 验收标准 the run reported.
+    fn acceptance_criteria(&self, _run_id: &str) -> Vec<v2::AcceptanceItem> {
+        Vec::new()
+    }
+    /// The time each step of a run started, in step order (for 回放).
+    fn run_step_times(&self, _run_id: &str) -> Vec<Millis> {
+        Vec::new()
+    }
+    /// 接管: pauses a run so I can use the machine (`run.pause`).
+    fn take_over_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 交还: lets a paused run go on (`run.resume`).
+    fn hand_back_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// The 成员 page detail of a member. The default counts this week's
+    /// runs from the cache.
+    fn member_stats(&self, member_id: &str) -> Option<v2::MemberStats> {
+        let week_ago = chrono::Local::now().timestamp_millis() - 7 * 24 * 3_600_000;
+        let mut stats = v2::MemberStats::default();
+        let mut topics = std::collections::HashSet::new();
+        for g in self.groups() {
+            for t in self.topics(&g.id) {
+                for r in self.runs(&g.id, &t.id) {
+                    if r.bot_id != member_id {
+                        continue;
+                    }
+                    if r.status.is_active() {
+                        stats.active.push((g.id.clone(), t.id.clone()));
+                    }
+                    if r.created_at >= week_ago {
+                        topics.insert((g.id.clone(), t.id.clone()));
+                        if r.status == RunStatus::Done {
+                            stats.done_this_week += 1;
+                        }
+                    }
+                }
+            }
+        }
+        stats.topics_this_week = topics.len() as u32;
+        Some(stats)
+    }
+    /// Every 产出 I can see, newest first, for the 产出 destination.
+    fn all_artifacts(&self) -> Vec<(GroupId, ArtifactSummary)> {
+        let mut out: Vec<(GroupId, ArtifactSummary)> = self
+            .groups()
+            .iter()
+            .flat_map(|g| {
+                self.topics(&g.id)
+                    .into_iter()
+                    .flat_map(|t| self.artifacts(&g.id, &t.id))
+                    .map(|a| (g.id.clone(), a))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        out.sort_by_key(|(_, a)| std::cmp::Reverse(a.updated_at));
+        out
+    }
+    /// 来龙去脉 of a 产出.
+    fn artifact_story(&self, _artifact_id: &str) -> Option<v2::ArtifactStory> {
         None
     }
 
