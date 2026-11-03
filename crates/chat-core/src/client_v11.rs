@@ -171,6 +171,15 @@ impl Client {
         Ok(self.store().artifact_events(artifact_id)?)
     }
 
+    /// Topics that point at a 产出 (Card v2 `ref` blocks), newest first, from the cache.
+    pub fn artifact_citations(
+        &self,
+        artifact_id: &str,
+        limit: usize,
+    ) -> Result<Vec<(String, String)>, ClientError> {
+        Ok(self.store().artifact_citations(artifact_id, limit)?)
+    }
+
     /// The newest state of each link (pull request) of a topic, newest first.
     pub fn topic_links(&self, topic_id: &str) -> Result<Vec<TopicLink>, ClientError> {
         Ok(self.store().topic_links(topic_id)?)

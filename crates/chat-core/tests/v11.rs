@@ -247,6 +247,49 @@ fn edits_replace_the_v2_card_and_deletes_clear_it() {
 }
 
 #[test]
+fn topics_that_cite_an_artifact_are_found_by_their_ref_blocks() {
+    let (_d, s) = open();
+    let cite = |id: &str, topic: &str, seq: u64, artifact: &str| {
+        let card: CardV2 = serde_json::from_value(json!({
+            "v": 2, "rev": 1, "intent": "info", "title": "周报", "fallback": "周报",
+            "blocks": [{ "type": "group", "id": "g", "blocks": [
+                { "type": "ref", "id": "r", "label": "报告",
+                  "target": { "kind": "artifact", "artifactId": artifact, "version": 2 } }
+            ] }]
+        }))
+        .unwrap();
+        Message {
+            kind: Some(MessageKind::Card),
+            card_v2: Some(card),
+            ..message(id, G1, topic, ALICE, seq, "")
+        }
+    };
+    s.apply_events(
+        G1,
+        &[
+            topic_created(1, G1, topic("T1", G1, "M1", 1)),
+            topic_created(2, G1, topic("T2", G1, "M2", 2)),
+            msg_created(3, cite("C1", "T1", 3, "A1")),
+            msg_created(4, cite("C2", "T2", 4, "A1")),
+            msg_created(5, cite("C3", "T2", 5, "A1")),
+            // Only the id inside the body: not a ref.
+            msg_created(6, message("M6", G1, "T1", ALICE, 6, "A9")),
+            msg_created(7, cite("C4", "T1", 7, "A9X")),
+        ],
+    )
+    .unwrap();
+    assert_eq!(
+        s.artifact_citations("A1", 10).unwrap(),
+        [
+            (G1.to_string(), "T2".to_string()),
+            (G1.to_string(), "T1".to_string())
+        ]
+    );
+    assert_eq!(s.artifact_citations("A1", 1).unwrap().len(), 1);
+    assert!(s.artifact_citations("A9", 10).unwrap().is_empty());
+}
+
+#[test]
 fn side_chat_topics_are_listed_by_their_context() {
     let dir = tempfile::tempdir().unwrap();
     let s = Store::open(&dir.path().join("cache.sqlite3")).unwrap();

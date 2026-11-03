@@ -6,7 +6,8 @@ use super::rows::{self, json_err};
 use super::{ApplyOutcome, LogEntry, Store, StoreResult};
 use crate::proto::{
     AnswerEdits, AnswerInputs, ArtifactEventedData, ArtifactVersion, BotRun, CardAnsweredData,
-    CardV2, Event, EventData, Message, TopicContext, TopicLink, TopicLinkedData,
+    CardV2, CardV2Block, Event, EventData, Message, RefTarget, TopicContext, TopicLink,
+    TopicLinkedData,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 
@@ -439,6 +440,42 @@ impl Store {
                 })
             })?
             .collect()
+        })
+    }
+
+    /// Topics whose messages point at a 产出 with a Card v2 `ref` block, newest message
+    /// first: `(group id, topic id)`, each topic once, at most `limit`.
+    pub fn artifact_citations(
+        &self,
+        artifact_id: &str,
+        limit: usize,
+    ) -> StoreResult<Vec<(String, String)>> {
+        self.with_reader(|c| {
+            let mut st = c.prepare_cached(
+                "SELECT raw FROM messages
+                 WHERE deleted_at IS NULL AND json_extract(raw, '$.cardV2') IS NOT NULL
+                   AND instr(raw, ?1) > 0
+                 ORDER BY created_at DESC LIMIT 500",
+            )?;
+            let rows = st.query_map([artifact_id], |r| r.get::<_, String>(0))?;
+            let mut out: Vec<(String, String)> = Vec::new();
+            for raw in rows {
+                let m: Message = serde_json::from_str(&raw?).map_err(json_err)?;
+                let Some(card) = &m.card_v2 else { continue };
+                let cites = card.all_blocks().into_iter().any(|b| {
+                    matches!(b, CardV2Block::Ref {
+                        target: RefTarget::Artifact { artifact_id: id, .. }, ..
+                    } if id == artifact_id)
+                });
+                let key = (m.group_id.clone(), m.topic_id.clone());
+                if cites && !out.contains(&key) {
+                    out.push(key);
+                    if out.len() >= limit {
+                        break;
+                    }
+                }
+            }
+            Ok(out)
         })
     }
 
