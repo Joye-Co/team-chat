@@ -1,11 +1,8 @@
 // Card v2.1 interaction loop (docs/protocol.md, "Interaction loop"): `card.event` and its short
 // forms (`card.answer`, `card.answer.retract`, and a v1 `card.action` on a v2 card),
 // `card.patch`, `interaction.resolve`; card state, causes and refs on send, edit and delete
-// (./hooks). An `artifact.event` frame is not stored (1.1, D9): when the version declares the
-// event, it goes to the version's creator bot as a transient `artifact.event` and through the
-// bots feature's outbox to a runner bot's run.
+// (./hooks). 产出 page events (`artifact.event`) are the files feature's (server/src/files/bridge.ts).
 import {
-  type ArtifactEventDecl,
   type CardPatchAck,
   type ClientFrameOf,
   type Message,
@@ -16,7 +13,6 @@ import { ApiError, unwrap } from "../core/errors";
 import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc } from "../core/registry";
 import { ulid } from "../core/ids";
-import { handOffPageEvent } from "../bots/room";
 import { type CardEventArgs, cardEvent, loadCard, writeCardUpdate } from "./events";
 import { checkCause, resolved } from "./hooks";
 import { applyPatch } from "./patch";
@@ -38,10 +34,7 @@ export const CARD_EVENT_RPC = "cards.event";
 export const CARD_PRESS_RPC = "cards.press";
 export const CARD_PATCH_RPC = "cards.patch";
 export const CARD_RESOLVE_RPC = "cards.resolve";
-export const ARTIFACT_EVENT_RPC = "artifacts.event";
 
-/** Page events: 5 per second per member, bursts of 10. */
-const PAGE_EVENT_RATE = { rate: 5, burst: 10 };
 /** Patches: bursts of 3 per message, then 1 per second. */
 const PATCH_RATE = { rate: 1, burst: 3 };
 
@@ -60,7 +53,6 @@ export type CardAnswerArgs = {
   value?: unknown;
 };
 
-const pageBuckets = new Map<string, TokenBucket>();
 const patchBuckets = new Map<string, TokenBucket>();
 
 function member(room: RoomContext, actor: Actor | null): Actor {
@@ -224,68 +216,5 @@ registerFrameHandler<ClientFrameOf<"interaction.resolve">>("interaction.resolve"
   rate: "write",
   async handle(f, c) {
     await rpc(f, c, CARD_RESOLVE_RPC, { eventId: f.eventId, result: f.result, note: f.note });
-  },
-});
-
-// ---------------------------------------------------------------------------
-// 产出 page events
-// ---------------------------------------------------------------------------
-
-type PageEventArgs = { artifactId: string; version: number; name: string; kind?: "emit" | "ask"; payload?: unknown };
-
-registerRoomRpc(ARTIFACT_EVENT_RPC, async (room: RoomContext, actor, args) => {
-  if (!actor) throw new ApiError("internal", "actor required");
-  if (!room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
-  const a = args as PageEventArgs;
-  const art = room.sql.exec<{ topic_id: string }>("SELECT topic_id FROM artifacts WHERE id = ?", a.artifactId).toArray()[0];
-  const v = room.sql
-    .exec<{ events: string | null; created_by: string }>(
-      "SELECT events, created_by FROM artifact_versions WHERE artifact_id = ? AND version = ?",
-      a.artifactId,
-      a.version,
-    )
-    .toArray()[0];
-  if (!art || !v) throw new ApiError("not_found", "产出 version not found");
-  const declared = v.events ? (JSON.parse(v.events) as ArtifactEventDecl[]) : [];
-  const decl = declared.find((d) => d.name === a.name);
-  if (!decl || (a.kind !== undefined && (decl.kind ?? "emit") !== a.kind)) {
-    throw new ApiError("forbidden", "the page does not declare this event");
-  }
-  const key = `${room.groupId}:${actor.id}`;
-  let bucket = pageBuckets.get(key);
-  if (!bucket) {
-    bucket = new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst);
-    pageBuckets.set(key, bucket);
-  }
-  if (!bucket.take()) throw new ApiError("rate_limited", "too many page events");
-  const eventId = ulid();
-  const at = Date.now();
-  const kind = decl.kind ?? "emit";
-  await handOffPageEvent(room, { eventId, actorId: actor.id, artifactId: a.artifactId, version: a.version, name: a.name, payload: a.payload });
-  // To the version's creator (SDK bots). Runner bots get it through the outbox above.
-  const transient: Record<string, unknown> = {
-    type: "artifact.event",
-    groupId: room.groupId,
-    topicId: art.topic_id,
-    artifactId: a.artifactId,
-    version: a.version,
-    eventId,
-    name: a.name,
-    kind,
-    actorId: actor.id,
-    at,
-  };
-  if (a.payload !== undefined) transient.payload = a.payload;
-  if (v.created_by !== actor.id) room.broadcast({ t: "transient", event: transient }, { to: [v.created_by] });
-  // `expect` is refined by the delivery feature (presence, runs); this is the author.
-  return { eventId, expect: { by: v.created_by, mode: "live" } };
-});
-
-registerFrameHandler<ClientFrameOf<"artifact.event">>("artifact.event", {
-  rate: "write",
-  async handle(frame, c) {
-    await c.requireMember(frame.groupId);
-    const { artifactId, version, name, kind, payload } = frame;
-    return unwrap(await roomStub(c.env, frame.groupId).rpc(frame.groupId, ARTIFACT_EVENT_RPC, c.actor, { artifactId, version, name, kind, payload }));
   },
 });

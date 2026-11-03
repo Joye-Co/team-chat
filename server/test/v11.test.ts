@@ -239,22 +239,27 @@ describe("产出 events", () => {
     expect(mine.body.version.events).toBeUndefined();
 
     const id = made.body.artifact.id;
+    // Page events go only to connections of the creator that take the 1.1 transients.
+    const old = (await Client.connect(bot.token)).c;
     const cb = (await Client.connect(bot.token, { features: ["interact/1"] })).c;
     const ack = await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { option: "B" } });
-    expect(ack).toMatchObject({ ok: true, result: { expect: { by: bot.id } } });
+    expect(ack).toMatchObject({ ok: true, result: { expect: { by: bot.id, mode: "live" } } });
     const tr = await cb.next((f) => f.t === "transient" && f.event.type === "artifact.event");
     expect(tr.event).toMatchObject({ actorId: owner.id, artifactId: id, version: 1, name: "pick", kind: "emit", payload: { option: "B" }, eventId: ack.result.eventId });
+    await new Promise((r) => setTimeout(r, 100));
+    expect(old.frames.some((f) => f.t === "transient" && f.event.type === "artifact.event")).toBe(false);
     // Page events are not stored (V11-INC R5).
     expect(co.events().some((e: { type: string }) => e.type === "artifact.evented")).toBe(false);
     // A declared name with the wrong kind is refused.
     expect(await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", kind: "ask" })).toMatchObject({
       ok: false,
-      error: { code: "forbidden" },
+      error: { code: "invalid", reason: "artifact.undeclared_event" },
     });
     cb.close();
+    old.close();
     expect(await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "delete" })).toMatchObject({
       ok: false,
-      error: { code: "forbidden" },
+      error: { code: "invalid", reason: "artifact.undeclared_event" },
     });
     expect(await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 9, name: "pick" })).toMatchObject({
       ok: false,
@@ -262,7 +267,7 @@ describe("产出 events", () => {
     });
     expect(
       await co.request({ t: "artifact.event", groupId: gid, artifactId: mine.body.artifact.id, version: 1, name: "pick" }),
-    ).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    ).toMatchObject({ ok: false, error: { code: "forbidden", reason: "artifact.no_bridge" } });
     co.close();
   });
 });

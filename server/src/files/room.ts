@@ -1,7 +1,17 @@
 // Group room side of files and 产出. The room keeps its own copy of every ready file of the group
 // and every 产出 version, so message sends and edits check attachments and 产出 references
 // synchronously, inside the room that owns the group: nobody can reference another group's files.
-import type { Artifact, ArtifactEventDecl, ArtifactFile, ArtifactKind, ArtifactVersion, FileRef } from "@chat/protocol";
+import {
+  type Artifact,
+  type ArtifactEventDecl,
+  type ArtifactFile,
+  type ArtifactKind,
+  type ArtifactVersion,
+  type FileRef,
+  MEDIA_LIMITS,
+  MediaInfo,
+  mediaProblem,
+} from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
   type Actor,
@@ -65,6 +75,40 @@ registerRoomMigration({
   `,
 });
 
+// 1.1: media metadata of a version (V11-MEDIA §2), its latest data snapshot (one per version,
+// INTERACT §5.4) and the page events of the last 24 h (idempotency, reply routing, causes).
+registerRoomMigration({
+  name: "files-4-bridge",
+  up: `
+    ALTER TABLE artifact_versions ADD COLUMN media TEXT;
+    ALTER TABLE artifact_versions ADD COLUMN data_rev INTEGER NOT NULL DEFAULT 0;
+    CREATE TABLE artifact_data (
+      artifact_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      data TEXT NOT NULL,
+      data_rev INTEGER NOT NULL,
+      push_id TEXT,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (artifact_id, version)
+    );
+    CREATE TABLE page_events (
+      event_id TEXT PRIMARY KEY,
+      artifact_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      actor_id TEXT NOT NULL,
+      bot_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      client_event_id TEXT,
+      ack TEXT NOT NULL,
+      at INTEGER NOT NULL,
+      reply_hash TEXT,
+      replied_at INTEGER
+    );
+    CREATE UNIQUE INDEX page_events_client ON page_events(actor_id, artifact_id, version, client_event_id);
+    CREATE INDEX page_events_at ON page_events(at);
+  `,
+});
+
 // Files that only deleted messages used, waiting for D1 and R2 to forget them (see below).
 registerRoomMigration({
   name: "files-2",
@@ -84,7 +128,7 @@ type FileRecordRow = {
   created_at: number;
 };
 
-type ArtifactRow = {
+export type ArtifactRow = {
   id: string;
   topic_id: string;
   title: string;
@@ -95,7 +139,7 @@ type ArtifactRow = {
   updated_at: number;
 };
 
-type VersionRow = {
+export type VersionRow = {
   artifact_id: string;
   version: number;
   entry: string;
@@ -105,6 +149,8 @@ type VersionRow = {
   created_at: number;
   run_id?: string | null;
   events?: string | null;
+  media?: string | null;
+  data_rev?: number;
 };
 
 export interface RegisterFileArgs {
@@ -128,9 +174,13 @@ export interface VersionInput {
   events?: ArtifactEventDecl[];
   /** A run of the calling bot in the 产出's topic; checked against D1 `bot_runs`. */
   runId?: string;
+  /** 1.1: media metadata (checked against the limits and the group's files). */
+  media?: MediaInfo;
+  /** 1.1: the first data snapshot. */
+  data?: unknown;
 }
 
-function fileRecord(room: RoomContext, id: string): FileRecordRow | undefined {
+export function fileRecord(room: RoomContext, id: string): FileRecordRow | undefined {
   return room.sql.exec<FileRecordRow>("SELECT * FROM file_records WHERE id = ?", id).toArray()[0] as
     | FileRecordRow
     | undefined;
@@ -143,13 +193,13 @@ function toFileRef(r: FileRecordRow): FileRef {
   return ref;
 }
 
-function artifactRow(room: RoomContext, id: string): ArtifactRow | undefined {
+export function artifactRow(room: RoomContext, id: string): ArtifactRow | undefined {
   return room.sql.exec<ArtifactRow>("SELECT * FROM artifacts WHERE id = ?", id).toArray()[0] as
     | ArtifactRow
     | undefined;
 }
 
-function toArtifact(room: RoomContext, r: ArtifactRow): Artifact {
+export function toArtifact(room: RoomContext, r: ArtifactRow): Artifact {
   return {
     id: r.id,
     groupId: room.groupId,
@@ -163,7 +213,7 @@ function toArtifact(room: RoomContext, r: ArtifactRow): Artifact {
   };
 }
 
-function toVersion(r: VersionRow): ArtifactVersion {
+export function toVersion(r: VersionRow): ArtifactVersion {
   const v: ArtifactVersion = {
     artifactId: r.artifact_id,
     version: r.version,
@@ -175,10 +225,12 @@ function toVersion(r: VersionRow): ArtifactVersion {
   if (r.note !== null) v.note = r.note;
   if (r.run_id) v.runId = r.run_id;
   if (r.events) v.events = JSON.parse(r.events) as ArtifactEventDecl[];
+  if (r.media) v.media = JSON.parse(r.media) as MediaInfo;
+  if (r.data_rev) v.dataRev = r.data_rev;
   return v;
 }
 
-function versionRow(room: RoomContext, artifactId: string, version: number): VersionRow | undefined {
+export function versionRow(room: RoomContext, artifactId: string, version: number): VersionRow | undefined {
   return room.sql
     .exec<VersionRow>("SELECT * FROM artifact_versions WHERE artifact_id = ? AND version = ?", artifactId, version)
     .toArray()[0] as VersionRow | undefined;
@@ -199,7 +251,38 @@ function resolveVersionFiles(room: RoomContext, kind: ArtifactKind, input: Versi
   if (!entry) throw new ApiError("invalid", "entry must be one of the paths");
   if (kind === "file" && files.length !== 1) throw new ApiError("invalid", "a file 产出 has exactly one file");
   if (kind === "html" && entry.mime !== "text/html") throw new ApiError("invalid", "the entry of an html 产出 must be text/html");
+  // V11-MEDIA §4: an HTML version is one bundle of at most 20 MB.
+  if (kind === "html" && files.reduce((n, f) => n + f.size, 0) > MEDIA_LIMITS.htmlBytes) {
+    throw new ApiError("too_large", "an html 产出 version exceeds 20 MB");
+  }
+  if (input.media) checkMedia(room, input.media);
   return files;
+}
+
+/** The file ids a media record points at (poster, frames, peaks, transcript, image set). */
+function mediaFileIds(m: MediaInfo): string[] {
+  return [
+    m.posterFileId,
+    m.peaksFileId,
+    m.transcriptFileId,
+    ...(m.frames ?? []).map((f) => f.fileId),
+    ...(m.images ?? []).flatMap((i) => [i.fileId, i.thumbFileId]),
+  ].filter((x): x is string => typeof x === "string");
+}
+
+/**
+ * Checks media metadata (V11-MEDIA §4): the size limits, and that every file it names is a
+ * ready file of this group. The server never decodes media.
+ */
+export function checkMedia(room: RoomContext, raw: unknown): MediaInfo {
+  const parsed = MediaInfo.safeParse(raw);
+  if (!parsed.success) throw new ApiError("invalid", `media: ${parsed.error.issues[0]?.message ?? "invalid"}`);
+  const problem = mediaProblem(parsed.data);
+  if (problem) throw new ApiError("too_large", `media: ${problem}`);
+  for (const id of mediaFileIds(parsed.data)) {
+    if (!fileRecord(room, id)) throw new ApiError("invalid", "media names a file that is not a ready file of this group");
+  }
+  return parsed.data;
 }
 
 function insertVersion(
@@ -212,8 +295,8 @@ function insertVersion(
   now: number,
 ): void {
   room.sql.exec(
-    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media, data_rev)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     artifactId,
     version,
     input.entry,
@@ -223,12 +306,27 @@ function insertVersion(
     now,
     input.runId ?? null,
     input.events && input.events.length > 0 ? JSON.stringify(input.events) : null,
+    input.media ? JSON.stringify(input.media) : null,
+    input.data !== undefined ? 1 : 0,
   );
+  // A new version starts with the data of its request, or none (INTERACT §5.3).
+  if (input.data !== undefined) {
+    room.sql.exec(
+      "INSERT OR REPLACE INTO artifact_data (artifact_id, version, data, data_rev, push_id, updated_at) VALUES (?, ?, ?, 1, NULL, ?)",
+      artifactId,
+      version,
+      JSON.stringify(input.data),
+      now,
+    );
+  }
 }
 
-/** Keeps `events` and `runId` only from a bot, and `runId` only for its own run in the topic. */
+/**
+ * Keeps `events`, `data` and `runId` only from a bot (a person's page gets no bridge), and
+ * `runId` only for its own run in the topic.
+ */
 async function botVersionFields(room: RoomContext, actor: Actor, topicId: string, input: VersionInput): Promise<VersionInput> {
-  if (actor.kind !== "bot") return { ...input, events: undefined, runId: undefined };
+  if (actor.kind !== "bot") return { ...input, events: undefined, runId: undefined, data: undefined };
   if (!input.runId) return input;
   const run = await room.env.DB.prepare("SELECT 1 AS x FROM bot_runs WHERE id = ? AND bot_id = ? AND topic_id = ?")
     .bind(input.runId, actor.id, topicId)
@@ -374,7 +472,11 @@ function resolveAttachments(room: RoomContext, raw: unknown): FileRef[] {
     if (!rec) throw new ApiError("invalid", "attachment is not a ready file of this group");
     if (seen.has(rec.id)) continue;
     seen.add(rec.id);
-    out.push(toFileRef(rec));
+    const ref = toFileRef(rec);
+    // 1.1: the sender's media metadata, checked against the limits and the group's files.
+    const media = (item as { media?: unknown }).media;
+    if (media !== undefined) ref.media = checkMedia(room, media);
+    out.push(ref);
   }
   return out;
 }
@@ -438,8 +540,8 @@ registerEventImporter((e, sql) => {
     a.updatedAt,
   );
   sql.exec(
-    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events, media)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     v.artifactId,
     v.version,
     v.entry,
@@ -449,7 +551,16 @@ registerEventImporter((e, sql) => {
     v.createdAt,
     v.runId ?? null,
     v.events && v.events.length > 0 ? JSON.stringify(v.events) : null,
+    v.media ? JSON.stringify(v.media) : null,
   );
+});
+
+// Restore: a later preview replaces the media of the version (data snapshots are not in the log).
+registerEventImporter((e, sql) => {
+  if (e.type !== "artifact.previewReady") return;
+  const d = (e.data ?? {}) as { artifactId?: string; version?: number; media?: unknown };
+  if (!d.artifactId || !d.version || !d.media) return;
+  sql.exec("UPDATE artifact_versions SET media = ? WHERE artifact_id = ? AND version = ?", JSON.stringify(d.media), d.artifactId, d.version);
 });
 
 /**
