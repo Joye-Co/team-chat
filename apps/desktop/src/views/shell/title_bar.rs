@@ -119,11 +119,11 @@ pub fn render(
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);
-    // The title keeps its width (up to 40 % of the bar); the state's step
+    // The title keeps its width (up to 35 % of the bar); the state's step
     // and then the 群 name give way first.
     let title = div()
         .flex_shrink(0.)
-        .max_w(gpui::relative(0.4))
+        .max_w(gpui::relative(0.35))
         .min_w_0()
         .one_line()
         .text_color(k.ink)
@@ -139,7 +139,10 @@ pub fn render(
         // the step in `ink-3`, a live dot or, while paused, a pause mark.
         let sentence = spec.state_detail.is_some() || spec.state_paused;
         let glyph = if spec.state_paused {
-            ui::icon(Lucide::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+            div()
+                .flex_none()
+                .child(ui::icon(Lucide::Pause, theme::icon::TAG, k.ink_3))
+                .into_any_element()
         } else {
             div()
                 .flex_none()
@@ -151,7 +154,7 @@ pub fn render(
         div()
             .when(!sentence, |el| el.flex_none())
             // The step gives way before the 话题 title does.
-            .when(sentence, |el| el.flex_shrink(16.).min_w_0())
+            .when(sentence, |el| el.flex_shrink(16.).min_w(px(88.)).overflow_hidden())
             .flex()
             .items_center()
             .gap(space::S6)
@@ -167,6 +170,8 @@ pub fn render(
                 }
             })
             .child(glyph)
+            // The step shrinks; the sentence stays whole (the state clips
+            // it only in the narrowest bar).
             .child(div().flex_none().child(text.clone()))
             .children(spec.state_detail.as_ref().map(|d| {
                 div()
@@ -213,13 +218,13 @@ pub fn render(
         .flex()
         .items_center()
         .gap(space::S8)
-        // A long 群 name gives way: it shrinks to an ellipsis (at most 30 %
+        // A long 群 name gives way: it shrinks to an ellipsis (at most 25 %
         // of the bar) while the 话题 title keeps its room.
         .children(spec.breadcrumb.as_ref().map(|b| {
             div()
                 .flex_shrink(1.)
                 .min_w(px(48.))
-                .max_w(gpui::relative(0.3))
+                .max_w(gpui::relative(0.25))
                 .flex()
                 .items_center()
                 .gap(space::S6)
