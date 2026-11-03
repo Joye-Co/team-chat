@@ -266,6 +266,91 @@ describe("patches", () => {
     expect(err).toBeInstanceOf(ChatError);
     expect(err.reason).toBe("card.bad_op");
   });
+
+  /** A bot with a short request timeout, so a lost ack shows as `timeout` quickly. */
+  async function quickBot(server: FakeServer): Promise<Bot> {
+    const bot = new Bot({ url: "http://127.0.0.1:1", token: "t", WebSocket: server.WebSocket as never, stateStore: new MemoryStateStore(), logLevel: "error", stopTimeoutMs: 500, requestTimeoutMs: 300 });
+    bots.push(bot);
+    await bot.start();
+    return bot;
+  }
+
+  test("a merged patch whose ack is lost goes again as the same frame; duplicate counts as applied", async () => {
+    const server = new FakeServer();
+    const r0 = message({ id: "01JC0MSG000000000000000001", kind: "card", cardV2: report() });
+    server.on("send", () => ({ ok: true, result: { message: r0 } }));
+    const bot = await quickBot(server);
+    const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
+    let rev = 1;
+    let limited = false;
+    const applied = new Map<string, unknown>();
+    server.on("card.patch", (f) => {
+      if (!limited) {
+        limited = true;
+        return { ok: false, error: { code: "rate_limited", message: "slow down" } };
+      }
+      const id = f.clientPatchId as string;
+      const prev = applied.get(id);
+      if (prev) return { ok: true, result: { ...(prev as object), duplicate: true } };
+      rev++;
+      const result = { message: message({ id: r.message.id, kind: "card", cardV2: { ...report(), rev } }), rev };
+      applied.set(id, result);
+      return "none"; // committed, but the ack is lost
+    });
+    const p1 = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_groups", props: { value: 39 } }]);
+    await server.next((f) => f.t === "card.patch");
+    const p2 = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_groups", props: { value: 40 } }]);
+    const p3 = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_dau", props: { value: 41 } }]);
+    const [m1, m2, m3] = await Promise.all([p1, p2, p3]);
+    const frames = server.of("card.patch");
+    expect(frames).toHaveLength(3);
+    expect((frames[1]?.ops as unknown[]).length).toBe(3);
+    expect(frames[2]?.clientPatchId).toBe(frames[1]?.clientPatchId as string);
+    expect(frames[2]?.ops).toEqual(frames[1]?.ops);
+    expect(frames[2]?.baseRev).toBe(frames[1]?.baseRev as number);
+    expect(applied.size).toBe(1);
+    expect(m1.cardV2?.rev).toBe(2);
+    expect(m2).toEqual(m1);
+    expect(m3).toEqual(m1);
+  });
+
+  test("a merged patch that times out and then gets a definite rejection: each part goes again alone", async () => {
+    const server = new FakeServer();
+    const r0 = message({ id: "01JC0MSG000000000000000001", kind: "card", cardV2: report() });
+    server.on("send", () => ({ ok: true, result: { message: r0 } }));
+    const bot = await quickBot(server);
+    const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
+    let rev = 1;
+    let calls = 0;
+    server.on("card.patch", (f) => {
+      calls++;
+      if (calls === 1) return { ok: false, error: { code: "rate_limited", message: "slow down" } };
+      if (calls === 2) return "none"; // the merged frame: no answer, nothing applied
+      if ((f.ops as { props?: { value?: number } }[]).some((o) => o.props?.value === -1)) {
+        return { ok: false, error: { code: "invalid", message: "bad value", reason: "card.bad_op" } };
+      }
+      rev++;
+      return { ok: true, result: { message: message({ id: r.message.id, kind: "card", cardV2: { ...report(), rev } }), rev } };
+    });
+    const p1 = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_groups", props: { value: 39 } }]);
+    await server.next((f) => f.t === "card.patch");
+    const good = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_groups", props: { value: 40 } }]);
+    const bad = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_dau", props: { value: -1 } }]).catch((e) => e as ChatError);
+    await p1;
+    expect((await good).cardV2?.rev).toBe(3);
+    const err = (await bad) as ChatError;
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.reason).toBe("card.bad_op");
+    const frames = server.of("card.patch");
+    // rate_limited, merged (no answer), merged again with the same id (rejected), then each alone.
+    expect(frames).toHaveLength(6);
+    expect((frames[1]?.ops as unknown[]).length).toBe(3);
+    expect(frames[2]?.clientPatchId).toBe(frames[1]?.clientPatchId as string);
+    for (const f of frames.slice(3)) {
+      expect((f.ops as unknown[]).length).toBe(1);
+      expect(f.clientPatchId).not.toBe(frames[1]?.clientPatchId as string);
+    }
+  });
 });
 
 describe("answers", () => {

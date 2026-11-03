@@ -428,6 +428,13 @@ interface PatchPart {
   tries: number;
   /** Set after a merged patch failed: this part goes in a frame of its own. */
   alone?: boolean;
+  /**
+   * Set after a merged patch got `timeout` or `internal`: the server may have applied it, so the
+   * same frame (same clientPatchId) goes again; the server answers a repeat with `duplicate`.
+   */
+  frame?: Record<string, unknown> & { t: string };
+  /** How many times `frame` went again. */
+  resends?: number;
   resolve: (m: Message) => void;
   reject: (e: unknown) => void;
 }
@@ -2301,6 +2308,14 @@ export class Bot {
       first.reject(new ChatError("invalid", `the card of ${messageId} is not known; pass baseRev`));
       return;
     }
+    // A merged frame whose outcome is not known goes again unchanged, with its parts.
+    if (first.frame) {
+      const resend = first.frame;
+      const batch = lane.parts.filter((p) => p.frame === resend);
+      lane.parts.splice(0, batch.length);
+      await this.sendPatch(messageId, lane, batch, resend);
+      return;
+    }
     // Merge: parts without their own baseRev join the first one while the ops fit in one frame.
     // A frame names one cause and the server resolves only that event, so a part with another
     // cause waits for the next frame.
@@ -2335,7 +2350,16 @@ export class Bot {
       clientPatchId: batch.length === 1 && first.clientPatchId ? first.clientPatchId : crypto.randomUUID(),
     };
     if (cause) frame.cause = cause;
+    await this.sendPatch(messageId, lane, batch, frame);
+  }
+
+  /** Sends one patch frame for its parts and settles them, or puts them back in the lane. */
+  private async sendPatch(messageId: string, lane: PatchLane, batch: PatchPart[], frame: Record<string, unknown> & { t: string }): Promise<void> {
+    const first = batch[0] as PatchPart;
+    const baseRev = frame.baseRev as number;
     try {
+      // A `duplicate` ack is the stored ack of the first try: the patch is applied, and the
+      // server resolved its cause then.
       const r = (await this.request(frame, { noRateRetry: true })) as CardPatchAck;
       if (r.message.cardV2) this.cacheCard(messageId, r.message.cardV2, r.message.cardState);
       this.noteMessage(r.message);
@@ -2343,10 +2367,28 @@ export class Bot {
     } catch (err) {
       const e = err instanceof ChatError ? err : undefined;
       if (e?.code === "rate_limited") {
+        // Nothing applied; a frame that goes again keeps its clientPatchId.
         lane.notBefore = Date.now() + PATCH_INTERVAL_MS;
         lane.parts.unshift(...batch);
         return;
       }
+      if (batch.length > 1 && (e?.code === "timeout" || e?.code === "internal")) {
+        // The ack is lost or the server failed after it may have committed: splitting now could
+        // apply ops (such as row appends) twice. Send the same frame again.
+        if ((first.resends ?? 0) < MAX_PATCH_TRIES) {
+          for (const p of batch) {
+            p.frame = frame;
+            p.resends = (p.resends ?? 0) + 1;
+          }
+          if (e.code === "internal") lane.notBefore = Date.now() + PATCH_INTERVAL_MS;
+          lane.parts.unshift(...batch);
+          return;
+        }
+        for (const p of batch) p.reject(err);
+        return;
+      }
+      // Any other answer says the frame was not applied: later frames are built again.
+      for (const p of batch) p.frame = undefined;
       const stale = e?.code === "conflict" && (e.reason === "card.stale_rev" || /stale_rev/.test(e.message));
       for (const p of batch) p.tries++;
       if (stale && batch.every((p) => p.baseRev === undefined) && batch.every((p) => p.tries < MAX_PATCH_TRIES)) {
