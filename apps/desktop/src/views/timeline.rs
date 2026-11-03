@@ -619,6 +619,26 @@ impl TimelineView {
         }
     }
 
+    /// In the v2 style, `el` (drawn 24 pt from the edges) sits in the
+    /// centered 720 pt column of the 话题 page.
+    fn v2_column(&self, el: AnyElement) -> AnyElement {
+        if !self.v2 {
+            return el;
+        }
+        div()
+            .w_full()
+            .px(v2::SIDE - theme::CONTENT_GUTTER)
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(v2::COLUMN + theme::CONTENT_GUTTER * 2.)
+                    .child(el),
+            )
+            .into_any_element()
+    }
+
     fn probe_element(&self) -> Option<AnyElement> {
         self.probe
             .clone()
@@ -782,8 +802,11 @@ impl Render for TimelineView {
                     .children(jump_unread)
                     .children(jump),
             )
-            .children(self.render_live(window, cx))
-            .children(self.render_typing(cx))
+            .children(self.render_live(window, cx).map(|el| self.v2_column(el)))
+            .children(
+                self.render_typing(cx)
+                    .map(|el| self.v2_column(el.into_any_element())),
+            )
             .children(self.probe_element())
             .into_any_element()
     }
