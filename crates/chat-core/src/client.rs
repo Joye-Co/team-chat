@@ -252,6 +252,10 @@ pub struct SendRequest {
     pub attachments: Option<Vec<FileRef>>,
     pub artifact_refs: Option<Vec<ArtifactRef>>,
     pub card: Option<Card>,
+    /// 1.1: a Card v2; the server derives the v1 card when `card` is `None`.
+    pub card_v2: Option<crate::proto::CardV2>,
+    /// 1.1: a side chat's context (a send in a DM with a bot); see [`Client::start_side_chat`].
+    pub context: Option<crate::proto::TopicContext>,
 }
 
 /// An edit of my message. `None` fields keep their value.
@@ -263,6 +267,8 @@ pub struct EditRequest {
     pub attachments: Option<Vec<FileRef>>,
     pub artifact_refs: Option<Vec<ArtifactRef>>,
     pub card: Option<Card>,
+    /// 1.1: a card message only; its `rev` must be higher than the stored one.
+    pub card_v2: Option<crate::proto::CardV2>,
 }
 
 /// Topic changes; `None` keeps a field. `owner_id: Some(None)` clears the owner.
@@ -540,26 +546,13 @@ impl Client {
     // Writes (queued; return at once)
     // ------------------------------------------------------------------
 
-    fn enqueue(&self, id: String, op: OutboxOp) -> Result<String, ClientError> {
-        let group_id = op.group_id().to_string();
-        let topic_id = op.topic_id().map(str::to_string);
-        self.shared.store.outbox_push(&OutboxItem {
-            id: id.clone(),
-            op,
-            attempts: 0,
-            last_error: None,
-            state: OutboxState::Pending,
-            created_at: crate::now_ms(),
-        })?;
-        match topic_id {
-            Some(t) => self.shared.emit(ClientUpdate::MessagesChanged {
-                group_id,
-                topic_id: t,
-            }),
-            None => self.shared.emit(ClientUpdate::TopicsChanged { group_id }),
-        }
-        let _ = self.cmd_tx.send(Command::Flush);
-        Ok(id)
+    pub(crate) fn enqueue(&self, id: String, op: OutboxOp) -> Result<String, ClientError> {
+        enqueue_with(&self.shared, &self.cmd_tx, id, op)
+    }
+
+    /// What a background task needs to queue writes after an await.
+    pub(crate) fn queue(&self) -> (Arc<Shared>, UnboundedSender<Command>) {
+        (self.shared.clone(), self.cmd_tx.clone())
     }
 
     fn check_body(body: &str) -> Result<(), ClientError> {
@@ -617,6 +610,7 @@ impl Client {
         if req.body.trim().is_empty()
             && !req.streaming
             && req.card.is_none()
+            && req.card_v2.is_none()
             && req.attachments.is_none()
         {
             return Err(ClientError::Invalid("empty message"));
@@ -637,6 +631,8 @@ impl Client {
                 attachments: req.attachments,
                 artifact_refs: req.artifact_refs,
                 card: req.card,
+                card_v2: req.card_v2,
+                context: req.context,
                 after_root,
             },
         )
@@ -695,6 +691,7 @@ impl Client {
                 attachments: req.attachments,
                 artifact_refs: req.artifact_refs,
                 card: req.card,
+                card_v2: req.card_v2,
             },
         )
     }
@@ -998,4 +995,32 @@ pub fn background() -> &'static tokio::runtime::Runtime {
             .build()
             .expect("tokio runtime")
     })
+}
+
+/// Stores one outbox row, tells the UI and wakes the engine.
+pub(crate) fn enqueue_with(
+    shared: &Shared,
+    cmd_tx: &UnboundedSender<Command>,
+    id: String,
+    op: OutboxOp,
+) -> Result<String, ClientError> {
+    let group_id = op.group_id().to_string();
+    let topic_id = op.topic_id().map(str::to_string);
+    shared.store.outbox_push(&OutboxItem {
+        id: id.clone(),
+        op,
+        attempts: 0,
+        last_error: None,
+        state: OutboxState::Pending,
+        created_at: crate::now_ms(),
+    })?;
+    match topic_id {
+        Some(t) => shared.emit(ClientUpdate::MessagesChanged {
+            group_id,
+            topic_id: t,
+        }),
+        None => shared.emit(ClientUpdate::TopicsChanged { group_id }),
+    }
+    let _ = cmd_tx.send(Command::Flush);
+    Ok(id)
 }

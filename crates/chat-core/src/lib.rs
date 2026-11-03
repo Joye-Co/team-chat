@@ -18,6 +18,7 @@ pub mod artifacts;
 pub mod backoff;
 pub mod client;
 mod client_ext;
+mod client_v11;
 pub mod diagnostics;
 mod engine;
 pub mod files;
@@ -38,13 +39,15 @@ pub use client::{
     Notification, SearchRequest, SendFailure, SendRequest, TopicPatch, background,
 };
 pub use client_ext::{ArtifactFolder, CancelRun};
+pub use client_v11::{SideChatRequest, SideChatStarted};
 pub use files::{Phase, Progress, ProgressFn, UploadRequest, no_progress};
 pub use http::{ApiError, HttpClient};
-pub use runs::{ProcessItem, ProcessView};
+pub use runs::{ProcessItem, ProcessView, TerminalLine, terminal_lines};
 pub use search::SearchError;
 pub use store::{
-    ArtifactRow, CardActionRow, GroupRow, LogEntry, Migration, OutboxItem, OutboxOp, OutboxState,
-    PendingRead, Store, TodoReason, TodoRow, TopicRow,
+    ArtifactEventRow, ArtifactRow, CardActionRow, CardAnswerRow, DecisionRow, GroupRow, LogEntry,
+    Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow,
+    TopicRow,
 };
 #[cfg(target_os = "macos")]
 pub use token::KeychainTokenStore;

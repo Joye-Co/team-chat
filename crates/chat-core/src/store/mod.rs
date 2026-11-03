@@ -10,6 +10,7 @@ mod apply;
 mod ext;
 pub mod migrations;
 mod rows;
+mod v11;
 
 use crate::proto::{Event, Member, Message};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -20,6 +21,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 pub use ext::{ArtifactRow, CardActionRow, TodoReason, TodoRow};
 pub use migrations::Migration;
 pub use rows::*;
+pub use v11::{ArtifactEventRow, CardAnswerRow, DecisionRow, Refetch};
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {

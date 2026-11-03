@@ -77,6 +77,8 @@ fn artifact(id: &str, topic: &str, v: u32) -> Artifact {
 
 fn version(id: &str, v: u32) -> ArtifactVersion {
     ArtifactVersion {
+        events: None,
+        run_id: None,
         artifact_id: id.into(),
         version: v,
         entry: "index.html".into(),
@@ -1044,6 +1046,12 @@ async fn diagnostics_collect_redact_gzip_and_upload() {
 
 fn bot_run(id: &str, topic: &str, status: RunStatus, updated: u64) -> BotRun {
     BotRun {
+        usage: None,
+        duration_ms: None,
+        result_message_id: None,
+        acceptance: None,
+        paused_by: None,
+        kind: None,
         id: id.into(),
         bot_id: ALICE.into(),
         group_id: G1.into(),

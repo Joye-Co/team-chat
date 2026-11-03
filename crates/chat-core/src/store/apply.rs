@@ -479,7 +479,11 @@ fn apply_one(
             waiting_on,
             owner_id,
             last_message_at,
+            context_of,
         }) => {
+            if let Some(c) = context_of {
+                super::v11::set_topic_context(tx, topic_id, c)?;
+            }
             let status = match status {
                 Some(s) => Some(enum_str(s)?),
                 None => None,
@@ -586,6 +590,7 @@ fn apply_one(
             attachments,
             artifact_refs,
             card,
+            card_v2,
         }) => {
             out.replaced_bodies.push(message_id.clone());
             let topic: Option<String> = tx
@@ -597,7 +602,11 @@ fn apply_one(
                 )
                 .optional()?;
             if let Some(t) = topic {
-                if attachments.is_some() || artifact_refs.is_some() || card.is_some() {
+                if attachments.is_some()
+                    || artifact_refs.is_some()
+                    || card.is_some()
+                    || card_v2.is_some()
+                {
                     update_message_raw(tx, message_id, |m| {
                         if let Some(a) = attachments {
                             m.attachments = Some(a.clone());
@@ -607,6 +616,9 @@ fn apply_one(
                         }
                         if let Some(c) = card {
                             m.card = Some(c.clone());
+                        }
+                        if let Some(c) = card_v2 {
+                            m.card_v2 = Some(c.clone());
                         }
                     })?;
                 }
@@ -712,6 +724,33 @@ fn apply_one(
         EventData::ArtifactCreated(d) | EventData::ArtifactVersionAdded(d) => {
             super::ext::upsert_artifact(tx, &d.artifact, std::slice::from_ref(&d.version))?;
             out.artifact_topics.insert(d.artifact.topic_id.clone());
+            out.other_events.push(ev.clone());
+        }
+        EventData::CardAnswered(d) => {
+            super::v11::insert_card_answer(tx, ev, d)?;
+            if ev.actor_id == me {
+                // My answer reached the server: drop its sent outbox row, so a lost ack does
+                // not send it again after a reconnect.
+                tx.execute(
+                    "DELETE FROM outbox WHERE kind = 'card_answer' AND group_id = ?1 AND attempts > 0
+                       AND json_extract(payload, '$.message_id') = ?2
+                       AND json_extract(payload, '$.action_id') = ?3
+                       AND json_extract(payload, '$.rev') = ?4",
+                    params![gid, d.message_id, d.action_id, d.rev],
+                )?;
+            }
+            if let Some(t) = super::v11::topic_of_message(tx, &d.message_id)? {
+                out.message_topics.insert(t);
+            }
+            out.other_events.push(ev.clone());
+        }
+        EventData::ArtifactEvented(d) => {
+            super::v11::insert_artifact_event(tx, ev, d)?;
+            out.other_events.push(ev.clone());
+        }
+        EventData::TopicLinked(d) => {
+            super::v11::upsert_topic_link(tx, ev, d)?;
+            out.topic_list_changed = true;
             out.other_events.push(ev.clone());
         }
     }

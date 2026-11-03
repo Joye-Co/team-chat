@@ -88,6 +88,37 @@ impl HttpClient {
         .await
     }
 
+    /// 1.1, the run's requester or an owner: pauses an active run for 接管 (docs/protocol.md,
+    /// "Run fields, pause and resume"). Answers with the run (`pausedBy` set); `conflict` when
+    /// it ended, is paused already, or its machine cannot pause.
+    pub async fn pause_run(&self, run_id: &str) -> ApiResult<BotRun> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/runs/{}/pause", enc(run_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
+    /// 1.1: resumes a paused run (交还). `note` becomes the CLI's next input when set.
+    /// Answers with the run (`pausedBy` cleared); `conflict` when it is not paused.
+    pub async fn resume_run(&self, run_id: &str, note: Option<&str>) -> ApiResult<BotRun> {
+        let body = serde_json::json!({ "note": note });
+        let body = if note.is_some() {
+            body
+        } else {
+            serde_json::json!({})
+        };
+        self.call(
+            Method::POST,
+            &format!("/v1/runs/{}/resume", enc(run_id)),
+            Some(&body),
+            true,
+        )
+        .await
+    }
+
     /// Owner: the raw CLI session of a run (gzip). 404 until the daemon uploaded it.
     pub async fn run_session(&self, run_id: &str) -> ApiResult<Vec<u8>> {
         let resp = self
@@ -216,6 +247,85 @@ pub fn entry_seq(e: &RunLogEntry) -> u64 {
     }
 }
 
+/// One line of the live terminal (实时查看): a command a run's CLI ran, or its output. Built
+/// from the run log's `tool.call` and `tool.result` events with [`terminal_lines`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum TerminalLine {
+    Command {
+        seq: u64,
+        at: u64,
+        item_id: String,
+        tool: String,
+        title: String,
+        input: Option<serde_json::Value>,
+    },
+    Output {
+        seq: u64,
+        at: u64,
+        item_id: String,
+        ok: bool,
+        output: Option<String>,
+        exit_code: Option<i64>,
+    },
+}
+
+impl TerminalLine {
+    pub fn seq(&self) -> u64 {
+        match self {
+            Self::Command { seq, .. } | Self::Output { seq, .. } => *seq,
+        }
+    }
+    pub fn at(&self) -> u64 {
+        match self {
+            Self::Command { at, .. } | Self::Output { at, .. } => *at,
+        }
+    }
+}
+
+/// The terminal lines of run log entries, in seq order.
+pub fn terminal_lines(entries: &[RunLogEntry]) -> Vec<TerminalLine> {
+    let mut out: Vec<TerminalLine> = entries
+        .iter()
+        .filter_map(|e| match e {
+            RunLogEntry::RunEvent { seq, at, event, .. } => match event {
+                RunEvent::ToolCall {
+                    item_id,
+                    tool,
+                    title,
+                    input,
+                    ..
+                } => Some(TerminalLine::Command {
+                    seq: *seq,
+                    at: *at,
+                    item_id: item_id.clone(),
+                    tool: tool.clone(),
+                    title: title.clone(),
+                    input: input.clone(),
+                }),
+                RunEvent::ToolResult {
+                    item_id,
+                    ok,
+                    output,
+                    exit_code,
+                    ..
+                } => Some(TerminalLine::Output {
+                    seq: *seq,
+                    at: *at,
+                    item_id: item_id.clone(),
+                    ok: *ok,
+                    output: output.clone(),
+                    exit_code: *exit_code,
+                }),
+                _ => None,
+            },
+            _ => None,
+        })
+        .collect();
+    out.sort_by_key(TerminalLine::seq);
+    out.dedup_by_key(|l| l.seq());
+    out
+}
+
 /// One row of the process view.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProcessItem {
@@ -280,6 +390,10 @@ pub struct ProcessView {
     pub last_seq: u64,
     /// The CLI session id and runtime, from the `session` event.
     pub session: Option<(String, String)>,
+    /// 1.1: the latest acceptance criteria the run reported.
+    pub acceptance: Option<Vec<crate::proto::AcceptanceItem>>,
+    /// 1.1: whether the CLI is paused now, from the last `paused` event, and by whom.
+    pub paused: Option<(bool, Option<String>)>,
     by_item: HashMap<String, usize>,
     by_approval: HashMap<String, usize>,
 }
@@ -499,6 +613,8 @@ impl ProcessView {
                 state: state.clone(),
                 message: message.clone(),
             }),
+            RunEvent::Acceptance { items } => self.acceptance = Some(items.clone()),
+            RunEvent::Paused { paused, by } => self.paused = Some((*paused, by.clone())),
             RunEvent::InputAccepted { .. } | RunEvent::Plan { .. } | RunEvent::Unknown => {}
         }
     }

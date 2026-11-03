@@ -144,6 +144,8 @@ pub async fn create_version(
                 entry: req.entry.clone(),
                 files: inputs,
                 note: req.note.clone(),
+                events: None,
+                run_id: None,
             })
             .await
         }
@@ -155,6 +157,8 @@ pub async fn create_version(
                     files: inputs,
                     note: req.note.clone(),
                     title: req.title.clone(),
+                    events: None,
+                    run_id: None,
                 },
             )
             .await
