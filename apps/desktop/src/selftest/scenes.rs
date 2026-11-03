@@ -774,6 +774,13 @@ const HOST_SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: crate::views::artifacts::state_scenes::open_embed_states,
     },
+    Scene {
+        name: "artifact-ref-toast",
+        about: "就这里提问 on a page element: the chip goes into the 话题 composer and the toast says 已放进话题的输入框",
+        start: Start::V2Refs,
+        setup: crate::views::artifacts::state_scenes::ref_toast_setup,
+        open: crate::views::artifacts::state_scenes::open_ref_toast,
+    },
 ];
 
 fn host_check(name: &str) -> bool {
@@ -795,6 +802,9 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
     // --- inc-host track ---
     if host_check(name) {
         return Some(host_preview::ready);
+    }
+    if name == "artifact-ref-toast" {
+        return Some(crate::views::artifacts::state_scenes::ref_toast_ready);
     }
     // --- end inc-host track ---
     // --- v11/media ---
@@ -834,6 +844,9 @@ pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Resu
     // --- inc-host track ---
     if host_check(name) {
         return Some(host_preview::verify);
+    }
+    if name == "artifact-ref-toast" {
+        return Some(crate::views::artifacts::state_scenes::ref_toast_verify);
     }
     // --- end inc-host track ---
     // --- v11/media ---
