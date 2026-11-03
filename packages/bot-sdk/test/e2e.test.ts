@@ -471,11 +471,11 @@ describe("1.1 cards, side chats and page events", () => {
     if (upd.type !== "message.updated") throw new Error("unreachable");
     expect(upd.data.cardV2?.actions).toBeUndefined();
     expect(upd.data.cardV2?.intent).toBe("info");
-    // A second answer to the old rev is refused.
+    // A second answer to the old rev is refused: rev 2 has no submit action (INTERACT §3.7: not_found, card.block_gone).
     const again = await human
       .answerCard(generalId, { messageId: r.message.id, rev: 1, actionId: "submit", inputs: { choice: "o1" } })
       .then(() => null, (e) => e as ChatError);
-    expect(again?.code).toBe("conflict");
+    expect(again?.code).toBe("not_found");
   });
 
   test("an approval pressed by an old v1 client arrives as an answer", async () => {
