@@ -372,6 +372,7 @@ pub fn mini_screen(
         .child(c::GROUP_PAGE_LIVE);
     let lights = traffic_lights.then(|| {
         div()
+            .flex_none()
             .flex()
             .gap(px(5.))
             .child(dot(gpui::rgb(0xFF5F57).into(), 6.))
@@ -398,7 +399,11 @@ pub fn mini_screen(
                     .children(lights)
                     .child(chip)
                     .children(screen.machine_name.map(|m| {
+                        // A long host name ends in an ellipsis inside the screen.
                         div()
+                            .flex_1()
+                            .min_w_0()
+                            .one_line()
                             .mono()
                             .text_size(px(10.))
                             .line_height(px(12.))
