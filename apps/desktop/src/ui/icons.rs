@@ -69,6 +69,13 @@ gpui_kit::assets::icon_assets!(
         MessageCircle,
         GitPullRequest,
         PanelRightOpen,
+        // --- rail track (1.1.0): rail options, the 话题 destination of mode C,
+        // ⌘K 交代或搜索 keys and 产出 thumbnails.
+        SlidersHorizontal,
+        TextAlignStart,
+        Command,
+        ChartLine,
+        // --- end rail track
     ]
 );
 

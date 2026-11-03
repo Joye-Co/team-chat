@@ -4,12 +4,12 @@ use gpui::App;
 
 use crate::{
     app::{RailMode, Services},
-    fake::v2 as d,
-    selftest::scenes::{Scene, Start, open_main, v2_open_topic},
+    selftest::scenes::{Scene, Start, open_main},
 };
 
+/// The rail over the 首页, as the artboards show it.
 fn rail(services: &Services, mode: RailMode, cx: &mut App) {
-    v2_open_topic(services, d::DEV, d::T_RECONNECT, cx);
+    services.nav.update(cx, |nav, cx| nav.open_desk(cx));
     services
         .nav
         .update(cx, |nav, cx| nav.set_rail_mode(mode, cx));
@@ -18,7 +18,7 @@ fn rail(services: &Services, mode: RailMode, cx: &mut App) {
 pub const SCENES: &[Scene] = &[
     Scene {
         name: "rail-work",
-        about: "Rail A 以工作为中心 (default): 话题 by 群 with live state, 断线重连后消息重复 selected",
+        about: "Rail A 以工作为中心 (default): 话题 by 群 with live state over the 首页",
         start: Start::V2,
         setup: |s, cx| rail(s, RailMode::Work, cx),
         open: open_main,

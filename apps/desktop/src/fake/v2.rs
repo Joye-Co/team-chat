@@ -1064,6 +1064,16 @@ impl ChatProvider for V2Samples {
     fn group_muted(&self, _group_id: &str) -> bool {
         false
     }
+    // --- rail track: I follow every 话题 of the 群 I am in, so the rail's
+    // 我参与的 filter lists what the artboards show.
+    fn topic_following(&self, group_id: &str, _topic_id: &str) -> bool {
+        self.with(|d| {
+            d.groups
+                .iter()
+                .any(|g| g.id == group_id && g.member_ids.iter().any(|m| m == ME))
+        })
+    }
+    // --- end rail track
     fn runs(&self, _group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
         let mut runs: Vec<BotRunSummary> = self.with(|d| {
             d.runs
