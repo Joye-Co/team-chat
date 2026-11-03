@@ -55,16 +55,22 @@ fn fence(src: &str) -> String {
     format!("```mermaid\n{src}\n```")
 }
 
-/// A flowchart with `n` nodes and long Chinese labels (worst case).
-pub fn big_flowchart(n: usize) -> String {
+/// A flowchart with `n` nodes: long Chinese labels (worst case) or short ones.
+pub fn big_flowchart(n: usize, long: bool) -> String {
     let mut s = String::from("flowchart TD\n");
     for i in 0..n {
-        s.push_str(&format!(
-            "  n{i}[第 {i} 步：把这一批群消息按 seq 去重以后再放进话题列表，同时记下最后确认的位置]\n"
-        ));
+        if long {
+            s.push_str(&format!("  n{i}[第 {i} 步：按 seq 去重后放进话题列表并记下确认位置]\n"));
+        } else {
+            s.push_str(&format!("  n{i}[检查 {i}]\n"));
+        }
     }
+    // Ten chains side by side, so the drawing stays inside the 4096 px limit.
+    let per = n.div_ceil(10).max(1);
     for i in 1..n {
-        s.push_str(&format!("  n{} --> n{i}\n", (i - 1) / 2));
+        if i % per != 0 {
+            s.push_str(&format!("  n{} --> n{i}\n", i - 1));
+        }
     }
     s
 }
@@ -82,7 +88,7 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
             m(
                 "m-coder",
                 "10:02",
-                format!("全部 150 步都在这里：\n\n{}", fence(&big_flowchart(150))),
+                format!("全部 150 步都在这里：\n\n{}", fence(&big_flowchart(150, true))),
             ),
         ];
     }
@@ -117,7 +123,12 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
             m(
                 "m-sentry",
                 "10:14",
-                format!("所有检查项：\n\n{}", fence(&big_flowchart(160))),
+                format!("所有检查项：\n\n{}", fence(&big_flowchart(160, false))),
+            ),
+            m(
+                "m-sentry",
+                "10:14",
+                format!("原始清单：\n\n{}", fence(&big_flowchart(400, true))),
             ),
             m(
                 "m-coder",

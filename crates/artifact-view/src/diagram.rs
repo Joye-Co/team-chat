@@ -210,11 +210,12 @@ pub fn mermaid_config(t: &ThemeVars) -> Value {
     config
 }
 
-/// Shape details the theme variables do not cover: rounded boxes (the artboard's 6 px),
-/// hairline grid, no "today" line, labels in the UI font.
+/// Shape details the theme variables do not cover: no drop shadows, rounded boxes (the
+/// artboard's 6 px), hairline grid, no "today" line, labels in the UI font.
 fn theme_css(t: &ThemeVars) -> String {
     format!(
-        ".node rect, .node polygon, rect.actor, rect.task, rect.note, .cluster rect {{ rx: 6px; ry: 6px; }}\
+        "* {{ filter: none !important; }}\
+         .node rect, .node polygon, rect.actor, rect.task, rect.note, .cluster rect {{ rx: 6px; ry: 6px; }}\
          .node rect, .node polygon, .node circle, rect.actor, rect.task {{ stroke-width: 1px; }}\
          .grid .tick line {{ stroke: {line}; opacity: 1; }} .grid path {{ stroke-width: 0; }}\
          .grid .tick text {{ fill: {ink3}; }} .today {{ display: none; }}\
