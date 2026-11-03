@@ -1211,3 +1211,51 @@ pub struct CardAnsweredData {
     )]
     pub edited_values: Option<AnswerEdits>,
 }
+
+/// Max decisions in one `GET /v1/groups/:id/decisions` page.
+pub const MAX_DECISIONS_PAGE: usize = 200;
+
+/// A group decision (群里的决定): an answer to a v2 ask whose `ask.record` was true at the
+/// answered rev. `GET /v1/groups/:id/decisions`, newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupDecision {
+    /// Seq of the `card.answered` event.
+    pub seq: crate::entities::Seq,
+    pub message_id: String,
+    pub topic_id: String,
+    pub rev: u32,
+    /// The card title at the answered rev: the question.
+    pub title: String,
+    pub action_id: String,
+    pub action_label: String,
+    /// Labels of the chosen options of the card's `decision` blocks, in block order.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub choices: Option<Vec<String>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub inputs: Option<AnswerInputs>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub edited_values: Option<AnswerEdits>,
+    pub answered_by: String,
+    pub answered_at: Millis,
+}
+
+/// `GET /v1/groups/:id/decisions?beforeSeq=&limit=`: newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionsResponse {
+    pub decisions: Vec<GroupDecision>,
+    pub has_more: bool,
+}

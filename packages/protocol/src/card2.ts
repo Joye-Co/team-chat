@@ -20,7 +20,7 @@ import {
   TextBlock,
   WebUrl,
 } from "./card.ts";
-import { Count, eventBase, Id, Millis, Rid, utf8Bytes } from "./common.ts";
+import { Count, eventBase, Id, Millis, Rid, Seq, utf8Bytes } from "./common.ts";
 import { RunPlan } from "./plan.ts";
 
 export const CARD_V2_VERSION = 2 as const;
@@ -324,6 +324,35 @@ export const CardAnsweredEvent = z.object({
   type: z.literal("card.answered"),
   data: z.object(answerFields),
 });
+
+/** Max decisions in one `GET /v1/groups/:id/decisions` page. */
+export const MAX_DECISIONS_PAGE = 200;
+
+/**
+ * A group decision (群里的决定): an answer to a v2 ask whose `ask.record` was true at the
+ * answered rev. `GET /v1/groups/:id/decisions`, newest first.
+ */
+export const GroupDecision = z.object({
+  /** Seq of the `card.answered` event. */
+  seq: Seq,
+  messageId: Id,
+  topicId: Id,
+  rev: z.int().positive(),
+  /** The card title at the answered rev: the question. */
+  title: z.string().min(1).max(200),
+  actionId: ActionId,
+  actionLabel: z.string().min(1).max(40),
+  /** Labels of the chosen options of the card's `decision` blocks, in block order. */
+  choices: z.array(z.string().min(1).max(200)).max(MAX_DECISION_OPTIONS * MAX_CARD_V2_BLOCKS).optional(),
+  inputs: AnswerInputs.optional(),
+  editedValues: AnswerEdits.optional(),
+  answeredBy: Id,
+  answeredAt: Millis,
+});
+export type GroupDecision = z.infer<typeof GroupDecision>;
+
+export const DecisionsResponse = z.object({ decisions: z.array(GroupDecision), hasMore: z.boolean() });
+export type DecisionsResponse = z.infer<typeof DecisionsResponse>;
 
 // ---------------------------------------------------------------------------
 // v1 card derived from a v2 card (for 1.0.x clients)

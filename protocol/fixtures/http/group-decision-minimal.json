@@ -1,0 +1,15 @@
+{
+  "kind": "GroupDecision",
+  "valid": true,
+  "value": {
+    "seq": 53,
+    "messageId": "01JBX0MSG000000000000000AE",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "rev": 2,
+    "title": "合并吗？",
+    "actionId": "ok",
+    "actionLabel": "好",
+    "answeredBy": "01JBX0OWNER0000000000000AA",
+    "answeredAt": 1762128000000
+  }
+}

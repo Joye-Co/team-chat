@@ -152,6 +152,8 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("CardV2", validated::<CardV2>),
     ("TopicLink", validated::<TopicLink>),
     ("TopicContext", validated::<TopicContext>),
+    ("GroupDecision", plain::<GroupDecision>),
+    ("DecisionsResponse", plain::<DecisionsResponse>),
 ];
 
 fn fixtures_root() -> PathBuf {

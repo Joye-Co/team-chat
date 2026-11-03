@@ -234,6 +234,31 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   bad("entities/topic-link-unknown-kind.json", "TopicLink", { ...pr, kind: "issue" }, "the server writes only known kinds");
   ok("events/topic.linked.json", "Event", { ...base, seq: 46, actorId: ID.bot, type: "topic.linked", data: { topicId: ID.topic, link: pr } });
 
+  // Group decisions (群里的决定) derived from answered asks with ask.record.
+  const decision = {
+    seq: 52,
+    messageId: ID.msg,
+    topicId: ID.topic,
+    rev: 1,
+    title: "发布 qqbot 1.4 到正式环境？",
+    actionId: "ship",
+    actionLabel: "发布",
+    choices: ["今晚 22:00"],
+    inputs: { when: "tonight", pct: 10 },
+    editedValues: { notes: "- 修好了重复消息" },
+    answeredBy: ID.alice,
+    answeredAt: T0 + 60_000,
+  };
+  ok("http/group-decision.json", "GroupDecision", decision);
+  ok("http/group-decision-minimal.json", "GroupDecision", {
+    seq: 53, messageId: ID.msg, topicId: ID.topic, rev: 2, title: "合并吗？", actionId: "ok", actionLabel: "好",
+    answeredBy: ID.owner, answeredAt: T0,
+  });
+  const { answeredBy: _who, ...anonymous } = decision;
+  bad("http/group-decision-no-answerer.json", "GroupDecision", anonymous, "a decision names who answered");
+  ok("http/decisions-response.json", "DecisionsResponse", { decisions: [decision], hasMore: false });
+  ok("http/decisions-response-empty.json", "DecisionsResponse", { decisions: [], hasMore: false });
+
   // Machines expose the daemon's features to owners.
   ok("entities/machine-v11.json", "Machine", {
     id: X.machine,

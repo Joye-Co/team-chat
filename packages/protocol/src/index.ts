@@ -22,7 +22,7 @@ import {
   Title,
 } from "./common.ts";
 import { CardActionedEvent, CardActionFrame } from "./card.ts";
-import { CardAnsweredEvent, CardAnswerFrame, CardV2 } from "./card2.ts";
+import { CardAnsweredEvent, CardAnswerFrame, CardV2, DecisionsResponse, GroupDecision } from "./card2.ts";
 import { TopicLink, TopicLinkedEvent } from "./links.ts";
 import { CharacterId } from "./characters.ts";
 import {
@@ -658,6 +658,8 @@ export const schemas = {
   CardV2,
   TopicLink,
   TopicContext,
+  GroupDecision,
+  DecisionsResponse,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

@@ -899,8 +899,21 @@ Rules:
   as expired after `ask.expiresAt`, and as superseded when a later rev exists.
 - Answers reach a runner bot's run as `run.input.answer` (machine-protocol.md) and an SDK bot
   as the `card.answered` event.
-- Group decisions (群里的决定) are derived on the client: every `card.answered` of a card whose
-  `ask.record` is true, with the question (title), the choice (action and inputs), who and when.
+- Group decisions (群里的决定): every `card.answered` of a card whose `ask.record` was true at
+  the answered rev, with the question (title), the choice (action, chosen option labels and
+  inputs), who and when. Clients may derive them from their cache; the server also lists them
+  (below), because a later rev of the card may drop `ask`.
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `GET /v1/groups/:id/decisions?beforeSeq=&limit=` | group member | `DecisionsResponse { decisions: GroupDecision[], hasMore }`, newest first; `limit` 1..200, default 50; `beforeSeq` = only answers with a lower seq |
+
+```ts
+GroupDecision = { seq /* of card.answered */, messageId, topicId, rev, title, actionId,
+                  actionLabel, choices?: string[], inputs?, editedValues?, answeredBy, answeredAt }
+```
+
+  A deleted card's decisions are not listed.
 - Readers are lenient: unknown block types, intents, kinds and styles read as unknown (Rust
   `Unknown`, rendered as nothing or the safe default), and a `cardV2` that does not parse is
   dropped while the v1 `card` stays. The server rejects all of these on write.
