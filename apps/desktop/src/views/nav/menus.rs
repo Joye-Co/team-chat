@@ -9,8 +9,11 @@ use super::{
     About, NewGroup, NextUnreadTopic, PreviousUnreadTopic, QuickSwitch, ShowMainWindow, StartDm,
 };
 use crate::{
-    app::{NewTopic, OpenSettings, Quit, ToggleSidePanel},
-    copy::{fill, nav, settings},
+    app::{
+        NewTopic, OpenArtifacts, OpenDesk, OpenMembers, OpenSettings, Quit, ToggleSideChat,
+        ToggleSidePanel,
+    },
+    copy::{fill, nav, rail, settings, topic_rail},
 };
 
 gpui::actions!(
@@ -57,6 +60,10 @@ pub fn app_menus() -> Vec<Menu> {
         Menu::new(nav::MENU_GO).items([
             MenuItem::action(nav::MENU_QUICK_SWITCH, QuickSwitch),
             MenuItem::separator(),
+            MenuItem::action(rail::RAIL_DESK, OpenDesk),
+            MenuItem::action(rail::RAIL_ARTIFACTS, OpenArtifacts),
+            MenuItem::action(rail::RAIL_MEMBERS, OpenMembers),
+            MenuItem::separator(),
             MenuItem::action(nav::MENU_NEW_TOPIC, NewTopic),
             MenuItem::action(nav::MENU_NEW_GROUP, NewGroup),
             MenuItem::action(nav::MENU_START_DM, StartDm),
@@ -66,6 +73,7 @@ pub fn app_menus() -> Vec<Menu> {
         ]),
         Menu::new(nav::MENU_VIEW).items([
             MenuItem::action(nav::MENU_SIDE_PANEL, ToggleSidePanel),
+            MenuItem::action(topic_rail::TITLE_SIDE_CHAT, ToggleSideChat),
             MenuItem::separator(),
             MenuItem::action(nav::MENU_FULL_SCREEN, ToggleFullScreen),
         ]),

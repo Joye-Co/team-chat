@@ -363,7 +363,8 @@ impl TopicListView {
                     })
                     .collect();
             }
-            None => {
+            // v2 pages: the retired topic list shows nothing.
+            _ => {
                 self.title.clear();
                 self.all.clear();
             }
@@ -377,7 +378,7 @@ impl TopicListView {
         match &self.place {
             Some(Place::Group(g)) => g == group_id,
             Some(Place::Todo) => self.all.iter().any(|r| r.group_id == group_id),
-            None => false,
+            _ => false,
         }
     }
 
@@ -772,7 +773,7 @@ impl Render for TopicListView {
             Some(Place::Todo) => Lucide::CircleCheck,
             Some(Place::Group(_)) if !self.all.is_empty() => Lucide::SearchX,
             Some(Place::Group(_)) => Lucide::MessageSquarePlus,
-            None => Lucide::UsersRound,
+            _ => Lucide::UsersRound,
         };
         let body = match empty_text {
             Some((text, hint)) => div()

@@ -14,7 +14,7 @@
 //! only that window with `screencapture -l <windowNumber> -o -x`, writes
 //! `<dir>/<scene>-<theme>.png` (`-worst` before `.png` with `--worst-case`)
 //! and `<dir>/screenshots.json`, closes the window and finally exits
-//! (0 = every PNG written). Scenes live in [`scenes::SCENES`].
+//! (0 = every PNG written). Scenes live in [`scenes::all`].
 
 pub mod capture;
 pub mod scenes;
@@ -65,7 +65,7 @@ const USAGE: &str = "usage: desktop --screenshot <dir> [--theme light|dark|both]
 pub fn main_if_requested() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--list-scenes") {
-        for s in scenes::SCENES {
+        for s in scenes::all() {
             println!("{:<12} {}", s.name, s.about);
         }
         return Some(0);
@@ -84,7 +84,7 @@ pub fn main_if_requested() -> Option<i32> {
 }
 
 fn scene_names() -> String {
-    scenes::SCENES
+    scenes::all()
         .iter()
         .map(|s| s.name)
         .collect::<Vec<_>>()
@@ -95,7 +95,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let mut options = Options {
         dir: PathBuf::new(),
         modes: vec![Mode::Light, Mode::Dark],
-        scenes: scenes::SCENES.iter().collect(),
+        scenes: scenes::all(),
         worst_case: false,
         size: size(px(1440.), px(900.)),
         settle: Duration::from_millis(400),
@@ -150,6 +150,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
     let base: Arc<dyn ChatProvider> = match start {
         Start::SignedOut => fake::FakeProvider::signed_out(),
         Start::SignedIn | Start::Empty => fake::FakeProvider::new(),
+        Start::V2 => fake::v2::V2Samples::new(),
         Start::Offline => {
             let fake = fake::FakeProvider::new();
             fake.set_connection(crate::data::ConnectionState::Reconnecting {
@@ -178,6 +179,8 @@ fn run(options: Options) -> i32 {
     }
     let code = std::rc::Rc::new(std::cell::Cell::new(1));
     let result = code.clone();
+    // At least the old 20-shot budget; more shots get 15 s each.
+    let shots = (options.scenes.len() * options.modes.len()).max(20) as u64;
     gpui_kit::application()
         .with_assets(crate::ui::AppAssets)
         .run(move |cx: &mut App| {
@@ -202,7 +205,7 @@ fn run(options: Options) -> i32 {
             // Never hang: quit after a generous per-shot budget.
             cx.spawn(async move |cx| {
                 cx.background_executor()
-                    .timer(Duration::from_secs(60 + 15 * 20))
+                    .timer(Duration::from_secs(60 + 15 * shots))
                     .await;
                 eprintln!("screenshot self-test timed out");
                 cx.update(|cx| cx.quit());

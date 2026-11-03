@@ -17,25 +17,22 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use gpui::{
-    Animation, AnimationExt as _, App, AppContext, Bounds, Context, ElementId, Entity,
-    EventEmitter, InteractiveElement, IntoElement, KeyBinding, MouseButton, MouseDownEvent,
-    MouseMoveEvent, MouseUpEvent, ParentElement, Render, Styled, Subscription, TitlebarOptions,
-    Window, WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point,
-    prelude::FluentBuilder as _, px, size,
+    App, AppContext, Bounds, Context, Entity, EventEmitter, InteractiveElement, IntoElement,
+    KeyBinding, ParentElement, Render, Styled, Subscription, TitlebarOptions, Window,
+    WindowBackgroundAppearance, WindowBounds, WindowOptions, div, point, px, size,
 };
 
 use crate::{
-    data::{Change, ChatProvider, GroupId, SessionState, TopicId},
+    data::{Change, ChatProvider, GroupId, MemberId, SessionState, TopicId},
     theme, ui,
     views::{
-        columns::{Column, Columns},
         composer::ComposerView,
         connection_banner::ConnectionBanner,
         login::LoginView,
-        side_panel::SidePanel,
+        rail::RailView,
+        shell::{pages::Pages, panes::Panes},
         sidebar::Sidebar,
         timeline::TimelineView,
-        topic_list::TopicListView,
     },
 };
 
@@ -49,7 +46,13 @@ gpui::actions!(
         NewTopic,
         MentionInComposer,
         FocusNext,
-        FocusPrev
+        FocusPrev,
+        // v2 shell (1.1.0)
+        ToggleSideChat,
+        ToggleTopicRail,
+        OpenDesk,
+        OpenMembers,
+        OpenArtifacts
     ]
 );
 
@@ -105,11 +108,95 @@ impl ChangeHub {
 }
 
 /// Where the user is.
+///
+/// v2 (1.1.0): the page follows from the place and the open 话题, see
+/// [`Navigation::page`]. A 话题 page is "a 话题 is open" with a `Group`
+/// place; `Todo` is the v1 待办 list, which v2 shows as the desk.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Place {
-    /// The 待办 list.
+    /// The 待办 list (v1). v2 draws it as the 首页 desk.
     Todo,
     Group(GroupId),
+    /// 首页: the desk.
+    Desk,
+    /// 成员, with one member's detail open.
+    Members(Option<MemberId>),
+    /// 产出: every 产出.
+    Artifacts,
+    /// One 产出 (`version: None` is the current one).
+    Artifact {
+        id: String,
+        version: Option<u32>,
+    },
+}
+
+/// The page the main window shows (v2 shell: rail | page | pane).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Page {
+    Desk,
+    Topic,
+    Group,
+    Members,
+    Artifacts,
+    Artifact,
+}
+
+/// The pane at the right of a page. Panes show only on 话题 pages, except
+/// [`RightPane::Artifact`], which any page can open.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub enum RightPane {
+    None,
+    /// The topic rail (负责, 计划, 改动, 产出 …): the default.
+    #[default]
+    TopicRail,
+    /// 单独问 with this member (⌘;).
+    SideChat(MemberId),
+    /// 实时查看 of this run.
+    Live(String),
+    /// A 产出 beside the 话题.
+    Artifact {
+        id: String,
+        version: Option<u32>,
+    },
+    /// 改动 (the PR of the 话题).
+    Changes,
+}
+
+impl RightPane {
+    /// Same kind of pane, whatever it shows.
+    pub fn same_kind(&self, other: &RightPane) -> bool {
+        std::mem::discriminant(self) == std::mem::discriminant(other)
+    }
+}
+
+/// How the left rail lists work (设置 → 外观 → 侧栏样式). Kept locally in
+/// `layout.json`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum RailMode {
+    /// A: 话题 grouped by 群, each row with its live state (default).
+    #[default]
+    Work,
+    /// B: 需要你 / 在做 / 做完了 · 今天, with 群 as filter chips.
+    Attention,
+    /// C: members, each expandable to the 话题 it works on.
+    Member,
+}
+
+impl RailMode {
+    pub const ALL: [RailMode; 3] = [RailMode::Work, RailMode::Attention, RailMode::Member];
+
+    /// The name in `layout.json`.
+    pub fn slug(self) -> &'static str {
+        match self {
+            RailMode::Work => "work",
+            RailMode::Attention => "attention",
+            RailMode::Member => "member",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<RailMode> {
+        RailMode::ALL.into_iter().find(|m| m.slug() == slug)
+    }
 }
 
 /// Navigation state shared by the views of one main window.
@@ -137,6 +224,10 @@ pub struct Navigation {
     pub header_hovered: bool,
     /// ⌘⇧S hid the sidebar (§4.4).
     pub sidebar_hidden: bool,
+    /// v2: the pane at the right of a 话题 page.
+    pub right_pane: RightPane,
+    /// v2: how the rail lists work.
+    pub rail_mode: RailMode,
 }
 
 /// Scroll the open topic to this message and highlight it. `serial` grows
@@ -164,6 +255,121 @@ impl Navigation {
             side_panel_auto_at: None,
             header_hovered: false,
             sidebar_hidden: false,
+            right_pane: RightPane::default(),
+            rail_mode: RailMode::default(),
+        }
+    }
+
+    /// The page to show (v2 shell).
+    pub fn page(&self) -> Page {
+        match (&self.place, &self.topic) {
+            (Some(Place::Members(_)), _) => Page::Members,
+            (Some(Place::Artifacts), _) => Page::Artifacts,
+            (Some(Place::Artifact { .. }), _) => Page::Artifact,
+            (_, Some(_)) => Page::Topic,
+            (Some(Place::Group(_)), None) => Page::Group,
+            (Some(Place::Desk | Place::Todo) | None, None) => Page::Desk,
+        }
+    }
+
+    /// 首页.
+    pub fn open_desk(&mut self, cx: &mut Context<Self>) {
+        self.place = Some(Place::Desk);
+        self.topic = None;
+        cx.notify();
+    }
+
+    /// 成员, with `member` selected.
+    pub fn open_members(&mut self, member: Option<MemberId>, cx: &mut Context<Self>) {
+        self.place = Some(Place::Members(member));
+        self.topic = None;
+        cx.notify();
+    }
+
+    /// 产出: the list.
+    pub fn open_artifacts(&mut self, cx: &mut Context<Self>) {
+        self.place = Some(Place::Artifacts);
+        self.topic = None;
+        cx.notify();
+    }
+
+    /// One 产出 page.
+    pub fn open_artifact(&mut self, id: String, version: Option<u32>, cx: &mut Context<Self>) {
+        self.place = Some(Place::Artifact { id, version });
+        self.topic = None;
+        cx.notify();
+    }
+
+    /// The pane that shows now: the chosen one on a 话题 page, an 产出 pane
+    /// anywhere, else none.
+    pub fn visible_pane(&self) -> RightPane {
+        match (&self.right_pane, self.page()) {
+            (pane, Page::Topic) => pane.clone(),
+            (RightPane::Artifact { .. }, _) => self.right_pane.clone(),
+            _ => RightPane::None,
+        }
+    }
+
+    /// Sets the pane by hand. Closing it remembers the 话题, so nothing opens
+    /// there by itself again.
+    pub fn set_right_pane(&mut self, pane: RightPane, cx: &mut Context<Self>) {
+        if pane == RightPane::None
+            && let Some(topic) = self.topic.clone()
+        {
+            self.side_panel_settled.insert(topic);
+        }
+        self.side_panel_auto_at = None;
+        if self.right_pane != pane {
+            self.right_pane = pane;
+            cx.notify();
+        }
+    }
+
+    /// A title bar button: opens `pane`, or closes it when that kind of pane
+    /// shows already (the rail toggle, 单独问 ⌘;, 产出, 电脑, 改动).
+    pub fn toggle_pane(&mut self, pane: RightPane, cx: &mut Context<Self>) {
+        let next = if self.visible_pane().same_kind(&pane) {
+            RightPane::None
+        } else {
+            pane
+        };
+        self.set_right_pane(next, cx);
+    }
+
+    /// ⌘;: 单独问 with `member` (the default member when `None`).
+    pub fn toggle_side_chat(&mut self, member: Option<MemberId>, cx: &mut Context<Self>) {
+        match member {
+            Some(m) => self.toggle_pane(RightPane::SideChat(m), cx),
+            None if matches!(self.visible_pane(), RightPane::SideChat(_)) => {
+                self.set_right_pane(RightPane::None, cx)
+            }
+            None => {}
+        }
+    }
+
+    /// Opens `pane` by itself (a run started, the first 产出 came), once per
+    /// 话题 and never after the user closed the pane there (§8.1 rule).
+    pub fn auto_open_pane(&mut self, pane: RightPane, cx: &mut Context<Self>) {
+        let Some(topic) = self.topic.clone() else {
+            return;
+        };
+        if self.header_hovered || self.side_panel_settled.contains(&topic) {
+            return;
+        }
+        self.side_panel_settled.insert(topic);
+        if self.right_pane != pane {
+            self.right_pane = pane;
+            self.side_panel_auto_at = Some(std::time::Instant::now());
+            cx.notify();
+        }
+    }
+
+    /// Changes how the rail lists work (saved by the caller, see
+    /// `views::shell::layout`).
+    pub fn set_rail_mode(&mut self, mode: RailMode, cx: &mut Context<Self>) {
+        if self.rail_mode != mode {
+            self.rail_mode = mode;
+            cx.notify();
         }
     }
 
@@ -326,20 +532,27 @@ impl Services {
 /// Called once per frame after the first frame; see `main.rs` self-tests.
 pub type FirstFrameHook = Box<dyn FnOnce(&mut Window, &mut App)>;
 
-/// The root view of the main window: login, or sidebar + topic list + topic view + side panel.
+/// The root view of the main window: login, or the v2 shell (1.1.0): the
+/// left rail | the page (title bar + body) | the right pane. See
+/// `views/shell` for the pages and panes and who owns each.
+///
+/// The v1 sidebar, topic list and side panel (`views/sidebar.rs`,
+/// `topic_list.rs`, `side_panel.rs`) still build but are not drawn; the
+/// final 1.1.0 integration deletes them.
 pub struct RootView {
     services: Services,
+    rail: Entity<RailView>,
+    /// The v1 sidebar: not drawn, kept for the navigation self-test until
+    /// the cutover deletes it.
     sidebar: Entity<Sidebar>,
-    topic_list: Entity<TopicListView>,
     timeline: Entity<TimelineView>,
     composer: Entity<ComposerView>,
-    side_panel: Entity<SidePanel>,
+    pages: Pages,
+    panes: Panes,
     login: Entity<LoginView>,
     banner: Entity<ConnectionBanner>,
     update_banner: Entity<crate::updater::banner::UpdateBanner>,
     first_frame: Option<FirstFrameHook>,
-    /// Widths of the sidebar and the topic list (`views/columns.rs`).
-    columns: Columns,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -361,65 +574,32 @@ impl RootView {
             }),
             cx.observe(&services.nav, |_, _, cx| cx.notify()),
         ];
-        // App-level banners sit above the sidebar footer (DESIGN.md §8.6).
+        // App-level banners (connection, update).
         let banner = cx.new(|cx| ConnectionBanner::new(services.clone(), cx));
         let update_banner = cx.new(crate::updater::banner::UpdateBanner::new);
         crate::views::banners::register(update_banner.clone(), banner.clone(), cx);
+        let timeline = cx.new(|cx| TimelineView::new(services.clone(), cx));
+        let composer = cx.new(|cx| ComposerView::new(services.clone(), window, cx));
+        let pages = Pages::new(&services, timeline.clone(), composer.clone(), cx);
+        let panes = Panes::new(&services, window, cx);
         Self {
+            rail: cx.new(|cx| RailView::new(services.clone(), cx)),
             sidebar: cx.new(|cx| Sidebar::new(services.clone(), cx)),
-            topic_list: cx.new(|cx| TopicListView::new(services.clone(), cx)),
-            timeline: cx.new(|cx| TimelineView::new(services.clone(), cx)),
-            composer: cx.new(|cx| ComposerView::new(services.clone(), window, cx)),
-            side_panel: cx.new(|cx| SidePanel::new(services.clone(), cx)),
+            timeline,
+            composer,
+            pages,
+            panes,
             login: cx.new(|cx| LoginView::new(services.clone(), window, cx)),
             banner,
             update_banner,
             services,
             first_frame,
-            columns: Columns::default(),
             _subscriptions: subscriptions,
         }
     }
 
     pub fn services(&self) -> &Services {
         &self.services
-    }
-
-    /// The divider between a column and the next: the 0.5 pt hairline and a
-    /// 6 pt hit strip with the resize cursor (§4.4).
-    fn divider(&self, column: Column, cx: &mut Context<Self>) -> gpui::AnyElement {
-        div()
-            .relative()
-            .flex_none()
-            .w(px(0.))
-            .h_full()
-            .child(ui::column_edge(cx))
-            .child(
-                div()
-                    .id(match column {
-                        Column::Sidebar => "sidebar-divider",
-                        Column::TopicList => "topic-list-divider",
-                    })
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left(px(-3.))
-                    .w(px(6.))
-                    .cursor_col_resize()
-                    .on_mouse_down(
-                        MouseButton::Left,
-                        cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-                            if e.click_count >= 2 {
-                                this.columns.reset(column);
-                            } else {
-                                this.columns.start_drag(column, e.position.x);
-                            }
-                            cx.stop_propagation();
-                            cx.notify();
-                        }),
-                    ),
-            )
-            .into_any_element()
     }
 
     pub fn login(&self) -> &Entity<LoginView> {
@@ -437,6 +617,14 @@ impl RootView {
     pub fn composer(&self) -> &Entity<ComposerView> {
         &self.composer
     }
+
+    pub fn pages(&self) -> &Pages {
+        &self.pages
+    }
+
+    pub fn panes(&self) -> &Panes {
+        &self.panes
+    }
 }
 
 impl Render for RootView {
@@ -444,16 +632,41 @@ impl Render for RootView {
         if let Some(hook) = self.first_frame.take() {
             window.on_next_frame(hook);
         }
-        let colors = theme::colors(cx);
+        let k = theme::colors(cx);
         let root = div()
             .id("root")
             .size_full()
-            .bg(colors.background)
-            .text_color(colors.foreground)
+            .bg(k.bg)
+            .text_color(k.ink)
             .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
+                // v2: ⌘⌥I toggles the topic rail.
                 this.services
                     .nav
-                    .update(cx, |nav, cx| nav.toggle_side_panel(cx));
+                    .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
+            }))
+            .on_action(cx.listener(|this, _: &ToggleTopicRail, _, cx| {
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.toggle_pane(RightPane::TopicRail, cx));
+            }))
+            .on_action(cx.listener(|this, _: &ToggleSideChat, _, cx| {
+                let member = this.services.provider.side_chat_default_member();
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.toggle_side_chat(member, cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenDesk, _, cx| {
+                this.services.nav.update(cx, |nav, cx| nav.open_desk(cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenMembers, _, cx| {
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.open_members(None, cx));
+            }))
+            .on_action(cx.listener(|this, _: &OpenArtifacts, _, cx| {
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.open_artifacts(cx));
             }))
             .on_action(|_: &FocusNext, window, cx| window.focus_next(cx))
             .on_action(|_: &FocusPrev, window, cx| window.focus_prev(cx))
@@ -475,123 +688,54 @@ impl Render for RootView {
         ) {
             return root.child(self.login.clone());
         }
-        // No 群 yet: one welcome in the content area, nothing else (§8.5, U06).
+        let nav = self.services.nav.read(cx);
+        let rail_shown = !nav.sidebar_hidden;
+        let rail = rail_shown.then(|| {
+            div()
+                .w(theme::RAIL_WIDTH)
+                .h_full()
+                .flex_none()
+                .relative()
+                .child(self.rail.clone())
+                .child(ui::column_edge(cx))
+                .into_any_element()
+        });
+        // No 群 yet: the rail and one welcome, nothing else (§8.5, U06).
         if self.services.provider.groups().is_empty() {
-            return root.flex().flex_row().children([
-                div()
-                    .w(self.columns.width(Column::Sidebar))
-                    .h_full()
-                    .flex_none()
-                    .child(self.sidebar.clone())
-                    .into_any_element(),
-                ui::column_edge(cx).into_any_element(),
+            return root.flex().flex_row().children(rail).child(
                 div()
                     .flex_1()
                     .h_full()
-                    .child(crate::views::welcome::Welcome)
-                    .into_any_element(),
-            ]);
+                    .child(crate::views::welcome::Welcome),
+            );
         }
-        // The side panel never shows with no topic open (U07). In a narrow
-        // window the columns shrink for it, then it floats (§4.4).
-        let nav = self.services.nav.read(cx);
-        let panel_open = nav.side_panel_open && nav.topic.is_some();
-        let sidebar_shown = !nav.sidebar_hidden;
-        let auto_at = nav.side_panel_auto_at;
+        let page = nav.page();
+        let pane = nav.visible_pane();
         let window_w = window.viewport_size().width;
-        let (sidebar_w, list_w, panel_floats) =
-            self.columns.layout(window_w, sidebar_shown, panel_open);
-        if self.columns.settling() {
-            window.request_animation_frame();
-        }
-        let sidebar = sidebar_shown.then(|| {
-            [
-                div()
-                    .w(sidebar_w)
-                    .h_full()
-                    .flex_none()
-                    .child(self.sidebar.clone())
-                    .into_any_element(),
-                self.divider(Column::Sidebar, cx),
-            ]
-        });
+        let rail_w = if rail_shown {
+            theme::RAIL_WIDTH
+        } else {
+            px(0.)
+        };
+        let pane_w = self
+            .panes
+            .fitted_width(&pane, window_w, window_w - rail_w, cx);
+        // A pane takes its own column while the page keeps its minimum;
+        // in a narrower window it floats over the page (level 2).
+        let floats = window_w - rail_w - pane_w < theme::PAGE_MIN_WIDTH;
+        let leading = if rail_shown {
+            px(0.)
+        } else {
+            theme::TRAFFIC_LIGHTS_INSET
+        };
+        let page_el = self.pages.render(page, &pane, leading, &self.services, cx);
+        let pane_el = self.panes.render(&pane, pane_w, floats, cx);
         root.flex()
             .flex_row()
             .relative()
-            .when(self.columns.drag.is_some(), |el| el.cursor_col_resize())
-            .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
-                if this.columns.drag.is_some() {
-                    if e.pressed_button != Some(MouseButton::Left) {
-                        this.columns.end_drag(cx.reduce_motion());
-                    } else if this.columns.drag_to(e.position.x) {
-                        cx.notify();
-                    }
-                }
-            }))
-            .on_mouse_up(
-                MouseButton::Left,
-                cx.listener(|this, _: &MouseUpEvent, _, cx| {
-                    if this.columns.end_drag(cx.reduce_motion()) {
-                        cx.notify();
-                    }
-                }),
-            )
-            .children(sidebar.into_iter().flatten())
-            .children([
-                div()
-                    .w(list_w)
-                    .h_full()
-                    .flex_none()
-                    .child(self.topic_list.clone())
-                    .into_any_element(),
-                self.divider(Column::TopicList, cx),
-                div()
-                    .flex_1()
-                    .min_w(theme::TOPIC_VIEW_MIN_WIDTH)
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .child(div().flex_1().min_h(px(0.)).child(self.timeline.clone()))
-                    .child(self.composer.clone())
-                    .into_any_element(),
-            ])
-            .children(panel_open.then(|| {
-                // Width snaps; when the panel opened by itself its content
-                // fades in over 120 ms, so the reflow of the topic is not a
-                // pop (§12). ⌘⌥I and the button stay instant, and so does
-                // reduce motion.
-                let fade =
-                    auto_at.filter(|at| at.elapsed() < theme::motion::FAST && !cx.reduce_motion());
-                let content = match fade {
-                    Some(at) => div()
-                        .size_full()
-                        .child(self.side_panel.clone())
-                        .with_animation(
-                            ElementId::Name(format!("side-panel-auto-{at:?}").into()),
-                            Animation::new(theme::motion::FAST)
-                                .with_easing(theme::motion::out_fn()),
-                            |el, t| el.opacity(t),
-                        )
-                        .into_any_element(),
-                    None => self.side_panel.clone().into_any_element(),
-                };
-                let panel = div()
-                    .w(theme::SIDE_PANEL_WIDTH)
-                    .h_full()
-                    .flex_none()
-                    .bg(colors.panel)
-                    .child(content);
-                if panel_floats {
-                    panel
-                        .absolute()
-                        .top_0()
-                        .right_0()
-                        .shadow(colors.shadow(theme::Elevation::Overlay))
-                        .occlude()
-                } else {
-                    panel.relative().child(ui::column_start_edge(cx))
-                }
-            }))
+            .children(rail)
+            .child(page_el)
+            .children(pane_el)
     }
 }
 
@@ -628,15 +772,16 @@ pub fn open_main_window(
 ) -> Result<Entity<RootView>, String> {
     let options = main_window_options(focus, cx);
     let (_, view) = gpui_kit::open_window(options, cx, move |window, cx| {
-        cx.new(|cx| {
-            let mut root = RootView::new(services, first_frame, window, cx);
-            // The app keeps the widths the user dragged; self-tests (no
-            // focus) always draw the defaults.
-            if focus {
-                root.columns = Columns::load();
-            }
-            root
-        })
+        // The app keeps the rail mode and theme of 设置 → 外观; self-tests
+        // (no focus) always draw the defaults.
+        if focus {
+            let prefs = crate::views::shell::layout::load();
+            theme::set_theme_choice(prefs.theme);
+            services
+                .nav
+                .update(cx, |nav, cx| nav.set_rail_mode(prefs.rail_mode, cx));
+        }
+        cx.new(|cx| RootView::new(services, first_frame, window, cx))
     })
     .map_err(|e| e.to_string())?;
     Ok(view)
@@ -655,6 +800,11 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
         KeyBinding::new("cmd-shift-s", ToggleSidebar, None),
         KeyBinding::new("cmd-n", NewTopic, None),
+        KeyBinding::new("cmd-;", ToggleSideChat, None),
+        KeyBinding::new("cmd-alt-r", ToggleTopicRail, None),
+        KeyBinding::new("cmd-shift-h", OpenDesk, None),
+        KeyBinding::new("cmd-shift-m", OpenMembers, None),
+        KeyBinding::new("cmd-shift-o", OpenArtifacts, None),
         // Tab moves keyboard focus through the window's tab stops (§11);
         // inputs keep their own Tab binding.
         KeyBinding::new("tab", FocusNext, None),

@@ -1,7 +1,8 @@
 //! The scenes of the screenshot self-test.
 //!
 //! A scene is one window in one state. To add a scene, add one entry to
-//! [`SCENES`]: a name (the PNG is `<name>-<theme>.png`), what it shows, the
+//! [`SCENES`] (v1 and shared scenes) or to the `SCENES` slice of a v2
+//! feature folder (`views/desk/scenes.rs`, …), which [`all`] chains: a name (the PNG is `<name>-<theme>.png`), what it shows, the
 //! data it starts from, a `setup` that moves navigation (or anything else in
 //! `Services`) into place, and an `open` that opens the window. Use
 //! [`open_main`] or [`open_settings`], or write your own opener for a new
@@ -27,6 +28,9 @@ pub enum Start {
     Empty,
     /// Signed in with the sample data while the connection is down.
     Offline,
+    /// Signed in with the v2 sample team of the 1.1.0 artboards
+    /// (`fake::v2::V2Samples`).
+    V2,
 }
 
 pub struct Scene {
@@ -54,6 +58,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: |s, c, cx| open_gallery(s, c, 1, cx),
+    },
+    Scene {
+        name: "components-v3",
+        about: "The component gallery: v3 tokens (surfaces, member tints, states, shadows), buttons, tags, rings, rail rows and motion",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| open_gallery(s, c, 2, cx),
     },
     Scene {
         name: "main",
@@ -477,8 +488,53 @@ pub const SCENES: &[Scene] = &[
     },
 ];
 
+/// Every scene: the shared ones, then each v2 feature's slice, in order.
+pub fn all() -> Vec<&'static Scene> {
+    let slices: [&'static [Scene]; 11] = [
+        SCENES,
+        crate::views::desk::scenes::SCENES,
+        crate::views::rail::scenes::SCENES,
+        crate::views::topic_page::scenes::SCENES,
+        crate::views::side_chat::scenes::SCENES,
+        crate::views::live::scenes::SCENES,
+        crate::views::nav::ask_scenes::SCENES,
+        crate::views::group_page::scenes::SCENES,
+        crate::views::members_page::scenes::SCENES,
+        crate::views::artifact_page::scenes::SCENES,
+        V2_SHARED,
+    ];
+    slices.into_iter().flatten().collect()
+}
+
+/// v2 scenes whose feature lives outside its own folder.
+const V2_SHARED: &[Scene] = &[
+    Scene {
+        name: "settings-appearance",
+        about: "设置 → 外观: theme and 侧栏样式",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: crate::views::settings::appearance::open_scene,
+    },
+    Scene {
+        name: "cards-v2",
+        about: "Generative cards v2 (stub): the approval card of qqbot v2.14 上线 in its 话题",
+        start: Start::V2,
+        setup: |s, cx| v2_open_topic(s, crate::fake::v2::OPS, crate::fake::v2::T_RELEASE, cx),
+        open: open_main,
+    },
+];
+
 pub fn find(name: &str) -> Option<&'static Scene> {
-    SCENES.iter().find(|s| s.name == name)
+    all().into_iter().find(|s| s.name == name)
+}
+
+/// v2 setups: open a 话题 of the sample team with the default pane.
+pub fn v2_open_topic(services: &Services, group: &str, topic: &str, cx: &mut App) {
+    let (g, t) = (group.to_string(), topic.to_string());
+    services.nav.update(cx, |nav, cx| {
+        nav.open_group(g.clone(), cx);
+        nav.open_topic(g, t, cx);
+    });
 }
 
 // --- setups ---

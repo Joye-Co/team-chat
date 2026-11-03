@@ -6,6 +6,7 @@
 //! is. Dialogs open in the main window, which `RootView::new` registers with
 //! [`attach_window`].
 
+pub mod ask_scenes;
 pub mod dialogs;
 pub mod menus;
 pub mod rename;
@@ -213,10 +214,36 @@ pub fn saved_from(place: Option<&Place>, topic: Option<&(GroupId, TopicId)>) -> 
         (None, Some(Place::Group(g))) => Some(g.clone()),
         _ => None,
     };
+    // v2 pages (additive): a 1.0.x client reads only the fields above.
+    let (page, member_id, artifact_id) = match place {
+        Some(Place::Desk) if topic.is_none() => (Some("desk"), None, None),
+        Some(Place::Members(m)) => (Some("members"), m.clone(), None),
+        Some(Place::Artifacts) => (Some("artifacts"), None, None),
+        Some(Place::Artifact { id, .. }) => (Some("artifact"), None, Some(id.clone())),
+        _ => (None, None, None),
+    };
+    let topic = topic.filter(|_| page.is_none());
     SavedNavigation {
         todo,
         group_id,
         topic_id: topic.map(|(_, t)| t.clone()),
+        page: page.map(str::to_string),
+        member_id,
+        artifact_id,
+    }
+}
+
+/// The v2 page a saved place names, when it is not a group or 话题 page.
+pub fn saved_page(saved: &SavedNavigation) -> Option<Place> {
+    match saved.page.as_deref()? {
+        "desk" => Some(Place::Desk),
+        "members" => Some(Place::Members(saved.member_id.clone())),
+        "artifacts" => Some(Place::Artifacts),
+        "artifact" => saved
+            .artifact_id
+            .clone()
+            .map(|id| Place::Artifact { id, version: None }),
+        _ => None,
     }
 }
 
@@ -255,7 +282,15 @@ pub fn restore(services: &Services, cx: &mut App) {
     let (todo, group, topic) = resolve_saved(saved.as_ref(), &groups, |g, t| {
         provider.topic(g, t).is_some()
     });
+    let page = saved.as_ref().and_then(saved_page);
     services.nav.update(cx, |nav, cx| {
+        match page {
+            Some(Place::Desk) => return nav.open_desk(cx),
+            Some(Place::Members(m)) => return nav.open_members(m, cx),
+            Some(Place::Artifacts) => return nav.open_artifacts(cx),
+            Some(Place::Artifact { id, version }) => return nav.open_artifact(id, version, cx),
+            _ => {}
+        }
         if todo {
             nav.open_todo(cx);
         } else if let Some(g) = group.clone() {

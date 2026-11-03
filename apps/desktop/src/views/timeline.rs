@@ -96,6 +96,8 @@ pub struct FrameProbe {
 
 pub struct TimelineView {
     services: Services,
+    /// Draw the v1 header band (the v2 shell draws its own title bar).
+    show_header: bool,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
     members: Vec<Member>,
@@ -181,6 +183,14 @@ pub struct TimelineView {
 impl EventEmitter<TimelineEvent> for TimelineView {}
 
 impl TimelineView {
+    /// Shows or hides the v1 header band (the v2 shell has its own title bar).
+    pub fn set_show_header(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_header != show {
+            self.show_header = show;
+            cx.notify();
+        }
+    }
+
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
@@ -218,6 +228,7 @@ impl TimelineView {
         list.set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
         let mut this = Self {
             services,
+            show_header: true,
             open: None,
             topic: None,
             members: Vec::new(),
@@ -739,7 +750,10 @@ impl Render for TimelineView {
             .flex()
             .flex_col()
             .bg(colors.content)
-            .child(self.render_header(&topic, window, cx))
+            .children(
+                self.show_header
+                    .then(|| self.render_header(&topic, window, cx)),
+            )
             .child(
                 div()
                     .relative()

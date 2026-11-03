@@ -20,6 +20,18 @@ pub mod topic_list;
 pub mod topic_menu;
 pub mod welcome;
 
+// The v2 shell (1.1.0) and one folder per feature track.
+pub mod artifact_page;
+pub mod desk;
+pub mod group_page;
+pub mod live;
+pub mod members_page;
+pub mod rail;
+pub mod shell;
+pub mod side_chat;
+pub mod topic_page;
+pub mod topic_rail;
+
 use chrono::{Datelike, Local, TimeZone};
 use gpui::{App, Div, IntoElement, ParentElement, Pixels, Styled, div, px};
 
