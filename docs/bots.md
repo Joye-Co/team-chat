@@ -214,7 +214,8 @@ page event of my 产出 while the bot is connected (the transient `artifact.even
 `ctx.kind`, `ctx.name`, `ctx.payload`, `ctx.actorId`). Answer an `ask` once with
 `ctx.reply(payload)` (private to the asker, within 120 s) or `ctx.decline(message)`. Push a new
 data snapshot to every open copy of the page with `ctx.pushData(data, { baseDataRev? })` (the
-page's `onData` gets it; at most 256 KiB). `ctx.postMessage(...)` posts in the 产出's topic. A
+page's `onData` gets it; at most 256 KiB). `ctx.postMessage(...)` posts in the 产出's topic with
+the page event as `causeEventId`, so the emitter's waiting state clears (`posted`). A
 handler that does not answer makes the SDK answer for it: an `emit` gets `ignored`, an `ask` a
 decline (`failed` when the handler throws). Page events are not stored in the group log, so they
 are not caught up after a restart. A page event never approves anything: ask with a Card v2 when
@@ -491,6 +492,7 @@ Codex 的计划更新)生成。
 - **页面事件**:`http.publishHtml({ ..., events: [{ name, label, kind }] })` 声明产出页面可以发回的事件
   (`kind` 为 `emit` 或 `ask`),`onArtifactEvent` 收到它们。`ask` 用 `ctx.reply(payload)` 回答一次
   (只给提问的人)或 `ctx.decline(message)`;`ctx.pushData(data)` 把新数据推给所有打开这个页面的人。
+  `ctx.postMessage` 发消息时把页面事件作为 `causeEventId`。
   处理函数没有回应时 SDK 自动回应(`emit` 回 `ignored`,`ask` 回拒绝)。页面事件不能当作批准:
   需要决定时发 Card v2 提问。
 - **交互闭环(2.1)**:块用 `events` 声明实时事件(如 `choice.change`、`chart.select`)。

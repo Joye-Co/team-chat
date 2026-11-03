@@ -910,6 +910,42 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
     }
   });
 
+  test.skipIf(!hasPageLoop)("page emits: ctx.postMessage names the emit as cause and resolves it posted; an unanswered emit is resolved ignored", async () => {
+    const t = await human.startTopic(generalId, { title: "看板 emit", body: "做个页面" });
+    const v = await ledger.http.publishHtml({
+      groupId: generalId,
+      topicId: t.message.topicId,
+      title: "看板 emit",
+      html: "<!doctype html><p>hi</p>",
+      events: [
+        { name: "report.flag", kind: "emit" },
+        { name: "report.seen", kind: "emit" },
+      ],
+    });
+    const errors: unknown[] = [];
+    ledger.onError((e) => errors.push(e));
+    ledger.onArtifactEvent(async (ctx) => {
+      if (ctx.artifactId !== v.artifact.id || ctx.name !== "report.flag") return;
+      await ctx.postMessage("收到，我去看一下");
+    });
+    const emit = (name: string) =>
+      frame({ t: "artifact.event", groupId: generalId, artifactId: v.artifact.id, version: v.version.version, clientEventId: clientEventId(), name, kind: "emit", payload: null });
+    const resolvedOf = (eventId: string) =>
+      waitFor(`interaction.resolved for ${eventId}`, () =>
+        transients.find((e): e is Extract<TransientEvent, { type: "interaction.resolved" }> => e.type === "interaction.resolved" && e.eventId === eventId),
+      );
+    const flag = await emit("report.flag");
+    const posted = await waitFor("the post of the emit", () =>
+      events.find((e) => e.type === "message.created" && e.data.message.body === "收到，我去看一下" && e.data.message.topicId === t.message.topicId),
+    );
+    if (posted.type !== "message.created") throw new Error("unreachable");
+    expect(posted.data.message.cause?.eventId).toBe(flag.eventId);
+    expect((await resolvedOf(flag.eventId)).result).toBe("posted");
+    const seen = await emit("report.seen");
+    expect((await resolvedOf(seen.eventId)).result).toBe("ignored");
+    expect(errors).toHaveLength(0);
+  });
+
   test.skipIf(!hasRefs)("REFS C3 1-4: a question about a cell and a node; ctx.refs, ctx.question, resolveRef current, then not current", async () => {
     const card = composeCard({
       intent: "info",

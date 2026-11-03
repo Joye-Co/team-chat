@@ -2115,8 +2115,9 @@ export class Bot {
       postMessage: async (input) => {
         const i = typeof input === "string" ? { body: input } : { ...input };
         if (!i.clientMsgId) i.clientMsgId = nextId();
-        if (!i.causeEventId) i.causeEventId = eventId;
-        const r = await this.send({ groupId, topicId }, i);
+        // The page event is the cause (INTERACT 4.3); a server without page causes gets none.
+        const auto = i.causeEventId ? undefined : eventId;
+        const r = await this.withCause(auto, (c) => this.send({ groupId, topicId }, c ? { ...i, causeEventId: c } : i));
         if (kind === "emit") flags.responded = true;
         return r;
       },

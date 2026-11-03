@@ -368,6 +368,45 @@ describe("causes outside the server's window", () => {
 });
 
 describe("page events", () => {
+  test("emit: ctx.postMessage names the page event as cause; without page causes it posts without one", async () => {
+    for (const takesPageCauses of [true, false]) {
+      const { server } = cardServer();
+      const send = server.handler("send") as (f: Frame) => Reply;
+      server.on("send", (f) =>
+        f.causeEventId === "PE7" && !takesPageCauses
+          ? { ok: false, error: { code: "invalid", message: "cause is not a recent event of this card", reason: "interact.bad_cause" } }
+          : send(f),
+      );
+      const bot = await start(server);
+      const errors: unknown[] = [];
+      bot.onError((e) => errors.push(e));
+      bot.onArtifactEvent(async (ctx) => {
+        await ctx.postMessage("收到，我去看一下");
+      });
+      server.transient({
+        type: "artifact.event",
+        groupId: GROUP_ID,
+        topicId: TOPIC_ID,
+        artifactId: "01JC0ART00000000000000OCT3",
+        version: 3,
+        eventId: "PE7",
+        name: "report.flag",
+        kind: "emit",
+        payload: null,
+        actorId: HUMAN_ID,
+        at: Date.now(),
+      });
+      const posted = await server.next((f) => f.t === "send" && f.body === "收到，我去看一下" && (f.causeEventId === undefined) !== takesPageCauses);
+      expect(posted.causeEventId).toBe(takesPageCauses ? "PE7" : undefined);
+      await new Promise((res) => setTimeout(res, 50));
+      expect(server.of("send").filter((f) => f.body === "收到，我去看一下")).toHaveLength(takesPageCauses ? 1 : 2);
+      // The post answered the emit: no automatic resolve, no handler error.
+      expect(server.of("interaction.resolve")).toHaveLength(0);
+      expect(errors).toHaveLength(0);
+      await bot.stop();
+    }
+  });
+
   test("ask: reply once; emit without an answer: ignored; ask without an answer: declined; pushData has the cause", async () => {
     const server = new FakeServer();
     server.on("artifact.data", () => ({ ok: true, result: { dataRev: 1 } }));
