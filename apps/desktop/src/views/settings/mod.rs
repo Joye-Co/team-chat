@@ -10,6 +10,8 @@ mod about;
 pub mod appearance;
 mod machines;
 mod members;
+// pages track: the 成员 page reuses the invite and add-member forms.
+pub(crate) use members::{open_add_bot, open_invite};
 mod notifications;
 mod profile;
 pub mod selftest;
