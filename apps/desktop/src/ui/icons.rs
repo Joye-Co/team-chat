@@ -111,6 +111,11 @@ gpui_kit::assets::icon_assets!(
         ListTree,
         ArrowUpDown,
         // --- end v11/media ---
+        // --- v11/inc-diagrams: diagrams ---
+        Workflow,
+        Scan,
+        Maximize2,
+        // --- end v11/inc-diagrams ---
     ]
 );
 

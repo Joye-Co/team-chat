@@ -19,6 +19,9 @@ pub mod login;
 // --- v11/media ---
 pub mod media;
 // --- end v11/media ---
+// --- v11/inc-diagrams ---
+pub mod diagrams;
+// --- end v11/inc-diagrams ---
 pub mod nav;
 pub mod notify;
 pub mod panel;
@@ -206,6 +209,13 @@ pub const SECTIONS: &[Section] = &[
         developer: false,
     },
     // --- end v11/media ---
+    // --- v11/inc-diagrams ---
+    Section {
+        name: "diagrams",
+        entries: diagrams::ENTRIES,
+        developer: false,
+    },
+    // --- end v11/inc-diagrams ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.

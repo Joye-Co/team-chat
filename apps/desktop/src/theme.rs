@@ -1526,6 +1526,22 @@ fn dark_colors() -> &'static Colors {
     }
 }
 
+// --- v11/inc-diagrams: diagrams render every theme id, not only the current one ---
+/// Whether Increase contrast is on.
+pub fn increase_contrast() -> bool {
+    INCREASE_CONTRAST.load(Ordering::Relaxed)
+}
+
+/// The colors of one mode and contrast setting, whatever the current mode is.
+pub fn colors_for(dark: bool, contrast: bool) -> Colors {
+    match (dark, contrast) {
+        (false, false) => build(false),
+        (true, false) => build(true),
+        (d, true) => high_contrast(build(d)),
+    }
+}
+// --- end v11/inc-diagrams ---
+
 /// The app's colors for the current mode.
 pub fn colors(cx: &App) -> Colors {
     if is_dark(cx) {
