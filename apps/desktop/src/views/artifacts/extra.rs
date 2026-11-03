@@ -22,7 +22,7 @@ impl MessageExtra for ArtifactRefsExtra {
         &self,
         message: &Message,
         ctx: &ExtrasContext,
-        _window: &mut Window,
+        window_: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
         if message.artifact_refs.is_empty() {
@@ -36,6 +36,12 @@ impl MessageExtra for ArtifactRefsExtra {
                 ctx.provider
                     .request_artifact(&message.group_id, &message.topic_id, &r.artifact_id);
             }
+            // --- v11/media: a preview of what the version holds, in place of the file row ---
+            if let Some(el) = media_preview(message, r, detail.as_ref(), ctx, index, window_, cx) {
+                list = list.child(el);
+                continue;
+            }
+            // --- end v11/media ---
             let opening = window::is_opening(&r.artifact_id, cx);
             let (title, meta, icon) = match &detail {
                 Some(d) => {
@@ -150,3 +156,52 @@ impl MessageExtra for ArtifactRefsExtra {
         Some(list.into_any_element())
     }
 }
+
+// --- v11/media ---
+/// The inline media preview of one reference, when its version holds something the app
+/// can show (`views/media`). `None` keeps the file row.
+fn media_preview(
+    message: &Message,
+    r: &crate::data::ArtifactRef,
+    detail: Option<&crate::data::ArtifactDetail>,
+    ctx: &ExtrasContext,
+    index: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    use crate::views::media::{self, MediaFile, inline, state::Target, store::MediaKey};
+    let d = detail?;
+    let v = d.versions.iter().find(|v| v.version == r.version)?;
+    if v.entry.is_empty() {
+        return None;
+    }
+    let files: Vec<MediaFile> = v
+        .files
+        .iter()
+        .map(|f| MediaFile {
+            path: f.path.clone(),
+            size: f.size,
+            mime: f.mime.clone(),
+        })
+        .collect();
+    let kind = media::classify(&v.entry, &files);
+    let key = if message.id.is_empty() {
+        &message.client_msg_id
+    } else {
+        &message.id
+    };
+    let spec = inline::InlineSpec {
+        key: MediaKey::new(r.artifact_id.clone(), r.version),
+        kind,
+        title: d.summary.title.clone(),
+        bytes: files.iter().map(|f| f.size).sum(),
+        target: Target {
+            provider: Some(ctx.provider.clone()),
+            group_id: message.group_id.clone(),
+            topic_id: message.topic_id.clone(),
+        },
+        id: SharedString::from(format!("media-{key}-{index}")),
+    };
+    inline::render(&spec, window, cx)
+}
+// --- end v11/media ---

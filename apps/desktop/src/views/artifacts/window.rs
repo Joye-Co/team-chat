@@ -116,6 +116,11 @@ pub fn open_artifact(
 /// default app. A file 产出 whose entry is a page (HTML, SVG, ...) also opens
 /// in the 产出 window: a browser would run it with network access.
 fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mut App) {
+    // --- v11/media: media the app can show opens in the 产出 viewer, not a system app ---
+    if !opens_in_window(&folder) && media_viewer(provider, &folder, cx) {
+        return;
+    }
+    // --- end v11/media ---
     if !opens_in_window(&folder) {
         let path = folder.dir.join(&folder.entry);
         if opens_unsafely(&folder.entry) {
@@ -429,3 +434,29 @@ mod tests {
         assert!(!opens_in_window(&folder("report.pdf", false)));
     }
 }
+
+// --- v11/media ---
+/// Opens a non-page version in the 产出 viewer when it is media the app shows (Markdown,
+/// images, video, audio, PDF, code, tables). False leaves it to the system app.
+fn media_viewer(provider: &Arc<dyn ChatProvider>, folder: &ArtifactFolder, cx: &mut App) -> bool {
+    use crate::views::media::{self, MediaKind, store::MediaKey, viewer};
+    let kind = media::file_kind(&folder.entry, media::mime_for(&folder.entry));
+    if matches!(kind, MediaKind::File | MediaKind::Html) {
+        return false;
+    }
+    let key = MediaKey::new(folder.artifact_id.clone(), folder.version);
+    let title = provider
+        .artifact(&folder.artifact_id)
+        .map(|d| d.summary.title)
+        .unwrap_or_else(|| folder.entry.clone());
+    media::store::request_folder(&key, &title, folder.dir.clone(), folder.entry.clone(), cx);
+    viewer::open(
+        key,
+        title,
+        viewer::target_for(provider, &folder.artifact_id),
+        viewer::Opening::default(),
+        cx,
+    );
+    true
+}
+// --- end v11/media ---
