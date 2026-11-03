@@ -3,8 +3,20 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Card, CardV2, Event, Message } from "@chat/protocol";
-import { Bot, ChatError, HttpClient, MemoryStateStore, type StreamWriter } from "../src/index.ts";
+import type { Card, Event, Message } from "@chat/protocol";
+import {
+  approvalCard,
+  type AsideContext,
+  Bot,
+  type CardAnswerContext,
+  ChatError,
+  decisionCard,
+  draftCard,
+  formCard,
+  HttpClient,
+  MemoryStateStore,
+  type StreamWriter,
+} from "../src/index.ts";
 
 const PORT = Number(process.env.BOT_SDK_E2E_PORT ?? 8795);
 
@@ -46,6 +58,7 @@ async function routeExists(method: string, path: string): Promise<boolean> {
 }
 const hasHttpSend = await routeExists("POST", `/v1/groups/${generalId}/messages`);
 const hasFiles = await routeExists("POST", "/v1/files");
+const hasAcceptance = await routeExists("PUT", "/v1/runs/none/acceptance");
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -97,6 +110,18 @@ function makeEchoBot(seen: { mentions: string[]; followed: string[]; catchUp: st
         await new Promise((r) => setTimeout(r, 150));
       }
       await w.finish();
+      return;
+    }
+    if (text.startsWith("work")) {
+      // The 1.1 output contract: a reaction, the plan, then one done card with proof.
+      await ctx.ack();
+      await ctx.setPlan([{ text: "做事", state: "current" }]);
+      await ctx.done({
+        title: "做完了",
+        summary: "改好了,测试通过",
+        evidence: [{ label: "测试 12/12 通过", state: "pass" }],
+        refs: [{ label: "PR #7", target: { kind: "pr", url: "https://github.com/o/r/pull/7", number: 7 } }],
+      });
       return;
     }
     if (text.startsWith("status")) {
@@ -402,32 +427,208 @@ describe("bot sdk e2e", () => {
   });
 });
 
-describe("cards v2", () => {
-  test("posts a v2 ask and gets the answer in onCardAnswer", async () => {
-    const card: CardV2 = {
-      v: 2,
-      rev: 1,
-      intent: "ask",
-      title: "Ship?",
-      fallback: "Pick a time",
-      ask: { from: ["owners"] },
-      blocks: [{ type: "decision", id: "when", options: [{ id: "now", label: "Now" }, { id: "later", label: "Later" }] }],
-      actions: [{ id: "ship", label: "Ship", style: "primary" }],
-    };
-    const res = await bot.postCardV2({ groupId: generalId }, card);
-    expect(res.message.cardV2).toEqual(card);
-    expect(res.message.card?.title).toBe("Ship?");
-    const answers: { actionId: string; inputs: Record<string, unknown>; actorId: string }[] = [];
-    bot.onCardAnswer(async (ctx) => {
-      answers.push({ actionId: ctx.actionId, inputs: ctx.inputs, actorId: ctx.actorId });
-      await ctx.updateCard({ ...card, rev: ctx.rev + 1, intent: "done", ask: undefined, actions: [] });
+describe("1.1 cards, side chats and page events", () => {
+  const ownerId = () => human.me.id;
+
+  test("a decision ask: the answer reaches onCardAnswer with typed inputs, resolve edits the card", async () => {
+    const answers: CardAnswerContext<{ choice: string }>[] = [];
+    const resolved: number[] = [];
+    bot.onCardAnswer<{ choice: string }>(async (ctx) => {
+      if (ctx.card?.title !== "发哪个版本") return;
+      answers.push(ctx);
+      const m = await ctx.resolve({ intent: "info" });
+      resolved.push(m.cardV2?.rev ?? 0);
     });
-    await human.answerCard(generalId, res.message.id, { rev: 1, actionId: "ship", inputs: { when: "later" } });
-    await waitFor("card answer", () => answers.length === 1);
-    expect(answers[0]).toMatchObject({ actionId: "ship", inputs: { when: "later" }, actorId: boot.member.id });
-    await waitFor("card v2 update", () =>
-      events.find((e) => e.type === "message.updated" && e.data.messageId === res.message.id && e.data.cardV2?.rev === 2),
+    const card = decisionCard({ title: "发哪个版本", text: "选一个", options: ["1.4", "1.5"], from: [ownerId()], record: true });
+    const r = await bot.postCardV2({ groupId: generalId }, card);
+    expect(r.message.kind).toBe("card");
+    expect(r.message.cardV2?.rev).toBe(1);
+    // Old readers get the derived v1 card without actions (there is a decision to fill).
+    expect(r.message.card?.title).toBe("发哪个版本");
+    expect(r.message.card?.actions).toBeUndefined();
+    await waitFor("human sees the card", () =>
+      events.find((e) => e.type === "message.created" && e.data.message.id === r.message.id),
     );
+    await human.answerCard(generalId, { messageId: r.message.id, rev: 1, actionId: "submit", inputs: { choice: "o2" } });
+    await waitFor("answer", () => answers.length === 1);
+    const a = answers[0] as CardAnswerContext<{ choice: string }>;
+    expect(a.actorId).toBe(ownerId());
+    expect(a.choice()).toBe("o2");
+    expect(a.choices()).toEqual(["o2"]);
+    expect(a.inputs.choice).toBe("o2");
+    expect(a.cancelled).toBe(false);
+    expect(a.action?.id).toBe("submit");
+    await waitFor("resolved", () => resolved.length === 1);
+    expect(resolved[0]).toBe(2);
+    const upd = await waitFor("human sees rev 2", () =>
+      events.find((e) => e.type === "message.updated" && e.data.messageId === r.message.id && e.data.cardV2?.rev === 2),
+    );
+    if (upd.type !== "message.updated") throw new Error("unreachable");
+    expect(upd.data.cardV2?.actions).toBeUndefined();
+    expect(upd.data.cardV2?.intent).toBe("info");
+    // A second answer to the old rev is refused.
+    const again = await human
+      .answerCard(generalId, { messageId: r.message.id, rev: 1, actionId: "submit", inputs: { choice: "o1" } })
+      .then(() => null, (e) => e as ChatError);
+    expect(again?.code).toBe("conflict");
+  });
+
+  test("an approval pressed by an old v1 client arrives as an answer", async () => {
+    const got: CardAnswerContext[] = [];
+    bot.onCardAnswer((ctx) => {
+      if (ctx.card?.title === "发布到正式环境?") got.push(ctx);
+    });
+    const r = await bot.postCardV2(
+      { groupId: generalId },
+      approvalCard({ title: "发布到正式环境?", text: "qqbot 1.4", from: ["owners"] }),
+    );
+    // No inputs: old clients may press its buttons.
+    expect(r.message.card?.actions?.map((x) => x.id)).toEqual(["approve", "deny"]);
+    await human.pressCard(generalId, r.message.id, "deny");
+    await waitFor("v1 press as answer", () => got.length === 1);
+    expect(got[0]?.actionId).toBe("deny");
+    expect(got[0]?.cancelled).toBe(true);
+  });
+
+  test("a form and a draft: inputs and edited text by block id", async () => {
+    const got: CardAnswerContext[] = [];
+    bot.onCardAnswer((ctx) => {
+      if (ctx.card?.title === "排期" || ctx.card?.title === "回复草稿") got.push(ctx);
+    });
+    const form = await bot.postCardV2(
+      { groupId: generalId },
+      formCard({
+        title: "排期",
+        from: ["requester", ownerId()],
+        inputs: [
+          { id: "count", kind: "number", label: "几篇", min: 1 },
+          { id: "notify", kind: "switch", label: "通知大家" },
+          { id: "note", kind: "textarea", label: "备注" },
+        ],
+      }),
+    );
+    await human.answerCard(generalId, {
+      messageId: form.message.id,
+      rev: 1,
+      actionId: "submit",
+      inputs: { count: 3, notify: true, note: "周四" },
+    });
+    const draft = await bot.postCardV2(
+      { groupId: generalId },
+      draftCard({ title: "回复草稿", draft: "您好,问题已修复。", from: [ownerId()], cancelLabel: "不发" }),
+    );
+    await human.answerCard(generalId, {
+      messageId: draft.message.id,
+      rev: 1,
+      actionId: "submit",
+      editedValues: { draft: "您好,问题已修复,谢谢。" },
+    });
+    await waitFor("two answers", () => got.length === 2);
+    const f = got.find((x) => x.messageId === form.message.id) as CardAnswerContext;
+    expect(f.number("count")).toBe(3);
+    expect(f.bool("notify")).toBe(true);
+    expect(f.text("note")).toBe("周四");
+    expect(f.text("missing")).toBeUndefined();
+    const d = got.find((x) => x.messageId === draft.message.id) as CardAnswerContext;
+    expect(d.draft()).toBe("您好,问题已修复,谢谢。");
+  });
+
+  test("builders reject cards that do not fit the protocol", () => {
+    expect(() => decisionCard({ title: "x", options: ["only one"], from: ["owners"] })).toThrow(ChatError);
+    expect(() => formCard({ title: "x", inputs: [{ id: "bad id!", kind: "text", label: "a" }], from: ["owners"] })).toThrow(
+      ChatError,
+    );
+  });
+
+  test("the output contract: ack reaction, plan, done card with proof, run ended", async () => {
+    const r = await mention("work please");
+    await waitFor("ack reaction", () =>
+      events.find((e) => e.type === "reaction.changed" && e.data.messageId === r.message.id && e.actorId === botId && e.data.on),
+    );
+    const done = await waitFor("done card", () => botMessages(r.message.topicId).find((m) => m.cardV2?.intent === "done"));
+    expect(done.cardV2?.blocks.map((b) => b.type)).toEqual(["text", "evidence", "ref"]);
+    expect(done.card?.tone).toBe("success");
+    expect(botMessages(r.message.topicId).filter((m) => !m.cardV2)).toHaveLength(0);
+    const ended = await waitFor("run done", () =>
+      events.find(
+        (e) => e.type === "run.updated" && e.data.run.topicId === r.message.topicId && e.data.run.status === "done" && e.data.run.endedAt,
+      ),
+    );
+    if (ended.type !== "run.updated") throw new Error("unreachable");
+    expect(ended.data.run.summary).toBe("改好了,测试通过");
+  });
+
+  test("a side chat: onAside gets the topic up to uptoSeq and answers in the DM", async () => {
+    const seenAside: AsideContext[] = [];
+    const sources: string[][] = [];
+    bot.onAside(async (ctx) => {
+      seenAside.push(ctx);
+      const src = await ctx.source();
+      sources.push(src.map((m) => m.body));
+      await ctx.reply(`看了 ${src.length} 条`);
+    });
+    const t = await human.startTopic(generalId, { title: "发版", body: "第一条" });
+    const second = await human.send({ groupId: generalId, topicId: t.message.topicId }, "第二条");
+    await human.send({ groupId: generalId, topicId: t.message.topicId }, "之后的不算");
+    const dm = await new HttpClient({ url: server.url, token: ownerToken }).dm(botId);
+    const ask = await human.send(
+      { groupId: dm.group.id },
+      { body: "这个话题现在怎样?", context: { groupId: generalId, topicId: t.message.topicId, uptoSeq: second.message.createdSeq } },
+    );
+    expect(ask.topic?.contextOf?.topicId).toBe(t.message.topicId);
+    await waitFor("aside handled", () => sources.length === 1);
+    expect(sources[0]).toEqual(["第一条", "第二条"]);
+    expect(seenAside[0]?.aside.groupId).toBe(generalId);
+    expect(seenAside[0]?.groupId).toBe(dm.group.id);
+    await waitFor("answer in the DM", () =>
+      events.find(
+        (e) =>
+          e.type === "message.created" &&
+          e.groupId === dm.group.id &&
+          e.data.message.authorId === botId &&
+          e.data.message.body === "看了 2 条",
+      ),
+    );
+    // Nothing reached the source topic.
+    expect(botMessages(t.message.topicId)).toHaveLength(0);
+  });
+
+  test.skipIf(!hasFiles)("a page event from my 产出 reaches onArtifactEvent", async () => {
+    const got: { name: string; payload: unknown; actorId: string; topicId?: string }[] = [];
+    bot.onArtifactEvent((ctx) => {
+      got.push({ name: ctx.name, payload: ctx.payload, actorId: ctx.actorId, topicId: ctx.topicId });
+    });
+    const t = await human.startTopic(generalId, { title: "看板", body: "做个页面" });
+    const v = await bot.http.publishHtml({
+      groupId: generalId,
+      topicId: t.message.topicId,
+      title: "看板",
+      html: "<!doctype html><p>hi</p>",
+      events: [{ name: "pick", label: "选这个" }],
+    });
+    expect(v.version.events?.[0]?.name).toBe("pick");
+    // The human's page sends the declared event (the desktop bridge does this).
+    await (human as unknown as { request(f: Record<string, unknown>): Promise<unknown> }).request({
+      t: "artifact.event",
+      groupId: generalId,
+      artifactId: v.artifact.id,
+      version: v.version.version,
+      name: "pick",
+      payload: { row: 2 },
+    });
+    await waitFor("page event", () => got.length === 1);
+    expect(got[0]).toEqual({ name: "pick", payload: { row: 2 }, actorId: ownerId(), topicId: t.message.topicId });
+  });
+
+  test.skipIf(!hasAcceptance)("sets the acceptance criteria of its run", async () => {
+    const t = await human.startTopic(generalId, { title: "验收", body: "做吧" });
+    const target = { groupId: generalId, topicId: t.message.topicId };
+    const run = await bot.setAcceptance(target, [
+      { text: "staging 能打开", state: "pass", evidence: { url: "https://staging.example.com" } },
+      { text: "测试通过", state: "pending" },
+    ]);
+    expect(run.acceptance?.map((a) => a.state)).toEqual(["pass", "pending"]);
+    await bot.endRun(target, "done");
   });
 });
 
