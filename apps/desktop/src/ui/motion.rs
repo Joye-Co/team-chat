@@ -120,6 +120,270 @@ pub fn fade_in<E: IntoElement + Styled + 'static>(
     enter(id, duration, element, |el, _| el, cx)
 }
 
+// ---------------------------------------------------------------------------
+// v3 motion helpers (CONCEPT2 §5). GPUI cannot transform a box, so a rise or
+// a slide is a layout offset of a `relative` element, and a drawn check is a
+// clip reveal. Every helper honors Reduce motion: travel goes, a short
+// opacity fade stays, and loops stand still.
+
+/// The delay of item `index` in a first-paint stagger.
+pub fn stagger_delay(index: usize) -> Duration {
+    motion::STAGGER * index.min(motion::STAGGER_MAX) as u32
+}
+
+/// Progress 0 → 1 on the out curve of an animation that waits `delay` and
+/// then runs `run`, sampled at `t` (0 → 1 over `delay + run`).
+pub fn delayed_progress(t: f32, delay: Duration, run: Duration) -> f32 {
+    let total = (delay + run).as_secs_f32();
+    if total <= 0. {
+        return 1.;
+    }
+    let at = t * total - delay.as_secs_f32();
+    let linear = (at / run.as_secs_f32().max(f32::EPSILON)).clamp(0., 1.);
+    motion::out_fn()(linear)
+}
+
+/// First paint: item `index` of a list rises in ([`motion::RISE`] up, with
+/// opacity) after its stagger delay, once per `id` in this session: a page,
+/// topic or row that comes back (or scrolls back into a virtual list) shows
+/// at rest (§12: switching pages or topics is never animated).
+pub fn rise<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    index: usize,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    let id = id.into();
+    let delay = stagger_delay(index);
+    if cx.reduce_motion() {
+        return once(id, motion::FAST, element, |el, t| {
+            el.opacity(motion::out_fn()(t))
+        });
+    }
+    let run = motion::RISE_IN;
+    once(id, delay + run, element, move |el, t| {
+        let p = delayed_progress(t, delay, run);
+        el.opacity(p).relative().top(motion::RISE * (1. - p))
+    })
+}
+
+/// A pane or the side chat enters: opacity plus [`motion::PANE_TRAVEL`] from
+/// the right over [`motion::PANE_ENTER`], once per `id`.
+pub fn pane_enter<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    enter(
+        id,
+        motion::PANE_ENTER,
+        element,
+        |el, t| el.relative().left(motion::PANE_TRAVEL * (1. - t)),
+        cx,
+    )
+}
+
+/// The opacity of a breath at `t` (0 → 1 over one [`motion::BREATHE`]):
+/// high at the ends, low in the middle, eased in and out.
+pub fn breath_opacity(t: f32) -> f32 {
+    let wave = 0.5 + 0.5 * (t * std::f32::consts::TAU).cos();
+    motion::BREATHE_LOW + (motion::BREATHE_HIGH - motion::BREATHE_LOW) * wave
+}
+
+/// The breathing loop: one phase for every ring in the app, and at most
+/// [`motion::DECORATIVE_FPS`] frames a second, because every frame of a loop
+/// renders the view that holds it again.
+pub fn breath_animation() -> gpui::Animation {
+    gpui::Animation::new(motion::BREATHE)
+        .repeat_synced()
+        .with_max_fps(motion::DECORATIVE_FPS)
+}
+
+/// A live signal breathes (rings, the current plan dot) for as long as it
+/// shows. With Reduce motion it stands still at full strength.
+pub fn breathe<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    use gpui::AnimationExt as _;
+    if cx.reduce_motion() {
+        return element.opacity(motion::BREATHE_HIGH).into_any_element();
+    }
+    element
+        .with_animation(id.into(), breath_animation(), |el, t| {
+            el.opacity(breath_opacity(t))
+        })
+        .into_any_element()
+}
+
+/// Whether an answer made at `at` is recent enough to draw its check
+/// ([`motion::JUST_ANSWERED`]); older answers show the check at rest.
+pub fn just_answered(at: crate::data::Millis) -> bool {
+    let age = crate::selftest::clock::now_ms() - at;
+    let window = motion::JUST_ANSWERED.as_millis() as i64;
+    (-window..=window).contains(&age)
+}
+
+/// An answered card's check: the glyph in a fixed box `width` wide, so the
+/// text beside it never moves. With `draw` it is revealed left to right over
+/// [`motion::CHECK_DRAW`], once per `id` in this session (§12: only
+/// answering draws the check); otherwise, and for a check already drawn, it
+/// shows at rest. With Reduce motion the draw is a fade.
+pub fn check_mark(
+    id: impl Into<ElementId>,
+    glyph: impl IntoElement + 'static,
+    width: gpui::Pixels,
+    draw: bool,
+    cx: &App,
+) -> AnyElement {
+    use gpui::ParentElement as _;
+    let id = id.into();
+    let frame = |inner: AnyElement| {
+        gpui::div()
+            .flex_none()
+            .w(width)
+            .flex()
+            .items_center()
+            .child(inner)
+            .into_any_element()
+    };
+    let inner = gpui::div().flex_none().overflow_hidden().child(glyph);
+    if !draw {
+        return frame(inner.w(width).into_any_element());
+    }
+    if cx.reduce_motion() {
+        return frame(once(id, motion::FAST, inner.w(width), |el, t| {
+            el.opacity(motion::out_fn()(t))
+        }));
+    }
+    frame(once(id, motion::CHECK_DRAW, inner, move |el, t| {
+        el.w(width * motion::out_fn()(t))
+    }))
+}
+
+/// A chart bar grows from zero to `height` once over [`motion::BAR_GROW`]
+/// after `delay`, once per `id` in this session. With Reduce motion it is
+/// drawn at its height.
+pub fn bar_grow<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    height: gpui::Pixels,
+    delay: Duration,
+    cx: &App,
+) -> AnyElement {
+    if cx.reduce_motion() {
+        return element.h(height).into_any_element();
+    }
+    let run = motion::BAR_GROW;
+    once(id, delay + run, element, move |el, t| {
+        el.h(height * delayed_progress(t, delay, run))
+    })
+}
+
+/// When each one-shot animation of this session started, by id. GPUI keeps
+/// the state of `with_animation` only while its element is drawn in every
+/// frame, so a remount (a page, topic or pane that comes back, a row that
+/// scrolls back into a virtual list) would play it again.
+#[derive(Default)]
+struct Played(std::collections::HashMap<ElementId, Instant>);
+
+impl gpui::Global for Played {}
+
+/// Runs `apply` with linear progress 0 → 1 over `duration`, once per `id`
+/// in this session: the clock starts the first time the id is drawn, and a
+/// later draw continues it or shows the end state. The id should name the
+/// thing that animates (a message, a card, a slot), not the place.
+pub fn once<E: IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    duration: Duration,
+    element: E,
+    apply: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    Once {
+        id: id.into(),
+        duration,
+        element: Some(element),
+        apply: Box::new(apply),
+    }
+    .into_any_element()
+}
+
+struct Once<E> {
+    id: ElementId,
+    duration: Duration,
+    element: Option<E>,
+    apply: Box<dyn Fn(E, f32) -> E>,
+}
+
+impl<E: IntoElement + 'static> IntoElement for Once<E> {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl<E: IntoElement + 'static> Element for Once<E> {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let now = cx.background_executor().now();
+        let start = *cx
+            .default_global::<Played>()
+            .0
+            .entry(self.id.clone())
+            .or_insert(now);
+        let t = fade_progress(now.saturating_duration_since(start), self.duration);
+        if t < 1.0 {
+            window.request_animation_frame();
+        }
+        let element = self.element.take().expect("laid out once");
+        let mut element = (self.apply)(element, t).into_any_element();
+        (element.request_layout(window, cx), element)
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: gpui::Bounds<gpui::Pixels>,
+        element: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        element.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: gpui::Bounds<gpui::Pixels>,
+        element: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        element.paint(window, cx);
+    }
+}
+
 /// A one-shot opacity fade that runs whatever `cx.reduce_motion()` says.
 struct Fade<E> {
     id: ElementId,
@@ -451,12 +715,78 @@ mod tests {
     }
 
     #[test]
+    fn staggers_wait_then_run_on_the_out_curve() {
+        assert_eq!(stagger_delay(0), Duration::ZERO);
+        assert_eq!(stagger_delay(2), motion::STAGGER * 2);
+        assert_eq!(
+            stagger_delay(100),
+            motion::STAGGER * motion::STAGGER_MAX as u32
+        );
+        let (d, r) = (Duration::from_millis(100), Duration::from_millis(300));
+        assert_eq!(delayed_progress(0., d, r), 0.);
+        assert_eq!(delayed_progress(0.25, d, r), 0.);
+        assert!(delayed_progress(0.5, d, r) > 0.5);
+        assert!((delayed_progress(1., d, r) - 1.).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_breath_swings_between_its_bounds() {
+        assert!((breath_opacity(0.) - motion::BREATHE_HIGH).abs() < 1e-4);
+        assert!((breath_opacity(0.5) - motion::BREATHE_LOW).abs() < 1e-4);
+        assert!((breath_opacity(1.) - motion::BREATHE_HIGH).abs() < 1e-4);
+    }
+
+    #[test]
     fn the_spinner_turns_at_a_constant_speed() {
         let quarter = motion::SPINNER_TURN / 4;
         assert!((turn_at(Duration::ZERO) - 0.0).abs() < 1e-4);
         assert!((turn_at(quarter) - 0.25).abs() < 1e-3);
         assert!((turn_at(quarter * 2) - 0.5).abs() < 1e-3);
         assert!((turn_at(motion::SPINNER_TURN + quarter) - 0.25).abs() < 1e-3);
+    }
+
+    #[test]
+    fn only_a_recent_answer_draws_its_check() {
+        let now = crate::selftest::clock::now_ms();
+        assert!(just_answered(now));
+        assert!(just_answered(now - 1_000));
+        assert!(
+            !just_answered(now - 60_000),
+            "yesterday's answer is at rest"
+        );
+    }
+
+    struct Rises;
+
+    impl gpui::Render for Rises {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            rise("a-card", 0, gpui::div().size(gpui::px(10.)), cx)
+        }
+    }
+
+    /// A one-shot animation runs once per id in the session: a second
+    /// window (a remount) with the same id, after the first ran out, asks
+    /// for no frames.
+    #[gpui::test]
+    fn a_rise_plays_once_per_id(cx: &mut gpui::TestAppContext) {
+        let size = gpui::size(gpui::px(100.), gpui::px(100.));
+        let first = cx.open_window(size, |_, _| Rises);
+        cx.run_until_parked();
+        let frames = first
+            .update(cx, |_, window, cx| window.simulate_next_frame(cx))
+            .unwrap();
+        assert!(frames > 0, "the first paint rises");
+        cx.executor().advance_clock(Duration::from_secs(2));
+        let again = cx.open_window(size, |_, _| Rises);
+        cx.run_until_parked();
+        let frames = again
+            .update(cx, |_, window, cx| window.simulate_next_frame(cx))
+            .unwrap();
+        assert_eq!(frames, 0, "a remount shows the card at rest");
     }
 
     struct Host;

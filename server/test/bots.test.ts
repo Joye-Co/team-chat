@@ -1,5 +1,4 @@
 import { SELF, env, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { MachineDownFrame } from "@chat/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import {
   type MachineView,
@@ -13,129 +12,16 @@ import {
   labelsMatch,
 } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
+import { Daemon, HEALTH, type World, downViolations, mention, world } from "./daemon";
+import { ACK_EMOJI } from "../src/bots/proof";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-const downViolations: unknown[] = [];
 
 afterAll(() => {
   expect(protocolViolations).toEqual([]);
   expect(downViolations).toEqual([]);
 });
-
-// ---------------------------------------------------------------------------
-// A fake machine daemon speaking docs/machine-protocol.md
-// ---------------------------------------------------------------------------
-
-const HEALTH = { diskFreeBytes: 100e9, diskTotalBytes: 500e9, load1: 0.5, load5: 0.5, load15: 0.5, cpuCount: 8, activeRuns: 0 };
-
-class Daemon {
-  frames: any[] = [];
-  closed: { code: number } | null = null;
-  seq = new Map<string, number>();
-  constructor(readonly ws: WebSocket) {
-    ws.addEventListener("message", (e) => {
-      const f = JSON.parse(e.data as string);
-      const check = MachineDownFrame.safeParse(f);
-      if (!check.success) downViolations.push({ frame: f, issues: check.error.issues });
-      this.frames.push(f);
-    });
-    ws.addEventListener("close", (e) => {
-      this.closed = { code: e.code };
-    });
-  }
-
-  static async connect(
-    token: string,
-    opts: { labels?: string[]; health?: Partial<typeof HEALTH>; runs?: { runId: string; lastSeq: number; done: boolean }[]; runtime?: string } = {},
-  ): Promise<{ d: Daemon; welcome: any }> {
-    const res = await SELF.fetch(`${BASE}/v1/machine/ws`, { headers: { upgrade: "websocket", authorization: `Bearer ${token}` } });
-    if (!res.webSocket) throw new Error(`upgrade failed: ${res.status}`);
-    res.webSocket.accept();
-    const d = new Daemon(res.webSocket);
-    d.send({
-      t: "hello",
-      protocol: 1,
-      machine: { name: "mac-mini", labels: opts.labels ?? ["mac"], daemonVersion: "0.1.0", os: "macos", arch: "aarch64", maxParallelRuns: 2 },
-      clis: [{ runtime: opts.runtime ?? "codex", kind: "codex", command: "codex", version: "0.159.0", available: true }],
-      health: { ...HEALTH, ...opts.health },
-      runs: opts.runs ?? [],
-    });
-    const welcome = await d.next((f) => f.t === "welcome" || f.t === "error");
-    return { d, welcome };
-  }
-
-  send(f: unknown): void {
-    this.ws.send(JSON.stringify(f));
-  }
-
-  async next(pred: (f: any) => boolean, ms = 5000): Promise<any> {
-    return waitUntil(() => this.frames.find(pred), ms, "daemon frame");
-  }
-
-  event(runId: string, event: unknown): number {
-    const seq = (this.seq.get(runId) ?? 0) + 1;
-    this.seq.set(runId, seq);
-    this.send({ t: "run.event", runId, seq, at: Date.now(), event });
-    return seq;
-  }
-
-  done(runId: string, extra: Record<string, unknown>): number {
-    const seq = (this.seq.get(runId) ?? 0) + 1;
-    this.seq.set(runId, seq);
-    this.send({ t: "run.done", runId, seq, at: Date.now(), durationMs: 1000, ...extra });
-    return seq;
-  }
-
-  async acked(runId: string, seq: number): Promise<void> {
-    await this.next((f) => f.t === "ack" && f.runId === runId && f.seq >= seq);
-  }
-
-  close(): void {
-    try {
-      this.ws.close(1000, "done");
-    } catch {
-      // ignore
-    }
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Setup helpers
-// ---------------------------------------------------------------------------
-
-interface World {
-  owner: TestMember;
-  human: TestMember;
-  bot: TestMember;
-  gid: string;
-  machineToken: string;
-  machineId: string;
-}
-
-/** Every world gets its own machine label, so runs never go to another test's machine. */
-async function world(opts: { runtime?: string; labels?: string[] } = {}): Promise<World> {
-  const label = `t-${crypto.randomUUID().slice(0, 8)}`;
-  const owner = await createMember({ level: "owner", name: "Joye" });
-  const human = await createMember({ name: "Alice" });
-  const bot = await createMember({ kind: "bot", name: "dev" });
-  const gid = await createGroup(owner, [human.id, bot.id]);
-  const r = await api(`/v1/bots/${bot.id}/runner`, {
-    method: "PUT",
-    token: owner.token,
-    body: { runtime: opts.runtime ?? "codex", labels: opts.labels ?? [label], repo: { path: "/tmp/repo" }, baseBranch: "main" },
-  });
-  expect(r.status, JSON.stringify(r.body)).toBe(200);
-  const m = await api("/v1/machines", { token: owner.token, body: { name: "mac-mini", labels: [label] } });
-  expect(m.status).toBe(200);
-  return { owner, human, bot, gid, machineToken: m.body.token, machineId: m.body.machine.id };
-}
-
-/** Human starts a topic that mentions the bot; returns the topic id. */
-async function mention(c: Client, w: World, body = "@dev please fix tests"): Promise<string> {
-  const res = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body, mentions: [w.bot.id] });
-  return res.message.topicId as string;
-}
 
 function botMessages(c: Client, topicId: string, botId: string): any[] {
   return c
@@ -335,19 +221,24 @@ describe("runner-backed bots", () => {
     expect((await api(`/v1/bots/${bot.id}/runner`, { token: owner.token })).status).toBe(404);
   });
 
-  it("dispatch a mention to a machine, stream progress, post the result and set the topic status", async () => {
+  it("dispatch a mention to a machine, acknowledge with a reaction, post a done card and set the topic status", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);
     const { c } = await Client.connect(w.human.token);
-    const topicId = await mention(c, w);
+    const sent = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev please fix tests", mentions: [w.bot.id] });
+    const topicId = sent.message.topicId as string;
+    const trigger = sent.message;
 
     const assign = await d.next((f) => f.t === "run.assign");
     expect(assign).toMatchObject({ botMemberId: w.bot.id, groupId: w.gid, topicId, runtime: "codex", repo: { path: "/tmp/repo", baseBranch: "main" } });
+    expect(assign.kind).toBeUndefined();
     expect(assign.prompt).toContain("@dev please fix tests");
     expect(assign.sessionUpload.url).toBe(`${BASE}/v1/machine/runs/${assign.runId}/session`);
     const runId = assign.runId as string;
 
-    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.ack), 5000, "ack");
+    // The acknowledgement is a reaction on the request, not a text line.
+    const ack = await c.waitEvent((e) => e.type === "reaction.changed" && e.data.messageId === trigger.id);
+    expect(ack).toMatchObject({ actorId: w.bot.id, data: { emoji: ACK_EMOJI, on: true } });
     await waitUntil(() => topicStatuses(c, topicId).includes("in_progress"), 5000, "in_progress");
     const owned = c.events().find((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.ownerId);
     expect(owned.data.ownerId).toBe(w.bot.id);
@@ -362,22 +253,47 @@ describe("runner-backed bots", () => {
     d.event(runId, { type: "tool.call", itemId: "c1", tool: "bash", title: "cargo test" });
     const s = d.event(runId, { type: "message", itemId: "m1", role: "assistant", text: "正在看测试" });
     await d.acked(runId, s);
-    const progress = await waitUntil(
-      () => botMessages(c, topicId, w.bot.id).find((m) => m.streaming),
-      5000,
-      "streaming progress message",
-    );
-    const seqDone = d.done(runId, { status: "succeeded", exitCode: 0, resultText: "修好了：sync 测试不再随机失败。", summary: "修好了" });
+    const result = "修好了：sync 测试不再随机失败。\nhttps://github.com/acme/app/pull/42\ntest result: ok. 12 passed; 0 failed";
+    const seqDone = d.done(runId, {
+      status: "succeeded",
+      exitCode: 0,
+      resultText: result,
+      summary: "修好了",
+      usage: { inputTokens: 1200, outputTokens: 340, costUsd: 0.05 },
+      durationMs: 61_000,
+    });
     await d.acked(runId, seqDone);
-    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body.startsWith("修好了")), 5000, "result");
-    const final = await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === progress.id && !e.data.streaming);
-    expect(final.data.body).toContain("cargo test");
-    expect(final.data.body).toContain("测试");
+    const card = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.cardV2), 5000, "done card");
+    expect(card.body).toBe(result);
+    expect(card.kind).toBe("card");
+    expect(card.cardV2).toMatchObject({ v: 2, intent: "done", title: "修好了：sync 测试不再随机失败。", data: { runId } });
+    expect(card.cardV2.blocks).toContainEqual({ type: "text", id: "result", text: result });
+    expect(card.cardV2.blocks).toContainEqual({ type: "evidence", id: "tests", label: "测试：12 个通过", state: "pass" });
+    expect(card.cardV2.blocks).toContainEqual({
+      type: "ref",
+      id: "pr-1",
+      label: "acme/app#42",
+      target: { kind: "pr", url: "https://github.com/acme/app/pull/42", repo: "acme/app", number: 42 },
+    });
+    // Old clients get a derived v1 card. A 1.0.x client draws the body unless it is empty or
+    // the card title, then the v1 text blocks: the result shows once.
+    expect(card.card).toMatchObject({ v: 1, tone: "success" });
+    const drawn10 = [
+      ...(card.body === "" || card.body === card.card.title.trim() ? [] : [card.body]),
+      ...card.card.blocks.filter((b: any) => b.type === "text").map((b: any) => b.text),
+    ];
+    expect(drawn10).toEqual([result]);
     await waitUntil(() => topicStatuses(c, topicId).at(-1) === "done", 5000, "done");
     const doneRun = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "done");
-    expect(doneRun.data.run.summary).toBe("修好了：sync 测试不再随机失败。");
-    // Exactly one acknowledgement.
-    expect(botMessages(c, topicId, w.bot.id).filter((m) => m.body === TEXT.ack)).toHaveLength(1);
+    expect(doneRun.data.run).toMatchObject({
+      summary: "修好了：sync 测试不再随机失败。",
+      resultMessageId: card.id,
+      usage: { inputTokens: 1200, outputTokens: 340, costUsd: 0.05 },
+      durationMs: 61_000,
+    });
+    // No progress message and no text acknowledgement: the done card is the bot's only message.
+    expect(botMessages(c, topicId, w.bot.id)).toHaveLength(1);
+    expect(botMessages(c, topicId, w.bot.id).some((m) => m.streaming)).toBe(false);
 
     // The run log for clients, paged.
     const page1 = await api(`/v1/runs/${runId}/events?limit=2`, { token: w.human.token });
@@ -1075,7 +991,7 @@ describe("runner-backed bots: review fixes", () => {
     d.close();
   });
 
-  it("post the final answer once: not also at the end of the progress message", async () => {
+  it("stream no progress into the topic and post a failed run as one note", async () => {
     const w = await world();
     const { d } = await Daemon.connect(w.machineToken);
     const { c } = await Client.connect(w.human.token);
@@ -1083,13 +999,14 @@ describe("runner-backed bots: review fixes", () => {
     const { runId } = await d.next((f) => f.t === "run.assign");
     d.send({ t: "run.accept", runId });
     d.event(runId, { type: "tool.call", itemId: "c1", tool: "bash", title: "cargo test" });
-    d.event(runId, { type: "message", itemId: "m1", role: "assistant", text: "全部通过。" });
-    const progress = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.streaming), 5000, "progress");
-    d.done(runId, { status: "succeeded", resultText: "全部通过。" });
-    const final = await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === progress.id && !e.data.streaming);
-    expect(final.data.body).toContain("cargo test");
-    expect(final.data.body).not.toContain("全部通过");
-    await waitUntil(() => botMessages(c, topicId, w.bot.id).some((m) => m.body === "全部通过。"), 5000, "result");
+    d.event(runId, { type: "message", itemId: "m1", role: "assistant", text: "还在看。" });
+    const seq = d.done(runId, { status: "failed", error: "cargo test failed", usage: { inputTokens: 5, outputTokens: 6 } });
+    await d.acked(runId, seq);
+    const ended = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "failed");
+    const msgs = botMessages(c, topicId, w.bot.id);
+    expect(msgs.map((m) => m.body)).toEqual([TEXT.failed("cargo test failed")]);
+    expect(msgs[0].cardV2).toBeUndefined();
+    expect(ended.data.run).toMatchObject({ resultMessageId: msgs[0].id, usage: { inputTokens: 5, outputTokens: 6 }, durationMs: 1000 });
     c.close();
     d.close();
   });

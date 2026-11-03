@@ -1,0 +1,24 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.input",
+    "runId": "01JA0000000000000000000R04",
+    "inputId": "01JA0000000000000000000I02",
+    "text": "[card answer] ship: {\"when\":\"tonight\"}",
+    "authorId": "01JA0000000000000000000H01",
+    "answer": {
+      "messageId": "01JA0000000000000000000E01",
+      "rev": 1,
+      "actionId": "ship",
+      "inputs": {
+        "when": "tonight"
+      },
+      "editedValues": {
+        "notes": "x"
+      },
+      "actorId": "01JA0000000000000000000H01"
+    }
+  }
+}

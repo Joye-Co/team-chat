@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 use crate::entities::{Millis, Seq};
 use crate::limits::{Validation, ValidationError, check_chars, check_name};
 use crate::machine::{CliInfo, Health, RunLogEntry};
+use crate::message::ArtifactRef;
 use crate::serde_util::non_null;
 
 pub const MAX_LABELS: usize = 20;
@@ -131,6 +132,147 @@ pub struct BotRun {
         skip_serializing_if = "Option::is_none"
     )]
     pub plan: Option<Vec<RunPlanItem>>,
+    // 1.1 fields. Absent on older runs.
+    /// Tokens and cost the CLI reported in `run.done`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub usage: Option<RunUsage>,
+    /// Run time the daemon reported in `run.done`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub duration_ms: Option<u64>,
+    /// The message (usually a Card v2 with intent "done") posted as the result.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub result_message_id: Option<String>,
+    /// 验收标准 the run reports; replaced as a whole.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub acceptance: Option<Vec<AcceptanceItem>>,
+    /// Present while a person has paused the run (接管): who.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub paused_by: Option<String>,
+    /// [`RUN_KIND_ASIDE`] for a side chat run; absent = a normal run. Unknown values read as normal.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub kind: Option<String>,
+}
+
+/// `BotRun.kind` of a read-only side chat run (单独问).
+pub const RUN_KIND_ASIDE: &str = "aside";
+
+impl BotRun {
+    /// Still working: created, running, waiting or blocked.
+    pub fn is_active(&self) -> bool {
+        matches!(
+            self.status,
+            RunStatus::Created | RunStatus::Running | RunStatus::Waiting | RunStatus::Blocked
+        )
+    }
+    pub fn is_aside(&self) -> bool {
+        self.kind.as_deref() == Some(RUN_KIND_ASIDE)
+    }
+    pub fn is_paused(&self) -> bool {
+        self.paused_by.is_some()
+    }
+    pub fn acceptance(&self) -> &[AcceptanceItem] {
+        self.acceptance.as_deref().unwrap_or(&[])
+    }
+}
+
+/// Tokens and cost of a run, as `run.done.usage` reported them.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    /// US dollars; read with [`RunUsage::cost_usd`].
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cost_usd: Option<serde_json::Number>,
+}
+
+impl RunUsage {
+    pub fn cost_usd(&self) -> Option<f64> {
+        self.cost_usd.as_ref().and_then(serde_json::Number::as_f64)
+    }
+}
+
+pub const MAX_ACCEPTANCE_ITEMS: usize = 20;
+
+/// State of one acceptance criterion. Closed: new states need a new field.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AcceptanceState {
+    Pending,
+    Pass,
+    Fail,
+}
+
+/// Proof of one criterion: a note, a file, a link or a 产出 version.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptanceEvidence {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub text: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub file_id: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub url: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub artifact: Option<ArtifactRef>,
+}
+
+/// One acceptance criterion (验收标准) of a run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcceptanceItem {
+    pub text: String,
+    pub state: AcceptanceState,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub evidence: Option<AcceptanceEvidence>,
 }
 
 /// `POST /v1/runs` (a bot that is not runner-backed): starts a run of the calling bot in the
@@ -199,6 +341,69 @@ impl EndRunRequest {
     pub fn validate(&self) -> Validation {
         match &self.summary {
             Some(s) => check_chars("summary", s, 0, 280),
+            None => Ok(()),
+        }
+    }
+}
+
+/// Checks the 1.1 acceptance criteria: at most 20, text 1..500, evidence within its limits.
+pub fn check_acceptance(field: &'static str, items: &[AcceptanceItem]) -> Validation {
+    if items.len() > MAX_ACCEPTANCE_ITEMS {
+        return fail(field, format!("at most {MAX_ACCEPTANCE_ITEMS} items"));
+    }
+    for item in items {
+        check_chars(field, &item.text, 1, 500)?;
+        if let Some(e) = &item.evidence {
+            if let Some(t) = &e.text {
+                check_chars(field, t, 0, 1000)?;
+            }
+            if let Some(id) = &e.file_id {
+                crate::limits::check_id(field, id)?;
+            }
+            if let Some(u) = &e.url {
+                crate::card::check_web_url(field, u)?;
+            }
+            if let Some(a) = &e.artifact {
+                crate::limits::check_id(field, &a.artifact_id)?;
+                if a.version == 0 {
+                    return fail(field, "artifact version must be positive");
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `PUT /v1/runs/:id/acceptance` (the run's bot, 1.1): replaces the acceptance criteria of an
+/// active run. An empty list clears them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRunAcceptanceRequest {
+    pub items: Vec<AcceptanceItem>,
+}
+
+impl SetRunAcceptanceRequest {
+    pub fn validate(&self) -> Validation {
+        check_acceptance("items", &self.items)
+    }
+}
+
+/// `POST /v1/runs/:id/resume` (1.1): `note` becomes the CLI's next input when set.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResumeRunRequest {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub note: Option<String>,
+}
+
+impl ResumeRunRequest {
+    pub fn validate(&self) -> Validation {
+        match &self.note {
+            Some(n) => check_chars("note", n, 0, 2000),
             None => Ok(()),
         }
     }
@@ -388,6 +593,20 @@ pub struct Machine {
     )]
     pub clis: Option<Vec<CliInfo>>,
     pub running_runs: Vec<String>,
+    /// 1.1: what the daemon supports (`hello.machine.features`). Owners only.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub features: Option<Vec<String>>,
+    /// 1.1: screen sharing address for 接管. Owners and run requesters only.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub takeover_url: Option<String>,
 }
 
 /// `POST /v1/machines` (owner)

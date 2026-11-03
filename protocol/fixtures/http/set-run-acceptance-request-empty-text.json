@@ -1,0 +1,13 @@
+{
+  "kind": "SetRunAcceptanceRequest",
+  "valid": false,
+  "description": "empty criterion text",
+  "value": {
+    "items": [
+      {
+        "text": "",
+        "state": "pending"
+      }
+    ]
+  }
+}

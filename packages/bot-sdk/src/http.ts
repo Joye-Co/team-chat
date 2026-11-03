@@ -1,7 +1,9 @@
 // HTTP API client: one-shot sends for scripts, files and 产出. Uses the same bearer token
 // as the WebSocket connection.
 import type {
+  AcceptanceItem,
   AddArtifactVersionRequest,
+  ArtifactEventDecl,
   BotRun,
   EndRunRequest,
   RunPlanItem,
@@ -187,6 +189,14 @@ export class HttpClient {
     return this.retried(() => this.request<BotRun>("PUT", `/v1/runs/${encodeURIComponent(runId)}/plan`, { json: { plan } }));
   }
 
+  /**
+   * `PUT /v1/runs/:id/acceptance` (1.1): replaces the 验收标准 of an active run of this bot;
+   * `[]` clears them. A server without the route answers `not_found`.
+   */
+  setRunAcceptance(runId: string, items: AcceptanceItem[]): Promise<BotRun> {
+    return this.retried(() => this.request<BotRun>("PUT", `/v1/runs/${encodeURIComponent(runId)}/acceptance`, { json: { items } }));
+  }
+
   /** `POST /v1/runs/:id/end`: ends a run this bot started with `startRun`. */
   endRun(runId: string, req: EndRunRequest): Promise<BotRun> {
     return this.request<BotRun>("POST", `/v1/runs/${encodeURIComponent(runId)}/end`, { json: req });
@@ -266,6 +276,10 @@ export class HttpClient {
     note?: string;
     artifactId?: string;
     extraFiles?: { path: string; mime: string; data: Uint8Array | ArrayBuffer | Blob }[];
+    /** 1.1: events the page may send back (`emitEvent`); they reach `Bot.onArtifactEvent`. */
+    events?: ArtifactEventDecl[];
+    /** 1.1: this bot's run that made the version (`Bot.currentRun(topicId)`). */
+    runId?: string;
   }): Promise<ArtifactVersionResponse> {
     const entry = "index.html";
     const files = [
@@ -276,8 +290,12 @@ export class HttpClient {
       const ref = await this.uploadFile({ groupId: input.groupId, topicId: input.topicId, name, mime: f.mime, data: f.data });
       files.push({ path: f.path, fileId: ref.fileId });
     }
+    const extra = {
+      ...(input.events ? { events: input.events } : {}),
+      ...(input.runId ? { runId: input.runId } : {}),
+    };
     if (input.artifactId) {
-      return this.addArtifactVersion(input.artifactId, { entry, files, note: input.note, title: input.title });
+      return this.addArtifactVersion(input.artifactId, { entry, files, note: input.note, title: input.title, ...extra });
     }
     return this.createArtifact({
       groupId: input.groupId,
@@ -287,6 +305,7 @@ export class HttpClient {
       entry,
       files,
       note: input.note,
+      ...extra,
     });
   }
 }

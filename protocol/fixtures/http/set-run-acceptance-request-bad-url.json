@@ -1,0 +1,16 @@
+{
+  "kind": "SetRunAcceptanceRequest",
+  "valid": false,
+  "description": "evidence url must be http or https",
+  "value": {
+    "items": [
+      {
+        "text": "x",
+        "state": "pass",
+        "evidence": {
+          "url": "ftp://x"
+        }
+      }
+    ]
+  }
+}

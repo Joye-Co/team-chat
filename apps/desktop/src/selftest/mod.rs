@@ -14,9 +14,10 @@
 //! only that window with `screencapture -l <windowNumber> -o -x`, writes
 //! `<dir>/<scene>-<theme>.png` (`-worst` before `.png` with `--worst-case`)
 //! and `<dir>/screenshots.json`, closes the window and finally exits
-//! (0 = every PNG written). Scenes live in [`scenes::SCENES`].
+//! (0 = every PNG written). Scenes live in [`scenes::all`].
 
 pub mod capture;
+pub mod clock;
 pub mod scenes;
 pub mod worst_case;
 
@@ -65,7 +66,7 @@ const USAGE: &str = "usage: desktop --screenshot <dir> [--theme light|dark|both]
 pub fn main_if_requested() -> Option<i32> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--list-scenes") {
-        for s in scenes::SCENES {
+        for s in scenes::all() {
             println!("{:<12} {}", s.name, s.about);
         }
         return Some(0);
@@ -74,6 +75,8 @@ pub fn main_if_requested() -> Option<i32> {
         return None;
     }
     crate::ui::rows::draw_as_key_window();
+    // Every scene reads the artboards' morning; the real app keeps the real clock.
+    clock::pin_to_artboards();
     match parse(&args) {
         Ok(options) => Some(run(options)),
         Err(error) => {
@@ -84,7 +87,7 @@ pub fn main_if_requested() -> Option<i32> {
 }
 
 fn scene_names() -> String {
-    scenes::SCENES
+    scenes::all()
         .iter()
         .map(|s| s.name)
         .collect::<Vec<_>>()
@@ -95,7 +98,7 @@ fn parse(args: &[String]) -> Result<Options, String> {
     let mut options = Options {
         dir: PathBuf::new(),
         modes: vec![Mode::Light, Mode::Dark],
-        scenes: scenes::SCENES.iter().collect(),
+        scenes: scenes::all(),
         worst_case: false,
         size: size(px(1440.), px(900.)),
         settle: Duration::from_millis(400),
@@ -150,6 +153,20 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
     let base: Arc<dyn ChatProvider> = match start {
         Start::SignedOut => fake::FakeProvider::signed_out(),
         Start::SignedIn | Start::Empty => fake::FakeProvider::new(),
+        Start::V2 => fake::v2::V2Samples::new(),
+        Start::V2Quiet => fake::v2::V2Samples::quiet(),
+        // --- provider track ---
+        Start::Core => {
+            static SHOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = SHOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "{}-selftest-core-{}-{n}",
+                env!("PRODUCT_SLUG"),
+                std::process::id()
+            ));
+            crate::provider::seeded::seeded(&root, clock::now_ms() as u64)
+        }
+        // --- end provider track ---
         Start::Offline => {
             let fake = fake::FakeProvider::new();
             fake.set_connection(crate::data::ConnectionState::Reconnecting {
@@ -178,6 +195,8 @@ fn run(options: Options) -> i32 {
     }
     let code = std::rc::Rc::new(std::cell::Cell::new(1));
     let result = code.clone();
+    // At least the old 20-shot budget; more shots get 15 s each.
+    let shots = (options.scenes.len() * options.modes.len()).max(20) as u64;
     gpui_kit::application()
         .with_assets(crate::ui::AppAssets)
         .run(move |cx: &mut App| {
@@ -202,7 +221,7 @@ fn run(options: Options) -> i32 {
             // Never hang: quit after a generous per-shot budget.
             cx.spawn(async move |cx| {
                 cx.background_executor()
-                    .timer(Duration::from_secs(60 + 15 * 20))
+                    .timer(Duration::from_secs(60 + 15 * shots))
                     .await;
                 eprintln!("screenshot self-test timed out");
                 cx.update(|cx| cx.quit());
@@ -338,6 +357,23 @@ async fn shoot(
                 }
             }
         }
+        // web-embed: native content (a web page) draws on its own schedule.
+        if let Some(ready) = scenes::ready_check(scene.name) {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !cx.update(|cx| ready(cx)) {
+                if Instant::now() > deadline {
+                    return Err("the native content was not ready within 20 s".into());
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let _ = next_frame(handle, cx).await;
+            }
+            for _ in 0..2 {
+                let _ = next_frame(handle, cx).await;
+            }
+            cx.background_executor().timer(options.settle).await;
+        }
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;
@@ -365,6 +401,9 @@ async fn shoot(
             }
         }
         let size = capture::png_size(png).ok_or("the PNG has no size")?;
+        if let Some(verify) = scenes::verify_check(scene.name) {
+            cx.update(|cx| verify(png, cx))?;
+        }
         Ok((number, size))
     }
     .await;

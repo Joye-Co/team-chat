@@ -249,16 +249,23 @@ impl RenderOnce for Band {
     }
 }
 
-/// A card (§7.10): `content` fill, 1 pt `border`, radius 12, no shadow.
-/// Nothing inside a card has its own outline. Padding 14 16 16 is the
-/// caller's (`card_padding`).
+/// A card (v3): `bg` fill, 1 pt `line`, radius 12 and `--lift` (no shadow
+/// in dark). Nothing inside a card has its own outline. Padding 14 16 16 is
+/// the caller's (`card_padding`).
 pub fn card(cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
     div()
         .rounded(theme::radius::LG)
-        .bg(k.content)
+        .bg(k.bg)
         .border_1()
-        .border_color(k.border)
+        .border_color(k.line)
+        .shadow(k.lift())
+}
+
+/// A rail card (v3 topic rail, 群 page side column): a [`card`] with the
+/// rail's 12 pt padding.
+pub fn rail_card(cx: &App) -> gpui::Div {
+    card(cx).p(space::S12).flex().flex_col().gap(space::S8)
 }
 
 /// The inner padding of a card: 14 top, 16 sides and bottom.

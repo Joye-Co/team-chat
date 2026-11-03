@@ -158,6 +158,11 @@ CREATE INDEX runs_by_topic ON runs(topic_id, created_at DESC);
 ALTER TABLE members ADD COLUMN character TEXT;
 "#,
     },
+    // 1.1: Card v2 answers, topic links, 产出 page events, and the one-time log re-fetch.
+    Migration {
+        name: "v11-1",
+        sql: super::v11::MIGRATION_SQL,
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

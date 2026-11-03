@@ -64,6 +64,34 @@ gpui_kit::assets::icon_assets!(
         Link,
         ListOrdered,
         Quote,
+        // v2 shell (1.1.0): 首页, 单独问, 改动, the rail toggle.
+        House,
+        MessageCircle,
+        GitPullRequest,
+        PanelRightOpen,
+        // --- rail track (1.1.0): rail options, the 话题 destination of mode C,
+        // ⌘K 交代或搜索 keys and 产出 thumbnails.
+        SlidersHorizontal,
+        TextAlignStart,
+        Command,
+        ChartLine,
+        // --- end rail track
+        // Desk track (1.1.0 首页): the 录屏 proof chip.
+        Play,
+        // panes track (1.1.0): 单独问 and 实时查看.
+        CornerDownRight,
+        MousePointer2,
+        Maximize2,
+        Minimize2,
+        ArrowUpRight,
+        ScreenShare,
+        // --- cards v2 track ---
+        Hourglass,
+        Ban,
+        GitMerge,
+        FileX,
+        Target,
+        // --- end cards v2 track ---
     ]
 );
 

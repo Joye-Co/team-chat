@@ -8,23 +8,59 @@
 //!   (`window.artifact.getData()` / `window.artifact.emitEvent(name, payload)`), checked
 //!   against the window's [`Capabilities`].
 //!
+//! The same page can also live inside a host window ([`EmbeddedArtifact`]): a child view
+//! of the host's content view that the host places from its own layout every frame
+//! ([`embed`]). It has the same isolation as the window.
+//!
 //! All window functions run on the main thread inside an app that already runs
 //! `NSApplication`.
 
 pub mod bridge;
+pub mod embed;
+pub mod gate;
 pub mod resolve;
 
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod mac_embed;
 
 use std::path::PathBuf;
 
 pub use bridge::Capabilities;
+pub use embed::{EmbedOptions, Placement, Rect};
 pub use resolve::{Content, origin_host};
 use serde_json::Value;
 
 #[cfg(target_os = "macos")]
-pub use mac::{ArtifactWindow, open_external_url};
+pub use mac::{ArtifactWindow, open_external_url, open_screen_share_url};
+
+/// Schemes a machine's screen sharing address (`takeoverUrl`) may use.
+pub const SCREEN_SHARE_SCHEMES: &[&str] = &["vnc", "http", "https"];
+
+/// True when `url` is a screen sharing address the app may offer to open: `vnc://`,
+/// `http://` or `https://` with a host, at most 2048 bytes, with no spaces or control
+/// characters. Anything else (`file:`, `smb:`, other apps' schemes) is never opened.
+pub fn is_screen_share_url(url: &str) -> bool {
+    if url.is_empty()
+        || url.len() > 2048
+        || url.chars().any(|c| c.is_whitespace() || c.is_control())
+    {
+        return false;
+    }
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return false;
+    };
+    SCREEN_SHARE_SCHEMES
+        .iter()
+        .any(|s| scheme.eq_ignore_ascii_case(s))
+        && rest
+            .split(['/', '?', '#'])
+            .next()
+            .is_some_and(|host| !host.is_empty() && !host.ends_with('@'))
+}
+#[cfg(target_os = "macos")]
+pub use mac_embed::{EmbeddedArtifact, view_from_ptr};
 
 /// One version of a 产出 to show.
 #[derive(Clone, Debug)]
@@ -121,11 +157,14 @@ pub enum ArtifactEvent {
     Loaded { version: u32 },
     /// The page could not load, or its web content process ended.
     LoadFailed { version: u32, reason: String },
-    /// The page called `emitEvent(name, payload)`.
+    /// The page called `emitEvent(name, payload)`. `user_action` is true when the viewer
+    /// clicked, dragged or typed in this web view at most [`gate::USER_ACTION_WINDOW`]
+    /// before; the host forwards only those events (see [`gate`]).
     Emit {
         version: u32,
         name: String,
         payload: Value,
+        user_action: bool,
     },
     /// The user activated a link to an `http`, `https` or `mailto` URL. The navigation was
     /// cancelled; the host may ask the user and then call [`open_external_url`].
@@ -133,7 +172,10 @@ pub enum ArtifactEvent {
     /// The user picked a version in the title-bar picker. The host loads that version and
     /// calls `show_version`.
     VersionSelected { version: u32 },
-    /// The window closed (by the user or by `close`).
+    /// An embedded page got (`true`) or lost (`false`) keyboard focus. Only
+    /// [`EmbeddedArtifact`] sends it.
+    FocusChanged { focused: bool },
+    /// The window closed (by the user or by `close`), or the embedded view was removed.
     Closed,
 }
 
@@ -147,6 +189,8 @@ pub enum Error {
     FolderMissing(PathBuf),
     /// The window was closed.
     Closed,
+    /// The host view to embed in has no superview (it is not in a window).
+    NoHostView,
 }
 
 impl std::fmt::Display for Error {
@@ -156,8 +200,44 @@ impl std::fmt::Display for Error {
             Error::InvalidEntry => write!(f, "invalid entry path"),
             Error::FolderMissing(p) => write!(f, "artifact folder missing: {}", p.display()),
             Error::Closed => write!(f, "artifact window closed"),
+            Error::NoHostView => write!(f, "host view is not in a window"),
         }
     }
 }
 
 impl std::error::Error for Error {}
+
+#[cfg(test)]
+mod tests {
+    use super::is_screen_share_url as ok;
+
+    #[test]
+    fn screen_share_urls() {
+        for u in [
+            "vnc://mac-mini.tailnet",
+            "VNC://mac-mini.tailnet:5900",
+            "vnc://joye@mac-mini",
+            "https://share.example.com/s/1",
+            "http://10.0.0.2:8080",
+        ] {
+            assert!(ok(u), "{u}");
+        }
+        for u in [
+            "",
+            "file:///Users/me/Downloads/x.command",
+            "smb://attacker.example/share",
+            "x-man-page://ls",
+            "javascript:alert(1)",
+            "vnc:mac-mini",
+            "vnc://",
+            "vnc:///path",
+            "vnc://user@",
+            "vnc://mac mini",
+            "vnc://mac-mini\n",
+            "https://a.example/\u{7}",
+        ] {
+            assert!(!ok(u), "{u}");
+        }
+        assert!(!ok(&format!("https://a.example/{}", "x".repeat(2048))));
+    }
+}

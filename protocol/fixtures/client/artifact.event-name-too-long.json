@@ -1,0 +1,13 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "name is 1..128",
+  "value": {
+    "t": "artifact.event",
+    "rid": "r101",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "artifactId": "01JBX0ART000000000000000AM",
+    "version": 2,
+    "name": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  }
+}

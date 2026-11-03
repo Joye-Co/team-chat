@@ -1,0 +1,28 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R04",
+    "seq": 3,
+    "at": 1793627400030,
+    "event": {
+      "type": "acceptance",
+      "items": [
+        {
+          "text": "staging 上能登录",
+          "state": "pass",
+          "evidence": {
+            "text": "curl 200",
+            "url": "https://staging.example.com"
+          }
+        },
+        {
+          "text": "E2E 全过",
+          "state": "pending"
+        }
+      ]
+    }
+  }
+}

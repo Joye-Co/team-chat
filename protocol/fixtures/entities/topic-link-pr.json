@@ -1,0 +1,25 @@
+{
+  "kind": "TopicLink",
+  "valid": true,
+  "value": {
+    "kind": "pr",
+    "repo": "Joye-Co/team-chat",
+    "number": 42,
+    "url": "https://github.com/Joye-Co/team-chat/pull/42",
+    "title": "fix: sync test",
+    "state": "open",
+    "checks": [
+      {
+        "name": "CI",
+        "conclusion": "success"
+      },
+      {
+        "name": "e2e",
+        "conclusion": "pending"
+      }
+    ],
+    "additions": 120,
+    "deletions": 30,
+    "changedFiles": 4
+  }
+}

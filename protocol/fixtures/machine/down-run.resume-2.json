@@ -1,0 +1,9 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.resume",
+    "runId": "01JA0000000000000000000R04"
+  }
+}

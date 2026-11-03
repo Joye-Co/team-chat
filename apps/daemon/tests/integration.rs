@@ -183,6 +183,7 @@ async fn collect(ws: &mut Ws, run: &str, ack: bool, stop: impl Fn(&Up) -> bool) 
 
 fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Down {
     Down::RunAssign(RunAssign {
+        kind: None,
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),
@@ -231,6 +232,11 @@ fn done(frames: &[Up]) -> RunDone {
 }
 
 fn write_config(dir: &Path, url: &str) -> Config {
+    write_config_with(dir, url, "")
+}
+
+/// `extra` is appended to the config (more runtimes).
+fn write_config_with(dir: &Path, url: &str, extra: &str) -> Config {
     let token = dir.join("token");
     std::fs::write(&token, format!("{TOKEN}\n")).unwrap();
     std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
@@ -245,11 +251,13 @@ work_root = "{work}"
 max_parallel_runs = 3
 min_free_gb = 0
 heartbeat_secs = 1
+takeover_url = "vnc://mac-mini.tailnet"
 
 [runtimes.fake]
 kind = "claude"
 command = "{fake}"
 env = {{ CLAUDE_CONFIG_DIR = "{claude}" }}
+{extra}
 "#,
         token = token.display(),
         work = dir.join("work").display(),
@@ -347,6 +355,8 @@ async fn daemon_end_to_end() {
             send(
                 &mut ws,
                 &Down::RunInput {
+                    answer: None,
+                    artifact_event: None,
                     run_id: "r1".into(),
                     input_id: "in1".into(),
                     text: "follow up".into(),
@@ -726,6 +736,403 @@ async fn restart_recovers_unfinished_runs() {
     tokio::time::timeout(Duration::from_secs(8), daemon)
         .await
         .expect("daemon exits once run.done is acked")
+        .unwrap()
+        .unwrap();
+}
+
+async fn wait_file(p: &Path) -> String {
+    for _ in 0..200 {
+        if let Ok(t) = std::fs::read_to_string(p)
+            && !t.trim().is_empty()
+        {
+            return t;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("{} never written", p.display());
+}
+
+fn proc_state(pid: i32) -> String {
+    let o = std::process::Command::new("ps")
+        .args(["-o", "stat=", "-p", &pid.to_string()])
+        .output()
+        .unwrap();
+    String::from_utf8_lossy(&o.stdout).trim().to_string()
+}
+
+fn is_paused(f: &Up, want: bool) -> bool {
+    matches!(f, Up::RunEvent { event: RunEvent::Paused { paused, .. }, .. } if *paused == want)
+}
+
+/// 1.1: hello reports the features and takeoverUrl; run.pause stops the CLI's process group and
+/// run.resume continues it with the note as the next turn; a Card v2 answer reaches the CLI as
+/// a fenced block of untrusted data; an acceptance block in the CLI's text becomes the
+/// acceptance event; a cancel while paused still stops the CLI; an aside run gets Claude Code's
+/// read-only mode and no repo-less runtime takes one.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pause_resume_answer_acceptance_and_aside() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config_with(
+        tmp.path(),
+        &m.url,
+        "[runtimes.sh]\nkind = \"pty\"\ncommand = \"/bin/sh\"\nargs = [\"-c\", \"{prompt}\"]\n",
+    );
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    match next(&mut ws).await {
+        Up::Hello { machine, .. } => {
+            assert_eq!(
+                machine.features.as_deref(),
+                Some(&["pause", "answer", "aside", "acceptance"].map(String::from)[..])
+            );
+            assert_eq!(
+                machine.takeover_url.as_deref(),
+                Some("vnc://mac-mini.tailnet")
+            );
+        }
+        f => panic!("{f:?}"),
+    }
+    send(&mut ws, &welcome(vec![])).await;
+
+    // 1. Pause and resume with a note, then an answer with an acceptance block.
+    send(&mut ws, &assign("p1", "fake", "tick", None)).await;
+    let dir = tmp.path().join("work/runs/p1/work");
+    let mut frames = collect(&mut ws, "p1", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let pid: i32 = wait_file(&dir.join("fake.pid"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+    wait_file(&dir.join("ticks.txt")).await;
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "p1".into(),
+            by: Some("u1".into()),
+        },
+    )
+    .await;
+    frames.extend(collect(&mut ws, "p1", true, |f| is_paused(f, true)).await);
+    assert!(frames.iter().any(|f| matches!(f,
+        Up::RunEvent { event: RunEvent::Paused { paused: true, by: Some(b) }, .. } if b == "u1")));
+    assert!(
+        proc_state(pid).contains('T'),
+        "CLI not stopped: {}",
+        proc_state(pid)
+    );
+    let ticks = std::fs::read_to_string(dir.join("ticks.txt")).unwrap();
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    assert_eq!(
+        std::fs::read_to_string(dir.join("ticks.txt")).unwrap(),
+        ticks,
+        "a stopped CLI made progress"
+    );
+    send(
+        &mut ws,
+        &Down::RunResume {
+            run_id: "p1".into(),
+            note: Some("go on".into()),
+        },
+    )
+    .await;
+    frames.extend(collect(&mut ws, "p1", true, |f| is_paused(f, false)).await);
+    assert!(!proc_state(pid).contains('T'), "CLI still stopped");
+    let mut inputs = BTreeMap::new();
+    inputs.insert("choice".to_string(), serde_json::json!("B"));
+    send(
+        &mut ws,
+        &Down::RunInput {
+            run_id: "p1".into(),
+            input_id: "in-answer".into(),
+            text: "\n```acceptance\n[{\"text\":\"Tests pass\",\"state\":\"pass\",\"evidence\":{\"text\":\"42 ok\"}}]\n```".into(),
+            author_id: Some("u1".into()),
+            answer: Some(RunAnswer {
+                message_id: "msg1".into(),
+                rev: 1,
+                action_id: "pick".into(),
+                inputs: Some(inputs),
+                edited_values: None,
+                actor_id: "u1".into(),
+            }),
+            artifact_event: None,
+        },
+    )
+    .await;
+    frames.extend(collect(&mut ws, "p1", true, |f| matches!(f, Up::RunDone(_))).await);
+    let evs = events(&frames);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "resume-1"))
+    );
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in-answer"))
+    );
+    let replies: Vec<&str> = evs
+        .iter()
+        .filter_map(|e| match e {
+            RunEvent::Message { role, text, .. } if role == "assistant" => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(replies.contains(&"reply 2: go on"), "{replies:?}");
+    let answer = replies.iter().find(|t| t.starts_with("reply 3:")).unwrap();
+    assert!(answer.contains("untrusted data"), "{answer}");
+    assert!(answer.contains("\"actionId\": \"pick\""), "{answer}");
+    let acc = evs
+        .iter()
+        .find_map(|e| match e {
+            RunEvent::Acceptance { items } => Some(items.clone()),
+            _ => None,
+        })
+        .expect("acceptance event");
+    assert_eq!(acc.len(), 1);
+    assert_eq!(acc[0].text, "Tests pass");
+    assert_eq!(
+        acc[0].evidence.as_ref().and_then(|e| e.text.as_deref()),
+        Some("42 ok")
+    );
+    assert_eq!(done(&frames).status, "succeeded");
+    assert_eq!(
+        std::fs::read_to_string(dir.join("ticks.txt"))
+            .unwrap()
+            .lines()
+            .count(),
+        30
+    );
+
+    // 2. Cancel while paused: the stopped CLI is resumed and killed.
+    send(&mut ws, &assign("p2", "fake", "hang", None)).await;
+    collect(&mut ws, "p2", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::TurnStarted { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let pid: i32 = wait_file(&tmp.path().join("work/runs/p2/work/fake.pid"))
+        .await
+        .trim()
+        .parse()
+        .unwrap();
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "p2".into(),
+            by: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "p2", true, |f| is_paused(f, true)).await;
+    assert!(proc_state(pid).contains('T'));
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "p2".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "p2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+    // SAFETY: probing a pid with signal 0.
+    assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "fake CLI still alive");
+
+    // 3. Aside: Claude Code in plan mode with only the read tools, no MCP servers and no
+    // settings files; no PTY aside; no unknown kinds.
+    let mut a = assign("s1", "fake", "what is the status", None);
+    if let Down::RunAssign(r) = &mut a {
+        r.kind = Some("aside".into());
+        r.env_allowlist = vec!["PATH".into()];
+    }
+    send(&mut ws, &a).await;
+    let fr = collect(&mut ws, "s1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "succeeded");
+    let argv: Vec<String> = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/work/argv.json")).unwrap(),
+    )
+    .unwrap();
+    let mode = argv.iter().position(|a| a == "--permission-mode").unwrap();
+    assert_eq!(argv[mode + 1], "plan");
+    let dis = argv.iter().position(|a| a == "--disallowedTools").unwrap();
+    assert!(argv[dis + 1].contains("Write") && argv[dis + 1].contains("Edit"));
+    assert!(argv[dis + 1].split(' ').any(|t| t == "Bash"));
+    let tools = argv.iter().position(|a| a == "--tools").unwrap();
+    assert_eq!(argv[tools + 1], "Read,Grep,Glob");
+    let sources = argv.iter().position(|a| a == "--setting-sources").unwrap();
+    assert_eq!(argv[sources + 1], "user");
+    assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
+    assert!(!argv.iter().any(|a| a == "acceptEdits"));
+    for (run, runtime, kind, reason) in [
+        ("s2", "sh", "aside", "runtime_unavailable"),
+        ("s3", "fake", "admin", "invalid"),
+    ] {
+        let mut a = assign(run, runtime, "x", None);
+        if let Down::RunAssign(r) = &mut a {
+            r.kind = Some(kind.into());
+        }
+        send(&mut ws, &a).await;
+        match next(&mut ws).await {
+            Up::RunReject {
+                run_id, reason: r, ..
+            } => assert_eq!((run_id.as_str(), r.as_str()), (run, reason)),
+            f => panic!("{f:?}"),
+        }
+    }
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+fn alive(pid: i32) -> bool {
+    // SAFETY: probing a pid with signal 0.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// Kills the fake CLI's tool children when a test ends, so a failed assertion leaks nothing.
+struct Reap(Vec<i32>);
+
+impl Drop for Reap {
+    fn drop(&mut self) {
+        for k in self.0.iter().filter(|k| alive(**k)) {
+            // SAFETY: plain syscalls on pids that this test's fake CLI started.
+            unsafe {
+                libc::kill(*k, libc::SIGCONT);
+                libc::kill(*k, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+fn file_len(p: &Path) -> u64 {
+    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Tool commands that a CLI starts in their own session or process group (Claude Code's Bash
+/// tool, Codex exec) stop with the run on pause, continue on resume and are gone after cancel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pause_and_cancel_cover_tool_children() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("c1", "fake", "spawn", None)).await;
+    let dir = tmp.path().join("work/runs/c1/work");
+    wait_file(&dir.join("fake.pid")).await;
+    let kids: Vec<i32> = wait_file(&dir.join("children.txt"))
+        .await
+        .split_whitespace()
+        .map(|p| p.parse().unwrap())
+        .collect();
+    assert_eq!(kids.len(), 2);
+    let _reap = Reap(kids.clone());
+    let ticks = [dir.join("session.ticks"), dir.join("group.ticks")];
+    for t in &ticks {
+        wait_file(t).await;
+    }
+
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "c1".into(),
+            by: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "c1", true, |f| is_paused(f, true)).await;
+    for k in &kids {
+        assert!(
+            proc_state(*k).contains('T'),
+            "child {k} not stopped: {}",
+            proc_state(*k)
+        );
+    }
+    let before: Vec<u64> = ticks.iter().map(|t| file_len(t)).collect();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let after: Vec<u64> = ticks.iter().map(|t| file_len(t)).collect();
+    assert_eq!(before, after, "a stopped tool child made progress");
+
+    send(
+        &mut ws,
+        &Down::RunResume {
+            run_id: "c1".into(),
+            note: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "c1", true, |f| is_paused(f, false)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    for (t, b) in ticks.iter().zip(&after) {
+        assert!(
+            file_len(t) > *b,
+            "{} did not tick after resume",
+            t.display()
+        );
+    }
+
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "c1".into(),
+            by: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "c1", true, |f| is_paused(f, true)).await;
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "c1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "c1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+    let mut left = kids.clone();
+    for _ in 0..100 {
+        left.retain(|k| alive(*k));
+        if left.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        left.is_empty(),
+        "tool children outlived the cancel: {left:?}"
+    );
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
         .unwrap()
         .unwrap();
 }

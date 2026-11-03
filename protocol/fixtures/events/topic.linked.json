@@ -1,0 +1,35 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 46,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0BOT000000000000000AC",
+    "type": "topic.linked",
+    "data": {
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "link": {
+        "kind": "pr",
+        "repo": "Joye-Co/team-chat",
+        "number": 42,
+        "url": "https://github.com/Joye-Co/team-chat/pull/42",
+        "title": "fix: sync test",
+        "state": "open",
+        "checks": [
+          {
+            "name": "CI",
+            "conclusion": "success"
+          },
+          {
+            "name": "e2e",
+            "conclusion": "pending"
+          }
+        ],
+        "additions": 120,
+        "deletions": 30,
+        "changedFiles": 4
+      }
+    }
+  }
+}

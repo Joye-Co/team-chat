@@ -63,6 +63,12 @@ pub trait MessageExtra: Sync {
         false
     }
 
+    /// This extra draws the message's files (the v2 timeline can draw its
+    /// own file cards instead).
+    fn draws_files(&self) -> bool {
+        false
+    }
+
     /// The element to show for `message`, or `None`. Deleted messages are
     /// never passed in.
     fn render(
@@ -96,6 +102,25 @@ pub fn render(
     REGISTRY
         .iter()
         .filter(|extra| extra.placement() == placement)
+        .filter_map(|extra| extra.render(message, ctx, window, cx))
+        .collect()
+}
+
+/// [`render`] without the extra that draws files (the v2 timeline draws its
+/// own file cards).
+pub fn render_without_files(
+    placement: Placement,
+    message: &Message,
+    ctx: &ExtrasContext,
+    window: &mut Window,
+    cx: &mut App,
+) -> Vec<AnyElement> {
+    if message.deleted_at.is_some() {
+        return Vec::new();
+    }
+    REGISTRY
+        .iter()
+        .filter(|extra| extra.placement() == placement && !extra.draws_files())
         .filter_map(|extra| extra.render(message, ctx, window, cx))
         .collect()
 }

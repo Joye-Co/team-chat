@@ -5,8 +5,8 @@
 //! queries and the event application need and override `raw` on read.
 
 use crate::proto::{
-    ArtifactRef, Card, CharacterId, FileRef, Group, Member, Message, NotifyLevel, ReplyToRef,
-    Topic, TopicStatus,
+    AnswerEdits, AnswerInputs, ArtifactRef, Card, CardV2, CharacterId, FileRef, Group, Member,
+    Message, NotifyLevel, ReplyToRef, Topic, TopicContext, TopicStatus,
 };
 use rusqlite::Row;
 use rusqlite::types::Value;
@@ -93,6 +93,12 @@ pub enum OutboxOp {
         artifact_refs: Option<Vec<ArtifactRef>>,
         #[serde(default)]
         card: Option<Card>,
+        /// 1.1: Card v2; the server derives the v1 card when `card` is absent.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        card_v2: Option<CardV2>,
+        /// 1.1: a side chat's context (a send in a DM with a bot).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<TopicContext>,
         /// A follow-up into a topic that is still being started: the `clientMsgId` of the
         /// topic's first message. The row waits until that message is acked or applied, and
         /// then gets the topic id.
@@ -112,6 +118,8 @@ pub enum OutboxOp {
         artifact_refs: Option<Vec<ArtifactRef>>,
         #[serde(default)]
         card: Option<Card>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        card_v2: Option<CardV2>,
     },
     Delete {
         group_id: String,
@@ -148,6 +156,28 @@ pub enum OutboxOp {
         emoji: String,
         on: bool,
     },
+    /// 1.1: my answer to a v2 card.
+    CardAnswer {
+        group_id: String,
+        topic_id: Option<String>,
+        message_id: String,
+        rev: u32,
+        action_id: String,
+        #[serde(default)]
+        inputs: Option<AnswerInputs>,
+        #[serde(default)]
+        edited_values: Option<AnswerEdits>,
+    },
+    /// 1.1: an event an interactive 产出 page sent.
+    ArtifactEvent {
+        group_id: String,
+        topic_id: Option<String>,
+        artifact_id: String,
+        version: u32,
+        name: String,
+        #[serde(default)]
+        payload: Option<serde_json::Value>,
+    },
 }
 
 impl OutboxOp {
@@ -160,6 +190,8 @@ impl OutboxOp {
             OutboxOp::TopicFollow { .. } => "topic_follow",
             OutboxOp::CardAction { .. } => "card_action",
             OutboxOp::React { .. } => "react",
+            OutboxOp::CardAnswer { .. } => "card_answer",
+            OutboxOp::ArtifactEvent { .. } => "artifact_event",
         }
     }
     pub fn group_id(&self) -> &str {
@@ -170,7 +202,9 @@ impl OutboxOp {
             | OutboxOp::TopicUpdate { group_id, .. }
             | OutboxOp::TopicFollow { group_id, .. }
             | OutboxOp::CardAction { group_id, .. }
-            | OutboxOp::React { group_id, .. } => group_id,
+            | OutboxOp::React { group_id, .. }
+            | OutboxOp::CardAnswer { group_id, .. }
+            | OutboxOp::ArtifactEvent { group_id, .. } => group_id,
         }
     }
     pub fn topic_id(&self) -> Option<&str> {
@@ -179,7 +213,9 @@ impl OutboxOp {
             | OutboxOp::Edit { topic_id, .. }
             | OutboxOp::Delete { topic_id, .. }
             | OutboxOp::CardAction { topic_id, .. }
-            | OutboxOp::React { topic_id, .. } => topic_id.as_deref(),
+            | OutboxOp::React { topic_id, .. }
+            | OutboxOp::CardAnswer { topic_id, .. }
+            | OutboxOp::ArtifactEvent { topic_id, .. } => topic_id.as_deref(),
             OutboxOp::TopicUpdate { topic_id, .. } | OutboxOp::TopicFollow { topic_id, .. } => {
                 Some(topic_id)
             }
@@ -371,6 +407,7 @@ pub(crate) fn clear_deleted(m: &mut Message) {
     m.attachments = None;
     m.artifact_refs = None;
     m.card = None;
+    m.card_v2 = None;
     m.reply_to = None;
     m.streaming = None;
 }

@@ -1,0 +1,23 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "only link actions have a target",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "working",
+    "title": "正在做",
+    "fallback": "",
+    "blocks": [],
+    "actions": [
+      {
+        "id": "a",
+        "label": "A",
+        "target": {
+          "kind": "url",
+          "url": "https://example.com"
+        }
+      }
+    ]
+  }
+}

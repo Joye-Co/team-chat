@@ -36,6 +36,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
             ("PATH".into(), std::env::var("PATH").unwrap()),
             ("HOME".into(), dir.to_string_lossy().into()),
         ],
+        aside: false,
     }
 }
 
@@ -281,4 +282,191 @@ async fn pty_cancel_kills_group() {
         .unwrap();
     // SAFETY: probing a pid with signal 0.
     assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "shell still alive");
+}
+
+/// A side chat run is read-only whatever the runtime config or the CLI's own config says.
+/// Codex gets sandbox `read-only`, no configured args, and web search, apps, plugins, browser
+/// and computer use and every configured MCP server turned off. Claude Code gets permission
+/// mode `plan`, only the read-only tools, the command, edit, web and MCP tools denied, no MCP
+/// servers and only the user's settings file, and neither `allowed_tools` nor the configured
+/// args.
+#[test]
+fn aside_runs_ignore_widening_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut s = spec(
+        tmp.path(),
+        "codex",
+        "codex",
+        &["--dangerously-bypass-approvals-and-sandbox"],
+        "q",
+    );
+    s.cfg.sandbox = Some("danger-full-access".into());
+    assert_eq!(
+        runtime::codex::thread_policy(&s),
+        ("on-request".to_string(), "danger-full-access".to_string())
+    );
+    assert_eq!(
+        runtime::codex::app_server_args(&s).unwrap(),
+        vec!["app-server", "--dangerously-bypass-approvals-and-sandbox"]
+    );
+    s.aside = true;
+    assert_eq!(
+        runtime::codex::thread_policy(&s),
+        ("never".to_string(), "read-only".to_string())
+    );
+    // MCP servers from $CODEX_HOME/config.toml (HOME/.codex here) and the project's config.
+    std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+    std::fs::write(
+        tmp.path().join(".codex/config.toml"),
+        "[mcp_servers.github]\ncommand = \"gh-mcp\"\n[mcp_servers.writer-2]\nurl = \"http://x\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(s.cwd.join(".codex")).unwrap();
+    std::fs::write(
+        s.cwd.join(".codex/config.toml"),
+        "[mcp_servers.repo_tool]\ncommand = \"t\"\n",
+    )
+    .unwrap();
+    let args = runtime::codex::app_server_args(&s).unwrap();
+    assert_eq!(args[0], "app-server");
+    assert!(!args.iter().any(|a| a.contains("dangerously")), "{args:?}");
+    let overrides: Vec<&str> = args
+        .windows(2)
+        .filter(|w| w[0] == "-c")
+        .map(|w| w[1].as_str())
+        .collect();
+    for want in [
+        "web_search=\"disabled\"",
+        "features.apps=false",
+        "features.plugins=false",
+        "features.browser_use=false",
+        "features.browser_use_external=false",
+        "features.computer_use=false",
+        "mcp_servers.github={command=\"true\",enabled=false}",
+        "mcp_servers.writer-2={url=\"http://127.0.0.1/\",enabled=false}",
+        "mcp_servers.repo_tool={command=\"true\",enabled=false}",
+    ] {
+        assert!(overrides.contains(&want), "{want} missing: {args:?}");
+    }
+    // A server name that `-c` cannot address fails the run instead of leaving it on.
+    std::fs::write(
+        s.cwd.join(".codex/config.toml"),
+        "[mcp_servers.\"a.b\"]\ncommand = \"t\"\n",
+    )
+    .unwrap();
+    assert!(runtime::codex::app_server_args(&s).is_err());
+
+    let mut c = spec(
+        tmp.path(),
+        "claude",
+        "claude",
+        &["--dangerously-skip-permissions"],
+        "q",
+    );
+    c.cfg.permission_mode = Some("bypassPermissions".into());
+    c.cfg.allowed_tools = Some("Bash".into());
+    let normal = runtime::claude::permission_args(&c);
+    assert!(normal.contains(&"bypassPermissions".to_string()));
+    assert!(normal.contains(&"--dangerously-skip-permissions".to_string()));
+    c.aside = true;
+    let args = runtime::claude::permission_args(&c);
+    let value = |flag: &str| {
+        let i = args
+            .iter()
+            .position(|a| a == flag)
+            .unwrap_or_else(|| panic!("{flag} missing: {args:?}"));
+        args[i + 1].clone()
+    };
+    assert_eq!(value("--permission-mode"), "plan");
+    let tools: Vec<String> = value("--tools").split(',').map(str::to_string).collect();
+    assert_eq!(tools, ["Read", "Grep", "Glob"]);
+    let denied: Vec<String> = value("--disallowedTools")
+        .split(' ')
+        .map(str::to_string)
+        .collect();
+    for t in [
+        "Bash",
+        "Edit",
+        "Write",
+        "MultiEdit",
+        "NotebookEdit",
+        "WebFetch",
+        "WebSearch",
+        "mcp__*",
+    ] {
+        assert!(denied.iter().any(|d| d == t), "{t} not denied: {denied:?}");
+    }
+    assert!(args.iter().any(|a| a == "--strict-mcp-config"));
+    assert_eq!(value("--mcp-config"), r#"{"mcpServers":{}}"#);
+    // Only the user's settings (auth env, apiKeyHelper, model); project and local settings
+    // come from the repo. The tool set above keeps a user allow rule from widening the run.
+    assert_eq!(value("--setting-sources"), "user");
+    for widening in [
+        "bypassPermissions",
+        "--dangerously-skip-permissions",
+        "--allowedTools",
+        "acceptEdits",
+    ] {
+        assert!(!args.iter().any(|a| a == widening), "{widening}: {args:?}");
+    }
+}
+
+/// The MCP overrides of a side chat run are valid for the real Codex CLI whether or not it
+/// loads a server's config file: here an untrusted project's `.codex/config.toml`, which Codex
+/// skips, and a user config with a stdio and a URL server. Every server ends up disabled.
+/// `codex mcp list` reads the config without a model call. Skipped without `codex` on PATH.
+#[test]
+fn codex_aside_mcp_overrides_load_in_real_cli() {
+    let Some(codex) = std::env::var_os("PATH").and_then(|p| {
+        std::env::split_paths(&p)
+            .map(|d| d.join("codex"))
+            .find(|f| f.is_file())
+    }) else {
+        eprintln!("codex not on PATH; skipped");
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join("config.toml"),
+        "[mcp_servers.local]\ncommand = \"echo\"\nargs = [\"a\"]\n\
+         [mcp_servers.web]\nurl = \"http://127.0.0.1:9/x\"\nbearer_token_env_var = \"NOPE\"\n",
+    )
+    .unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    s.env
+        .push(("CODEX_HOME".into(), home.to_string_lossy().into()));
+    s.aside = true;
+    std::fs::create_dir_all(s.cwd.join(".codex")).unwrap();
+    std::fs::write(
+        s.cwd.join(".codex/config.toml"),
+        "[mcp_servers.repo_tool]\ncommand = \"t\"\n",
+    )
+    .unwrap();
+    let args = runtime::codex::app_server_args(&s).unwrap();
+    let out = std::process::Command::new(codex)
+        .args(["mcp", "list", "--json"])
+        .args(&args[1..])
+        .current_dir(&s.cwd)
+        .env("CODEX_HOME", &home)
+        .env("HOME", tmp.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "codex rejected {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let list: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let list = list.as_array().unwrap();
+    for name in ["local", "web"] {
+        assert!(
+            list.iter().any(|e| e["name"] == name),
+            "{name} missing: {list:?}"
+        );
+    }
+    for e in list {
+        assert_eq!(e["enabled"], false, "{e}");
+    }
 }

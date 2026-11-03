@@ -10,6 +10,19 @@ use crate::serde_util::ProtocolV1;
 
 pub const MACHINE_PROTOCOL: u32 = 1;
 
+/// `hello.machine.features` values of the 1.1 daemon. The server sends a 1.1 frame or field
+/// only to a daemon that reports its feature.
+pub mod feature {
+    /// `run.pause` and `run.resume`.
+    pub const PAUSE: &str = "pause";
+    /// `run.input.answer` and `run.input.artifactEvent`.
+    pub const ANSWER: &str = "answer";
+    /// `run.assign.kind = "aside"` (read-only side chat runs).
+    pub const ASIDE: &str = "aside";
+    /// The `acceptance` run event.
+    pub const ACCEPTANCE: &str = "acceptance";
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MachineInfo {
@@ -22,6 +35,12 @@ pub struct MachineInfo {
     pub os: String,
     pub arch: String,
     pub max_parallel_runs: u32,
+    /// 1.1: see [`feature`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub features: Option<Vec<String>>,
+    /// 1.1: screen sharing address (e.g. `vnc://mac-mini.tailnet`) for 接管.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub takeover_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -107,6 +126,35 @@ pub struct RunAssign {
     pub max_duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_upload: Option<SessionUpload>,
+    /// 1.1: "aside" = a read-only side chat run (feature "aside").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+}
+
+/// A Card v2 answer given to a run (`run.input.answer`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunAnswer {
+    pub message_id: String,
+    pub rev: u32,
+    pub action_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<BTreeMap<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_values: Option<BTreeMap<String, String>>,
+    pub actor_id: String,
+}
+
+/// An event from an interactive 产出 page given to a run (`run.input.artifactEvent`).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunArtifactEvent {
+    pub artifact_id: String,
+    pub version: u32,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payload: Option<Value>,
+    pub actor_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -230,6 +278,18 @@ pub enum RunEvent {
         state: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
+    },
+    /// 1.1: the run's acceptance criteria and their state; replaces `BotRun.acceptance`.
+    #[serde(rename = "acceptance", rename_all = "camelCase")]
+    Acceptance {
+        items: Vec<crate::bots::AcceptanceItem>,
+    },
+    /// 1.1: the CLI is stopped (`paused: true`, after run.pause) or goes on (after run.resume).
+    #[serde(rename = "paused", rename_all = "camelCase")]
+    Paused {
+        paused: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
     },
     /// A type this reader does not know (a newer daemon). Readers skip it; never written.
     #[serde(other)]
@@ -366,6 +426,12 @@ pub enum Down {
         text: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         author_id: Option<String>,
+        /// 1.1 (feature "answer").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        answer: Option<RunAnswer>,
+        /// 1.1 (feature "answer").
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        artifact_event: Option<RunArtifactEvent>,
     },
     #[serde(rename = "run.approval", rename_all = "camelCase")]
     RunApproval {
@@ -379,6 +445,20 @@ pub enum Down {
         run_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         reason: Option<String>,
+    },
+    /// 1.1 (feature "pause"): stop the CLI's process group for 接管; deadlines stop too.
+    #[serde(rename = "run.pause", rename_all = "camelCase")]
+    RunPause {
+        run_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        by: Option<String>,
+    },
+    /// 1.1 (feature "pause"): go on; `note`, when set, is the CLI's next input.
+    #[serde(rename = "run.resume", rename_all = "camelCase")]
+    RunResume {
+        run_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        note: Option<String>,
     },
     #[serde(rename = "ack", rename_all = "camelCase")]
     Ack { run_id: String, seq: u64 },

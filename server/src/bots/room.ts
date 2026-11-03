@@ -2,7 +2,7 @@
 // and the hand-off of human messages and card presses to the responsible bot's BotDesk. The
 // hand-off is written to an outbox in the same transaction as the event and delivered after
 // commit; a failed delivery is retried by the room alarm until the desk accepts it.
-import type { BotRun, Event, Message } from "@chat/protocol";
+import type { BotRun, CardV2, Event, Message, TopicContext } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
   type ArchivedEvent,
@@ -13,6 +13,8 @@ import {
   registerRoomMigration,
   registerRoomRpc,
 } from "../core/registry";
+import { storedCard } from "../cards2/decisions";
+import { type AnswerData, type PageEventData, answerText, pageEventText } from "./answers";
 import { CONTEXT_MESSAGES, type ContextMessage } from "./dispatch";
 import type { Env } from "../core/env";
 import type { Logger } from "../core/logger";
@@ -55,13 +57,24 @@ export interface ClaimResult {
   botId: string;
   title: string;
   messages: ContextMessage[];
+  /** The topic is a side chat about this topic (1.1, `Topic.contextOf`). */
+  contextOf?: TopicContext;
 }
+
+/** What `bots.context` returns: the side chat's source topic up to `uptoSeq`. */
+export interface SourceContext {
+  title: string;
+  messages: ContextMessage[];
+}
+
+/** Messages of a side chat's source topic given to the aside run. */
+export const SIDE_CHAT_CONTEXT_MESSAGES = 60;
 
 /** Makes the calling bot the topic's responsible bot unless another bot already is. */
 registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
   const { topicId } = args as { topicId: string };
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
-  const topic = room.sql.exec<{ title: string }>("SELECT title FROM topics WHERE id = ?", topicId).toArray()[0];
+  const topic = room.sql.exec<{ title: string; context: string | null }>("SELECT title, context FROM topics WHERE id = ?", topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
   room.sql.exec(
     "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
@@ -79,7 +92,34 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     .toArray()
     .reverse()
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
-  return { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
+  const out: ClaimResult = { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
+  // Only a DM topic can be a side chat (the room checks this when it stores the context).
+  if (topic.context && room.groupKind === "dm") out.contextOf = JSON.parse(topic.context) as TopicContext;
+  return out;
+});
+
+/**
+ * The source topic of a side chat, read by its aside run: messages up to `uptoSeq`, oldest
+ * first. The calling bot and the asker must both still be members of this group.
+ */
+registerRoomRpc("bots.context", (room, actor, args): SourceContext => {
+  const { topicId, uptoSeq, askerId } = args as { topicId: string; uptoSeq: number; askerId: string };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  if (!room.isMember(actor.id) || !room.isMember(askerId)) throw new ApiError("forbidden", "not a member of this group");
+  const topic = room.sql.exec<{ title: string }>("SELECT title FROM topics WHERE id = ?", topicId).toArray()[0];
+  if (!topic) throw new ApiError("not_found", "topic not found");
+  const messages = room.sql
+    .exec<{ id: string; author_id: string; body: string }>(
+      `SELECT id, author_id, body FROM messages WHERE topic_id = ? AND deleted_at IS NULL AND created_seq <= ?
+       ORDER BY created_seq DESC LIMIT ?`,
+      topicId,
+      uptoSeq,
+      SIDE_CHAT_CONTEXT_MESSAGES,
+    )
+    .toArray()
+    .reverse()
+    .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
+  return { title: topic.title, messages };
 });
 
 /** Checks that a topic exists in this group (external bots start runs in it). */
@@ -132,6 +172,8 @@ export interface TopicMessage {
   authorLevel?: "owner" | "member";
   body: string;
   mentioned: boolean;
+  /** The message the run's acknowledgement reacts to when `messageId` is a synthetic key. */
+  ackMessageId?: string;
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */
@@ -144,13 +186,40 @@ export interface CardPress {
   actorLevel: "owner" | "member" | null;
 }
 
-type MemberInfo = { id: string; kind: string; level: string; deactivated: number; runner: number };
+/** A Card v2 answer for the card's author, as BotDesk.cardAnswer gets it. */
+export interface CardAnswerIn {
+  groupId: string;
+  topicId: string;
+  /** Seq of the `card.answered` event: the answer's identity. */
+  seq: number;
+  answer: AnswerData;
+  actorId: string;
+  actorKind: "human" | "bot" | null;
+  actorLevel: "owner" | "member" | null;
+  /** The text form for the run (machine-protocol.md `run.input.text`). */
+  text: string;
+}
+
+/** A 产出 page event for the bot that made the version, as BotDesk.artifactEvent gets it. */
+export interface PageEventIn {
+  groupId: string;
+  topicId: string;
+  seq: number;
+  event: PageEventData;
+  /** The run that made the version, when the bot named it. */
+  runId: string | null;
+  actorId: string;
+  actorKind: "human" | "bot" | null;
+  text: string;
+}
+
+type MemberInfo = { id: string; name: string; kind: string; level: string; deactivated: number; runner: number };
 
 async function memberInfo(db: D1Database, ids: string[]): Promise<Map<string, MemberInfo>> {
   const uniq = [...new Set(ids)];
   const rows = await db
     .prepare(
-      `SELECT m.id, m.kind, m.level, m.deactivated, r.member_id IS NOT NULL AS runner FROM members m
+      `SELECT m.id, m.name, m.kind, m.level, m.deactivated, r.member_id IS NOT NULL AS runner FROM members m
        LEFT JOIN bot_runners r ON r.member_id = m.id AND r.enabled = 1
        WHERE m.id IN (${uniq.map(() => "?").join(",")})`,
     )
@@ -176,10 +245,13 @@ const RETRY_MAX_MS = 5 * 60_000;
 
 type OutboxCard = { botId: string; messageId: string; actionId: string; actorId: string };
 type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId"> & { mentions: string[] };
+/** The card as it was answered: the author may edit it before the hand-off is delivered. */
+type OutboxAnswer = { botId: string; seq: number; answer: AnswerData; actorId: string; card: CardV2 };
+type OutboxPageEvent = { botId: string; seq: number; event: PageEventData; runId: string | null; actorId: string; title: string | null };
 
 type OutboxRow = {
   id: number;
-  kind: "message" | "card";
+  kind: "message" | "card" | "answer" | "artifact";
   topic_id: string;
   payload: string;
   attempts: number;
@@ -198,6 +270,31 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     if (!row || claimedBot(sql, row.topic_id) !== row.author_id) return;
     const payload: OutboxCard = { botId: row.author_id, messageId, actionId, actorId: event.actorId };
     enqueue(sql, "card", row.topic_id, payload);
+    return;
+  }
+  if (event.type === "card.answered") {
+    // To the card's author; deliver() keeps only runner bots (SDK bots read the event itself).
+    const answer = event.data as AnswerData;
+    const stored = storedCard(sql, answer.messageId);
+    if (!stored || stored.authorId === event.actorId) return;
+    const payload: OutboxAnswer = { botId: stored.authorId, seq: event.seq, answer, actorId: event.actorId, card: stored.card };
+    enqueue(sql, "answer", stored.topicId, payload);
+    return;
+  }
+  if (event.type === "artifact.evented") {
+    // To the bot that made the version (only versions that declare events get these events).
+    const e = event.data as PageEventData;
+    const v = sql
+      .exec<{ created_by: string; run_id: string | null; topic_id: string; title: string }>(
+        `SELECT v.created_by, v.run_id, a.topic_id, a.title FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
+         WHERE v.artifact_id = ? AND v.version = ?`,
+        e.artifactId,
+        e.version,
+      )
+      .toArray()[0];
+    if (!v || v.created_by === event.actorId) return;
+    const payload: OutboxPageEvent = { botId: v.created_by, seq: event.seq, event: e, runId: v.run_id, actorId: event.actorId, title: v.title };
+    enqueue(sql, "artifact", v.topic_id, payload);
     return;
   }
   if (event.type !== "message.created") return;
@@ -251,6 +348,7 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     await deskStub(c.env, p.botId).cardAction(p.botId, press);
     return;
   }
+  if (row.kind === "answer" || row.kind === "artifact") return deliverToAuthor(c, row);
   const m = JSON.parse(row.payload) as OutboxMessage;
   // The responsible bot now (a run may have claimed the topic since the message was written).
   const claimed = claimedBot(c.sql, m.topicId);
@@ -284,6 +382,45 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     mentioned: m.mentions.includes(target) || target === peer,
   };
   await deskStub(c.env, target).onMessage(target, args);
+}
+
+/** A card answer or a page event, to the runner bot that made the card or the 产出 version. */
+async function deliverToAuthor(c: DeliverContext, row: OutboxRow): Promise<void> {
+  const p = JSON.parse(row.payload) as OutboxAnswer | OutboxPageEvent;
+  const byId = await memberInfo(c.env.DB, [p.botId, p.actorId]);
+  const bot = byId.get(p.botId);
+  // SDK bots and people read the stored event; only runner bots need a hand-off.
+  if (!bot || bot.kind !== "bot" || !bot.runner || bot.deactivated) return;
+  const who = byId.get(p.actorId);
+  const actorKind = who && !who.deactivated ? (who.kind as "human" | "bot") : null;
+  const name = who?.name ?? p.actorId;
+  if (row.kind === "answer") {
+    const a = p as OutboxAnswer;
+    const args: CardAnswerIn = {
+      groupId: c.groupId,
+      topicId: row.topic_id,
+      seq: a.seq,
+      answer: a.answer,
+      actorId: a.actorId,
+      actorKind,
+      actorLevel: who && !who.deactivated ? (who.level as "owner" | "member") : null,
+      text: answerText(a.card, a.answer, name),
+    };
+    await deskStub(c.env, a.botId).cardAnswer(a.botId, args);
+    return;
+  }
+  const e = p as OutboxPageEvent;
+  const args: PageEventIn = {
+    groupId: c.groupId,
+    topicId: row.topic_id,
+    seq: e.seq,
+    event: e.event,
+    runId: e.runId,
+    actorId: e.actorId,
+    actorKind,
+    text: pageEventText(e.event, name, e.title),
+  };
+  await deskStub(c.env, e.botId).artifactEvent(e.botId, args);
 }
 
 /** Rooms with a drain running (one per room object; the alarm and hooks share it). */
@@ -339,8 +476,10 @@ export async function drainOutbox(c: DeliverContext): Promise<void> {
   if (next !== null && next !== undefined) c.wakeAt(Math.max(next, Date.now() + 1000));
 }
 
+const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered", "artifact.evented"]);
+
 registerAfterCommit(async (event: Event, h) => {
-  if (event.type !== "message.created" && event.type !== "card.actioned") return;
+  if (!HANDED_OFF.has(event.type)) return;
   await drainOutbox(h);
 });
 

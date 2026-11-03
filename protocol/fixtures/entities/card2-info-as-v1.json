@@ -1,0 +1,26 @@
+{
+  "kind": "Card",
+  "valid": true,
+  "description": "cardV2ToV1 of card2-info: the action stays pressable",
+  "value": {
+    "v": 1,
+    "title": "提示",
+    "tone": "neutral",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "只是告诉你"
+      },
+      {
+        "type": "text",
+        "text": "x"
+      }
+    ],
+    "actions": [
+      {
+        "id": "ok",
+        "label": "知道了"
+      }
+    ]
+  }
+}

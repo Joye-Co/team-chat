@@ -1,0 +1,10 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.resume",
+    "runId": "01JA0000000000000000000R04",
+    "note": "A person used this computer for 5 minutes. Look at the current state before you go on."
+  }
+}

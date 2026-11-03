@@ -1,0 +1,22 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 43,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "card.answered",
+    "data": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "rev": 1,
+      "actionId": "ship",
+      "inputs": {
+        "when": "tonight"
+      },
+      "editedValues": {
+        "notes": "x"
+      }
+    }
+  }
+}

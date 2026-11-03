@@ -23,8 +23,16 @@ bot.onMention(async (ctx) => {
   ]);
 });
 
+// 1.1: answers to v2 cards (decisionCard, approvalCard, draftCard, formCard), then a done card.
+bot.onCardAnswer<{ choice: string }>(async (ctx) => {
+  await ctx.resolve();
+  await ctx.bot.done({ groupId: ctx.groupId, topicId: ctx.topicId }, { title: "做完了", summary: `选了 ${ctx.choice()}` });
+});
+
 await bot.start();
 ```
+
+See `examples/ask-bot.ts` for acknowledgements, asks, side chats (`onAside`) and done cards.
 
 `bun test` runs the end-to-end tests against its own `wrangler dev` (port 8795, or
 `BOT_SDK_E2E_PORT`).

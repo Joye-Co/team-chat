@@ -102,6 +102,6 @@ pub fn msg_created(seq: u64, m: Message) -> Event {
         seq,
         &g,
         &a,
-        EventData::MessageCreated(MessageCreatedData { message: m }),
+        EventData::MessageCreated(Box::new(MessageCreatedData { message: m })),
     )
 }

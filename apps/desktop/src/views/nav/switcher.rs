@@ -685,7 +685,7 @@ impl Switcher {
             .find(|e| e.target == Target::Group(h.group_id.clone()))
             .map(|e| e.label.clone())
             .unwrap_or_default();
-        let time = list_time(h.created_at, chrono::Local::now());
+        let time = list_time(h.created_at, crate::selftest::clock::local_now());
         // A DM is named after its peer: no `小王 · 小王`; scoped: no 群.
         let author_name = author.map(|a| a.name.as_str()).unwrap_or_default();
         let group = if self.scope.is_some() || group == author_name {

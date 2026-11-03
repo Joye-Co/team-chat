@@ -1,0 +1,115 @@
+{
+  "kind": "Message",
+  "valid": true,
+  "description": "a cardV2 this version cannot read is dropped; the v1 card stays",
+  "value": {
+    "id": "01JBX0MSG000000000000000AE",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "authorId": "01JBX0BOT000000000000000AC",
+    "body": "Scout 在 staging 验收通过。请选择发布时间。",
+    "mentions": [],
+    "createdSeq": 41,
+    "createdAt": 1762128005000,
+    "kind": "card",
+    "card": {
+      "v": 1,
+      "title": "发布 qqbot 1.4 到正式环境？",
+      "tone": "warning",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Scout 在 staging 验收通过。请选择发布时间。"
+        },
+        {
+          "type": "text",
+          "text": "**验收通过**，没有新的报错。"
+        },
+        {
+          "type": "list",
+          "items": [
+            {
+              "text": "现在发"
+            },
+            {
+              "text": "今晚 22:00"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "- 修好了重复消息\n- 更快的启动"
+        },
+        {
+          "type": "list",
+          "items": [
+            {
+              "text": "E2E 42/42",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    },
+    "cardV2": {
+      "v": 3,
+      "rev": 1,
+      "intent": "working",
+      "title": "正在做",
+      "fallback": "",
+      "blocks": []
+    }
+  },
+  "normalized": {
+    "id": "01JBX0MSG000000000000000AE",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "authorId": "01JBX0BOT000000000000000AC",
+    "body": "Scout 在 staging 验收通过。请选择发布时间。",
+    "mentions": [],
+    "createdSeq": 41,
+    "createdAt": 1762128005000,
+    "kind": "card",
+    "card": {
+      "v": 1,
+      "title": "发布 qqbot 1.4 到正式环境？",
+      "tone": "warning",
+      "blocks": [
+        {
+          "type": "text",
+          "text": "Scout 在 staging 验收通过。请选择发布时间。"
+        },
+        {
+          "type": "text",
+          "text": "**验收通过**，没有新的报错。"
+        },
+        {
+          "type": "list",
+          "items": [
+            {
+              "text": "现在发"
+            },
+            {
+              "text": "今晚 22:00"
+            }
+          ]
+        },
+        {
+          "type": "text",
+          "text": "- 修好了重复消息\n- 更快的启动"
+        },
+        {
+          "type": "list",
+          "items": [
+            {
+              "text": "E2E 42/42",
+              "status": "done"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

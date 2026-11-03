@@ -385,6 +385,7 @@ fn realtime_live() {
         todo: false,
         group_id: Some(g.clone()),
         topic_id: Some(t1.clone()),
+        ..Default::default()
     };
     b.p.save_navigation(place.clone());
     let dir = session::account_dir(&b.root, &url, &me_b);

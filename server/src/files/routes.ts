@@ -313,6 +313,8 @@ export function registerFileRoutes(): void {
         entry: req.entry,
         files: req.files,
         note: req.note,
+        events: req.events,
+        runId: req.runId,
       });
       if (!r.ok) {
         await env.DB.prepare("DELETE FROM artifacts WHERE id = ?").bind(id).run();
@@ -343,6 +345,8 @@ export function registerFileRoutes(): void {
           files: req.files,
           note: req.note,
           title: req.title,
+          events: req.events,
+          runId: req.runId,
         }),
       ) as ArtifactVersionResponse;
       await auditStatement(env.DB, a, {

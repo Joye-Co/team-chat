@@ -3,6 +3,37 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.1.0 (unreleased)
+
+Notes: [docs/releases/1.1.0.md](docs/releases/1.1.0.md). Draft: the date, the final scope and the
+deploy facts are filled in at release time. The server deploys first (e2e, staging, production),
+then the app and the machine daemon.
+
+- Design v3 ([docs/DESIGN.md](docs/DESIGN.md), artboards in `docs/design/mockups-v3/`): HELMET2
+  ink-on-paper tokens, ink primary buttons, grey selection, state colors amber (you), blue (live)
+  and red (problem), mono numerals, member tiles with status rings, 52 pt title bars, motion with
+  reduce-motion support, light, dark and Increase contrast.
+- Shell: left rail · page · right pane; the topic-list column is removed. The rail has three
+  modes (work, attention, members), chosen in the new 设置 → 外观 page with the theme.
+- New pages: 首页 (需要你拍板, 做完了, 正在做, 排队), 群, 成员 and the 产出 viewer in the main window.
+- Topic page: title bar with pane buttons, the pinned decision card above the composer, and the
+  topic rail (负责, 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本).
+- 单独问 (⌘;): a private side chat with a member that reads the topic; a suggestion posts into the
+  topic only when pressed.
+- 实时查看: a member's terminal rebuilt from the run's tool events, 回放 by step, 验收标准, and
+  接管 / 交还 (`run.pause` / `run.resume`: the daemon stops and continues the run's process group;
+  the server suspends stall deadlines; `BotRun.pausedBy`).
+- ⌘K 交代或搜索: hand work to a member (a new topic addressed to it) or search.
+- Card v2 (`Message.cardV2`, additive): intents, typed blocks (decision, approval with confirm,
+  form, draft, plan, metric, chart, table, diff, evidence, refs) and states; answers travel as
+  `card.answer` / `card.answered` to the card's author. The server derives a v1 `card` for 1.0.x
+  clients.
+- Runs: members acknowledge with a reaction, post no progress messages, and end with a done card
+  with proof; `BotRun.usage` and `durationMs` are stored.
+- chat-core: a cache migration re-fetches group logs once, so events that 1.0.x skipped are read.
+- Protocol: additive only (new optional fields and new frame and event types); closed enums are
+  unchanged. See docs/protocol.md and docs/machine-protocol.md.
+
 ## 1.0.1 (2026-11-03)
 
 Notes: [docs/releases/1.0.1.md](docs/releases/1.0.1.md). No server change.

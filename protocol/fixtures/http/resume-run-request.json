@@ -1,0 +1,8 @@
+{
+  "kind": "ResumeRunRequest",
+  "valid": true,
+  "description": "a note for the CLI",
+  "value": {
+    "note": "I fixed the config; go on from step 3."
+  }
+}

@@ -51,6 +51,13 @@ pub struct SavedNav {
     pub group_id: Option<String>,
     #[serde(default)]
     pub topic_id: Option<String>,
+    /// v2 (1.1.0): additive, skipped when empty so a 1.0.x file stays the same.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub member_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub artifact_id: Option<String>,
 }
 
 impl From<&SavedNavigation> for SavedNav {
@@ -59,6 +66,9 @@ impl From<&SavedNavigation> for SavedNav {
             todo: n.todo,
             group_id: n.group_id.clone(),
             topic_id: n.topic_id.clone(),
+            page: n.page.clone(),
+            member_id: n.member_id.clone(),
+            artifact_id: n.artifact_id.clone(),
         }
     }
 }
@@ -69,6 +79,9 @@ impl From<SavedNav> for SavedNavigation {
             todo: n.todo,
             group_id: n.group_id,
             topic_id: n.topic_id,
+            page: n.page,
+            member_id: n.member_id,
+            artifact_id: n.artifact_id,
         }
     }
 }
@@ -197,6 +210,9 @@ mod tests {
             todo: false,
             group_id: Some("g".into()),
             topic_id: Some("t".into()),
+            page: Some("members".into()),
+            member_id: Some("m".into()),
+            artifact_id: None,
         };
         let state = UiState::new(vec![saved.clone()], Some(&nav));
         write(&dir, &state).unwrap();
@@ -208,5 +224,13 @@ mod tests {
         std::fs::write(dir.join(FILE), b"{oops").unwrap();
         assert_eq!(load(&dir), UiState::default());
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn a_1_0_navigation_reads_and_writes_the_same_bytes() {
+        let old = br#"{"todo":false,"group_id":"g","topic_id":"t"}"#;
+        let nav: SavedNav = serde_json::from_slice(old).unwrap();
+        assert_eq!(nav.page, None);
+        assert_eq!(serde_json::to_vec(&nav).unwrap(), old.to_vec());
     }
 }

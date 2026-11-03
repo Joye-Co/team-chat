@@ -10,6 +10,7 @@ pub mod codex;
 pub mod pty;
 
 use crate::config::RuntimeConfig;
+use crate::proctree;
 use crate::proto::{RunEvent, Usage};
 use serde_json::Value;
 use std::future::Future;
@@ -37,6 +38,9 @@ pub struct RunSpec {
     pub run_dir: PathBuf,
     /// The complete environment of the CLI process.
     pub env: Vec<(String, String)>,
+    /// A read-only side chat run (`run.assign.kind = "aside"`): the runtime forces its
+    /// read-only mode and ignores the configured args and tool grants.
+    pub aside: bool,
 }
 
 impl RunSpec {
@@ -202,16 +206,37 @@ impl Proc {
         }
     }
 
-    /// SIGTERM the process group, then SIGKILL after `grace`. Returns the exit code.
+    /// The tool groups below the CLI (see [`crate::proctree`]). Empty once the CLI is reaped:
+    /// its pid may then belong to another process.
+    fn tool_targets(&mut self) -> Vec<proctree::Target> {
+        match self.child.try_wait() {
+            Ok(None) => proctree::targets(self.pgid),
+            _ => vec![],
+        }
+    }
+
+    /// SIGTERM the process group and the tool groups below it, then SIGKILL after `grace`.
+    /// Returns the exit code.
     pub async fn kill_group(&mut self, grace: Duration) -> Option<i64> {
+        let mut tools = self.tool_targets();
         self.signal_group(libc::SIGTERM);
+        proctree::signal(&tools, libc::SIGTERM);
+        // A stopped tool cannot handle SIGTERM.
+        proctree::signal(&tools, libc::SIGCONT);
         match tokio::time::timeout(grace, self.child.wait()).await {
             Ok(Ok(s)) => {
                 self.signal_group(libc::SIGKILL);
+                proctree::signal(&tools, libc::SIGKILL);
                 s.code().map(i64::from)
             }
             _ => {
+                for t in self.tool_targets() {
+                    if !tools.contains(&t) {
+                        tools.push(t);
+                    }
+                }
                 self.signal_group(libc::SIGKILL);
+                proctree::signal(&tools, libc::SIGKILL);
                 self.child
                     .wait()
                     .await
@@ -241,6 +266,8 @@ impl Proc {
 
 impl Drop for Proc {
     fn drop(&mut self) {
+        let tools = self.tool_targets();
+        proctree::signal(&tools, libc::SIGKILL);
         self.signal_group(libc::SIGKILL);
     }
 }

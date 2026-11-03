@@ -80,6 +80,19 @@ pub(crate) fn new_topic_placeholder(group: &str) -> String {
     )
 }
 
+/// The v2 群 page composer: `在开发里开个话题，或 @ 成员交代…`, the 群
+/// name cut like the new-topic placeholder's.
+pub(crate) fn group_page_placeholder(group: &str) -> String {
+    let group = crate::views::sidebar::topic_line(group);
+    fill(
+        crate::copy::group_page::GROUP_PAGE_COMPOSER,
+        &[(
+            "group",
+            &crate::ui::emoji::clip_units(&group, PLACEHOLDER_GROUP_UNITS),
+        )],
+    )
+}
+
 /// The message being edited.
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct EditTarget {
@@ -127,6 +140,14 @@ pub struct ComposerView {
     format_open: bool,
     /// Bounds of the composer box in the window, for the @ list's anchor.
     anchor: std::rc::Rc<std::cell::Cell<gpui::Bounds<gpui::Pixels>>>,
+    /// The v2 style of the 话题 page: its placeholder, two tools and the
+    /// 单独问 hint (topic track).
+    v2: bool,
+    /// The placeholder must be set again on the next render.
+    placeholder_stale: bool,
+    /// The member at work in the open 话题 (v2): the field says 插一句…
+    /// and that the member reads it before its next step.
+    working: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -170,10 +191,38 @@ impl ComposerView {
             emoji_closed_at: None,
             format_open: false,
             anchor: Default::default(),
+            v2: false,
+            placeholder_stale: false,
+            working: None,
             _subscriptions: subscriptions,
         };
         this.sync_key(window, cx);
         this
+    }
+
+    /// The name of the member at work in the open 话题 (v2 only).
+    fn working_member(&self) -> Option<String> {
+        if !self.v2 || self.editing.is_some() {
+            return None;
+        }
+        let key = self.key.as_ref()?;
+        let topic = key.topic_id.as_deref()?;
+        let runs = self.services.provider.runs(&key.group_id, topic);
+        let run = crate::views::topic_page::working_run(&runs)?;
+        Some(crate::views::shell::member_name(
+            &self.services,
+            &run.bot_id,
+        ))
+        .filter(|n| !n.is_empty())
+    }
+
+    /// Switches to the v2 style of the 话题 page (topic track).
+    pub fn set_v2(&mut self, v2: bool, cx: &mut Context<Self>) {
+        if self.v2 != v2 {
+            self.v2 = v2;
+            self.placeholder_stale = true;
+            cx.notify();
+        }
     }
 
     /// Focuses the field with the caret at the end and opens the @ list for
@@ -273,10 +322,15 @@ impl ComposerView {
         }
         match &key.topic_id {
             Some(t) => match provider.topic(&key.group_id, t) {
+                Some(_) if self.v2 && self.working_member().is_some() => {
+                    crate::copy::topic_rail::COMPOSER_INTERJECT.to_string()
+                }
+                Some(_) if self.v2 => crate::copy::topic_rail::COMPOSER_PLACEHOLDER.to_string(),
                 Some(topic) => reply_placeholder(&topic.title),
                 None => c::PLACEHOLDER.to_string(),
             },
             None => match provider.groups().into_iter().find(|g| g.id == key.group_id) {
+                Some(group) if self.v2 => group_page_placeholder(&group.name),
                 Some(group) => new_topic_placeholder(&group.name),
                 None => c::PLACEHOLDER_NEW_TOPIC.to_string(),
             },
@@ -352,6 +406,16 @@ impl ComposerView {
             || changes.any(|ch| matches!(ch, Change::Members));
         if draft_changed || (self.quote.is_some() && quoted_changed) {
             self.refresh_extras(cx);
+        }
+        // A run started or ended: the field says 插一句… only while a
+        // member works (the render reads it again).
+        if self.v2
+            && let Some(t) = &key.topic_id
+            && changes.any(|ch| {
+                matches!(ch, Change::Runs { group_id, topic_id } if *group_id == key.group_id && topic_id == t)
+            })
+        {
+            cx.notify();
         }
     }
 
@@ -1054,6 +1118,19 @@ fn model_format(f: Format) -> model::Format {
 
 impl Render for ComposerView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let working = self.working_member();
+        if working != self.working {
+            self.working = working;
+            self.placeholder_stale = true;
+        }
+        if std::mem::take(&mut self.placeholder_stale) {
+            self.update_placeholder(window, cx);
+        }
+        // The v2 style: the 话题 page's, and the 群 page's (Group.dc.html),
+        // which starts a 话题 with the same two tools and Jojo's hint.
+        let group_v2 = self.v2 && self.key.as_ref().is_some_and(|k| k.topic_id.is_none());
+        let topic_v2 = self.v2 && self.key.as_ref().is_some_and(|k| k.topic_id.is_some());
+        let v2 = topic_v2 || group_v2;
         let colors = theme::colors(cx);
         let enabled = self.key.is_some();
         let editing = self.editing.is_some();
@@ -1112,6 +1189,8 @@ impl Render for ComposerView {
                 theme::size::ICON_BUTTON,
             ))
         })
+        // v2: a round send button (Topic.dc.html).
+        .when(v2, |b| b.rounded(theme::size::ICON_BUTTON / 2.))
         .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
 
         // XSmall drops the editor's own inset; the shell pads the text 12 top
@@ -1126,6 +1205,7 @@ impl Render for ComposerView {
             window,
             cx,
         );
+        #[allow(unused_mut)]
         let mut shell = ui::ComposerShell::new(
             "composer-box",
             div()
@@ -1143,33 +1223,125 @@ impl Render for ComposerView {
         .focused(focused && enabled)
         .disabled(!enabled)
         .tool(
-            ui::composer_tool("attach", Lucide::Plus, c::ATTACH)
-                .disabled(!enabled || editing)
-                .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
+            ui::composer_tool(
+                "attach",
+                if v2 { Lucide::Paperclip } else { Lucide::Plus },
+                c::ATTACH,
+            )
+            .disabled(!enabled || editing)
+            .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
         )
         .tool(
             ui::composer_tool("mention", Lucide::AtSign, c::MENTION)
                 .disabled(!enabled)
                 .on_click(cx.listener(|this, _, window, cx| this.insert_text("@", window, cx))),
-        )
-        .tool(
-            ui::composer_tool("emoji", Lucide::FaceSlightlySmiling, c::EMOJI)
-                .disabled(!enabled)
-                .when(self.emoji_open, |b| b.selected(true))
-                .on_click(cx.listener(|this, e: &gpui::ClickEvent, _, cx| {
-                    this.toggle_emoji(e, cx);
-                })),
-        )
-        .tool(
-            ui::composer_tool("format", Lucide::Type, c::FORMAT)
-                .disabled(!enabled)
-                .when(self.format_open, |b| b.selected(true))
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.format_open = !this.format_open;
-                    cx.notify();
-                })),
-        )
-        .send(send);
+        );
+        if !v2 {
+            shell = shell
+                .tool(
+                    ui::composer_tool("emoji", Lucide::FaceSlightlySmiling, c::EMOJI)
+                        .disabled(!enabled)
+                        .when(self.emoji_open, |b| b.selected(true))
+                        .on_click(cx.listener(|this, e: &gpui::ClickEvent, _, cx| {
+                            this.toggle_emoji(e, cx);
+                        })),
+                )
+                .tool(
+                    ui::composer_tool("format", Lucide::Type, c::FORMAT)
+                        .disabled(!enabled)
+                        .when(self.format_open, |b| b.selected(true))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.format_open = !this.format_open;
+                            cx.notify();
+                        })),
+                );
+        }
+        // While a member works: `Forge 会在下一步前看到` after the tools.
+        if topic_v2
+            && !editing
+            && let Some(name) = &self.working
+        {
+            shell = shell.tool(
+                div()
+                    .h(theme::size::ICON_BUTTON)
+                    .ml(space::S6)
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .t_meta()
+                    .text_color(colors.ink_3)
+                    .child(div().min_w_0().one_line().child(fill(
+                        crate::copy::topic_rail::COMPOSER_NEXT_STEP,
+                        &[("name", name)],
+                    ))),
+            );
+        }
+        let helper = group_v2
+            .then(|| self.services.provider.side_chat_default_member())
+            .flatten()
+            .map(|id| crate::views::shell::member_name(&self.services, &id))
+            .filter(|n| !n.is_empty());
+        let send: gpui::AnyElement = if group_v2 && !editing {
+            // Jojo 会先看一眼，再交给合适的成员 beside the send button.
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .children(helper.map(|name| {
+                    div()
+                        .pr(space::S8)
+                        .t_meta()
+                        .text_color(colors.ink_3)
+                        .child(fill(
+                            crate::copy::group_page::GROUP_PAGE_COMPOSER_HINT,
+                            &[("name", &name)],
+                        ))
+                }))
+                .child(send)
+                .into_any_element()
+        } else if topic_v2 && !editing && self.working.is_some() {
+            send.into_any_element()
+        } else if topic_v2 && !editing {
+            // 只想问问？ ⌘; 单独问: opens the side chat (nothing goes to the 话题).
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S6)
+                .child(
+                    div()
+                        .id("composer-side-chat")
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .pr(space::S8)
+                        .t_meta()
+                        .text_color(colors.ink_3)
+                        .cursor_pointer()
+                        .child(crate::copy::topic_rail::JUST_ASK)
+                        .child(
+                            div()
+                                .px(px(5.))
+                                .rounded(px(5.))
+                                .bg(colors.sunken)
+                                .text_color(colors.ink_2)
+                                .t_mono()
+                                .text_size(px(11.))
+                                .line_height(px(18.))
+                                .child("⌘;"),
+                        )
+                        .child(crate::copy::topic_rail::TITLE_SIDE_CHAT)
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            this.services
+                                .nav
+                                .update(cx, |nav, cx| nav.toggle_side_chat(None, cx));
+                        })),
+                )
+                .child(send)
+                .into_any_element()
+        } else {
+            send.into_any_element()
+        };
+        shell = shell.send(send);
         if self.format_open && enabled {
             shell =
                 shell.format_bar(
@@ -1237,10 +1409,12 @@ impl Render for ComposerView {
         div()
             .id("composer")
             .flex_none()
-            .px(theme::CONTENT_GUTTER)
-            .pb(space::S16)
-            .pt(space::S8)
-            .bg(colors.content)
+            .when(!v2, |el| {
+                el.px(theme::CONTENT_GUTTER)
+                    .pb(space::S16)
+                    .pt(space::S8)
+                    .bg(colors.content)
+            })
             .on_drop(
                 cx.listener(|this, paths: &ExternalPaths, _, cx| this.on_drop_paths(paths, cx)),
             )

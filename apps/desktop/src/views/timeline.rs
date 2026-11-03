@@ -24,9 +24,11 @@ mod header;
 mod live;
 mod menu;
 mod model;
+pub mod plan;
 pub mod preview;
 mod row;
 pub mod selftest;
+pub mod v2;
 
 use std::{
     cell::Cell,
@@ -96,6 +98,12 @@ pub struct FrameProbe {
 
 pub struct TimelineView {
     services: Services,
+    /// Draw the v1 header band (the v2 shell draws its own title bar).
+    show_header: bool,
+    /// The v2 style of the 话题 page (`timeline/v2.rs`).
+    v2: bool,
+    /// When the open 话题 opened: rows rise in during the first paint.
+    opened_at: Option<Instant>,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
     members: Vec<Member>,
@@ -165,6 +173,8 @@ pub struct TimelineView {
     followed_runs: std::collections::HashSet<String>,
     /// Steps rows the user opened.
     open_steps: std::collections::HashSet<String>,
+    /// Plan cards the user folded (run ids; `timeline/plan.rs`).
+    plan_collapsed: std::collections::HashSet<String>,
     /// A one-second tick runs while a bot works (the elapsed time).
     ticking: bool,
     /// A card was in the rows painted last frame (the header hides the
@@ -181,6 +191,23 @@ pub struct TimelineView {
 impl EventEmitter<TimelineEvent> for TimelineView {}
 
 impl TimelineView {
+    /// Shows or hides the v1 header band (the v2 shell has its own title bar).
+    pub fn set_show_header(&mut self, show: bool, cx: &mut Context<Self>) {
+        if self.show_header != show {
+            self.show_header = show;
+            cx.notify();
+        }
+    }
+
+    /// Switches to the v2 style of the 话题 page (`timeline/v2.rs`).
+    pub fn set_v2(&mut self, v2: bool, cx: &mut Context<Self>) {
+        if self.v2 != v2 {
+            self.v2 = v2;
+            self.list.reset(self.messages.len());
+            cx.notify();
+        }
+    }
+
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
@@ -218,6 +245,9 @@ impl TimelineView {
         list.set_scroll_handler(move |event, _, _| end.set(event.visible_range.end));
         let mut this = Self {
             services,
+            show_header: true,
+            v2: false,
+            opened_at: None,
             open: None,
             topic: None,
             members: Vec::new(),
@@ -257,6 +287,7 @@ impl TimelineView {
             window_active: false,
             followed_runs: Default::default(),
             open_steps: Default::default(),
+            plan_collapsed: Default::default(),
             ticking: false,
             card_visible: false,
             card_seen: false,
@@ -282,6 +313,7 @@ impl TimelineView {
             .as_ref()
             .and_then(|(g, t)| self.services.provider.topic(g, t))
             .map_or(0, |t| t.unread);
+        self.opened_at = open.as_ref().map(|_| Instant::now());
         self.open = open;
         self.messages.clear();
         self.list.reset(0);
@@ -591,6 +623,26 @@ impl TimelineView {
         }
     }
 
+    /// In the v2 style, `el` (drawn 24 pt from the edges) sits in the
+    /// centered 720 pt column of the 话题 page.
+    fn v2_column(&self, el: AnyElement) -> AnyElement {
+        if !self.v2 {
+            return el;
+        }
+        div()
+            .w_full()
+            .px(v2::SIDE - theme::CONTENT_GUTTER)
+            .flex()
+            .justify_center()
+            .child(
+                div()
+                    .w_full()
+                    .max_w(v2::COLUMN + theme::CONTENT_GUTTER * 2.)
+                    .child(el),
+            )
+            .into_any_element()
+    }
+
     fn probe_element(&self) -> Option<AnyElement> {
         self.probe
             .clone()
@@ -739,7 +791,10 @@ impl Render for TimelineView {
             .flex()
             .flex_col()
             .bg(colors.content)
-            .child(self.render_header(&topic, window, cx))
+            .children(
+                self.show_header
+                    .then(|| self.render_header(&topic, window, cx)),
+            )
             .child(
                 div()
                     .relative()
@@ -751,8 +806,13 @@ impl Render for TimelineView {
                     .children(jump_unread)
                     .children(jump),
             )
-            .children(self.render_live(window, cx))
-            .children(self.render_typing(cx))
+            // The 话题 page shows a member at work as the plan card at the
+            // foot of the list (`timeline/plan.rs`), not the pending row.
+            .children((!self.v2).then(|| self.render_live(window, cx)).flatten())
+            .children(
+                self.render_typing(cx)
+                    .map(|el| self.v2_column(el.into_any_element())),
+            )
             .children(self.probe_element())
             .into_any_element()
     }

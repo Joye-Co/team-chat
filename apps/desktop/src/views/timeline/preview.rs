@@ -81,7 +81,7 @@ pub struct TopicSamples {
 }
 
 fn today_at(hour: u32, minute: u32, days_ago: i64) -> Millis {
-    let date = Local::now().date_naive() - chrono::Duration::days(days_ago);
+    let date = crate::selftest::clock::local_now().date_naive() - chrono::Duration::days(days_ago);
     let at = date.and_hms_opt(hour, minute, 0).unwrap_or_default();
     Local
         .from_local_datetime(&at)
@@ -173,7 +173,7 @@ fn draft_card() -> card::Card {
 
 impl TopicSamples {
     pub fn new(inner: Arc<dyn ChatProvider>, offline: bool) -> Arc<Self> {
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         let mut messages = HashMap::new();
         let mut cards = HashMap::new();
 

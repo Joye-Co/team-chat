@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
 // Local end-to-end run of a runner-backed bot: `wrangler dev` (fresh local state) plus the real
 // machine daemon with the fake Claude Code CLI. A member mentions the bot in a topic; the run
-// must show the acknowledgement, streamed progress, the result and the topic status `done`,
+// must show the acknowledgement (a reaction on the mention), no progress message in the topic,
+// the result as a done card (Card v2, intent done) and the topic status `done`,
 // the run log and the uploaded raw session. Then 停止: a second run hangs in the fake CLI, a member
 // stops it through the client API (the chat-core `cancel_run` example), and the run must end as
 // cancelled with the fake CLI stopped by the daemon's run.cancel, one bot note and the topic open.
@@ -225,18 +226,21 @@ async function runDaemonCheck(
 
   const botMsgs = () => events.filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id).map((e) => e.data.message);
   const statuses = () => events.filter((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status).map((e) => e.data.status);
-  const ackMsg = await until("acknowledgement", () => botMsgs().find((m) => m.body === "收到，我来处理。"));
+  const ackReaction = await until("acknowledgement", () =>
+    events.find((e) => e.type === "reaction.changed" && e.actorId === bot.member.id && e.data.messageId === ack.frame.result.message.id && e.data.on),
+  );
   await until("topic in progress", () => statuses().includes("in_progress"));
-  step("bot acknowledged; topic in progress");
-  const progress = await until("streaming progress message", () => botMsgs().find((m) => m.streaming));
+  step("bot acknowledged with a reaction; topic in progress");
   const done = await until("topic done", () => statuses().at(-1) === "done", 60_000);
-  const result = botMsgs().find((m) => !m.streaming && m.id !== progress.id && m.body.startsWith("reply 1:"));
-  if (!result) throw new Error("no result message");
-  const final = events.find((e) => e.type === "message.updated" && e.data.messageId === progress.id && e.data.streaming === false);
-  const deltas = transients.filter((t) => t.type === "message.delta" && t.messageId === progress.id);
+  const result = botMsgs().find((m) => m.cardV2?.intent === "done" && m.body.startsWith("reply 1:"));
+  if (!result) throw new Error("no done card");
+  // Progress stays in the run (plan, run log): the done card is the bot's only message.
+  if (botMsgs().length !== 1 || botMsgs().some((m) => m.streaming)) throw new Error(`unexpected bot messages: ${botMsgs().length}`);
   const runs = events.filter((e) => e.type === "run.updated").map((e) => e.data.run);
   const runId = runs[0]?.id as string;
-  step("progress streamed, result posted, topic done");
+  const finalRun = runs.filter((r: any) => r.id === runId).at(-1);
+  if (finalRun?.resultMessageId !== result.id) throw new Error("run has no resultMessageId");
+  step("no progress message; done card posted; topic done");
 
   const log = await call("GET", `/v1/runs/${runId}/events`, { token: alice.token });
   const session = await until("raw session uploaded", async () => {
@@ -250,10 +254,12 @@ async function runDaemonCheck(
     ok: true,
     topicId,
     runId,
-    acknowledgement: ackMsg.body,
-    progressDeltas: deltas.length,
-    progressFinal: final?.data.body ?? null,
+    acknowledgement: ackReaction.data.emoji,
+    botMessages: botMsgs().length,
     result: result.body,
+    resultCardBlocks: result.cardV2.blocks.map((b: any) => b.type),
+    usage: finalRun.usage ?? null,
+    durationMs: finalRun.durationMs ?? null,
     topicStatuses: statuses(),
     runStatuses: runs.map((r: any) => r.status),
     runLogEntries: log.entries.length,

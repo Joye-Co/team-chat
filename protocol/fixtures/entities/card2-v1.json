@@ -1,0 +1,13 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "v must be 2",
+  "value": {
+    "v": 1,
+    "rev": 1,
+    "intent": "working",
+    "title": "正在做",
+    "fallback": "",
+    "blocks": []
+  }
+}

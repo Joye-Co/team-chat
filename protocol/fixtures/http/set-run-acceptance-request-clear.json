@@ -1,0 +1,8 @@
+{
+  "kind": "SetRunAcceptanceRequest",
+  "valid": true,
+  "description": "an empty list clears them",
+  "value": {
+    "items": []
+  }
+}

@@ -1,0 +1,45 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "hello",
+    "protocol": 1,
+    "machine": {
+      "id": "01JA0000000000000000000M01",
+      "name": "mac-mini",
+      "labels": [
+        "mac"
+      ],
+      "daemonVersion": "1.1.0",
+      "os": "macos",
+      "arch": "aarch64",
+      "maxParallelRuns": 1,
+      "features": [
+        "pause",
+        "answer",
+        "aside",
+        "acceptance"
+      ],
+      "takeoverUrl": "vnc://mac-mini.tailnet"
+    },
+    "clis": [
+      {
+        "runtime": "claude",
+        "kind": "claude",
+        "command": "claude",
+        "available": true
+      }
+    ],
+    "health": {
+      "diskFreeBytes": 120000000000,
+      "diskTotalBytes": 494000000000,
+      "load1": 1.5,
+      "load5": 1.2,
+      "load15": 0.9,
+      "cpuCount": 10,
+      "activeRuns": 0
+    },
+    "runs": []
+  }
+}

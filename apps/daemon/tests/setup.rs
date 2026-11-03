@@ -121,18 +121,81 @@ fn launchd_plist_install_and_uninstall() {
     );
     assert!(text.contains("<key>KeepAlive</key>"));
     assert!(text.contains("<key>PATH</key>"));
-    let lint = Command::new("plutil")
-        .arg("-lint")
-        .arg(&file)
-        .output()
-        .unwrap();
-    assert!(
-        lint.status.success(),
-        "{}",
-        String::from_utf8_lossy(&lint.stdout)
-    );
+    check_plist(&text, &std::fs::canonicalize(&cfg).unwrap());
+    // macOS also checks it with its own plist parser.
+    if cfg!(target_os = "macos") {
+        let lint = Command::new("plutil")
+            .arg("-lint")
+            .arg(&file)
+            .output()
+            .unwrap();
+        assert!(
+            lint.status.success(),
+            "{}",
+            String::from_utf8_lossy(&lint.stdout)
+        );
+    }
     daemon::service::uninstall(&agents, false).unwrap();
     assert!(!file.exists());
+}
+
+/// Parses the LaunchAgent plist as XML on every platform and checks its structure: a
+/// `plist` 1.0 root with one `dict` of key/value pairs, the program arguments and the keys
+/// launchd needs.
+fn elems<'a, 'i>(n: roxmltree::Node<'a, 'i>) -> Vec<roxmltree::Node<'a, 'i>> {
+    n.children().filter(|c| c.is_element()).collect()
+}
+
+fn check_plist(text: &str, config: &std::path::Path) {
+    let opts = roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..Default::default()
+    };
+    let doc =
+        roxmltree::Document::parse_with_options(text, opts).expect("plist is well-formed XML");
+    let root = doc.root_element();
+    assert_eq!(root.tag_name().name(), "plist");
+    assert_eq!(root.attribute("version"), Some("1.0"));
+    let top = elems(root);
+    assert_eq!(top.len(), 1, "one top-level dict");
+    let dict = elems(top[0]);
+    assert_eq!(top[0].tag_name().name(), "dict");
+    assert_eq!(dict.len() % 2, 0, "dict holds key/value pairs");
+    let mut map = std::collections::BTreeMap::new();
+    for pair in dict.chunks(2) {
+        assert_eq!(pair[0].tag_name().name(), "key");
+        let key = pair[0].text().unwrap_or_default().to_string();
+        assert!(
+            map.insert(key.clone(), pair[1]).is_none(),
+            "duplicate key {key}"
+        );
+    }
+    for key in [
+        "Label",
+        "ProgramArguments",
+        "EnvironmentVariables",
+        "RunAtLoad",
+        "KeepAlive",
+        "StandardOutPath",
+        "StandardErrorPath",
+    ] {
+        assert!(map.contains_key(key), "missing {key}");
+    }
+    assert_eq!(map["KeepAlive"].tag_name().name(), "true");
+    assert_eq!(map["RunAtLoad"].tag_name().name(), "true");
+    assert!(!map["Label"].text().unwrap_or_default().is_empty());
+    let args: Vec<String> = elems(map["ProgramArguments"])
+        .iter()
+        .map(|a| {
+            assert_eq!(a.tag_name().name(), "string");
+            a.text().unwrap_or_default().to_string()
+        })
+        .collect();
+    assert_eq!(args.len(), 4);
+    assert_eq!(&args[1..3], ["run", "--config"]);
+    assert_eq!(args[3], config.to_string_lossy());
+    let env = elems(map["EnvironmentVariables"]);
+    assert_eq!(env.first().and_then(|k| k.text()), Some("PATH"));
 }
 
 fn git(dir: &std::path::Path, args: &[&str]) {

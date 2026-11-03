@@ -1,0 +1,25 @@
+{
+  "kind": "Machine",
+  "valid": true,
+  "value": {
+    "id": "01JBX0MACHINE00000000000AV",
+    "name": "mac-mini",
+    "labels": [
+      "mac"
+    ],
+    "createdBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "connected": true,
+    "healthy": true,
+    "runningRuns": [
+      "01JBX0RUN000000000000000AU"
+    ],
+    "features": [
+      "pause",
+      "answer",
+      "aside",
+      "acceptance"
+    ],
+    "takeoverUrl": "vnc://mac-mini.tailnet"
+  }
+}

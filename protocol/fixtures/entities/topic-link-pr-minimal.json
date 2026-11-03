@@ -1,0 +1,13 @@
+{
+  "kind": "TopicLink",
+  "valid": true,
+  "value": {
+    "kind": "pr",
+    "repo": "a/b",
+    "number": 1,
+    "url": "https://github.com/a/b/pull/1",
+    "title": "",
+    "state": "draft",
+    "checks": []
+  }
+}

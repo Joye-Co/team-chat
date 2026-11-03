@@ -1,14 +1,20 @@
 #!/usr/bin/env python3
 """Fake Claude Code headless CLI: stream-json in and out, as the CLI docs describe.
 
-Prompt words: "slow" streams 5 deltas 0.3 s apart; "hang" writes fake.pid and sleeps.
+Prompt words: "slow" streams 5 deltas 0.3 s apart; "hang" writes fake.pid and sleeps; "tick"
+writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped process stops ticking);
+"spawn" starts two tool children like a CLI's shell tool, one in a new session (setsid) and one
+in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
+to children.txt and then hangs like "hang".
+The arguments are written to argv.json in the working directory.
 The session file goes to $CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as ->/<id>.jsonl.
 """
-import json, os, re, sys, time
+import json, os, re, subprocess, sys, time
 
 args = sys.argv[1:]
 sid = args[args.index("--session-id") + 1] if "--session-id" in args else "fake-session"
 assert "--input-format" in args and "stream-json" in args
+open("argv.json", "w").write(json.dumps(args))
 cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.environ["HOME"], ".claude")
 proj = os.path.join(cfg, "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(os.getcwd())))
 os.makedirs(proj, exist_ok=True)
@@ -26,9 +32,23 @@ for line in sys.stdin:
         out({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": sid, "model": "fake-model"})
     n += 1
     mid = "msg_%d" % n
+    if "spawn" in text:
+        loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
+        quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
+        kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], start_new_session=True, **quiet),
+                subprocess.Popen([sys.executable, "-c", loop % "group.ticks"], process_group=0, **quiet)]
+        open("children.txt", "w").write(" ".join(str(k.pid) for k in kids))
+        open("fake.pid", "w").write(str(os.getpid()))
+        time.sleep(600)
     if "hang" in text:
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
+    if "tick" in text:
+        open("fake.pid", "w").write(str(os.getpid()))
+        for i in range(30):
+            with open("ticks.txt", "a") as t:
+                t.write("%d\n" % i)
+            time.sleep(0.1)
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
     k = 5 if "slow" in text else 2

@@ -78,7 +78,8 @@ fn open_pty() -> std::io::Result<(OwnedFd, OwnedFd)> {
             &mut slave,
             std::ptr::null_mut(),
             std::ptr::null_mut(),
-            &mut ws,
+            // A raw pointer: Linux takes `*const winsize`, macOS `*mut winsize`.
+            &raw mut ws,
         )
     };
     if rc != 0 {
@@ -238,11 +239,17 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                 Some(Control::Approval { .. }) => {}
                 Some(Control::Cancel) => {
                     cancelled = true;
+                    // Jobs the shell started in groups of their own; only while the shell is
+                    // not reaped (its pid is still ours).
+                    let tools = if exit.is_none() { crate::proctree::targets(pgid) } else { vec![] };
                     kill(libc::SIGTERM);
+                    crate::proctree::signal(&tools, libc::SIGTERM);
+                    crate::proctree::signal(&tools, libc::SIGCONT);
                     match tokio::time::timeout(Duration::from_secs(3), child.wait()).await {
                         Ok(Ok(s)) => exit = Some(s),
                         _ => { kill(libc::SIGKILL); exit = child.wait().await.ok(); }
                     }
+                    crate::proctree::signal(&tools, libc::SIGKILL);
                     break;
                 }
             },

@@ -1,7 +1,7 @@
 // Group room side of files and 产出. The room keeps its own copy of every ready file of the group
 // and every 产出 version, so message sends and edits check attachments and 产出 references
 // synchronously, inside the room that owns the group: nobody can reference another group's files.
-import type { Artifact, ArtifactFile, ArtifactKind, ArtifactVersion, FileRef } from "@chat/protocol";
+import type { Artifact, ArtifactEventDecl, ArtifactFile, ArtifactKind, ArtifactVersion, FileRef } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
   type Actor,
@@ -56,6 +56,15 @@ registerRoomMigration({
   `,
 });
 
+// 1.1: the run that made a version and the events its page may send (docs/protocol.md, "产出 events").
+registerRoomMigration({
+  name: "files-3-events",
+  up: `
+    ALTER TABLE artifact_versions ADD COLUMN run_id TEXT;
+    ALTER TABLE artifact_versions ADD COLUMN events TEXT;
+  `,
+});
+
 // Files that only deleted messages used, waiting for D1 and R2 to forget them (see below).
 registerRoomMigration({
   name: "files-2",
@@ -94,6 +103,8 @@ type VersionRow = {
   note: string | null;
   created_by: string;
   created_at: number;
+  run_id?: string | null;
+  events?: string | null;
 };
 
 export interface RegisterFileArgs {
@@ -113,6 +124,10 @@ export interface VersionInput {
   entry: string;
   files: { path: string; fileId: string }[];
   note?: string;
+  /** Bot members only; dropped for others. */
+  events?: ArtifactEventDecl[];
+  /** A run of the calling bot in the 产出's topic; checked against D1 `bot_runs`. */
+  runId?: string;
 }
 
 function fileRecord(room: RoomContext, id: string): FileRecordRow | undefined {
@@ -158,6 +173,8 @@ function toVersion(r: VersionRow): ArtifactVersion {
     createdAt: r.created_at,
   };
   if (r.note !== null) v.note = r.note;
+  if (r.run_id) v.runId = r.run_id;
+  if (r.events) v.events = JSON.parse(r.events) as ArtifactEventDecl[];
   return v;
 }
 
@@ -195,8 +212,8 @@ function insertVersion(
   now: number,
 ): void {
   room.sql.exec(
-    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     artifactId,
     version,
     input.entry,
@@ -204,7 +221,19 @@ function insertVersion(
     input.note ?? null,
     actorId,
     now,
+    input.runId ?? null,
+    input.events && input.events.length > 0 ? JSON.stringify(input.events) : null,
   );
+}
+
+/** Keeps `events` and `runId` only from a bot, and `runId` only for its own run in the topic. */
+async function botVersionFields(room: RoomContext, actor: Actor, topicId: string, input: VersionInput): Promise<VersionInput> {
+  if (actor.kind !== "bot") return { ...input, events: undefined, runId: undefined };
+  if (!input.runId) return input;
+  const run = await room.env.DB.prepare("SELECT 1 AS x FROM bot_runs WHERE id = ? AND bot_id = ? AND topic_id = ?")
+    .bind(input.runId, actor.id, topicId)
+    .first();
+  return run ? input : { ...input, runId: undefined };
 }
 
 function requireActor(actor: Actor | null): Actor {
@@ -236,9 +265,10 @@ registerRoomRpc("files.register", (room, _actor, args) => {
   return { ok: true };
 });
 
-registerRoomRpc("artifacts.create", (room, actor, args) => {
+registerRoomRpc("artifacts.create", async (room, actor, args) => {
   const a = requireActor(actor);
-  const req = args as VersionInput & { id: string; topicId: string; title: string; kind: ArtifactKind };
+  const given = args as VersionInput & { id: string; topicId: string; title: string; kind: ArtifactKind };
+  const req = { ...given, ...(await botVersionFields(room, a, given.topicId, given)) };
   const topic = room.sql.exec("SELECT id FROM topics WHERE id = ?", req.topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
   if (artifactRow(room, req.id)) throw new ApiError("conflict", "产出 exists");
@@ -266,10 +296,14 @@ registerRoomRpc("artifacts.create", (room, actor, args) => {
   });
 });
 
-registerRoomRpc("artifacts.addVersion", (room, actor, args) => {
+registerRoomRpc("artifacts.addVersion", async (room, actor, args) => {
   const a = requireActor(actor);
-  const req = args as VersionInput & { artifactId: string; title?: string };
-  const row = artifactRow(room, req.artifactId);
+  const given = args as VersionInput & { artifactId: string; title?: string };
+  const first = artifactRow(room, given.artifactId);
+  if (!first) throw new ApiError("not_found", "产出 not found");
+  const req = { ...given, ...(await botVersionFields(room, a, first.topic_id, given)) };
+  // Read the row again after the D1 await: another version can commit while it waits.
+  const row = artifactRow(room, given.artifactId);
   if (!row) throw new ApiError("not_found", "产出 not found");
   const files = resolveVersionFiles(room, row.kind, req);
   const now = Date.now();
@@ -404,8 +438,8 @@ registerEventImporter((e, sql) => {
     a.updatedAt,
   );
   sql.exec(
-    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     v.artifactId,
     v.version,
     v.entry,
@@ -413,6 +447,8 @@ registerEventImporter((e, sql) => {
     v.note ?? null,
     v.createdBy,
     v.createdAt,
+    v.runId ?? null,
+    v.events && v.events.length > 0 ? JSON.stringify(v.events) : null,
   );
 });
 

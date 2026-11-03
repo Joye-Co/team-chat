@@ -7,7 +7,9 @@ import {
   MAX_BODY_CHARS,
   MAX_EXCERPT_CHARS,
   type Card,
+  type CardV2,
   type ClientFrameOf,
+  cardV2ToV1,
   type Event,
   type Message,
   type MessageKind,
@@ -15,6 +17,7 @@ import {
   type SendResult,
   type Topic,
   type TopicState,
+  type TopicContext,
   type TopicStatus,
 } from "@chat/protocol";
 import { groupMemberIds, getGroup } from "./db";
@@ -112,6 +115,11 @@ export const ROOM_CORE_MIGRATIONS: MigrationStep[] = [
       CREATE INDEX messages_reply ON messages(json_extract(ext, '$.replyTo.messageId'));
     `,
   },
+  {
+    // 1.1 side chats: the topic a DM topic is about (Topic.contextOf), as JSON.
+    name: "core-3",
+    up: `ALTER TABLE topics ADD COLUMN context TEXT;`,
+  },
 ];
 
 export function roomMigrationSteps(): MigrationStep[] {
@@ -130,6 +138,8 @@ type TopicRow = {
   waiting_on: string;
   owner_id: string | null;
   last_message_at: number | null;
+  /** JSON of `contextOf` (core-3). */
+  context?: string | null;
 };
 
 type MessageRow = {
@@ -562,6 +572,7 @@ export class GroupRoom extends DurableObject<Env> {
       ownerId: r.owner_id ?? null,
     };
     if (r.last_message_at !== null && r.last_message_at !== undefined) t.lastMessageAt = r.last_message_at;
+    if (r.context) t.contextOf = JSON.parse(r.context) as TopicContext;
     return t;
   }
 
@@ -744,6 +755,24 @@ export class GroupRoom extends DurableObject<Env> {
     return this.ordered(order, () => this.sendNow(groupId, actor, frame));
   }
 
+  /**
+   * `send.context` (side chats, docs/protocol.md): only in a DM. A new topic gets it as
+   * `contextOf`; in an existing side chat it must name the same topic and returns the context to
+   * store only when `uptoSeq` grew. The cross-group checks run in the sidechat frame validator.
+   */
+  private sideChatContext(frame: SendFrame): TopicContext | undefined {
+    const c = frame.context;
+    if (!c) return undefined;
+    if (this.groupKind !== "dm") throw new ApiError("invalid", "context is only for a side chat in a DM");
+    if (!frame.topicId) return { groupId: c.groupId, topicId: c.topicId, uptoSeq: c.uptoSeq };
+    const row = this.topicRow(frame.topicId);
+    const cur = row?.context ? (JSON.parse(row.context) as TopicContext) : null;
+    if (!cur || cur.groupId !== c.groupId || cur.topicId !== c.topicId) {
+      throw new ApiError("invalid", "context must name the side chat's own topic");
+    }
+    return c.uptoSeq > cur.uptoSeq ? { groupId: c.groupId, topicId: c.topicId, uptoSeq: c.uptoSeq } : undefined;
+  }
+
   private async sendNow(groupId: string, actor: Actor, frame: SendFrame): Promise<Result<SendResult>> {
     return run(async () => {
       await this.ready(groupId);
@@ -768,13 +797,17 @@ export class GroupRoom extends DurableObject<Env> {
       const room = this.roomContext();
       let ext: Record<string, unknown> | undefined;
       if (frame.replyTo) ext = { replyTo: this.replyTo(frame.replyTo.messageId) };
-      const kind: MessageKind = frame.card ? "card" : "text";
-      if (frame.card) ext = { ...ext, card: frame.card };
+      // A Card v2 travels next to a v1 card that 1.0.x clients read (docs/protocol.md, "Cards v2").
+      const card = frame.card ?? (frame.cardV2 ? cardV2ToV1(frame.cardV2) : undefined);
+      const kind: MessageKind = card ? "card" : "text";
+      if (card) ext = { ...ext, card };
+      if (frame.cardV2) ext = { ...ext, cardV2: frame.cardV2 };
       for (const e of messageExtensions) {
         const add = e(frame as Record<string, unknown>, room, actor);
         if (add) ext = { ...ext, ...add };
       }
-      const body = frame.card && frame.body === "" ? frame.card.title : frame.body;
+      const body = card && frame.body === "" ? frame.cardV2?.fallback || card.title : frame.body;
+      const context = this.sideChatContext(frame);
 
       const now = Date.now();
       const messageId = ulid(now);
@@ -789,8 +822,8 @@ export class GroupRoom extends DurableObject<Env> {
           const seq = tx.nextSeq();
           this.sql.exec(
             `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count,
-                                 owner_id, last_message_at)
-             VALUES (?, ?, 'open', ?, ?, ?, ?, 0, ?, ?)`,
+                                 owner_id, last_message_at, context)
+             VALUES (?, ?, 'open', ?, ?, ?, ?, 0, ?, ?, ?)`,
             topicId,
             title,
             actor.id,
@@ -799,11 +832,18 @@ export class GroupRoom extends DurableObject<Env> {
             seq,
             actor.id,
             now,
+            context ? JSON.stringify(context) : null,
           );
           const topic = this.toTopic(this.topicRow(topicId) as TopicRow);
           tx.append({ type: "topic.created", actorId: actor.id, topicId, data: { topic } });
         } else {
           this.sql.exec("UPDATE topics SET last_message_at = ? WHERE id = ?", now, topicId);
+          if (context) {
+            // The side chat reads its topic further now.
+            const s2 = tx.nextSeq();
+            this.sql.exec("UPDATE topics SET context = ?, last_seq = ? WHERE id = ?", JSON.stringify(context), s2, topicId);
+            tx.append({ type: "topic.updated", actorId: actor.id, topicId, data: { topicId, contextOf: context } });
+          }
         }
         const seq = tx.nextSeq();
         this.sql.exec(
@@ -849,11 +889,17 @@ export class GroupRoom extends DurableObject<Env> {
       if (!row) throw new ApiError("not_found", "message not found");
       if (row.author_id !== actor.id) throw new ApiError("forbidden", "only the author can edit");
       if (row.deleted_at !== null) throw new ApiError("conflict", "message is deleted");
-      if (frame.card && row.kind !== "card") throw new ApiError("invalid", "only a card message can get a card");
+      if ((frame.card || frame.cardV2) && row.kind !== "card") throw new ApiError("invalid", "only a card message can get a card");
       const current = this.toMessage(row);
       let ext: Record<string, unknown> = row.ext ? (JSON.parse(row.ext) as Record<string, unknown>) : {};
       const changed: Record<string, unknown> = {};
       if (frame.card) changed.card = frame.card;
+      if (frame.cardV2) {
+        const stored = ext.cardV2 as CardV2 | undefined;
+        if (stored && frame.cardV2.rev <= stored.rev) throw new ApiError("conflict", "the card has a newer rev");
+        changed.cardV2 = frame.cardV2;
+        if (!frame.card) changed.card = cardV2ToV1(frame.cardV2);
+      }
       const room = this.roomContext();
       for (const e of editExtensions) {
         const add = e(frame as Record<string, unknown>, room, actor, current);
@@ -861,7 +907,8 @@ export class GroupRoom extends DurableObject<Env> {
       }
       ext = { ...ext, ...changed };
       const card = (ext.card as Card | undefined) ?? null;
-      const body = row.kind === "card" && frame.body === "" && card ? card.title : frame.body;
+      const fallback = (ext.cardV2 as CardV2 | undefined)?.fallback;
+      const body = row.kind === "card" && frame.body === "" && card ? fallback || card.title : frame.body;
       const streaming = row.streaming === 1 && frame.streaming === true;
       if (!streaming) this.dropDelta(row.id);
       const now = Date.now();
@@ -1015,7 +1062,13 @@ export class GroupRoom extends DurableObject<Env> {
       this.requireMember(actor.id);
       const row = this.messageRow(messageId);
       if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found");
-      const card = row.ext ? (JSON.parse(row.ext) as { card?: Card }).card : undefined;
+      const stored = row.ext ? (JSON.parse(row.ext) as { card?: Card; cardV2?: CardV2 }) : {};
+      // A v1 press on a v2 card is an answer with that action at the current rev (cards2 feature).
+      const answer = stored.cardV2 ? roomRpcHandlers.get("cards.answer") : undefined;
+      if (stored.cardV2 && answer) {
+        return (await answer(this.roomContext(), actor, { messageId, rev: stored.cardV2.rev, actionId })) as { seq: number };
+      }
+      const card = stored.card;
       const action = card?.actions?.find((a) => a.id === actionId);
       if (!action) throw new ApiError("not_found", "card action not found");
       const key = `${actor.id}:${messageId}`;

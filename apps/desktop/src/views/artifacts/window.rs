@@ -135,12 +135,21 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
             .into_iter()
             .map(|(version, label)| artifact_view::VersionItem { version, label })
             .collect();
+        // pages track: bridge capabilities by author (a bot's version that
+        // declares events may send them; nobody reads data). They follow the
+        // version shown, also in a window that is open already.
+        let caps = provider
+            .artifact(&folder.artifact_id)
+            .map(|d| {
+                crate::views::artifact_page::capabilities(provider.as_ref(), &d, folder.version)
+            })
+            .unwrap_or(artifact_view::Capabilities::NONE);
         if let Some(win) = windows(cx).open.get(&folder.artifact_id)
             && !win.is_closed()
         {
             win.set_title(&title);
             win.set_versions(&items);
-            if let Err(e) = win.show_version(spec) {
+            if let Err(e) = win.show_version(spec, caps) {
                 tracing::warn!(error = %e, "cannot show the version");
             }
             win.focus();
@@ -152,6 +161,7 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
             title,
             spec,
             items,
+            caps,
             cx,
         );
     }
@@ -189,7 +199,15 @@ pub fn open_html_file(file: &FileAttachment, path: &Path, cx: &mut App) {
             return;
         }
         let spec = VersionSpec::new(1, Content::Folder(dir.to_path_buf())).with_entry(entry);
-        open_window_with(None, id, file.name.clone(), spec, Vec::new(), cx);
+        open_window_with(
+            None,
+            id,
+            file.name.clone(),
+            spec,
+            Vec::new(),
+            artifact_view::Capabilities::NONE,
+            cx,
+        );
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -205,9 +223,10 @@ fn open_window(
     title: String,
     spec: artifact_view::VersionSpec,
     items: Vec<artifact_view::VersionItem>,
+    caps: artifact_view::Capabilities,
     cx: &mut App,
 ) {
-    open_window_with(Some(provider), artifact_id, title, spec, items, cx);
+    open_window_with(Some(provider), artifact_id, title, spec, items, caps, cx);
 }
 
 #[cfg(target_os = "macos")]
@@ -217,9 +236,10 @@ fn open_window_with(
     title: String,
     spec: artifact_view::VersionSpec,
     items: Vec<artifact_view::VersionItem>,
+    caps: artifact_view::Capabilities,
     cx: &mut App,
 ) {
-    use artifact_view::{ArtifactWindow, Capabilities, OpenOptions};
+    use artifact_view::{ArtifactWindow, OpenOptions};
     use futures::StreamExt as _;
     use objc2_foundation::MainThreadMarker;
 
@@ -228,8 +248,8 @@ fn open_window_with(
         return;
     };
     let mut options = OpenOptions::new(title, artifact_id.clone(), spec);
-    // Pages from teammates get no bridge capabilities.
-    options.capabilities = Capabilities::NONE;
+    // Only a bot's version that declares events may send them (pages track).
+    options.capabilities = caps;
     options.versions = items;
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let win = match ArtifactWindow::open(mtm, options, move |event| {
@@ -280,8 +300,37 @@ fn on_event(
             tracing::warn!(artifact_id, version, %reason, "产出 page failed to load");
             notify_error(ca::LOAD_FAILED.to_string(), cx);
         }
-        E::Loaded { .. } | E::Emit { .. } => {}
+        E::Emit {
+            version,
+            name,
+            payload,
+            user_action,
+        } => {
+            // pages track: a declared page event goes to the bot that made it,
+            // only after the viewer's input and paced.
+            if let Some(p) = provider {
+                crate::views::artifact_page::forward_page_event(
+                    p,
+                    artifact_id,
+                    version,
+                    &name,
+                    &payload,
+                    user_action,
+                    cx,
+                );
+            }
+        }
+        E::Loaded { .. } | E::FocusChanged { .. } => {}
     }
+}
+
+/// Asks before a 产出 page opens a web link (also for pages embedded in the
+/// main window).
+pub(crate) fn ask_before_link(url: String) {
+    #[cfg(target_os = "macos")]
+    ask_to_open_link(url);
+    #[cfg(not(target_os = "macos"))]
+    let _ = url;
 }
 
 /// Only one link prompt shows at a time; links clicked meanwhile are dropped.
@@ -291,25 +340,66 @@ static PROMPTING: AtomicBool = AtomicBool::new(false);
 /// runs on a later main-queue turn, outside any GPUI update.
 #[cfg(target_os = "macos")]
 fn ask_to_open_link(url: String) {
+    let ask = Ask {
+        title: ca::LINK_TITLE.to_string(),
+        detail: fill(ca::LINK_DETAIL, &[("url", &url)]),
+        open: ca::LINK_OPEN,
+        cancel: ca::LINK_CANCEL,
+    };
+    ask_then_open(ask, url, artifact_view::open_external_url);
+}
+
+/// Asks before a machine's screen sharing address (接管) opens, and opens
+/// only a `vnc`, `http` or `https` address.
+pub(crate) fn ask_before_screen_share(name: &str, url: String) {
+    if !artifact_view::is_screen_share_url(&url) {
+        tracing::warn!("screen sharing address refused");
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use crate::copy::live as cl;
+        let ask = Ask {
+            title: cl::LIVE_SHARE_ASK_TITLE.to_string(),
+            detail: fill(cl::LIVE_SHARE_ASK_DETAIL, &[("name", name), ("url", &url)]),
+            open: cl::LIVE_SHARE_ASK_OPEN,
+            cancel: cl::LIVE_SHARE_ASK_CANCEL,
+        };
+        ask_then_open(ask, url, artifact_view::open_screen_share_url);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = name;
+}
+
+/// The text of one open-a-link alert.
+#[cfg(target_os = "macos")]
+struct Ask {
+    title: String,
+    detail: String,
+    open: &'static str,
+    cancel: &'static str,
+}
+
+/// Shows `ask` as a native alert on a later main-queue turn (outside any
+/// GPUI update) and calls `open` with `url` only when the user agrees.
+#[cfg(target_os = "macos")]
+fn ask_then_open(ask: Ask, url: String, open: fn(&str) -> bool) {
     if PROMPTING.swap(true, Ordering::SeqCst) {
         return;
     }
     dispatch2::DispatchQueue::main().exec_async(move || {
         use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle};
         use objc2_foundation::{MainThreadMarker, NSString};
-        let open = MainThreadMarker::new().is_some_and(|mtm| {
+        let agreed = MainThreadMarker::new().is_some_and(|mtm| {
             let alert = NSAlert::new(mtm);
             alert.setAlertStyle(NSAlertStyle::Warning);
-            alert.setMessageText(&NSString::from_str(ca::LINK_TITLE));
-            alert.setInformativeText(&NSString::from_str(&fill(
-                ca::LINK_DETAIL,
-                &[("url", &url)],
-            )));
-            alert.addButtonWithTitle(&NSString::from_str(ca::LINK_OPEN));
-            alert.addButtonWithTitle(&NSString::from_str(ca::LINK_CANCEL));
+            alert.setMessageText(&NSString::from_str(&ask.title));
+            alert.setInformativeText(&NSString::from_str(&ask.detail));
+            alert.addButtonWithTitle(&NSString::from_str(ask.open));
+            alert.addButtonWithTitle(&NSString::from_str(ask.cancel));
             alert.runModal() == NSAlertFirstButtonReturn
         });
-        if open && !artifact_view::open_external_url(&url) {
+        if agreed && !open(&url) {
             tracing::warn!("external link refused");
         }
         PROMPTING.store(false, Ordering::SeqCst);

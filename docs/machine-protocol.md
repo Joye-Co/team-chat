@@ -47,7 +47,8 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
 ```ts
 { t: "hello", protocol: 1,
   machine: { id?: string, name: string, labels: string[], daemonVersion: string,
-             os: string, arch: string, maxParallelRuns: number },
+             os: string, arch: string, maxParallelRuns: number,
+             features?: string[] /* 1.1, see "1.1 features" */, takeoverUrl?: string /* 1.1 */ },
   clis: CliInfo[], health: Health, runs: RunCursor[] }
   // machine.id is the configured id (optional); the token is authoritative.
   // runs = every run the daemon still holds (running, or finished with frames not yet acked)
@@ -88,10 +89,17 @@ KnownRun = { runId, ackedSeq: number }
   envAllowlist: string[],          // names of daemon env vars the CLI may see (see Environment)
   leaseMs: number,                 // e.g. 600000
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
-  sessionUpload?: { url: string, headers?: Record<string, string> } }
-{ t: "run.input",    runId, inputId, text, authorId? }           // a follow-up from the topic
+  sessionUpload?: { url: string, headers?: Record<string, string> },
+  kind?: "aside" }                 // 1.1, feature "aside": a read-only side chat run
+{ t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
+  answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
 { t: "run.approval", runId, approvalId, decision: "approve" | "deny" }
 { t: "run.cancel",   runId, reason? }
+{ t: "run.pause",    runId, by? }                                // 1.1, feature "pause"
+{ t: "run.resume",   runId, note? /* <= 2000 */ }                // 1.1, feature "pause"
+RunAnswer = { messageId, rev /* 1..4294967295 */, actionId, inputs?: Record<string, JSON>,
+              editedValues?: Record<string, string>, actorId }
+RunArtifactEvent = { artifactId, version, name, payload?: JSON, actorId }
 { t: "ack",          runId, seq }                                // cumulative: every frame <= seq is stored
 { t: "error",        error: { code: ErrorCode, message } }       // connection-level, as in protocol.md
 ```
@@ -121,6 +129,8 @@ RunEvent =
   | { type: "input.accepted",   inputId }                               // the CLI took this run.input
   | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md)
   | { type: "status",           state: "preparing" | "running" | "retrying" | "stalled" | "error", message? }
+  | { type: "acceptance",       items: AcceptanceItem[] }               // 1.1: replaces BotRun.acceptance
+  | { type: "paused",           paused: boolean, by? }                  // 1.1: after run.pause / run.resume
 ```
 
 - `status: "preparing"` comes first (worktree setup), then `running`.
@@ -213,8 +223,82 @@ RunEvent =
   answers the CLI and emits `approval.resolved`. Claude Code runs with a fixed
   `permission_mode` and does not ask.
 - `run.cancel` interrupts the CLI (Codex `turn/interrupt`, ACP `session/cancel`), then sends
-  SIGTERM to the CLI's whole process group, SIGKILL after 3 s, and ends with
+  SIGTERM to the CLI's whole process group and to the tool groups below it (see **pause**),
+  SIGKILL after 3 s, and ends with
   `run.done status = "cancelled"`. `maxDurationMs` does the same with `status = "timeout"`.
+
+## 1.1 features
+
+A 1.1 daemon lists what it supports in `hello.machine.features`. The server sends a 1.1 frame
+or field to a daemon only when it reports the feature; an older daemon logs and drops unknown
+server frames and ignores unknown fields, so it must never get work it cannot do safely (an
+`aside` run on an old daemon would run with full permissions).
+
+| Feature | What the daemon does |
+| --- | --- |
+| `pause` | `run.pause`: interrupts the CLI turn where the CLI supports it, else sends SIGSTOP to the run's process group, stops the stall timer and the `maxDurationMs` clock, and emits `paused { paused: true, by }`. `run.resume`: SIGCONT, restarts both clocks (the deadline moves by the paused time), emits `paused { paused: false }` and gives `note` to the CLI as its next input when set. A cancel while paused resumes first. |
+| `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
+| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
+| `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
+
+How the 1.1 daemon does each one:
+
+- **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
+  every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. CLIs start tool
+  commands in process groups or sessions of their own (Claude Code's Bash tool, Codex exec), so
+  the daemon then finds the CLI's descendants (libproc on macOS, `/proc` on Linux) and stops
+  each of their groups, scanning again until a scan finds nothing new. It never signals its own
+  group, pid 1, or a process outside the run's tree. Resume and cancel send `SIGCONT` to the
+  same groups. The daemon keeps each target's start time (libproc, or the `starttime` field of
+  `/proc/<pid>/stat`) and checks it before each later signal, so a pid that now belongs to
+  another process gets no signal. A pause that comes
+  while the run is still `preparing` stops the CLI as soon as it starts. While paused, no
+  `stalled` status is sent and the `maxDurationMs` clock stands still. `run.resume` sends
+  `SIGCONT`, moves the deadline by the paused time, emits `paused { paused: false }`, and sends
+  `note` (cut to 2000 characters) as the next input with `inputId` `resume-<n>`. A
+  `run.cancel` while paused sends `SIGCONT` first (a stopped process cannot handle
+  `SIGTERM`), emits `paused { paused: false }`, then cancels as usual. A repeated pause, or a
+  resume of a run that is not paused, does nothing.
+- **answer**: the CLI gets `text` (when not empty) followed by a fenced `json` block for
+  `answer` and one for `artifactEvent`, each after a line that labels it as untrusted data from a
+  member of the group. The fence is longer than any backtick run in the data, so the data cannot
+  close it. It is the CLI's next turn in the same session (Claude Code: one more stream-json user
+  line; Codex: `turn/steer`, or the next `turn/start`). When the CLI has already ended, the input
+  is not taken (see "Follow-up input"), and BotDesk starts a new run.
+- **aside**: `run.assign.kind = "aside"` is accepted only for runtimes of kind `claude` and
+  `codex`; others are rejected with `runtime_unavailable` (ACP agents and the PTY have no
+  read-only mode the daemon can force). A `kind` this daemon does not know is rejected with
+  `invalid`. Claude Code gets `--permission-mode plan --tools Read,Grep,Glob --disallowedTools
+  "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch mcp__*" --strict-mcp-config
+  --mcp-config '{"mcpServers":{}}' --setting-sources user`: no MCP servers, and only the
+  user's own settings file (its env, `apiKeyHelper` and model keep the run's auth and model);
+  the project and local settings come from the repo and stay out. The tool set keeps a user
+  allow rule for a command or edit tool from widening the run. Codex gets
+  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
+  and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
+  each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the
+  working directory and the folders above it (MCP tools run outside the sandbox): each one is
+  set to a disabled definition with a placeholder of its own transport
+  (`mcp_servers.<name>={command="true",enabled=false}`, or `url=...` for a URL server), which
+  is valid also when Codex does not load that file (an untrusted project). A server
+  name that `-c` cannot address fails the run. The
+  runtime's `args`, `allowed_tools`, `permission_mode`, `sandbox` and `approval_policy` from
+  `daemon.toml` are ignored, and the CLI gets none of the `envAllowlist` variables. The run
+  folder is made as for any run; the answer is the run's `run.done.resultText`.
+- **acceptance**: until the daemon has a tool server, the CLI reports its criteria as a fenced
+  block with the info string `acceptance` in an assistant message, holding a JSON array of
+  `AcceptanceItem` (or `{ "items": [...] }`). The last block of a message wins. The daemon
+  cuts texts to the limits (text 500, evidence text 1000 characters, at most 20 items), reads
+  `passed`/`met`/`done` as `pass` and `failed`/`unmet` as `fail`, drops unknown states and
+  malformed evidence, and sends the `acceptance` event only when the list changed. The message
+  itself is sent unchanged.
+
+`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://mac-mini.tailnet`).
+It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
+doctor` reports a bad one, and the daemon does not send it). A value that redaction would
+change is not sent either.
+The owner turns on macOS Screen Sharing by hand; the daemon never changes system settings, and
+no credentials pass through chat. The server shows the address to owners and run requesters.
 
 ## Raw session upload
 
@@ -289,7 +373,7 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, and `[runtimes.<name>]` with `kind`,
+`stall_minutes`, `repo_roots`, `env_passthrough`, `takeover_url` (1.1), and `[runtimes.<name>]` with `kind`,
 `command`, `args`, `env`, `model`, `approval_policy`, `sandbox` (Codex), `permission_mode`,
 `allowed_tools` (Claude Code). Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
@@ -310,6 +394,6 @@ found on PATH.
   health gating, leases, follow-ups, no bot loops, stall detection).
 - `bun apps/daemon/e2e/local-e2e.ts [--port 8793]`: `wrangler dev` with fresh local state plus
   the real daemon and the fake Claude Code CLI. A member mentions the bot; the run must show
-  the acknowledgement, streamed progress, the result, the topic status `done`, the run log and
-  the uploaded session. It writes `report.json` in a temp folder and stops both processes by
+  the acknowledgement reaction, no progress message, the done card with `resultMessageId`, the
+  topic status `done`, the run log and the uploaded session. It writes `report.json` in a temp folder and stops both processes by
   the PIDs it started.

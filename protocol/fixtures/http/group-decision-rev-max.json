@@ -1,0 +1,25 @@
+{
+  "kind": "GroupDecision",
+  "valid": true,
+  "value": {
+    "seq": 52,
+    "messageId": "01JBX0MSG000000000000000AE",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "rev": 4294967295,
+    "title": "发布 qqbot 1.4 到正式环境？",
+    "actionId": "ship",
+    "actionLabel": "发布",
+    "choices": [
+      "今晚 22:00"
+    ],
+    "inputs": {
+      "when": "tonight",
+      "pct": 10
+    },
+    "editedValues": {
+      "notes": "- 修好了重复消息"
+    },
+    "answeredBy": "01JBX0ALICE0000000000000AB",
+    "answeredAt": 1762128060000
+  }
+}

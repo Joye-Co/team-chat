@@ -1,0 +1,30 @@
+{
+  "kind": "ArtifactVersion",
+  "valid": true,
+  "description": "made by a run, declares events",
+  "value": {
+    "artifactId": "01JBX0ART000000000000000AM",
+    "version": 2,
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JBX0FILE00000000000000AH",
+        "size": 2048,
+        "mime": "text/html"
+      }
+    ],
+    "createdBy": "01JBX0BOT000000000000000AC",
+    "createdAt": 1762128009000,
+    "runId": "01JBX0RUN000000000000000AU",
+    "events": [
+      {
+        "name": "pick",
+        "label": "选了一个方案"
+      },
+      {
+        "name": "submit"
+      }
+    ]
+  }
+}

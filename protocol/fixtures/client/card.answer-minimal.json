@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "card.answer",
+    "rid": "r94",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "rev": 1,
+    "actionId": "later"
+  }
+}

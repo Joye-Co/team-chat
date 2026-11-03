@@ -1,0 +1,131 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "edit",
+    "rid": "r91",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "body": "",
+    "cardV2": {
+      "v": 2,
+      "rev": 2,
+      "intent": "ask",
+      "title": "发布 qqbot 1.4 到正式环境？",
+      "fallback": "Scout 在 staging 验收通过。请选择发布时间。",
+      "ask": {
+        "from": [
+          "requester",
+          "owners",
+          "01JBX0ALICE0000000000000AB"
+        ],
+        "expiresAt": 1762214400000,
+        "record": true,
+        "irreversible": {
+          "verb": "发布",
+          "target": "qqbot 1.4 到正式环境",
+          "consequence": "所有群立刻用上新版本",
+          "typeToConfirm": "发布"
+        }
+      },
+      "blocks": [
+        {
+          "type": "text",
+          "id": "why",
+          "text": "**验收通过**，没有新的报错。"
+        },
+        {
+          "type": "decision",
+          "id": "when",
+          "options": [
+            {
+              "id": "now",
+              "label": "现在发"
+            },
+            {
+              "id": "tonight",
+              "label": "今晚 22:00",
+              "detail": "人少"
+            }
+          ],
+          "default": [
+            "tonight"
+          ]
+        },
+        {
+          "type": "input",
+          "id": "note",
+          "kind": "textarea",
+          "label": "给大家的话",
+          "placeholder": "可不填",
+          "maxLength": 500
+        },
+        {
+          "type": "input",
+          "id": "pct",
+          "kind": "number",
+          "label": "灰度比例",
+          "min": 0,
+          "max": 100,
+          "default": 10
+        },
+        {
+          "type": "input",
+          "id": "tags",
+          "kind": "chips",
+          "label": "通知",
+          "options": [
+            {
+              "id": "all",
+              "label": "全员"
+            },
+            {
+              "id": "ops",
+              "label": "值班"
+            }
+          ]
+        },
+        {
+          "type": "input",
+          "id": "notify",
+          "kind": "switch",
+          "label": "发通知",
+          "default": true
+        },
+        {
+          "type": "draft",
+          "id": "notes",
+          "label": "发布说明",
+          "text": "- 修好了重复消息\n- 更快的启动",
+          "editable": true
+        },
+        {
+          "type": "evidence",
+          "id": "e2e",
+          "label": "E2E 42/42",
+          "state": "pass",
+          "url": "https://github.com/Joye-Co/qqbot/actions/runs/1"
+        }
+      ],
+      "actions": [
+        {
+          "id": "ship",
+          "label": "发布",
+          "style": "primary",
+          "confirm": {
+            "title": "确定发布？",
+            "body": "所有群立刻用上新版本。"
+          }
+        },
+        {
+          "id": "later",
+          "label": "再等等",
+          "kind": "cancel"
+        }
+      ],
+      "data": {
+        "releaseId": 14
+      }
+    }
+  }
+}

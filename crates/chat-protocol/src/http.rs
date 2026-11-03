@@ -272,6 +272,19 @@ pub struct PostMessageRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub card: Option<crate::Card>,
+    /// 1.1: as on `send`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card_v2: Option<crate::CardV2>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context: Option<crate::TopicContext>,
 }
 
 impl PostMessageRequest {
@@ -297,6 +310,8 @@ impl PostMessageRequest {
             attachments: self.attachments,
             artifact_refs: self.artifact_refs,
             card: self.card,
+            card_v2: self.card_v2,
+            context: self.context,
         })
     }
 }

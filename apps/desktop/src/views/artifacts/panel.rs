@@ -363,7 +363,7 @@ fn day_time_text(at: crate::data::Millis) -> String {
     let Some(then) = Local.timestamp_millis_opt(at).single() else {
         return String::new();
     };
-    if then.date_naive() == Local::now().date_naive() {
+    if then.date_naive() == crate::selftest::clock::local_now().date_naive() {
         format!("{} {}", crate::copy::timeline::TODAY, then.format("%H:%M"))
     } else {
         time_text(at)

@@ -7,11 +7,12 @@ use crate::client::{
     ClientConfig, ClientUpdate, ConnectionState, SearchRequest, SendFailure, Shared,
 };
 use crate::proto::{
-    AckFrame, AckOutcome, CardActionFrame, ClientFrame, ClientInfo, DeleteFrame, DeltaFrame,
-    DirectoryFrame, EditFrame, ErrorBody, ErrorCode, Event, FetchFrame, HelloFrame, HistoryFrame,
-    HistoryRequestFrame, Message, MessageDeltaEvent, NotifyReason, PROTOCOL_VERSION, PresenceEvent,
-    ReactFrame, ReadFrame, SearchFrame, SendFrame, SendResult, ServerFrame, TopicFollowFrame,
-    TopicState, TopicUpdateFrame, TransientEvent, TypingEvent, TypingFrame, WelcomeFrame,
+    AckFrame, AckOutcome, ArtifactEventFrame, CardActionFrame, CardAnswerFrame, ClientFrame,
+    ClientInfo, DeleteFrame, DeltaFrame, DirectoryFrame, EditFrame, ErrorBody, ErrorCode, Event,
+    FetchFrame, HelloFrame, HistoryFrame, HistoryRequestFrame, Message, MessageDeltaEvent,
+    NotifyReason, PROTOCOL_VERSION, PresenceEvent, ReactFrame, ReadFrame, SearchFrame, SendFrame,
+    SendResult, ServerFrame, TopicFollowFrame, TopicState, TopicUpdateFrame, TransientEvent,
+    TypingEvent, TypingFrame, WelcomeFrame,
 };
 use crate::store::{ApplyOutcome, LogEntry, OutboxOp, OutboxState, PendingRead};
 use futures_util::{SinkExt, StreamExt};
@@ -284,10 +285,23 @@ async fn connect(base: &str, token: &str, max_frame_bytes: usize) -> Result<Ws, 
 }
 
 enum Pending {
-    Outbox { id: String },
-    Fetch { group_id: String },
-    History { group_id: String, topic_id: String },
-    Search { rid: String },
+    Outbox {
+        id: String,
+    },
+    Fetch {
+        group_id: String,
+    },
+    /// A page of the 1.1 cache recovery (`log_refetch`).
+    Refetch {
+        group_id: String,
+    },
+    History {
+        group_id: String,
+        topic_id: String,
+    },
+    Search {
+        rid: String,
+    },
 }
 
 #[derive(Default)]
@@ -668,7 +682,10 @@ impl Session {
             // A card press that was sent before waits until its group caught up: if the server
             // applied it, its `card.actioned` event removes the row instead of a second press.
             if item.attempts > 0
-                && matches!(item.op, OutboxOp::CardAction { .. })
+                && matches!(
+                    item.op,
+                    OutboxOp::CardAction { .. } | OutboxOp::CardAnswer { .. }
+                )
                 && self.catching_up.contains(item.op.group_id())
             {
                 continue;
@@ -720,6 +737,8 @@ impl Session {
                     attachments,
                     artifact_refs,
                     card,
+                    card_v2,
+                    context,
                     ..
                 } => ClientFrame::Send(SendFrame {
                     rid: rid.clone(),
@@ -734,6 +753,8 @@ impl Session {
                     attachments,
                     artifact_refs,
                     card,
+                    card_v2,
+                    context,
                 }),
                 OutboxOp::Edit {
                     group_id,
@@ -743,6 +764,7 @@ impl Session {
                     attachments,
                     artifact_refs,
                     card,
+                    card_v2,
                     ..
                 } => ClientFrame::Edit(EditFrame {
                     rid: rid.clone(),
@@ -753,6 +775,7 @@ impl Session {
                     attachments,
                     artifact_refs,
                     card,
+                    card_v2,
                 }),
                 OutboxOp::Delete {
                     group_id,
@@ -813,6 +836,38 @@ impl Session {
                     message_id,
                     emoji,
                     on,
+                }),
+                OutboxOp::CardAnswer {
+                    group_id,
+                    message_id,
+                    rev,
+                    action_id,
+                    inputs,
+                    edited_values,
+                    ..
+                } => ClientFrame::CardAnswer(CardAnswerFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    message_id,
+                    rev,
+                    action_id,
+                    inputs,
+                    edited_values,
+                }),
+                OutboxOp::ArtifactEvent {
+                    group_id,
+                    artifact_id,
+                    version,
+                    name,
+                    payload,
+                    ..
+                } => ClientFrame::ArtifactEvent(ArtifactEventFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    artifact_id,
+                    version,
+                    name,
+                    payload,
                 }),
             };
             if let Err(e) = self.shared.store.outbox_attempt(&item.id) {
@@ -900,6 +955,13 @@ impl Session {
                 if self.catching_up.is_empty() {
                     self.caught_up();
                 }
+                // 1.1 cache recovery: re-read logs that 1.0.x applied, once.
+                let known: BTreeSet<&str> = groups.iter().map(|g| g.group.id.as_str()).collect();
+                for (group_id, r) in self.shared.store.refetches().unwrap_or_default() {
+                    if known.contains(group_id.as_str()) {
+                        self.start_refetch(&group_id, r.after);
+                    }
+                }
                 if let Ok(reads) = self.shared.store.unsynced_reads() {
                     for r in reads {
                         self.send_read(r);
@@ -962,6 +1024,10 @@ impl Session {
                     Pending::History { group_id, topic_id } => {
                         self.history_inflight.remove(&topic_id);
                         warn!(group = %group_id, code = ?error.as_ref().map(|e| e.code), "history refused");
+                    }
+                    Pending::Refetch { group_id } => {
+                        // Tried again on the next connection.
+                        warn!(group = %group_id, code = ?error.as_ref().map(|e| e.code), "recovery fetch refused");
                     }
                     Pending::Search { rid } => {
                         let (code, message) = match error {
@@ -1058,7 +1124,7 @@ impl Session {
         self.groups.remove(group_id);
         let mut topics = Vec::new();
         self.pending.retain(|_, (p, _)| match p {
-            Pending::Fetch { group_id: g } => g != group_id,
+            Pending::Fetch { group_id: g } | Pending::Refetch { group_id: g } => g != group_id,
             Pending::History {
                 group_id: g,
                 topic_id,
@@ -1101,7 +1167,15 @@ impl Session {
         has_more: bool,
         last_seq: u64,
     ) {
-        let Some((Pending::Fetch { .. }, _)) = self.pending.remove(&rid) else {
+        let pending = match self.pending.remove(&rid) {
+            Some((Pending::Refetch { group_id: g }, _)) => {
+                self.on_refetch_page(g, entries, has_more);
+                return;
+            }
+            Some(p) => p,
+            None => return,
+        };
+        let (Pending::Fetch { .. }, _) = pending else {
             return;
         };
         let empty = entries.is_empty();
@@ -1192,6 +1266,11 @@ impl Session {
                     topic_id: Some(topic_id),
                     ..
                 }
+                | OutboxOp::CardAnswer {
+                    group_id,
+                    topic_id: Some(topic_id),
+                    ..
+                }
                 | OutboxOp::React {
                     group_id,
                     topic_id: Some(topic_id),
@@ -1243,6 +1322,12 @@ impl Session {
             ErrorCode::Unauthorized => Some(SessionEnd::Unauthorized),
             ErrorCode::NotFound if matches!(item.op, OutboxOp::Delete { .. }) => {
                 // Already gone.
+                let _ = self.shared.store.outbox_remove(&id);
+                None
+            }
+            code if matches!(item.op, OutboxOp::ArtifactEvent { .. }) => {
+                // A refused page event (undeclared name, rate limit after retries) is dropped.
+                warn!(id = %id, ?code, "artifact event refused");
                 let _ = self.shared.store.outbox_remove(&id);
                 None
             }
@@ -1350,6 +1435,53 @@ impl Session {
                 self.shared
                     .emit(ClientUpdate::MessagesChanged { group_id, topic_id });
             }
+        }
+    }
+
+    fn start_refetch(&mut self, group_id: &str, after: u64) {
+        let rid = self.rid();
+        debug!(group = %group_id, after, "recovery fetch");
+        self.out.push(ClientFrame::Fetch(FetchFrame {
+            rid: rid.clone(),
+            group_id: group_id.to_string(),
+            after_seq: after,
+            limit: Some(self.fetch_limit),
+        }));
+        self.track(
+            rid,
+            Pending::Refetch {
+                group_id: group_id.to_string(),
+            },
+        );
+    }
+
+    /// One page of the 1.1 cache recovery: re-applies what 1.0.x dropped, then asks for the
+    /// next page until the recorded seq is reached.
+    fn on_refetch_page(&mut self, group_id: String, entries: Vec<LogEntry>, has_more: bool) {
+        let Ok(Some(r)) = self.shared.store.refetch(&group_id) else {
+            return;
+        };
+        let last = entries.iter().map(LogEntry::seq).max().unwrap_or(r.after);
+        let done = !has_more || entries.is_empty() || last >= r.upto || last <= r.after;
+        let mut out = match self
+            .shared
+            .store
+            .apply_recovered(&group_id, &entries, last, done)
+        {
+            Ok(o) => o,
+            Err(e) => {
+                warn!(group = %group_id, error = %e, "apply recovery page");
+                return;
+            }
+        };
+        // Recovered rows are not new events: report the changes, never as notifications.
+        out.other_events.clear();
+        out.applied = out.applied.max(1);
+        self.emit_outcome(&group_id, &out);
+        if !done {
+            self.start_refetch(&group_id, last);
+        } else {
+            info!(group = %group_id, "cache recovery done");
         }
     }
 

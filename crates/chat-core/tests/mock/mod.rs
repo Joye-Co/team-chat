@@ -189,7 +189,7 @@ impl State {
         self.append(
             gid,
             author,
-            EventData::MessageCreated(MessageCreatedData { message: m.clone() }),
+            EventData::MessageCreated(Box::new(MessageCreatedData { message: m.clone() })),
         );
         (m, new_topic)
     }

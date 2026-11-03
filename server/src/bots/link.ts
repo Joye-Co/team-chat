@@ -341,9 +341,28 @@ export class MachineLink extends DurableObject<BotsEnv> {
     this.touchD1(now, true);
   }
 
+  /** True when the daemon of the last hello reports a 1.1 feature (machine-protocol.md "1.1 features"). */
+  private hasFeature(name: string): boolean {
+    const info = this.meta("info");
+    if (!info) return false;
+    try {
+      return ((JSON.parse(info) as { features?: string[] }).features ?? []).includes(name);
+    } catch {
+      return false;
+    }
+  }
+
+  /** The frame as this daemon may get it: typed answers and page events only with feature "answer". */
+  private forDaemon(frame: Record<string, unknown>): Record<string, unknown> {
+    if (frame.t !== "run.input" || (frame.answer === undefined && frame.artifactEvent === undefined)) return frame;
+    if (this.hasFeature("answer")) return frame;
+    const { answer: _a, artifactEvent: _e, ...text } = frame;
+    return text;
+  }
+
   private flushOutbox(ws: WebSocket): void {
     const rows = this.sql.exec<{ id: number; frame: string }>("SELECT id, frame FROM outbox ORDER BY id").toArray();
-    for (const row of rows) this.send(ws, JSON.parse(row.frame));
+    for (const row of rows) this.send(ws, this.forDaemon(JSON.parse(row.frame)));
     if (rows.length > 0) this.sql.exec("DELETE FROM outbox WHERE id <= ?", rows[rows.length - 1].id);
   }
 
@@ -486,12 +505,12 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return { sent: ws !== null };
   }
 
-  /** run.input, run.approval or run.cancel for an open run; queued while the link is down. */
-  async toRun(frame: { t: "run.input" | "run.approval" | "run.cancel"; runId: string }): Promise<{ ok: boolean; sent: boolean }> {
+  /** run.input, run.approval, run.cancel, run.pause or run.resume for an open run; queued while the link is down. */
+  async toRun(frame: { t: "run.input" | "run.approval" | "run.cancel" | "run.pause" | "run.resume"; runId: string }): Promise<{ ok: boolean; sent: boolean }> {
     const r = this.run(frame.runId);
     if (!r || (r.state !== "assigned" && r.state !== "accepted")) return { ok: false, sent: false };
     const ws = this.socket();
-    if (ws) this.send(ws, frame);
+    if (ws) this.send(ws, this.forDaemon(frame));
     else this.sql.exec("INSERT INTO outbox (run_id, frame) VALUES (?, ?)", frame.runId, JSON.stringify(frame));
     return { ok: true, sent: ws !== null };
   }

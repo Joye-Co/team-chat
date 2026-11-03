@@ -22,6 +22,11 @@ tracing = "0.1"
 sha2 = "0.10"
 # Thumbnails of image attachments (src/provider/files.rs).
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# The 产出 window (src/views/artifacts/window.rs) and pages inside the window
+# (src/ui/web_embed.rs). Its native parts build only on macOS.
+artifact-view = { path = "../../crates/artifact-view" }
+# Cuts a member name in the title bar at a grapheme boundary.
+unicode-segmentation = "1.13"
 
 [dev-dependencies]
 tempfile = "3"
@@ -41,6 +46,4 @@ raw-window-handle = "0.6"
 block2 = "0.6"
 libc = "0.2"
 objc2-user-notifications = "0.3"
-# The 产出 window (src/views/artifacts/window.rs).
-artifact-view = { path = "../../crates/artifact-view" }
 dispatch2 = "0.3"

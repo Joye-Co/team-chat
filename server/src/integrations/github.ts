@@ -1,6 +1,6 @@
 // GitHub adapter, pure part: payload parsing, the per-topic state reducer, the status card and
 // the topic status. The gateway part (deliver.ts) stores the state and talks to the room.
-import { Card, MAX_TITLE_CHARS, type TopicStatus } from "@chat/protocol";
+import { Card, MAX_LINK_CHECKS, MAX_TITLE_CHARS, TopicLink, type TopicStatus } from "@chat/protocol";
 import { z } from "zod";
 
 // ---------------------------------------------------------------------------
@@ -23,6 +23,9 @@ const PullRequest = z.object({
   head: z.object({ sha: z.string(), ref: z.string() }),
   base: z.object({ ref: z.string() }),
   requested_reviewers: z.array(z.object({ login: z.string().optional() })).optional(),
+  additions: z.int().nonnegative().optional(),
+  deletions: z.int().nonnegative().optional(),
+  changed_files: z.int().nonnegative().optional(),
 });
 
 const PullRequestEvent = z.object({ action: z.string(), pull_request: PullRequest, repository: Repo });
@@ -79,6 +82,14 @@ export interface PrInfo {
   headRef: string;
   baseRef: string;
   requested: string[];
+  /** Size of the change; GitHub sends it in `pull_request` events, not in review events. */
+  size?: PrSize;
+}
+
+export interface PrSize {
+  additions: number;
+  deletions: number;
+  changedFiles: number;
 }
 
 /** A GitHub delivery reduced to what the adapter acts on. */
@@ -127,6 +138,9 @@ function prInfo(p: z.infer<typeof PullRequest>): PrInfo {
     headRef: p.head.ref,
     baseRef: p.base.ref,
     requested: (p.requested_reviewers ?? []).map((r) => r.login).filter((l): l is string => !!l),
+    ...(p.additions !== undefined && p.deletions !== undefined && p.changed_files !== undefined
+      ? { size: { additions: p.additions, deletions: p.deletions, changedFiles: p.changed_files } }
+      : {}),
   };
 }
 
@@ -243,6 +257,8 @@ export interface PrState {
   reviews: Record<string, "approved" | "changes_requested">;
   /** CI results of the current head commit, by check name. */
   checks: Record<string, CheckResult>;
+  /** The latest known size of the change. */
+  size?: PrSize;
 }
 
 export interface IssueState {
@@ -293,6 +309,7 @@ function fromPr(prev: PrState | null, repo: string, number: number, pr: PrInfo):
     requested: pr.requested,
     reviews: { ...(prev?.reviews ?? {}) },
     checks: sameHead ? { ...(prev?.checks ?? {}) } : {},
+    ...((pr.size ?? prev?.size) ? { size: pr.size ?? prev?.size } : {}),
   };
 }
 
@@ -475,4 +492,29 @@ export function buildCard(s: GhState): Card {
     };
   }
   return Card.parse(card);
+}
+
+// ---------------------------------------------------------------------------
+// Topic link (1.1, docs/protocol.md "Topic links")
+// ---------------------------------------------------------------------------
+
+/** The structured link of a pull request for `topic.linked`; null when it is not known yet or not valid. */
+export function topicLink(s: GhState): TopicLink | null {
+  if (s.kind !== "pr" || !s.known) return null;
+  const checks = Object.keys(s.checks)
+    .sort()
+    .slice(0, MAX_LINK_CHECKS)
+    .map((name) => ({ name: cut(name, 200), conclusion: cut(s.checks[name].conclusion || "neutral", 32) }));
+  const link = {
+    kind: "pr" as const,
+    repo: cut(s.repo, 200),
+    number: s.number,
+    url: s.url,
+    title: cut(s.title, 500),
+    state: s.state === "open" && s.draft ? "draft" : s.state,
+    checks,
+    ...(s.size ?? {}),
+  };
+  const parsed = TopicLink.safeParse(link);
+  return parsed.success ? parsed.data : null;
 }

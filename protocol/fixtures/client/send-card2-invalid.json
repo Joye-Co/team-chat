@@ -1,0 +1,20 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "a send with an invalid cardV2 is rejected",
+  "value": {
+    "t": "send",
+    "rid": "r92",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "clientMsgId": "c92",
+    "body": "",
+    "cardV2": {
+      "v": 2,
+      "rev": 1,
+      "intent": "x",
+      "title": "正在做",
+      "fallback": "",
+      "blocks": []
+    }
+  }
+}

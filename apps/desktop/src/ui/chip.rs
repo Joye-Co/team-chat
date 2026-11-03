@@ -344,6 +344,38 @@ impl RenderOnce for RoleTag {
     }
 }
 
+/// The v3 岗位 tag after a member's name: 18 pt, radius 5, `sunken`,
+/// 12/16 `ink-2`, no glyph (CONCEPT2 §6 "Bot identity in card headers").
+#[derive(IntoElement)]
+pub struct JobTag {
+    label: SharedString,
+}
+
+impl JobTag {
+    pub fn new(label: impl Into<SharedString>) -> Self {
+        Self {
+            label: label.into(),
+        }
+    }
+}
+
+impl RenderOnce for JobTag {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = theme::colors(cx);
+        div()
+            .flex_none()
+            .h(theme::TAG_HEIGHT)
+            .px(space::S6)
+            .rounded(theme::TAG_RADIUS)
+            .bg(k.sunken)
+            .flex()
+            .items_center()
+            .t_meta()
+            .text_color(k.ink_2)
+            .child(div().one_line().max_w(px(120.)).child(self.label))
+    }
+}
+
 /// A keyboard key (§7.8): 20 pt, min width 20, `field`, 12/16 500 `text-2`.
 #[derive(IntoElement)]
 pub struct Kbd {

@@ -20,6 +20,20 @@ pub mod topic_list;
 pub mod topic_menu;
 pub mod welcome;
 
+// The v2 shell (1.1.0) and one folder per feature track.
+pub mod artifact_page;
+pub mod desk;
+pub mod group_page;
+pub mod live;
+pub mod members_page;
+pub mod rail;
+pub mod shell;
+pub mod side_chat;
+pub mod topic_page;
+pub mod topic_rail;
+// --- rail track: ⌘K 交代或搜索.
+pub mod ask;
+
 use chrono::{Datelike, Local, TimeZone};
 use gpui::{App, Div, IntoElement, ParentElement, Pixels, Styled, div, px};
 
@@ -95,7 +109,7 @@ pub fn status_chip(
 
 /// Short local time for lists and the timeline: 刚刚, N 分钟前, HH:MM, 昨天, M月D日.
 pub fn time_text(at: Millis) -> String {
-    let now = Local::now();
+    let now = crate::selftest::clock::local_now();
     let Some(then) = Local.timestamp_millis_opt(at).single() else {
         return String::new();
     };

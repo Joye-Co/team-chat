@@ -51,7 +51,12 @@ check!(
     CreateMachineRequest,
     StartRunRequest,
     SetRunPlanRequest,
-    EndRunRequest
+    EndRunRequest,
+    CardV2,
+    TopicLink,
+    TopicContext,
+    SetRunAcceptanceRequest,
+    ResumeRunRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -145,6 +150,17 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("MachinesResponse", plain::<MachinesResponse>),
     ("MachineUpFrame", plain::<Up>),
     ("MachineDownFrame", plain::<Down>),
+    // 1.1
+    ("CardV2", validated::<CardV2>),
+    ("TopicLink", validated::<TopicLink>),
+    ("TopicContext", validated::<TopicContext>),
+    ("GroupDecision", plain::<GroupDecision>),
+    ("DecisionsResponse", plain::<DecisionsResponse>),
+    (
+        "SetRunAcceptanceRequest",
+        validated::<SetRunAcceptanceRequest>,
+    ),
+    ("ResumeRunRequest", validated::<ResumeRunRequest>),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -243,7 +259,9 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
     assert_eq!(
         client,
         [
+            "artifact.event",
             "card.action",
+            "card.answer",
             "delete",
             "delta",
             "edit",
@@ -277,7 +295,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 13);
+    assert_eq!(valid("Event", "type").len(), 16);
     assert_eq!(valid("TransientEvent", "type").len(), 3);
 }
 
@@ -350,4 +368,75 @@ fn v1_helpers() {
         ..Default::default()
     };
     assert!(post.validate().is_ok());
+}
+
+#[test]
+fn card_v2_readers_are_lenient() {
+    // Values a later version may add read as Unknown, and validate() rejects them.
+    let card: CardV2 = serde_json::from_str(
+        r#"{"v":2,"rev":1,"intent":"vote","title":"t","fallback":"","blocks":[
+            {"type":"map","id":"m"},
+            {"type":"input","id":"i","kind":"color","label":"l"},
+            {"type":"chart","id":"c","kind":"pie","series":[{"name":"a","values":[1]}]},
+            {"type":"ref","id":"r","label":"x","target":{"kind":"issue","url":"https://e.com"}}],
+          "actions":[{"id":"a","label":"A","kind":"later","style":"ghost"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(card.intent, CardIntent::Unknown);
+    assert_eq!(card.blocks[0], CardV2Block::Unknown);
+    assert!(matches!(
+        card.blocks[1],
+        CardV2Block::Input {
+            kind: InputKind::Unknown,
+            ..
+        }
+    ));
+    assert!(matches!(
+        card.blocks[2],
+        CardV2Block::Chart {
+            kind: ChartKind::Unknown,
+            ..
+        }
+    ));
+    assert!(matches!(
+        card.blocks[3],
+        CardV2Block::Ref {
+            target: RefTarget::Unknown,
+            ..
+        }
+    ));
+    assert_eq!(card.actions()[0].kind(), CardActionKind::Unknown);
+    assert!(card.validate().is_err());
+
+    // A cardV2 that does not parse at all is dropped; the message and its v1 card stay.
+    let m: Message = serde_json::from_str(
+        r#"{"id":"m","clientMsgId":"c","groupId":"g","topicId":"t","authorId":"a","body":"x","mentions":[],
+            "createdSeq":1,"createdAt":0,"kind":"card","card":{"v":1,"title":"t","blocks":[]},
+            "cardV2":{"v":3,"anything":true}}"#,
+    )
+    .unwrap();
+    assert!(m.card.is_some());
+    assert!(m.card_v2.is_none());
+
+    let ask = CardAsk {
+        from: vec!["requester".into(), "owners".into(), "m1".into()],
+        ..Default::default()
+    };
+    assert!(ask.allows("m1", false, None));
+    assert!(ask.allows("m2", true, None));
+    assert!(ask.allows("m3", false, Some("m3")));
+    assert!(!ask.allows("m4", false, Some("m3")));
+}
+
+#[test]
+fn unknown_topic_link_kind_is_read_but_rejected() {
+    let ev: Event = serde_json::from_str(
+        r#"{"seq":1,"groupId":"g","at":0,"actorId":"a","type":"topic.linked","data":{"topicId":"t","link":{"kind":"issue","url":"https://e.com"}}}"#,
+    )
+    .unwrap();
+    let EventData::TopicLinked(d) = ev.data else {
+        panic!("not topic.linked")
+    };
+    assert_eq!(d.link, TopicLink::Unknown);
+    assert!(d.validate().is_err());
 }

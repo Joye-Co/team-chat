@@ -1,0 +1,21 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.input",
+    "runId": "01JA0000000000000000000R04",
+    "inputId": "01JA0000000000000000000I03",
+    "text": "[page event] pick: {\"option\":\"B\"}",
+    "authorId": "01JA0000000000000000000H01",
+    "artifactEvent": {
+      "artifactId": "01JA0000000000000000000A01",
+      "version": 2,
+      "name": "pick",
+      "payload": {
+        "option": "B"
+      },
+      "actorId": "01JA0000000000000000000H01"
+    }
+  }
+}

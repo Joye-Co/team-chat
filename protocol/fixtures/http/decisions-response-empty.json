@@ -1,0 +1,8 @@
+{
+  "kind": "DecisionsResponse",
+  "valid": true,
+  "value": {
+    "decisions": [],
+    "hasMore": false
+  }
+}

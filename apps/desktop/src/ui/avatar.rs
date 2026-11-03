@@ -1,8 +1,10 @@
 //! `MemberAvatar` (DESIGN.md §7.9): the one avatar path of the app.
 //!
 //! - People are circles: a photo through gpui-component's `Avatar`, or the
-//!   neutral `avatar-bg` disc with `avatar-fg` initials. One character for a
-//!   CJK name, two letters for a Latin name at 32 pt and above, one letter at
+//!   neutral `avatar-bg` disc with `avatar-fg` initials; my own disc is ink
+//!   (`btn` with `btn-ink`), as in the rail footer. One character for a
+//!   CJK name (the second of a two-character name that starts with 小, 老
+//!   or 阿: 小王 is 王), two letters for a Latin name at 32 pt and above, one letter at
 //!   24 pt and below; a leading emoji is skipped. A presence dot shows for
 //!   people who are online; offline shows no dot.
 //! - Bots are rounded-square tiles (radius 0.25 x size) in the bot's tint,
@@ -14,20 +16,48 @@
 //! The shape alone says bot or person.
 
 use gpui::{
-    App, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
+    App, Global, Hsla, IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::avatar::Avatar;
 
 use crate::{
+    app::{Changes, Services},
     characters::{self, CharacterStatus, status::StatusBoard},
-    data::Member,
+    data::{Change, Member},
     theme::{self, Type as _, type_scale},
     ui::icons::{Lucide, icon},
 };
 
 /// Ring around presence dots and pips.
 const DOT_RING: Pixels = px(2.);
+
+/// My member id, for the ink disc. Kept from the session so an avatar does
+/// not ask the provider while it paints.
+struct Viewer(Option<String>);
+
+impl Global for Viewer {}
+
+/// Keeps [`Viewer`] equal to the signed-in member. Call once at start.
+pub fn track_viewer(services: &Services, cx: &mut App) {
+    cx.set_global(Viewer(services.me()));
+    let source = services.clone();
+    cx.subscribe(&services.hub, move |_, changes: &Changes, cx| {
+        if changes.any(|c| matches!(c, Change::Session)) {
+            cx.set_global(Viewer(source.me()));
+        }
+    })
+    .detach();
+}
+
+/// Whether `id` is me.
+fn is_viewer(id: &str, cx: &App) -> bool {
+    !id.is_empty()
+        && cx
+            .try_global::<Viewer>()
+            .and_then(|v| v.0.as_deref())
+            .is_some_and(|me| me == id)
+}
 
 #[derive(IntoElement)]
 pub struct MemberAvatar {
@@ -48,6 +78,18 @@ pub struct MemberAvatar {
     character: Option<(characters::CharacterId, Member)>,
     /// A fixed status instead of the live one (previews, the self-test).
     status_override: Option<CharacterStatus>,
+    /// v3 ring around the avatar: breathing blue while the member works,
+    /// static amber while it waits on me.
+    ring: Option<Ring>,
+}
+
+/// The ring of an avatar (v3): 1.5 pt, 3 pt out from the tile or circle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ring {
+    /// `--live`, breathing (static with reduce motion).
+    Live,
+    /// `--you`, static.
+    You,
 }
 
 impl MemberAvatar {
@@ -65,7 +107,14 @@ impl MemberAvatar {
             dimmed: member.is_some_and(|m| m.deactivated),
             character: member.and_then(|m| m.character.map(|c| (c, m.clone()))),
             status_override: None,
+            ring: None,
         }
+    }
+
+    /// Draws a v3 ring around the avatar (see [`Ring`]).
+    pub fn ring(mut self, ring: Option<Ring>) -> Self {
+        self.ring = ring;
+        self
     }
 
     /// Shows the presence dot when a person is online, and the status pip of
@@ -125,11 +174,19 @@ impl RenderOnce for MemberAvatar {
                 (Some((_, member)), None) => StatusBoard::status(cx, member),
                 (None, None) => CharacterStatus::Idle,
             };
-            let key = self
-                .character
-                .as_ref()
-                .map(|(c, _)| c.as_str().to_string())
-                .unwrap_or_else(|| self.id.clone());
+            // v3: the named member tint (`--c-<name>`), by name when it is
+            // a roster name, else by the roster character, else by id.
+            let named = theme::MEMBER_TINTS
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case(self.name.trim()));
+            let key = if named {
+                self.name.clone()
+            } else {
+                self.character
+                    .as_ref()
+                    .map(|(c, _)| c.as_str().to_string())
+                    .unwrap_or_else(|| self.id.clone())
+            };
             let art = match &self.character {
                 Some((c, _)) => characters::tile::tile_image(*c, status, size).into_any_element(),
                 None => icon(Lucide::Bot, size * 0.5, k.text_2).into_any_element(),
@@ -151,6 +208,7 @@ impl RenderOnce for MemberAvatar {
                         .size(size)
                         .rounded(theme::radius::bot(size))
                         .bg(k.bot_tint(&key))
+                        .shadow(k.tile_edge())
                         .when(self.selected, |el| el.border_1().border_color(k.tile_ring))
                         .overflow_hidden()
                         .flex()
@@ -159,6 +217,11 @@ impl RenderOnce for MemberAvatar {
                         .child(art),
                 )
                 .children(pip.map(dot))
+                .children(
+                    self.ring.map(|r| {
+                        ring_element(&self.id, r, size, Some(theme::radius::bot(size)), cx)
+                    }),
+                )
                 .into_any_element();
         }
 
@@ -191,8 +254,13 @@ impl RenderOnce for MemberAvatar {
             None => div()
                 .size(size)
                 .rounded_full()
-                .bg(k.avatar_bg)
-                .text_color(k.avatar_fg)
+                .map(|el| {
+                    if is_viewer(&self.id, cx) {
+                        el.bg(k.btn).text_color(k.btn_ink)
+                    } else {
+                        el.bg(k.avatar_bg).text_color(k.avatar_fg)
+                    }
+                })
                 .flex()
                 .items_center()
                 .justify_center()
@@ -210,7 +278,40 @@ impl RenderOnce for MemberAvatar {
             .when(self.dimmed, |el| el.opacity(0.5))
             .child(face)
             .when(self.online, |el| el.child(dot(k.online)))
+            .children(self.ring.map(|r| ring_element(&self.id, r, size, None, cx)))
             .into_any_element()
+    }
+}
+
+/// The ring element: absolute, around a box of `size` with `radius` (`None`
+/// for a circle). Live rings breathe unless reduce motion is on.
+fn ring_element(
+    id: &str,
+    ring: Ring,
+    size: Pixels,
+    radius: Option<Pixels>,
+    cx: &App,
+) -> gpui::AnyElement {
+    let k = theme::colors(cx);
+    let gap = theme::RING_GAP;
+    let color = match ring {
+        Ring::Live => k.live,
+        Ring::You => k.you,
+    };
+    let el = div()
+        .absolute()
+        .left(-gap)
+        .top(-gap)
+        .size(size + gap * 2.)
+        .border(theme::RING_WIDTH)
+        .border_color(color)
+        .map(|el| match radius {
+            Some(r) => el.rounded(r + gap),
+            None => el.rounded_full(),
+        });
+    match ring {
+        Ring::You => el.into_any_element(),
+        Ring::Live => crate::ui::motion::breathe(format!("ring-{id}"), el, cx),
     }
 }
 
@@ -301,7 +402,7 @@ impl GroupTile {
 impl RenderOnce for GroupTile {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
-        let first = monogram(&self.name, px(0.));
+        let first = first_letter(&self.name);
         div()
             .flex_none()
             .size(self.size)
@@ -334,9 +435,28 @@ pub fn is_han(c: char) -> bool {
         0x3400..=0x4DBF | 0x4E00..=0x9FFF | 0xF900..=0xFAFF | 0x20000..=0x2EBEF)
 }
 
-/// The initials of a name (§7.9): one character for a CJK name; two letters
-/// for a Latin name at 32 pt and above, one at 24 pt and below; a leading
-/// emoji is skipped.
+/// Prefixes of a familiar two-character Chinese name (小王, 老李, 阿强):
+/// the monogram is the second character.
+const FAMILIAR_PREFIXES: [char; 3] = ['小', '老', '阿'];
+
+/// The first letter of a 群 name, upper case.
+fn first_letter(name: &str) -> String {
+    let trimmed = name.trim_start_matches(|c: char| !c.is_alphanumeric());
+    match trimmed.chars().next() {
+        Some(c) => c.to_uppercase().collect(),
+        None => name
+            .trim()
+            .chars()
+            .next()
+            .map(String::from)
+            .unwrap_or_default(),
+    }
+}
+
+/// The initials of a person's name (§7.9): one character for a CJK name
+/// (the second of a two-character name that starts with 小, 老 or 阿); two
+/// letters for a Latin name at 32 pt and above, one at 24 pt and below; a
+/// leading emoji is skipped.
 pub fn monogram(name: &str, size: Pixels) -> String {
     // Skip leading symbols (emoji, ZWJ, variation selectors) and spaces.
     let trimmed: &str = name.trim_start_matches(|c: char| !c.is_alphanumeric());
@@ -350,6 +470,10 @@ pub fn monogram(name: &str, size: Pixels) -> String {
             .unwrap_or_default();
     };
     if is_han(first) {
+        let chars: Vec<char> = trimmed.chars().collect();
+        if chars.len() == 2 && FAMILIAR_PREFIXES.contains(&first) && is_han(chars[1]) {
+            return chars[1].to_string();
+        }
         return first.to_string();
     }
     let upper = |c: char| c.to_uppercase().collect::<String>();
@@ -393,5 +517,28 @@ mod tests {
         assert_eq!(monogram("John Smith, Sr", big), "JS");
         assert_eq!(monogram("محمد عبد الله", big), "م");
         assert_eq!(monogram("דוד כהן", big), "ד");
+    }
+
+    #[test]
+    fn familiar_chinese_names_use_the_second_character() {
+        let size = px(24.);
+        assert_eq!(monogram("小王", size), "王");
+        assert_eq!(monogram("老李", size), "李");
+        assert_eq!(monogram("阿强", size), "强");
+        assert_eq!(monogram("李雪", size), "李");
+        assert_eq!(monogram("陈晨", size), "陈");
+        // Three characters: a full name, not a familiar form.
+        assert_eq!(monogram("小林一", size), "小");
+        // One character, or a non-Han second character.
+        assert_eq!(monogram("小", size), "小");
+        assert_eq!(monogram("小A", size), "小");
+    }
+
+    #[test]
+    fn group_tiles_keep_the_first_character() {
+        assert_eq!(first_letter("小组周会"), "小");
+        assert_eq!(first_letter("老友"), "老");
+        assert_eq!(first_letter("design"), "D");
+        assert_eq!(first_letter("🚀 launch"), "L");
     }
 }

@@ -18,6 +18,7 @@
 //! | [`truncate`] | §15 | one cut line with the full text in a tooltip |
 //! | [`motion`] | §12 | durations, reduce motion, the busy spinner |
 //! | [`gallery`] | §16 | every component in its states (self-test scene) |
+//! | [`web_embed`] | — | a live 产出 page inside the window (native web view) |
 
 pub mod avatar;
 pub mod chip;
@@ -32,12 +33,13 @@ pub mod parts;
 pub mod rows;
 pub mod sheet;
 pub mod truncate;
+pub mod web_embed;
 
 // The screens build from these; some are not used by every screen yet.
 #[allow(unused_imports)]
-pub use avatar::{GroupGlyph, GroupTile, MemberAvatar};
+pub use avatar::{GroupGlyph, GroupTile, MemberAvatar, Ring};
 #[allow(unused_imports)]
-pub use chip::{BadgeKind, ChipStyle, CountBadge, Kbd, RoleTag, StatusChip};
+pub use chip::{BadgeKind, ChipStyle, CountBadge, JobTag, Kbd, RoleTag, StatusChip};
 #[allow(unused_imports)]
 pub use composer::{ComposerShell, composer_tool, send_button};
 #[allow(unused_imports)]
@@ -56,7 +58,7 @@ pub use overlay::{
 #[allow(unused_imports)]
 pub use parts::{
     Band, EmptyState, KbdHint, capsule, card, card_padding, column_edge, column_start_edge,
-    floating, hairline, header_band, toolbar_band, vhairline,
+    floating, hairline, header_band, rail_card, toolbar_band, vhairline,
 };
 #[allow(unused_imports)]
 pub use rows::{

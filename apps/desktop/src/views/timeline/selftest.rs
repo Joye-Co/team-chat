@@ -117,7 +117,7 @@ pub struct SelftestProvider {
 /// The provider for `--selftest-timeline <count>`.
 pub fn provider(count: usize) -> Arc<dyn ChatProvider> {
     let inner = FakeProvider::new();
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = crate::selftest::clock::utc_now().timestamp_millis();
     let messages = generate(count, now);
     let last_seq = messages.last().map(|m| m.created_seq).unwrap_or(0);
     let topic = Topic {

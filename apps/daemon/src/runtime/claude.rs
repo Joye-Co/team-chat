@@ -330,6 +330,55 @@ pub fn find_session_file(config_dir: &Path, cwd: &Path, session_id: &str) -> Opt
     })
 }
 
+/// The only tools a side chat run has: built-in tools that read files.
+pub const ASIDE_TOOLS: &str = "Read,Grep,Glob";
+
+/// Tools a side chat run may never use, also if a settings file or a later CLI adds them: the
+/// command, edit and web tools and every MCP tool.
+pub const ASIDE_DISALLOWED_TOOLS: &str =
+    "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch mcp__*";
+
+/// Permission flags and the configured extra args. A side chat run (`spec.aside`) is
+/// read-only whatever `daemon.toml` or the CLI's own settings say: permission mode `plan`, only
+/// [`ASIDE_TOOLS`], [`ASIDE_DISALLOWED_TOOLS`] denied, no MCP servers, and neither
+/// `allowed_tools` nor the configured args (which could widen permissions). Only the user's own
+/// settings file loads (its env, `apiKeyHelper` and model give the run its auth and model); the
+/// project and local settings come from the repo and stay out. The tool set keeps the run
+/// read-only also when a user allow rule names a command or edit tool.
+pub fn permission_args(spec: &RunSpec) -> Vec<String> {
+    let mut args = vec!["--permission-mode".to_string()];
+    if spec.aside {
+        args.extend(
+            [
+                "plan",
+                "--tools",
+                ASIDE_TOOLS,
+                "--disallowedTools",
+                ASIDE_DISALLOWED_TOOLS,
+                "--strict-mcp-config",
+                "--mcp-config",
+                r#"{"mcpServers":{}}"#,
+                "--setting-sources",
+                "user",
+            ]
+            .map(String::from),
+        );
+        return args;
+    }
+    args.push(
+        spec.cfg
+            .permission_mode
+            .clone()
+            .unwrap_or_else(|| "acceptEdits".into()),
+    );
+    if let Some(t) = &spec.cfg.allowed_tools {
+        args.push("--allowedTools".into());
+        args.push(t.clone());
+    }
+    args.extend(spec.cfg.args.iter().cloned());
+    args
+}
+
 fn user_line(text: &str) -> Value {
     json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } })
 }
@@ -361,22 +410,11 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     .map(|s| s.to_string())
     .collect();
     args.push(session_id.clone());
-    args.push("--permission-mode".into());
-    args.push(
-        spec.cfg
-            .permission_mode
-            .clone()
-            .unwrap_or_else(|| "acceptEdits".into()),
-    );
+    args.extend(permission_args(&spec));
     if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
         args.push("--model".into());
         args.push(m);
     }
-    if let Some(t) = &spec.cfg.allowed_tools {
-        args.push("--allowedTools".into());
-        args.push(t.clone());
-    }
-    args.extend(spec.cfg.args.iter().cloned());
     let program = spec.cfg.command();
     let config_dir = spec
         .env_var("CLAUDE_CONFIG_DIR")

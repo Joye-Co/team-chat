@@ -1,0 +1,53 @@
+//! 首页 (the desk, Main.dc.html). The desk track owns this file.
+
+crate::copy! {
+    DESK_TITLE = "首页",
+    DESK_NEEDS_YOU = "需要你拍板",
+    DESK_DONE_TODAY = "做完了",
+    DESK_TODAY = "今天",
+    DESK_WORKING = "正在做",
+    DESK_QUEUE = "排队",
+    DESK_EMPTY = "现在没有需要你拍板的事",
+    DESK_EMPTY_LINE = "成员需要你决定时，会出现在这里。",
+    DESK_DATE = "{m} 月 {d} 日 {weekday}",
+    WEEKDAY_1 = "周一",
+    WEEKDAY_2 = "周二",
+    WEEKDAY_3 = "周三",
+    WEEKDAY_4 = "周四",
+    WEEKDAY_5 = "周五",
+    WEEKDAY_6 = "周六",
+    WEEKDAY_7 = "周日",
+    // Jojo's one-line priority: "Jojo：先批 Watch 的发布。"
+    DESK_NOTE_FROM = "{name}：",
+    // Card footers.
+    DESK_CONFIRM_FIRST = "{verb}前会再确认一次",
+    DESK_NO_UNDO = "{verb}后不能撤回",
+    DESK_FILES = "{n} 个文件",
+    DESK_OPEN_TOPIC = "打开话题",
+    DESK_TOPIC_WAITS = "这个话题在等你回复",
+    DESK_REVIEW_WAITS = "这个话题在等你验收",
+    // The answered record of a card.
+    DESK_ANSWERED = "你选了「{label}」",
+    DESK_ANSWERED_OPTION = "你选了 {key}：{label}",
+    DESK_SENT_TO = "已发给 {name}",
+    DESK_JUST_NOW = "刚刚",
+    DESK_UNDO = "撤回",
+    DESK_SEND_FAILED = "没有发出去，再试一次",
+    // Proof chips.
+    DESK_TESTS_PASSED = "测试 {n} 项通过",
+    DESK_TESTS_FAILED = "测试 {n} 项没通过",
+    DESK_RECORDING = "录屏 {t}",
+    DESK_CHECKS_ALL = "{n} 项都通过",
+    DESK_CHECKS_SOME = "{passed}/{total} 项通过",
+    DESK_ARTIFACT_META = "v{v} · {kind}",
+    DESK_KIND_PAGE = "网页",
+    DESK_KIND_FILE = "文件",
+    DESK_KIND_IMAGE = "图片",
+    DESK_KIND_DECISION = "决定",
+    // 正在做.
+    DESK_LIVE = "实时",
+    DESK_ELAPSED_MINUTES = "已 {n} 分钟",
+    DESK_ELAPSED_HOURS = "已 {n} 小时",
+    DESK_HIDE_SIDE = "收起右栏",
+    DESK_SHOW_SIDE = "展开右栏",
+}

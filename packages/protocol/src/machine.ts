@@ -2,6 +2,7 @@
 // These frames never reach desktop clients, except the run log entries (`RunLogEntry`), which
 // clients read with `GET /v1/runs/:id/events`.
 import { z } from "zod";
+import { CardRev } from "./card2.ts";
 import { Id, Millis, Seq } from "./common.ts";
 import { RunPlan } from "./plan.ts";
 
@@ -14,6 +15,12 @@ export const Label = z.string().regex(/^[A-Za-z0-9_.:-]{1,64}$/);
 export const MAX_LABELS = 20;
 export const Labels = z.array(Label).max(MAX_LABELS);
 
+/** A feature a daemon reports in `hello.machine.features`; see docs/machine-protocol.md. */
+export const MachineFeature = z.string().min(1).max(64);
+export const MAX_MACHINE_FEATURES = 32;
+/** Features of the 1.1 daemon. The server sends a 1.1 frame or field only to a daemon that has its feature. */
+export const MACHINE_FEATURES = ["pause", "answer", "aside", "acceptance"] as const;
+
 export const MachineInfo = z.object({
   /** The id configured on the machine (optional); the token is authoritative. */
   id: z.string().optional(),
@@ -23,6 +30,10 @@ export const MachineInfo = z.object({
   os: z.string().max(32),
   arch: z.string().max(32),
   maxParallelRuns: z.int().nonnegative(),
+  /** 1.1: what this daemon supports, e.g. "pause", "answer", "aside", "acceptance". */
+  features: z.array(MachineFeature).max(MAX_MACHINE_FEATURES).optional(),
+  /** 1.1: a screen sharing address (e.g. `vnc://mac-mini.tailnet`) people use for 接管. */
+  takeoverUrl: z.string().min(1).max(2048).optional(),
 });
 export type MachineInfo = z.infer<typeof MachineInfo>;
 
@@ -73,6 +84,28 @@ export const Usage = z.object({
 export type Usage = z.infer<typeof Usage>;
 
 // ---------------------------------------------------------------------------
+// Acceptance criteria (验收标准)
+// ---------------------------------------------------------------------------
+
+export const MAX_ACCEPTANCE_ITEMS = 20;
+export const AcceptanceState = z.enum(["pending", "pass", "fail"]);
+export type AcceptanceState = z.infer<typeof AcceptanceState>;
+/** Proof of one criterion: a note, a file, a link or a 产出 version. */
+export const AcceptanceEvidence = z.object({
+  text: z.string().max(1000).optional(),
+  fileId: Id.optional(),
+  url: z.string().max(2048).regex(/^https?:\/\/[^\s]+$/).optional(),
+  artifact: z.object({ artifactId: Id, version: z.int().positive() }).optional(),
+});
+export type AcceptanceEvidence = z.infer<typeof AcceptanceEvidence>;
+export const AcceptanceItem = z.object({
+  text: z.string().min(1).max(500),
+  state: AcceptanceState,
+  evidence: AcceptanceEvidence.optional(),
+});
+export type AcceptanceItem = z.infer<typeof AcceptanceItem>;
+
+// ---------------------------------------------------------------------------
 // Run events (the item model)
 // ---------------------------------------------------------------------------
 
@@ -120,6 +153,10 @@ export const RunEvent = z.discriminatedUnion("type", [
     state: z.enum(["preparing", "running", "retrying", "stalled", "warning", "error"]),
     message: z.string().optional(),
   }),
+  /** 1.1: the run's acceptance criteria and their state; replaces `BotRun.acceptance`. */
+  z.object({ type: z.literal("acceptance"), items: z.array(AcceptanceItem).max(MAX_ACCEPTANCE_ITEMS) }),
+  /** 1.1: the CLI is stopped (`paused: true`, after run.pause) or goes on (`false`, after run.resume). */
+  z.object({ type: z.literal("paused"), paused: z.boolean(), by: Id.optional() }),
 ]);
 export type RunEvent = z.infer<typeof RunEvent>;
 export type RunEventType = RunEvent["type"];
@@ -206,8 +243,30 @@ export const RunAssignFrame = z.object({
   leaseMs: z.int().positive(),
   maxDurationMs: z.int().positive().optional(),
   sessionUpload: SessionUpload.optional(),
+  /** 1.1: "aside" = a read-only side chat run. Sent only to a daemon with feature "aside". */
+  kind: z.string().min(1).max(32).optional(),
 });
 export type RunAssignFrame = z.infer<typeof RunAssignFrame>;
+
+/** A Card v2 answer given to a run (`run.input.answer`). */
+export const RunAnswer = z.object({
+  messageId: Id,
+  rev: CardRev,
+  actionId: z.string().min(1).max(64),
+  inputs: z.record(z.string(), z.json()).optional(),
+  editedValues: z.record(z.string(), z.string()).optional(),
+  actorId: Id,
+});
+export type RunAnswer = z.infer<typeof RunAnswer>;
+/** An event from an interactive 产出 page given to a run (`run.input.artifactEvent`). */
+export const RunArtifactEvent = z.object({
+  artifactId: Id,
+  version: z.int().positive(),
+  name: z.string().min(1).max(128),
+  payload: z.json().optional(),
+  actorId: Id,
+});
+export type RunArtifactEvent = z.infer<typeof RunArtifactEvent>;
 
 export const MachineDownFrame = z.discriminatedUnion("t", [
   z.object({
@@ -219,9 +278,24 @@ export const MachineDownFrame = z.discriminatedUnion("t", [
   }),
   z.object({ t: z.literal("heartbeat.ack"), at: Millis }),
   RunAssignFrame,
-  z.object({ t: z.literal("run.input"), runId: RunId, inputId: z.string().min(1), text: z.string(), authorId: Id.optional() }),
+  z.object({
+    t: z.literal("run.input"),
+    runId: RunId,
+    inputId: z.string().min(1),
+    /** Always set: the text form of the input, for daemons without the feature of `answer`/`artifactEvent`. */
+    text: z.string(),
+    authorId: Id.optional(),
+    /** 1.1 (feature "answer"): a Card v2 answer, as typed data. */
+    answer: RunAnswer.optional(),
+    /** 1.1 (feature "answer"): an event from an interactive 产出 page. */
+    artifactEvent: RunArtifactEvent.optional(),
+  }),
   z.object({ t: z.literal("run.approval"), runId: RunId, approvalId: z.string().min(1), decision: z.enum(["approve", "deny"]) }),
   z.object({ t: z.literal("run.cancel"), runId: RunId, reason: z.string().optional() }),
+  /** 1.1 (feature "pause"): stop the CLI (SIGSTOP of its process group) for 接管; deadlines stop too. */
+  z.object({ t: z.literal("run.pause"), runId: RunId, by: Id.optional() }),
+  /** 1.1 (feature "pause"): go on after a pause; `note` becomes the CLI's next input when set. */
+  z.object({ t: z.literal("run.resume"), runId: RunId, note: z.string().max(2000).optional() }),
   z.object({ t: z.literal("ack"), runId: RunId, seq: Seq }),
   z.object({ t: z.literal("error"), error: z.object({ code: z.string(), message: z.string() }) }),
 ]);

@@ -14,13 +14,23 @@
 
 pub mod app_glue;
 mod cards;
+// --- cards v2 track ---
+mod cards_v2;
+// --- end cards v2 track ---
 pub mod convert;
+// Desk track (1.1.0 首页).
+mod desk;
 pub mod files;
 #[cfg(test)]
 mod files_live;
 #[cfg(target_os = "macos")]
 pub mod macos;
+mod panes;
 pub mod persist;
+// Proof chips from done cards (1.1.0).
+mod proof;
+// pages track: the 群, 成员 and 产出 pages.
+mod pages;
 mod process;
 mod realtime;
 #[cfg(test)]
@@ -30,6 +40,9 @@ mod search_live;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+// provider track: v2 topic surfaces and the seeded cache of the `topic-core` scene.
+pub mod seeded;
+mod topic_v2;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -139,6 +152,16 @@ struct Shared {
     /// Run logs and machine names for the process view (`process.rs`).
     runs: process::RunCache,
     cards: cards::CardCache,
+    // panes track (1.1.0): 单独问 and 实时查看.
+    panes: panes::PanesCache,
+    // --- cards v2 track ---
+    cards_v2: cards_v2::CardV2Cache,
+    // --- end cards v2 track ---
+    /// 群里的决定 from the server (`provider/pages.rs`).
+    decisions: pages::DecisionsCache,
+    // --- provider track: v2 topic surfaces (provider/topic_v2.rs) ---
+    topic_v2: topic_v2::TopicV2Cache,
+    // --- end provider track ---
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -171,6 +194,10 @@ impl CoreProvider {
                 files: files::FilesState::default(),
                 runs: process::RunCache::default(),
                 cards: cards::CardCache::default(),
+                panes: panes::PanesCache::default(),
+                cards_v2: cards_v2::CardV2Cache::default(),
+                decisions: pages::DecisionsCache::default(),
+                topic_v2: topic_v2::TopicV2Cache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -363,6 +390,7 @@ impl CoreProvider {
         };
         self.shared.files.reset();
         self.shared.cards.clear();
+        self.shared.cards_v2.clear();
         self.spawn_pump(generation, updates);
         self.emit(vec![
             Change::Session,
@@ -392,6 +420,7 @@ impl CoreProvider {
         self.shared.drafts.clear_all();
         self.shared.files.reset();
         self.shared.cards.clear();
+        self.shared.cards_v2.clear();
         if let Some(a) = &account {
             a.client.stop();
         }
@@ -636,6 +665,8 @@ impl CoreProvider {
                 out.extend([Change::Topics { group_id }, Change::Todo]);
             }
             ClientUpdate::MessagesChanged { group_id, topic_id } => {
+                // --- cards v2 track: an edit replaces a card in place ---
+                self.shared.cards_v2.forget_topic(&topic_id);
                 out.push(Change::Messages { group_id, topic_id });
             }
             ClientUpdate::HistoryLoaded {
@@ -711,6 +742,13 @@ impl CoreProvider {
                 {
                     self.shared.cards.on_refused(&a.client, &f.id, f.code);
                 }
+                // --- cards v2 track ---
+                if f.kind == "card_answer"
+                    && let Some(a) = self.account()
+                {
+                    self.shared.cards_v2.on_refused(&a.client, &f.id, f.code);
+                }
+                // --- end cards v2 track ---
                 match f.topic_id {
                     Some(topic_id) => out.push(Change::Messages {
                         group_id: f.group_id,
@@ -742,6 +780,23 @@ impl CoreProvider {
                 out.push(Change::Runs { group_id, topic_id });
             }
             ClientUpdate::GroupEvent(ev) => {
+                // --- cards v2 track ---
+                if let chat_core::proto::EventData::CardAnswered(d) = &ev.data
+                    && let Some(a) = self.account()
+                {
+                    let mine = ev.actor_id == a.me.id;
+                    self.shared.cards_v2.on_answered(&d.message_id, mine, d.rev);
+                    if let Some(m) = a.client.store().message(&d.message_id).ok().flatten() {
+                        out.extend([
+                            Change::Messages {
+                                group_id: m.group_id,
+                                topic_id: m.topic_id,
+                            },
+                            Change::Todo,
+                        ]);
+                    }
+                }
+                // --- end cards v2 track ---
                 if let chat_core::proto::EventData::CardActioned(d) = &ev.data
                     && let Some(a) = self.account()
                 {
@@ -1029,6 +1084,7 @@ impl ChatProvider for CoreProvider {
             let n = limit.max(1) + extra;
             let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
             self.shared.cards.remember(&msgs);
+            self.shared.cards_v2.remember(&msgs);
             let cached_more = msgs.len() > n;
             if cached_more {
                 msgs.remove(0);
@@ -1654,6 +1710,63 @@ impl ChatProvider for CoreProvider {
         }
     }
 
+    // --- cards v2 track ---
+    fn card_v2(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Option<crate::data::cards_v2::CardV2Message> {
+        let a = self.account()?;
+        self.shared.cards_v2.card(&a.client, message_id)
+    }
+
+    fn card_v2_answers(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Vec<crate::data::cards_v2::CardV2Answer> {
+        match self.account() {
+            Some(a) => self.shared.cards_v2.answers(&a.client, message_id),
+            None => Vec::new(),
+        }
+    }
+
+    fn card_v2_pending(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Option<crate::data::cards_v2::CardV2Pending> {
+        let a = self.account()?;
+        self.shared.cards_v2.pending(&a.client, message_id)
+    }
+
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        answer: crate::data::cards_v2::CardV2AnswerRequest,
+    ) {
+        if let Some(a) = self.account() {
+            self.shared.cards_v2.answer(&a.client, message_id, answer);
+            self.emit(vec![Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
+        }
+    }
+
+    fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        if let Some(a) = self.account() {
+            self.shared.cards_v2.withdraw(&a.client, message_id);
+            self.emit(vec![Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
+        }
+    }
+    // --- end cards v2 track ---
+
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
         let a = self.account()?;
         let this = self.clone();
@@ -1665,6 +1778,188 @@ impl ChatProvider for CoreProvider {
             .cards
             .image(&a.client, file_id, move || this.emit(vec![change]))
     }
+
+    // --- desk track (1.1.0 首页): provider/desk.rs ---
+
+    fn asks_for_me(&self) -> Vec<crate::data::v2::AskItem> {
+        self.desk_asks()
+    }
+
+    // Card v2 reads and answers come from the cards v2 track above.
+
+    fn message_proof(&self, _group_id: &str, message_id: &str) -> Vec<crate::data::v2::Proof> {
+        self.message_proof_inner(message_id)
+    }
+
+    fn topic_result_proof(&self, _group_id: &str, topic_id: &str) -> Vec<crate::data::v2::Proof> {
+        self.topic_result_proof_inner(&self.resolve_topic(topic_id))
+    }
+
+    // --- end of the desk track block ---
+
+    // --- panes track (1.1.0): 单独问 and 实时查看 (provider/panes.rs) ---
+
+    fn side_chat(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        member_id: &str,
+    ) -> crate::data::v2::SideChatThread {
+        self.side_chat_inner(group_id, topic_id, member_id)
+    }
+
+    fn send_side_chat(&self, group_id: &str, topic_id: &str, member_id: &str, body: String) {
+        self.send_side_chat_inner(group_id, topic_id, member_id, body)
+    }
+
+    fn post_side_chat_suggestion(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        member_id: &str,
+        message_id: &str,
+    ) {
+        self.post_side_chat_suggestion_inner(group_id, topic_id, member_id, message_id)
+    }
+
+    fn machine_screen(&self, run_id: &str) -> Option<crate::data::v2::MachineScreen> {
+        self.machine_screen_inner(run_id)
+    }
+
+    fn acceptance_criteria(&self, run_id: &str) -> Vec<crate::data::v2::AcceptanceItem> {
+        self.acceptance_inner(run_id)
+    }
+
+    fn run_step_times(&self, run_id: &str) -> Vec<crate::data::Millis> {
+        self.run_step_times_inner(run_id)
+    }
+
+    fn take_over_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.pause_inner(group_id, topic_id, run_id, true)
+    }
+
+    fn hand_back_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.pause_inner(group_id, topic_id, run_id, false)
+    }
+
+    // --- end of the panes track ---
+
+    // --- pages track: the 群, 成员 and 产出 pages (provider/pages.rs) ---
+
+    fn group_decisions(&self, group_id: &str) -> Vec<crate::data::v2::Decision> {
+        self.group_decisions_inner(group_id)
+    }
+
+    fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
+        self.artifact_page_events_inner(artifact_id, version)
+    }
+
+    fn send_artifact_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        payload: Option<serde_json::Value>,
+    ) {
+        self.send_artifact_event_inner(artifact_id, version, name, payload)
+    }
+
+    fn artifact_responses(&self, artifact_id: &str) -> Vec<crate::data::pages::ArtifactResponse> {
+        self.artifact_responses_inner(artifact_id)
+    }
+
+    fn retry_member_problem(&self, member_id: &str, run_id: &str) -> AdminReply<()> {
+        self.retry_member_problem_inner(member_id, run_id)
+    }
+
+    // --- end pages track ---
+
+    // --- provider track: v2 topic surfaces (provider/topic_v2.rs) ---
+
+    fn topic_changes(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+    ) -> Option<crate::data::v2::TopicChanges> {
+        self.topic_changes_inner(group_id, topic_id)
+    }
+
+    fn pinned_ask(&self, group_id: &str, topic_id: &str) -> Option<crate::data::v2::AskItem> {
+        self.pinned_ask_inner(group_id, topic_id)
+    }
+
+    fn changes_approval(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+    ) -> Option<(crate::data::MemberId, crate::data::Millis)> {
+        self.changes_approval_inner(group_id, topic_id)
+    }
+
+    fn approve_changes(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        self.approve_changes_inner(group_id, topic_id)
+    }
+
+    fn withdraw_changes_approval(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        self.withdraw_changes_approval_inner(group_id, topic_id)
+    }
+
+    fn changes_approval_queued(&self, group_id: &str, topic_id: &str) -> bool {
+        self.changes_approval_queued_inner(group_id, topic_id)
+    }
+
+    fn run_usage(&self, run_id: &str) -> Option<crate::data::v2::RunUsage> {
+        self.run_usage_inner(run_id)
+    }
+
+    fn topic_decisions(&self, group_id: &str, topic_id: &str) -> Vec<crate::data::v2::Decision> {
+        self.topic_decisions_inner(group_id, topic_id)
+    }
+
+    fn artifact_story(&self, artifact_id: &str) -> Option<crate::data::v2::ArtifactStory> {
+        self.artifact_story_inner(artifact_id)
+    }
+
+    fn artifact_preview(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::v2::ArtifactPreview> {
+        self.artifact_preview_inner(artifact_id, version, true)
+    }
+
+    fn artifact_thumb(&self, artifact_id: &str) -> Option<crate::data::pages::ArtifactThumb> {
+        self.artifact_thumb_inner(artifact_id)
+    }
+
+    fn media_duration(&self, file: &FileAttachment) -> Option<u64> {
+        self.media_duration_inner(file)
+    }
+
+    // desk_note and queue keep their empty defaults: 1.1 has no data source for them.
+
+    // --- end provider track ---
+
+    // --- dfix-motion track ---
+
+    fn side_chat_topics(&self) -> std::collections::HashSet<(GroupId, crate::data::TopicId)> {
+        let Some(a) = self.account() else {
+            return Default::default();
+        };
+        // Side chats live in my DMs only.
+        a.client
+            .groups()
+            .unwrap_or_default()
+            .iter()
+            .map(|row| convert::group(row, &a.me.id, |_| None))
+            .filter(|g| g.kind == crate::data::GroupKind::Dm)
+            .flat_map(|g| a.client.topics(&g.id, TOPIC_LIMIT).unwrap_or_default())
+            .filter(|row| row.topic.context_of.is_some())
+            .map(|row| (row.topic.group_id.clone(), row.topic.id.clone()))
+            .collect()
+    }
+
+    // --- end dfix-motion track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

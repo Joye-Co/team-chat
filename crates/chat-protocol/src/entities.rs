@@ -3,12 +3,14 @@
 use serde::{Deserialize, Serialize};
 
 use crate::card::Card;
+use crate::card2::{CardV2, lenient_card_v2};
 use crate::characters::CharacterId;
 use crate::members::NotifyLevel;
 use crate::message::{ArtifactRef, FileRef, MessageKind, ReplyTo};
 use crate::reactions::Reaction;
 use crate::reads::TopicState;
 use crate::serde_util::{non_null, nullable};
+use crate::topic::TopicContext;
 
 /// Milliseconds since the Unix epoch, UTC.
 pub type Millis = u64;
@@ -193,6 +195,13 @@ pub struct Topic {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_message_at: Option<Millis>,
+    /// Set on a side chat topic (1.1): the topic it is about.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context_of: Option<TopicContext>,
 }
 
 impl Topic {
@@ -268,6 +277,13 @@ pub struct Message {
         skip_serializing_if = "Option::is_none"
     )]
     pub card: Option<Card>,
+    /// Card v2 (1.1). Read leniently: a value this version cannot parse is dropped.
+    #[serde(
+        default,
+        deserialize_with = "lenient_card_v2",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card_v2: Option<CardV2>,
     /// Who reacted with which emoji; absent = none.
     #[serde(
         default,

@@ -133,6 +133,11 @@ dropped (`ping` too).
 | otherwise | `open` | nobody |
 
   The topic owner is set once to the author's member, when the author is mapped.
+- **Topic link (1.1)**: the adapter also stores `topic.linked` (docs/protocol.md, "Topic
+  links") in the PR's topic with the PR's state (`open`, `draft`, `merged`, `closed`), title,
+  the CI results of the head commit and its size (additions, deletions, changed files). It stores
+  one only when one of these changes, so reviews alone add none. A link that cannot be stored is
+  tried again on the next delivery; the card and the topic status are not held back.
 - **CI** goes to the PR topic: by the `pull_requests` of the event, else by its head commit. CI
   for a commit with no known PR goes to one topic per branch, `github:<owner>/<repo>@<branch>`,
   with one card that shows the latest commit. CI never changes a topic's status.

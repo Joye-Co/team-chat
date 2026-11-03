@@ -32,6 +32,14 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   | `blocked` | 卡住了 | 卡住了 |
   | `done` | 完成 | 完成 |
 
+- Status words are a closed set, one meaning each (docs/DESIGN.md §9.1): 需要你拍板 (the viewer
+  must decide or review), 等你 (its short form in lists), 等{name} (waiting on someone else),
+  正在做 / 在做 (live work), 排队 (queued), 做完了 (a result arrived), 卡住了 (a problem), 完成 (the
+  topic is closed). The `TopicStatus` chips above map onto them in the copy catalog.
+- Other UI words allowed from 1.1.0: 单独问 (a private side chat with a member about a topic),
+  实时查看 (watch a member's computer while it works), 接管 and 交还 (pause the member and take over,
+  then hand back), 交代 (hand work to a member), 来龙去脉 (where a 产出 came from), 群里的决定 (the
+  decisions recorded in a 群), 验收标准 (the checks a result must pass), 回放 (replay a run by step).
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 成本 (cost).
 - Developer words appear only in the developer view (开发者视图) and in logs: session, CLI,
@@ -44,20 +52,54 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 
 ## Screens (desktop)
 
-- **Sidebar**: 待办 at the top (topics waiting on me and unread mentions), then one list of 群
-  sorted by last activity with unread and mention badges. DMs show the other member's avatar
-  and presence dot. A search field and a quick switcher (Cmd+K).
-- **Topic list** of the selected 群: title, status chip, last activity, unread count per topic.
-  A button starts a new topic.
-- **Topic view**: the timeline (virtualized, anchored at the bottom, Markdown, images inline,
-  cards rendered natively, streaming bot replies) and the composer (multi-line, Chinese IME,
-  @mentions, quote a message, paste or drop images and files). A side panel shows the topic's
-  产出 and the process view of a bot's work.
-- **产出 window**: HTML pages open in a separate native window (WKWebView, one origin per 产出,
-  strict CSP, no network) with a version list. Files open with the default macOS app.
-- **Settings**: my profile (name, 岗位, avatar), 成员 (invite, change level, deactivate, add a
-  bot member and its 岗位, 机器 and credential), 机器 (connected machines and their health),
-  通知 (mute a 群, follow topics), diagnostics, sign out, and a developer-view switch.
+The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its artboards
+([design/mockups-v3/](design/mockups-v3/)).
+
+- **Shell**: one main window: a left rail, the page, and one right pane. Every page has a title
+  bar with the place, its state, and buttons that open the right panes.
+- **Left rail**: search (⌘K), the destinations 首页, 产出 and 成员, the list of work, the active
+  members, and me. The list has three modes; each person picks one in 设置 → 外观 (侧栏样式) or in
+  the rail's header menu, and the choice is kept on this computer:
+  - **A 以工作为中心** (default): 话题 grouped by 群, then 私聊; each row shows one state (needs me,
+    who is working, waiting on someone, done today). A filter shows only the topics I take part in.
+  - **B 以「需要我」为中心**: sections 需要你, 在做, 等别人, 做完了 · 今天; 群 are filter chips.
+  - **C 以成员为中心**: each member with the topics it is doing, then people.
+- **首页**: Jojo's one-line priority for today (only when Jojo wrote one), 需要你拍板 (every card and
+  topic that waits on me, answerable in place), 做完了 today with proof, and a column 正在做 with
+  each active run, its plan progress and, when it uses its computer, a live thumbnail; 排队 when
+  runs are queued.
+- **话题**: the timeline (virtualized, anchored at the bottom, Markdown, images inline, cards
+  rendered natively), the newest decision that waits on me pinned above the composer, and the
+  composer (multi-line, Chinese IME, @mentions, quote a message, paste or drop images and files).
+  On the right, the topic rail: 负责, 计划, 改动, 产出, 用到的决定, 电脑, 用时和成本; a card with no
+  data is hidden.
+- **单独问** (⌘;): a side chat with a member (Jojo by default) beside a topic. The member has read
+  the topic up to now. Only I see the questions and answers. A suggested step goes into the topic
+  only when I press its button.
+- **实时查看 + 接管**: a member's computer beside the topic while it works: its terminal rebuilt from
+  the run's steps, the plan, 验收标准, and 回放 by step. 接管 pauses the member so I can act; 交还 lets
+  it continue from that step; 停止 cancels the run.
+- **⌘K 交代或搜索**: one field to hand work to a member (交给 <member> starts a topic addressed to
+  it in the chosen 群; ⌘↵ hands it to Jojo) or to find 话题, 产出 and 成员.
+- **群**: a composer to start a topic, the topics 进行中 with live previews, 最近完成, and a rail with
+  群里的决定 (recorded from answered decisions, or added with 记一条), 最近的产出 and the 电脑 in use.
+- **成员**: every member with filters (全部, 在做事, 等人); a member's page shows 现在, 这周 (topics,
+  产出, cost), 最近交付, 需要批准的事, 能用的工具, 电脑 and 最近的问题. Changing a member opens the settings
+  forms.
+- **产出 viewer**: a 产出 in the main window with its 来龙去脉 (the topic, who made it, who asked,
+  versions, choices made in the page, decisions used, where it is cited). HTML pages stay isolated
+  (one origin per 产出, strict CSP, no network); they also open in their own native window.
+  Choices inside a page a member made go back to that member. Files open with the default macOS
+  app.
+- **Cards (Card v2)**: members send semantic cards and the app draws them the same way on 首页, in
+  话题, 群 and notifications: choices, approvals with a confirm step, forms, drafts to confirm or
+  edit, plans, numbers and charts, tables, diffs, evidence, and links. A card shows who must act;
+  only they get live controls. After an answer the card becomes a one-line record of who answered
+  and when.
+- **Settings**: 外观 (theme: follow the system, light or dark; 侧栏样式), my profile (name, 岗位,
+  avatar), 成员 (invite, change level, deactivate, add a bot member and its 岗位, 机器 and
+  credential), 机器 (connected machines and their health), 通知 (mute a 群, follow topics),
+  diagnostics, sign out, and a developer-view switch.
 - **Menu bar item**: the app can stay in the menu bar and keep its connection.
 
 ## Behavior
@@ -65,15 +107,19 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
 - Starting to write in a 群 without picking a topic starts a new topic; its title defaults to
   the first line of the message.
 - Long content goes into 产出; the topic keeps the conclusion and a link.
-- Notifications are quiet by default: only when I am @mentioned, when a topic waits on me, or
-  when a topic I follow gets a result (status 完成 or a new 产出).
+- Notifications are quiet by default: only when I am @mentioned, when a topic waits on me
+  (需要你拍板), or when a topic I follow gets a result (做完了, status 完成 or a new 产出).
 - Presence, typing, read positions and unread counts sync in real time. Read positions are per
   topic: reading one topic does not mark the other topics of the 群 read.
-- @mentioning a bot asks it to take the work. It acknowledges once, works quietly, and comes
-  back only with a result, a decision it needs, or when it is stuck. One responsible member per
-  topic. Everyone sees the same streaming reply.
-- Cards are declarative JSON (status, fields, table, progress, list, code, image, actions). Bots
-  and integrations post them; buttons send the action back to the card's author.
+- @mentioning a bot asks it to take the work. It acknowledges with a reaction, works quietly
+  (progress shows in its plan and in 实时查看, not as messages in the topic), and comes back only
+  with a result card with proof, a decision it needs, or when it is stuck. One responsible member
+  per topic.
+- Cards are declarative JSON. Card v1 (status, fields, table, progress, list, code, image,
+  actions) still works. Card v2 adds intents (ask, done, working, info), typed blocks and states
+  (pending, waiting on someone, sent, answered, executing, done, failed, expired, superseded).
+  Bots and integrations post them; answers go back to the card's author. Clients before 1.1.0 see
+  a v1 card that the server derives.
 - Permissions: levels `owner` (Joye and the bots at Joye's level) and `member` (interns and
   their bots). Clients and bots use the same API. Every write is audited with who asked, who
   did it, which credential, and what changed.

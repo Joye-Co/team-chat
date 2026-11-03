@@ -1,7 +1,8 @@
 //! The scenes of the screenshot self-test.
 //!
 //! A scene is one window in one state. To add a scene, add one entry to
-//! [`SCENES`]: a name (the PNG is `<name>-<theme>.png`), what it shows, the
+//! [`SCENES`] (v1 and shared scenes) or to the `SCENES` slice of a v2
+//! feature folder (`views/desk/scenes.rs`, …), which [`all`] chains: a name (the PNG is `<name>-<theme>.png`), what it shows, the
 //! data it starts from, a `setup` that moves navigation (or anything else in
 //! `Services`) into place, and an `open` that opens the window. Use
 //! [`open_main`] or [`open_settings`], or write your own opener for a new
@@ -27,6 +28,17 @@ pub enum Start {
     Empty,
     /// Signed in with the sample data while the connection is down.
     Offline,
+    /// Signed in with the v2 sample team of the 1.1.0 artboards
+    /// (`fake::v2::V2Samples`).
+    V2,
+    /// The v2 sample team on a quiet day: nothing waits on me, nothing runs
+    /// (desk track, `desk-empty`).
+    V2Quiet,
+    // --- provider track ---
+    /// The real chat-core provider on a seeded cache, with no server
+    /// (`provider::seeded`).
+    Core,
+    // --- end provider track ---
 }
 
 pub struct Scene {
@@ -54,6 +66,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: |s, c, cx| open_gallery(s, c, 1, cx),
+    },
+    Scene {
+        name: "components-v3",
+        about: "The component gallery: v3 tokens (surfaces, member tints, states, shadows), buttons, tags, rings, rail rows and motion",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| open_gallery(s, c, 2, cx),
     },
     Scene {
         name: "main",
@@ -475,10 +494,138 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: crate::views::timeline::preview::open_compose,
     },
+    // --- web-embed: 产出 pages live inside the window (v11/web-embed) ---
+    Scene {
+        name: "web-embed",
+        about: "An HTML 产出 live inline in a 话题 and in the 产出 pane, with local video and audio",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Topic, cx),
+    },
+    Scene {
+        name: "web-embed-scrolled",
+        about: "web-embed with the 话题 scrolled: the inline page is cut off at the clip edge",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Scrolled, cx),
+    },
+    Scene {
+        name: "web-embed-covered",
+        about: "web-embed with a menu over the inline page: the page hides and its snapshot shows",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Covered, cx),
+    },
+    // --- end web-embed ---
 ];
 
+/// Every scene: the shared ones, then each v2 feature's slice, in order.
+pub fn all() -> Vec<&'static Scene> {
+    let slices: [&'static [Scene]; 13] = [
+        SCENES,
+        crate::views::desk::scenes::SCENES,
+        crate::views::rail::scenes::SCENES,
+        crate::views::topic_page::scenes::SCENES,
+        crate::views::side_chat::scenes::SCENES,
+        crate::views::live::scenes::SCENES,
+        crate::views::nav::ask_scenes::SCENES,
+        crate::views::group_page::scenes::SCENES,
+        crate::views::members_page::scenes::SCENES,
+        crate::views::artifact_page::scenes::SCENES,
+        V2_SHARED,
+        // --- provider track ---
+        CORE_SCENES,
+        // --- end provider track ---
+        // --- cards v2 track ---
+        crate::views::cards::v2::scenes::SCENES,
+        // --- end cards v2 track ---
+    ];
+    slices.into_iter().flatten().collect()
+}
+
+// --- provider track ---
+/// Scenes on the real chat-core provider (seeded cache, no server): the v2 topic parts it
+/// reads from the cache.
+const CORE_SCENES: &[Scene] = &[Scene {
+    name: "topic-core",
+    about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
+    start: Start::Core,
+    setup: |s, cx| {
+        v2_open_topic(
+            s,
+            crate::provider::seeded::GROUP,
+            crate::provider::seeded::TOPIC,
+            cx,
+        )
+    },
+    open: open_main,
+}];
+// --- end provider track ---
+
+/// v2 scenes whose feature lives outside its own folder.
+const V2_SHARED: &[Scene] = &[
+    Scene {
+        name: "settings-appearance",
+        about: "设置 → 外观: theme and 侧栏样式",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: crate::views::settings::appearance::open_scene,
+    },
+    // cards-v2: moved to the cards v2 track's slice (views/cards/v2/scenes.rs).
+];
+
+// --- web-embed: scenes that wait for native content and check their capture ---
+
+use crate::views::artifacts::embed_preview::{self, Mode as EmbedMode};
+
+/// For a scene whose window shows native content (a web page) that GPUI's frames do not
+/// cover: true once it is ready to capture.
+pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
+    match name {
+        "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
+        "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
+        "web-embed-covered" => Some(|cx| embed_preview::ready(EmbedMode::Covered, cx)),
+        // pages track: the 产出 page shows its live page.
+        "artifact-v2" | "artifact-v2-old" | "artifact-pane-v2" => {
+            Some(crate::views::artifact_page::scenes::ready)
+        }
+        // --- r2-trust ---
+        "artifact-v2-choose" | "artifact-quiet-page" => {
+            Some(crate::views::artifact_page::gate_check::ready)
+        }
+        // --- end r2-trust ---
+        _ => None,
+    }
+}
+
+/// For a scene that checks its own capture: runs after the PNG is written.
+pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+    match name {
+        "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
+        "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
+        "web-embed-covered" => Some(|png, cx| embed_preview::verify(EmbedMode::Covered, png, cx)),
+        // --- r2-trust ---
+        "artifact-v2-choose" | "artifact-quiet-page" => {
+            Some(crate::views::artifact_page::gate_check::verify)
+        }
+        // --- end r2-trust ---
+        _ => None,
+    }
+}
+
+// --- end web-embed ---
+
 pub fn find(name: &str) -> Option<&'static Scene> {
-    SCENES.iter().find(|s| s.name == name)
+    all().into_iter().find(|s| s.name == name)
+}
+
+/// v2 setups: open a 话题 of the sample team with the default pane.
+pub fn v2_open_topic(services: &Services, group: &str, topic: &str, cx: &mut App) {
+    let (g, t) = (group.to_string(), topic.to_string());
+    services.nav.update(cx, |nav, cx| {
+        nav.open_group(g.clone(), cx);
+        nav.open_topic(g, t, cx);
+    });
 }
 
 // --- setups ---

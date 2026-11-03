@@ -25,6 +25,17 @@ pub mod search;
 pub mod settings;
 pub mod timeline;
 pub mod update;
+// v2 areas (1.1.0): one file per feature track, registered once here.
+pub mod appearance;
+pub mod artifact_page;
+pub mod cards_v2;
+pub mod desk;
+pub mod group_page;
+pub mod live;
+pub mod members_page;
+pub mod rail;
+pub mod side_chat;
+pub mod topic_rail;
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
 #[macro_export]
@@ -134,6 +145,56 @@ pub const SECTIONS: &[Section] = &[
         name: "dev",
         entries: dev::ENTRIES,
         developer: true,
+    },
+    Section {
+        name: "desk",
+        entries: desk::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "rail",
+        entries: rail::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "topic_rail",
+        entries: topic_rail::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "side_chat",
+        entries: side_chat::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "live",
+        entries: live::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "group_page",
+        entries: group_page::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "members_page",
+        entries: members_page::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "artifact_page",
+        entries: artifact_page::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "appearance",
+        entries: appearance::ENTRIES,
+        developer: false,
+    },
+    Section {
+        name: "cards_v2",
+        entries: cards_v2::ENTRIES,
+        developer: false,
     },
 ];
 

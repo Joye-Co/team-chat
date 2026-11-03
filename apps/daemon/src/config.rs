@@ -38,9 +38,43 @@ pub struct Config {
     pub env_passthrough: Vec<String>,
     #[serde(default = "default_heartbeat_secs")]
     pub heartbeat_secs: u64,
+    /// Screen sharing address people use for 接管 (e.g. `vnc://mac-mini.tailnet`), reported in
+    /// `hello`. The owner turns on macOS Screen Sharing by hand; never put credentials here.
+    #[serde(default)]
+    pub takeover_url: Option<String>,
     /// Runtimes by name. When empty, `codex` and `claude` are added if found on PATH.
     #[serde(default)]
     pub runtimes: BTreeMap<String, RuntimeConfig>,
+}
+
+/// Why a `takeover_url` cannot be reported, or None when it is fine: it must be a
+/// `scheme://host...` address of at most 2048 bytes, without spaces and without a password.
+pub fn takeover_url_problem(url: &str) -> Option<&'static str> {
+    if url.len() > 2048 {
+        return Some("takeover_url must be at most 2048 bytes");
+    }
+    if url.chars().any(|c| c.is_whitespace() || c.is_control()) {
+        return Some("takeover_url must not contain spaces");
+    }
+    let Some((scheme, rest)) = url.split_once("://") else {
+        return Some("takeover_url must look like vnc://host");
+    };
+    let scheme_ok = !scheme.is_empty()
+        && scheme.starts_with(|c: char| c.is_ascii_alphabetic())
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    let authority = rest.split(['/', '?', '#']).next().unwrap_or_default();
+    if !scheme_ok || authority.is_empty() {
+        return Some("takeover_url must look like vnc://host");
+    }
+    if authority
+        .rsplit_once('@')
+        .is_some_and(|(user, _)| user.contains(':'))
+    {
+        return Some("takeover_url must not contain a password");
+    }
+    None
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -208,6 +242,9 @@ impl Config {
                 out.push(format!("runtime {name}: command is required"));
             }
         }
+        if let Some(p) = self.takeover_url.as_deref().and_then(takeover_url_problem) {
+            out.push(p.into());
+        }
         if self.runtimes.is_empty() {
             out.push("no runtimes: install codex or claude, or add [runtimes.*]".into());
         }
@@ -249,6 +286,7 @@ min_free_gb = 10
 stall_minutes = 5
 repo_roots = []                     # e.g. ["~/code"]; empty allows any local repo path
 env_passthrough = []                # e.g. ["GITHUB_TOKEN"]; assignments pick from these
+# takeover_url = "vnc://mac-mini.tailnet"   # 接管: Screen Sharing address (turn Sharing on by hand; no passwords)
 
 [runtimes.codex]
 kind = "codex"
@@ -269,3 +307,19 @@ permission_mode = "acceptEdits"
 # command = "/bin/sh"
 # args = ["-c", "{prompt}"]
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::takeover_url_problem as p;
+
+    #[test]
+    fn takeover_url_rules() {
+        assert_eq!(p("vnc://mac-mini.tailnet"), None);
+        assert_eq!(p("vnc://joye@mac-mini.local:5900/"), None);
+        assert!(p("vnc://joye:hunter2@mac-mini.local").is_some());
+        assert!(p("mac-mini.local").is_some());
+        assert!(p("vnc://").is_some());
+        assert!(p("vnc://mac mini").is_some());
+        assert!(p(&format!("vnc://{}", "a".repeat(2050))).is_some());
+    }
+}

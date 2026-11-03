@@ -1,0 +1,248 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "the server derives card",
+  "value": {
+    "t": "send",
+    "rid": "r90",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "c90",
+    "body": "",
+    "cardV2": {
+      "v": 2,
+      "rev": 3,
+      "intent": "done",
+      "title": "修好了 sync 测试",
+      "fallback": "测试 128/128 通过，PR #42 已开。",
+      "blocks": [
+        {
+          "type": "metric",
+          "id": "tests",
+          "label": "测试",
+          "value": 128,
+          "unit": "个",
+          "delta": 3,
+          "better": "up"
+        },
+        {
+          "type": "metric",
+          "id": "time",
+          "label": "用时",
+          "value": 4.5,
+          "unit": "分钟",
+          "better": "down",
+          "note": "比上次快"
+        },
+        {
+          "type": "chart",
+          "id": "trend",
+          "kind": "line",
+          "label": "构建时间",
+          "unit": "s",
+          "x": [
+            "周一",
+            "周二",
+            "周三"
+          ],
+          "series": [
+            {
+              "name": "main",
+              "values": [
+                312,
+                298.5,
+                270
+              ]
+            }
+          ]
+        },
+        {
+          "type": "chart",
+          "id": "spark",
+          "kind": "spark",
+          "series": [
+            {
+              "name": "失败",
+              "values": []
+            }
+          ]
+        },
+        {
+          "type": "diff",
+          "id": "patch",
+          "path": "src/sync.rs",
+          "text": "@@ -1 +1 @@\n-a\n+b\n",
+          "additions": 1,
+          "deletions": 1
+        },
+        {
+          "type": "plan",
+          "id": "plan",
+          "runId": "01JBX0RUN000000000000000AU",
+          "items": [
+            {
+              "text": "跑测试",
+              "state": "done"
+            },
+            {
+              "text": "开 PR",
+              "state": "current"
+            },
+            {
+              "text": "等审",
+              "state": "waiting"
+            },
+            {
+              "text": "合并",
+              "state": "pending"
+            }
+          ]
+        },
+        {
+          "type": "group",
+          "id": "refs",
+          "label": "相关",
+          "blocks": [
+            {
+              "type": "ref",
+              "id": "pr",
+              "label": "PR #42",
+              "target": {
+                "kind": "pr",
+                "url": "https://github.com/Joye-Co/team-chat/pull/42",
+                "repo": "Joye-Co/team-chat",
+                "number": 42,
+                "state": "open"
+              }
+            },
+            {
+              "type": "ref",
+              "id": "page",
+              "label": "报告",
+              "target": {
+                "kind": "artifact",
+                "artifactId": "01JBX0ART000000000000000AM",
+                "version": 2
+              }
+            },
+            {
+              "type": "ref",
+              "id": "topic",
+              "label": "原话题",
+              "target": {
+                "kind": "topic",
+                "groupId": "01JBX0GENERAL000000000000A",
+                "topicId": "01JBX0TOPIC0000000000000AD"
+              }
+            },
+            {
+              "type": "ref",
+              "id": "who",
+              "label": "Alice",
+              "target": {
+                "kind": "member",
+                "memberId": "01JBX0ALICE0000000000000AB"
+              }
+            },
+            {
+              "type": "ref",
+              "id": "docs",
+              "label": "文档",
+              "target": {
+                "kind": "url",
+                "url": "https://example.com/docs"
+              }
+            },
+            {
+              "type": "evidence",
+              "id": "shot",
+              "label": "截图",
+              "state": "info",
+              "fileId": "01JBX0FILE00000000000000AH",
+              "artifact": {
+                "artifactId": "01JBX0ART000000000000000AM",
+                "version": 1
+              }
+            }
+          ]
+        },
+        {
+          "type": "fields",
+          "id": "f",
+          "fields": [
+            {
+              "label": "分支",
+              "value": "bot/run"
+            }
+          ]
+        },
+        {
+          "type": "table",
+          "id": "tbl",
+          "columns": [
+            "文件",
+            "改动"
+          ],
+          "rows": [
+            [
+              "src/a.rs",
+              "+3"
+            ]
+          ]
+        },
+        {
+          "type": "list",
+          "id": "lst",
+          "items": [
+            {
+              "text": "a",
+              "status": "done"
+            }
+          ]
+        },
+        {
+          "type": "progress",
+          "id": "prog",
+          "value": 1,
+          "label": "完成"
+        },
+        {
+          "type": "code",
+          "id": "log",
+          "lang": "text",
+          "text": "ok"
+        },
+        {
+          "type": "image",
+          "id": "img",
+          "fileId": "01JBX0FILE00000000000000AH",
+          "alt": "结果"
+        },
+        {
+          "type": "divider",
+          "id": "div"
+        },
+        {
+          "type": "link",
+          "id": "lnk",
+          "label": "打开",
+          "target": {
+            "kind": "url",
+            "url": "https://example.com"
+          }
+        }
+      ],
+      "actions": [
+        {
+          "id": "open",
+          "label": "看 PR",
+          "kind": "link",
+          "target": {
+            "kind": "pr",
+            "url": "https://github.com/Joye-Co/team-chat/pull/42"
+          }
+        }
+      ]
+    }
+  }
+}

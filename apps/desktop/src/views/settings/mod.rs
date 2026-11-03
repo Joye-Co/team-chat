@@ -7,8 +7,11 @@
 //! through a [`crate::data::AdminReply`], awaited off the UI thread.
 
 mod about;
+pub mod appearance;
 mod machines;
 mod members;
+// pages track: the 成员 page reuses the invite and add-member forms.
+pub(crate) use members::{open_add_bot, open_invite};
 mod notifications;
 mod profile;
 pub mod selftest;
@@ -30,6 +33,7 @@ use crate::{
 };
 
 pub use about::AboutPage;
+pub use appearance::AppearancePage;
 pub use machines::MachinesPage;
 pub use members::MembersPage;
 pub use notifications::NotificationsPage;
@@ -43,16 +47,19 @@ pub enum Page {
     Members,
     Machines,
     Notifications,
+    /// 外观 (1.1.0): theme and rail style.
+    Appearance,
     About,
 }
 
 impl Page {
     /// 成本 has no page until it exists (U43).
-    pub const ALL: [Page; 5] = [
+    pub const ALL: [Page; 6] = [
         Page::Profile,
         Page::Members,
         Page::Machines,
         Page::Notifications,
+        Page::Appearance,
         Page::About,
     ];
 
@@ -62,6 +69,7 @@ impl Page {
             Page::Members => s::PAGE_MEMBERS,
             Page::Machines => s::PAGE_MACHINES,
             Page::Notifications => s::PAGE_NOTIFICATIONS,
+            Page::Appearance => crate::copy::appearance::APPEARANCE_PAGE,
             Page::About => s::PAGE_GENERAL,
         }
     }
@@ -73,6 +81,7 @@ impl Page {
             Page::Members => "members",
             Page::Machines => "machines",
             Page::Notifications => "notifications",
+            Page::Appearance => "appearance",
             Page::About => "about",
         }
     }
@@ -96,6 +105,7 @@ pub struct SettingsView {
     members: Entity<MembersPage>,
     machines: Entity<MachinesPage>,
     notifications: Entity<NotificationsPage>,
+    appearance: Entity<AppearancePage>,
     about: Entity<AboutPage>,
     /// The page scroll, so a scene can show the end of a long page.
     scroll: gpui::ScrollHandle,
@@ -117,6 +127,7 @@ impl SettingsView {
         let members = cx.new(|cx| MembersPage::new(services.clone(), window, cx));
         let machines = cx.new(|cx| MachinesPage::new(services.clone(), window, cx));
         let notifications = cx.new(|cx| NotificationsPage::new(services.clone(), window, cx));
+        let appearance = cx.new(|cx| AppearancePage::new(services.clone(), window, cx));
         let about = cx.new(|cx| AboutPage::new(services.clone(), window, cx));
         let mut this = Self {
             page: Page::Profile,
@@ -124,6 +135,7 @@ impl SettingsView {
             members,
             machines,
             notifications,
+            appearance,
             about,
             scroll: gpui::ScrollHandle::new(),
             _subscriptions: vec![theme::follow_system(window, cx)],
@@ -178,6 +190,7 @@ impl SettingsView {
             Page::Members => self.members.clone().into_any_element(),
             Page::Machines => self.machines.clone().into_any_element(),
             Page::Notifications => self.notifications.clone().into_any_element(),
+            Page::Appearance => self.appearance.clone().into_any_element(),
             Page::About => self.about.clone().into_any_element(),
         }
     }
@@ -200,6 +213,7 @@ impl Page {
             Page::Members => Lucide::Users,
             Page::Machines => Lucide::Monitor,
             Page::Notifications => Lucide::Bell,
+            Page::Appearance => Lucide::Monitor,
             Page::About => Lucide::Settings,
         }
     }

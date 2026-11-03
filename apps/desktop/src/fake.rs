@@ -8,7 +8,6 @@
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
@@ -16,6 +15,10 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use crate::{data::*, drafts::DraftStore};
 
 mod settings;
+/// The v2 sample team of the 1.1.0 artboards.
+pub mod v2;
+// Desk track (1.1.0 首页).
+pub mod v2_desk;
 
 pub const ME: &str = "m-joye";
 /// The topic with 10,000 messages.
@@ -55,10 +58,7 @@ struct State {
 }
 
 fn now_ms() -> Millis {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::selftest::clock::now_ms()
 }
 
 const MIN: i64 = 60_000;

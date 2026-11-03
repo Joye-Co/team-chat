@@ -118,12 +118,15 @@ pub fn button(
     let k = theme::colors(cx);
     let b = Button::new(id).label(label);
     let b = match kind {
-        ButtonKind::Primary => b.primary(),
+        // v3: ink fill with the inner highlight (`--btn-hi`).
+        ButtonKind::Primary => b.primary().shadow(k.btn_hi()),
+        // v3: `bg` fill, 1 pt `line-2` and the hairline drop (`--sec-hi`).
         ButtonKind::Secondary => b
             .custom(secondary_variant(cx))
             .outline()
-            .bg(gpui::transparent_black())
-            .border_color(k.border_strong),
+            .bg(k.bg)
+            .border_color(k.line_2)
+            .shadow(k.sec_hi()),
         ButtonKind::Ghost => b.ghost(),
         ButtonKind::Danger => b.danger(),
     };
@@ -548,7 +551,12 @@ mod tests {
                     if !(rest.starts_with("icon_button(") || rest.starts_with("icon_button_sm(")) {
                         continue;
                     }
-                    let chain = &rest[..rest.len().min(400)];
+                    // 400 bytes, cut back to a char boundary (CJK copy nearby).
+                    let end = (0..=rest.len().min(400))
+                        .rev()
+                        .find(|&i| rest.is_char_boundary(i))
+                        .unwrap_or(0);
+                    let chain = &rest[..end];
                     let named = chain.find(".named(");
                     let tooltip = chain.find(".tooltip(");
                     // The hover toolbar builds its buttons in a closure and

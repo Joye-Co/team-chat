@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10 月数据月报</title>
+<style>
+:root{--bg:#FFFFFF;--sunken:#F3F3F4;--raised:#FAFAFA;--ink:#111113;--ink-2:#52525B;--ink-3:#6E6E76;--line:#EBEBED;--line-2:#DCDCE0;--hover:#F0F0F2;--sel:#E9E9EC;--btn:#111113;--btn-ink:#FFFFFF;--ok-ink:#177245;--c-ledger:#F4DDE3;--tile-ink:#2D3272;--lift:0 1px 2px rgba(17,17,19,.05);--sec-hi:0 1px 1px rgba(17,17,19,.05)}
+@media (prefers-color-scheme:dark){:root{--bg:#111113;--sunken:#1C1C1F;--raised:#151517;--ink:#F1F1F3;--ink-2:#A9A9B2;--ink-3:#8C8C95;--line:#252529;--line-2:#34343A;--hover:#1D1D20;--sel:#26262A;--btn:#F1F1F3;--btn-ink:#111113;--ok-ink:#6AD69C;--c-ledger:#CDB9BE;--tile-ink:#232858;--lift:none;--sec-hi:none}}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Helvetica Neue",sans-serif;font-size:14px;line-height:22px;-webkit-font-smoothing:antialiased}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+article{max-width:800px;margin:0 auto;padding:32px 40px 40px}
+.kpi{margin:24px 0 0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.kpi>div{padding:16px;display:flex;align-items:flex-end;gap:12px}
+.kpi>div:first-child{padding-left:0}
+.kpi>div+div{border-left:1px solid var(--line)}
+.kpi dt{font-size:12px;line-height:18px;color:var(--ink-3)}
+.kpi dd{margin:4px 0 0}
+.kpi .v{font-size:26px;line-height:32px;font-weight:600;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.kpi .d{font-size:12px;line-height:18px;color:var(--ink-3)}
+.bars{flex:none;display:flex;align-items:flex-end;gap:3px;height:28px;margin-bottom:4px}
+.bars span{width:6px;border-radius:1.5px;background:var(--line-2)}
+.bars span:last-child{background:var(--ink-3)}
+.grid{margin-top:32px;display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:32px}
+.cap{font-size:13px;line-height:20px;font-weight:600}
+.unit{font-size:12px;color:var(--ink-3);font-weight:400;margin-left:8px}
+.tag{height:18px;padding:0 6px;border-radius:5px;background:var(--sunken);color:var(--ink-2);font-size:12px;line-height:18px;font-weight:400;margin-left:8px}
+table{margin-top:8px;width:100%;border-collapse:collapse;font-size:13px;line-height:20px}
+th,td{padding:8px 0;border-bottom:1px solid var(--line)}
+thead th{font-size:12px;color:var(--ink-3);font-weight:400;padding:6px 0}
+tbody th{text-align:left;font-weight:400}
+td{text-align:right;font-size:12px}
+tr:last-child th,tr:last-child td{border-bottom:0}
+.share{display:flex;align-items:center;justify-content:flex-end;gap:8px;color:var(--ink-2)}
+.track{width:48px;height:4px;border-radius:2px;background:var(--sunken);display:flex}
+.track span{height:4px;border-radius:2px;background:var(--ink-3)}
+.ask{margin-top:32px;border:1px solid var(--line);border-radius:12px;background:var(--bg);box-shadow:var(--lift);overflow:hidden}
+.ask .in{padding:14px 16px 16px}
+.who{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;color:var(--ink-3)}
+.tile{flex:none;width:20px;height:20px;border-radius:6px;background:var(--c-ledger);color:var(--tile-ink);font-size:10px;font-weight:600;display:flex;align-items:center;justify-content:center}
+.opts{margin-top:12px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.opt{display:flex;align-items:center;gap:10px;height:36px;padding:0 12px 0 8px;border:1px solid var(--line-2);border-radius:9px;background:var(--bg);box-shadow:var(--sec-hi);font:inherit;font-size:13px;color:var(--ink);text-align:left;cursor:pointer}
+.opt:hover{border-color:var(--ink-3)}
+.opt .k{flex:none;width:20px;height:20px;border-radius:6px;background:var(--sunken);color:var(--ink-2);font-size:11px;line-height:20px;text-align:center}
+.opt.on{border-color:var(--ink);box-shadow:inset 0 0 0 .5px var(--ink)}
+.opt.on .k{background:var(--btn);color:var(--btn-ink)}
+.opt .r{margin-left:auto;font-size:12px;color:var(--ink-3)}
+.opt[disabled]{color:var(--ink-2);cursor:default}
+.foot{margin:0;display:flex;align-items:center;gap:8px;padding:10px 16px;border-top:1px solid var(--line);background:var(--raised);font-size:12px;line-height:18px;color:var(--ink-3)}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes line{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+.rise{animation:rise .36s cubic-bezier(.23,1,.32,1) both}
+.draw{stroke-dasharray:1;animation:line .6s cubic-bezier(.23,1,.32,1) .3s both}
+@media (max-width:600px){article{padding:24px 20px 32px}.kpi{grid-template-columns:1fr}.kpi>div{padding:12px 0}.kpi>div+div{border-left:0;border-top:1px solid var(--line)}.opts{grid-template-columns:1fr}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+<article>
+<p class="mono rise" style="margin:0;font-size:12px;line-height:18px;color:var(--ink-3)">夹夹 · 2026.10.01 – 10.31</p>
+<h2 class="rise" style="margin:8px 0 0;font-size:22px;line-height:30px;font-weight:600;letter-spacing:-.015em">新增群涨了 12%，回复也更快了</h2>
+<p class="rise" style="margin:8px 0 0;color:var(--ink-2)">小红书带来的新增最多，而且每周都在涨。日活按去重设备算。</p>
+
+<dl class="kpi rise">
+<div><span style="flex:1"><dt>新增群</dt><dd class="v">38</dd><dd class="d"><span class="mono" style="color:var(--ok-ink)">+12%</span> 比 9 月</dd></span>
+<span class="bars"><span style="height:20px"></span><span style="height:22px"></span><span style="height:25px"></span><span style="height:28px"></span></span></div>
+<div><span style="flex:1"><dt>日活</dt><dd class="v">2,340</dd><dd class="d"><span class="mono" style="color:var(--ok-ink)">+4%</span> 比 9 月</dd></span>
+<span class="bars"><span style="height:23px"></span><span style="height:24px"></span><span style="height:26px"></span><span style="height:28px"></span></span></div>
+<div><span style="flex:1"><dt>平均回复</dt><dd class="v">1.2<span style="margin-left:4px;font-size:14px;font-weight:500;color:var(--ink-2)">秒</span></dd><dd class="d"><span class="mono" style="color:var(--ok-ink)">−0.3 秒</span> 更快了</dd></span>
+<span class="bars"><span style="height:28px"></span><span style="height:26px"></span><span style="height:22px"></span><span style="height:20px"></span></span></div>
+</dl>
+
+<div class="grid">
+<figure class="rise" style="margin:0;min-width:0">
+<figcaption class="cap">各渠道每周新增群<span class="unit">单位：个</span></figcaption>
+<svg viewBox="0 0 344 184" width="100%" style="display:block;max-width:344px;margin-top:12px;overflow:visible">
+<g style="stroke:var(--line)" stroke-width="1"><path d="M32 150H262"/><path d="M32 103.3H262"/><path d="M32 56.7H262"/><path d="M32 10H262"/></g>
+<g class="mono" style="fill:var(--ink-3)" font-size="12" text-anchor="end"><text x="22" y="154">0</text><text x="22" y="107">2</text><text x="22" y="61">4</text><text x="22" y="14">6</text></g>
+<g style="fill:var(--ink-3)" font-size="12" text-anchor="middle"><text x="40" y="176">第 1 周</text><text x="114" y="176">第 2 周</text><text x="188" y="176">第 3 周</text><text x="262" y="176">第 4 周</text></g>
+<g fill="none" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" style="stroke:var(--ink-3)" opacity=".55">
+<path class="draw" pathLength="1" d="M40 80L114 80L188 103.3L262 103.3"/><path class="draw" pathLength="1" d="M40 103.3L114 103.3L188 103.3L262 80"/><path class="draw" pathLength="1" d="M40 126.7L114 126.7L188 103.3L262 126.7"/></g>
+<path class="draw" pathLength="1" d="M40 103.3L114 80L188 56.7L262 33.3" fill="none" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" style="stroke:var(--ink)"/>
+<g stroke-width="2" style="stroke:var(--ink);fill:var(--bg)"><circle cx="40" cy="103.3" r="3.5"/><circle cx="114" cy="80" r="3.5"/><circle cx="188" cy="56.7" r="3.5"/><circle cx="262" cy="33.3" r="3.5"/></g>
+<g font-size="12"><text x="272" y="37.5" font-weight="600" style="fill:var(--ink)">小红书</text><text x="272" y="84" style="fill:var(--ink-3)">B 站</text><text x="272" y="107.5" style="fill:var(--ink-3)">群内邀请</text><text x="272" y="131" style="fill:var(--ink-3)">抖音</text></g>
+</svg>
+</figure>
+<!--v3-->
+<div class="rise" style="min-width:0">
+<div class="cap">渠道拆分<span class="tag">v3 新加</span></div>
+<table>
+<thead><tr><th style="text-align:left">渠道</th><th style="text-align:right">新增群</th><th style="text-align:right">占比</th><th style="text-align:right">比 9 月</th></tr></thead>
+<tbody>
+<tr><th style="font-weight:500">小红书</th><td class="mono">14</td><td class="mono"><span class="share"><span class="track"><span style="width:18px;background:var(--ink)"></span></span><span style="width:28px;text-align:right">37%</span></span></td><td class="mono" style="color:var(--ok-ink)">+6</td></tr>
+<tr><th>群内邀请</th><td class="mono">10</td><td class="mono"><span class="share"><span class="track"><span style="width:12.5px"></span></span><span style="width:28px;text-align:right">26%</span></span></td><td class="mono" style="color:var(--ink-2)">+1</td></tr>
+<tr><th>B 站</th><td class="mono">9</td><td class="mono"><span class="share"><span class="track"><span style="width:11.5px"></span></span><span style="width:28px;text-align:right">24%</span></span></td><td class="mono" style="color:var(--ink-2)">−1</td></tr>
+<tr><th>抖音</th><td class="mono">5</td><td class="mono"><span class="share"><span class="track"><span style="width:6px"></span></span><span style="width:28px;text-align:right">13%</span></span></td><td class="mono" style="color:var(--ink-2)">−2</td></tr>
+<tr><th style="color:var(--ink-3)">合计</th><td class="mono" style="font-weight:600">38</td><td class="mono" style="color:var(--ink-3)">100%</td><td class="mono" style="color:var(--ink-2)">+4</td></tr>
+</tbody>
+</table>
+</div>
+<!--/v3-->
+</div>
+
+<section class="ask rise">
+<div class="in">
+<div class="who"><span class="tile">L</span><span style="font-size:13px;font-weight:500;color:var(--ink)">Ledger</span><span class="tag" style="margin-left:0">数据</span><span>在页面里问</span></div>
+<h3 style="margin:10px 0 0;font-size:16px;line-height:24px;font-weight:600">下个月加预算投哪个渠道？</h3>
+<p style="margin:4px 0 0;font-size:13px;line-height:20px;color:var(--ink-2)">按 10 月算，每个新增群的花费：小红书 <span class="mono">¥41</span>，B 站 <span class="mono">¥58</span>，抖音 <span class="mono">¥96</span>。群内邀请不花钱，但涨不动。</p>
+<div class="opts" id="opts">
+<button type="button" class="opt" data-id="a" data-label="小红书"><span class="k mono">A</span><span>小红书</span><span class="r">Ledger 推荐</span></button>
+<button type="button" class="opt on" data-id="b" data-label="B 站"><span class="k mono">B</span><span>B 站</span><svg class="r ok" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round" style="color:var(--ink)"><path d="M20 6 9 17l-5-5"/></svg></button>
+<button type="button" class="opt" data-id="c" data-label="抖音"><span class="k mono">C</span><span>抖音</span></button>
+<button type="button" class="opt" data-id="d" data-label="先不加，维持现状"><span class="k mono">D</span><span>先不加，维持现状</span></button>
+</div>
+</div>
+<p class="foot" id="foot" data-now="10:21"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 21.5 22 2 2.5 9.5l8 3.5Z"/><path d="M22 2 10.5 13"/></svg><span id="sent">你选了「B 站」· <span class="mono">10:12</span> · 已发给 Ledger</span></p>
+</section>
+</article>
+<script>
+(function(){
+  var opts=document.querySelectorAll('#opts .opt');
+  opts.forEach(function(b){
+    b.addEventListener('click',function(){
+      if(b.disabled)return;
+      opts.forEach(function(o){o.classList.remove('on')});
+      b.classList.add('on');
+      var label=b.getAttribute('data-label');
+      // The sample's own clock (the artboards' 10:21), not the viewer's.
+      var hh=document.getElementById('foot').getAttribute('data-now')||'';
+      // One choice: the ✓ moves to the chosen option.
+      var ok=document.querySelector('#opts .ok');
+      if(ok){ok.parentNode.removeChild(ok);ok.style.marginLeft=b.querySelector('.r')?'8px':'';b.appendChild(ok);}
+      document.getElementById('sent').innerHTML='你选了「'+label+'」· <span class="mono">'+hh+'</span> · 已发给 Ledger';
+      if(window.artifact&&window.artifact.emitEvent){window.artifact.emitEvent('choose',{option:b.getAttribute('data-id'),label:label}).catch(function(){});}
+    });
+  });
+})();
+</script>
+</body>
+</html>

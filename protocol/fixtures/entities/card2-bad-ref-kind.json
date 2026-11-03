@@ -1,0 +1,23 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "unknown ref kind",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "working",
+    "title": "正在做",
+    "fallback": "",
+    "blocks": [
+      {
+        "type": "ref",
+        "id": "r",
+        "label": "x",
+        "target": {
+          "kind": "issue",
+          "url": "https://example.com"
+        }
+      }
+    ]
+  }
+}

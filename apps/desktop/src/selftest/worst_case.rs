@@ -166,10 +166,7 @@ fn topic(mut t: Topic, i: usize, now: Millis) -> Topic {
 }
 
 fn now_ms() -> Millis {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::selftest::clock::now_ms()
 }
 
 /// The fake provider with every rendered value replaced by a worst case.
@@ -401,6 +398,51 @@ impl ChatProvider for WorstCase {
     fn set_typing(&self, group_id: &str, topic_id: &str) {
         self.inner.set_typing(group_id, topic_id)
     }
+    // --- desk track (1.1.0 首页): the desk's data at its worst ---
+
+    fn desk_note(&self) -> Option<v2::DeskNote> {
+        self.inner.desk_note().map(|mut n| {
+            n.text = pick(BODIES, 4).to_string();
+            n
+        })
+    }
+    fn asks_for_me(&self) -> Vec<v2::AskItem> {
+        self.inner
+            .asks_for_me()
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut a)| {
+                a.title = pick(TITLES, i).to_string();
+                a.at = if i == 1 { 0 } else { a.at };
+                a
+            })
+            .collect()
+    }
+    fn done_today(&self) -> Vec<v2::DoneItem> {
+        self.inner
+            .done_today()
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut d)| {
+                d.title = pick(TITLES, i * 3).to_string();
+                d
+            })
+            .collect()
+    }
+    fn queue(&self) -> Vec<v2::QueuedItem> {
+        self.inner
+            .queue()
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut q)| {
+                q.title = pick(PLAN_TEXTS, i).to_string();
+                q
+            })
+            .collect()
+    }
+
+    // --- end of the desk track block ---
+
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         self.inner.subscribe()
     }
@@ -529,6 +571,21 @@ impl ChatProvider for WorstCase {
     ) -> Reply<ArtifactFolder> {
         self.inner.open_artifact_version(artifact_id, version)
     }
+    // --- r2-trust ---
+    fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
+        self.inner.artifact_page_events(artifact_id, version)
+    }
+    fn send_artifact_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        payload: Option<serde_json::Value>,
+    ) {
+        self.inner
+            .send_artifact_event(artifact_id, version, name, payload)
+    }
+    // --- end r2-trust ---
     fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
         self.inner.create_artifact(request)
     }
@@ -634,7 +691,131 @@ impl ChatProvider for WorstCase {
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
         self.inner.card_image(group_id, topic_id, file_id)
     }
+
+    // --- panes track (1.1.0): 单独问 and 实时查看 at their worst ---
+
+    fn side_chat_default_member(&self) -> Option<MemberId> {
+        self.inner.side_chat_default_member()
+    }
+    /// The aside with a long question, an unbroken path in a ref chip and a
+    /// long suggestion.
+    fn side_chat(&self, group_id: &str, topic_id: &str, member_id: &str) -> v2::SideChatThread {
+        let mut thread = self.inner.side_chat(group_id, topic_id, member_id);
+        for m in &mut thread.messages {
+            m.body = format!("{}\n{}", m.body, PANES_LONG_TEXT);
+            m.refs.push(
+                "apps/desktop/src/views/side_chat/very/deep/folder/reconnect_with_backoff_and_dedupe.rs".into(),
+            );
+            if let Some(s) = &mut m.suggestion {
+                s.text = format!(
+                    "{}，并在 iOS、Android、Windows 和网页端各跑一遍完整的回归",
+                    s.text
+                );
+            }
+        }
+        thread
+    }
+    fn send_side_chat(&self, group_id: &str, topic_id: &str, member_id: &str, body: String) {
+        self.inner
+            .send_side_chat(group_id, topic_id, member_id, body)
+    }
+    fn post_side_chat_suggestion(&self, g: &str, t: &str, m: &str, id: &str) {
+        self.inner.post_side_chat_suggestion(g, t, m, id)
+    }
+    /// A screen with very long command and output lines and many of them.
+    fn machine_screen(&self, run_id: &str) -> Option<v2::MachineScreen> {
+        let mut screen = self.inner.machine_screen(run_id)?;
+        // desk track: the live thumbnail rows get the long bodies too.
+        for (i, l) in screen.lines.iter_mut().enumerate() {
+            if i % 2 == 0 {
+                l.text = pick(BODIES, i).to_string();
+            }
+        }
+        screen.machine_name = Some("mac-mini-office-build-runner-arm64-nightly-02.tailnet".into());
+        let step = screen.lines.last().and_then(|l| l.step);
+        let at = screen.lines.last().map(|l| l.at).unwrap_or(self.now);
+        for i in 0..30 {
+            screen.lines.push(v2::ScreenLine {
+                kind: if i % 7 == 0 {
+                    v2::ScreenLineKind::Command
+                } else if i % 11 == 5 {
+                    v2::ScreenLineKind::Error
+                } else {
+                    v2::ScreenLineKind::Output
+                },
+                text: format!("{i:02} {}", PANES_LONG_TEXT),
+                at,
+                step,
+            });
+        }
+        Some(screen)
+    }
+    fn acceptance_criteria(&self, run_id: &str) -> Vec<v2::AcceptanceItem> {
+        let mut items = self.inner.acceptance_criteria(run_id);
+        for i in &mut items {
+            i.text = format!("{}，{}", i.text, PANES_LONG_TEXT);
+            if let Some(e) = &mut i.evidence {
+                e.push_str("（第 3 次测量，取 60 秒内的最差值，Mac mini M2）");
+            }
+        }
+        items
+    }
+    fn run_step_times(&self, run_id: &str) -> Vec<Millis> {
+        self.inner.run_step_times(run_id)
+    }
+    fn take_over_run(&self, g: &str, t: &str, run_id: &str) -> AdminReply<()> {
+        self.inner.take_over_run(g, t, run_id)
+    }
+    fn hand_back_run(&self, g: &str, t: &str, run_id: &str) -> AdminReply<()> {
+        self.inner.hand_back_run(g, t, run_id)
+    }
+
+    // --- end of the panes track ---
+
+    // --- cards v2 track: v2 cards with worst-case titles and subtitles ---
+    fn card_v2(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Message> {
+        let mut msg = self.inner.card_v2(group_id, message_id)?;
+        let i = message_id.bytes().map(usize::from).sum::<usize>();
+        let mut card = (*msg.card).clone();
+        let title = pick(TITLES, i);
+        if !title.is_empty() {
+            card.title = title.to_string();
+        }
+        card.fallback = pick(TITLES, i + 3).to_string();
+        // desk track: long bodies in the text blocks too.
+        for b in card.blocks.iter_mut() {
+            if let cards_v2::CardV2Block::Text { text, .. } = b {
+                *text = pick(BODIES, 4).to_string();
+            }
+        }
+        msg.card = Arc::new(card);
+        Some(msg)
+    }
+    fn card_v2_answers(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::CardV2Answer> {
+        self.inner.card_v2_answers(group_id, message_id)
+    }
+    fn card_v2_pending(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Pending> {
+        self.inner.card_v2_pending(group_id, message_id)
+    }
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        answer: cards_v2::CardV2AnswerRequest,
+    ) {
+        self.inner
+            .answer_card_v2(group_id, topic_id, message_id, answer)
+    }
+    fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        self.inner
+            .withdraw_card_v2_answer(group_id, topic_id, message_id)
+    }
+    // --- end cards v2 track ---
 }
+
+/// A long run of mixed text with an unbroken token (panes track).
+const PANES_LONG_TEXT: &str = "重连后在弱网下连续切换 Wi-Fi 和蜂窝网络三十次，检查 seq_dedupe_window_after_reconnect_with_exponential_backoff_capped_at_30s 是否始终只推一次";
 
 /// Signed in as the fake provider's member, with nothing else.
 pub struct Empty {

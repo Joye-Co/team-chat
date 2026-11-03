@@ -1,0 +1,159 @@
+{
+  "kind": "Card",
+  "valid": true,
+  "description": "cardV2ToV1 of card2-done",
+  "value": {
+    "v": 1,
+    "title": "修好了 sync 测试",
+    "tone": "success",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "测试 128/128 通过，PR #42 已开。"
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "label": "测试",
+            "value": "128个"
+          }
+        ]
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "label": "用时",
+            "value": "4.5分钟"
+          }
+        ]
+      },
+      {
+        "type": "code",
+        "lang": "diff",
+        "text": "@@ -1 +1 @@\n-a\n+b\n"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "跑测试",
+            "status": "done"
+          },
+          {
+            "text": "开 PR",
+            "status": "in_progress"
+          },
+          {
+            "text": "等审",
+            "status": "todo"
+          },
+          {
+            "text": "合并",
+            "status": "todo"
+          }
+        ]
+      },
+      {
+        "type": "link",
+        "label": "PR #42",
+        "target": {
+          "kind": "url",
+          "url": "https://github.com/Joye-Co/team-chat/pull/42"
+        }
+      },
+      {
+        "type": "link",
+        "label": "报告",
+        "target": {
+          "kind": "artifact",
+          "artifactId": "01JBX0ART000000000000000AM",
+          "version": 2
+        }
+      },
+      {
+        "type": "link",
+        "label": "原话题",
+        "target": {
+          "kind": "topic",
+          "groupId": "01JBX0GENERAL000000000000A",
+          "topicId": "01JBX0TOPIC0000000000000AD"
+        }
+      },
+      {
+        "type": "link",
+        "label": "文档",
+        "target": {
+          "kind": "url",
+          "url": "https://example.com/docs"
+        }
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "截图"
+          }
+        ]
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "label": "分支",
+            "value": "bot/run"
+          }
+        ]
+      },
+      {
+        "type": "table",
+        "columns": [
+          "文件",
+          "改动"
+        ],
+        "rows": [
+          [
+            "src/a.rs",
+            "+3"
+          ]
+        ]
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "a",
+            "status": "done"
+          }
+        ]
+      },
+      {
+        "type": "progress",
+        "value": 1,
+        "label": "完成"
+      },
+      {
+        "type": "code",
+        "lang": "text",
+        "text": "ok"
+      },
+      {
+        "type": "image",
+        "fileId": "01JBX0FILE00000000000000AH",
+        "alt": "结果"
+      },
+      {
+        "type": "divider"
+      },
+      {
+        "type": "link",
+        "label": "打开",
+        "target": {
+          "kind": "url",
+          "url": "https://example.com"
+        }
+      }
+    ]
+  }
+}

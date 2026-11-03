@@ -7,3 +7,5 @@ import "./search";
 import "./integrations";
 import "./bots";
 import "./reactions";
+import "./cards2";
+import "./sidechat";
