@@ -28,7 +28,7 @@ import {
   type TopicStatus,
   type TransientEvent,
 } from "@chat/protocol";
-import { answeredCard, checkCardV2, type DoneCardOptions, doneCard } from "./cards.ts";
+import { answeredCard, checkCardV2, type DoneCardOptions, doneCard, failedV1Card } from "./cards.ts";
 import { ChatError } from "./errors.ts";
 import { HttpClient, normalizeBaseUrl, type UploadInput } from "./http.ts";
 import { consoleLogger, type Logger, type LogLevel } from "./log.ts";
@@ -636,13 +636,16 @@ export class Bot {
    * `formCard` and `doneCard`.
    */
   postCardV2(target: Target, card: CardV2, input: Omit<SendInput, "card" | "cardV2"> = {}): Promise<SendResult> {
-    return this.send(target, { ...input, cardV2: checkCardV2(card), body: input.body ?? "" });
+    const checked = checkCardV2(card);
+    const v1 = failedV1Card(checked);
+    return this.send(target, { ...input, cardV2: checked, ...(v1 ? { card: v1 } : {}), body: input.body ?? "" });
   }
 
   /** Replaces one of my v2 cards. `card.rev` must be higher than the stored rev. */
   async updateCardV2(groupId: string, messageId: string, card: CardV2, body?: string): Promise<Message> {
     const checked = checkCardV2(card);
-    const r = await this.edit(groupId, messageId, { body: body ?? (checked.fallback || checked.title), cardV2: checked });
+    const v1 = failedV1Card(checked);
+    const r = await this.edit(groupId, messageId, { body: body ?? (checked.fallback || checked.title), cardV2: checked, ...(v1 ? { card: v1 } : {}) });
     this.cacheCard(messageId, checked);
     return r.message;
   }

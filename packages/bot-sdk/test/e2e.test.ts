@@ -124,6 +124,11 @@ function makeEchoBot(seen: { mentions: string[]; followed: string[]; catchUp: st
       });
       return;
     }
+    if (text.startsWith("fail")) {
+      await ctx.setPlan([{ text: "部署", state: "current" }]);
+      await ctx.done({ title: "部署", summary: "staging 起不来", failed: true });
+      return;
+    }
     if (text.startsWith("status")) {
       await ctx.updateTopic({ status: "in_progress" });
     }
@@ -606,6 +611,17 @@ describe("1.1 cards, side chats and page events", () => {
     );
     if (ended.type !== "run.updated") throw new Error("unreachable");
     expect(ended.data.run.summary).toBe("改好了,测试通过");
+  });
+
+  test("a failed done card shows the failure in v2 and in the v1 card, and ends the run failed", async () => {
+    const r = await mention("fail now");
+    const done = await waitFor("failed done card", () => botMessages(r.message.topicId).find((m) => m.cardV2?.intent === "done"));
+    expect(done.cardV2?.blocks[1]).toEqual({ type: "evidence", id: "failed", label: "没有完成", state: "fail" });
+    expect(done.card?.tone).toBe("danger");
+    expect(done.card?.blocks).toContainEqual({ type: "list", items: [{ text: "没有完成", status: "failed" }] });
+    await waitFor("run failed", () =>
+      events.find((e) => e.type === "run.updated" && e.data.run.topicId === r.message.topicId && e.data.run.status === "failed"),
+    );
   });
 
   test("a side chat: onAside gets the topic up to uptoSeq and answers in the DM", async () => {

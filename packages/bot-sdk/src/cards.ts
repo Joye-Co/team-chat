@@ -4,6 +4,7 @@
 // throws ChatError `invalid` when it does not fit. See docs/bots.md, "Cards v2".
 import {
   type ArtifactRef,
+  type Card,
   type CardAsk,
   type CardV2,
   CardV2 as CardV2Schema,
@@ -11,6 +12,7 @@ import {
   type CardV2Block,
   type InputKind,
   type RefTarget,
+  cardV2ToV1,
 } from "@chat/protocol";
 import { ChatError } from "./errors.ts";
 
@@ -23,6 +25,8 @@ export const CARD_IDS = {
   approve: "approve",
   deny: "deny",
   cancel: "cancel",
+  /** The leading `fail` evidence block of a failed done card. */
+  failed: "failed",
 } as const;
 
 /** Who may answer, and the other ask fields. `from` is member ids, "requester" or "owners". */
@@ -123,8 +127,10 @@ export type DoneCardOptions = Common & {
   /** Links to what the work made: pull requests, 产出, topics, pages. */
   refs?: { label: string; target: RefTarget }[];
   metrics?: { label: string; value: number; unit?: string; delta?: number; better?: "up" | "down"; note?: string }[];
-  /** The work failed: the card says so but keeps intent "done". */
+  /** The work failed: the card says so (a leading `fail` evidence block) but keeps intent "done". */
   failed?: boolean;
+  /** The label of that block; default "没有完成". */
+  failedLabel?: string;
 };
 
 /** Makes the id of a free-text option: its position, so ids stay valid for any label. */
@@ -230,10 +236,20 @@ export function formCard(o: FormCardOptions): CardV2 {
 /** The result of a run: a summary with its proof (checks, files, links, 产出) and no actions. */
 export function doneCard(o: DoneCardOptions): CardV2 {
   const own: CardV2Block[] = [];
+  if (o.failed) own.push({ type: "evidence", id: CARD_IDS.failed, label: o.failedLabel ?? "没有完成", state: "fail" });
   for (const [i, m] of (o.metrics ?? []).entries()) own.push({ type: "metric", id: `metric${i + 1}`, ...m });
   for (const [i, e] of (o.evidence ?? []).entries()) own.push({ type: "evidence", id: `evidence${i + 1}`, ...e });
   for (const [i, r] of (o.refs ?? []).entries()) own.push({ type: "ref", id: `ref${i + 1}`, label: r.label, target: r.target });
   return build({ ...o, text: o.text ?? o.summary, fallback: o.fallback ?? o.summary }, "done", own, {});
+}
+
+/**
+ * The v1 card to send next to a failed done card: the derived one with tone `danger`, so
+ * 1.0.x clients do not show the failure in the success tone. Undefined for other cards.
+ */
+export function failedV1Card(card: CardV2): Card | undefined {
+  const failed = card.intent === "done" && card.blocks.some((b) => b.type === "evidence" && b.id === CARD_IDS.failed && b.state === "fail");
+  return failed ? { ...cardV2ToV1(card), tone: "danger" } : undefined;
 }
 
 /** The same card as answered: a higher rev and no submit or cancel actions (link actions stay). */

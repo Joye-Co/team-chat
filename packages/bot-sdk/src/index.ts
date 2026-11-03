@@ -35,6 +35,7 @@ export {
   doneCard,
   draftCard,
   type Evidence,
+  failedV1Card,
   type FormCardOptions,
   type FormInput,
   formCard,

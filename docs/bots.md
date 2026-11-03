@@ -159,7 +159,8 @@ These need a 1.1 server. `examples/ask-bot.ts` uses all of them.
 (`ctx.ack()`, 👀). Keep progress in the plan (`ctx.setPlan`), not in a streaming message:
 `stream()` still works but is deprecated for work reports. End with one result card,
 `ctx.done(...)`, which posts a Card v2 with intent `done` and ends the run (`failed: true` ends
-it as failed):
+it as failed; the card then starts with a `fail` evidence block `failed`, label `failedLabel`,
+default 没有完成, and its v1 card for 1.0.x clients has tone `danger`):
 
 ```ts
 await ctx.done({
@@ -311,7 +312,8 @@ Codex 的计划更新)生成。
 - **交付方式**:收到请求先用表情回应(`ctx.ack()`,👀),不要发「收到」;进度放在计划里
   (`ctx.setPlan`),不用流式消息(`stream()` 仍可用,但不再推荐用来汇报工作);最后用
   `ctx.done({ title, summary, evidence, refs, metrics })` 发一张「做完了」卡片(Card v2,intent
-  `done`)并结束这次运行,`failed: true` 则以失败结束。
+  `done`)并结束这次运行,`failed: true` 则以失败结束:卡片开头加一个 `fail` 证据块 `failed`
+  (文字为 `failedLabel`,默认「没有完成」),给 1.0.x 客户端的 v1 卡片用 `danger` 色调。
 - **卡片构造函数**:`askCard`、`decisionCard`、`approvalCard`、`draftCard`、`formCard`、`doneCard`
   生成合法的 v2 卡片,不合协议时抛出 `ChatError`(`invalid`)。`from` 指定谁能回答(成员 id、
   `"requester"`、`"owners"`),`record: true` 表示答案是群里的决定,`irreversible` 说明不可撤销的
