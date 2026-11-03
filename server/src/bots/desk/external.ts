@@ -2,7 +2,7 @@
 // has no model: fixed rules turn a mention into a run on a machine, run events into topic
 // messages and topic status, and later topic messages into run input. The normalized run log
 // lives in its SQLite. This class adds runs of external bots, plans over HTTP and reads to the
-// feature modules it extends (core, runs, events, stall, input, takeover).
+// feature modules it extends (core, runs, events, stall, input, takeover, interact).
 import type { BotRun, RunPlan } from "@chat/protocol";
 import { roomStub } from "../../core/env";
 import { ApiError, type Result, unwrap } from "../../core/errors";
@@ -10,9 +10,9 @@ import { ulid } from "../../core/ids";
 import { TokenBucket } from "../../core/ratelimit";
 import { cut } from "../dispatch";
 import { DEFAULT_PAGE, MAX_PAGE, PLAN_RATE, type RunRow, result } from "./core";
-import { DeskTakeover } from "./takeover";
+import { DeskInteract } from "./interact";
 
-export class BotDesk extends DeskTakeover {
+export class BotDesk extends DeskInteract {
   // -------------------------------------------------------------------------
   // Runs of external bots and plans over HTTP (docs/protocol.md, "Run plans")
   // -------------------------------------------------------------------------

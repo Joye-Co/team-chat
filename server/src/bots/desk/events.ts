@@ -100,6 +100,19 @@ export abstract class DeskEvents extends DeskRuns {
             await this.topic(r, "in_progress");
           }
           break;
+        case "turn.started":
+        case "turn.completed": {
+          const inTurn = ev.type === "turn.started" ? 1 : 0;
+          if (r.in_turn !== inTurn) {
+            this.sql.exec("UPDATE runs SET in_turn = ? WHERE id = ?", inTurn, r.id);
+            r.in_turn = inTurn;
+          }
+          break;
+        }
+        case "output":
+          // chat-run (1.1): post or patch a card, resolve an event, push or answer a 产出.
+          await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f.at);
+          break;
         case "input.accepted":
           this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id);
           break;

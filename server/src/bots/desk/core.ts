@@ -72,6 +72,9 @@ export type RunRow = {
   paused_at: number | null;
   /** "aside" = a read-only side chat run; null = a normal run. */
   kind: string | null;
+  // desk-5 (1.1 interaction loop)
+  /** 1 while the CLI is inside a turn (turn.started without turn.completed). */
+  in_turn: number;
 };
 
 export const ACTIVE = "ended_at IS NULL";
@@ -232,6 +235,27 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           // run. Old rows read as NULL and acknowledge on message_id.
           name: "desk-5-input-ack",
           up: `ALTER TABLE inputs ADD COLUMN ack_message_id TEXT;`,
+        },
+        {
+          // 1.1 interaction loop: coalescing windows of live events per card, events waiting for
+          // a window or a machine, short follow-up runs started by live events (limits), refs a
+          // run already saw, and whether the CLI is inside a turn (expect).
+          name: "desk-5-interact",
+          up: `
+            ALTER TABLE runs ADD COLUMN in_turn INTEGER NOT NULL DEFAULT 0;
+            CREATE TABLE interact_windows (card_key TEXT PRIMARY KEY, run_id TEXT NOT NULL, until INTEGER NOT NULL);
+            CREATE TABLE interact_pending (
+              card_key TEXT NOT NULL,
+              block_key TEXT NOT NULL,
+              run_id TEXT NOT NULL,
+              frame TEXT NOT NULL,
+              at INTEGER NOT NULL,
+              PRIMARY KEY (card_key, block_key)
+            );
+            CREATE TABLE interact_runs (run_id TEXT PRIMARY KEY, card_key TEXT NOT NULL, at INTEGER NOT NULL);
+            CREATE INDEX interact_runs_at ON interact_runs(at);
+            CREATE TABLE run_refs_seen (run_id TEXT NOT NULL, message_id TEXT NOT NULL, PRIMARY KEY (run_id, message_id));
+          `,
         },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
@@ -448,4 +472,6 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
   protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[]): Promise<void>;
+  /** A RunEvent `output` (`chat-run`, 1.1): performed and answered by the interaction module. */
+  protected abstract output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, at: number): Promise<void>;
 }

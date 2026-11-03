@@ -1,6 +1,7 @@
 // Pure rules of the bots feature: machine choice, health gating, approval answers, prompt and
 // progress text. No I/O here, so the rules are easy to test.
 import type { BotRunner, CliInfo, Health, Machine, MachineInfo } from "@chat/protocol";
+import { REFS_RULE } from "./refs";
 
 /** Lease the server gives each run; heartbeats and run frames renew it. */
 export const LEASE_MS = 10 * 60_000;
@@ -175,11 +176,17 @@ export function buildPrompt(opts: {
   names: Map<string, string>;
   request: ContextMessage;
   followUps?: ContextMessage[];
+  /**
+   * 1.1 (引用提问): the request's references section (`refsText`). The request body is then the
+   * question without the server's quote lines.
+   */
+  refs?: string;
 }): string {
   const name = (id: string) => opts.names.get(id) ?? id;
   const lines = [
     `You are ${opts.botName}, a member of a team chat. You were asked to work in the topic "${opts.title}".`,
     "Your final answer is posted into the topic as is, so keep it short and in the language of the request.",
+    ...(opts.refs ? [REFS_RULE] : []),
     "",
     "Recent messages of the topic, oldest first:",
     ...opts.messages.map((m) => `${name(m.authorId)}: ${m.body}`),
@@ -187,6 +194,7 @@ export function buildPrompt(opts: {
     `Request from ${name(opts.request.authorId)}:`,
     opts.request.body,
   ];
+  if (opts.refs) lines.push("", opts.refs);
   for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
   return lines.join("\n");
 }

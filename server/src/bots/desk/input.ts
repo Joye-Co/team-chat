@@ -6,7 +6,9 @@ import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { TEXT, approvalDecision } from "../dispatch";
 import { linkStub } from "../env";
-import type { CardAnswerIn, CardPress, PageEventIn, TopicMessage } from "../room";
+import { answerText } from "../answers";
+import { refsText } from "../refs";
+import type { CardAnswerIn, CardPress, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
 import { DeskStall } from "./stall";
 
@@ -94,16 +96,30 @@ export abstract class DeskInput extends DeskStall {
       return;
     }
     const inputId = ulid();
+    const text = await this.inputText(r, m);
     this.sql.exec(
       "INSERT INTO inputs (id, run_id, message_id, author_id, body, at) VALUES (?, ?, ?, ?, ?, ?)",
       inputId,
       r.id,
       m.messageId,
       m.authorId,
-      m.body,
+      text,
       Date.now(),
     );
-    if (link) await link.toRun({ t: "run.input", runId: r.id, inputId, text: m.body, authorId: m.authorId } as never);
+    if (link) await link.toRun({ t: "run.input", runId: r.id, inputId, text, authorId: m.authorId } as never);
+  }
+
+  /**
+   * The `run.input` text of a topic message: the body, and with refs (引用提问) the question
+   * and the references section; context only for sources the run did not see yet.
+   */
+  protected async inputText(r: RunRow, m: TopicMessage): Promise<string> {
+    if (!m.refs || m.refs.length === 0) return m.body;
+    const ids = m.refs.map((x) => x.fromId).filter((x): x is string => Boolean(x));
+    const names = await this.names([m.authorId, ...ids]);
+    const text = [m.body, refsText(names.get(m.authorId) ?? m.authorId, m.refs, names, this.seenRefs(r.id))].filter((x) => x !== "").join("\n\n");
+    this.seeRefs(r.id, m.refs.map((x) => x.messageId));
+    return text;
   }
 
   /** A card button of this bot's message was pressed (approval cards). */
@@ -129,9 +145,10 @@ export abstract class DeskInput extends DeskStall {
   // -------------------------------------------------------------------------
 
   /**
-   * A person answered a v2 card of this bot. The topic's active run gets it as `run.input`
-   * (typed `answer` for daemons with feature "answer", text for the others, see MachineLink);
-   * with no active run, the answer starts a run like a mention. Idempotent by the answer's seq.
+   * A person answered a v2 card of this bot. The topic's active run gets it as `run.answer` (a
+   * 1.1 daemon) or `run.input` with the text envelope (older daemons; typed `answer` for feature
+   * "answer"), see MachineLink; with no active run, the answer starts a run like a mention.
+   * Idempotent by the answer's seq.
    */
   async cardAnswer(botId: string, a: CardAnswerIn): Promise<void> {
     this.bind(botId);
@@ -142,6 +159,9 @@ export abstract class DeskInput extends DeskStall {
     this.messagesInFlight.add(key);
     try {
       if (!(await this.botActive())) return;
+      const actor = { id: a.actorId, name: a.actorName };
+      const inputId = ulid();
+      const text = answerText(a.card, a.answer, actor, inputId);
       const m: TopicMessage = {
         groupId: a.groupId,
         topicId: a.topicId,
@@ -149,7 +169,7 @@ export abstract class DeskInput extends DeskStall {
         ackMessageId: a.answer.messageId,
         authorId: a.actorId,
         authorLevel: a.actorLevel ?? undefined,
-        body: a.text,
+        body: text,
         mentioned: true,
       };
       const active = this.activeRun(a.topicId);
@@ -158,26 +178,18 @@ export abstract class DeskInput extends DeskStall {
         const r = this.run(active.id);
         if (!r) return;
         if (r.ended_at !== null) return this.start(m);
-        const inputId = ulid();
         this.sql.exec(
           "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, ack_message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
           inputId,
           r.id,
           key,
           a.actorId,
-          a.text,
+          text,
           Date.now(),
           a.answer.messageId,
         );
         if (!r.machine_id || r.external) return;
-        await linkStub(this.env, r.machine_id).toRun({
-          t: "run.input",
-          runId: r.id,
-          inputId,
-          text: a.text,
-          authorId: a.actorId,
-          answer: { ...a.answer, actorId: a.actorId },
-        } as never);
+        await linkStub(this.env, r.machine_id).toRun(this.answerFrame(r, inputId, text, a) as never);
       });
     } catch (err) {
       this.log.error("cardAnswer failed", { err, topicId: a.topicId });
@@ -187,47 +199,8 @@ export abstract class DeskInput extends DeskStall {
     }
   }
 
-  /**
-   * An event from an interactive 产出 page this bot made. It goes to the run that made the
-   * version when that run is still active, else to the topic's active run. A page event never
-   * starts a run, and one the CLI does not take is not carried into a follow-up run.
-   */
-  async artifactEvent(botId: string, e: PageEventIn): Promise<void> {
-    this.bind(botId);
-    const key = `artifact:${e.groupId}:${e.eventId}`;
-    if (e.actorKind !== "human" || this.handledMessage(key)) return;
-    if (!(await this.botActive())) return;
-    const byRun = e.runId ? this.run(e.runId) : undefined;
-    const target = byRun && byRun.ended_at === null ? byRun : this.activeRun(e.topicId);
-    if (!target) {
-      this.log.info("page event without an active run", { topicId: e.topicId, name: e.event.name });
-      return;
-    }
-    await this.serial(target.id, async () => {
-      const r = this.run(target.id);
-      if (!r || r.ended_at !== null || this.handledMessage(key)) return;
-      const inputId = ulid();
-      // accepted = 1: a page event is not leftover input for a follow-up run.
-      this.sql.exec(
-        "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
-        inputId,
-        r.id,
-        key,
-        e.actorId,
-        e.text,
-        Date.now(),
-      );
-      if (!r.machine_id || r.external) return;
-      await linkStub(this.env, r.machine_id).toRun({
-        t: "run.input",
-        runId: r.id,
-        inputId,
-        text: e.text,
-        authorId: e.actorId,
-        artifactEvent: { ...e.event, actorId: e.actorId },
-      } as never);
-    });
-  }
+  /** `run.answer` (or `run.input`) for an answer; the interaction module builds it. */
+  protected abstract answerFrame(r: RunRow, inputId: string, text: string, a: CardAnswerIn): Record<string, unknown>;
 
   // -------------------------------------------------------------------------
   // Stopping runs (members, and a deactivated bot)

@@ -2,11 +2,10 @@
 // and the hand-off of human messages and card presses to the responsible bot's BotDesk. The
 // hand-off is written to an outbox in the same transaction as the event and delivered after
 // commit; a failed delivery is retried by the room alarm until the desk accepts it.
-import type { BotRun, CardV2, Event, Message, TopicContext } from "@chat/protocol";
+import type { BlockRef, BotRun, CardV2, Event, Message, TopicContext } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
   type ArchivedEvent,
-  type RoomContext,
   registerAfterCommit,
   registerEventImporter,
   registerEventWriter,
@@ -15,11 +14,12 @@ import {
   registerRoomRpc,
 } from "../core/registry";
 import { storedCard } from "../cards2/decisions";
-import { type AnswerData, type PageEventData, answerText, pageEventText } from "./answers";
+import type { AnswerData } from "./answers";
 import { CONTEXT_MESSAGES, type ContextMessage } from "./dispatch";
 import type { Env } from "../core/env";
 import type { Logger } from "../core/logger";
 import { deskStub } from "./env";
+import { type RefSource, resolveRefs, stripRefPrefix } from "./refs";
 
 registerRoomMigration({
   name: "bots-1",
@@ -171,10 +171,13 @@ export interface TopicMessage {
   authorId: string;
   /** The author's level, for approvals by text (only the requester or an owner). */
   authorLevel?: "owner" | "member";
+  /** The body; with refs, the question without the server's quote lines. */
   body: string;
   mentioned: boolean;
   /** The message the run's acknowledgement reacts to when `messageId` is a synthetic key. */
   ackMessageId?: string;
+  /** 1.1 (引用提问): the message's refs, resolved by the room. */
+  refs?: RefSource[];
 }
 
 /** Who pressed a card button, as BotDesk.cardAction gets it. */
@@ -197,27 +200,14 @@ export interface CardAnswerIn {
   actorId: string;
   actorKind: "human" | "bot" | null;
   actorLevel: "owner" | "member" | null;
-  /** The text form for the run (machine-protocol.md `run.input.text`). */
-  text: string;
+  actorName: string;
+  /** The card at the answered rev. */
+  card: CardV2;
 }
 
-/** A 产出 page event for the bot that made the version, as BotDesk.artifactEvent gets it. */
-export interface PageEventIn {
-  groupId: string;
-  topicId: string;
-  /** The event id (page events are not stored, so they have no seq). */
-  eventId: string;
-  event: PageEventData;
-  /** The run that made the version, when the bot named it. */
-  runId: string | null;
-  actorId: string;
-  actorKind: "human" | "bot" | null;
-  text: string;
-}
+export type MemberInfo = { id: string; name: string; kind: string; level: string; deactivated: number; runner: number };
 
-type MemberInfo = { id: string; name: string; kind: string; level: string; deactivated: number; runner: number };
-
-async function memberInfo(db: D1Database, ids: string[]): Promise<Map<string, MemberInfo>> {
+export async function memberInfo(db: D1Database, ids: string[]): Promise<Map<string, MemberInfo>> {
   const uniq = [...new Set(ids)];
   const rows = await db
     .prepare(
@@ -246,13 +236,13 @@ export const HANDOFF_GIVE_UP_MS = 60 * 60_000;
 const RETRY_MAX_MS = 5 * 60_000;
 
 type OutboxCard = { botId: string; messageId: string; actionId: string; actorId: string };
-type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId"> & { mentions: string[] };
+type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId" | "refs"> & { mentions: string[]; blockRefs?: BlockRef[] };
 /** The card as it was answered: the author may edit it before the hand-off is delivered. */
 type OutboxAnswer = { botId: string; seq: number; answer: AnswerData; actorId: string; card: CardV2 };
-type OutboxPageEvent = { botId: string; eventId: string; event: PageEventData; runId: string | null; actorId: string; title: string | null };
 
 type OutboxRow = {
   id: number;
+  /** "artifact" rows (page events before 1.1 made them transient) are dropped. */
   kind: "message" | "card" | "answer" | "artifact";
   topic_id: string;
   payload: string;
@@ -296,6 +286,7 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     body: message.body,
     mentions: message.mentions,
   };
+  if (message.blockRefs && message.blockRefs.length > 0) payload.blockRefs = message.blockRefs;
   enqueue(sql, "message", message.topicId, payload);
 });
 
@@ -334,7 +325,8 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     await deskStub(c.env, p.botId).cardAction(p.botId, press);
     return;
   }
-  if (row.kind === "answer" || row.kind === "artifact") return deliverToAuthor(c, row);
+  if (row.kind === "artifact") return;
+  if (row.kind === "answer") return deliverAnswer(c, row);
   const m = JSON.parse(row.payload) as OutboxMessage;
   // The responsible bot now (a run may have claimed the topic since the message was written).
   const claimed = claimedBot(c.sql, m.topicId);
@@ -367,46 +359,33 @@ async function deliver(c: DeliverContext, row: OutboxRow): Promise<void> {
     body: m.body,
     mentioned: m.mentions.includes(target) || target === peer,
   };
+  if (m.blockRefs && m.blockRefs.length > 0) {
+    args.body = stripRefPrefix(m.body, m.blockRefs);
+    args.refs = resolveRefs(c.sql, m.blockRefs);
+  }
   await deskStub(c.env, target).onMessage(target, args);
 }
 
-/** A card answer or a page event, to the runner bot that made the card or the 产出 version. */
-async function deliverToAuthor(c: DeliverContext, row: OutboxRow): Promise<void> {
-  const p = JSON.parse(row.payload) as OutboxAnswer | OutboxPageEvent;
-  const byId = await memberInfo(c.env.DB, [p.botId, p.actorId]);
-  const bot = byId.get(p.botId);
+/** A card answer, to the runner bot that made the card. */
+async function deliverAnswer(c: DeliverContext, row: OutboxRow): Promise<void> {
+  const a = JSON.parse(row.payload) as OutboxAnswer;
+  const byId = await memberInfo(c.env.DB, [a.botId, a.actorId]);
+  const bot = byId.get(a.botId);
   // SDK bots and people read the stored event; only runner bots need a hand-off.
   if (!bot || bot.kind !== "bot" || !bot.runner || bot.deactivated) return;
-  const who = byId.get(p.actorId);
-  const actorKind = who && !who.deactivated ? (who.kind as "human" | "bot") : null;
-  const name = who?.name ?? p.actorId;
-  if (row.kind === "answer") {
-    const a = p as OutboxAnswer;
-    const args: CardAnswerIn = {
-      groupId: c.groupId,
-      topicId: row.topic_id,
-      seq: a.seq,
-      answer: a.answer,
-      actorId: a.actorId,
-      actorKind,
-      actorLevel: who && !who.deactivated ? (who.level as "owner" | "member") : null,
-      text: answerText(a.card, a.answer, name),
-    };
-    await deskStub(c.env, a.botId).cardAnswer(a.botId, args);
-    return;
-  }
-  const e = p as OutboxPageEvent;
-  const args: PageEventIn = {
+  const who = byId.get(a.actorId);
+  const args: CardAnswerIn = {
     groupId: c.groupId,
     topicId: row.topic_id,
-    eventId: e.eventId,
-    event: e.event,
-    runId: e.runId,
-    actorId: e.actorId,
-    actorKind,
-    text: pageEventText(e.event, name, e.title),
+    seq: a.seq,
+    answer: a.answer,
+    actorId: a.actorId,
+    actorKind: who && !who.deactivated ? (who.kind as "human" | "bot") : null,
+    actorLevel: who && !who.deactivated ? (who.level as "owner" | "member") : null,
+    actorName: who?.name ?? a.actorId,
+    card: a.card,
   };
-  await deskStub(c.env, e.botId).artifactEvent(e.botId, args);
+  await deskStub(c.env, a.botId).cardAnswer(a.botId, args);
 }
 
 /** Rooms with a drain running (one per room object; the alarm and hooks share it). */
@@ -463,32 +442,6 @@ export async function drainOutbox(c: DeliverContext): Promise<void> {
 }
 
 const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered"]);
-
-/**
- * A 产出 page event (1.1): not stored in the group log, so it is handed to the version's
- * creator bot here instead of from a stored event. Returns the creator, or null when the
- * creator is the actor.
- */
-export async function handOffPageEvent(
-  room: RoomContext,
-  e: { eventId: string; actorId: string } & PageEventData,
-): Promise<string | null> {
-  const v = room.sql
-    .exec<{ created_by: string; run_id: string | null; topic_id: string; title: string }>(
-      `SELECT v.created_by, v.run_id, a.topic_id, a.title FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
-       WHERE v.artifact_id = ? AND v.version = ?`,
-      e.artifactId,
-      e.version,
-    )
-    .toArray()[0];
-  if (!v || v.created_by === e.actorId) return null;
-  const event: PageEventData = { artifactId: e.artifactId, version: e.version, name: e.name };
-  if (e.payload !== undefined) event.payload = e.payload;
-  const payload: OutboxPageEvent = { botId: v.created_by, eventId: e.eventId, event, runId: v.run_id, actorId: e.actorId, title: v.title };
-  enqueue(room.sql, "artifact", v.topic_id, payload);
-  room.waitUntil(drainOutbox(room));
-  return v.created_by;
-}
 
 registerAfterCommit(async (event: Event, h) => {
   if (!HANDED_OFF.has(event.type)) return;

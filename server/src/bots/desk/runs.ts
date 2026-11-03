@@ -7,6 +7,7 @@ import { ulid } from "../../core/ids";
 import { LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, cut, hasFeature, pickMachine } from "../dispatch";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
+import { refsText } from "../refs";
 import { loadMachines, loadRunner } from "../store";
 import { DeskCore, type RunRow } from "./core";
 
@@ -51,7 +52,10 @@ export abstract class DeskRuns extends DeskCore {
         )
           .bind(runId, botId, m.groupId, m.topicId, now)
           .run();
-        await this.ack(r, m.ackMessageId);
+        // Answers and live events start runs too: a card answer acknowledges on the answered card,
+        // other synthetic keys get no reaction.
+        if (m.ackMessageId) await this.ack(r, m.ackMessageId);
+        else if (!m.messageId.includes(":")) await this.ack(r);
         await this.setStatus(r, "created");
         await this.topic(r, "in_progress");
 
@@ -64,6 +68,10 @@ export abstract class DeskRuns extends DeskCore {
         const prompt = claim.contextOf
           ? await this.asidePrompt(m, claim, claim.contextOf, followUps)
           : await this.topicPrompt(m, claim, followUps);
+        // Sources of refs the run saw: later run.input texts give their context only once.
+        if (m.refs && m.refs.length > 0) {
+          this.seeRefs(runId, [...claim.messages.map((x) => x.id), ...m.refs.map((x) => x.messageId)]);
+        }
         await this.assign(r, runner, machine, prompt);
       } catch (err) {
         // A run that never reached a machine must not block the topic.
@@ -84,7 +92,10 @@ export abstract class DeskRuns extends DeskCore {
 
   protected async topicPrompt(m: TopicMessage, claim: ClaimResult, followUps: { authorId: string; body: string }[]): Promise<string> {
     const botId = this.botId as string;
-    const names = await this.names([...claim.messages.map((x) => x.authorId), m.authorId, botId]);
+    const refIds = (m.refs ?? []).map((x) => x.fromId).filter((x): x is string => Boolean(x));
+    const names = await this.names([...claim.messages.map((x) => x.authorId), m.authorId, botId, ...refIds]);
+    const seen = new Set(claim.messages.map((x) => x.id).filter((x): x is string => Boolean(x)));
+    const refs = m.refs && m.refs.length > 0 ? refsText(names.get(m.authorId) ?? m.authorId, m.refs, names, seen) : undefined;
     return buildPrompt({
       botName: names.get(botId) ?? "bot",
       title: claim.title,
@@ -92,7 +103,24 @@ export abstract class DeskRuns extends DeskCore {
       names,
       request: { authorId: m.authorId, body: m.body },
       followUps,
+      refs,
     });
+  }
+
+  /** Remembers source messages a run saw (prompt messages and refs with their context). */
+  protected seeRefs(runId: string, messageIds: (string | undefined)[]): void {
+    for (const id of new Set(messageIds)) {
+      if (id) this.sql.exec("INSERT OR IGNORE INTO run_refs_seen (run_id, message_id) VALUES (?, ?)", runId, id);
+    }
+  }
+
+  protected seenRefs(runId: string): Set<string> {
+    return new Set(
+      this.sql
+        .exec<{ message_id: string }>("SELECT message_id FROM run_refs_seen WHERE run_id = ?", runId)
+        .toArray()
+        .map((x) => x.message_id),
+    );
   }
 
   /** The side chat's prompt: the source topic up to the asker's point, then this DM topic. */

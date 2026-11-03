@@ -21,6 +21,15 @@ import { type BotsEnv, deskStub } from "./env";
 
 export const MACHINE_HEADER = "x-chat-machine-id";
 
+/** True when a version like "1.1.0" or "1.2.0-beta.1" is at least `min` (major, minor, patch). */
+export function versionAtLeast(version: string, min: [number, number, number]): boolean {
+  const m = /^v?(\d+)\.(\d+)\.(\d+)/.exec(version.trim());
+  if (!m) return false;
+  const v = [Number(m[1]), Number(m[2]), Number(m[3])];
+  for (let i = 0; i < 3; i++) if (v[i] !== min[i]) return v[i] > min[i];
+  return true;
+}
+
 /** How often the alarm checks leases, assigns and the link while anything is open. */
 const TICK_MS = 30_000;
 /** A finished run waits this long for its run.session before it is closed. */
@@ -352,8 +361,32 @@ export class MachineLink extends DurableObject<BotsEnv> {
     }
   }
 
-  /** The frame as this daemon may get it: typed answers and page events only with feature "answer". */
+  /**
+   * True when the daemon takes the 1.1 interaction frames (`run.answer`, `run.interaction`):
+   * it reports feature "interact", or it is 1.1.0 or newer (`hello.machine.daemonVersion`).
+   */
+  private takesInteract(): boolean {
+    if (this.hasFeature("interact")) return true;
+    const info = this.meta("info");
+    if (!info) return false;
+    try {
+      return versionAtLeast((JSON.parse(info) as { daemonVersion?: string }).daemonVersion ?? "", [1, 1, 0]);
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * The frame as this daemon may get it. `run.answer` and `run.interaction` carry a `fallback`
+   * (never sent): an older daemon gets it as `run.input` with the text envelope instead. Typed
+   * answers and page events in `run.input` go only to a daemon with feature "answer".
+   */
   private forDaemon(frame: Record<string, unknown>): Record<string, unknown> {
+    if (frame.t === "run.answer" || frame.t === "run.interaction") {
+      const { fallback, ...typed } = frame as { fallback?: Record<string, unknown> } & Record<string, unknown>;
+      if (this.takesInteract() || !fallback) return typed;
+      return this.forDaemon({ t: "run.input", runId: frame.runId, inputId: frame.inputId, ...fallback });
+    }
     if (frame.t !== "run.input" || (frame.answer === undefined && frame.artifactEvent === undefined)) return frame;
     if (this.hasFeature("answer")) return frame;
     const { answer: _a, artifactEvent: _e, ...text } = frame;
@@ -506,7 +539,10 @@ export class MachineLink extends DurableObject<BotsEnv> {
   }
 
   /** run.input, run.approval, run.cancel, run.pause or run.resume for an open run; queued while the link is down. */
-  async toRun(frame: { t: "run.input" | "run.approval" | "run.cancel" | "run.pause" | "run.resume"; runId: string }): Promise<{ ok: boolean; sent: boolean }> {
+  async toRun(frame: {
+    t: "run.input" | "run.approval" | "run.cancel" | "run.pause" | "run.resume" | "run.answer" | "run.interaction" | "run.output.result";
+    runId: string;
+  }): Promise<{ ok: boolean; sent: boolean }> {
     const r = this.run(frame.runId);
     if (!r || (r.state !== "assigned" && r.state !== "accepted")) return { ok: false, sent: false };
     const ws = this.socket();
