@@ -119,7 +119,11 @@ pub fn render(
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);
+    // The title keeps its width (up to 40 % of the bar); the state's step
+    // and then the 群 name give way first.
     let title = div()
+        .flex_shrink(0.)
+        .max_w(gpui::relative(0.4))
         .min_w_0()
         .one_line()
         .text_color(k.ink)
@@ -146,7 +150,8 @@ pub fn render(
         };
         div()
             .when(!sentence, |el| el.flex_none())
-            .when(sentence, |el| el.flex_shrink(1.).min_w_0())
+            // The step gives way before the 话题 title does.
+            .when(sentence, |el| el.flex_shrink(16.).min_w_0())
             .flex()
             .items_center()
             .gap(space::S6)
@@ -208,13 +213,13 @@ pub fn render(
         .flex()
         .items_center()
         .gap(space::S8)
-        // A long 群 name gives way first: it shrinks to an ellipsis (at
-        // most 40 % of the bar) while the 话题 title keeps its room.
+        // A long 群 name gives way: it shrinks to an ellipsis (at most 30 %
+        // of the bar) while the 话题 title keeps its room.
         .children(spec.breadcrumb.as_ref().map(|b| {
             div()
                 .flex_shrink(1.)
                 .min_w(px(48.))
-                .max_w(gpui::relative(0.4))
+                .max_w(gpui::relative(0.3))
                 .flex()
                 .items_center()
                 .gap(space::S6)
