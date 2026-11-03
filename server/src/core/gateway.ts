@@ -6,6 +6,7 @@ import {
   type ClientFrameOf,
   type GroupSummary,
   type Member,
+  MAX_CARD_ANSWER_BYTES,
   MAX_CARD_BYTES,
   MAX_FRAME_BYTES,
   PROTOCOL_VERSION,
@@ -274,6 +275,12 @@ export class MemberGateway extends DurableObject<Env> {
         if (c !== undefined && new TextEncoder().encode(JSON.stringify(c)).byteLength > MAX_CARD_BYTES) {
           return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };
         }
+      }
+      if (
+        t === "card.answer" &&
+        new TextEncoder().encode(JSON.stringify([obj.inputs ?? null, obj.editedValues ?? null])).byteLength > MAX_CARD_ANSWER_BYTES
+      ) {
+        return { ok: false, rid, error: { code: "too_large", message: "answer exceeds 64 KiB" } };
       }
       const issue = result.error.issues[0];
       const where = issue?.path.join(".") || "(root)";

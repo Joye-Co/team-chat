@@ -57,6 +57,12 @@ describe("cards v2", () => {
     expect(await answer(ca, { rev: 2 })).toMatchObject({ ok: false, error: { code: "conflict" } });
     expect(await answer(ca, { actionId: "pr" })).toMatchObject({ ok: false, error: { code: "not_found" } });
     expect(await answer(ca, { inputs: { nope: 1 } })).toMatchObject({ ok: false, error: { code: "invalid" } });
+    // inputs with editedValues over 64 KiB as JSON: too_large, as docs/protocol.md says.
+    const long = "x".repeat(30_000);
+    expect(await answer(ca, { editedValues: { notes: long, a: long, b: long } })).toMatchObject({
+      ok: false,
+      error: { code: "too_large" },
+    });
     expect(await answer(ca, { inputs: { when: "now" }, editedValues: { notes: "改过" } })).toMatchObject({ ok: true });
     const ev = await cb.waitEvent((e) => e.type === "card.answered");
     expect(ev).toMatchObject({
