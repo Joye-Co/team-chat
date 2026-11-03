@@ -359,11 +359,12 @@ export abstract class DeskInteract extends DeskTakeover {
       if (cause !== undefined) frame.causeEventId = cause;
       return frame;
     }
+    // Output ids restart at o1 in every run, so the default keys name the run too.
     if (op === "card.patch") {
-      return { ...b, t, ...base, clientPatchId: typeof b.clientPatchId === "string" ? b.clientPatchId : `o:${outputId}`.slice(0, 64) };
+      return { ...b, t, ...base, clientPatchId: typeof b.clientPatchId === "string" ? b.clientPatchId : `o:${r.id}:${outputId}`.slice(0, 64) };
     }
     if (op === "artifact.data") {
-      return { ...b, t, ...base, clientPushId: typeof b.clientPushId === "string" ? b.clientPushId : `o:${outputId}`.slice(0, 64) };
+      return { ...b, t, ...base, clientPushId: typeof b.clientPushId === "string" ? b.clientPushId : `o:${r.id}:${outputId}`.slice(0, 64) };
     }
     if (op === "artifact.reply" && typeof b.decline === "string") {
       return { t, ...base, eventId: b.eventId, ok: false, error: { code: "declined", message: b.decline.slice(0, 200) } };

@@ -365,7 +365,8 @@ Server rules (BotDesk):
   (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
   `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,
   `artifact.data {artifactId, version, data, baseDataRev?, cause?}`, `artifact.reply {eventId, ok,
-  payload? | error?}` or `{eventId, decline: "…"}`. An unknown op gets `invalid` with reason
+  payload? | error?}` or `{eventId, decline: "…"}`. Without `clientPatchId` / `clientPushId` in
+  the body, the key is `o:{runId}:{outputId}`, so a later run's `o1` is never a repeat. An unknown op gets `invalid` with reason
   `output.unknown_op`; an aside run gets `forbidden` (`output.read_only`). An `output` older than
   60 s when it is applied is not performed again.
 

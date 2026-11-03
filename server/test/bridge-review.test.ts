@@ -205,3 +205,54 @@ describe("a page event row exists before delivery (F3)", () => {
   });
 });
 
+
+// ---------------------------------------------------------------------------
+// chat-run outputs (daemon F1, F3)
+// ---------------------------------------------------------------------------
+
+async function startRun(w: World, d: Daemon, c: Client, body?: string) {
+  const topicId = await mention(c, w, body);
+  const { runId } = await d.next((f) => f.t === "run.assign" && !d.frames.some((g) => g.t === "_taken" && g.runId === f.runId));
+  d.frames.push({ t: "_taken", runId });
+  d.send({ t: "run.accept", runId });
+  await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "running");
+  return { topicId, runId };
+}
+
+describe("chat-run outputs", () => {
+  it("scope the patch and push keys to the run, so a later run's first output is not a repeat (daemon F1)", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token, INTERACT);
+    const { c: cb } = await Client.connect(w.bot.token, INTERACT);
+    const result = (runId: string, outputId: string) => d.next((f) => f.t === "run.output.result" && f.runId === runId && f.outputId === outputId);
+    const r1 = await startRun(w, d, c);
+    const card: CardV2 = { v: 2, rev: 1, intent: "info", title: "月报", fallback: "月报", blocks: [{ type: "text", id: "t", text: "1" }] } as CardV2;
+    const posted = await cb.ok({ t: "send", groupId: w.gid, topicId: r1.topicId, clientMsgId: clientMsgId(), body: "", cardV2: card });
+    const messageId = posted.message.id as string;
+    const made = await makePage(w.bot, w.gid, r1.topicId, EVENTS);
+    expect(made.status, JSON.stringify(made.body)).toBe(200);
+    const artifactId = made.body.artifact.id as string;
+
+    d.event(r1.runId, { type: "output", outputId: "o1", op: "card.patch", body: { messageId, baseRev: 1, ops: [{ op: "card", props: { title: "月报 1" } }] } });
+    expect(await result(r1.runId, "o1")).toMatchObject({ ok: true, result: { rev: 2 } });
+    d.event(r1.runId, { type: "output", outputId: "o2", op: "artifact.data", body: { artifactId, version: 1, data: { n: 1 } } });
+    expect(await result(r1.runId, "o2")).toMatchObject({ ok: true, result: { dataRev: 1 } });
+    d.done(r1.runId, { status: "succeeded", resultText: "好了" });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === r1.runId && e.data.run.status === "done");
+
+    // Run 2 numbers its outputs from o1 again.
+    const r2 = await startRun(w, d, c, "@dev again");
+    d.event(r2.runId, { type: "output", outputId: "o1", op: "card.patch", body: { messageId, baseRev: 2, ops: [{ op: "card", props: { title: "月报 2" } }] } });
+    const p2 = await result(r2.runId, "o1");
+    expect(p2, JSON.stringify(p2)).toMatchObject({ ok: true, result: { rev: 3 } });
+    expect(p2.result.duplicate).toBeUndefined();
+    d.event(r2.runId, { type: "output", outputId: "o2", op: "artifact.data", body: { artifactId, version: 1, data: { n: 2 } } });
+    const d2 = await result(r2.runId, "o2");
+    expect(d2, JSON.stringify(d2)).toMatchObject({ ok: true, result: { dataRev: 2 } });
+    const data = await api(`/v1/artifacts/${artifactId}/versions/1/data`, { token: w.human.token });
+    expect(data.body).toMatchObject({ data: { n: 2 }, dataRev: 2 });
+    for (const x of [c, cb, d]) x.close();
+  });
+
+});
