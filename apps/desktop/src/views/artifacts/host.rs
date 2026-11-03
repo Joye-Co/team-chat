@@ -1068,16 +1068,41 @@ pub fn stop_waiting(artifact_id: &str, version: u32, cx: &mut App) {
 }
 
 /// The footer line of a version: what its page may do, from its declarations.
-pub fn capability_line(provider: &dyn ChatProvider, artifact_id: &str, version: u32) -> String {
+/// The run-log notice is apart ([`CapabilityLine::run_log`]), so a long line of events
+/// never cuts it off.
+pub fn capability_line(
+    provider: &dyn ChatProvider,
+    artifact_id: &str,
+    version: u32,
+) -> CapabilityLine {
     let bridge = provider.page_bridge(artifact_id, version);
-    let caps = capabilities_for(bridge.as_ref());
-    let Some(b) = bridge.filter(|_| caps.emit || caps.ask) else {
-        return cp::PAGE_READ_ONLY.to_string();
-    };
-    let name = provider
-        .member(&b.author_id)
+    let name = bridge
+        .as_ref()
+        .and_then(|b| provider.member(&b.author_id))
         .map(|m| m.name)
         .unwrap_or_default();
+    capability_text(bridge, &name)
+}
+
+/// What a page may do, in words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CapabilityLine {
+    /// 页面里的操作会发给 {name} · {labels}, or 页面能做的：读这份数据.
+    pub line: String,
+    /// A runner-made page that declares `ask`: its answers go into the run log, which the
+    /// 群 can read (INTERACT §6.3). The short catalog line and the full one.
+    pub run_log: Option<(String, String)>,
+}
+
+fn capability_text(bridge: Option<PageBridge>, name: &str) -> CapabilityLine {
+    let caps = capabilities_for(bridge.as_ref());
+    let Some(b) = bridge.filter(|_| caps.emit || caps.ask) else {
+        return CapabilityLine {
+            line: cp::PAGE_READ_ONLY.to_string(),
+            run_log: None,
+        };
+    };
+    let name = name.to_string();
     let mut parts = vec![fill(cp::PAGE_SENDS_TO, &[("name", &name)])];
     parts.extend(
         b.events
@@ -1085,10 +1110,15 @@ pub fn capability_line(provider: &dyn ChatProvider, artifact_id: &str, version: 
             .filter_map(|e| e.label.as_ref())
             .map(|l| l.chars().take(40).collect::<String>()),
     );
-    if b.runner && caps.ask {
-        parts.push(fill(cp::PAGE_RUN_LOG, &[("name", &name)]));
+    CapabilityLine {
+        line: parts.join(" · "),
+        run_log: (b.runner && caps.ask).then(|| {
+            (
+                cp::PAGE_RUN_LOG_SHORT.to_string(),
+                fill(cp::PAGE_RUN_LOG, &[("name", &name)]),
+            )
+        }),
     }
-    parts.join(" · ")
 }
 
 /// The footer of a 产出 page frame: what the page may do on the left, and the band of
@@ -1105,13 +1135,39 @@ pub fn page_footer(
         theme::{Type as _, radius, space},
         ui::{self, Lucide},
     };
-    use gpui::{InteractiveElement as _, ParentElement as _, Styled as _, div, px};
-    use gpui_component::Sizable as _;
+    use gpui::{
+        InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
+        div, px,
+    };
+    use gpui_component::{Sizable as _, tooltip::Tooltip};
     let k = theme::colors(cx);
-    let line = capability_line(provider, artifact_id, version);
+    let CapabilityLine { line, run_log } = capability_line(provider, artifact_id, version);
+    let full = SharedString::from(line.clone());
     let base = crate::views::media::parts::footer(cx)
         .children(lead)
-        .child(div().flex_1().min_w(px(0.)).one_line().child(line));
+        .child(
+            div()
+                .id(SharedString::from(format!("{id}-can")))
+                .flex_1()
+                .min_w(px(0.))
+                .one_line()
+                .child(line)
+                .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
+        )
+        // Never cut: the short line, with the whole notice on hover.
+        .children(run_log.map(|(short, whole)| {
+            let whole = SharedString::from(whole);
+            div()
+                .id(SharedString::from(format!("{id}-run-log")))
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(space::S4)
+                .whitespace_nowrap()
+                .child(ui::icon(Lucide::Info, px(12.), k.ink_3))
+                .child(short)
+                .tooltip(move |window, cx| Tooltip::new(whole.clone()).build(window, cx))
+        }));
     let pill = || {
         div()
             .flex_none()
@@ -1610,6 +1666,35 @@ mod tests {
         // Stable: the same element gets the same key; another element another one.
         assert_eq!(selector_key(&long), key);
         assert_ne!(selector_key(&format!("{long}x")), key);
+    }
+
+    #[test]
+    fn the_run_log_notice_stands_apart_from_the_event_list() {
+        let mut b = bridge(true, &[PageEventKind::Emit, PageEventKind::Ask]);
+        for e in &mut b.events {
+            e.label = Some("很长的事件名".repeat(6));
+        }
+        b.runner = true;
+        let t = capability_text(Some(b.clone()), "Ledger");
+        assert!(
+            t.line
+                .starts_with(&fill(cp::PAGE_SENDS_TO, &[("name", "Ledger")]))
+        );
+        assert_eq!(
+            t.run_log,
+            Some((
+                cp::PAGE_RUN_LOG_SHORT.to_string(),
+                fill(cp::PAGE_RUN_LOG, &[("name", "Ledger")])
+            ))
+        );
+        assert!(!t.line.contains(cp::PAGE_RUN_LOG_SHORT));
+        // No run log without a runner, or without ask.
+        b.runner = false;
+        assert_eq!(capability_text(Some(b), "Ledger").run_log, None);
+        let mut emit_only = bridge(true, &[PageEventKind::Emit]);
+        emit_only.runner = true;
+        assert_eq!(capability_text(Some(emit_only), "Ledger").run_log, None);
+        assert_eq!(capability_text(None, "").line, cp::PAGE_READ_ONLY);
     }
 
     #[test]

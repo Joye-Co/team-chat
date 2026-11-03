@@ -4,6 +4,7 @@
 crate::copy! {
     PAGE_SENDS_TO = "页面里的操作会发给 {name}",
     PAGE_RUN_LOG = "回答会记在 {name} 的工作记录里",
+    PAGE_RUN_LOG_SHORT = "回答会记进工作记录",
     PAGE_READ_ONLY = "页面能做的：读这份数据",
     PAGE_WAITING = "等 {name} 回应",
     PAGE_STILL_WORKING = "{name} 还在处理",
