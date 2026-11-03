@@ -951,7 +951,50 @@ pub struct Draft {
     /// The message the reply quotes.
     pub quote_of: Option<MessageId>,
     pub files: Vec<PendingFile>,
+    /// inc-refs: the reference chips (引用提问, REFS §A4), at most 5, oldest first.
+    pub refs: Vec<DraftRef>,
 }
+
+// --- inc-refs track: 引用提问 drafts ---
+
+/// One reference chip of a draft: what is sent (`input`) and how the chip draws.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DraftRef {
+    pub input: chat_core::proto::BlockRefInput,
+    /// The 群 and 话题 of the source (to scroll back to it and to tell 已更新).
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    /// Code points at the start of `input.label` drawn quiet (source and block); the rest is
+    /// the part, drawn strong.
+    pub lead_chars: usize,
+}
+
+impl DraftRef {
+    /// The address that makes two chips the same (dedupe, REFS §A4).
+    pub fn same_address(&self, other: &chat_core::proto::BlockRefInput) -> bool {
+        let a = &self.input;
+        a.message_id == other.message_id
+            && a.artifact == other.artifact
+            && a.block_id == other.block_id
+            && a.part == other.part
+    }
+}
+
+/// What adding a chip did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddRef {
+    Added,
+    /// The same part is a chip already, at this index.
+    Duplicate(usize),
+    /// Five chips already (最多引用 5 处).
+    Full,
+    /// This provider keeps no chips.
+    Unsupported,
+}
+
+/// Most chips of one message.
+pub const MAX_DRAFT_REFS: usize = chat_core::proto::MAX_BLOCK_REFS;
+// --- end inc-refs track ---
 
 /// A quoted message outside the timeline window ([`ChatProvider::quoted_message`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -2245,6 +2288,37 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
 
     // --- end inc-host track ---
+    // --- inc-refs track: 引用提问 (REFS part A) ---
+
+    /// The server takes references to a part (`welcome.features` has `refs/1`). Without it the
+    /// views hide every 引用提问 affordance. False by default.
+    fn refs_supported(&self) -> bool {
+        false
+    }
+    /// Adds a reference chip to a draft: deduped by address, at most 5. Emits `Change::Draft`
+    /// when it was added.
+    fn add_draft_ref(&self, _key: &DraftKey, _r: DraftRef) -> AddRef {
+        AddRef::Unsupported
+    }
+    /// Removes the chip at `index`. Emits `Change::Draft`.
+    fn remove_draft_ref(&self, _key: &DraftKey, _index: usize) {}
+    /// The references of a sent (or queued) message, in send order. Empty by default.
+    fn message_block_refs(&self, _message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        Vec::new()
+    }
+    /// [`ChatProvider::send_with_files`] with references (`send.blockRefs`); the server writes
+    /// their quote lines in front of the body. The default drops the references.
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+        _refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        self.send_with_files(request, key, files)
+    }
+
+    // --- end inc-refs track ---
 
     // --- changes ---
 

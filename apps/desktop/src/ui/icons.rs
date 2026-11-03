@@ -116,6 +116,9 @@ gpui_kit::assets::icon_assets!(
         Scan,
         Maximize2,
         // --- end v11/inc-diagrams ---
+        // --- inc-refs: 引用提问 chips ---
+        FileDiff,
+        // --- end inc-refs ---
     ]
 );
 

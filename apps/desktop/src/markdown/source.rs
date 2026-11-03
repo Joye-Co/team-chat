@@ -246,6 +246,61 @@ fn link_end(s: &str) -> Option<usize> {
     Some(end + 1)
 }
 
+// --- inc-refs: the Markdown block counter of 引用提问 (REFS §A2.1) ---
+
+/// The kind of a top-level Markdown block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum MdBlock {
+    Paragraph,
+    Heading,
+    List,
+    Quote,
+    Code,
+    Table,
+    Rule,
+    Html,
+    Math,
+    Other,
+}
+
+/// The top-level blocks of a normalized body ([`normalize_fences`]) in source order, with
+/// their byte ranges: paragraph, heading, list (one block for the whole list), block quote,
+/// fenced or indented code, table, thematic break, HTML block. Blank lines and link
+/// definitions are not blocks. Parsed with the `markdown` crate at the options of
+/// gpui-component's renderer (GFM and math), so the index `md:<n>` names the block the
+/// person sees.
+pub fn top_level_blocks(source: &str) -> Vec<(MdBlock, std::ops::Range<usize>)> {
+    use markdown::mdast::Node;
+    let mut options = markdown::ParseOptions::gfm();
+    options.constructs.math_text = true;
+    options.constructs.math_flow = true;
+    let Ok(Node::Root(root)) = markdown::to_mdast(source, &options) else {
+        return Vec::new();
+    };
+    root.children
+        .iter()
+        .filter_map(|node| {
+            let kind = match node {
+                Node::Definition(_) | Node::FootnoteDefinition(_) => return None,
+                Node::Paragraph(_) => MdBlock::Paragraph,
+                Node::Heading(_) => MdBlock::Heading,
+                Node::List(_) => MdBlock::List,
+                Node::Blockquote(_) => MdBlock::Quote,
+                Node::Code(_) => MdBlock::Code,
+                Node::Table(_) => MdBlock::Table,
+                Node::ThematicBreak(_) => MdBlock::Rule,
+                Node::Html(_) => MdBlock::Html,
+                Node::Math(_) => MdBlock::Math,
+                _ => MdBlock::Other,
+            };
+            let p = node.position()?;
+            Some((kind, p.start.offset..p.end.offset))
+        })
+        .collect()
+}
+
+// --- end inc-refs ---
+
 #[cfg(test)]
 mod tests {
     use super::*;

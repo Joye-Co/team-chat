@@ -25,6 +25,9 @@ pub mod diagrams;
 // --- inc-host track ---
 pub mod page_host;
 // --- end inc-host track ---
+// --- inc-refs ---
+pub mod refs;
+// --- end inc-refs ---
 pub mod nav;
 pub mod notify;
 pub mod panel;
@@ -236,6 +239,13 @@ pub const SECTIONS: &[Section] = &[
         developer: false,
     },
     // --- end inc-host track ---
+    // --- inc-refs ---
+    Section {
+        name: "refs",
+        entries: refs::ENTRIES,
+        developer: false,
+    },
+    // --- end inc-refs ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.

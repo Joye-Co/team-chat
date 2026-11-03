@@ -378,7 +378,10 @@ pub fn open(
                                 message_id: Some("dprev-1".into()),
                                 topic_id: Some("dprev-topic".into()),
                                 artifact: None,
-                                block: super::DiagramBlock::MarkdownFence { offset: 0 },
+                                block: super::DiagramBlock::MarkdownFence {
+                                    offset: 0,
+                                    index: Some(0),
+                                },
                             },
                             return_focus: None,
                         },

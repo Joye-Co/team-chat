@@ -99,6 +99,8 @@ struct UploadJob {
     mentions: Vec<String>,
     quote_of: Option<String>,
     files: Vec<JobFile>,
+    // --- inc-refs: references sent with the message (引用提问).
+    block_refs: Option<Vec<proto::BlockRefInput>>,
     created_at: i64,
     failed: bool,
     running: bool,
@@ -394,6 +396,21 @@ impl CoreProvider {
     /// job id (used as the message's client id), or `None` when the draft
     /// has none of these files.
     #[allow(clippy::too_many_arguments)] // the fields of one draft message
+    // --- inc-refs ---
+    /// Gives a queued upload job the references its message carries.
+    pub(super) fn set_job_refs(&self, job_id: &str, refs: Vec<proto::BlockRefInput>) {
+        if let Some(job) = self
+            .files()
+            .inner()
+            .jobs
+            .iter_mut()
+            .find(|j| j.id == job_id)
+        {
+            job.block_refs = Some(refs);
+        }
+    }
+    // --- end inc-refs ---
+
     pub(super) fn start_upload_job(
         &self,
         key: &DraftKey,
@@ -424,6 +441,7 @@ impl CoreProvider {
             mentions,
             quote_of,
             files,
+            block_refs: None,
             created_at: chat_core::now_ms() as i64,
             failed: false,
             running: false,
@@ -731,6 +749,7 @@ impl CoreProvider {
             mentions: job.mentions.clone(),
             reply_to: job.quote_of.clone(),
             attachments: Some(attachments),
+            block_refs: job.block_refs.clone(),
             ..Default::default()
         });
         match sent {

@@ -8,7 +8,10 @@ use std::{collections::HashMap, sync::Mutex};
 
 use crate::{
     copy::{composer as c, fill},
-    data::{Draft, DraftKey, MemberId, MessageId, NewFile, PendingFile},
+    data::{
+        AddRef, Draft, DraftKey, DraftRef, MAX_DRAFT_REFS, MemberId, MessageId, NewFile,
+        PendingFile,
+    },
 };
 
 /// Most files one draft holds; more are ignored.
@@ -97,6 +100,48 @@ impl DraftStore {
             changed
         })
     }
+
+    // --- inc-refs: reference chips (REFS §A4) ---
+
+    /// Adds a chip unless the same address is there (the index is returned) or 5 are.
+    pub fn add_ref(&self, key: &DraftKey, r: DraftRef) -> AddRef {
+        self.with(|i| {
+            let draft = i.drafts.entry(key.clone()).or_default();
+            if let Some(at) = draft.refs.iter().position(|d| d.same_address(&r.input)) {
+                return AddRef::Duplicate(at);
+            }
+            if draft.refs.len() >= MAX_DRAFT_REFS {
+                return AddRef::Full;
+            }
+            draft.refs.push(r);
+            AddRef::Added
+        })
+    }
+
+    /// Removes the chip at `index`. Returns true when there was one.
+    pub fn remove_ref(&self, key: &DraftKey, index: usize) -> bool {
+        self.with(|i| {
+            let Some(draft) = i.drafts.get_mut(key) else {
+                return false;
+            };
+            let removed = index < draft.refs.len();
+            if removed {
+                draft.refs.remove(index);
+            }
+            i.prune(key);
+            removed
+        })
+    }
+
+    /// Puts back the chips of a saved draft (restart).
+    pub fn set_refs(&self, key: &DraftKey, refs: Vec<DraftRef>) {
+        self.with(|i| {
+            let draft = i.drafts.entry(key.clone()).or_default();
+            draft.refs = refs.into_iter().take(MAX_DRAFT_REFS).collect();
+            i.prune(key);
+        })
+    }
+    // --- end inc-refs ---
 
     /// Returns true when there was a draft.
     pub fn clear(&self, key: &DraftKey) -> bool {
@@ -214,6 +259,53 @@ mod tests {
         assert!(store.clear(&k));
         assert_eq!(store.get(&k), Draft::default());
     }
+
+    // --- inc-refs ---
+    fn chip(block: &str) -> DraftRef {
+        DraftRef {
+            input: chat_core::proto::BlockRefInput {
+                message_id: Some("m-1".into()),
+                block_id: block.into(),
+                label: format!("卡 · {block}"),
+                ..Default::default()
+            },
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            lead_chars: 4,
+        }
+    }
+
+    #[test]
+    fn chips_dedupe_cap_at_five_and_survive_text_changes() {
+        let store = DraftStore::new();
+        let k = DraftKey::topic("g", "t");
+        assert_eq!(store.add_ref(&k, chip("a")), AddRef::Added);
+        assert_eq!(store.add_ref(&k, chip("a")), AddRef::Duplicate(0));
+        for b in ["b", "c", "d", "e"] {
+            assert_eq!(store.add_ref(&k, chip(b)), AddRef::Added);
+        }
+        assert_eq!(store.add_ref(&k, chip("f")), AddRef::Full);
+        assert_eq!(store.add_ref(&k, chip("c")), AddRef::Duplicate(2));
+        store.save_text(&k, String::new(), vec![]);
+        assert_eq!(store.get(&k).refs.len(), 5, "an empty text keeps the chips");
+        assert!(store.remove_ref(&k, 4));
+        assert!(!store.remove_ref(&k, 4));
+        let left: Vec<_> = store
+            .get(&k)
+            .refs
+            .iter()
+            .map(|r| r.input.block_id.clone())
+            .collect();
+        assert_eq!(left, ["a", "b", "c", "d"]);
+        for _ in 0..4 {
+            store.remove_ref(&k, 0);
+        }
+        assert!(
+            !store.inner.lock().unwrap().drafts.contains_key(&k),
+            "pruned"
+        );
+    }
+    // --- end inc-refs ---
 
     #[test]
     fn file_count_is_limited() {

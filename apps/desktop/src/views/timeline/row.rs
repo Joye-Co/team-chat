@@ -217,6 +217,8 @@ impl TimelineView {
             .then(|| self.render_steps(message, cx))
             .flatten();
 
+        // inc-refs: the body without the quote lines of its references (drawn as chips).
+        let shown_body = crate::views::refs::chips::shown_body(message, &self.services.provider);
         let edited = message.edited_at.is_some() && !deleted;
         // The mark follows the last line (§7.5, U12): inside the body text
         // when it can, on its own line only after a code block or a table.
@@ -233,7 +235,7 @@ impl TimelineView {
             Some(self.render_editor(&input, window, cx))
         } else if body_hidden {
             None
-        } else if message.body.is_empty() && message.streaming {
+        } else if shown_body.is_empty() && message.streaming {
             Some(
                 div()
                     .t_body()
@@ -241,9 +243,9 @@ impl TimelineView {
                     .child(t::STREAMING)
                     .into_any_element(),
             )
-        } else if message.body.is_empty() {
+        } else if shown_body.is_empty() {
             None
-        } else if model::is_jumbo(&message.body) {
+        } else if model::is_jumbo(shown_body) {
             // The edited mark sits right of the emoji, on its baseline.
             mark_inline = true;
             Some(
@@ -253,7 +255,7 @@ impl TimelineView {
                     .child(
                         div()
                             .type_role(theme::type_scale::EMOJI)
-                            .child(message.body.trim().to_string()),
+                            .child(shown_body.trim().to_string()),
                     )
                     .when(edited, |el| {
                         el.child(
@@ -267,9 +269,19 @@ impl TimelineView {
                     .into_any_element(),
             )
         } else {
-            let (view, inline) = markdown::message_body_marked(
+            // inc-refs: tables and code fences of a sent message can be referenced.
+            let refs_body = (!message.id.is_empty() && !message.streaming).then(|| {
+                crate::views::refs::markdown::RefsBody {
+                    group_id: message.group_id.clone(),
+                    topic_id: message.topic_id.clone(),
+                    message_id: message.id.clone(),
+                    author: author.as_ref().map(|a| a.name.clone()).unwrap_or_default(),
+                    block_offset: usize::from(shown_body.len() != message.body.len()),
+                }
+            });
+            let (view, inline) = markdown::message_body_refs(
                 ElementId::Name(format!("body-{key}").into()),
-                message.body.clone(),
+                shown_body.to_string(),
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
                 edited,
                 Some(&markdown::DiagramContext {
@@ -281,6 +293,7 @@ impl TimelineView {
                     topic_id: message.topic_id.clone(),
                     streaming: message.streaming,
                 }),
+                refs_body.as_ref(),
             );
             mark_inline = inline;
             Some(view.w_full().text_color(colors.text_1).into_any_element())

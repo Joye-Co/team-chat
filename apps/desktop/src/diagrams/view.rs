@@ -440,6 +440,7 @@ fn image_with_hits(
             .w(px(fit.w))
             .h(px(full_h)),
     );
+    let refs_on = crate::views::refs::enabled(cx);
     for (i, node) in ready.meta.nodes.iter().enumerate() {
         let (x, y, w, h) = hit_rect(node, fit.scale);
         let ring = if focused == Some(i) {
@@ -485,20 +486,14 @@ fn image_with_hits(
                         super::on_node_ref(origin.clone(), &nid, &label, window, cx);
                     }
                 })
-                .when(hovered == Some(i), |el| {
+                // inc-refs: the ink 问这里 of every part, only when the server takes refs.
+                .when(hovered == Some(i) && refs_on, |el| {
                     el.child(
                         div().absolute().top(px(-12.)).right(px(-8.)).child(
-                            gpui_component::button::Button::new(ElementId::Name(
-                                format!("dask-{id}-{i}").into(),
-                            ))
-                            .ghost()
-                            .compact()
-                            .with_size(gpui_component::Size::XSmall)
-                            .label(c::ASK_HERE)
-                            .bg(k.raised)
-                            .border_1()
-                            .border_color(k.line_2)
-                            .rounded(radius::SM)
+                            crate::views::refs::affordance::ask_button(
+                                ElementId::Name(format!("dask-{id}-{i}").into()),
+                                cx,
+                            )
                             .on_click(move |_, window, cx| {
                                 cx.stop_propagation();
                                 super::on_node_ref(

@@ -20,6 +20,10 @@ use super::FakeProvider;
 // pages track: the sample data of the 群, 成员 and 产出 pages.
 #[path = "v2_pages.rs"]
 mod pages_samples;
+// --- inc-refs: the 引用提问 samples (Refs.dc.html §01, §03).
+#[path = "v2_refs.rs"]
+pub mod refs_samples;
+// --- end inc-refs
 use crate::data::{pages, v2::*, *};
 
 pub const ME: &str = "m-joye";
@@ -177,6 +181,8 @@ pub struct V2Samples {
     // --- cards v2 track ---
     cards_v2: crate::views::cards::v2::samples::SampleCards,
     // --- end cards v2 track ---
+    // --- inc-refs
+    refs: super::refs::FakeRefs,
 }
 
 fn group(id: &str, kind: GroupKind, name: &str, members: &[&str], last: Millis) -> GroupSummary {
@@ -325,6 +331,7 @@ impl V2Samples {
             quiet: false,
             desk: Mutex::default(),
             cards_v2: Default::default(),
+            refs: Default::default(),
         })
     }
 
@@ -341,6 +348,7 @@ impl V2Samples {
             // --- cards v2 track ---
             cards_v2: Default::default(),
             // --- end cards v2 track ---
+            refs: Default::default(),
         })
     }
 
@@ -2021,6 +2029,46 @@ impl ChatProvider for V2Samples {
         }
     }
     // --- end cards v2 track ---
+
+    // --- inc-refs track ---
+
+    fn refs_supported(&self) -> bool {
+        true
+    }
+
+    fn add_draft_ref(&self, key: &DraftKey, r: DraftRef) -> AddRef {
+        let added = self.inner.add_draft_ref(key, r);
+        if added == AddRef::Added {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+        added
+    }
+
+    fn remove_draft_ref(&self, key: &DraftKey, index: usize) {
+        self.inner.remove_draft_ref(key, index);
+        self.emit(vec![Change::Draft { key: key.clone() }]);
+    }
+
+    fn clear_draft(&self, key: &DraftKey) {
+        self.inner.clear_draft(key);
+        self.emit(vec![Change::Draft { key: key.clone() }]);
+    }
+
+    fn message_block_refs(&self, message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        self.refs.of(message)
+    }
+
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        _key: &DraftKey,
+        _files: Vec<PendingFileId>,
+        refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        refs_samples::send(self, request, refs)
+    }
+
+    // --- end inc-refs track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

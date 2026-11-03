@@ -523,6 +523,8 @@ impl Services {
         // --- inc-host track: the 产出 page host (data, asks, new versions) ---
         crate::views::artifacts::host::start(&services, cx);
         // --- end inc-host track ---
+        // inc-refs: 引用提问 reaches the provider and the navigation from element callbacks.
+        crate::views::refs::install(&services, cx);
         services
     }
 

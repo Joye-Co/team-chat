@@ -39,6 +39,10 @@ pub enum Start {
     /// (`provider::seeded`).
     Core,
     // --- end provider track ---
+    // --- inc-refs ---
+    /// The v2 sample team with the 引用提问 messages (`fake::v2::refs_samples`).
+    V2Refs,
+    // --- end inc-refs ---
 }
 
 pub struct Scene {
@@ -672,7 +676,7 @@ pub const SCENES: &[Scene] = &[
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 15] = [
+    let slices: [&'static [Scene]; 16] = [
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -696,6 +700,9 @@ pub fn all() -> Vec<&'static Scene> {
         // --- inc-host track ---
         HOST_SCENES,
         // --- end inc-host track ---
+        // --- inc-refs ---
+        crate::views::refs::scenes::SCENES,
+        // --- end inc-refs ---
     ];
     slices.into_iter().flatten().collect()
 }
@@ -790,6 +797,11 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         return Some(check);
     }
     // --- end v11/inc-diagrams ---
+    // --- inc-refs ---
+    if let Some(check) = crate::views::refs::scenes::ready(name) {
+        return Some(check);
+    }
+    // --- end inc-refs ---
     match name {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),

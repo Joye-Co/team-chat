@@ -49,6 +49,9 @@ mod settings;
 // provider track: v2 topic surfaces and the seeded cache of the `topic-core` scene.
 pub mod seeded;
 mod topic_v2;
+// --- inc-refs: 引用提问 (references, chips, sends with blockRefs).
+mod refs;
+// --- end inc-refs
 
 use std::{
     collections::{HashMap, HashSet},
@@ -176,6 +179,9 @@ struct Shared {
     // --- inc-host track: acks, replies and data pushes for open 产出 pages ---
     page_signals: page_host::PageSignals,
     // --- end inc-host track ---
+    // --- inc-refs ---
+    refs: refs::RefsCache,
+    // --- end inc-refs ---
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -215,6 +221,7 @@ impl CoreProvider {
                 page_events: pages::PageEventLog::default(),
                 topic_v2: topic_v2::TopicV2Cache::default(),
                 page_signals: page_host::PageSignals::default(),
+                refs: refs::RefsCache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -1159,6 +1166,7 @@ impl ChatProvider for CoreProvider {
                 }
             }
             // --- end inc-cards21 ---
+            self.shared.refs.remember(&msgs);
             let cached_more = msgs.len() > n;
             if cached_more {
                 msgs.remove(0);
@@ -2213,6 +2221,38 @@ impl ChatProvider for CoreProvider {
     }
 
     // --- end inc-host track ---
+    // --- inc-refs track ---
+
+    fn refs_supported(&self) -> bool {
+        self.refs_supported_inner()
+    }
+
+    fn add_draft_ref(&self, key: &DraftKey, r: crate::data::DraftRef) -> crate::data::AddRef {
+        self.add_draft_ref_inner(key, r)
+    }
+
+    fn remove_draft_ref(&self, key: &DraftKey, index: usize) {
+        self.remove_draft_ref_inner(key, index)
+    }
+
+    fn message_block_refs(
+        &self,
+        message: &crate::data::Message,
+    ) -> Vec<chat_core::proto::BlockRef> {
+        self.message_block_refs_inner(message)
+    }
+
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+        refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        self.send_with_refs_inner(request, key, files, refs)
+    }
+
+    // --- end inc-refs track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

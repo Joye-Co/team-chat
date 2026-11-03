@@ -24,6 +24,9 @@ use gpui_component::{
 };
 
 pub use source::MentionTarget;
+// --- inc-refs: the Markdown block counter (REFS §A2.1) ---
+pub use source::{MdBlock, top_level_blocks};
+// --- end inc-refs ---
 use source::{
     AFTER_MARK, EDITED_SCHEME, MENTION_ME_SCHEME, MENTION_SCHEME, append_edited_mark,
     link_mentions, normalize_fences,
@@ -108,6 +111,20 @@ pub fn message_body_marked(
     edited: bool,
     diagrams: Option<&DiagramContext>,
 ) -> (TextView, bool) {
+    message_body_refs(id, text, mentions, edited, diagrams, None)
+}
+
+/// [`message_body_marked`] whose tables and code fences can be referenced (引用提问): `refs`
+/// names the message. Without it, or when the server does not take references, the body
+/// renders as before.
+pub fn message_body_refs(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    mentions: &[MentionTarget],
+    edited: bool,
+    diagrams: Option<&DiagramContext>,
+    refs: Option<&crate::views::refs::markdown::RefsBody>,
+) -> (TextView, bool) {
     let text: SharedString = text.into();
     let source = link_mentions(&normalize_fences(&text), mentions);
     let marked = edited
@@ -119,7 +136,16 @@ pub fn message_body_marked(
         allowed: crate::diagrams::diagram_fences(&source, d.streaming),
         message_id: d.message_id.clone(),
         topic_id: d.topic_id.clone(),
+        // inc-refs: `md:<index>` of each fence (REFS §A2.1), counted in the stored body.
+        blocks: top_level_blocks(&source),
+        block_offset: refs.map_or(0, |r| r.block_offset),
     });
+    // --- inc-refs: tables and code fences can be referenced ---
+    let refs = refs.filter(|r| !r.message_id.is_empty());
+    let table_plugin =
+        refs.map(|r| crate::views::refs::markdown::TablePlugin::new(r.clone(), &source));
+    let code_refs = refs.map(|r| (r.clone(), source.clone()));
+    // --- end inc-refs ---
     let view = TextView::markdown(id, source)
         .selectable(true)
         .text_size(crate::theme::type_scale::MESSAGE.0)
@@ -128,15 +154,35 @@ pub fn message_body_marked(
         .plugin(MentionPlugin)
         .plugin(EditedPlugin)
         .when_some(diagram_plugin, |view, p| view.plugin(p))
-        .code_block_actions(|code, _window, _cx| {
+        .when_some(table_plugin, |view, p| view.plugin(p))
+        .code_block_actions(move |code, _window, cx| {
             let text = code.code();
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
             text.hash(&mut hasher);
-            Clipboard::new(ElementId::Name(
-                format!("copy-code-{:x}", hasher.finish()).into(),
-            ))
-            .value(text)
-            .tooltip(t::COPY_CODE)
+            let hash = hasher.finish();
+            let copy = Clipboard::new(ElementId::Name(format!("copy-code-{hash:x}").into()))
+                .value(text.clone())
+                .tooltip(t::COPY_CODE);
+            // inc-refs: 问这里 on a code fence references the whole fence.
+            let ask = code_refs
+                .as_ref()
+                .filter(|_| crate::views::refs::enabled(cx))
+                .and_then(|(body, source)| {
+                    crate::views::refs::markdown::code_target(body, source, &text)
+                })
+                .map(|target| {
+                    crate::views::refs::affordance::inline_button(
+                        &format!("code-{}-{hash:x}", target.block_id),
+                        std::rc::Rc::new(move |_: &gpui::App| target.clone()),
+                        cx,
+                    )
+                });
+            div()
+                .flex()
+                .items_center()
+                .gap(theme::space::S4)
+                .children(ask)
+                .child(copy)
         })
         .on_link_click(|url, _event, _window, cx| {
             if let Some(url) = safe_link(url) {
@@ -176,11 +222,14 @@ struct DiagramPlugin {
     allowed: Vec<usize>,
     message_id: String,
     topic_id: String,
+    blocks: Vec<(MdBlock, std::ops::Range<usize>)>,
+    block_offset: usize,
 }
 
 struct DiagramNode {
     source: String,
     offset: usize,
+    index: Option<usize>,
     message_id: String,
     topic_id: String,
 }
@@ -213,6 +262,11 @@ impl MarkdownPlugin for DiagramPlugin {
                 DiagramNode {
                     source: code.value.clone(),
                     offset,
+                    index: self
+                        .blocks
+                        .iter()
+                        .position(|(_, r)| r.start <= at && at < r.end.max(r.start + 1))
+                        .map(|i| i + self.block_offset),
                     message_id: self.message_id.clone(),
                     topic_id: self.topic_id.clone(),
                 },
@@ -235,7 +289,10 @@ impl MarkdownPlugin for DiagramPlugin {
                 message_id: Some(d.message_id.clone()),
                 topic_id: Some(d.topic_id.clone()),
                 artifact: None,
-                block: crate::diagrams::DiagramBlock::MarkdownFence { offset: d.offset },
+                block: crate::diagrams::DiagramBlock::MarkdownFence {
+                    offset: d.offset,
+                    index: d.index,
+                },
             },
         };
         div()

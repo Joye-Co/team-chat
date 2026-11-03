@@ -49,16 +49,17 @@ pub struct DiagramSource {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DiagramBlock {
     /// A ```mermaid fence of a Markdown body, by the byte offset of its opening line in the
-    /// normalized body. The 引用提问 track maps it to `md:<index>` (REFS §A2.1).
-    MarkdownFence { offset: usize },
+    /// normalized body, and (inc-refs) its top-level block index `md:<index>` (REFS §A2.1).
+    MarkdownFence { offset: usize, index: Option<usize> },
     /// A Card v2 `diagram` block by its id (built by the Card v2.1 renderer track).
     #[allow(dead_code)]
     Card { block_id: String },
 }
 
 /// A node reference (⌥-click, 问这里, the context menu, ⌥↵): a `node` part (REFS §A2.2)
-/// handed to [`refs::ask_about`]. The group id and the `md:<index>` of a Markdown fence are
-/// left empty here; the 引用提问 track fills them (REFS §A2.1).
+/// handed to [`refs::ask_about`]. The label is `{source} · {block} · {node}`: the author's
+/// name (a Markdown fence), the card title (a card block) or `{title} v{n}` (a 产出); the
+/// block is the diagram's title, else 图.
 pub fn on_node_ref(
     source: DiagramSource,
     node_id: &str,
@@ -66,38 +67,101 @@ pub fn on_node_ref(
     window: &mut gpui::Window,
     cx: &mut gpui::App,
 ) {
-    use crate::views::refs::{self, PartTarget, RefIntent, RefSource};
-    use chat_core::proto::card2::{PartKey, PartRef};
+    use crate::views::refs::{self, RefIntent};
+    let Some(target) = node_target(&source, node_id, label, cx) else {
+        return;
+    };
+    refs::ask_about(target, RefIntent::Topic, window, cx);
+}
+
+/// The reference to a node of a diagram (inc-refs).
+pub fn node_target(
+    source: &DiagramSource,
+    node_id: &str,
+    label: &str,
+    cx: &gpui::App,
+) -> Option<crate::views::refs::PartTarget> {
+    use crate::views::refs::{RefSource, parts};
     let topic_id = source.topic_id.clone().unwrap_or_default();
-    let target_source = match (&source.artifact, &source.message_id) {
-        (Some((artifact_id, version)), _) => RefSource::Artifact {
-            group_id: String::new(),
-            topic_id,
-            artifact_id: artifact_id.clone(),
-            version: *version,
-        },
-        (None, message_id) => RefSource::Message {
-            group_id: String::new(),
-            topic_id,
-            message_id: message_id.clone().unwrap_or_default(),
-        },
+    let services = crate::views::refs::services(cx);
+    let provider = services.as_ref().map(|s| s.provider.clone());
+    let group_id = provider
+        .as_ref()
+        .and_then(|p| {
+            p.groups()
+                .into_iter()
+                .find(|g| p.topic(&g.id, &topic_id).is_some())
+        })
+        .map(|g| g.id)
+        .unwrap_or_default();
+    let (target_source, source_label, card_rev) = match (&source.artifact, &source.message_id) {
+        (Some((artifact_id, version)), _) => {
+            let title = provider
+                .as_ref()
+                .and_then(|p| {
+                    p.artifacts(&group_id, &topic_id)
+                        .into_iter()
+                        .find(|a| &a.id == artifact_id)
+                })
+                .map(|a| a.title)
+                .unwrap_or_default();
+            (
+                RefSource::Artifact {
+                    group_id: group_id.clone(),
+                    topic_id: topic_id.clone(),
+                    artifact_id: artifact_id.clone(),
+                    version: *version,
+                },
+                parts::artifact_source(&title, *version),
+                None,
+            )
+        }
+        (None, message_id) => {
+            let message_id = message_id.clone().unwrap_or_default();
+            let (label, rev) = match (&source.block, provider.as_ref()) {
+                (DiagramBlock::Card { .. }, Some(p)) => p
+                    .card_v2(&group_id, &message_id)
+                    .map(|c| (c.card.title.clone(), Some(u64::from(c.card.rev))))
+                    .unwrap_or_default(),
+                (DiagramBlock::MarkdownFence { .. }, Some(p)) => {
+                    let author = p
+                        .messages(&group_id, &topic_id, 400)
+                        .messages
+                        .into_iter()
+                        .find(|m| m.id == message_id)
+                        .map(|m| m.author_id);
+                    (
+                        author
+                            .and_then(|a| p.member(&a))
+                            .map(|m| m.name)
+                            .unwrap_or_default(),
+                        None,
+                    )
+                }
+                _ => (String::new(), None),
+            };
+            (
+                RefSource::Message {
+                    group_id: group_id.clone(),
+                    topic_id: topic_id.clone(),
+                    message_id,
+                },
+                label,
+                rev,
+            )
+        }
     };
     let block_id = match &source.block {
         DiagramBlock::Card { block_id } => block_id.clone(),
-        DiagramBlock::MarkdownFence { .. } => String::new(),
+        DiagramBlock::MarkdownFence { index, .. } => format!("md:{}", (*index)?),
     };
-    let target = PartTarget {
-        source: target_source,
+    Some(parts::node(node_id, label, None).target(
+        target_source,
+        &source_label,
         block_id,
-        part: Some(PartRef {
-            kind: "node".into(),
-            keys: Some([("node".to_string(), PartKey::Key(node_id.to_string()))].into()),
-        }),
-        label: label.chars().take(120).collect(),
-        value: Some(serde_json::json!({ "node": node_id, "label": label })),
-        card_rev: None,
-    };
-    refs::ask_about(target, RefIntent::Topic, window, cx);
+        Some(crate::copy::diagrams::BLOCK),
+        card_rev,
+    ))
 }
 
 /// The four error kinds the person sees (REFS §B4 table).

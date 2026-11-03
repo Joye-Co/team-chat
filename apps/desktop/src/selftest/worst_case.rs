@@ -447,6 +447,46 @@ impl ChatProvider for WorstCase {
         self.inner.subscribe()
     }
 
+    // --- inc-refs: references pass through; their labels are the worst case (long Chinese
+    // labels, cut at 120) and a body that no longer starts with its quote lines.
+    fn refs_supported(&self) -> bool {
+        self.inner.refs_supported()
+    }
+    fn add_draft_ref(&self, key: &DraftKey, r: DraftRef) -> AddRef {
+        self.inner.add_draft_ref(key, r)
+    }
+    fn remove_draft_ref(&self, key: &DraftKey, index: usize) {
+        self.inner.remove_draft_ref(key, index)
+    }
+    fn message_block_refs(&self, message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        self.inner
+            .message_block_refs(message)
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut r)| {
+                if r.deleted.is_none() && i % 2 == 0 {
+                    r.source.label = crate::views::refs::label::build(
+                        "第四季度各渠道新增群和留存的完整月报（含去重说明）",
+                        Some("按渠道和来源拆开的明细表"),
+                        Some("小红书 · 品牌合作 · 新增群（去重后，含邀请回流） 14"),
+                    )
+                    .text;
+                }
+                r
+            })
+            .collect()
+    }
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+        refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        self.inner.send_with_refs(request, key, files, refs)
+    }
+    // --- end inc-refs
+
     // Everything else goes to the fake provider, so cards, runs, files,
     // drafts, search and machines are on screen under --worst-case too;
     // the values a view renders are rewritten as above.

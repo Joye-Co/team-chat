@@ -89,6 +89,17 @@ pub struct DiagramViewer {
     hovered: Option<usize>,
 }
 
+// --- inc-refs: a scene opens the viewer with a node under the pointer (问这里 shows).
+thread_local! {
+    static PREVIEW_HOVER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+}
+
+/// The next viewer starts with node `index` hovered (screenshot scenes).
+pub fn preview_hover_next(index: usize) {
+    PREVIEW_HOVER.with(|h| h.set(Some(index)));
+}
+// --- end inc-refs
+
 /// Opens the viewer over `window`.
 pub fn open(spec: ViewerSpec, window: &mut Window, cx: &mut App) -> Entity<DiagramViewer> {
     let size = window.viewport_size();
@@ -134,7 +145,7 @@ impl DiagramViewer {
             drag: None,
             focus: cx.focus_handle().tab_stop(true),
             viewport: (0., 0.),
-            hovered: None,
+            hovered: PREVIEW_HOVER.with(|h| h.take()),
         }
     }
 
@@ -336,6 +347,7 @@ impl DiagramViewer {
                 .w(px(w))
                 .h(px(h)),
         );
+        let refs_on = crate::views::refs::enabled(cx);
         for (i, node) in ready.meta.nodes.iter().enumerate() {
             let (x, y, nw, nh) = hit_rect(node, z);
             let origin = self.spec.origin.clone();
@@ -351,6 +363,25 @@ impl DiagramViewer {
                     .h(px(nh + 6.))
                     .rounded(radius::MD)
                     .when(hovered, |el| el.border_1().border_color(k.line_2))
+                    // --- inc-refs: 问这里 beside the hovered node.
+                    .when(hovered && refs_on, |el| {
+                        let (o, nid, label) = (
+                            self.spec.origin.clone(),
+                            node.id.clone(),
+                            node.label.clone(),
+                        );
+                        el.child(div().absolute().top(px(-12.)).right(px(-8.)).child(
+                            crate::views::refs::affordance::inline_button(
+                                &format!("dv-{i}"),
+                                std::rc::Rc::new(move |cx: &App| {
+                                    super::node_target(&o, &nid, &label, cx)
+                                        .unwrap_or_else(crate::views::refs::empty_target)
+                                }),
+                                cx,
+                            ),
+                        ))
+                    })
+                    // --- end inc-refs
                     .on_hover(cx.listener(move |this, on: &bool, _, cx| {
                         let next = if *on {
                             Some(i)
