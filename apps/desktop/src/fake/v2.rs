@@ -147,6 +147,8 @@ struct Data {
     artifacts: Vec<(GroupId, ArtifactSummary)>,
     side_chat: Vec<SideChatMessage>,
     paused_by: Option<MemberId>,
+    // topic track (v11/topic): who approved PR #61 and when.
+    approval: Option<(MemberId, Millis)>,
 }
 
 /// The v2 sample provider.
@@ -907,6 +909,7 @@ impl V2Samples {
             artifacts,
             side_chat,
             paused_by: None,
+            approval: None,
         }
     }
 
@@ -1140,7 +1143,8 @@ impl ChatProvider for V2Samples {
                 title: title.into(),
                 at: when,
             };
-        vec![
+        let approved = self.with(|d| d.approval.is_some());
+        let mut asks = vec![
             ask(
                 OPS,
                 T_RELEASE,
@@ -1177,7 +1181,11 @@ impl ChatProvider for V2Samples {
                 "邀请码输入框用哪种？",
                 at(9, 58),
             ),
-        ]
+        ];
+        if approved {
+            asks.retain(|a| a.topic_id != T_RECONNECT);
+        }
+        asks
     }
     fn done_today(&self) -> Vec<DoneItem> {
         if self.quiet {
@@ -1236,7 +1244,11 @@ impl ChatProvider for V2Samples {
             files: 12,
             checks_passed: 3,
             checks_total: 3,
-            state: ChangeState::Open,
+            state: if self.with(|d| d.approval.is_some()) {
+                ChangeState::Merging
+            } else {
+                ChangeState::Open
+            },
         })
     }
     fn run_usage(&self, run_id: &str) -> Option<RunUsage> {
@@ -1551,6 +1563,130 @@ impl ChatProvider for V2Samples {
     }
 
     // --- end of the desk track block ---
+
+    // --- topic track (v11/topic) ---
+
+    fn message_proof(&self, _group_id: &str, message_id: &str) -> Vec<Proof> {
+        if message_id != format!("{T_RECONNECT}-m5") {
+            return Vec::new();
+        }
+        vec![
+            Proof::Pr {
+                number: 61,
+                additions: 214,
+                deletions: 63,
+            },
+            Proof::Tests {
+                passed: 148,
+                failed: 0,
+            },
+            Proof::Recording {
+                duration_ms: 42_000,
+            },
+            Proof::Artifact {
+                artifact_id: ART_RECONNECT.into(),
+                title: "重连测试报告".into(),
+                version: 2,
+            },
+        ]
+    }
+    fn media_duration(&self, file: &FileAttachment) -> Option<u64> {
+        (file.file_id == "f-v2-video").then_some(18_000)
+    }
+    fn artifact_preview(&self, artifact_id: &str, _version: u32) -> Option<ArtifactPreview> {
+        if artifact_id != ART_RECONNECT {
+            return None;
+        }
+        let row = |label: &str| PreviewRow {
+            label: label.into(),
+            ok: Some(true),
+            value: "0".into(),
+        };
+        let bar = |label: &str, share: f32, value: &str, highlight: bool| PreviewBar {
+            label: label.into(),
+            share,
+            value: value.into(),
+            highlight,
+        };
+        Some(ArtifactPreview {
+            eyebrow: Some("测试报告 · staging".into()),
+            title: "重连测试报告".into(),
+            summary: Some(
+                "修复后的客户端，每个场景跑 20 次，记录重连耗时和重复消息的条数。".into(),
+            ),
+            metrics: vec![
+                PreviewMetric {
+                    label: "场景".into(),
+                    value: "6".into(),
+                    unit: Some("/ 6".into()),
+                    note: Some("全部通过".into()),
+                },
+                PreviewMetric {
+                    label: "最长重连".into(),
+                    value: "1.8".into(),
+                    unit: Some("秒".into()),
+                    note: Some("合盖休眠 10 分钟后".into()),
+                },
+            ],
+            table_title: Some("逐项结果".into()),
+            columns: vec!["场景".into(), "结果".into(), "重复".into()],
+            rows: vec![
+                row("断网 5 秒"),
+                row("断网 60 秒"),
+                row("合盖休眠 10 分钟"),
+                row("切换 Wi-Fi"),
+                row("服务器重启"),
+                row("弱网（丢包 20%）"),
+            ],
+            chart_title: Some("重连耗时".into()),
+            chart_note: Some("20 次的中位数，单位秒".into()),
+            bars: vec![
+                bar("断网 5 秒", 0.3, "0.6", false),
+                bar("断网 60 秒", 0.6, "1.2", false),
+                bar("合盖休眠 10 分钟", 0.9, "1.8", true),
+                bar("切换 Wi-Fi", 0.45, "0.9", false),
+                bar("服务器重启", 0.7, "1.4", false),
+                bar("弱网", 0.55, "1.1", false),
+            ],
+            axis: vec!["0".into(), "1".into(), "2".into()],
+        })
+    }
+    fn changes_approval(&self, _group_id: &str, topic_id: &str) -> Option<(MemberId, Millis)> {
+        (topic_id == T_RECONNECT)
+            .then(|| self.with(|d| d.approval.clone()))
+            .flatten()
+    }
+    fn approve_changes(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        if topic_id != T_RECONNECT {
+            return reply_now(Err(AdminError::NotFound));
+        }
+        self.with(|d| d.approval = Some((ME.into(), chrono::Utc::now().timestamp_millis())));
+        self.emit(vec![
+            Change::Topics {
+                group_id: group_id.into(),
+            },
+            Change::Messages {
+                group_id: group_id.into(),
+                topic_id: topic_id.into(),
+            },
+            Change::Todo,
+        ]);
+        reply_now(Ok(()))
+    }
+    fn withdraw_changes_approval(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        self.with(|d| d.approval = None);
+        self.emit(vec![
+            Change::Topics {
+                group_id: group_id.into(),
+            },
+            Change::Messages {
+                group_id: group_id.into(),
+                topic_id: topic_id.into(),
+            },
+            Change::Todo,
+        ]);
+        reply_now(Ok(()))
+    }
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

@@ -290,3 +290,56 @@ pub struct CardAnswer {
     /// My answer is queued and the server has not stored it yet.
     pub pending: bool,
 }
+
+// --- topic track (v11/topic): the 话题 page, its pinned card and 产出 pane ---
+
+/// One big number of a 产出 preview (`6 / 6 场景 · 全部通过`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewMetric {
+    pub label: String,
+    pub value: String,
+    /// After the value in `ink-3` (`/ 6`, `秒`).
+    pub unit: Option<String>,
+    pub note: Option<String>,
+}
+
+/// One row of a 产出 preview table: a label, a pass or fail mark and a mono
+/// value.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PreviewRow {
+    pub label: String,
+    pub ok: Option<bool>,
+    pub value: String,
+}
+
+/// One bar of a 产出 preview chart.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewBar {
+    pub label: String,
+    /// 0..=1 of the chart width.
+    pub share: f32,
+    pub value: String,
+    /// The bar the chart is about (drawn in `ink`).
+    pub highlight: bool,
+}
+
+/// A short, real preview of a 产出 version for the topic rail thumbnail and
+/// the 产出 pane, read from the page itself. `None` when the provider cannot
+/// read the page; the views then show the title and 在窗口打开 only.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct ArtifactPreview {
+    /// The mono line over the title (`测试报告 · staging`).
+    pub eyebrow: Option<String>,
+    pub title: String,
+    pub summary: Option<String>,
+    pub metrics: Vec<PreviewMetric>,
+    pub table_title: Option<String>,
+    /// Header of the table: label, mark and value columns.
+    pub columns: Vec<String>,
+    pub rows: Vec<PreviewRow>,
+    pub chart_title: Option<String>,
+    pub chart_note: Option<String>,
+    pub bars: Vec<PreviewBar>,
+    /// Axis labels under the bars (`0 1 2`).
+    pub axis: Vec<String>,
+}

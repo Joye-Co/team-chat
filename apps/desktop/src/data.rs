@@ -1838,6 +1838,37 @@ pub trait ChatProvider: Send + Sync + 'static {
 
     // --- end of the desk track block ---
 
+    // --- topic track (v11/topic): the 话题 page ---
+
+    /// Proof chips of one result message (a PR, test counts, a recording,
+    /// 产出), from its done card. Empty when the message has none; the 话题
+    /// page then derives what it can from the 话题's change and 产出 refs.
+    fn message_proof(&self, _group_id: &str, _message_id: &str) -> Vec<v2::Proof> {
+        Vec::new()
+    }
+    /// The length of a video or audio file, when known.
+    fn media_duration(&self, _file: &FileAttachment) -> Option<u64> {
+        None
+    }
+    /// A short, real preview of a 产出 version (topic rail thumbnail and the
+    /// 产出 pane).
+    fn artifact_preview(&self, _artifact_id: &str, _version: u32) -> Option<v2::ArtifactPreview> {
+        None
+    }
+    /// Who approved the 话题's change and when, while it merges or after.
+    fn changes_approval(&self, _group_id: &str, _topic_id: &str) -> Option<(MemberId, Millis)> {
+        None
+    }
+    /// Approves the 话题's change (批准合并 on the pinned card). Emits
+    /// `Change::Topics` and `Change::Messages` for the 话题.
+    fn approve_changes(&self, _group_id: &str, _topic_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// Takes my approval back while the change has not merged (撤回).
+    fn withdraw_changes_approval(&self, _group_id: &str, _topic_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+
     // --- changes ---
 
     /// A new stream of change batches. Each call gives a new receiver; all
