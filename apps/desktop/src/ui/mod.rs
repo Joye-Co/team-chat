@@ -18,6 +18,7 @@
 //! | [`truncate`] | §15 | one cut line with the full text in a tooltip |
 //! | [`motion`] | §12 | durations, reduce motion, the busy spinner |
 //! | [`gallery`] | §16 | every component in its states (self-test scene) |
+//! | [`web_embed`] | — | a live 产出 page inside the window (native web view) |
 
 pub mod avatar;
 pub mod chip;
@@ -32,6 +33,7 @@ pub mod parts;
 pub mod rows;
 pub mod sheet;
 pub mod truncate;
+pub mod web_embed;
 
 // The screens build from these; some are not used by every screen yet.
 #[allow(unused_imports)]

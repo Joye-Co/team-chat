@@ -19,11 +19,10 @@ use objc2_foundation::{
     NSString, NSURL, NSURLRequest,
 };
 use objc2_web_kit::{
-    WKContentRuleList, WKContentRuleListStore, WKNavigation, WKNavigationAction,
-    WKNavigationActionPolicy, WKNavigationDelegate, WKNavigationType, WKScriptMessage,
-    WKScriptMessageHandler, WKUIDelegate, WKURLSchemeHandler, WKURLSchemeTask,
-    WKAudiovisualMediaTypes, WKUserContentController, WKUserScript, WKUserScriptInjectionTime,
-    WKWebView,
+    WKAudiovisualMediaTypes, WKContentRuleList, WKContentRuleListStore, WKNavigation,
+    WKNavigationAction, WKNavigationActionPolicy, WKNavigationDelegate, WKNavigationType,
+    WKScriptMessage, WKScriptMessageHandler, WKUIDelegate, WKURLSchemeHandler, WKURLSchemeTask,
+    WKUserContentController, WKUserScript, WKUserScriptInjectionTime, WKWebView,
     WKWebViewConfiguration, WKWebsiteDataStore, WKWindowFeatures,
 };
 use serde_json::Value;

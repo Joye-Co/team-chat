@@ -589,11 +589,36 @@ mod tests {
             })
         );
         assert_eq!(parse_range("bytes=-10"), Some(ByteRange::Suffix(10)));
-        for bad in ["bytes=0-1,4-5", "items=0-1", "bytes=5-2", "bytes=a-b", "bytes=-", "bytes=+1-2"] {
+        for bad in [
+            "bytes=0-1,4-5",
+            "items=0-1",
+            "bytes=5-2",
+            "bytes=a-b",
+            "bytes=-",
+            "bytes=+1-2",
+        ] {
             assert_eq!(parse_range(bad), None, "{bad}");
         }
-        assert_eq!(resolve_range(ByteRange::From { start: 2, end: Some(99) }, 10), Some((2, 9)));
-        assert_eq!(resolve_range(ByteRange::From { start: 10, end: None }, 10), None);
+        assert_eq!(
+            resolve_range(
+                ByteRange::From {
+                    start: 2,
+                    end: Some(99)
+                },
+                10
+            ),
+            Some((2, 9))
+        );
+        assert_eq!(
+            resolve_range(
+                ByteRange::From {
+                    start: 10,
+                    end: None
+                },
+                10
+            ),
+            None
+        );
         assert_eq!(resolve_range(ByteRange::Suffix(4), 10), Some((6, 9)));
         assert_eq!(resolve_range(ByteRange::Suffix(40), 10), Some((0, 9)));
         assert_eq!(resolve_range(ByteRange::Suffix(0), 10), None);
@@ -618,16 +643,33 @@ mod tests {
         assert_eq!((r.status, r.body.len()), (200, 10));
         assert_eq!(header(&r, "Accept-Ranges").as_deref(), Some("bytes"));
         // A range never widens access: other origins and traversal still fail.
-        let r = serve_range(&c, "a-v1", "index.html", "GET", "artifact://a-v2/clip.mp4", Some("bytes=0-1"));
+        let r = serve_range(
+            &c,
+            "a-v1",
+            "index.html",
+            "GET",
+            "artifact://a-v2/clip.mp4",
+            Some("bytes=0-1"),
+        );
         assert_eq!(r.status, 404);
 
         let dir = std::env::temp_dir().join(format!("artifact-view-range-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.wav"), (0u8..100).collect::<Vec<_>>()).unwrap();
         let c = Content::Folder(dir.clone()).prepared().unwrap();
-        let r = serve_range(&c, "a-v1", "index.html", "GET", "artifact://a-v1/a.wav", Some("bytes=-3"));
+        let r = serve_range(
+            &c,
+            "a-v1",
+            "index.html",
+            "GET",
+            "artifact://a-v1/a.wav",
+            Some("bytes=-3"),
+        );
         assert_eq!((r.status, &*r.body), (206, &[97u8, 98, 99][..]));
-        assert_eq!(header(&r, "Content-Range").as_deref(), Some("bytes 97-99/100"));
+        assert_eq!(
+            header(&r, "Content-Range").as_deref(),
+            Some("bytes 97-99/100")
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

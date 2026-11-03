@@ -165,8 +165,14 @@ mod tests {
     #[test]
     fn hides_when_fully_out_or_empty() {
         let full = Rect::new(0.0, 0.0, 100.0, 100.0);
-        assert_eq!(place(full, Rect::new(0.0, 200.0, 100.0, 100.0), 900.0, false, 2.0), None);
-        assert_eq!(place(Rect::new(0.0, 0.0, 0.0, 10.0), full, 900.0, false, 2.0), None);
+        assert_eq!(
+            place(full, Rect::new(0.0, 200.0, 100.0, 100.0), 900.0, false, 2.0),
+            None
+        );
+        assert_eq!(
+            place(Rect::new(0.0, 0.0, 0.0, 10.0), full, 900.0, false, 2.0),
+            None
+        );
         assert_eq!(place(full, Rect::default(), 900.0, false, 2.0), None);
     }
 
@@ -174,6 +180,9 @@ mod tests {
     fn snaps_to_device_pixels() {
         let r = Rect::new(10.3, 10.26, 100.1, 50.0).snap(2.0);
         assert_eq!(r, Rect::new(10.5, 10.5, 100.0, 50.0));
-        assert_eq!(Rect::new(1.2, 0.0, 1.0, 1.0).snap(1.0), Rect::new(1.0, 0.0, 1.0, 1.0));
+        assert_eq!(
+            Rect::new(1.2, 0.0, 1.0, 1.0).snap(1.0),
+            Rect::new(1.0, 0.0, 1.0, 1.0)
+        );
     }
 }
