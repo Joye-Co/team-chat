@@ -48,6 +48,7 @@ their tokens are revoked at the end of the run.
 | `permissions` | A non-member can neither read nor write (WS frames and HTTP); bad and revoked tokens get 401 |
 | `reactions` | A and B add and remove reactions; caches follow live, a repeated add stores nothing, a fresh client rebuilds the list from the log |
 | `plan` | A bot starts a run with a plan; a member's cache gets it; an update replaces the whole plan, `[]` clears it; a member gets 403 and a 201-character item 400; after the end a late member catches up to the final plan |
+| `runs-v11` | 1.1 runs on a raw machine socket with features `pause`, `answer` and `aside`: a mention gets a 👀 reaction (no text ack); the requester pauses (409 on a second pause) and resumes with a note, and the machine gets `run.pause` and `run.resume`; the bot posts a Card v2 ask, the requester's answer reaches the run as `run.input.answer` and a second answer is refused; `run.done` posts one done card with test proof and stores `resultMessageId`, `usage` and `durationMs`; `GET /v1/groups/:id/decisions` lists the answer; a side chat runs as `kind: aside` in the asker's DM and posts nothing in the source group |
 | `load` | 5 humans + 5 bots in 3 groups send 100 messages each at once; all caches equal the server log; p50/p95 latency |
 | `soak` | `--minutes N` of low-rate chat with network blips and restarts (sends queued while stopped); consistency at the end |
 

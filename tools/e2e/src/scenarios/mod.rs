@@ -17,6 +17,7 @@ mod permissions;
 mod pipeline;
 mod plan;
 mod reactions;
+mod runs_v11;
 mod soak;
 mod streaming;
 
@@ -43,6 +44,7 @@ pub fn registry() -> Vec<Scenario> {
         reactions::SCENARIO,
         pipeline::SCENARIO,
         plan::SCENARIO,
+        runs_v11::SCENARIO,
         load::SCENARIO,
         soak::SCENARIO,
     ]

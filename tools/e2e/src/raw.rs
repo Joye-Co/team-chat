@@ -17,6 +17,10 @@ type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 pub const TIMEOUT: Duration = Duration::from_secs(15);
 
 fn ws_url(base: &str) -> String {
+    ws_url_at(base, "/v1/ws")
+}
+
+fn ws_url_at(base: &str, path: &str) -> String {
     let b = base.trim_end_matches('/');
     let b = if let Some(r) = b.strip_prefix("https://") {
         format!("wss://{r}")
@@ -25,7 +29,7 @@ fn ws_url(base: &str) -> String {
     } else {
         b.to_string()
     };
-    format!("{b}/v1/ws")
+    format!("{b}{path}")
 }
 
 /// The HTTP status of a failed upgrade, or `None` when the upgrade worked.
@@ -77,6 +81,35 @@ impl RawWs {
         let w = r.read(TIMEOUT).await?;
         if w["t"] != "welcome" {
             bail!("expected welcome, got {}", w["t"]);
+        }
+        r.welcome = w;
+        Ok(r)
+    }
+
+    /// A machine (docs/machine-protocol.md): connects to `/v1/machine/ws`, sends `hello` and
+    /// waits for `welcome`. Machine frames carry no `rid`; read them with `next_matching`.
+    pub async fn machine(base: &str, token: &str, hello: Value) -> Result<RawWs> {
+        let mut req = ws_url_at(base, "/v1/machine/ws").into_client_request()?;
+        req.headers_mut().insert(
+            "authorization",
+            HeaderValue::from_str(&format!("Bearer {token}"))?,
+        );
+        let (ws, _) = tokio::time::timeout(TIMEOUT, tokio_tungstenite::connect_async(req))
+            .await
+            .map_err(|_| anyhow!("machine connect timed out"))?
+            .map_err(|e| anyhow!("machine connect: {e}"))?;
+        let mut r = RawWs {
+            ws,
+            stash: VecDeque::new(),
+            next_rid: 1,
+            welcome: Value::Null,
+        };
+        r.send(hello).await?;
+        let w = r
+            .next_matching(TIMEOUT, |f| f["t"] == "welcome" || f["t"] == "error")
+            .await?;
+        if w["t"] != "welcome" {
+            bail!("expected welcome, got {w}");
         }
         r.welcome = w;
         Ok(r)

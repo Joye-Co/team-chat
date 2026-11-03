@@ -186,6 +186,11 @@ impl Harness {
         Ok(acc)
     }
 
+    /// The owner's HTTP client (runner and machine setup).
+    pub fn owner_http(&self) -> &HttpClient {
+        &self.owner
+    }
+
     pub fn http(&self, acc: &Account) -> HttpClient {
         HttpClient::new(&self.base, Some(acc.token.clone())).expect("base url checked in setup")
     }
