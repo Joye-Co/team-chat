@@ -2,6 +2,7 @@
 //! normalized progress back. See docs/machine-protocol.md.
 
 pub mod acceptance;
+pub mod chat_run;
 pub mod config;
 pub mod daemon;
 pub mod doctor;

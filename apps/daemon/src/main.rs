@@ -4,6 +4,13 @@ use std::path::PathBuf;
 const USAGE: &str = "usage: daemon <run|doctor|install-service|uninstall-service|example-config> [--config <file>] [--no-load]";
 
 fn main() {
+    // The same binary is `chat-run` inside a run (a link named chat-run on the run's PATH).
+    let argv0 = std::env::args_os().next().unwrap_or_default();
+    if std::path::Path::new(&argv0).file_name()
+        == Some(std::ffi::OsStr::new(daemon::chat_run::NAME))
+    {
+        std::process::exit(daemon::chat_run::main(std::env::args().skip(1).collect()));
+    }
     let mut args = std::env::args().skip(1);
     let cmd = args.next().unwrap_or_default();
     let mut config_path = config::default_config_path();
