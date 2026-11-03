@@ -27,6 +27,8 @@ crate::copy! {
     ARTIFACT_BACK = "回到话题 {group} / {topic}",
     ARTIFACTS_EMPTY = "还没有产出",
     ARTIFACT_PAGE_SNAPSHOT = "这个产出在单独的窗口里打开",
+    ARTIFACT_RESPONSE = "{name} {action}",
+    ARTIFACT_RESPONSE_VALUE = "{name} {action}「{value}」",
     ARTIFACT_COLLAPSE = "收起右栏",
     ARTIFACT_EXPAND = "显示右栏",
 }

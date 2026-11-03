@@ -68,5 +68,6 @@ crate::copy! {
     MEMBERS_OUTPUTS_BUTTON = "产出",
     MEMBERS_COMPUTER_BUTTON = "电脑",
     MEMBERS_TOGGLE_ASIDE = "显示或隐藏右栏",
+    MEMBERS_RETRY_MESSAGE = "@{name} 上次卡住了，再试一次",
     MEMBERS_MONEY = "¥{v}",
 }

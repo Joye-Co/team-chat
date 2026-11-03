@@ -24,6 +24,8 @@ mod files_live;
 pub mod macos;
 mod panes;
 pub mod persist;
+// pages track: the 群, 成员 and 产出 pages.
+mod pages;
 mod process;
 mod realtime;
 #[cfg(test)]
@@ -1755,6 +1757,36 @@ impl ChatProvider for CoreProvider {
     }
 
     // --- end of the panes track ---
+
+    // --- pages track: the 群, 成员 and 产出 pages (provider/pages.rs) ---
+
+    fn group_decisions(&self, group_id: &str) -> Vec<crate::data::v2::Decision> {
+        self.group_decisions_inner(group_id)
+    }
+
+    fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
+        self.artifact_page_events_inner(artifact_id, version)
+    }
+
+    fn send_artifact_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        payload: Option<serde_json::Value>,
+    ) {
+        self.send_artifact_event_inner(artifact_id, version, name, payload)
+    }
+
+    fn artifact_responses(&self, artifact_id: &str) -> Vec<crate::data::pages::ArtifactResponse> {
+        self.artifact_responses_inner(artifact_id)
+    }
+
+    fn retry_member_problem(&self, member_id: &str, run_id: &str) -> AdminReply<()> {
+        self.retry_member_problem_inner(member_id, run_id)
+    }
+
+    // --- end pages track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();
