@@ -57,8 +57,29 @@ export interface SocketState {
   /** Socket id for write order; older attachments have none (see `socketId`). */
   sid?: string;
   client?: { name: string; version: string };
-  /** `hello.features` (1.1); the 1.1 transient types go only to sockets with `interact/1`. */
+  /** 1.1: `hello.features` of this socket (e.g. "interact/1"). */
   features?: string[];
+}
+
+/**
+ * Key of a frame that only sockets with this `hello.features` entry get (1.1 transients such as
+ * `card.event` or `artifact.data`). The gateway removes the key before it sends the frame.
+ */
+export const ONLY_FEATURE = "onlyFeature";
+
+/** Wraps a transient event so only sockets that sent `feature` in their hello get it. */
+export function featureTransient(feature: string, event: Record<string, unknown>): Record<string, unknown> {
+  return { t: "transient", event, [ONLY_FEATURE]: feature };
+}
+
+/** The text of `frame` for a socket with these features, or null when it must not get it. */
+function frameText(frame: unknown, features: string[] | undefined): string | null {
+  if (frame && typeof frame === "object" && ONLY_FEATURE in frame) {
+    const { [ONLY_FEATURE]: need, ...rest } = frame as Record<string, unknown>;
+    if (!features?.includes(need as string)) return null;
+    return JSON.stringify(rest);
+  }
+  return featureAllows(features, frame) ? JSON.stringify(frame) : null;
 }
 
 /** Transient types that only `interact/1` sockets get (docs/protocol.md, "Features and catalogs"). */
@@ -472,6 +493,7 @@ export class MemberGateway extends DurableObject<Env> {
       ws.close(4001, "unauthorized");
       return;
     }
+    // Before syncing starts, so frames buffered during the directory load see the features.
     if (frame.features) {
       state.features = frame.features.slice(0, 32);
       ws.serializeAttachment(state);
@@ -603,9 +625,29 @@ export class MemberGateway extends DurableObject<Env> {
   }
 
   private broadcastFrame(frame: unknown): void {
-    const text = JSON.stringify(frame);
-    for (const ws of this.readySockets()) this.sendText(ws, text);
-    for (const [ws, buf] of this.syncing) if (ws.readyState === WebSocket.OPEN) buf.push(text);
+    this.sendFrames([frame]);
+  }
+
+  /** Sends frames to every ready socket (and buffers them for sockets still syncing), by feature. */
+  private sendFrames(frames: unknown[]): number {
+    const sockets = this.readySockets();
+    const plain = frames.every((f) => !(f && typeof f === "object" && ONLY_FEATURE in f) && featureAllows(undefined, f));
+    const shared = plain ? frames.map((f) => JSON.stringify(f)) : null;
+    const textsFor = (ws: WebSocket) => {
+      if (shared) return shared;
+      const features = (ws.deserializeAttachment() as SocketState | null)?.features;
+      return frames.map((f) => frameText(f, features)).filter((t): t is string => t !== null);
+    };
+    for (const ws of sockets) for (const text of textsFor(ws)) this.sendText(ws, text);
+    for (const [ws, buf] of this.syncing) {
+      if (ws.readyState === WebSocket.OPEN) buf.push(...textsFor(ws));
+    }
+    return sockets.length;
+  }
+
+  /** True when a ready socket of this member sent `feature` in its hello (1.1). */
+  async onlineWith(feature: string): Promise<boolean> {
+    return this.featureOnline(feature);
   }
 
   // -------------------------------------------------------------------------
@@ -617,19 +659,7 @@ export class MemberGateway extends DurableObject<Env> {
    * transient types go only to sockets that sent `hello.features` with `interact/1`.
    */
   async deliver(frames: unknown[]): Promise<number> {
-    const sockets = this.readySockets().map((ws) => ({ ws, features: (ws.deserializeAttachment() as SocketState | null)?.features }));
-    const texts = frames.map((f) => JSON.stringify(f));
-    frames.forEach((frame, i) => {
-      for (const s of sockets) if (featureAllows(s.features, frame)) this.sendText(s.ws, texts[i]);
-    });
-    for (const [ws, buf] of this.syncing) {
-      if (ws.readyState !== WebSocket.OPEN) continue;
-      const features = (ws.deserializeAttachment() as SocketState | null)?.features;
-      frames.forEach((frame, i) => {
-        if (featureAllows(features, frame)) buf.push(texts[i]);
-      });
-    }
-    return sockets.length;
+    return this.sendFrames(frames);
   }
 
   /** True when a ready socket of this member sent `hello.features` with this feature. */
