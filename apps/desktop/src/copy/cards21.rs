@@ -229,4 +229,6 @@ crate::copy! {
     // v11/pb-cards: an embed that did not open.
     EMBED_FAILED = "页面没有打开",
     EMBED_NOT_PAGE = "这个产出不是网页",
+    // v11/pb-cards: the step of a working band (CARD21 §2).
+    BAND_STEP = "{n}/{total}",
 }

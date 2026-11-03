@@ -293,8 +293,26 @@ pub fn words(ctx: &Ctx, base: (String, String)) -> (String, String) {
         } => (c::BAND_FAILED.into(), c::SEND_FAILED_NET.into()),
         CardState::SendFailed { .. } | CardState::Failed { .. } => (c::BAND_FAILED.into(), detail),
         CardState::Done { .. } => (c::BAND_DONE.into(), detail),
+        CardState::Executing { progress, .. } if !progress.waiting => {
+            (c::BAND_WORKING.into(), working_detail(progress))
+        }
         _ => base,
     }
+}
+
+/// The detail of a blue 处理中 band: the step `k/n` and what the step does.
+pub(crate) fn working_detail(p: &crate::views::cards::v2::state::Progress) -> String {
+    let mut parts = Vec::new();
+    if let Some(step) = p.step {
+        parts.push(fill(
+            c::BAND_STEP,
+            &[("n", &step.to_string()), ("total", &p.total.to_string())],
+        ));
+    }
+    if let Some(cur) = &p.current {
+        parts.push(cur.clone());
+    }
+    parts.join(" · ")
 }
 
 fn poll_total(ctx: &Ctx) -> usize {
@@ -421,4 +439,28 @@ pub fn surface_mark(ctx: &Ctx, tree: &super::Tree, id: &str) -> Option<Mark> {
     }
     let (_, list) = names(ctx);
     (!list.is_empty() && !ctx.surface_live).then_some(Mark::Waiting(list))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::views::cards::v2::state::Progress;
+
+    #[test]
+    fn a_working_band_says_the_step_and_what_it_does() {
+        let p = Progress {
+            done: 0,
+            total: 3,
+            step: Some(1),
+            current: Some("Ledger 在补夹夹增长的数".into()),
+            waiting: false,
+        };
+        assert_eq!(working_detail(&p), "1/3 · Ledger 在补夹夹增长的数");
+        let bare = Progress {
+            step: None,
+            current: None,
+            ..p
+        };
+        assert_eq!(working_detail(&bare), "");
+    }
 }
