@@ -1,7 +1,7 @@
 // Review fixes of the 1.1 interaction loop in the group room: audit redaction, private
 // polls and anonymous questionnaires, concurrent card writes, refs, edit marks, requester
 // asks, the retract window and the topic status of blocking asks.
-import { env } from "cloudflare:test";
+import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
 import { Client, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
@@ -39,6 +39,7 @@ const send = (c: Client, gid: string, cardV2: CardV2, extra: Record<string, unkn
   c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2, ...extra });
 const ev = (c: Client, gid: string, messageId: string, f: Record<string, unknown>) =>
   c.request({ t: "card.event", groupId: gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), ...f });
+const roomOf = (gid: string) => env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(gid));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 describe("card event audit", () => {
@@ -100,5 +101,47 @@ describe("retract window", () => {
       error: { reason: "card.retract_closed" },
     });
     for (const c of [ca, cbot]) c.close();
+  });
+});
+
+describe("poll answer cap", () => {
+  it("keeps every voter's newest vote when one voter changes a vote many times", async () => {
+    const { owner, alice, bob, gid, ca, cb, cbot } = await setup();
+    const poll = base({
+      intent: "ask",
+      title: "周五团建去哪？",
+      ask: { from: ["owners"], blocking: false },
+      blocks: [
+        {
+          id: "where",
+          type: "poll",
+          label: "去哪",
+          options: [{ id: "a", label: "爬山" }, { id: "b", label: "火锅" }],
+          voters: [alice.id, bob.id, owner.id],
+          closesAt: Date.now() + 60_000,
+          public: true,
+          changeable: true,
+          fallbackText: "投票：爬山或火锅",
+        },
+      ],
+    });
+    const m = (await send(cbot, gid, poll)).message;
+    await ev(ca, gid, m.id, { blockId: "where", event: "choice.submit", value: { value: "a" } });
+    const b1 = await ev(cb, gid, m.id, { blockId: "where", event: "choice.submit", value: { value: "b" } });
+    expect(b1).toMatchObject({ ok: true });
+    // Bob changed his vote 499 times (the rate limit makes that take minutes; write it directly).
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      const row = state.storage.sql.exec<{ ext: string }>("SELECT ext FROM messages WHERE id = ?", m.id).one();
+      const ext = JSON.parse(row.ext);
+      const mine = ext.cardState.answers.find((x: { actorId: string }) => x.actorId === bob.id);
+      for (let i = 0; i < 498; i++) ext.cardState.answers.push({ ...mine, answerId: `${mine.answerId}${i}`, value: { value: i % 2 ? "b" : "a" } });
+      state.storage.sql.exec("UPDATE messages SET ext = ? WHERE id = ?", JSON.stringify(ext), m.id);
+    });
+    await sleep(1100);
+    await ev(cb, gid, m.id, { blockId: "where", event: "choice.submit", value: { value: "b" } });
+    const u = await cb.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardState?.answers?.length === 500);
+    expect(u.data.cardState.tally).toEqual({ a: 1, b: 1 });
+    expect(u.data.cardState.tallyBy).toEqual({ a: [alice.id], b: [bob.id] });
+    for (const c of [ca, cb, cbot]) c.close();
   });
 });

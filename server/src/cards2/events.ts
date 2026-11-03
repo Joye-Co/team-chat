@@ -281,6 +281,30 @@ export async function cardEvent(room: RoomContext, actor: Actor, a: CardEventArg
 
 type Loaded = { row: MessageRow; ext: Record<string, unknown>; card: CardV2; state: CardState; dir: Directory; now: number };
 
+/** Answers a card state keeps (INTERACT §3.6). */
+const MAX_ANSWERS = 500;
+
+/**
+ * The newest `MAX_ANSWERS` answers, oldest first. Older answers that are not the newest live
+ * answer of their voter in their round go first, so a voter who changes a vote many times never
+ * pushes out another voter's only vote.
+ */
+export function capAnswers(answers: CardAnswer[]): CardAnswer[] {
+  if (answers.length <= MAX_ANSWERS) return answers;
+  const newest = new Map<string, number>();
+  answers.forEach((x, i) => {
+    if (x.retractedAt === undefined) newest.set(`${x.askId}\u0000${x.actorId}`, i);
+  });
+  const live = new Set(newest.values());
+  let drop = answers.length - MAX_ANSWERS;
+  const kept = answers.filter((_, i) => {
+    if (drop === 0 || live.has(i)) return true;
+    drop -= 1;
+    return false;
+  });
+  return kept.length > MAX_ANSWERS ? kept.slice(-MAX_ANSWERS) : kept;
+}
+
 function insertEvent(
   room: RoomContext,
   r: { eventId: string; row: MessageRow; actor: Actor; a: CardEventArgs; stored: boolean; now: number; ack: CardEventAck; cardRev?: number },
@@ -327,7 +351,7 @@ async function storeAnswer(
   if (a.value !== undefined) entry.value = a.value as CardAnswer["value"];
   if (a.inputs !== undefined) entry.inputs = a.inputs as CardAnswer["inputs"];
   if (a.editedValues !== undefined) entry.edited = Object.keys(a.editedValues);
-  const state: CardState = { ...l.state, answers: [...l.state.answers, entry].slice(-500) };
+  const state: CardState = { ...l.state, answers: capAnswers([...l.state.answers, entry]) };
   const poll = pollOf(card);
   if (!poll) state.ask = { ...ask, status: "answered", answeredBy: actor.id, answeredAt: now };
   else {
