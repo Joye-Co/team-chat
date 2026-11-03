@@ -78,6 +78,13 @@ gpui_kit::assets::icon_assets!(
         // --- end rail track
         // Desk track (1.1.0 首页): the 录屏 proof chip.
         Play,
+        // panes track (1.1.0): 单独问 and 实时查看.
+        CornerDownRight,
+        MousePointer2,
+        Maximize2,
+        Minimize2,
+        ArrowUpRight,
+        ScreenShare,
     ]
 );
 

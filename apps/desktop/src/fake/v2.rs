@@ -885,7 +885,8 @@ impl V2Samples {
             SideChatMessage {
                 id: "sc-2".into(),
                 author_id: JOJO.into(),
-                body: "风险不大，有三点要知道：\n1. 去重靠 seq，旧消息不受影响。\n2. 指数退避最长 30 秒，断网久了重连会慢一点。\n3. 旧客户端照旧工作，只是不去重。\n\nForge 的测试覆盖了 6 个场景，没覆盖多端同时在线。".into(),
+                // panes track: the 单独问 artboard's answer.
+                body: "风险不大，有三处值得留意：\n1. 去重靠客户端记住的 seq。缓存清空后会从头拉一次，不会重复，只是首次打开慢一点。\n2. 断网久了，重试间隔会拉长到 30 秒，网恢复后最多等半分钟才连上。\n3. 旧版客户端不带 seq，服务器照旧推送。\n\nForge 的测试覆盖了 6 个场景，没覆盖多端同时在线。".into(),
                 at: at(10, 31),
                 refs: vec![
                     "reconnect.ts seq 去重".into(),
