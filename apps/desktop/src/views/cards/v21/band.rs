@@ -185,6 +185,29 @@ fn ask_kind(card: &CardV2) -> Option<String> {
     })
 }
 
+/// The card's short summary when the amber band says it (Interact.dc.html 01: 等你 · Ledger
+/// 想在周会前确认数据); a questionnaire's band counts its questions instead.
+fn band_summary(card: &CardV2) -> Option<String> {
+    if card
+        .blocks
+        .iter()
+        .any(|b| matches!(b, CardV2Block::Questionnaire { .. }))
+    {
+        return None;
+    }
+    card.summary.clone().filter(|s| s.chars().count() <= 24)
+}
+
+/// True when the band says the card's summary, so the body does not say it again
+/// (CARD21 §2).
+pub fn summary_in_band(ctx: &Ctx) -> bool {
+    is_21(ctx.card)
+        && matches!(ctx.state, CardState::Pending)
+        && poll(ctx.card).is_none()
+        && pending(ctx).is_none()
+        && band_summary(ctx.card).is_some()
+}
+
 pub(crate) fn names(ctx: &Ctx) -> (usize, String) {
     let Some(ask) = &ctx.card.ask else {
         return (0, String::new());
@@ -246,8 +269,8 @@ pub fn words(ctx: &Ctx, base: (String, String)) -> (String, String) {
                     ),
                 );
             }
-            let kind = ask_kind(ctx.card)
-                .or_else(|| ctx.card.summary.clone().filter(|s| s.chars().count() <= 24))
+            let kind = band_summary(ctx.card)
+                .or_else(|| ask_kind(ctx.card))
                 .unwrap_or(detail);
             (c::BAND_YOU.into(), kind)
         }

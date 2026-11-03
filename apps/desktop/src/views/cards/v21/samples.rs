@@ -236,21 +236,22 @@ fn compare(rev: u32) -> Value {
     )
 }
 
+/// INTERACT 7.1 as Interact.dc.html 01 draws it: Ledger asks Joye, before the weekly
+/// meeting, whether the data is right (an ask card: the amber band for Joye, 等 Joye for
+/// everyone else), with the chart and the question side by side (2 : 1).
 fn report_rev1() -> Value {
     with(
         base(
-            "10 月数据月报",
-            "done",
-            "Ledger 发了 10 月数据月报：新增群 38，日活 2,340。请看一眼数据对不对。",
+            "10 月日活 2,340，比 9 月涨了 4%",
+            "ask",
+            "Ledger 想在周会前确认 10 月数据：日活 2,340，比 9 月涨了 4%。这个数据对不对？",
         ),
         json!({
-            "summary": "新增群 38 个，比 9 月多 12%；日活 2,340。",
-            "ask": { "id": "verify", "from": [ME], "blocking": false, "promise": "你确认之前，我不会把月报发到全员群。" },
+            "summary": "Ledger 想在周会前确认数据",
+            "ask": { "id": "verify", "from": [ME], "expiresAt": at(14, 0),
+                     "promise": "你确认之前，我不会把月报发到全员群。" },
             "blocks": [
-                { "id": "kpis", "type": "row", "children": ["m_groups", "m_dau", "m_reply"] },
-                { "id": "m_groups", "type": "metric", "label": "新增群", "value": 38, "delta": 12, "unit": "%", "better": "up", "note": "比 9 月" },
-                { "id": "m_dau", "type": "metric", "label": "日活", "value": 2340, "delta": 4, "unit": "%", "better": "up", "note": "比 9 月" },
-                { "id": "m_reply", "type": "metric", "label": "平均回复", "value": 1.2, "unit": "秒", "delta": -0.3, "better": "down" },
+                { "id": "basis", "type": "text", "text": "按去重设备算，用的是 Joye 11-01 定的口径。发到周会之前，想请你看一眼。" },
                 { "id": "main", "type": "row", "weights": [2, 1], "children": ["trend", "check_col"] },
                 { "id": "trend", "type": "chart", "kind": "line", "label": "日活 · 近 4 周", "emphasis": "high",
                   "x": ["10-06", "10-13", "10-20", "10-27"],
@@ -259,11 +260,10 @@ fn report_rev1() -> Value {
                   "summary": "10 月日活从 2,210 涨到 2,340，每周都比 9 月高。", "events": ["chart.select"] },
                 { "id": "check_col", "type": "stack", "children": ["check", "note"] },
                 { "id": "check", "type": "decision", "label": "这个数据对不对？", "required": true, "fallbackText": "对 / 有问题",
+                  "help": "有问题就写一句，Ledger 会先查再发。",
                   "options": [ { "id": "ok", "label": "对，可以发周会" }, { "id": "wrong", "label": "有问题" } ],
                   "deliver": "onSubmit", "events": ["choice.change"] },
-                { "id": "note", "type": "input", "kind": "textarea", "label": "补充一句（可选）", "required": false, "maxLength": 300 },
-                { "id": "full", "type": "ref", "emphasis": "low", "label": "10 月数据月报 v3",
-                  "target": { "kind": "artifact", "artifactId": ART_REPORT, "version": 3 } }
+                { "id": "note", "type": "input", "kind": "textarea", "label": "哪里不对？", "required": false, "maxLength": 300 }
             ],
             "actions": [ { "id": "send", "label": "发给 Ledger", "style": "primary", "kind": "submit", "inputs": ["check", "note"] } ]
         }),

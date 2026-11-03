@@ -1326,7 +1326,8 @@ fn title(ctx: &Ctx, cx: &App) -> AnyElement {
             ctx.card
                 .summary
                 .clone()
-                .filter(|_| super::v21::is_21(ctx.card)),
+                .filter(|_| super::v21::is_21(ctx.card))
+                .filter(|_| !super::v21::band::summary_in_band(ctx)),
             |el, s| {
                 el.child(
                     div()
