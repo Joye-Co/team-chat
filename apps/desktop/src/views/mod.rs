@@ -9,6 +9,9 @@ pub mod composer;
 pub mod connection_banner;
 pub mod files;
 pub mod login;
+// --- v11/media ---
+pub mod media;
+// --- end v11/media ---
 pub mod nav;
 pub mod process;
 pub mod search;

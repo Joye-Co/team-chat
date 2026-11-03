@@ -16,6 +16,9 @@ pub mod connection;
 pub mod dev;
 pub mod files;
 pub mod login;
+// --- v11/media ---
+pub mod media;
+// --- end v11/media ---
 pub mod nav;
 pub mod notify;
 pub mod panel;
@@ -196,6 +199,13 @@ pub const SECTIONS: &[Section] = &[
         entries: cards_v2::ENTRIES,
         developer: false,
     },
+    // --- v11/media ---
+    Section {
+        name: "media",
+        entries: media::ENTRIES,
+        developer: false,
+    },
+    // --- end v11/media ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.
