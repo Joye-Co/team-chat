@@ -183,6 +183,7 @@ async fn collect(ws: &mut Ws, run: &str, ack: bool, stop: impl Fn(&Up) -> bool) 
 
 fn assign(run: &str, runtime: &str, prompt: &str, upload: Option<String>) -> Down {
     Down::RunAssign(RunAssign {
+        kind: None,
         run_id: run.into(),
         bot_member_id: "bot1".into(),
         group_id: "g1".into(),
@@ -347,6 +348,8 @@ async fn daemon_end_to_end() {
             send(
                 &mut ws,
                 &Down::RunInput {
+                    answer: None,
+                    artifact_event: None,
                     run_id: "r1".into(),
                     input_id: "in1".into(),
                     text: "follow up".into(),

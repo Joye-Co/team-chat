@@ -428,6 +428,8 @@ impl Daemon {
                         os: std::env::consts::OS.into(),
                         arch: std::env::consts::ARCH.into(),
                         max_parallel_runs: self.cfg.max_parallel_runs,
+                        features: None,
+                        takeover_url: None,
                     },
                     clis: self.clis.clone(),
                     health: health::health(&self.cfg, self.active_count()),
@@ -532,6 +534,10 @@ impl Daemon {
                 }
             }
             Down::Error { error } => log!("server error {}: {}", error.code, error.message),
+            // This daemon does not report the "pause" feature, so the server does not send these.
+            Down::RunPause { run_id, .. } | Down::RunResume { run_id, .. } => {
+                log!("ignored pause or resume of run {run_id}: feature not supported");
+            }
         }
     }
 
