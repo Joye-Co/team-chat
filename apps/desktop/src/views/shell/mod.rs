@@ -39,6 +39,12 @@ use crate::{
 /// bar shows. The shell draws the title bar above the body.
 pub trait PageView: Render {
     fn title_bar(&self, cx: &App) -> TitleBarSpec;
+    /// pages track: true when the page draws its own 52 pt title bars (the
+    /// 群, 成员 and 产出 pages have a side column with its own header that
+    /// starts at the top of the window). The shell then draws none.
+    fn draws_own_header(&self, _cx: &App) -> bool {
+        false
+    }
 }
 
 /// A pane at the right of a page.

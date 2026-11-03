@@ -65,6 +65,13 @@ impl Pages {
     ) -> AnyElement {
         let k = theme::colors(cx);
         let (spec, body) = self.parts(page, cx);
+        // pages track: a page with its own title bars gets none from here.
+        let own_header = match page {
+            Page::Group => self.group.read(cx).draws_own_header(cx),
+            Page::Members => self.members.read(cx).draws_own_header(cx),
+            Page::Artifacts | Page::Artifact => self.artifact.read(cx).draws_own_header(cx),
+            Page::Desk | Page::Topic => false,
+        };
         div()
             .flex_1()
             .min_w(px(0.))
@@ -72,9 +79,9 @@ impl Pages {
             .flex()
             .flex_col()
             .bg(k.bg)
-            // A page that draws its own header (首页, desk track) returns an
-            // empty spec: no title bar.
-            .when(spec != TitleBarSpec::default(), |el| {
+            // A page that draws its own header (首页 with an empty spec, or the
+            // 群, 成员 and 产出 pages) gets no title bar from here.
+            .when(!own_header && spec != TitleBarSpec::default(), |el| {
                 el.child(title_bar::render(&spec, open, leading, services, cx))
             })
             .child(div().flex_1().min_h(px(0.)).child(body))
