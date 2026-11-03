@@ -62,6 +62,9 @@ pub struct StateLine {
     pub detail: Option<String>,
     /// The member's run is paused (someone took over its computer).
     pub paused: bool,
+    /// The member's name that leads `text`: the title bar cuts it with `…`
+    /// before it cuts `在做 3/5`.
+    pub name: Option<String>,
 }
 
 impl StateLine {
@@ -71,6 +74,7 @@ impl StateLine {
             tone,
             detail: None,
             paused: false,
+            name: None,
         }
     }
 }
@@ -138,6 +142,7 @@ pub fn run_state(
             tone: StateTone::Quiet,
             detail: Some(detail),
             paused: true,
+            name: Some(name.to_string()),
         };
     }
     match plan_progress(&run.plan) {
@@ -153,12 +158,14 @@ pub fn run_state(
             tone: StateTone::Live,
             detail: step,
             paused: false,
+            name: Some(name.to_string()),
         },
         None => StateLine {
             text: fill(c::STATE_WORKING_NO_PLAN, &[("name", name)]),
             tone: StateTone::Live,
             detail: None,
             paused: false,
+            name: Some(name.to_string()),
         },
     }
 }
@@ -286,6 +293,7 @@ impl PageView for TopicPage {
             state: state.as_ref().map(|s| (s.text.clone(), s.tone)),
             state_detail: state.as_ref().and_then(|s| s.detail.clone()),
             state_paused: state.as_ref().is_some_and(|s| s.paused),
+            state_name: state.as_ref().and_then(|s| s.name.clone()),
             buttons: pane_buttons(&self.services, &g, &t),
         }
     }
