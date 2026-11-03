@@ -6,7 +6,8 @@ use super::rows::{self, json_err};
 use super::{ApplyOutcome, LogEntry, Store, StoreResult};
 use crate::proto::{
     AnswerEdits, AnswerInputs, ArtifactPreviewReadyData, ArtifactVersion, BotRun, CardAnsweredData,
-    CardRetractedData, CardV2, CardV2Block, Event, EventData, Message, RefTarget, TopicContext, TopicLink, TopicLinkedData,
+    CardRetractedData, CardV2, CardV2Block, Event, EventData, Message, RefTarget, TopicContext,
+    TopicLink, TopicLinkedData,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 

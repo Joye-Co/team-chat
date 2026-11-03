@@ -1267,16 +1267,16 @@ async fn an_answer_is_acked_when_its_event_arrives_first() {
         s.append(
             G1,
             ME,
-            EventData::MessageCreated(MessageCreatedData {
+            EventData::MessageCreated(Box::new(MessageCreatedData {
                 message: message("M1", G1, "T1", ME, 2, "root"),
-            }),
+            })),
         );
         s.append(
             G1,
             BOT,
-            EventData::MessageCreated(MessageCreatedData {
+            EventData::MessageCreated(Box::new(MessageCreatedData {
                 message: card_message("C1", 3, report_card()),
-            }),
+            })),
         );
     });
     let dir = tempfile::tempdir().unwrap();
