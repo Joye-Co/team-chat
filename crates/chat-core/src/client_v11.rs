@@ -199,7 +199,7 @@ impl Client {
             .find(|g| {
                 g.group.kind == GroupKind::Dm
                     && g.group.member_ids.iter().any(|m| m == member_id)
-                    && g.group.member_ids.iter().any(|m| *m == me)
+                    && g.group.member_ids.contains(&me)
             })
             .map(|g| g.group.id))
     }
