@@ -162,7 +162,7 @@ fn step_line(step: &ProcessStep) -> Option<(Lucide, String, bool)> {
 }
 
 /// The latest step of a running bot, as one phrase for the pending row.
-fn live_label(steps: &[ProcessStep]) -> Option<String> {
+pub(super) fn live_label(steps: &[ProcessStep]) -> Option<String> {
     steps.iter().rev().find_map(|s| match s {
         ProcessStep::Status { message } if !message.trim().is_empty() => {
             Some(message.trim().to_string())

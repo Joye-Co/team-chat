@@ -24,6 +24,7 @@ mod header;
 mod live;
 mod menu;
 mod model;
+mod plan;
 pub mod preview;
 mod row;
 pub mod selftest;
@@ -172,6 +173,8 @@ pub struct TimelineView {
     followed_runs: std::collections::HashSet<String>,
     /// Steps rows the user opened.
     open_steps: std::collections::HashSet<String>,
+    /// Plan cards the user folded (run ids; `timeline/plan.rs`).
+    plan_collapsed: std::collections::HashSet<String>,
     /// A one-second tick runs while a bot works (the elapsed time).
     ticking: bool,
     /// A card was in the rows painted last frame (the header hides the
@@ -284,6 +287,7 @@ impl TimelineView {
             window_active: false,
             followed_runs: Default::default(),
             open_steps: Default::default(),
+            plan_collapsed: Default::default(),
             ticking: false,
             card_visible: false,
             card_seen: false,
@@ -802,7 +806,13 @@ impl Render for TimelineView {
                     .children(jump_unread)
                     .children(jump),
             )
-            .children(self.render_live(window, cx).map(|el| self.v2_column(el)))
+            // The 话题 page shows a member at work as the plan card at the
+            // foot of the list (`timeline/plan.rs`), not the pending row.
+            .children(
+                (!self.v2)
+                    .then(|| self.render_live(window, cx))
+                    .flatten(),
+            )
             .children(
                 self.render_typing(cx)
                     .map(|el| self.v2_column(el.into_any_element())),
