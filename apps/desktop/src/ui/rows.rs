@@ -25,6 +25,10 @@ pub enum RowSurface {
     Content,
     /// `hover` / `selected` with radius 6 (menus, popups, the switcher).
     Overlay,
+    /// v3 rail rows (destinations, 话题, members): `hover` / grey `sel` on
+    /// `rail`, radius 8. The selected row's text is `ink` at weight 500
+    /// (the caller's).
+    Rail,
 }
 
 /// An interactive row with the shared states (§7.1): hover fill at once,
@@ -46,6 +50,7 @@ pub fn list_row(
         RowSurface::Sidebar => (k.sidebar_hover, k.sidebar_selected, theme::radius::MD),
         RowSurface::Content => (k.hover, k.selected, theme::radius::MD),
         RowSurface::Overlay => (k.hover, k.selected, theme::radius::SM),
+        RowSurface::Rail => (k.hover, k.sel, theme::radius::MD),
     };
     div()
         .id(id)

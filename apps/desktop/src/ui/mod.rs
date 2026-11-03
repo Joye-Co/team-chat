@@ -35,9 +35,9 @@ pub mod truncate;
 
 // The screens build from these; some are not used by every screen yet.
 #[allow(unused_imports)]
-pub use avatar::{GroupGlyph, GroupTile, MemberAvatar};
+pub use avatar::{GroupGlyph, GroupTile, MemberAvatar, Ring};
 #[allow(unused_imports)]
-pub use chip::{BadgeKind, ChipStyle, CountBadge, Kbd, RoleTag, StatusChip};
+pub use chip::{BadgeKind, ChipStyle, CountBadge, JobTag, Kbd, RoleTag, StatusChip};
 #[allow(unused_imports)]
 pub use composer::{ComposerShell, composer_tool, send_button};
 #[allow(unused_imports)]
@@ -56,7 +56,7 @@ pub use overlay::{
 #[allow(unused_imports)]
 pub use parts::{
     Band, EmptyState, KbdHint, capsule, card, card_padding, column_edge, column_start_edge,
-    floating, hairline, header_band, toolbar_band, vhairline,
+    floating, hairline, header_band, rail_card, toolbar_band, vhairline,
 };
 #[allow(unused_imports)]
 pub use rows::{
