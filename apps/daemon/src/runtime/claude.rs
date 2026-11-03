@@ -330,18 +330,37 @@ pub fn find_session_file(config_dir: &Path, cwd: &Path, session_id: &str) -> Opt
     })
 }
 
-/// Tools a side chat run may never use, on top of permission mode `plan`.
-pub const ASIDE_DISALLOWED_TOOLS: &str = "Edit Write MultiEdit NotebookEdit";
+/// The only tools a side chat run has: built-in tools that read files.
+pub const ASIDE_TOOLS: &str = "Read,Grep,Glob";
+
+/// Tools a side chat run may never use, also if a settings file or a later CLI adds them: the
+/// command, edit and web tools and every MCP tool.
+pub const ASIDE_DISALLOWED_TOOLS: &str =
+    "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch mcp__*";
 
 /// Permission flags and the configured extra args. A side chat run (`spec.aside`) is
-/// read-only whatever `daemon.toml` says: permission mode `plan`, the edit tools disallowed,
-/// and neither `allowed_tools` nor the configured args (which could widen permissions).
+/// read-only whatever `daemon.toml` or the CLI's own settings say: permission mode `plan`, only
+/// [`ASIDE_TOOLS`], [`ASIDE_DISALLOWED_TOOLS`] denied, no MCP servers, no user, project or
+/// local settings files (their allow rules could approve a write), and neither `allowed_tools`
+/// nor the configured args (which could widen permissions).
 pub fn permission_args(spec: &RunSpec) -> Vec<String> {
     let mut args = vec!["--permission-mode".to_string()];
     if spec.aside {
-        args.push("plan".into());
-        args.push("--disallowedTools".into());
-        args.push(ASIDE_DISALLOWED_TOOLS.into());
+        args.extend(
+            [
+                "plan",
+                "--tools",
+                ASIDE_TOOLS,
+                "--disallowedTools",
+                ASIDE_DISALLOWED_TOOLS,
+                "--strict-mcp-config",
+                "--mcp-config",
+                r#"{"mcpServers":{}}"#,
+                "--setting-sources",
+                "",
+            ]
+            .map(String::from),
+        );
         return args;
     }
     args.push(

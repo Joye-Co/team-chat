@@ -238,7 +238,7 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | --- | --- |
 | `pause` | `run.pause`: interrupts the CLI turn where the CLI supports it, else sends SIGSTOP to the run's process group, stops the stall timer and the `maxDurationMs` clock, and emits `paused { paused: true, by }`. `run.resume`: SIGCONT, restarts both clocks (the deadline moves by the paused time), emits `paused { paused: false }` and gives `note` to the CLI as its next input when set. A cancel while paused resumes first. |
 | `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
-| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only`, Claude Code permission mode `plan`, no repo write) whatever `daemon.toml` says. |
+| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only` with no MCP servers or web tools, Claude Code permission mode `plan` with only the read tools, no repo write) whatever `daemon.toml` or the CLI's own settings say. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
 
 How the 1.1 daemon does each one:
@@ -266,8 +266,15 @@ How the 1.1 daemon does each one:
 - **aside**: `run.assign.kind = "aside"` is accepted only for runtimes of kind `claude` and
   `codex`; others are rejected with `runtime_unavailable` (ACP agents and the PTY have no
   read-only mode the daemon can force). A `kind` this daemon does not know is rejected with
-  `invalid`. Claude Code gets `--permission-mode plan --disallowedTools "Edit Write MultiEdit
-  NotebookEdit"`; Codex gets `approvalPolicy: "never"` and `sandbox: "read-only"`. The
+  `invalid`. Claude Code gets `--permission-mode plan --tools Read,Grep,Glob --disallowedTools
+  "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch mcp__*" --strict-mcp-config
+  --mcp-config '{"mcpServers":{}}' --setting-sources ""`: no MCP servers and no user, project
+  or local settings files, so their allow rules cannot widen the run. Codex gets
+  `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
+  and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
+  each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the
+  working directory and the folders above it (MCP tools run outside the sandbox). A server
+  name that `-c` cannot address fails the run. The
   runtime's `args`, `allowed_tools`, `permission_mode`, `sandbox` and `approval_policy` from
   `daemon.toml` are ignored, and the CLI gets none of the `envAllowlist` variables. The run
   folder is made as for any run; the answer is the run's `run.done.resultText`.

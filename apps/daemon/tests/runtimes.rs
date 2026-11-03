@@ -284,9 +284,11 @@ async fn pty_cancel_kills_group() {
     assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "shell still alive");
 }
 
-/// A side chat run is read-only whatever the runtime config says: Codex gets sandbox
-/// `read-only` and no configured args; Claude Code gets permission mode `plan`, the edit tools
-/// disallowed, and neither `allowed_tools` nor the configured args.
+/// A side chat run is read-only whatever the runtime config or the CLI's own config says.
+/// Codex gets sandbox `read-only`, no configured args, and web search, apps, plugins, browser
+/// and computer use and every configured MCP server turned off. Claude Code gets permission
+/// mode `plan`, only the read-only tools, the command, edit, web and MCP tools denied, no MCP
+/// servers and no settings files, and neither `allowed_tools` nor the configured args.
 #[test]
 fn aside_runs_ignore_widening_config() {
     let tmp = tempfile::tempdir().unwrap();
@@ -302,11 +304,56 @@ fn aside_runs_ignore_widening_config() {
         runtime::codex::thread_policy(&s),
         ("on-request".to_string(), "danger-full-access".to_string())
     );
+    assert_eq!(
+        runtime::codex::app_server_args(&s).unwrap(),
+        vec!["app-server", "--dangerously-bypass-approvals-and-sandbox"]
+    );
     s.aside = true;
     assert_eq!(
         runtime::codex::thread_policy(&s),
         ("never".to_string(), "read-only".to_string())
     );
+    // MCP servers from $CODEX_HOME/config.toml (HOME/.codex here) and the project's config.
+    std::fs::create_dir_all(tmp.path().join(".codex")).unwrap();
+    std::fs::write(
+        tmp.path().join(".codex/config.toml"),
+        "[mcp_servers.github]\ncommand = \"gh-mcp\"\n[mcp_servers.writer-2]\nurl = \"http://x\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(s.cwd.join(".codex")).unwrap();
+    std::fs::write(
+        s.cwd.join(".codex/config.toml"),
+        "[mcp_servers.repo_tool]\ncommand = \"t\"\n",
+    )
+    .unwrap();
+    let args = runtime::codex::app_server_args(&s).unwrap();
+    assert_eq!(args[0], "app-server");
+    assert!(!args.iter().any(|a| a.contains("dangerously")), "{args:?}");
+    let overrides: Vec<&str> = args
+        .windows(2)
+        .filter(|w| w[0] == "-c")
+        .map(|w| w[1].as_str())
+        .collect();
+    for want in [
+        "web_search=\"disabled\"",
+        "features.apps=false",
+        "features.plugins=false",
+        "features.browser_use=false",
+        "features.browser_use_external=false",
+        "features.computer_use=false",
+        "mcp_servers.github.enabled=false",
+        "mcp_servers.writer-2.enabled=false",
+        "mcp_servers.repo_tool.enabled=false",
+    ] {
+        assert!(overrides.contains(&want), "{want} missing: {args:?}");
+    }
+    // A server name that `-c` cannot address fails the run instead of leaving it on.
+    std::fs::write(
+        s.cwd.join(".codex/config.toml"),
+        "[mcp_servers.\"a.b\"]\ncommand = \"t\"\n",
+    )
+    .unwrap();
+    assert!(runtime::codex::app_server_args(&s).is_err());
 
     let mut c = spec(
         tmp.path(),
@@ -321,13 +368,43 @@ fn aside_runs_ignore_widening_config() {
     assert!(normal.contains(&"bypassPermissions".to_string()));
     assert!(normal.contains(&"--dangerously-skip-permissions".to_string()));
     c.aside = true;
-    assert_eq!(
-        runtime::claude::permission_args(&c),
-        vec![
-            "--permission-mode".to_string(),
-            "plan".into(),
-            "--disallowedTools".into(),
-            runtime::claude::ASIDE_DISALLOWED_TOOLS.into(),
-        ]
-    );
+    let args = runtime::claude::permission_args(&c);
+    let value = |flag: &str| {
+        let i = args
+            .iter()
+            .position(|a| a == flag)
+            .unwrap_or_else(|| panic!("{flag} missing: {args:?}"));
+        args[i + 1].clone()
+    };
+    assert_eq!(value("--permission-mode"), "plan");
+    let tools: Vec<String> = value("--tools").split(',').map(str::to_string).collect();
+    assert_eq!(tools, ["Read", "Grep", "Glob"]);
+    let denied: Vec<String> = value("--disallowedTools")
+        .split(' ')
+        .map(str::to_string)
+        .collect();
+    for t in [
+        "Bash",
+        "Edit",
+        "Write",
+        "MultiEdit",
+        "NotebookEdit",
+        "WebFetch",
+        "WebSearch",
+        "mcp__*",
+    ] {
+        assert!(denied.iter().any(|d| d == t), "{t} not denied: {denied:?}");
+    }
+    assert!(args.iter().any(|a| a == "--strict-mcp-config"));
+    assert_eq!(value("--mcp-config"), r#"{"mcpServers":{}}"#);
+    // No user, project or local settings: their allow rules cannot widen the run.
+    assert_eq!(value("--setting-sources"), "");
+    for widening in [
+        "bypassPermissions",
+        "--dangerously-skip-permissions",
+        "--allowedTools",
+        "acceptEdits",
+    ] {
+        assert!(!args.iter().any(|a| a == widening), "{widening}: {args:?}");
+    }
 }

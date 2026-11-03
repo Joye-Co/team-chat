@@ -954,8 +954,8 @@ async fn pause_resume_answer_acceptance_and_aside() {
     // SAFETY: probing a pid with signal 0.
     assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "fake CLI still alive");
 
-    // 3. Aside: Claude Code in plan mode with the edit tools disallowed; no PTY aside; no
-    // unknown kinds.
+    // 3. Aside: Claude Code in plan mode with only the read tools, no MCP servers and no
+    // settings files; no PTY aside; no unknown kinds.
     let mut a = assign("s1", "fake", "what is the status", None);
     if let Down::RunAssign(r) = &mut a {
         r.kind = Some("aside".into());
@@ -972,6 +972,12 @@ async fn pause_resume_answer_acceptance_and_aside() {
     assert_eq!(argv[mode + 1], "plan");
     let dis = argv.iter().position(|a| a == "--disallowedTools").unwrap();
     assert!(argv[dis + 1].contains("Write") && argv[dis + 1].contains("Edit"));
+    assert!(argv[dis + 1].split(' ').any(|t| t == "Bash"));
+    let tools = argv.iter().position(|a| a == "--tools").unwrap();
+    assert_eq!(argv[tools + 1], "Read,Grep,Glob");
+    let sources = argv.iter().position(|a| a == "--setting-sources").unwrap();
+    assert_eq!(argv[sources + 1], "");
+    assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
     assert!(!argv.iter().any(|a| a == "acceptEdits"));
     for (run, runtime, kind, reason) in [
         ("s2", "sh", "aside", "runtime_unavailable"),

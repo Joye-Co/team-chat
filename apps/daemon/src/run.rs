@@ -45,7 +45,8 @@ impl From<Control> for RunCtl {
 pub const KIND_ASIDE: &str = "aside";
 
 /// Runtime kinds that have a read-only mode the daemon can force (Codex sandbox `read-only`,
-/// Claude Code permission mode `plan`). ACP agents and the PTY have none.
+/// Claude Code permission mode `plan` with only the read tools). ACP agents and the PTY have
+/// none.
 pub fn aside_capable(kind: &str) -> bool {
     matches!(kind, "codex" | "claude")
 }

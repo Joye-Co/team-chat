@@ -288,11 +288,10 @@ fn text_input(text: &str) -> Value {
 
 async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let program = spec.cfg.command();
-    let mut args = vec!["app-server".to_string()];
-    // A side chat run ignores the configured args: they could widen the sandbox.
-    if !spec.aside {
-        args.extend(spec.cfg.args.iter().cloned());
-    }
+    let args = match app_server_args(&spec) {
+        Ok(a) => a,
+        Err(e) => return Outcome::failed(e),
+    };
     let mut p = match Proc::spawn(&spec, &program, &args) {
         Ok(p) => p,
         Err(e) => return Outcome::failed(format!("cannot start {program}: {e}")),
@@ -540,6 +539,74 @@ pub fn thread_policy(spec: &RunSpec) -> (String, String) {
             .clone()
             .unwrap_or_else(|| "workspace-write".into()),
     )
+}
+
+/// Config overrides of a side chat run: tools outside the sandbox (web search, apps, plugins,
+/// browser and computer use) are off.
+pub const ASIDE_CONFIG: &[&str] = &[
+    "web_search=\"disabled\"",
+    "features.apps=false",
+    "features.plugins=false",
+    "features.browser_use=false",
+    "features.browser_use_external=false",
+    "features.computer_use=false",
+];
+
+/// Names of the MCP servers in the Codex config files a run loads: `$CODEX_HOME/config.toml`
+/// and `.codex/config.toml` in the working directory and each folder above it.
+fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<String>, String> {
+    let home = spec
+        .env_var("CODEX_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".codex"));
+    let files = std::iter::once(home.join("config.toml"))
+        .chain(spec.cwd.ancestors().map(|d| d.join(".codex/config.toml")));
+    let mut names: Vec<String> = vec![];
+    for f in files {
+        let Ok(text) = std::fs::read_to_string(&f) else {
+            continue;
+        };
+        let table: toml::Table =
+            toml::from_str(&text).map_err(|_| format!("cannot read {}", f.display()))?;
+        if let Some(servers) = table.get("mcp_servers").and_then(toml::Value::as_table) {
+            for n in servers.keys() {
+                if !names.contains(n) {
+                    names.push(n.clone());
+                }
+            }
+        }
+    }
+    Ok(names)
+}
+
+/// `codex app-server` arguments. A side chat run ignores the configured args (they could widen
+/// the sandbox) and turns off [`ASIDE_CONFIG`] and every configured MCP server: MCP tools run
+/// outside the sandbox. The sandbox (`thread_policy`) blocks writes and network for commands.
+pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
+    let mut args = vec!["app-server".to_string()];
+    if !spec.aside {
+        args.extend(spec.cfg.args.iter().cloned());
+        return Ok(args);
+    }
+    let plain = |n: &str| {
+        !n.is_empty()
+            && n.chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    };
+    let mut overrides: Vec<String> = ASIDE_CONFIG.iter().map(|c| c.to_string()).collect();
+    for name in configured_mcp_servers(spec)? {
+        if !plain(&name) {
+            return Err(format!(
+                "cannot turn off MCP server {name:?} for a read-only run"
+            ));
+        }
+        overrides.push(format!("mcp_servers.{name}.enabled=false"));
+    }
+    for o in overrides {
+        args.push("-c".into());
+        args.push(o);
+    }
+    Ok(args)
 }
 
 /// Input that arrived while the last turn was ending still gets a turn.
