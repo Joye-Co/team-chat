@@ -1,17 +1,15 @@
 //! The 首页 (desk track, 1.1.0) for [`super::CoreProvider`]: 需要你拍板 with the
-//! card of each ask, and v2 card answers. Everything is read from the local
+//! card of each ask. v2 card reads and answers live in `cards_v2.rs`. Everything is read from the local
 //! cache; the desk view keeps a snapshot and rebuilds it on a change, so
 //! these reads are not on the frame path.
-
-use std::{collections::BTreeMap, sync::Arc};
 
 use chat_core::proto::{self, CardV2, CardV2Block, MemberLevel};
 
 use super::CoreProvider;
 use crate::data::{
-    Change, TodoReason, TopicStatus,
+    TodoReason, TopicStatus,
     card::{ActionStyle, CardTone},
-    v2::{AskItem, AskKind, CardAnswer},
+    v2::{AskItem, AskKind},
 };
 
 /// Messages of a waiting 话题 searched for its newest card.
@@ -122,73 +120,5 @@ impl CoreProvider {
         }
         out.sort_by_key(|x| std::cmp::Reverse(x.at));
         out
-    }
-
-    pub(super) fn desk_card_v2(&self, message_id: &str) -> Option<Arc<CardV2>> {
-        let a = self.account()?;
-        let m = a.client.store().message(message_id).ok().flatten()?;
-        if m.is_deleted() {
-            return None;
-        }
-        m.card_v2.map(Arc::new)
-    }
-
-    pub(super) fn desk_card_v2_answers(&self, topic_id: &str, message_id: &str) -> Vec<CardAnswer> {
-        let Some(a) = self.account() else {
-            return Vec::new();
-        };
-        let mut out: Vec<CardAnswer> = a
-            .client
-            .card_answers(message_id)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|r| CardAnswer {
-                actor_id: r.actor_id,
-                action_id: r.action_id,
-                inputs: r.inputs.unwrap_or_default(),
-                at: r.at.min(i64::MAX as u64) as i64,
-                pending: false,
-            })
-            .collect();
-        let real = self.resolve_topic(topic_id);
-        for (id, _rev, action_id, failed) in
-            a.client.pending_card_answers(&real).unwrap_or_default()
-        {
-            if id == message_id && !failed {
-                out.push(CardAnswer {
-                    actor_id: a.me.id.clone(),
-                    action_id,
-                    inputs: BTreeMap::new(),
-                    at: chrono::Local::now().timestamp_millis(),
-                    pending: true,
-                });
-            }
-        }
-        out
-    }
-
-    pub(super) fn desk_answer_card_v2(
-        &self,
-        group_id: &str,
-        topic_id: &str,
-        message_id: &str,
-        rev: u32,
-        action_id: &str,
-        inputs: BTreeMap<String, serde_json::Value>,
-    ) {
-        let Some(a) = self.account() else {
-            return;
-        };
-        let inputs = (!inputs.is_empty()).then_some(inputs);
-        if let Err(error) = a
-            .client
-            .answer_card(message_id, rev, action_id, inputs, None)
-        {
-            tracing::warn!("desk: could not answer a card: {error}");
-        }
-        self.emit(vec![Change::Messages {
-            group_id: group_id.to_string(),
-            topic_id: topic_id.to_string(),
-        }]);
     }
 }
