@@ -1083,7 +1083,11 @@ impl ChatProvider for V2Samples {
                 created_at: summary.updated_at - (summary.version - v) as i64 * 24 * 60 * MIN,
                 // --- v11/media ---
                 entry: "index.html".into(),
-                files: Vec::new(),
+                files: vec![ArtifactVersionFile {
+                    path: "index.html".into(),
+                    size: 18_400,
+                    mime: "text/html".into(),
+                }],
                 // --- end v11/media ---
             })
             .collect();
