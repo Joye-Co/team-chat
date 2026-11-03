@@ -810,6 +810,12 @@ A 1.0.x client skips the new event types (`LogEntry::Unknown`) and drops the new
 caches a message or a run. The 1.1 client's cache migration `v11-1` therefore fetches every group
 log once from the start and re-applies what 1.0.x lost (see "Client cache recovery").
 
+Accepted limitation: a 1.0.x client shows its edited mark on a card message after a state update
+that the server makes (an answer, a retract, an expiry of a card ask; a ref whose source was
+deleted). 1.0.1 shows the mark for every `message.updated`, and such an update carries
+`editedAt` (see "Edit marks" under Cards v2). The message content does not change. A 1.1 client
+does not show the mark. The server sends these updates to 1.0.x connections unchanged.
+
 ## Cards v2
 
 Module: `card2.ts` / `card2.rs`. A v2 card travels in `Message.cardV2`. The existing `card` field
