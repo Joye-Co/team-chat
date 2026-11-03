@@ -100,13 +100,14 @@ pub fn bar_divider(cx: &App) -> Div {
 }
 
 /// The side column of a page: `rail` fill, a hairline at its start and its
-/// own 52 pt header with a title and the collapse button.
+/// own 52 pt header with a title and, when `on_collapse` is given, the
+/// collapse button.
 pub fn aside(
     id: &'static str,
     title: &str,
     width: Pixels,
     pad: Pixels,
-    on_collapse: impl Fn(&mut gpui::Window, &mut App) + 'static,
+    on_collapse: Option<Box<dyn Fn(&mut gpui::Window, &mut App)>>,
     cx: &App,
 ) -> Stateful<Div> {
     let k = theme::colors(cx);
@@ -134,7 +135,7 @@ pub fn aside(
                         .child(title.to_string()),
                 )
                 .child(div().flex_1())
-                .child(
+                .children(on_collapse.map(|f| {
                     icon_button(
                         SharedString::from(format!("{id}-collapse")),
                         Lucide::PanelRight,
@@ -142,8 +143,8 @@ pub fn aside(
                         true,
                         cx,
                     )
-                    .on_click(move |_, window, cx| on_collapse(window, cx)),
-                ),
+                    .on_click(move |_, window, cx| f(window, cx))
+                })),
         )
 }
 

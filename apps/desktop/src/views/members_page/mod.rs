@@ -487,7 +487,9 @@ impl MembersPage {
                             .min_w_0()
                             .child(
                                 div()
-                                    .flex_none()
+                                    .flex_shrink(0.5)
+                                    .min_w(px(40.))
+                                    .one_line()
                                     .t_small()
                                     .medium()
                                     .text_color(if away { k.ink_2 } else { k.ink })
@@ -818,7 +820,8 @@ impl MembersPage {
                         .text_color(k.ink_3)
                         .child(
                             div()
-                                .min_w_0()
+                                .flex_shrink(0.3)
+                                .min_w(px(80.))
                                 .one_line()
                                 .t_ui()
                                 .line_height(px(22.))
@@ -826,11 +829,10 @@ impl MembersPage {
                                 .text_color(k.ink)
                                 .child(topic.map(|t| t.title).unwrap_or_default()),
                         )
-                        .child(div().flex_none().child(fill(
+                        .child(div().flex_1().min_w_0().one_line().child(fill(
                             c::MEMBERS_TOPIC_META,
                             &[("group", &group), ("name", &by)],
                         )))
-                        .child(div().flex_1())
                         .children(
                             kit::plan_progress(&r.plan)
                                 .map(|(n, m)| div().flex_none().mono().child(format!("{n}/{m}"))),
@@ -1011,7 +1013,10 @@ impl MembersPage {
         );
         let outputs = tile(
             meta(c::MEMBERS_OUTPUTS.to_string()),
-            e.stats.artifacts_this_week.to_string(),
+            e.stats
+                .artifacts_this_week
+                .max(e.extras.prs_this_week + e.extras.pages_this_week)
+                .to_string(),
             div()
                 .mt(space::S2)
                 .child(meta(fill(
@@ -1596,18 +1601,12 @@ impl MembersPage {
                     .into_any_element(),
             );
         }
-        let this = cx.entity().downgrade();
         kit::aside(
             "member-aside",
             c::MEMBERS_WORKPLACE,
             kit::MEMBER_ASIDE_WIDTH,
             space::S12,
-            move |_, cx| {
-                let _ = this.update(cx, |this, cx| {
-                    this.aside_open = false;
-                    cx.notify();
-                });
-            },
+            None,
             cx,
         )
         // The 成员 detail's own title bar holds the toggle (Members.dc.html).

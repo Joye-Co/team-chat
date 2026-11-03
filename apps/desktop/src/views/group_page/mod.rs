@@ -1001,11 +1001,17 @@ impl GroupPage {
                                         .flex()
                                         .items_center()
                                         .gap(space::S6)
+                                        .min_w_0()
                                         .t_small()
                                         .child(
-                                            div().medium().text_color(k.ink).child(
-                                                run.machine_name.clone().unwrap_or_default(),
-                                            ),
+                                            div()
+                                                .min_w_0()
+                                                .one_line()
+                                                .medium()
+                                                .text_color(k.ink)
+                                                .child(
+                                                    run.machine_name.clone().unwrap_or_default(),
+                                                ),
                                         )
                                         .child(
                                             div()
@@ -1249,12 +1255,12 @@ impl Render for GroupPage {
                     c::GROUP_PAGE_INFO,
                     kit::ASIDE_WIDTH,
                     space::S16,
-                    move |_, cx| {
+                    Some(Box::new(move |_, cx| {
                         let _ = this.update(cx, |this, cx| {
                             this.aside_open = false;
                             cx.notify();
                         });
-                    },
+                    })),
                     cx,
                 )
                 .child(div().flex().flex_col().gap(space::S10).children(cards))

@@ -917,12 +917,12 @@ impl ArtifactPage {
             c::ARTIFACT_STORY,
             kit::ASIDE_WIDTH,
             space::S16,
-            move |_, cx| {
+            Some(Box::new(move |_, cx| {
                 let _ = this.update(cx, |this, cx| {
                     this.aside_open = false;
                     cx.notify();
                 });
-            },
+            })),
             cx,
         )
         .child(
