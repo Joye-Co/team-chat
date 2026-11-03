@@ -6,7 +6,7 @@ import { ApiError, type Result, unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { TEXT, approvalDecision } from "../dispatch";
 import { linkStub } from "../env";
-import type { CardPress, TopicMessage } from "../room";
+import type { CardAnswerIn, CardPress, PageEventIn, TopicMessage } from "../room";
 import { ACTIVE, type RunRow, result } from "./core";
 import { DeskStall } from "./stall";
 
@@ -122,6 +122,109 @@ export abstract class DeskInput extends DeskStall {
     }
     await this.auditApproval(r, a.actorId, decision, "card");
     await linkStub(this.env, r.machine_id).toRun({ t: "run.approval", runId: r.id, approvalId: r.approval_id, decision } as never);
+  }
+
+  // -------------------------------------------------------------------------
+  // Card v2 answers and 产出 page events (1.1)
+  // -------------------------------------------------------------------------
+
+  /**
+   * A person answered a v2 card of this bot. The topic's active run gets it as `run.input`
+   * (typed `answer` for daemons with feature "answer", text for the others, see MachineLink);
+   * with no active run, the answer starts a run like a mention. Idempotent by the answer's seq.
+   */
+  async cardAnswer(botId: string, a: CardAnswerIn): Promise<void> {
+    this.bind(botId);
+    const key = `answer:${a.groupId}:${a.seq}`;
+    // People only: an answer by a bot never reaches a bot (no loops).
+    if (a.actorKind !== "human" || this.handledMessage(key)) return;
+    if (this.messagesInFlight.has(key)) throw new ApiError("conflict", "answer is being handled");
+    this.messagesInFlight.add(key);
+    try {
+      if (!(await this.botActive())) return;
+      const m: TopicMessage = {
+        groupId: a.groupId,
+        topicId: a.topicId,
+        messageId: key,
+        authorId: a.actorId,
+        authorLevel: a.actorLevel ?? undefined,
+        body: a.text,
+        mentioned: true,
+      };
+      const active = this.activeRun(a.topicId);
+      if (!active) return await this.start(m);
+      await this.serial(active.id, async () => {
+        const r = this.run(active.id);
+        if (!r) return;
+        if (r.ended_at !== null) return this.start(m);
+        const inputId = ulid();
+        this.sql.exec(
+          "INSERT INTO inputs (id, run_id, message_id, author_id, body, at) VALUES (?, ?, ?, ?, ?, ?)",
+          inputId,
+          r.id,
+          key,
+          a.actorId,
+          a.text,
+          Date.now(),
+        );
+        if (!r.machine_id || r.external) return;
+        await linkStub(this.env, r.machine_id).toRun({
+          t: "run.input",
+          runId: r.id,
+          inputId,
+          text: a.text,
+          authorId: a.actorId,
+          answer: { ...a.answer, actorId: a.actorId },
+        } as never);
+      });
+    } catch (err) {
+      this.log.error("cardAnswer failed", { err, topicId: a.topicId });
+      throw err;
+    } finally {
+      this.messagesInFlight.delete(key);
+    }
+  }
+
+  /**
+   * An event from an interactive 产出 page this bot made. It goes to the run that made the
+   * version when that run is still active, else to the topic's active run. A page event never
+   * starts a run, and one the CLI does not take is not carried into a follow-up run.
+   */
+  async artifactEvent(botId: string, e: PageEventIn): Promise<void> {
+    this.bind(botId);
+    const key = `artifact:${e.groupId}:${e.seq}`;
+    if (e.actorKind !== "human" || this.handledMessage(key)) return;
+    if (!(await this.botActive())) return;
+    const byRun = e.runId ? this.run(e.runId) : undefined;
+    const target = byRun && byRun.ended_at === null ? byRun : this.activeRun(e.topicId);
+    if (!target) {
+      this.log.info("page event without an active run", { topicId: e.topicId, name: e.event.name });
+      return;
+    }
+    await this.serial(target.id, async () => {
+      const r = this.run(target.id);
+      if (!r || r.ended_at !== null || this.handledMessage(key)) return;
+      const inputId = ulid();
+      // accepted = 1: a page event is not leftover input for a follow-up run.
+      this.sql.exec(
+        "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, accepted) VALUES (?, ?, ?, ?, ?, ?, 1)",
+        inputId,
+        r.id,
+        key,
+        e.actorId,
+        e.text,
+        Date.now(),
+      );
+      if (!r.machine_id || r.external) return;
+      await linkStub(this.env, r.machine_id).toRun({
+        t: "run.input",
+        runId: r.id,
+        inputId,
+        text: e.text,
+        authorId: e.actorId,
+        artifactEvent: { ...e.event, actorId: e.actorId },
+      } as never);
+    });
   }
 
   // -------------------------------------------------------------------------
