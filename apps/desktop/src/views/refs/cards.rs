@@ -463,9 +463,20 @@ pub fn chart_overlay(
                             _ => t,
                         })
                         .unwrap_or_default();
+                    // Above the point, or under it when the plot has no room above:
+                    // the tip never covers the point it describes.
+                    let at = main.values.get(xi).and_then(|v| v.as_f64()).map_or(0., |v| {
+                        crate::views::cards::v2::chart_y_from_top(*kind, series, v)
+                    });
+                    let y = height * at;
+                    let top = if y - TIP_H - TIP_GAP >= gpui::px(0.) {
+                        y - TIP_H - TIP_GAP
+                    } else {
+                        y + TIP_GAP
+                    };
                     div()
                         .absolute()
-                        .top(crate::theme::space::S4)
+                        .top(top)
                         .left_0()
                         .right_0()
                         .flex()
@@ -513,6 +524,11 @@ pub fn chart_overlay(
             .into_any_element(),
     )
 }
+
+/// Height of the point tooltip (a 22 pt button, padding and the border), and its gap to
+/// the point.
+const TIP_H: gpui::Pixels = gpui::px(32.);
+const TIP_GAP: gpui::Pixels = gpui::px(8.);
 
 /// The plot's offset in a chart element: below the label row when the chart has a label
 /// or a legend (`views::cards::v2::chart`: an 18 pt row and a 12 pt gap).
