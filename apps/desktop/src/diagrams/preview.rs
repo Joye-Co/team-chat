@@ -3,9 +3,12 @@
 //! hidden renderer, snapshot, cache) through the real Markdown body.
 //!
 //! - `diagram-inline`: a sequence diagram, a flowchart and a gantt.
-//! - `diagram-error`: each error kind, a fifth fence that stays code, a streaming body.
+//! - `diagram-error`: each error kind (parse, unsupported, forbidden, too large; the tall
+//!   too-large ones last so all four fit the capture), a fifth fence that stays code, a
+//!   streaming body.
 //! - `diagram-viewer`: the expand viewer zoomed to 250 % (the 4× raster).
-//! - With `--worst-case`: a 150-node flowchart with long Chinese labels in a narrow window.
+//! - With `--worst-case`: a 150-node flowchart with long Chinese labels in a narrow window
+//!   (`diagram-inline`, `diagram-viewer`); `diagram-error` keeps each error state there.
 
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -82,7 +85,9 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
         body,
         streaming: false,
     };
-    if worst {
+    // The error scene keeps every error state in the worst case too (in the narrow
+    // window); the others draw the 150-step flowchart.
+    if worst && scene != Scene::Error {
         return vec![
             m(
                 "m-xiaowang",
@@ -145,6 +150,14 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
                 ),
             ),
             m(
+                "m-coder",
+                "10:13",
+                format!(
+                    "点一下就能打开：\n\n{}",
+                    fence("flowchart LR\n  A[报告] --> B[详情]\n  click A \"https://example.com\"")
+                ),
+            ),
+            m(
                 "m-sentry",
                 "10:14",
                 format!("所有检查项：\n\n{}", fence(&big_flowchart(160, false))),
@@ -153,14 +166,6 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
                 "m-sentry",
                 "10:14",
                 format!("原始清单：\n\n{}", fence(&big_flowchart(400, true))),
-            ),
-            m(
-                "m-coder",
-                "10:15",
-                format!(
-                    "点一下就能打开：\n\n{}",
-                    fence("flowchart LR\n  A[报告] --> B[详情]\n  click A \"https://example.com\"")
-                ),
             ),
             m(
                 "m-coder",
@@ -410,4 +415,27 @@ pub fn ready(scene: Scene, cx: &App) -> bool {
             |n| matches!(super::peek(n, super::ZOOM_SCALE, cx), Some(s) if !s.is_pending()),
         );
     all && zoomed && super::idle(cx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_worst_error_scene_keeps_every_error_state() {
+        let bodies = |worst| -> Vec<String> {
+            messages(Scene::Error, worst)
+                .into_iter()
+                .map(|m| m.body)
+                .collect()
+        };
+        assert_eq!(bodies(true), bodies(false));
+        assert_ne!(
+            messages(Scene::Inline, true)
+                .into_iter()
+                .map(|m| m.body)
+                .collect::<Vec<_>>(),
+            bodies(true)
+        );
+    }
 }
