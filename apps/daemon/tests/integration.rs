@@ -997,3 +997,136 @@ async fn pause_resume_answer_acceptance_and_aside() {
         .unwrap()
         .unwrap();
 }
+
+fn alive(pid: i32) -> bool {
+    // SAFETY: probing a pid with signal 0.
+    unsafe { libc::kill(pid, 0) == 0 }
+}
+
+/// Kills the fake CLI's tool children when a test ends, so a failed assertion leaks nothing.
+struct Reap(Vec<i32>);
+
+impl Drop for Reap {
+    fn drop(&mut self) {
+        for k in self.0.iter().filter(|k| alive(**k)) {
+            // SAFETY: plain syscalls on pids that this test's fake CLI started.
+            unsafe {
+                libc::kill(*k, libc::SIGCONT);
+                libc::kill(*k, libc::SIGKILL);
+            }
+        }
+    }
+}
+
+fn file_len(p: &Path) -> u64 {
+    std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+}
+
+/// Tool commands that a CLI starts in their own session or process group (Claude Code's Bash
+/// tool, Codex exec) stop with the run on pause, continue on resume and are gone after cancel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn pause_and_cancel_cover_tool_children() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("c1", "fake", "spawn", None)).await;
+    let dir = tmp.path().join("work/runs/c1/work");
+    wait_file(&dir.join("fake.pid")).await;
+    let kids: Vec<i32> = wait_file(&dir.join("children.txt"))
+        .await
+        .split_whitespace()
+        .map(|p| p.parse().unwrap())
+        .collect();
+    assert_eq!(kids.len(), 2);
+    let _reap = Reap(kids.clone());
+    let ticks = [dir.join("session.ticks"), dir.join("group.ticks")];
+    for t in &ticks {
+        wait_file(t).await;
+    }
+
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "c1".into(),
+            by: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "c1", true, |f| is_paused(f, true)).await;
+    for k in &kids {
+        assert!(
+            proc_state(*k).contains('T'),
+            "child {k} not stopped: {}",
+            proc_state(*k)
+        );
+    }
+    let before: Vec<u64> = ticks.iter().map(|t| file_len(t)).collect();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let after: Vec<u64> = ticks.iter().map(|t| file_len(t)).collect();
+    assert_eq!(before, after, "a stopped tool child made progress");
+
+    send(
+        &mut ws,
+        &Down::RunResume {
+            run_id: "c1".into(),
+            note: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "c1", true, |f| is_paused(f, false)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    for (t, b) in ticks.iter().zip(&after) {
+        assert!(
+            file_len(t) > *b,
+            "{} did not tick after resume",
+            t.display()
+        );
+    }
+
+    send(
+        &mut ws,
+        &Down::RunPause {
+            run_id: "c1".into(),
+            by: None,
+        },
+    )
+    .await;
+    collect(&mut ws, "c1", true, |f| is_paused(f, true)).await;
+    send(
+        &mut ws,
+        &Down::RunCancel {
+            run_id: "c1".into(),
+            reason: None,
+        },
+    )
+    .await;
+    let fr = collect(&mut ws, "c1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&fr).status, "cancelled");
+    let mut left = kids.clone();
+    for _ in 0..100 {
+        left.retain(|k| alive(*k));
+        if left.is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        left.is_empty(),
+        "tool children outlived the cancel: {left:?}"
+    );
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

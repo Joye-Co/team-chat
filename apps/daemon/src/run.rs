@@ -4,7 +4,7 @@ use crate::config::{Config, RuntimeConfig};
 use crate::proto::{RunAssign, RunDone, RunEvent, RunSession, Up, now_ms, truncate};
 use crate::redact::DeltaGate;
 use crate::runtime::{self, Control, Outcome, RunSpec, Status};
-use crate::workspace;
+use crate::{proctree, workspace};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -24,7 +24,8 @@ pub type RunOut = mpsc::UnboundedSender<(String, RunMsg)>;
 #[derive(Debug, Clone, PartialEq)]
 pub enum RunCtl {
     Runtime(Control),
-    /// `run.pause`: SIGSTOP the CLI's process group and stop the stall and deadline clocks.
+    /// `run.pause`: SIGSTOP the CLI's process group and the tool groups below it, and stop the
+    /// stall and deadline clocks.
     Pause {
         by: Option<String>,
     },
@@ -260,20 +261,24 @@ pub async fn supervise(ctx: RunCtx) {
 /// Pause state of a run (接管).
 struct Paused {
     since: Instant,
-    /// The process group got SIGSTOP (false while the CLI has not started yet).
-    stopped: bool,
+    /// The CLI's process group that got SIGSTOP (None while the CLI has not started yet).
+    stopped: Option<i32>,
+    /// The tool groups below the CLI that got SIGSTOP.
+    tools: Vec<proctree::Target>,
+}
+
+impl Paused {
+    /// SIGCONT the CLI and its tools.
+    fn resume(&self) {
+        if let Some(pgid) = self.stopped {
+            proctree::resume(pgid, &self.tools);
+        }
+    }
 }
 
 /// The CLI's process group, from `run.json` (written when the runtime spawned the CLI).
 fn run_pgid(run_dir: &std::path::Path) -> Option<i32> {
     workspace::read_meta(run_dir)?.pgid.filter(|p| *p > 1)
-}
-
-fn signal(pgid: i32, sig: i32) {
-    // SAFETY: plain syscall; a negative pid addresses the CLI's process group.
-    unsafe {
-        libc::kill(-pgid, sig);
-    }
 }
 
 async fn run_runtime(
@@ -310,11 +315,11 @@ async fn run_runtime(
     let mut gate = DeltaGate::default();
     let outcome = loop {
         // A pause that came before the CLI started stops it as soon as its group is known.
-        if let Some(p) = paused.as_mut().filter(|p| !p.stopped)
+        if let Some(p) = paused.as_mut().filter(|p| p.stopped.is_none())
             && let Some(pgid) = run_pgid(&run_dir)
         {
-            signal(pgid, libc::SIGSTOP);
-            p.stopped = true;
+            proctree::stop(pgid, &mut p.tools);
+            p.stopped = Some(pgid);
         }
         let hold_until = gate
             .deadline()
@@ -338,19 +343,18 @@ async fn run_runtime(
                             continue;
                         }
                         let pgid = run_pgid(&run_dir);
+                        let mut tools = vec![];
                         if let Some(pgid) = pgid {
-                            signal(pgid, libc::SIGSTOP);
+                            proctree::stop(pgid, &mut tools);
                         }
-                        paused = Some(Paused { since: Instant::now(), stopped: pgid.is_some() });
+                        paused = Some(Paused { since: Instant::now(), stopped: pgid, tools });
                         for ev in gate.push(RunEvent::Paused { paused: true, by }) {
                             event(ev);
                         }
                     }
                     RunCtl::Resume { note } => {
                         let Some(p) = paused.take() else { continue };
-                        if p.stopped && let Some(pgid) = run_pgid(&run_dir) {
-                            signal(pgid, libc::SIGCONT);
-                        }
+                        p.resume();
                         // The paused time does not count toward maxDurationMs or the stall.
                         if let Some(d) = deadline.as_mut() {
                             *d += p.since.elapsed();
@@ -371,9 +375,7 @@ async fn run_runtime(
                     RunCtl::Runtime(c) => {
                         // A stopped CLI cannot handle SIGTERM: a cancel resumes it first.
                         if c == Control::Cancel && let Some(p) = paused.take() {
-                            if p.stopped && let Some(pgid) = run_pgid(&run_dir) {
-                                signal(pgid, libc::SIGCONT);
-                            }
+                            p.resume();
                             for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
                                 event(ev);
                             }
@@ -405,11 +407,8 @@ async fn run_runtime(
         }
     };
     // Never leave a stopped group behind (the runtime already reaped the CLI).
-    if let Some(p) = paused.take()
-        && p.stopped
-        && let Some(pgid) = run_pgid(&run_dir)
-    {
-        signal(pgid, libc::SIGCONT);
+    if let Some(p) = paused.take() {
+        p.resume();
     }
     while let Ok(ev) = emit_rx.try_recv() {
         let extra = acceptance.on_event(&ev);

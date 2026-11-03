@@ -223,7 +223,8 @@ RunEvent =
   answers the CLI and emits `approval.resolved`. Claude Code runs with a fixed
   `permission_mode` and does not ask.
 - `run.cancel` interrupts the CLI (Codex `turn/interrupt`, ACP `session/cancel`), then sends
-  SIGTERM to the CLI's whole process group, SIGKILL after 3 s, and ends with
+  SIGTERM to the CLI's whole process group and to the tool groups below it (see **pause**),
+  SIGKILL after 3 s, and ends with
   `run.done status = "cancelled"`. `maxDurationMs` does the same with `status = "timeout"`.
 
 ## 1.1 features
@@ -243,7 +244,12 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 How the 1.1 daemon does each one:
 
 - **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
-  every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. A pause that comes
+  every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. CLIs start tool
+  commands in process groups or sessions of their own (Claude Code's Bash tool, Codex exec), so
+  the daemon then finds the CLI's descendants (libproc on macOS, `/proc` on Linux) and stops
+  each of their groups, scanning again until a scan finds nothing new. It never signals its own
+  group, pid 1, or a process outside the run's tree. Resume and cancel send `SIGCONT` to the
+  same groups. A pause that comes
   while the run is still `preparing` stops the CLI as soon as it starts. While paused, no
   `stalled` status is sent and the `maxDurationMs` clock stands still. `run.resume` sends
   `SIGCONT`, moves the deadline by the paused time, emits `paused { paused: false }`, and sends

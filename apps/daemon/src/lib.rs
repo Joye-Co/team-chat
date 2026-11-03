@@ -7,6 +7,7 @@ pub mod daemon;
 pub mod doctor;
 pub mod health;
 pub mod input;
+pub mod proctree;
 pub mod product;
 pub mod proto;
 pub mod redact;
