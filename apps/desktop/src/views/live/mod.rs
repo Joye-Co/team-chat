@@ -1209,8 +1209,7 @@ fn may_control(me: Option<&Member>, run: &BotRunSummary) -> bool {
     me.is_some_and(|m| {
         !m.is_bot()
             && !m.deactivated
-            && (run.requested_by.as_deref() == Some(m.id.as_str())
-                || m.level == MemberLevel::Owner)
+            && (run.requested_by.as_deref() == Some(m.id.as_str()) || m.level == MemberLevel::Owner)
     })
 }
 
@@ -1419,11 +1418,9 @@ impl Render for LivePane {
                         .pb(space::S20)
                         .flex()
                         .flex_col()
-                        .children(
-                            held.then(|| {
-                                self.held_banner(&bot, &screen, &run, held_by_me, can_control, cx)
-                            }),
-                        )
+                        .children(held.then(|| {
+                            self.held_banner(&bot, &screen, &run, held_by_me, can_control, cx)
+                        }))
                         .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
                         .children(self.replay(&run, &times, current, replay_step, end, cx))
                         .children(self.acceptance(&run, &criteria, cx))
@@ -1439,15 +1436,7 @@ impl Render for LivePane {
             .bg(k.raised)
             .child(self.header(&bot, &screen, &run, held_by_me, cx))
             .child(body)
-            .child(self.footer(
-                &run,
-                &bot,
-                &step_text,
-                held,
-                held_by_me,
-                can_control,
-                cx,
-            ))
+            .child(self.footer(&run, &bot, &step_text, held, held_by_me, can_control, cx))
             .into_any_element()
     }
 }
@@ -1501,8 +1490,14 @@ mod tests {
         bot.kind = MemberKind::Bot;
         assert!(!may_control(Some(&bot), &r));
         // A run nobody asked for: owners only.
-        assert!(!may_control(Some(&person("alice", MemberLevel::Member)), &run(None)));
-        assert!(may_control(Some(&person("olga", MemberLevel::Owner)), &run(None)));
+        assert!(!may_control(
+            Some(&person("alice", MemberLevel::Member)),
+            &run(None)
+        ));
+        assert!(may_control(
+            Some(&person("olga", MemberLevel::Owner)),
+            &run(None)
+        ));
     }
 
     #[test]

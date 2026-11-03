@@ -18,9 +18,7 @@ use crate::{
     copy::{fill, topic_rail as c},
     data::{
         ArtifactKind, ArtifactSummary, BotRunSummary, Member, MemberId, Millis, PlanState, Topic,
-        v2::{
-            ArtifactPreview, ChangeState, Currency, Decision, Proof, TopicChanges, TopicCost,
-        },
+        v2::{ArtifactPreview, ChangeState, Currency, Decision, Proof, TopicChanges, TopicCost},
     },
     theme::{self, Type as _, space},
     ui::{self, Lucide},

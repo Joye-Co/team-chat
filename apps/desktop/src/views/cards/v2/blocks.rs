@@ -2287,7 +2287,10 @@ fn pr_state(raw: &str) -> PrState {
 /// `2/3`: checks done of all.
 fn is_count(word: &str) -> bool {
     word.split_once('/').is_some_and(|(a, b)| {
-        !a.is_empty() && !b.is_empty() && a.bytes().all(|x| x.is_ascii_digit()) && b.bytes().all(|x| x.is_ascii_digit())
+        !a.is_empty()
+            && !b.is_empty()
+            && a.bytes().all(|x| x.is_ascii_digit())
+            && b.bytes().all(|x| x.is_ascii_digit())
     })
 }
 
@@ -2471,7 +2474,10 @@ mod tests {
         assert_eq!(pr_state("draft").text, c::REF_PR_DRAFT);
         assert_eq!(pr_state("closed").text, rail::CHANGES_CLOSED);
         let merged = pr_state("merged");
-        assert_eq!((merged.text.as_str(), merged.tone), (rail::CHANGES_MERGED, PrTone::Merged));
+        assert_eq!(
+            (merged.text.as_str(), merged.tone),
+            (rail::CHANGES_MERGED, PrTone::Merged)
+        );
         assert_eq!(pr_state("open").tone, PrTone::Plain);
     }
 

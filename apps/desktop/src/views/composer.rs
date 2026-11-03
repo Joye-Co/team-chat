@@ -209,7 +209,11 @@ impl ComposerView {
         let topic = key.topic_id.as_deref()?;
         let runs = self.services.provider.runs(&key.group_id, topic);
         let run = crate::views::topic_page::working_run(&runs)?;
-        Some(crate::views::shell::member_name(&self.services, &run.bot_id)).filter(|n| !n.is_empty())
+        Some(crate::views::shell::member_name(
+            &self.services,
+            &run.bot_id,
+        ))
+        .filter(|n| !n.is_empty())
     }
 
     /// Switches to the v2 style of the 话题 page (topic track).
@@ -1266,12 +1270,10 @@ impl Render for ComposerView {
                     .items_center()
                     .t_meta()
                     .text_color(colors.ink_3)
-                    .child(
-                        div().min_w_0().one_line().child(fill(
-                            crate::copy::topic_rail::COMPOSER_NEXT_STEP,
-                            &[("name", name)],
-                        )),
-                    ),
+                    .child(div().min_w_0().one_line().child(fill(
+                        crate::copy::topic_rail::COMPOSER_NEXT_STEP,
+                        &[("name", name)],
+                    ))),
             );
         }
         let helper = group_v2
@@ -1286,10 +1288,14 @@ impl Render for ComposerView {
                 .items_center()
                 .gap(space::S6)
                 .children(helper.map(|name| {
-                    div().pr(space::S8).t_meta().text_color(colors.ink_3).child(fill(
-                        crate::copy::group_page::GROUP_PAGE_COMPOSER_HINT,
-                        &[("name", &name)],
-                    ))
+                    div()
+                        .pr(space::S8)
+                        .t_meta()
+                        .text_color(colors.ink_3)
+                        .child(fill(
+                            crate::copy::group_page::GROUP_PAGE_COMPOSER_HINT,
+                            &[("name", &name)],
+                        ))
                 }))
                 .child(send)
                 .into_any_element()

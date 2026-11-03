@@ -42,7 +42,9 @@ pub const SCREEN_SHARE_SCHEMES: &[&str] = &["vnc", "http", "https"];
 /// `http://` or `https://` with a host, at most 2048 bytes, with no spaces or control
 /// characters. Anything else (`file:`, `smb:`, other apps' schemes) is never opened.
 pub fn is_screen_share_url(url: &str) -> bool {
-    if url.is_empty() || url.len() > 2048 || url.chars().any(|c| c.is_whitespace() || c.is_control())
+    if url.is_empty()
+        || url.len() > 2048
+        || url.chars().any(|c| c.is_whitespace() || c.is_control())
     {
         return false;
     }

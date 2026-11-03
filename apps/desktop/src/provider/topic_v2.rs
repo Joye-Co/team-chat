@@ -31,8 +31,8 @@ use crate::data::{
     pages::{ArtifactThumb, ThumbRow},
     reply_now,
     v2::{
-        ArtifactPreview, ArtifactStory, AskItem, AskKind, ChangeState, Decision, PreviewRow,
-        Currency, RunUsage, TopicChanges,
+        ArtifactPreview, ArtifactStory, AskItem, AskKind, ChangeState, Currency, Decision,
+        PreviewRow, RunUsage, TopicChanges,
     },
 };
 

@@ -286,8 +286,7 @@ impl CoreProvider {
         let Some(a) = self.account() else {
             return reply_now(Err(AdminError::Unsupported));
         };
-        let week_ago =
-            (crate::selftest::clock::now_ms() - 14 * 24 * 3_600_000).max(0) as u64;
+        let week_ago = (crate::selftest::clock::now_ms() - 14 * 24 * 3_600_000).max(0) as u64;
         let run = a
             .client
             .runs_since(week_ago)

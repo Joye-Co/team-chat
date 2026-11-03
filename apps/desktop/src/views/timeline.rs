@@ -808,11 +808,7 @@ impl Render for TimelineView {
             )
             // The 话题 page shows a member at work as the plan card at the
             // foot of the list (`timeline/plan.rs`), not the pending row.
-            .children(
-                (!self.v2)
-                    .then(|| self.render_live(window, cx))
-                    .flatten(),
-            )
+            .children((!self.v2).then(|| self.render_live(window, cx)).flatten())
             .children(
                 self.render_typing(cx)
                     .map(|el| self.v2_column(el.into_any_element())),

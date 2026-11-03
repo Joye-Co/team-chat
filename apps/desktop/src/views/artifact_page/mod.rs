@@ -130,7 +130,12 @@ pub fn forward_page_event(
     cx: &mut App,
 ) {
     if !user_action {
-        tracing::debug!(artifact_id, version, name, "page event without user input dropped");
+        tracing::debug!(
+            artifact_id,
+            version,
+            name,
+            "page event without user input dropped"
+        );
         return;
     }
     if !provider

@@ -1134,7 +1134,9 @@ fn header(ctx: &Ctx, cx: &App) -> AnyElement {
                         }),
                 )
             })
-            .when(both, |el| el.child(div().flex_none().px(space::S4).child("/")))
+            .when(both, |el| {
+                el.child(div().flex_none().px(space::S4).child("/"))
+            })
             .when(!topic.trim().is_empty(), |el| {
                 el.child(
                     part("path-topic", topic)

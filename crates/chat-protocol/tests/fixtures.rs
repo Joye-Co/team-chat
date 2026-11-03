@@ -156,7 +156,10 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("TopicContext", validated::<TopicContext>),
     ("GroupDecision", plain::<GroupDecision>),
     ("DecisionsResponse", plain::<DecisionsResponse>),
-    ("SetRunAcceptanceRequest", validated::<SetRunAcceptanceRequest>),
+    (
+        "SetRunAcceptanceRequest",
+        validated::<SetRunAcceptanceRequest>,
+    ),
     ("ResumeRunRequest", validated::<ResumeRunRequest>),
 ];
 

@@ -31,8 +31,8 @@ use serde_json::Value;
 
 use crate::resolve::{self, Content, SCHEME};
 use crate::{
-    ArtifactEvent, Capabilities, Error, OpenOptions, Presentation, VersionItem, VersionSpec, bridge,
-    gate,
+    ArtifactEvent, Capabilities, Error, OpenOptions, Presentation, VersionItem, VersionSpec,
+    bridge, gate,
 };
 
 const RULE_LIST_ID: &str = "artifact-view-block-network-v1";
@@ -898,7 +898,10 @@ mod tests {
     use super::*;
 
     fn spec(version: u32) -> VersionSpec {
-        VersionSpec::new(version, Content::memory([("index.html".to_string(), b"<p>".to_vec())]))
+        VersionSpec::new(
+            version,
+            Content::memory([("index.html".to_string(), b"<p>".to_vec())]),
+        )
     }
 
     #[test]
