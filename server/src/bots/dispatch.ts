@@ -25,7 +25,6 @@ export const CONTEXT_MESSAGES = 30;
 
 /** Topic texts the bot posts. Product words only (PRODUCT.md): no developer words. */
 export const TEXT = {
-  ack: "收到，我来处理。",
   noMachine: "现在没有空闲的电脑能接手，请稍后再 @我。",
   lost: "卡住了：处理中断了（电脑离线太久），这次没有完成。需要的话请再 @我。",
   stalled: "卡住了：10 分钟没有进展。",
@@ -38,7 +37,13 @@ export const TEXT = {
     `需要你确认：${title}${detail ? `\n\n${detail}` : ""}\n\n回复「同意」或「拒绝」。`,
   approve: "同意",
   deny: "拒绝",
+  noAsideMachine: "现在没有能单独回答的电脑，请稍后再问。",
 } as const;
+
+/** The machine's daemon reports this 1.1 feature (docs/machine-protocol.md, "1.1 features"). */
+export function hasFeature(m: Pick<MachineView, "info">, feature: string): boolean {
+  return (m.info?.features ?? []).includes(feature);
+}
 
 export interface MachineView {
   id: string;
@@ -180,6 +185,37 @@ export function buildPrompt(opts: {
     `Request from ${name(opts.request.authorId)}:`,
     opts.request.body,
   ];
+  for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
+  return lines.join("\n");
+}
+
+/**
+ * The prompt of a side chat run (单独问): read-only, private to the asker, about a topic of
+ * another group read up to the asker's point. The asker's DM messages of the side chat come
+ * last, then the question.
+ */
+export function buildAsidePrompt(opts: {
+  botName: string;
+  source: { title: string; messages: ContextMessage[] };
+  chat: ContextMessage[];
+  names: Map<string, string>;
+  request: ContextMessage;
+  followUps?: ContextMessage[];
+}): string {
+  const name = (id: string) => opts.names.get(id) ?? id;
+  const lines = [
+    `You are ${opts.botName}, a member of a team chat. ${name(opts.request.authorId)} asks you privately about the topic "${opts.source.title}".`,
+    "This is a side conversation: only the asker reads your answer. Nothing you write is posted to the topic.",
+    "Read only: do not change files, run commands that change anything, or contact anyone.",
+    "Answer short and in the language of the question. When you suggest a message for the topic, write it as a quote the asker can send.",
+    "",
+    "Messages of the topic up to the asker's point, oldest first:",
+    ...opts.source.messages.map((m) => `${name(m.authorId)}: ${m.body}`),
+  ];
+  if (opts.chat.length > 0) {
+    lines.push("", "This side conversation so far, oldest first:", ...opts.chat.map((m) => `${name(m.authorId)}: ${m.body}`));
+  }
+  lines.push("", `Question from ${name(opts.request.authorId)}:`, opts.request.body);
   for (const f of opts.followUps ?? []) lines.push("", `Follow-up from ${name(f.authorId)}:`, f.body);
   return lines.join("\n");
 }

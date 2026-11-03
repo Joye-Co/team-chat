@@ -1,16 +1,33 @@
 // BotDesk core: the Durable Object's state, its SQLite migrations, run rows and the writes
 // it makes in rooms as the bot. The feature modules extend it in this order: runs (start and
 // machine answers), events (run log and results), stall (stall detection), input (topic
-// messages, approvals, stop) and the BotDesk class itself (external runs and reads).
+// messages, approvals, stop), takeover (pause, resume, acceptance) and the BotDesk class itself
+// (external runs and reads).
 import { DurableObject } from "cloudflare:workers";
-import { type BotRun, type Card, MAX_PLAN_ITEMS, MAX_PLAN_TEXT_CHARS, type RunPlan, RunPlanItem, type RunStatus, type TopicStatus } from "@chat/protocol";
+import {
+  AcceptanceItem,
+  type BotRun,
+  type Card,
+  type CardV2,
+  MAX_ACCEPTANCE_ITEMS,
+  MAX_PLAN_ITEMS,
+  MAX_PLAN_TEXT_CHARS,
+  type RunPlan,
+  RunPlanItem,
+  RUN_KIND_ASIDE,
+  type RunStatus,
+  type TopicStatus,
+  Usage,
+} from "@chat/protocol";
 import { roomStub } from "../../core/env";
 import { type Result, toErrorBody, unwrap } from "../../core/errors";
 import { logger as baseLogger, type Logger } from "../../core/logger";
 import { runMigrations } from "../../core/migrations";
 import type { TokenBucket } from "../../core/ratelimit";
 import type { Actor } from "../../core/registry";
+import { ROOM_REACT_RPC } from "../../reactions";
 import type { BotsEnv } from "../env";
+import { ACK_EMOJI } from "../proof";
 import type { TopicMessage } from "../room";
 
 export type RunRow = {
@@ -43,6 +60,18 @@ export type RunRow = {
   external: number;
   /** Highest run_log seq whose effects were applied (frames are stored before they apply). */
   applied_seq: number;
+  // desk-4 (1.1)
+  /** JSON of `Usage` from run.done, or null. */
+  usage: string | null;
+  duration_ms: number | null;
+  result_message_id: string | null;
+  /** JSON of the latest acceptance criteria, or null. */
+  acceptance: string | null;
+  /** Who paused the run (接管); null while it is not paused. */
+  paused_by: string | null;
+  paused_at: number | null;
+  /** "aside" = a read-only side chat run; null = a normal run. */
+  kind: string | null;
 };
 
 export const ACTIVE = "ended_at IS NULL";
@@ -72,6 +101,24 @@ export function sanitizePlan(items: unknown): RunPlan | null {
     if (out.length === MAX_PLAN_ITEMS) break;
   }
   return out;
+}
+
+/** A daemon's acceptance items cut to the protocol limits; null when `items` is not a list. */
+export function sanitizeAcceptance(items: unknown): AcceptanceItem[] | null {
+  if (!Array.isArray(items)) return null;
+  const out: AcceptanceItem[] = [];
+  for (const it of items) {
+    const parsed = AcceptanceItem.safeParse(it);
+    if (parsed.success) out.push(parsed.data);
+    if (out.length === MAX_ACCEPTANCE_ITEMS) break;
+  }
+  return out;
+}
+
+/** `run.done.usage` when it fits the protocol, else null. */
+export function sanitizeUsage(usage: unknown): Usage | null {
+  const parsed = Usage.safeParse(usage);
+  return parsed.success ? parsed.data : null;
 }
 
 /** A daemon status event from its own stall detector (machine-protocol.md). */
@@ -166,6 +213,20 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             CREATE INDEX runs_trigger ON runs(trigger_message_id);
           `,
         },
+        {
+          // 1.1: run.done usage and time, the result message, acceptance criteria, pause (接管)
+          // and the run kind (side chats). Old rows read as a normal run without them.
+          name: "desk-4-v11",
+          up: `
+            ALTER TABLE runs ADD COLUMN usage TEXT;
+            ALTER TABLE runs ADD COLUMN duration_ms INTEGER;
+            ALTER TABLE runs ADD COLUMN result_message_id TEXT;
+            ALTER TABLE runs ADD COLUMN acceptance TEXT;
+            ALTER TABLE runs ADD COLUMN paused_by TEXT;
+            ALTER TABLE runs ADD COLUMN paused_at INTEGER;
+            ALTER TABLE runs ADD COLUMN kind TEXT;
+          `,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;
@@ -224,7 +285,33 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     if (r.summary) run.summary = r.summary;
     const plan = this.planOf(r);
     if (plan && plan.length > 0) run.plan = plan;
+    const usage = r.usage ? sanitizeUsage(JSON.parse(r.usage)) : null;
+    if (usage) run.usage = usage;
+    if (r.duration_ms !== null && r.duration_ms !== undefined) run.durationMs = r.duration_ms;
+    if (r.result_message_id) run.resultMessageId = r.result_message_id;
+    const acceptance = this.acceptanceOf(r);
+    if (acceptance && acceptance.length > 0) run.acceptance = acceptance;
+    if (r.paused_by) run.pausedBy = r.paused_by;
+    if (r.kind) run.kind = r.kind;
     return run;
+  }
+
+  protected acceptanceOf(r: Pick<RunRow, "acceptance">): AcceptanceItem[] | null {
+    if (!r.acceptance) return null;
+    try {
+      return JSON.parse(r.acceptance) as AcceptanceItem[];
+    } catch {
+      return null;
+    }
+  }
+
+  /** Keeps `items` as the run's acceptance criteria. Returns false when they did not change. */
+  protected storeAcceptance(r: RunRow, items: AcceptanceItem[]): boolean {
+    const next = items.length > 0 ? JSON.stringify(items) : null;
+    if ((r.acceptance ?? null) === next) return false;
+    r.acceptance = next;
+    this.sql.exec("UPDATE runs SET acceptance = ? WHERE id = ?", next, r.id);
+    return true;
   }
 
   protected planOf(r: Pick<RunRow, "plan">): RunPlan | null {
@@ -256,7 +343,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
     r: Pick<RunRow, "group_id" | "topic_id">,
     clientMsgId: string,
     body: string,
-    extra: { streaming?: boolean; card?: Card; mentions?: string[] } = {},
+    extra: { streaming?: boolean; card?: Card; cardV2?: CardV2; mentions?: string[] } = {},
   ): Promise<string> {
     const res = unwrap(
       await this.room(r).send(r.group_id, this.actor(), {
@@ -280,6 +367,8 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   }
 
   protected async topic(r: RunRow, status: TopicStatus, waitingOn: string[] = []): Promise<void> {
+    // A side chat answers in the asker's DM; its topic keeps no work status.
+    if (r.kind === RUN_KIND_ASIDE) return;
     try {
       unwrap(
         await this.room(r).topicUpdate(r.group_id, this.actor(), {
@@ -294,6 +383,17 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
       );
     } catch (err) {
       this.log.warn("topic update failed", { runId: r.id, status, err });
+    }
+  }
+
+  /** Acknowledges the message that started the run with a reaction (no text line). */
+  protected async ack(r: RunRow): Promise<void> {
+    try {
+      unwrap(
+        await this.room(r).rpc(r.group_id, ROOM_REACT_RPC, this.actor(), { messageId: r.trigger_message_id, emoji: ACK_EMOJI, on: true }),
+      );
+    } catch (err) {
+      this.log.warn("ack reaction failed", { runId: r.id, err });
     }
   }
 
@@ -340,7 +440,7 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   }
 
   // Implemented by the feature modules that extend this class.
-  protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string): Promise<void>;
+  protected abstract end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success?: boolean): Promise<void>;
   protected abstract scheduleStall(): Promise<void>;
   protected abstract markStalled(r: RunRow): Promise<void>;
   protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[]): Promise<void>;

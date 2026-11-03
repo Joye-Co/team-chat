@@ -338,6 +338,6 @@ found on PATH.
   health gating, leases, follow-ups, no bot loops, stall detection).
 - `bun apps/daemon/e2e/local-e2e.ts [--port 8793]`: `wrangler dev` with fresh local state plus
   the real daemon and the fake Claude Code CLI. A member mentions the bot; the run must show
-  the acknowledgement, streamed progress, the result, the topic status `done`, the run log and
-  the uploaded session. It writes `report.json` in a temp folder and stops both processes by
+  the acknowledgement reaction, no progress message, the done card with `resultMessageId`, the
+  topic status `done`, the run log and the uploaded session. It writes `report.json` in a temp folder and stops both processes by
   the PIDs it started.

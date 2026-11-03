@@ -2,7 +2,7 @@
 // and the hand-off of human messages and card presses to the responsible bot's BotDesk. The
 // hand-off is written to an outbox in the same transaction as the event and delivered after
 // commit; a failed delivery is retried by the room alarm until the desk accepts it.
-import type { BotRun, CardV2, Event, Message } from "@chat/protocol";
+import type { BotRun, CardV2, Event, Message, TopicContext } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import {
   type ArchivedEvent,
@@ -57,13 +57,24 @@ export interface ClaimResult {
   botId: string;
   title: string;
   messages: ContextMessage[];
+  /** The topic is a side chat about this topic (1.1, `Topic.contextOf`). */
+  contextOf?: TopicContext;
 }
+
+/** What `bots.context` returns: the side chat's source topic up to `uptoSeq`. */
+export interface SourceContext {
+  title: string;
+  messages: ContextMessage[];
+}
+
+/** Messages of a side chat's source topic given to the aside run. */
+export const SIDE_CHAT_CONTEXT_MESSAGES = 60;
 
 /** Makes the calling bot the topic's responsible bot unless another bot already is. */
 registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
   const { topicId } = args as { topicId: string };
   if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
-  const topic = room.sql.exec<{ title: string }>("SELECT title FROM topics WHERE id = ?", topicId).toArray()[0];
+  const topic = room.sql.exec<{ title: string; context: string | null }>("SELECT title, context FROM topics WHERE id = ?", topicId).toArray()[0];
   if (!topic) throw new ApiError("not_found", "topic not found");
   room.sql.exec(
     "INSERT OR IGNORE INTO bot_topics (topic_id, bot_id, claimed_at) VALUES (?, ?, ?)",
@@ -81,7 +92,34 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     .toArray()
     .reverse()
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
-  return { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
+  const out: ClaimResult = { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
+  // Only a DM topic can be a side chat (the room checks this when it stores the context).
+  if (topic.context && room.groupKind === "dm") out.contextOf = JSON.parse(topic.context) as TopicContext;
+  return out;
+});
+
+/**
+ * The source topic of a side chat, read by its aside run: messages up to `uptoSeq`, oldest
+ * first. The calling bot and the asker must both still be members of this group.
+ */
+registerRoomRpc("bots.context", (room, actor, args): SourceContext => {
+  const { topicId, uptoSeq, askerId } = args as { topicId: string; uptoSeq: number; askerId: string };
+  if (!actor || actor.kind !== "bot") throw new ApiError("forbidden", "bots only");
+  if (!room.isMember(actor.id) || !room.isMember(askerId)) throw new ApiError("forbidden", "not a member of this group");
+  const topic = room.sql.exec<{ title: string }>("SELECT title FROM topics WHERE id = ?", topicId).toArray()[0];
+  if (!topic) throw new ApiError("not_found", "topic not found");
+  const messages = room.sql
+    .exec<{ id: string; author_id: string; body: string }>(
+      `SELECT id, author_id, body FROM messages WHERE topic_id = ? AND deleted_at IS NULL AND created_seq <= ?
+       ORDER BY created_seq DESC LIMIT ?`,
+      topicId,
+      uptoSeq,
+      SIDE_CHAT_CONTEXT_MESSAGES,
+    )
+    .toArray()
+    .reverse()
+    .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
+  return { title: topic.title, messages };
 });
 
 /** Checks that a topic exists in this group (external bots start runs in it). */

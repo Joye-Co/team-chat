@@ -1,11 +1,12 @@
 // BotDesk events: the run log from MachineLink, its effects (progress message, plan, approval
 // cards), and the end of a run (result, status, follow-up runs).
-import type { Card, RunStatus, TopicStatus } from "@chat/protocol";
+import { type Card, RUN_KIND_ASIDE, type RunStatus, type TopicStatus } from "@chat/protocol";
 import { ApiError, unwrap } from "../../core/errors";
 import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
-import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizePlan } from "./core";
+import { type RunProof, doneCard, mergePrs, prRefs } from "../proof";
+import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage } from "./core";
 import { DeskRuns } from "./runs";
 
 export abstract class DeskEvents extends DeskRuns {
@@ -25,8 +26,13 @@ export abstract class DeskEvents extends DeskRuns {
       }
       const top = Math.max(r.last_seq, ...frames.map((f) => f.seq));
       this.sql.exec("UPDATE runs SET last_seq = ? WHERE id = ?", top, runId);
-      // A late run.session still records its upload.
-      if (r.ended_at !== null) return { lastSeq: top };
+      // A late run.session still records its upload; a late run.done (the run was stopped
+      // here first) still gives the run its usage and time.
+      if (r.ended_at !== null) {
+        const late = frames.find((f): f is Extract<SeqFrame, { t: "run.done" }> => f.t === "run.done");
+        if (late && r.usage === null && r.duration_ms === null && this.storeUsage(r, late)) await this.setStatus(r, r.status);
+        return { lastSeq: top };
+      }
       // Stored frames whose effects did not apply yet (also after a failed or interrupted apply).
       const pending = this.sql
         .exec<{ seq: number; frame: string }>("SELECT seq, frame FROM run_log WHERE run_id = ? AND seq > ? ORDER BY seq", runId, r.applied_seq)
@@ -103,6 +109,11 @@ export abstract class DeskEvents extends DeskRuns {
           if (plan && this.storePlan(r, plan)) planChanged = true;
           break;
         }
+        case "acceptance": {
+          const items = sanitizeAcceptance(ev.items);
+          if (items && this.storeAcceptance(r, items)) planChanged = true;
+          break;
+        }
         default:
           break;
       }
@@ -114,7 +125,11 @@ export abstract class DeskEvents extends DeskRuns {
     else await this.scheduleStall();
   }
 
-  /** Streams the new progress text into the run's one streaming message. */
+  /**
+   * Keeps the progress text. Since 1.1 progress lives in the run (plan, run log) and nothing is
+   * streamed into the topic; only a run that already had a streaming message (started before
+   * the upgrade) keeps it up to date until it ends.
+   */
   protected async flush(r: RunRow, progress: Progress): Promise<void> {
     const append = progress.take();
     this.sql.exec(
@@ -125,15 +140,9 @@ export abstract class DeskEvents extends DeskRuns {
       r.id,
     );
     r.progress_text = progress.text;
-    if (append === "") return;
+    if (append === "" || !r.progress_message_id) return;
     try {
-      if (!r.progress_message_id) {
-        const id = await this.post(r, `run:${r.id}:progress`, progress.text, { streaming: true });
-        this.sql.exec("UPDATE runs SET progress_message_id = ? WHERE id = ?", id, r.id);
-        r.progress_message_id = id;
-      } else {
-        unwrap(await this.room(r).delta(r.group_id, this.actor(), r.progress_message_id, append));
-      }
+      unwrap(await this.room(r).delta(r.group_id, this.actor(), r.progress_message_id, append));
     } catch (err) {
       this.log.warn("progress stream failed", { runId: r.id, err });
     }
@@ -206,11 +215,23 @@ export abstract class DeskEvents extends DeskRuns {
     await this.topic(r, "waiting_answer", [r.requested_by]);
   }
 
+  /** Keeps `run.done` usage and time with the run. Returns false when nothing changed. */
+  protected storeUsage(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): boolean {
+    const usage = sanitizeUsage(f.usage);
+    const duration = Number.isInteger(f.durationMs) && f.durationMs >= 0 ? f.durationMs : null;
+    if (!usage && duration === null) return false;
+    r.usage = usage ? JSON.stringify(usage) : null;
+    r.duration_ms = duration;
+    this.sql.exec("UPDATE runs SET usage = ?, duration_ms = ? WHERE id = ?", r.usage, r.duration_ms, r.id);
+    return true;
+  }
+
   protected async finish(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): Promise<void> {
+    this.storeUsage(r, f);
     if (f.status === "succeeded") {
       const result = (f.resultText ?? "").trim() || (f.summary ?? "").trim() || TEXT.done;
       this.dropResultFromProgress(r, result);
-      await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result));
+      await this.end(r, "done", cut(result, MAX_RESULT_CHARS), "done", firstLine(result), true);
     } else if (f.status === "cancelled") {
       await this.end(r, "cancelled", TEXT.cancelled, "blocked", TEXT.cancelled);
     } else {
@@ -265,18 +286,53 @@ export abstract class DeskEvents extends DeskRuns {
     this.sql.exec("UPDATE runs SET progress_text = ? WHERE id = ?", rest, r.id);
   }
 
-  /** Final state: closes the progress message, posts `body`, sets the run and topic status. */
-  protected async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string): Promise<void> {
+  /**
+   * Final state: closes a legacy progress message, posts the result (`body`; on success a Card v2
+   * with intent "done" and its proof), keeps it as `resultMessageId`, sets the run and topic
+   * status.
+   */
+  protected async end(r: RunRow, status: RunStatus, body: string, topicStatus: TopicStatus, summary: string, success = false): Promise<void> {
     const now = Date.now();
     await this.closeProgress(r);
-    this.sql.exec("UPDATE runs SET approval_id = NULL WHERE id = ?", r.id);
+    this.sql.exec("UPDATE runs SET approval_id = NULL, paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
     r.approval_id = null;
-    try {
-      await this.post(r, `run:${r.id}:result`, body);
-    } catch (err) {
-      this.log.warn("result post failed", { runId: r.id, err });
+    r.paused_by = null;
+    r.paused_at = null;
+    const id = await this.postResult(r, body, success);
+    if (id) {
+      this.sql.exec("UPDATE runs SET result_message_id = ? WHERE id = ?", id, r.id);
+      r.result_message_id = id;
     }
     await this.setStatus(r, status, { ended_at: now, summary: cut(summary, 280) || null });
     await this.topic(r, topicStatus);
+  }
+
+  /** Posts the result once (idempotent by client message id); returns its message id. */
+  protected async postResult(r: RunRow, body: string, success: boolean): Promise<string | null> {
+    const cmid = `run:${r.id}:result`;
+    // A side chat answers as a plain message in the asker's DM.
+    if (success && r.kind !== RUN_KIND_ASIDE) {
+      try {
+        const proof = unwrap(
+          await this.room(r).rpc(r.group_id, "bots.runProof", this.actor(), { topicId: r.topic_id, runId: r.id, since: r.created_at }),
+        ) as RunProof;
+        const card = doneCard({
+          runId: r.id,
+          result: body,
+          prs: mergePrs(proof.prs, prRefs(body)),
+          artifacts: proof.artifacts,
+          acceptance: this.acceptanceOf(r) ?? [],
+        });
+        if (card) return await this.post(r, cmid, body, { cardV2: card });
+      } catch (err) {
+        this.log.warn("done card failed, posting text", { runId: r.id, err });
+      }
+    }
+    try {
+      return await this.post(r, cmid, body);
+    } catch (err) {
+      this.log.warn("result post failed", { runId: r.id, err });
+      return null;
+    }
   }
 }

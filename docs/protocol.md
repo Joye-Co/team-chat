@@ -749,8 +749,11 @@ Rules:
   later human message in the topic goes to that run as input. A message that reaches the run
   after its last turn ended starts a new run. When no run is active, only a new mention of the
   bot starts a run.
-- The bot answers once with a short acknowledgement, streams progress into one streaming
-  message, and posts the result when the run ends. It sets the topic's `status`:
+- The bot acknowledges the message that started the run with one reaction (👀; before 1.1, a
+  short text line). It posts nothing while it works: progress lives in the run (`plan`, the run
+  log; before 1.1, one streaming message). When the run ends it posts one result message and
+  sets `BotRun.resultMessageId` to it (1.1): on success a card message whose `cardV2` has
+  intent `done` (see "Run fields, pause and resume"), else a short note. It sets the topic's `status`:
   `in_progress` while it works, `waiting_answer` with `waitingOn` = the requester while the run
   asks a question (reply 同意 or 拒绝 to an approval, or press the card's buttons; only the
   requester or an owner can answer, every answer is audited as `run.approval`; when the question
@@ -763,8 +766,9 @@ Rules:
   posts one note. A person in the run's group stops a run with `POST /v1/runs/:id/cancel`: the
   machine gets `run.cancel`, the run ends as `cancelled` at once, the bot posts one note and the
   topic goes back to `open`.
-- When the run's result is also the last text of the progress message, the progress message
-  leaves it out (the result is posted once).
+- A run that started before 1.1 keeps its streaming progress message until it ends. When the
+  run's result is also the last text of that message, the message leaves it out (the result is
+  posted once).
 - `run.updated` is stored in the group log when a run is created and on every status change, so
   clients show runs from events. The process view reads the run log with
   `GET /v1/runs/:id/events`, paged by `seq` (gaps are normal: the daemon may drop deltas).
@@ -941,7 +945,10 @@ Rules:
   carry `context` with the same `groupId` and `topicId` and a higher `uptoSeq`; the server then
   stores `topic.updated { contextOf }`. Any other use of `context` gets `invalid`.
 - The bot answers with a read-only run (`BotRun.kind = "aside"`) whose prompt holds the source
-  topic up to `uptoSeq`. Its answers stay in the DM. Nothing is posted to the source topic: a
+  topic up to `uptoSeq` (its last 60 messages; the asker must still be a member of the source
+  group) and the side chat so far. The run goes only to a machine whose daemon reports feature
+  `aside`; with none it ends `failed` with one note. It sets no status on the side chat topic.
+  Its answers stay in the DM. Nothing is posted to the source topic: a
   "post to topic" button on the client sends a normal message by the person.
 - Clients list the side chats of a topic by `contextOf` and hide side chat topics from the DM's
   normal topic list.
@@ -974,7 +981,17 @@ Machine += { features?: string[], takeoverUrl?: string }
 
 Rules:
 
-- `usage` and `durationMs` are set when the run ends, from `run.done`. `acceptance` comes from
+- The done card of a run (output contract): `intent: "done"`, `title` = the result's first
+  line, `fallback` and `body` = the result, `data.runId` = the run, and blocks in this order: a
+  `text` block `result`; an `evidence` block `tests` when the result reports test counts
+  (`12 passed`, `3 failed`, `12 pass`); one `evidence` block `acceptance-N` per acceptance item
+  (`pending` = `info`); one `ref` block `pr-N` per pull request (the topic's `topic.linked`
+  links, then GitHub pull request URLs in the result; at most 5); one `ref` block `artifact-N`
+  per 产出 the run made (versions with its `runId`, or by the bot in the topic since the run
+  started; the newest version each; at most 10). A card that does not fit the Card v2 limits
+  falls back to a text message. Side chat runs answer with a text message.
+- `usage` and `durationMs` are set when the run ends, from `run.done` (also when `run.done`
+  comes after a member stopped the run). `acceptance` comes from
   the run event `acceptance` (runner-backed bots) or `PUT /v1/runs/:id/acceptance` (the run's
   bot) and is stored in `run.updated` like the plan. `kind` and the
   closed `RunStatus` are separate: a paused run keeps its status (`running`) and has `pausedBy`.
