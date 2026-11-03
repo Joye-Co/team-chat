@@ -7,6 +7,7 @@ import { addV1Fixtures } from "./fixtures-v1.ts";
 import { addBotsFixtures } from "./fixtures-bots.ts";
 import { addReactionsFixtures } from "./fixtures-reactions.ts";
 import { addV11Fixtures } from "./fixtures-v11.ts";
+import { addInteractFixtures } from "./fixtures-v11-interact.ts";
 
 type Fixture = {
   kind: string;
@@ -343,6 +344,7 @@ addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSummary, dmSummary,
 addBotsFixtures({ ok, bad, T0, ID, base });
 addReactionsFixtures({ ok, bad, ID, base, message });
 addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic });
+addInteractFixtures({ ok, bad, T0, ID, base, message });
 
 // ---------------------------------------------------------------------------
 

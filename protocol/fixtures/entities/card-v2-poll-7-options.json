@@ -1,0 +1,53 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "poll has 2..6 options",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "p",
+        "type": "poll",
+        "label": "投",
+        "voters": "group",
+        "closesAt": 1762128000000,
+        "options": [
+          {
+            "id": "o0",
+            "label": "0"
+          },
+          {
+            "id": "o1",
+            "label": "1"
+          },
+          {
+            "id": "o2",
+            "label": "2"
+          },
+          {
+            "id": "o3",
+            "label": "3"
+          },
+          {
+            "id": "o4",
+            "label": "4"
+          },
+          {
+            "id": "o5",
+            "label": "5"
+          },
+          {
+            "id": "o6",
+            "label": "6"
+          }
+        ],
+        "fallbackText": "投"
+      }
+    ]
+  }
+}

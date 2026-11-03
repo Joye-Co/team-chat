@@ -1,0 +1,17 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "artifact.event",
+    "rid": "r40",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 1,
+    "clientEventId": "01JC0AEV000000000000000001",
+    "name": "breakdown",
+    "kind": "ask",
+    "payload": {
+      "channel": "douyin"
+    }
+  }
+}

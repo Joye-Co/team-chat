@@ -1,0 +1,22 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "rating max is always 5",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "r",
+        "type": "rating",
+        "label": "分",
+        "max": 4,
+        "fallbackText": "分"
+      }
+    ]
+  }
+}

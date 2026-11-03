@@ -1,0 +1,52 @@
+{
+  "kind": "Card",
+  "valid": true,
+  "description": "v1 card derived from tabs with a compare",
+  "value": {
+    "v": 1,
+    "title": "夹夹 4.0 首页用哪个方案？",
+    "tone": "warning",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Pixel 做了两个首页方案，请选一个。"
+      },
+      {
+        "type": "text",
+        "text": "**选方案**"
+      },
+      {
+        "type": "text",
+        "text": "**首页用哪个？**"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "按活动整理"
+          },
+          {
+            "text": "按时间排"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "5 位群主都提到要按活动找照片。"
+      },
+      {
+        "type": "text",
+        "text": "**数据**"
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "label": "按活动找照片的人",
+            "value": "62%"
+          }
+        ]
+      }
+    ]
+  }
+}

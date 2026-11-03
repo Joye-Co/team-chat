@@ -1,0 +1,130 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "an unknown event name is kept and ignored by readers",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 2,
+    "intent": "info",
+    "title": "10 月新增群从哪来",
+    "fallback": "Ledger：10 月新增群 38 个，小红书最多（14 个）。",
+    "blocks": [
+      {
+        "id": "bars",
+        "type": "chart",
+        "kind": "bar",
+        "label": "新增群 · 按渠道",
+        "x": [
+          "小红书",
+          "群内邀请",
+          "B 站",
+          "抖音"
+        ],
+        "series": [
+          {
+            "id": "groups",
+            "name": "新增群",
+            "values": [
+              14,
+              10,
+              9,
+              5
+            ]
+          }
+        ],
+        "summary": "小红书 14、群内邀请 10、B 站 9、抖音 5。",
+        "events": [
+          "chart.select",
+          "chart.zoom"
+        ],
+        "emitBy": "members"
+      },
+      {
+        "id": "detail",
+        "type": "group",
+        "title": "小红书 · 14 个新增群",
+        "children": [
+          "detail_row",
+          "d_posts"
+        ]
+      },
+      {
+        "id": "detail_row",
+        "type": "row",
+        "weights": [
+          1,
+          2
+        ],
+        "children": [
+          "d_metric",
+          "d_weeks"
+        ]
+      },
+      {
+        "id": "d_metric",
+        "type": "metric",
+        "label": "小红书新增群",
+        "value": 14,
+        "delta": 6,
+        "better": "up"
+      },
+      {
+        "id": "d_weeks",
+        "type": "chart",
+        "kind": "bar",
+        "label": "每周",
+        "x": [
+          "10-06",
+          "10-13",
+          "10-20",
+          "10-27"
+        ],
+        "series": [
+          {
+            "name": "新增群",
+            "values": [
+              2,
+              3,
+              4,
+              5
+            ]
+          }
+        ],
+        "summary": "每周都在涨，10-27 这周 5 个。"
+      },
+      {
+        "id": "d_posts",
+        "type": "table",
+        "columns": [
+          "笔记",
+          "带来的群"
+        ],
+        "rows": [
+          [
+            "群相册一键分享回群",
+            "6"
+          ],
+          [
+            "周末徒步怎么建群",
+            "5"
+          ],
+          [
+            "生日会照片整理",
+            "3"
+          ]
+        ],
+        "rowKeys": [
+          "p1",
+          "p2",
+          "p3"
+        ],
+        "select": "multiple",
+        "sortable": true,
+        "events": [
+          "table.rowSelect"
+        ]
+      }
+    ]
+  }
+}

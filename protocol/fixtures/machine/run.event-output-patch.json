@@ -1,0 +1,26 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "value": {
+    "t": "run.event",
+    "runId": "01JBX0RUN000000000000000AU",
+    "seq": 12,
+    "at": 1762128000000,
+    "event": {
+      "type": "output",
+      "outputId": "o1",
+      "op": "card.patch",
+      "body": {
+        "messageId": "01JBX0MSG000000000000000AE",
+        "baseRev": 1,
+        "cause": "01JC0EV0000000000000000001",
+        "ops": [
+          {
+            "op": "remove",
+            "id": "note"
+          }
+        ]
+      }
+    }
+  }
+}

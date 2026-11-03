@@ -1,0 +1,65 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "a questionnaire with three input children",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "ask",
+    "title": "实习反馈",
+    "fallback": "三道题，一起提交。",
+    "ask": {
+      "from": [
+        "owners"
+      ]
+    },
+    "blocks": [
+      {
+        "id": "qs",
+        "type": "questionnaire",
+        "children": [
+          "q1",
+          "q2",
+          "q3"
+        ],
+        "submitLabel": "一起提交",
+        "anonymous": true
+      },
+      {
+        "id": "q1",
+        "type": "rating",
+        "label": "带教清楚吗？",
+        "max": 5,
+        "required": true,
+        "fallbackText": "1 到 5 分"
+      },
+      {
+        "id": "q2",
+        "type": "decision",
+        "label": "想留下吗？",
+        "options": [
+          {
+            "id": "y",
+            "label": "想"
+          },
+          {
+            "id": "n",
+            "label": "不想"
+          }
+        ],
+        "allowOther": {
+          "label": "其他",
+          "placeholder": "说说看"
+        }
+      },
+      {
+        "id": "q3",
+        "type": "input",
+        "kind": "textarea",
+        "label": "还想说什么",
+        "maxLength": 500
+      }
+    ]
+  }
+}

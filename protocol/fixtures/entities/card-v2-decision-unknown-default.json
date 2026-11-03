@@ -1,0 +1,32 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "default names an unknown option",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "c",
+        "type": "decision",
+        "options": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          }
+        ],
+        "default": [
+          "z"
+        ]
+      }
+    ]
+  }
+}

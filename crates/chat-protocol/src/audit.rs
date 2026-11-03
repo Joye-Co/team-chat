@@ -9,6 +9,8 @@ use crate::entities::Millis;
 use crate::serde_util::{non_null, nullable};
 
 pub const MAX_AUDIT_LIMIT: u32 = 200;
+/// Audit actions of the 1.1 interaction loop (live card events, page events, data pushes).
+pub const AUDIT_ACTIONS_INTERACT: [&str; 3] = ["card.event", "artifact.event", "artifact.data"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

@@ -1,0 +1,17 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 62,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "card.retracted",
+    "data": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "answerId": "01JC0AN0000000000000000001",
+      "askId": "verify",
+      "eventId": "01JC0EV0000000000000000006"
+    }
+  }
+}

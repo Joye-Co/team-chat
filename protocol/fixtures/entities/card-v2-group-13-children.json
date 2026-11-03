@@ -1,0 +1,100 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "group has 1..12 children",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "g",
+        "type": "group",
+        "title": "多",
+        "children": [
+          "x0",
+          "x1",
+          "x2",
+          "x3",
+          "x4",
+          "x5",
+          "x6",
+          "x7",
+          "x8",
+          "x9",
+          "x10",
+          "x11",
+          "x12"
+        ]
+      },
+      {
+        "id": "x0",
+        "type": "text",
+        "text": "x0"
+      },
+      {
+        "id": "x1",
+        "type": "text",
+        "text": "x1"
+      },
+      {
+        "id": "x2",
+        "type": "text",
+        "text": "x2"
+      },
+      {
+        "id": "x3",
+        "type": "text",
+        "text": "x3"
+      },
+      {
+        "id": "x4",
+        "type": "text",
+        "text": "x4"
+      },
+      {
+        "id": "x5",
+        "type": "text",
+        "text": "x5"
+      },
+      {
+        "id": "x6",
+        "type": "text",
+        "text": "x6"
+      },
+      {
+        "id": "x7",
+        "type": "text",
+        "text": "x7"
+      },
+      {
+        "id": "x8",
+        "type": "text",
+        "text": "x8"
+      },
+      {
+        "id": "x9",
+        "type": "text",
+        "text": "x9"
+      },
+      {
+        "id": "x10",
+        "type": "text",
+        "text": "x10"
+      },
+      {
+        "id": "x11",
+        "type": "text",
+        "text": "x11"
+      },
+      {
+        "id": "x12",
+        "type": "text",
+        "text": "x12"
+      }
+    ]
+  }
+}

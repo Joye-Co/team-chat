@@ -1,0 +1,21 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "set cannot change the type",
+  "value": {
+    "t": "card.patch",
+    "rid": "b9",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "baseRev": 1,
+    "ops": [
+      {
+        "op": "set",
+        "id": "a",
+        "props": {
+          "type": "chart"
+        }
+      }
+    ]
+  }
+}

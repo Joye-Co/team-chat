@@ -1,0 +1,26 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "card.unknown_block: stack needs tc.card/2.1",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "s",
+        "type": "stack",
+        "children": [
+          "a"
+        ]
+      },
+      {
+        "id": "a",
+        "type": "text",
+        "text": "a"
+      }
+    ]
+  }
+}

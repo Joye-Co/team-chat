@@ -1,0 +1,34 @@
+{
+  "kind": "Message",
+  "valid": true,
+  "description": "the source was deleted: label empty, no value",
+  "value": {
+    "id": "01JBX0MSG000000000000000AE",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "authorId": "01JBX0OWNER0000000000000AA",
+    "body": "> ↳ 原消息已删除\n\n为什么？",
+    "mentions": [
+      "01JBX0ALICE0000000000000AB"
+    ],
+    "createdSeq": 41,
+    "createdAt": 1762128005000,
+    "blockRefs": [
+      {
+        "messageId": "01JBX0MSG000000000000000AE",
+        "blockId": "channels",
+        "part": {
+          "kind": "cell",
+          "keys": {
+            "row": "bili",
+            "col": 1
+          }
+        },
+        "label": "",
+        "sourceTopicId": "01JBX0TOPIC0000000000000AD",
+        "deleted": true
+      }
+    ]
+  }
+}

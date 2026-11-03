@@ -1,0 +1,21 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "run.input.answer with the 2.1 answer fields (old daemons get the envelope text)",
+  "value": {
+    "t": "run.input",
+    "runId": "01JBX0RUN000000000000000AU",
+    "inputId": "in-10",
+    "text": "<teamchat-event v=\"1\" id=\"in-10\" kind=\"card.answer\">{}</teamchat-event>",
+    "answer": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "rev": 3,
+      "actionId": "send",
+      "actorId": "01JBX0OWNER0000000000000AA",
+      "answerId": "01JC0AN0000000000000000001",
+      "askId": "verify",
+      "eventId": "01JC0EV0000000000000000003",
+      "event": "action.press"
+    }
+  }
+}

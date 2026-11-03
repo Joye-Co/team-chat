@@ -1,0 +1,34 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a child has two parents",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "s1",
+        "type": "stack",
+        "children": [
+          "a"
+        ]
+      },
+      {
+        "id": "s2",
+        "type": "stack",
+        "children": [
+          "a"
+        ]
+      },
+      {
+        "id": "a",
+        "type": "text",
+        "text": "a"
+      }
+    ]
+  }
+}

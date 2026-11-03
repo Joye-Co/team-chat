@@ -1,0 +1,15 @@
+{
+  "kind": "PartRef",
+  "valid": false,
+  "description": "at most 4 keys",
+  "value": {
+    "kind": "cell",
+    "keys": {
+      "a": 1,
+      "b": 2,
+      "c": 3,
+      "d": 4,
+      "e": 5
+    }
+  }
+}

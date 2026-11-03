@@ -1,7 +1,7 @@
 // 1.1 fixtures: Card v2, card answers, side chat context, run fields, artifact events and
 // topic links. Called by gen-fixtures.ts. The machine frames of 1.1 are daemon golden lines
 // (apps/daemon/tests/fixtures/machine/*.jsonl), added by fixtures-bots.ts.
-import { cardV2ToV1, MAX_CARD_REV, MAX_CARD_V2_ACTIONS } from "../src/index.ts";
+import { cardV2ToV1, MAX_CARD_REV, MAX_CARD_V2_ACTIONS, MAX_CARD_V2_BLOCKS } from "../src/index.ts";
 import type { CardV2 } from "../src/index.ts";
 
 type Obj = Record<string, unknown>;
@@ -113,7 +113,7 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   bad("entities/card2-bad-ref-kind.json", "CardV2", { ...working, blocks: [{ type: "ref", id: "r", label: "x", target: { kind: "issue", url: "https://example.com" } }] }, "unknown ref kind");
   bad("entities/card2-ask-from-empty.json", "CardV2", { ...ask, ask: { from: [] } }, "ask.from needs a member");
   bad("entities/card2-too-many-actions.json", "CardV2", { ...working, actions: Array.from({ length: MAX_CARD_V2_ACTIONS + 1 }, (_, i) => ({ id: `a${i}`, label: "x" })) }, "limit: 11 actions");
-  bad("entities/card2-too-many-blocks.json", "CardV2", { ...working, blocks: Array.from({ length: 51 }, (_, i) => ({ type: "divider", id: `d${i}` })) }, "limit: 51 blocks");
+  bad("entities/card2-too-many-blocks.json", "CardV2", { ...working, blocks: Array.from({ length: MAX_CARD_V2_BLOCKS + 1 }, (_, i) => ({ type: "divider", id: `d${i}` })) }, "limit: 81 blocks");
   bad("entities/card2-too-big.json", "CardV2", { ...working, blocks: Array.from({ length: 9 }, (_, i) => ({ type: "code", id: `c${i}`, text: "x".repeat(8000) })) }, "card exceeds 64 KiB");
   bad("entities/card2-unknown-block.json", "CardV2", { ...working, blocks: [{ type: "map", id: "m" }] }, "the server rejects unknown block types");
 
@@ -211,7 +211,7 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   bad("http/resume-run-request-note-too-long.json", "ResumeRunRequest", { note: "x".repeat(2001) }, "note over 2000 characters");
 
   // -------------------------------------------------------------------------
-  // 产出: version runId and declared events, artifact.event, artifact.evented
+  // 产出: version runId and declared events, artifact.event (page events are transient: no stored event)
   // -------------------------------------------------------------------------
   const version = {
     artifactId: X.art,
@@ -229,7 +229,6 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   ok("client/artifact.event-minimal.json", "ClientFrame", { t: "artifact.event", rid: "r99", groupId: ID.general, artifactId: X.art, version: 2, name: "submit" });
   bad("client/artifact.event-too-big.json", "ClientFrame", { t: "artifact.event", rid: "r100", groupId: ID.general, artifactId: X.art, version: 2, name: "pick", payload: "x".repeat(16_385) }, "payload exceeds 16 KiB");
   bad("client/artifact.event-name-too-long.json", "ClientFrame", { t: "artifact.event", rid: "r101", groupId: ID.general, artifactId: X.art, version: 2, name: "x".repeat(129) }, "name is 1..128");
-  ok("events/artifact.evented.json", "Event", { ...base, seq: 45, actorId: ID.alice, type: "artifact.evented", data: { artifactId: X.art, version: 2, name: "pick", payload: { option: "B" } } });
 
   // -------------------------------------------------------------------------
   // Topic links

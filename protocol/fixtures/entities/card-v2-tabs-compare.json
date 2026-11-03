@@ -1,0 +1,103 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "compare with option children inside tabs; compare commits on pick",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "ask",
+    "title": "夹夹 4.0 首页用哪个方案？",
+    "fallback": "Pixel 做了两个首页方案，请选一个。",
+    "ask": {
+      "from": [
+        "01JBX0OWNER0000000000000AA"
+      ],
+      "blocking": true
+    },
+    "blocks": [
+      {
+        "id": "views",
+        "type": "tabs",
+        "tabs": [
+          {
+            "id": "pick",
+            "label": "选方案",
+            "children": [
+              "cmp"
+            ]
+          },
+          {
+            "id": "data",
+            "label": "数据",
+            "children": [
+              "usage"
+            ]
+          }
+        ],
+        "selected": "pick",
+        "events": [
+          "tab.open"
+        ]
+      },
+      {
+        "id": "cmp",
+        "type": "compare",
+        "question": "首页用哪个？",
+        "options": [
+          {
+            "id": "A",
+            "label": "按活动整理",
+            "pros": [
+              "找照片最快"
+            ],
+            "cons": [
+              "每个活动要先归类"
+            ],
+            "preview": {
+              "fileId": "01JC0FIL0000000000000INDEX"
+            },
+            "recommended": true,
+            "children": [
+              "a_note"
+            ]
+          },
+          {
+            "id": "B",
+            "label": "按时间排",
+            "pros": [
+              "做起来最快"
+            ],
+            "cons": [
+              "照片一多就难找"
+            ],
+            "preview": {
+              "artifactId": "01JC0ART00000000000000OCT3",
+              "version": 2
+            }
+          }
+        ],
+        "note": {
+          "label": "说说为什么",
+          "maxLength": 300
+        },
+        "deliver": "immediate"
+      },
+      {
+        "id": "a_note",
+        "type": "text",
+        "text": "5 位群主都提到要按活动找照片。"
+      },
+      {
+        "id": "usage",
+        "type": "metric",
+        "label": "按活动找照片的人",
+        "value": 62,
+        "unit": "%",
+        "events": [
+          "metric.press"
+        ]
+      }
+    ]
+  }
+}

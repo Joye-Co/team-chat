@@ -1,0 +1,25 @@
+{
+  "kind": "AddArtifactVersionRequest",
+  "valid": true,
+  "value": {
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "events": [
+      {
+        "name": "pick"
+      }
+    ],
+    "media": {
+      "kind": "html",
+      "mime": "text/html",
+      "bytes": 1000,
+      "preview": "ready"
+    },
+    "data": null
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "short form of card.event answer.retract",
+  "value": {
+    "t": "card.answer.retract",
+    "rid": "r103",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "answerId": "01JC0AN0000000000000000001"
+  }
+}

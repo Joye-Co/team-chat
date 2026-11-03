@@ -22,7 +22,25 @@ import {
   Title,
 } from "./common.ts";
 import { CardActionedEvent, CardActionFrame } from "./card.ts";
-import { CardAnsweredEvent, CardAnswerFrame, CardV2, DecisionsResponse, GroupDecision } from "./card2.ts";
+import {
+  CardAnsweredEvent,
+  CardAnswerFrame,
+  CardAnswerRetractFrame,
+  CardEventAck,
+  CardEventFrame,
+  CardEventTransient,
+  CardPatchFrame,
+  CardRev,
+  CardRetractedEvent,
+  CardState,
+  CardV2,
+  DecisionsResponse,
+  GroupDecision,
+  InteractionResolvedTransient,
+  InteractionResolveFrame,
+  PartRef,
+} from "./card2.ts";
+import { ArtifactPreviewReadyEvent, MediaInfo } from "./media.ts";
 import { TopicLink, TopicLinkedEvent } from "./links.ts";
 import { CharacterId } from "./characters.ts";
 import {
@@ -39,11 +57,19 @@ import {
   FileResponse,
   Artifact,
   ArtifactVersion,
-  ArtifactEventedEvent,
   ArtifactEventFrame,
+  ArtifactEventAck,
+  ArtifactDataFrame,
+  ArtifactDataAck,
+  ArtifactReplyFrame,
+  ArtifactEventTransient,
+  ArtifactDataTransient,
+  ArtifactReplyTransient,
+  ArtifactDataResponse,
+  PutArtifactDataRequest,
 } from "./files.ts";
 import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
-import { editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
+import { BlockRef, BlockRefInput, editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
 import { Card } from "./card.ts";
 import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, UpdateGroupRequest, UpdateMemberRequest } from "./members.ts";
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
@@ -78,6 +104,8 @@ export * from "./topic.ts";
 export * from "./reads.ts";
 export * from "./card.ts";
 export * from "./card2.ts";
+export * from "./diagram.ts";
+export * from "./media.ts";
 export * from "./links.ts";
 export * from "./message.ts";
 export * from "./files.ts";
@@ -192,7 +220,12 @@ export const ErrorCode = z.enum([
 ]);
 export type ErrorCode = z.infer<typeof ErrorCode>;
 
-export const ErrorBody = z.object({ code: ErrorCode, message: z.string() });
+export const ErrorBody = z.object({
+  code: ErrorCode,
+  message: z.string(),
+  /** 1.1: the specific reason, e.g. `card.already_answered` (no new `ErrorCode` values). */
+  reason: z.string().min(1).max(64).optional(),
+});
 export type ErrorBody = z.infer<typeof ErrorBody>;
 
 // ---------------------------------------------------------------------------
@@ -268,8 +301,9 @@ export const Event = z.discriminatedUnion("type", [
   ReactionChangedEvent,
   // 1.1
   CardAnsweredEvent,
-  ArtifactEventedEvent,
   TopicLinkedEvent,
+  CardRetractedEvent,
+  ArtifactPreviewReadyEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -301,6 +335,12 @@ export const TransientEvent = z.discriminatedUnion("type", [
   TypingEvent,
   PresenceEvent,
   MessageDeltaEvent,
+  // 1.1: only to connections whose hello has feature "interact/1".
+  CardEventTransient,
+  InteractionResolvedTransient,
+  ArtifactEventTransient,
+  ArtifactDataTransient,
+  ArtifactReplyTransient,
 ]);
 export type TransientEvent = z.infer<typeof TransientEvent>;
 
@@ -314,7 +354,15 @@ export const HelloFrame = z.object({
   protocol: z.int().positive(),
   client: z.object({ name: z.string(), version: z.string() }),
   cursors: z.record(z.string(), Seq).optional(),
+  /** 1.1: what this client handles (`CLIENT_FEATURES`); new transients go only to these. */
+  features: z.array(z.string().min(1).max(32)).max(32).optional(),
+  /** 1.1: Card v2 catalogs this client renders, e.g. ["tc.card/2.0", "tc.card/2.1"]. */
+  supportedCatalogs: z.array(z.string().min(1).max(32)).max(16).optional(),
 });
+/** `hello.features` of a 1.1 client: the interaction loop and refs to parts. */
+export const CLIENT_FEATURES = ["interact/1", "refs/1"] as const;
+/** `welcome.features` of a 1.1 server; clients hide affordances the server does not list. */
+export const SERVER_FEATURES = ["interact/1", "refs/1", "diagram/1"] as const;
 export const SendFrame = z.object({
   t: z.literal("send"),
   rid: Rid,
@@ -405,6 +453,12 @@ export const ClientFrame = z.discriminatedUnion("t", [
   // 1.1
   CardAnswerFrame,
   ArtifactEventFrame,
+  CardEventFrame,
+  CardAnswerRetractFrame,
+  CardPatchFrame,
+  InteractionResolveFrame,
+  ArtifactDataFrame,
+  ArtifactReplyFrame,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 export type ClientFrameType = ClientFrame["t"];
@@ -418,6 +472,10 @@ export const SendResult = z.object({
 });
 export type SendResult = z.infer<typeof SendResult>;
 
+/** ack.result of `card.patch`: the message at its new rev. */
+export const CardPatchAck = z.object({ message: Message, rev: CardRev, duplicate: z.boolean().optional() });
+export type CardPatchAck = z.infer<typeof CardPatchAck>;
+
 // ---------------------------------------------------------------------------
 // WebSocket: server to client
 // ---------------------------------------------------------------------------
@@ -429,6 +487,8 @@ export const WelcomeFrame = z.object({
   members: z.array(Member),
   groups: z.array(GroupSummary),
   serverTime: Millis,
+  /** 1.1: what this server supports (`SERVER_FEATURES`). */
+  features: z.array(z.string().min(1).max(32)).max(32).optional(),
 });
 export const EventFrame = z.object({ t: z.literal("event"), event: Event, ...eventFrameFields });
 export const TransientFrame = z.object({
@@ -664,6 +724,18 @@ export const schemas = {
   DecisionsResponse,
   SetRunAcceptanceRequest,
   ResumeRunRequest,
+  // 1.1 interaction loop, refs, media
+  CardState,
+  PartRef,
+  BlockRefInput,
+  BlockRef,
+  MediaInfo,
+  CardEventAck,
+  CardPatchAck,
+  ArtifactEventAck,
+  ArtifactDataAck,
+  ArtifactDataResponse,
+  PutArtifactDataRequest,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

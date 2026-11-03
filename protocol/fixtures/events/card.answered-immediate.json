@@ -1,0 +1,24 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "description": "the commit of an immediate block: no actionId",
+  "value": {
+    "seq": 61,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "type": "card.answered",
+    "data": {
+      "messageId": "01JBX0MSG000000000000000AE",
+      "answerId": "01JC0AN0000000000000000003",
+      "askId": "a1",
+      "eventId": "01JC0EV0000000000000000005",
+      "rev": 1,
+      "event": "compare.pick",
+      "blockId": "cmp",
+      "value": {
+        "value": "A"
+      }
+    }
+  }
+}

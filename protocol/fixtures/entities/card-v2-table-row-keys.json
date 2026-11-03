@@ -1,0 +1,39 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "R4: table rowKeys (one key per row) is the row-key mechanism",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "10 月数据月报",
+    "fallback": "渠道表",
+    "blocks": [
+      {
+        "id": "channels",
+        "type": "table",
+        "title": "渠道表",
+        "columns": [
+          "渠道",
+          "新增群"
+        ],
+        "rows": [
+          [
+            "小红书",
+            "14"
+          ],
+          [
+            "B 站",
+            "9"
+          ]
+        ],
+        "rowKeys": [
+          "xhs",
+          "bili"
+        ],
+        "select": "single"
+      }
+    ]
+  }
+}

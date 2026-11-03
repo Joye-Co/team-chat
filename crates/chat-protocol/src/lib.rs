@@ -17,6 +17,7 @@ pub mod card;
 pub mod card2;
 pub mod characters;
 pub mod diagnostics;
+pub mod diagram;
 pub mod entities;
 pub mod errors;
 pub mod events;
@@ -27,6 +28,7 @@ pub mod http;
 pub mod limits;
 pub mod links;
 pub mod machine;
+pub mod media;
 pub mod members;
 pub mod message;
 pub mod reactions;
@@ -42,6 +44,7 @@ pub use card::*;
 pub use card2::*;
 pub use characters::*;
 pub use diagnostics::*;
+pub use diagram::*;
 pub use entities::*;
 pub use errors::*;
 pub use events::*;
@@ -51,6 +54,7 @@ pub use hooks::*;
 pub use http::*;
 pub use limits::*;
 pub use links::*;
+pub use media::*;
 pub use members::*;
 pub use message::*;
 pub use reactions::*;
@@ -61,3 +65,11 @@ pub use topic::*;
 pub use updates::*;
 
 pub const PROTOCOL_VERSION: u32 = 1;
+/// `hello.features` of a 1.1 client: the interaction loop and refs to parts.
+pub const CLIENT_FEATURES: [&str; 2] = ["interact/1", "refs/1"];
+/// `welcome.features` of a 1.1 server; clients hide affordances the server does not list.
+pub const SERVER_FEATURES: [&str; 3] = ["interact/1", "refs/1", "diagram/1"];
+/// The feature that turns on the 1.1 transients for a connection.
+pub const FEATURE_INTERACT: &str = "interact/1";
+pub const FEATURE_REFS: &str = "refs/1";
+pub const FEATURE_DIAGRAM: &str = "diagram/1";

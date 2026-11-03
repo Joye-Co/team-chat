@@ -1,0 +1,15 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "artifact.reply",
+    "rid": "b43",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000020",
+    "ok": false,
+    "error": {
+      "code": "declined",
+      "message": "没有这个渠道的数"
+    }
+  }
+}

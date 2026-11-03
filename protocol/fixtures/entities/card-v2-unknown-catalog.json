@@ -1,0 +1,20 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "card.unknown_catalog",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.2",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "a",
+        "type": "text",
+        "text": "a"
+      }
+    ]
+  }
+}

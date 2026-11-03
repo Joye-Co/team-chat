@@ -1,0 +1,27 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "card.event",
+    "rid": "r101",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "rev": 3,
+    "clientEventId": "01JC0CEV000000000000000004",
+    "actionId": "send",
+    "event": "action.press",
+    "inputs": {
+      "check": {
+        "value": "wrong"
+      },
+      "by_channel": {
+        "values": [
+          "douyin"
+        ]
+      },
+      "what": {
+        "value": "后台是 7 个，差 2 个"
+      }
+    }
+  }
+}

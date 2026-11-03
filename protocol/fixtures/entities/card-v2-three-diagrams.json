@@ -1,0 +1,36 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "at most 2 diagrams per card",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "d1",
+        "type": "diagram",
+        "syntax": "mermaid",
+        "source": "gantt\n  title x",
+        "fallbackText": "图"
+      },
+      {
+        "id": "d2",
+        "type": "diagram",
+        "syntax": "mermaid",
+        "source": "gantt\n  title x",
+        "fallbackText": "图"
+      },
+      {
+        "id": "d3",
+        "type": "diagram",
+        "syntax": "mermaid",
+        "source": "gantt\n  title x",
+        "fallbackText": "图"
+      }
+    ]
+  }
+}

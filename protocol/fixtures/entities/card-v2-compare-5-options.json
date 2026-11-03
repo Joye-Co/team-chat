@@ -1,0 +1,41 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "compare has 2..4 options",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "c",
+        "type": "compare",
+        "options": [
+          {
+            "id": "o0",
+            "label": "0"
+          },
+          {
+            "id": "o1",
+            "label": "1"
+          },
+          {
+            "id": "o2",
+            "label": "2"
+          },
+          {
+            "id": "o3",
+            "label": "3"
+          },
+          {
+            "id": "o4",
+            "label": "4"
+          }
+        ]
+      }
+    ]
+  }
+}

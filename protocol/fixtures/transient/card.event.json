@@ -1,0 +1,19 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "card.event",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "eventId": "01JC0EV0000000000000000001",
+    "rev": 1,
+    "blockId": "check",
+    "event": "choice.change",
+    "value": {
+      "value": "wrong"
+    },
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "at": 1762128001000
+  }
+}

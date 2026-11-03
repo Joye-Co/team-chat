@@ -1,0 +1,12 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "description": "over 64 KiB: GET the data",
+  "value": {
+    "type": "artifact.data",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 1,
+    "dataRev": 3
+  }
+}

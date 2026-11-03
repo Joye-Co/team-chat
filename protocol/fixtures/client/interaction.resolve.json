@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "interaction.resolve",
+    "rid": "b11",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000001",
+    "result": "ignored",
+    "note": "没有 10-14 之前的数"
+  }
+}

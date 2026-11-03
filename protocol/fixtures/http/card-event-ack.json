@@ -1,0 +1,13 @@
+{
+  "kind": "CardEventAck",
+  "valid": true,
+  "value": {
+    "eventId": "01JC0EV0000000000000000001",
+    "stored": false,
+    "expect": {
+      "by": "01JBX0BOT000000000000000AC",
+      "mode": "live",
+      "etaMs": 2000
+    }
+  }
+}

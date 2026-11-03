@@ -1,0 +1,29 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "card.event",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "eventId": "01JC0EV0000000000000000010",
+    "rev": 1,
+    "blockId": "bars",
+    "event": "chart.select",
+    "value": {
+      "series": "groups",
+      "x": "小红书",
+      "y": 14,
+      "index": 0
+    },
+    "part": {
+      "kind": "bar",
+      "keys": {
+        "series": "groups",
+        "x": "小红书"
+      }
+    },
+    "actorId": "01JBX0ALICE0000000000000AB",
+    "at": 1762128000000
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "kind": "Card",
+  "valid": true,
+  "description": "v1 card derived from the 7.1 report",
+  "value": {
+    "v": 1,
+    "title": "10 月数据月报",
+    "tone": "success",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Ledger 发了 10 月数据月报：新增群 38，日活 2,340。请看一眼数据对不对。"
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "label": "新增群",
+            "value": "38"
+          }
+        ]
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "label": "日活",
+            "value": "2340"
+          }
+        ]
+      },
+      {
+        "type": "fields",
+        "fields": [
+          {
+            "label": "平均回复",
+            "value": "1.2秒"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "**日活 · 近 4 周**：10 月日活从 2,210 涨到 2,340，每周都比 9 月高。"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "对"
+          },
+          {
+            "text": "有问题"
+          }
+        ]
+      },
+      {
+        "type": "link",
+        "label": "10 月数据月报 v3",
+        "target": {
+          "kind": "artifact",
+          "artifactId": "01JC0ART00000000000000OCT3",
+          "version": 3
+        }
+      }
+    ]
+  }
+}

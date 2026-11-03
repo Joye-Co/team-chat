@@ -1,0 +1,23 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "hello",
+    "protocol": 1,
+    "client": {
+      "name": "desktop",
+      "version": "1.1.0"
+    },
+    "cursors": {
+      "01JBX0GENERAL000000000000A": 42
+    },
+    "features": [
+      "interact/1",
+      "refs/1"
+    ],
+    "supportedCatalogs": [
+      "tc.card/2.0",
+      "tc.card/2.1"
+    ]
+  }
+}

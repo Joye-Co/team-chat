@@ -1,0 +1,13 @@
+{
+  "kind": "PutArtifactDataRequest",
+  "valid": true,
+  "value": {
+    "data": {
+      "channels": {
+        "douyin": 7
+      }
+    },
+    "baseDataRev": 1,
+    "cause": "01JC0EV0000000000000000021"
+  }
+}

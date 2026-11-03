@@ -1,0 +1,23 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "embed height is 160..480",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "e",
+        "type": "embed",
+        "artifactId": "01JC0ART00000000000000OCT3",
+        "version": 1,
+        "height": 600,
+        "fallbackText": "页面"
+      }
+    ]
+  }
+}

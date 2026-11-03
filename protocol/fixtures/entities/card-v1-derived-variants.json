@@ -1,0 +1,97 @@
+{
+  "kind": "Card",
+  "valid": true,
+  "description": "v1 card derived from the 2.1 leaves (confirm, matrix, diagram as code)",
+  "value": {
+    "v": 1,
+    "title": "2.1 的块",
+    "tone": "neutral",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "每种 2.1 块一个。"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "群相册"
+          },
+          {
+            "text": "分享回群"
+          },
+          {
+            "text": "生日提醒"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "首页清楚吗？"
+      },
+      {
+        "type": "text",
+        "text": "会推荐给朋友吗？"
+      },
+      {
+        "type": "text",
+        "text": "今晚发布？"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "封面 A"
+          },
+          {
+            "text": "封面 B"
+          }
+        ]
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "群相册"
+          },
+          {
+            "text": "生日提醒"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "什么时候评审？"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "爬山"
+          },
+          {
+            "text": "密室"
+          }
+        ]
+      },
+      {
+        "type": "link",
+        "label": "渠道预算分配",
+        "target": {
+          "kind": "artifact",
+          "artifactId": "01JC0ART00000000000000OCT3",
+          "version": 1
+        }
+      },
+      {
+        "type": "text",
+        "text": "**流程**"
+      },
+      {
+        "type": "code",
+        "lang": "mermaid",
+        "text": "flowchart LR\n  a[提问] --> b[回答]"
+      }
+    ]
+  }
+}

@@ -99,7 +99,8 @@ Event = { seq: number, groupId: string, at: number, actorId: string } & (
 
 V1 adds `card.actioned`, `artifact.created` and `artifact.versionAdded`, and new optional fields
 on several entities, frames and events: see [V1 extensions](#v1-extensions). 1.1 adds
-`card.answered`, `artifact.evented` and `topic.linked`: see [1.1 extensions](#11-extensions).
+`card.answered`, `topic.linked`, `card.retracted` and `artifact.previewReady`: see
+[1.1 extensions](#11-extensions).
 
 Transient events are delivered once, have no `seq` and are never stored:
 
@@ -1013,24 +1014,35 @@ Rules:
 Module: `files.ts` / `files.rs`.
 
 ```ts
-ArtifactVersion += { runId?: string, events?: { name /* 1..128 */, label? /* <= 200 */ }[] /* <= 20 */ }
-CreateArtifactRequest += { events?, runId? }      AddArtifactVersionRequest += { events?, runId? }
-{ t: "artifact.event", rid, groupId, artifactId, version, name, payload?: JSON /* <= 16 KiB */ }   // ack, no result
-artifact.evented (stored event) data: { artifactId, version, name, payload? }   // actorId = viewer
+ArtifactVersion += { runId?: string, events?: ArtifactEventDecl[] /* <= 20 */, media?: MediaInfo, dataRev?: number }
+ArtifactEventDecl = { name /* 1..128; writes: [a-z][A-Za-z0-9_.-]{0,63}, unique */, label? /* <= 200 */,
+                      kind?: "emit" | "ask" /* default emit */, schema?: TcSchema }
+CreateArtifactRequest += { events?, runId?, media?: MediaInfo, data?: JSON /* <= 256 KiB */ }
+AddArtifactVersionRequest += { events?, runId?, media?, data? }
+{ t: "artifact.event", rid, groupId, artifactId, version, clientEventId?, name, kind?, payload?: JSON /* <= 16 KiB */ }
+   // ack.result (1.1 server) = ArtifactEventAck { eventId, duplicate?, expect: Expect }
 ```
+
+Page events are **not stored** in the group log (they are transient and audited; the 1.1
+pre-release type `artifact.evented` is gone). The bridge frames, transients and data routes are
+in [Interaction loop](#interaction-loop-tccard21).
 
 Rules:
 
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
-- `artifact.event`: any member of the group; the version must exist (`not_found`) and declare
-  `name` in `events` (`forbidden` otherwise); at most 5 events per member per second
-  (`rate_limited`). The event goes to the author bot's run as `run.input.artifactEvent`: the
-  run named by the version's `runId` while it is active, else the topic's active run. A page
-  event never starts a run, and one the CLI does not take is not given to a later run.
-- The desktop gives a page the `emitEvent` bridge only when its version was made by a bot of
-  the group and declares events. Page events never approve anything: a bot that needs a
-  decision posts a Card v2 ask.
+- `TcSchema` is a subset of JSON Schema: `type properties required enum items maxItems minimum
+  maximum maxLength pattern (<= 200) description`, depth <= 4, no `$ref`.
+- Paths under `__teamchat/` are reserved for the page host: create and add version refuse them
+  (`invalid`).
+- `artifact.event`: a human member of the group; the version exists (`not_found`), its creator is
+  a bot member of the group that is not deactivated (`forbidden`, reason `artifact.no_bridge`),
+  and it declares `name` with that `kind` (`invalid`, reason `artifact.undeclared_event`); the
+  payload fits the schema. At most 5 events per member per second. The event goes to the version's
+  creator: transient `artifact.event` (SDK bots) or `run.interaction` / `run.input` (runner bots).
+- The desktop gives a page `emit`/`ask` only when its version was made by a bot of the group and
+  declares events of that kind. Page events never approve anything: a bot that needs a decision
+  posts a Card v2 ask.
 
 ## Topic links
 
@@ -1059,3 +1071,161 @@ had applied. After the next `welcome` the client fetches each such group's log f
 that seq once, in pages, and re-applies only what is idempotent: `cardV2` of messages, `contextOf`
 of topics, newer runs, 产出 versions, and the 1.1 events. Read counts and message counts do not
 change. When a group is done its record is removed.
+
+## Interaction loop (tc.card/2.1)
+
+Modules: `card2.ts` / `card2.rs` (cards, events, patches, state, parts), `message.ts` /
+`message.rs` (refs), `files.ts` / `files.rs` (产出 bridge), `media.ts` / `media.rs`,
+`diagram.ts` / `diagram.rs`. Everything is additive; no closed enum gains a value
+(`ErrorCode`, `CardTone`, `TopicStatus`, ... stay as they are).
+
+### Features and catalogs
+
+```ts
+hello += { features?: string[] /* "interact/1", "refs/1" */, supportedCatalogs?: string[] /* "tc.card/2.0", "tc.card/2.1" */ }
+welcome += { features?: string[] /* "interact/1", "refs/1", "diagram/1" */ }
+ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
+```
+
+- The new transient types go only to connections whose `hello.features` has `interact/1`.
+- A 1.1 client hides an affordance (events, refs, diagrams) the server does not list.
+- Errors keep their `ErrorCode`; `reason` names the rule: `card.style_property`,
+  `card.unknown_catalog`, `card.unknown_block`, `card.limits`, `card.depth`,
+  `card.decision_surfaces`, `card.secret_deferred`, `card.undeclared_event`, `card.block_gone`,
+  `card.stale_rev`, `card.superseded`, `card.already_answered`, `card.expired`,
+  `card.retract_closed`, `card.rev_limit`, `interact.bot_emitter`, `interact.no_responder`,
+  `interact.bad_cause`, `artifact.no_bridge`, `artifact.undeclared_event`, `artifact.stale_data`,
+  `artifact.reply_closed`.
+
+### Card v2.1
+
+```ts
+CardV2 += { catalog?: "tc.card/2.0" | "tc.card/2.1" /* absent = 2.0 */, summary? /* <= 280 */ }
+CardAsk += { id? /* round, default "a1" */, blocking? /* default intent === "ask" */, promise? /* <= 200 */ }
+CardV2Action += { kind: "reject" | "press" (new values of the 1.1 enum), inputs?: blockId[] }
+BlockBase (every block) += { emphasis?: "high" | "low", events?: CardEventName[] /* <= 16 */,
+                             deliver?: "immediate" | "onSubmit", emitBy?: EmitBy, fallbackText? /* <= 300 */ }
+EmitBy = "ask" | "requester" | "members" | "owners" | { memberIds: string[] }
+```
+
+Blocks stay one flat list; containers name their children by id (`children`), and a child has
+exactly one parent. Containers: `group` (2.0 inline `blocks`, or 2.1 `children` + `title`,
+`summary`, `collapsible`, `collapsed`), `stack`, `row {weights?: (1|2|3)[]}`, `compare {question?,
+options[2..4] {id, label, pros?, cons?, preview?, recommended?, children?}, note?}`, `tabs
+{tabs[2..5] {id, label, children}, selected?}`, `questionnaire {children, submitLabel?,
+anonymous?}`. New leaves (catalog 2.1, `fallbackText` required): `rank`, `rating` (max 5),
+`scale`, `confirm`, `imageChoice`, `matrix`, `slots`, `poll`, `buttons`, `diagram`, `embed`.
+CARD21's `choice` is the 2.0 `decision` block (wire name kept) with `label?`, `required?`,
+`help?`, `minSelect?`, `maxSelect?`, `allowOther?`, option `recommended?`. `input` gains kind
+`slider` (`step`, `unit`); `secret` is refused. `table` gains `title?`, `rowKeys?` (one key per
+row: the only row-key mechanism), `select?: "single" | "multiple"`, `sortable?`. `chart` gains
+`series[].id?` and `summary?`. `metric` gains `tone?: "good" | "bad" | "neutral"`.
+
+Write rules (`cardV2Problem` / `CardV2::problem`, run on send, edit and after a patch): known
+catalog; 2.1 types only in catalog 2.1; <= 80 blocks; unique ids (`root` and `$…` reserved);
+children exist, one parent, no cycle; a container has depth <= 2; no `row` in a `row`, no `tabs`
+inside `tabs`/`row`/`compare`, no `compare` inside `row`/`compare`, `questionnaire` children are
+leaves; counts (row 2–3, stack/group 1–12, questionnaire 2–5, compare 2–4, tabs 2–5); <= 12
+input blocks; <= 20 blocks with `events`; <= 2 `emphasis: "high"`; <= 2 diagrams; `deliver` only
+on input blocks, `immediate` only on single choices, `confirm`, `compare`, `rating`, `scale` and
+single-line inputs; at most one primary action; action `inputs` name input blocks; one decision
+surface per ask. Style keys (`style class className css html color colour background bg font
+fontSize fontWeight padding margin gap width height border radius shadow icon`) are refused at any
+depth of a block or action, except `style` of actions and inline buttons and `height` of `embed`.
+Readers keep unknown event names and an unknown `diagram.syntax` (show the source as code).
+
+### Events, answers and card state
+
+```ts
+{ t: "card.event", rid, groupId, messageId, rev, clientEventId, blockId? | actionId?, event: CardEventName,
+  value?: JSON /* <= 4 KiB */, inputs?: Record<blockId, JSON> /* <= 16 KiB, action.press only */, part?: PartRef }
+{ t: "card.answer", ..., clientEventId? }        // short form of card.event action.press
+{ t: "card.answer.retract", rid, groupId, messageId, answerId }   // short form of card.event answer.retract
+ack.result = CardEventAck { eventId, stored, answerId?, duplicate?, expect: Expect }
+Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs? }
+
+card.answered (stored) data += { answerId?, askId?, eventId?, event?, blockId?, value? }   // actionId absent for an immediate commit
+card.retracted (stored) data: { messageId, answerId, askId?, eventId? }                     // actorId = the answerer
+Message += { cardState?: CardState, cause?: Cause }       message.updated data += { cardState?, cause? }
+CardState = { ask?: { id, status: "open"|"answered"|"expired"|"closed"|"superseded", from: memberId[], blocking,
+              expiresAt?, answeredBy?, answeredAt? }, answers: CardAnswer[] /* <= 500 */,
+              tally?, tallyBy?, emitters?, lastCause?: Cause }
+Cause = { eventId, actorId, at, event, blockId?, actionId? }
+transient card.event: { groupId, topicId, messageId, eventId, rev, blockId?, actionId?, event, value?, inputs?, part?, actorId, at }
+```
+
+Event catalog: `choice.change choice.submit input.change input.submit chart.select chart.clear
+metric.press table.rowSelect table.sort button.press draft.edit compare.pick tab.open action.press
+answer.retract`. `chart.select` sends `part {kind: "point"|"bar", keys: {series, x}}` next to its
+`value {series, x, y, index}`; `metric.press` sends `part {kind: "metric"}`. A live event goes to
+the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
+Members never write `cardState` or `cause`.
+
+### Patches and resolves
+
+```ts
+{ t: "card.patch", rid, groupId, messageId, baseRev, ops: PatchOp[] /* 1..50 */, cause?: eventId, clientPatchId? }
+PatchOp = { op: "set", id, props } | { op: "replace", id, block } | { op: "insert", block, parent?, after? | before? | index? }
+        | { op: "remove", id } | { op: "data", path, value? } | { op: "card", props: { title?, summary?, intent?, fallback?, ask?: CardAsk | null, actions? } }
+ack.result = CardPatchAck { message, rev, duplicate? }
+send += { causeEventId?, blockRefs? }      edit += { baseRev?, causeEventId? }
+{ t: "interaction.resolve", rid, groupId, eventId, result: "ignored" | "failed", note? /* <= 120 */ }
+transient interaction.resolved: { groupId, eventId, result: "ignored"|"failed"|"patched"|"posted"|"replied", messageId?, note? }
+```
+
+### 产出 bridge
+
+```ts
+{ t: "artifact.data", rid, groupId, artifactId, version, data /* <= 256 KiB */, baseDataRev?, cause?, clientPushId? }   // ack.result { dataRev }
+{ t: "artifact.reply", rid, groupId, eventId, ok, payload? /* <= 64 KiB, ok: true */, error? { code: "declined"|"failed", message } }
+transient artifact.event: { groupId, topicId, artifactId, version, eventId, name, kind, payload?, actorId, at }   // to the version's creator
+transient artifact.data:  { groupId, artifactId, version, dataRev, data? /* inline when <= 64 KiB */, cause? }    // to every member
+transient artifact.reply: { groupId, eventId, ok, payload?, error? }                                               // to the asker only
+GET /v1/artifacts/:id/versions/:v/data  -> ArtifactDataResponse { data: JSON | null, dataRev, updatedAt }
+PUT /v1/artifacts/:id/versions/:v/data  PutArtifactDataRequest { data, baseDataRev?, cause? } -> ArtifactDataAck { dataRev }
+```
+
+Audit actions: `card.event`, `artifact.event` (payload: first 1 KiB, redacted), `artifact.data`
+(`{version, dataRev, bytes}`, no content).
+
+### Media
+
+```ts
+MediaInfo = { kind: "html"|"markdown"|"image"|"imageSet"|"video"|"audio"|"pdf"|"code"|"table"|"file", mime, bytes,
+              width?, height?, duration?, pages?, rows?, cols?, lines?, language?, posterFileId?,
+              frames? { t, fileId, label? }[] /* <= 12 */, chapters? { t, title }[] /* <= 20 */, peaksFileId?,
+              transcriptFileId?, images? { fileId, width, height, thumbFileId }[] /* <= 30 */,
+              focus? { fromLine, toLine }, preview: "ready" | "pending" | "failed" }
+ArtifactVersion += { media? }      FileRef (message attachments) += { media? }
+artifact.previewReady (stored) data: { artifactId, version, media }
+```
+
+The sender's client computes `media`; the server checks the limits (`mediaProblem`: 2 GB, 4 h,
+images 50 MB / 100 MP, PDF 500 MB / 2000 pages, HTML 20 MB, Markdown and code 5 MB) and never
+decodes media.
+
+### References to a part (引用提问)
+
+```ts
+PartRef = { kind: PartKind /* 1..16 of [a-z], open set */, keys?: Record</* [a-z]{1,16} */ string, string /* <= 256 */ | int >= 0> /* <= 4 */ }
+BlockRefInput = { messageId? | artifact? { artifactId, version } /* exactly one */, cardRev?, blockId, part?, label /* 1..120, no control characters */, value? /* <= 2048 bytes */ }
+BlockRef = BlockRefInput & { sourceAuthorId?, sourceTopicId, deleted?: true /* label "", no value */ }
+Message += { blockRefs?: BlockRef[] /* <= 5 */ }    send / PostMessageRequest += { blockRefs?: BlockRefInput[] /* 1..5 */ }
+message.updated data += { blockRefs? }
+```
+
+`blockId` is a Card v2 block id, `card`, `page` (a 产出 page), `v1:<0..49>` or `md:<0..199>`.
+Table keys: `row` = `rowKeys[i]` when present, else the 0-based row index; `col` = the 0-based
+column index. The server writes one quote line `> ↳ {label}` per ref in front of the body (then
+an empty line), so 1.0.x readers see the reference. Refs travel to runner CLIs inside the prompt
+and `run.input.text` (machine protocol unchanged for refs).
+
+### Diagrams
+
+Card v2 block `diagram {syntax: "mermaid", source /* <= 16384 bytes */, title?, caption?, alt?,
+fallbackText}`; Markdown fences with info string `mermaid`. `checkDiagramSource` /
+`check_diagram_source` (shared cases in `protocol/checks/diagram-checks.json`): first keyword one
+of `flowchart graph sequenceDiagram stateDiagram stateDiagram-v2 classDiagram erDiagram gantt
+timeline`; no front matter and none of `%%{ click href callback call javascript: <script
+<iframe <foreignObject` (any case). The derived v1 card shows the source as a `mermaid` code
+block.

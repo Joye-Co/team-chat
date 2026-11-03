@@ -1,0 +1,13 @@
+{
+  "kind": "ArtifactDataResponse",
+  "valid": true,
+  "value": {
+    "data": {
+      "channels": {
+        "douyin": 7
+      }
+    },
+    "dataRev": 2,
+    "updatedAt": 1762128000000
+  }
+}

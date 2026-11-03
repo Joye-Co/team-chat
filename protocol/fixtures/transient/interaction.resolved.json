@@ -1,0 +1,11 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "interaction.resolved",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000021",
+    "result": "replied",
+    "note": "看板里抖音的数改好了"
+  }
+}

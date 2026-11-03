@@ -21,6 +21,10 @@ pub mod feature {
     pub const ASIDE: &str = "aside";
     /// The `acceptance` run event.
     pub const ACCEPTANCE: &str = "acceptance";
+    /// 1.1 interaction loop: `run.answer` and `run.interaction`.
+    pub const INTERACT: &str = "interact";
+    /// 1.1 `chat-run`: RunEvent `output` and `run.output.result`.
+    pub const OUTPUT: &str = "output";
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -143,6 +147,128 @@ pub struct RunAnswer {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_values: Option<BTreeMap<String, String>>,
     pub actor_id: String,
+    /// 1.1 interaction loop: the stored answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub answer_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ask_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+
+/// Who made an answer or an event (a person).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunActor {
+    pub id: String,
+    pub name: String,
+}
+
+/// `run.answer.source`: the stored answer of a card.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RunAnswerSource {
+    #[serde(rename = "card", rename_all = "camelCase")]
+    Card {
+        message_id: String,
+        ask_id: String,
+        answer_id: String,
+        rev: u32,
+    },
+}
+
+/// `run.answer` (feature "interact"): a stored Card v2 answer for the run's CLI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunAnswerFrame {
+    pub run_id: String,
+    pub input_id: String,
+    pub source: RunAnswerSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block_id: Option<String>,
+    pub event: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inputs: Option<BTreeMap<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub edited_values: Option<BTreeMap<String, String>>,
+    pub actor: RunActor,
+}
+
+/// `run.interaction.source`: a live card event or a page event.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum RunInteractionSource {
+    #[serde(rename = "card", rename_all = "camelCase")]
+    Card {
+        message_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action_id: Option<String>,
+        rev: u32,
+    },
+    #[serde(rename = "artifact", rename_all = "camelCase")]
+    Artifact {
+        artifact_id: String,
+        version: u32,
+        event_id: String,
+        ask: bool,
+    },
+}
+
+/// `run.interaction` (feature "interact"): a live card event or a page event for the CLI.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunInteractionFrame {
+    pub run_id: String,
+    pub input_id: String,
+    pub source: RunInteractionSource,
+    /// A card event name or the page event name.
+    pub event: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+    pub actor: RunActor,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunOutputError {
+    pub code: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    pub message: String,
+}
+
+/// `run.output.result` (feature "output"): the answer to a RunEvent `output`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RunOutputResult {
+    pub run_id: String,
+    pub output_id: String,
+    pub ok: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<RunOutputError>,
+}
+
+/// What a `chat-run` output asks for; each one has the rules of the matching frame.
+pub mod output_op {
+    pub const CARD_POST: &str = "card.post";
+    pub const CARD_PATCH: &str = "card.patch";
+    pub const INTERACTION_RESOLVE: &str = "interaction.resolve";
+    pub const ARTIFACT_DATA: &str = "artifact.data";
+    pub const ARTIFACT_REPLY: &str = "artifact.reply";
 }
 
 /// An event from an interactive 产出 page given to a run (`run.input.artifactEvent`).
@@ -290,6 +416,14 @@ pub enum RunEvent {
         paused: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         by: Option<String>,
+    },
+    /// 1.1 (feature "output", `chat-run`): post or patch a card, resolve an event, or push
+    /// data to / reply from a 产出. `op` is one of [`output_op`].
+    #[serde(rename = "output", rename_all = "camelCase")]
+    Output {
+        output_id: String,
+        op: String,
+        body: Value,
     },
     /// A type this reader does not know (a newer daemon). Readers skip it; never written.
     #[serde(other)]
@@ -464,6 +598,15 @@ pub enum Down {
     Ack { run_id: String, seq: u64 },
     #[serde(rename = "error", rename_all = "camelCase")]
     Error { error: MachineErrorBody },
+    /// 1.1 (feature "interact").
+    #[serde(rename = "run.answer")]
+    RunAnswer(RunAnswerFrame),
+    /// 1.1 (feature "interact").
+    #[serde(rename = "run.interaction")]
+    RunInteraction(RunInteractionFrame),
+    /// 1.1 (feature "output").
+    #[serde(rename = "run.output.result")]
+    RunOutputResult(RunOutputResult),
 }
 
 impl Up {

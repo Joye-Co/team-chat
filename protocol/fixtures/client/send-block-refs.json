@@ -1,0 +1,37 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "a cell of a v2 table",
+  "value": {
+    "t": "send",
+    "rid": "r60",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JC0CMI000000000000000010",
+    "body": "@Ledger 为什么比上月少了 1 个？",
+    "mentions": [
+      "01JBX0BOT000000000000000AC"
+    ],
+    "blockRefs": [
+      {
+        "messageId": "01JBX0MSG000000000000000AE",
+        "cardRev": 1,
+        "blockId": "channels",
+        "part": {
+          "kind": "cell",
+          "keys": {
+            "row": "bili",
+            "col": 1
+          }
+        },
+        "label": "10 月数据月报 · 渠道表 · B 站 · 新增群 9",
+        "value": {
+          "row": "B 站",
+          "column": "新增群",
+          "display": "9",
+          "raw": 9
+        }
+      }
+    ]
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "card.depth: a container at depth 3",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "g0",
+        "type": "group",
+        "title": "0",
+        "children": [
+          "s1"
+        ]
+      },
+      {
+        "id": "s1",
+        "type": "stack",
+        "children": [
+          "s2"
+        ]
+      },
+      {
+        "id": "s2",
+        "type": "stack",
+        "children": [
+          "s3"
+        ]
+      },
+      {
+        "id": "s3",
+        "type": "stack",
+        "children": [
+          "x"
+        ]
+      },
+      {
+        "id": "x",
+        "type": "text",
+        "text": "x"
+      }
+    ]
+  }
+}

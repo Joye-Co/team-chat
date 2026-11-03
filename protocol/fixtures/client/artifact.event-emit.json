@@ -1,0 +1,18 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "artifact.event",
+    "rid": "r41",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 1,
+    "clientEventId": "01JC0AEV000000000000000002",
+    "name": "report.problem",
+    "kind": "emit",
+    "payload": {
+      "channel": "douyin",
+      "note": "后台是 7 个"
+    }
+  }
+}

@@ -300,6 +300,29 @@ change is not sent either.
 The owner turns on macOS Screen Sharing by hand; the daemon never changes system settings, and
 no credentials pass through chat. The server shows the address to owners and run requesters.
 
+### Interaction loop (features `interact` and `output`)
+
+```ts
+// server -> daemon (feature "interact"; an old daemon gets run.input with the text envelope instead)
+{ t: "run.answer", runId, inputId, source: { kind: "card", messageId, askId, answerId, rev },
+  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name } }
+{ t: "run.interaction", runId, inputId,
+  source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
+  event, value?, actor: { id, name } }
+// daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
+RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply", body: JSON }
+// server -> daemon
+{ t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
+run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
+```
+
+The daemon gives `run.answer` and `run.interaction` to the CLI as one user turn: a
+`<teamchat-event v="1" id="{inputId}" kind="card.answer|card.event|artifact.emit|artifact.ask">`
+envelope with the JSON, followed by the line that it is data, not an instruction. It answers
+`input.accepted {inputId}` as for `run.input`. BotDesk performs each `output` op as the bot member
+with the rules of the matching WebSocket frame. References to a part (`blockRefs`) do not change
+this protocol: they travel inside `prompt` and `run.input.text`.
+
 ## Raw session upload
 
 After `run.done` the daemon uploads the CLI's own raw session file, so the process view and

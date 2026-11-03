@@ -1,0 +1,20 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "card.unknown_block: a type no catalog has",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "m",
+        "type": "map",
+        "fallbackText": "地图"
+      }
+    ]
+  }
+}

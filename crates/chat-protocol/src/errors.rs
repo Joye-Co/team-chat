@@ -20,6 +20,13 @@ pub enum ErrorCode {
 pub struct ErrorBody {
     pub code: ErrorCode,
     pub message: String,
+    /// 1.1: the specific reason, e.g. `card.already_answered` (no new `ErrorCode` values).
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_util::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reason: Option<String>,
 }
 
 /// A frame that could not be parsed or encoded. Codes match `parseFrame` in packages/protocol:

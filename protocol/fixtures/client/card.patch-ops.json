@@ -1,0 +1,121 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "all six ops; data without value deletes; ask null closes the ask",
+  "value": {
+    "t": "card.patch",
+    "rid": "b7",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "baseRev": 1,
+    "cause": "01JC0EV0000000000000000001",
+    "clientPatchId": "01JC0PAT000000000000000001",
+    "ops": [
+      {
+        "op": "insert",
+        "after": "main",
+        "block": {
+          "id": "drill",
+          "type": "group",
+          "title": "按渠道拆开",
+          "collapsible": false,
+          "children": []
+        }
+      },
+      {
+        "op": "insert",
+        "parent": "drill",
+        "block": {
+          "id": "by_channel",
+          "type": "table",
+          "columns": [
+            "渠道",
+            "新增群"
+          ],
+          "rows": [
+            [
+              "小红书",
+              "14"
+            ],
+            [
+              "抖音",
+              "5"
+            ]
+          ],
+          "rowKeys": [
+            "xhs",
+            "douyin"
+          ],
+          "select": "multiple",
+          "events": [
+            "table.rowSelect"
+          ]
+        }
+      },
+      {
+        "op": "set",
+        "id": "m_groups",
+        "props": {
+          "value": 40,
+          "note": "已改正"
+        }
+      },
+      {
+        "op": "replace",
+        "id": "note",
+        "block": {
+          "id": "note",
+          "type": "input",
+          "kind": "textarea",
+          "label": "哪一项不对？",
+          "maxLength": 300
+        }
+      },
+      {
+        "op": "remove",
+        "id": "full"
+      },
+      {
+        "op": "data",
+        "path": "/weeks/0",
+        "value": "10-07"
+      },
+      {
+        "op": "data",
+        "path": "/old"
+      },
+      {
+        "op": "card",
+        "props": {
+          "summary": "新增群 40 个。",
+          "ask": {
+            "id": "verify",
+            "from": [
+              "requester"
+            ],
+            "blocking": false
+          },
+          "actions": [
+            {
+              "id": "send",
+              "label": "发给 Ledger",
+              "style": "primary",
+              "kind": "submit",
+              "inputs": [
+                "check",
+                "by_channel",
+                "note"
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "op": "card",
+        "props": {
+          "ask": null
+        }
+      }
+    ]
+  }
+}

@@ -67,6 +67,20 @@ pub struct WelcomeFrame {
     pub members: Vec<Member>,
     pub groups: Vec<GroupSummary>,
     pub server_time: Millis,
+    /// 1.1: what this server supports ([`crate::SERVER_FEATURES`]).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub features: Option<Vec<String>>,
+}
+
+impl WelcomeFrame {
+    /// True when the server listed `feature` in `welcome.features`.
+    pub fn has_feature(&self, feature: &str) -> bool {
+        self.features.iter().flatten().any(|f| f == feature)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

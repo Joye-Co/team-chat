@@ -1,0 +1,19 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "artifact.event",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 1,
+    "eventId": "01JC0EV0000000000000000020",
+    "name": "breakdown",
+    "kind": "ask",
+    "payload": {
+      "channel": "douyin"
+    },
+    "actorId": "01JBX0OWNER0000000000000AA",
+    "at": 1762128000000
+  }
+}

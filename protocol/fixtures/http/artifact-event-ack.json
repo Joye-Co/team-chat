@@ -1,0 +1,11 @@
+{
+  "kind": "ArtifactEventAck",
+  "valid": true,
+  "value": {
+    "eventId": "01JC0EV0000000000000000020",
+    "expect": {
+      "by": "01JBX0BOT000000000000000AC",
+      "mode": "live"
+    }
+  }
+}

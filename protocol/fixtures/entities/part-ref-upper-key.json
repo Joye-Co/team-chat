@@ -1,0 +1,11 @@
+{
+  "kind": "PartRef",
+  "valid": false,
+  "description": "keys are [a-z]",
+  "value": {
+    "kind": "cell",
+    "keys": {
+      "Row": 1
+    }
+  }
+}

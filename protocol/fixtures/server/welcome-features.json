@@ -1,0 +1,22 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "value": {
+    "t": "welcome",
+    "protocol": 1,
+    "me": {
+      "id": "01JBX0OWNER0000000000000AA",
+      "kind": "human",
+      "name": "Joye",
+      "level": "owner"
+    },
+    "members": [],
+    "groups": [],
+    "serverTime": 1762128000000,
+    "features": [
+      "interact/1",
+      "refs/1",
+      "diagram/1"
+    ]
+  }
+}

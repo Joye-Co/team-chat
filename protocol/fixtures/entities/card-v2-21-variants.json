@@ -1,0 +1,222 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "every 2.1 leaf: rank rating scale confirm imageChoice matrix slots poll buttons embed diagram and the slider input",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "2.1 的块",
+    "fallback": "每种 2.1 块一个。",
+    "blocks": [
+      {
+        "id": "rank",
+        "type": "rank",
+        "label": "先做哪个？",
+        "items": [
+          {
+            "id": "photos",
+            "label": "群相册"
+          },
+          {
+            "id": "share",
+            "label": "分享回群"
+          },
+          {
+            "id": "birthday",
+            "label": "生日提醒",
+            "meta": "3 票"
+          }
+        ],
+        "cut": {
+          "after": 2,
+          "label": "前 2 个进 4.0"
+        },
+        "fallbackText": "排序题：群相册、分享回群、生日提醒"
+      },
+      {
+        "id": "rate",
+        "type": "rating",
+        "label": "首页清楚吗？",
+        "max": 5,
+        "labels": {
+          "1": "很乱",
+          "5": "很清楚"
+        },
+        "fallbackText": "1 到 5 分"
+      },
+      {
+        "id": "nps",
+        "type": "scale",
+        "label": "会推荐给朋友吗？",
+        "min": 0,
+        "max": 10,
+        "ends": [
+          "不会",
+          "一定会"
+        ],
+        "fallbackText": "0 到 10 分"
+      },
+      {
+        "id": "go",
+        "type": "confirm",
+        "label": "今晚发布？",
+        "yes": "可以",
+        "no": "不行",
+        "detail": "所有群立刻用上新版本。",
+        "fallbackText": "可以 / 不行"
+      },
+      {
+        "id": "img",
+        "type": "imageChoice",
+        "label": "用哪张封面？",
+        "options": [
+          {
+            "id": "a",
+            "label": "封面 A",
+            "fileId": "01JC0FIL0000000000000INDEX"
+          },
+          {
+            "id": "b",
+            "label": "封面 B",
+            "fileId": "01JC0FIL0000000000000INDEX",
+            "recommended": true
+          }
+        ],
+        "fallbackText": "两张封面选一张"
+      },
+      {
+        "id": "mx",
+        "type": "matrix",
+        "label": "每项进哪个版本？",
+        "rows": [
+          {
+            "id": "photos",
+            "label": "群相册",
+            "required": true
+          },
+          {
+            "id": "birthday",
+            "label": "生日提醒"
+          }
+        ],
+        "columns": [
+          {
+            "id": "v40",
+            "label": "4.0"
+          },
+          {
+            "id": "v41",
+            "label": "4.1"
+          }
+        ],
+        "fallbackText": "两项各选一个版本"
+      },
+      {
+        "id": "when",
+        "type": "slots",
+        "label": "什么时候评审？",
+        "tz": "Asia/Shanghai",
+        "multiple": true,
+        "slots": [
+          {
+            "id": "t1",
+            "start": 1762128000000,
+            "end": 1762129800000
+          },
+          {
+            "id": "t2",
+            "start": 1762131600000,
+            "end": 1762133400000,
+            "conflicts": [
+              "01JBX0ALICE0000000000000AB"
+            ]
+          }
+        ],
+        "fallbackText": "两个时间段"
+      },
+      {
+        "id": "vote",
+        "type": "poll",
+        "label": "团建去哪？",
+        "options": [
+          {
+            "id": "A",
+            "label": "爬山"
+          },
+          {
+            "id": "B",
+            "label": "密室"
+          }
+        ],
+        "voters": "group",
+        "closesAt": 1762214400000,
+        "public": true,
+        "changeable": true,
+        "fallbackText": "投票：爬山 / 密室"
+      },
+      {
+        "id": "more",
+        "type": "buttons",
+        "buttons": [
+          {
+            "id": "by_channel",
+            "label": "按渠道拆开"
+          },
+          {
+            "id": "weekly",
+            "label": "换成按周看"
+          },
+          {
+            "id": "reset",
+            "label": "清空",
+            "style": "danger",
+            "confirm": {
+              "title": "清空筛选？"
+            }
+          }
+        ],
+        "events": [
+          "button.press"
+        ],
+        "fallbackText": "按渠道拆开 · 换成按周看"
+      },
+      {
+        "id": "page",
+        "type": "embed",
+        "artifactId": "01JC0ART00000000000000OCT3",
+        "version": 1,
+        "height": 360,
+        "title": "渠道预算分配",
+        "events": [
+          "budget.submit"
+        ],
+        "fallbackText": "Ledger 做了一个预算分配页面，请在 TeamChat 1.1 里打开。"
+      },
+      {
+        "id": "flow",
+        "type": "diagram",
+        "syntax": "mermaid",
+        "source": "flowchart LR\n  a[提问] --> b[回答]",
+        "title": "流程",
+        "alt": "提问之后回答",
+        "fallbackText": "图：提问、回答"
+      },
+      {
+        "id": "pct",
+        "type": "input",
+        "kind": "slider",
+        "label": "灰度比例",
+        "min": 0,
+        "max": 100,
+        "step": 5,
+        "unit": "%",
+        "default": 10,
+        "events": [
+          "input.change"
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.output.result",
+    "runId": "01JBX0RUN000000000000000AU",
+    "outputId": "o1",
+    "ok": true,
+    "result": {
+      "rev": 2
+    }
+  }
+}

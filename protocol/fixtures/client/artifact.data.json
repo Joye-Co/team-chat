@@ -1,0 +1,21 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "artifact.data",
+    "rid": "b41",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 1,
+    "baseDataRev": 1,
+    "cause": "01JC0EV0000000000000000021",
+    "clientPushId": "01JC0PSH000000000000000001",
+    "data": {
+      "asOf": "2026-10-31",
+      "channels": {
+        "all": 40,
+        "douyin": 7
+      }
+    }
+  }
+}

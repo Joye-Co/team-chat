@@ -1,0 +1,55 @@
+{
+  "kind": "ArtifactVersion",
+  "valid": true,
+  "description": "declared events with kind and schema, media metadata and the data rev",
+  "value": {
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 1,
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX",
+        "size": 12000,
+        "mime": "text/html"
+      }
+    ],
+    "createdBy": "01JBX0BOT000000000000000AC",
+    "createdAt": 1762128000000,
+    "events": [
+      {
+        "name": "breakdown",
+        "kind": "ask",
+        "label": "按渠道筛选",
+        "schema": {
+          "type": "object",
+          "required": [
+            "channel"
+          ],
+          "properties": {
+            "channel": {
+              "enum": [
+                "all",
+                "xhs",
+                "douyin"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "name": "report.problem",
+        "kind": "emit",
+        "label": "数据有问题"
+      }
+    ],
+    "media": {
+      "kind": "html",
+      "mime": "text/html",
+      "bytes": 12000,
+      "posterFileId": "01JC0FIL0000000000000INDEX",
+      "preview": "ready"
+    },
+    "dataRev": 2
+  }
+}

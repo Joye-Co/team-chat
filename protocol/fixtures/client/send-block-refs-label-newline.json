@@ -1,0 +1,37 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "label with a newline",
+  "value": {
+    "t": "send",
+    "rid": "r60",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JC0CMI000000000000000010",
+    "body": "@Ledger 为什么比上月少了 1 个？",
+    "mentions": [
+      "01JBX0BOT000000000000000AC"
+    ],
+    "blockRefs": [
+      {
+        "messageId": "01JBX0MSG000000000000000AE",
+        "cardRev": 1,
+        "blockId": "channels",
+        "part": {
+          "kind": "cell",
+          "keys": {
+            "row": "bili",
+            "col": 1
+          }
+        },
+        "label": "第一行\n第二行",
+        "value": {
+          "row": "B 站",
+          "column": "新增群",
+          "display": "9",
+          "raw": 9
+        }
+      }
+    ]
+  }
+}

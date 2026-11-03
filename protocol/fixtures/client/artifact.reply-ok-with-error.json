@@ -1,0 +1,16 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "ok: true takes no error",
+  "value": {
+    "t": "artifact.reply",
+    "rid": "b44",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000020",
+    "ok": true,
+    "error": {
+      "code": "failed",
+      "message": "x"
+    }
+  }
+}
