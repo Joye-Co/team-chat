@@ -4,6 +4,7 @@ export {
   SDK_VERSION,
   type BotOptions,
   type CardActionContext,
+  type CardAnswerContext,
   type EditInput,
   type EventContext,
   type MessageContext,

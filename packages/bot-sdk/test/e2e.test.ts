@@ -3,7 +3,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Card, Event, Message } from "@chat/protocol";
+import type { Card, CardV2, Event, Message } from "@chat/protocol";
 import { Bot, ChatError, HttpClient, MemoryStateStore, type StreamWriter } from "../src/index.ts";
 
 const PORT = Number(process.env.BOT_SDK_E2E_PORT ?? 8795);
@@ -398,6 +398,35 @@ describe("bot sdk e2e", () => {
     await waitFor("card press", () => pressed.length === 1);
     await waitFor("card update", () =>
       events.find((e) => e.type === "message.updated" && e.data.messageId === res.message.id && e.data.card?.status?.label === "done"),
+    );
+  });
+});
+
+describe("cards v2", () => {
+  test("posts a v2 ask and gets the answer in onCardAnswer", async () => {
+    const card: CardV2 = {
+      v: 2,
+      rev: 1,
+      intent: "ask",
+      title: "Ship?",
+      fallback: "Pick a time",
+      ask: { from: ["owners"] },
+      blocks: [{ type: "decision", id: "when", options: [{ id: "now", label: "Now" }, { id: "later", label: "Later" }] }],
+      actions: [{ id: "ship", label: "Ship", style: "primary" }],
+    };
+    const res = await bot.postCardV2({ groupId: generalId }, card);
+    expect(res.message.cardV2).toEqual(card);
+    expect(res.message.card?.title).toBe("Ship?");
+    const answers: { actionId: string; inputs: Record<string, unknown>; actorId: string }[] = [];
+    bot.onCardAnswer(async (ctx) => {
+      answers.push({ actionId: ctx.actionId, inputs: ctx.inputs, actorId: ctx.actorId });
+      await ctx.updateCard({ ...card, rev: ctx.rev + 1, intent: "done", ask: undefined, actions: [] });
+    });
+    await human.answerCard(generalId, res.message.id, { rev: 1, actionId: "ship", inputs: { when: "later" } });
+    await waitFor("card answer", () => answers.length === 1);
+    expect(answers[0]).toMatchObject({ actionId: "ship", inputs: { when: "later" }, actorId: boot.member.id });
+    await waitFor("card v2 update", () =>
+      events.find((e) => e.type === "message.updated" && e.data.messageId === res.message.id && e.data.cardV2?.rev === 2),
     );
   });
 });

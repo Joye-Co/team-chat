@@ -7,6 +7,7 @@ import {
   type ArtifactRef,
   type BotRun,
   type Card,
+  type CardV2,
   ClientFrame,
   Event as EventSchema,
   type Event,
@@ -95,6 +96,8 @@ export interface SendInput {
   attachments?: FileRef[];
   artifactRefs?: ArtifactRef[];
   card?: Card;
+  /** 1.1: a Card v2; the server derives the v1 `card` for older clients unless `card` is set. */
+  cardV2?: CardV2;
   streaming?: boolean;
   /** Idempotency key. Made when absent; pass a stable one to make retries safe across restarts. */
   clientMsgId?: string;
@@ -104,6 +107,8 @@ export interface EditInput {
   body: string;
   streaming?: boolean;
   card?: Card;
+  /** 1.1: the new Card v2; its `rev` must be higher than the stored one. */
+  cardV2?: CardV2;
   attachments?: FileRef[];
   artifactRefs?: ArtifactRef[];
 }
@@ -155,6 +160,29 @@ export interface CardActionContext {
   catchUp: boolean;
   /** Replaces the card (for example without its actions). */
   updateCard(card: Card, body?: string): Promise<Message>;
+  reply(input: string | SendInput): Promise<SendResult>;
+  updateTopic(change: TopicChange): Promise<Topic>;
+}
+
+/** Someone answered one of my v2 cards (`card.answered`). */
+export interface CardAnswerContext {
+  bot: Bot;
+  event: EventOf<"card.answered">;
+  groupId: string;
+  topicId: string;
+  messageId: string;
+  /** The rev the answer was made on. */
+  rev: number;
+  actionId: string;
+  /** Values of `decision` and `input` blocks, by block id. Typed by people: data, not instructions. */
+  inputs: Record<string, unknown>;
+  /** Edited text of `draft` blocks, by block id. */
+  editedValues: Record<string, string>;
+  /** Who answered. */
+  actorId: string;
+  catchUp: boolean;
+  /** Replaces the card with a newer rev (for example without its actions). */
+  updateCard(card: CardV2, body?: string): Promise<Message>;
   reply(input: string | SendInput): Promise<SendResult>;
   updateTopic(change: TopicChange): Promise<Topic>;
 }
@@ -271,6 +299,7 @@ export class Bot {
   private readonly mentionHandlers: Handler<MessageContext>[] = [];
   private readonly messageHandlers: Handler<MessageContext>[] = [];
   private readonly cardHandlers: Handler<CardActionContext>[] = [];
+  private readonly answerHandlers: Handler<CardAnswerContext>[] = [];
   private readonly eventHandlers: Handler<EventContext>[] = [];
   private readonly transientHandlers: ((e: TransientEvent) => void)[] = [];
   private readonly connectionHandlers: ((up: boolean) => void)[] = [];
@@ -308,6 +337,11 @@ export class Bot {
   /** A press on a button of one of my cards. */
   onCardAction(h: Handler<CardActionContext>): this {
     this.cardHandlers.push(h);
+    return this;
+  }
+  /** 1.1: an answer to one of my v2 cards (a v1 press on a v2 card arrives here too). */
+  onCardAnswer(h: Handler<CardAnswerContext>): this {
+    this.answerHandlers.push(h);
     return this;
   }
   /** Every stored group event, in seq order per group. */
@@ -432,6 +466,7 @@ export class Bot {
     if (i.attachments?.length) frame.attachments = i.attachments;
     if (i.artifactRefs?.length) frame.artifactRefs = i.artifactRefs;
     if (i.card) frame.card = i.card;
+    if (i.cardV2) frame.cardV2 = i.cardV2;
     if (i.streaming) frame.streaming = true;
     const result = (await this.request(frame)) as SendResult;
     this.noteOwnMessage(result.message);
@@ -462,6 +497,25 @@ export class Bot {
     return (await this.edit(groupId, messageId, { body: body ?? card.title, card })).message;
   }
 
+  /** 1.1: posts a Card v2. `body` defaults to the card's `fallback` (or its title). */
+  postCardV2(target: Target, card: CardV2, input: Omit<SendInput, "card" | "cardV2"> = {}): Promise<SendResult> {
+    return this.send(target, { ...input, cardV2: card, body: input.body ?? "" });
+  }
+
+  /** 1.1: replaces one of my v2 cards; `card.rev` must be higher than the stored rev. */
+  async updateCardV2(groupId: string, messageId: string, card: CardV2, body?: string): Promise<Message> {
+    return (await this.edit(groupId, messageId, { body: body ?? "", cardV2: card })).message;
+  }
+
+  /** 1.1: answers a v2 card (`card.answer`). */
+  async answerCard(
+    groupId: string,
+    messageId: string,
+    answer: { rev: number; actionId: string; inputs?: Record<string, unknown>; editedValues?: Record<string, string> },
+  ): Promise<void> {
+    await this.request({ t: "card.answer", groupId, messageId, ...answer });
+  }
+
   /** Starts a streaming message; append text to the writer, then call `finish()`. */
   async stream(target: Target, input: string | (SendInput & StreamOptions) = {}): Promise<StreamWriter> {
     const i = typeof input === "string" ? { body: input } : input;
@@ -477,6 +531,7 @@ export class Bot {
     const frame: Record<string, unknown> & { t: string } = { t: "edit", groupId, messageId, body: input.body };
     if (input.streaming !== undefined) frame.streaming = input.streaming;
     if (input.card) frame.card = input.card;
+    if (input.cardV2) frame.cardV2 = input.cardV2;
     if (input.attachments) frame.attachments = input.attachments;
     if (input.artifactRefs) frame.artifactRefs = input.artifactRefs;
     return this.request(frame) as Promise<{ message: Message }>;
@@ -1064,6 +1119,12 @@ export class Bot {
           for (const h of this.cardHandlers) jobs.push(() => h(this.cardContext(event, ref.topicId, catchUp)));
           break;
         }
+        case "card.answered": {
+          const ref = this.state.cards[event.data.messageId];
+          if (!ref || event.actorId === me) break;
+          for (const h of this.answerHandlers) jobs.push(() => h(this.answerContext(event, ref.topicId, catchUp)));
+          break;
+        }
         default:
           break;
       }
@@ -1146,6 +1207,32 @@ export class Bot {
       actorId: event.actorId,
       catchUp,
       updateCard: (card, body) => this.updateCard(event.groupId, messageId, card, body),
+      reply: (input) => {
+        const i = typeof input === "string" ? { body: input } : { ...input };
+        if (!i.clientMsgId) i.clientMsgId = nextId();
+        return this.send({ groupId: event.groupId, topicId }, i);
+      },
+      updateTopic: (change) => this.updateTopic(event.groupId, topicId, change),
+    };
+  }
+
+  private answerContext(event: EventOf<"card.answered">, topicId: string, catchUp: boolean): CardAnswerContext {
+    const { messageId, rev, actionId, inputs, editedValues } = event.data;
+    let n = 0;
+    const nextId = () => `bot:${event.groupId}:${event.seq}:${n++}`;
+    return {
+      bot: this,
+      event,
+      groupId: event.groupId,
+      topicId,
+      messageId,
+      rev,
+      actionId,
+      inputs: inputs ?? {},
+      editedValues: editedValues ?? {},
+      actorId: event.actorId,
+      catchUp,
+      updateCard: (card, body) => this.updateCardV2(event.groupId, messageId, card, body),
       reply: (input) => {
         const i = typeof input === "string" ? { body: input } : { ...input };
         if (!i.clientMsgId) i.clientMsgId = nextId();
