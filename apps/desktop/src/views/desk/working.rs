@@ -264,7 +264,10 @@ fn screen(r: &RunCard, cx: &App) -> AnyElement {
         let run = desk_screen::SCROLL_PER_LINE * lines.len() as u32;
         list.with_animation(
             SharedString::from(format!("desk-screen-scroll-{}", r.run.id)),
-            Animation::new(run).repeat(),
+            // Every frame renders the page again: decorative rate only.
+            Animation::new(run)
+                .repeat()
+                .with_max_fps(theme::motion::DECORATIVE_FPS),
             move |el, t| el.top(-copy_h * t),
         )
         .into_any_element()

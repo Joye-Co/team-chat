@@ -195,6 +195,15 @@ pub fn breath_opacity(t: f32) -> f32 {
     motion::BREATHE_LOW + (motion::BREATHE_HIGH - motion::BREATHE_LOW) * wave
 }
 
+/// The breathing loop: one phase for every ring in the app, and at most
+/// [`motion::DECORATIVE_FPS`] frames a second, because every frame of a loop
+/// renders the view that holds it again.
+pub fn breath_animation() -> gpui::Animation {
+    gpui::Animation::new(motion::BREATHE)
+        .repeat_synced()
+        .with_max_fps(motion::DECORATIVE_FPS)
+}
+
 /// A live signal breathes (rings, the current plan dot) for as long as it
 /// shows. With Reduce motion it stands still at full strength.
 pub fn breathe<E: IntoElement + Styled + 'static>(
@@ -202,16 +211,14 @@ pub fn breathe<E: IntoElement + Styled + 'static>(
     element: E,
     cx: &App,
 ) -> AnyElement {
-    use gpui::{Animation, AnimationExt as _};
+    use gpui::AnimationExt as _;
     if cx.reduce_motion() {
         return element.opacity(motion::BREATHE_HIGH).into_any_element();
     }
     element
-        .with_animation(
-            id.into(),
-            Animation::new(motion::BREATHE).repeat(),
-            |el, t| el.opacity(breath_opacity(t)),
-        )
+        .with_animation(id.into(), breath_animation(), |el, t| {
+            el.opacity(breath_opacity(t))
+        })
         .into_any_element()
 }
 
