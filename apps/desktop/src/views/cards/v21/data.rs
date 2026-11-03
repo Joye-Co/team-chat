@@ -550,3 +550,70 @@ mod tests {
         assert_eq!(sorted(&rows, 1, false), [0, 2, 1]);
     }
 }
+
+#[cfg(test)]
+mod chart_tests {
+    use gpui::{
+        Context, IntoElement, Modifiers, ParentElement as _, Render, Styled as _, Window, div,
+        point, px,
+    };
+
+    use crate::{
+        app::Services,
+        data::ChatProvider as _,
+        fake::v2::{ME, V2Samples},
+        views::cards::{
+            v2::{CardEnv, CardMode, render},
+            v21::samples::REPORT,
+        },
+    };
+
+    /// The 7.1 report as a 话题 draws it, where 引用提问 affordances show.
+    struct Host {
+        services: Services,
+    }
+
+    impl Render for Host {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let env = CardEnv {
+                viewer: Some(ME.into()),
+                ..CardEnv::from_services(&self.services)
+            };
+            let group = self
+                .services
+                .provider
+                .card_v2("", REPORT)
+                .map(|m| m.group_id)
+                .unwrap_or_default();
+            div()
+                .w(px(720.))
+                .children(render(&env, &group, REPORT, CardMode::Topic, window, cx))
+        }
+    }
+
+    /// Regression (live check of PR B): a point of a chart I may select that is also a
+    /// 引用提问 part took a second `on_hover` on one element, a debug assert that crashed the
+    /// app on the first draw. The chart draws, and the pointer moves over its points.
+    #[gpui::test]
+    fn a_selectable_chart_with_part_refs_draws_and_takes_the_pointer(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        cx.update(gpui_component::init);
+        let provider = V2Samples::new();
+        assert!(provider.refs_supported(), "the parts show");
+        let (_view, vcx) = cx.add_window_view(move |_, cx| Host {
+            services: Services::new(provider, cx),
+        });
+        vcx.run_until_parked();
+        for y in (200..700).step_by(25) {
+            for x in (40..700).step_by(60) {
+                vcx.simulate_mouse_move(
+                    point(px(x as f32), px(y as f32)),
+                    None,
+                    Modifiers::none(),
+                );
+            }
+        }
+        vcx.run_until_parked();
+    }
+}
