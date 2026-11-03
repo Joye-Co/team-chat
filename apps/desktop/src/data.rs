@@ -1691,14 +1691,20 @@ pub trait ChatProvider: Send + Sync + 'static {
         let mut cost = v2::TopicCost {
             duration_ms: 0,
             cost_cents: None,
+            currency: v2::Currency::default(),
             started_at: runs.iter().filter_map(|r| r.started_at).min(),
             ended_at: runs.iter().filter_map(|r| r.ended_at).max(),
         };
+        // Costs in two currencies are not added up (and never converted).
+        let mut currency: Option<v2::Currency> = None;
+        let mut mixed = false;
         for r in &runs {
             match self.run_usage(&r.id) {
                 Some(u) => {
                     cost.duration_ms += u.duration_ms;
                     if let Some(c) = u.cost_cents {
+                        mixed |= currency.is_some_and(|k| k != u.currency);
+                        currency = Some(u.currency);
                         cost.cost_cents = Some(cost.cost_cents.unwrap_or(0) + c);
                     }
                 }
@@ -1709,6 +1715,10 @@ pub trait ChatProvider: Send + Sync + 'static {
                 }
             }
         }
+        if mixed {
+            cost.cost_cents = None;
+        }
+        cost.currency = currency.unwrap_or_default();
         Some(cost)
     }
     /// 用到的决定: decisions a 话题 used.

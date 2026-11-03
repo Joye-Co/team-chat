@@ -32,7 +32,7 @@ use crate::data::{
     reply_now,
     v2::{
         ArtifactPreview, ArtifactStory, AskItem, AskKind, ChangeState, Decision, PreviewRow,
-        RunUsage, TopicChanges,
+        Currency, RunUsage, TopicChanges,
     },
 };
 
@@ -129,8 +129,8 @@ pub fn changes_of(pr: &proto::PrLink, approved: bool) -> TopicChanges {
     }
 }
 
-/// What a run used: its time, and its tokens when the CLI reported them. The cost stays
-/// unknown: the server reports US dollars and the views show yuan.
+/// What a run used: its time, its tokens and its cost when the CLI reported them. The
+/// server reports the cost in US dollars (`usage.costUsd`); it stays in dollars.
 pub fn usage_of(run: &proto::BotRun) -> Option<RunUsage> {
     let duration_ms = run
         .duration_ms
@@ -143,7 +143,13 @@ pub fn usage_of(run: &proto::BotRun) -> Option<RunUsage> {
     }
     Some(RunUsage {
         duration_ms: duration_ms.unwrap_or(0),
-        cost_cents: None,
+        cost_cents: run
+            .usage
+            .as_ref()
+            .and_then(|u| u.cost_usd())
+            .filter(|c| c.is_finite() && *c >= 0.)
+            .map(|c| (c * 100.).round() as u64),
+        currency: Currency::Usd,
         input_tokens: run.usage.as_ref().map(|u| u.input_tokens),
         output_tokens: run.usage.as_ref().map(|u| u.output_tokens),
     })
@@ -932,7 +938,7 @@ mod tests {
         let u = usage_of(&run).expect("usage");
         assert_eq!(u.duration_ms, 59_000);
         assert_eq!((u.input_tokens, u.output_tokens), (Some(1200), Some(300)));
-        assert_eq!(u.cost_cents, None);
+        assert_eq!((u.cost_cents, u.currency), (Some(42), Currency::Usd));
         let bare = proto::BotRun {
             usage: None,
             duration_ms: None,

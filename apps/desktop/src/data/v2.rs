@@ -121,12 +121,24 @@ pub struct TopicChanges {
     pub state: ChangeState,
 }
 
+/// The currency a cost was reported in. A cost is shown in the currency the
+/// data has; it is never converted.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Currency {
+    /// US dollars (`BotRun.usage.costUsd`).
+    #[default]
+    Usd,
+    /// Yuan.
+    Cny,
+}
+
 /// What a run used (`BotRun.usage` + `durationMs`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RunUsage {
     pub duration_ms: u64,
-    /// Cost in cents of [`RunUsage::currency`] (`¥6.20` is 620).
+    /// Cost in cents of [`RunUsage::currency`] (`$0.85` is 85).
     pub cost_cents: Option<u64>,
+    pub currency: Currency,
     pub input_tokens: Option<u64>,
     pub output_tokens: Option<u64>,
 }
@@ -135,7 +147,10 @@ pub struct RunUsage {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TopicCost {
     pub duration_ms: u64,
+    /// Cents of [`TopicCost::currency`]; `None` when no run reported a cost,
+    /// or when the runs reported different currencies.
     pub cost_cents: Option<u64>,
+    pub currency: Currency,
     pub started_at: Option<Millis>,
     pub ended_at: Option<Millis>,
 }

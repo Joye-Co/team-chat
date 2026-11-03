@@ -18,7 +18,9 @@ use crate::{
     copy::{fill, topic_rail as c},
     data::{
         ArtifactKind, ArtifactSummary, BotRunSummary, Member, MemberId, Millis, PlanState, Topic,
-        v2::{ArtifactPreview, ChangeState, Decision, Proof, TopicChanges, TopicCost},
+        v2::{
+            ArtifactPreview, ChangeState, Currency, Decision, Proof, TopicChanges, TopicCost,
+        },
     },
     theme::{self, Type as _, space},
     ui::{self, Lucide},
@@ -160,9 +162,15 @@ pub fn duration_parts(ms: u64) -> (String, &'static str) {
     }
 }
 
-/// Cents as `¥6.20`.
-pub fn money_text(cents: u64) -> String {
-    format!("¥{}.{:02}", cents / 100, cents % 100)
+/// Cents in the currency the data has: `$0.85` for US dollars, `¥6.20`
+/// for yuan. Never converted.
+pub fn money_text(cents: u64, currency: Currency) -> String {
+    let v = format!("{}.{:02}", cents / 100, cents % 100);
+    let template = match currency {
+        Currency::Usd => c::MONEY_USD,
+        Currency::Cny => c::MONEY_CNY,
+    };
+    fill(template, &[("v", &v)])
 }
 
 /// A recording length as `0:42`.
@@ -971,7 +979,7 @@ impl TopicRail {
                         .child(unit)
                         .when_some(cost.cost_cents, |el, cents| {
                             el.child(div().text_color(k.ink_3).child("·"))
-                                .child(value(money_text(cents)))
+                                .child(value(money_text(cents, cost.currency)))
                         })
                         .child(div().flex_1())
                         .when_some(range, |el, r| {
@@ -1206,5 +1214,19 @@ impl Render for ChangesPane {
             )
         });
         stub_body(Lucide::GitPullRequest, c::TITLE_CHANGES, line, cx)
+    }
+}
+
+#[cfg(test)]
+mod money_tests {
+    use super::*;
+
+    /// A cost shows in the currency the data has, never converted.
+    #[test]
+    fn money_shows_the_reported_currency() {
+        assert_eq!(money_text(85, Currency::Usd), "$0.85");
+        assert_eq!(money_text(1_234, Currency::Usd), "$12.34");
+        assert_eq!(money_text(620, Currency::Cny), "¥6.20");
+        assert_eq!(money_text(0, Currency::Usd), "$0.00");
     }
 }

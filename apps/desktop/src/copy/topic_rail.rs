@@ -92,6 +92,9 @@ crate::copy! {
     FILES_UNIT = "个文件",
     CHECKS_UNIT = "项检查通过",
     COST_LABEL = "用时",
+    // A cost in the currency the data reports: `$0.85`, `¥6.20`.
+    MONEY_USD = "${v}",
+    MONEY_CNY = "¥{v}",
     MINUTES_UNIT = "分钟",
     HOURS_UNIT = "小时",
     // The 产出 pane.

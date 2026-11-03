@@ -1300,13 +1300,17 @@ impl ChatProvider for V2Samples {
         match run_id {
             RUN_RECONNECT => Some(RunUsage {
                 duration_ms: 41 * 60_000,
+                // The sample team's costs are in yuan (the artboards' ¥6.20).
                 cost_cents: Some(620),
+                currency: crate::data::v2::Currency::Cny,
                 input_tokens: None,
                 output_tokens: None,
             }),
             RUN_VIRTUAL => Some(RunUsage {
                 duration_ms: 20 * 60_000,
+                // The sample team's costs are in yuan (the artboards' ¥6.20).
                 cost_cents: Some(310),
+                currency: crate::data::v2::Currency::Cny,
                 input_tokens: None,
                 output_tokens: None,
             }),
