@@ -7,7 +7,7 @@ mod mock;
 use chat_core::proto::machine::{RunEvent, RunLogEntry};
 use chat_core::proto::*;
 use chat_core::{
-    Client, ClientConfig, ClientUpdate, OutboxOp, Store, TerminalLine, terminal_lines,
+    Client, ClientConfig, ClientUpdate, LogEntry, OutboxOp, Store, TerminalLine, terminal_lines,
 };
 use common::*;
 use mock::{MockServer, TOKEN};
@@ -400,6 +400,86 @@ fn a_cache_from_1_0_records_every_synced_group_for_recovery() {
     // A fresh cache has nothing to recover.
     let (_d, fresh) = open();
     assert!(fresh.refetches().unwrap().is_empty());
+}
+
+#[test]
+fn recovery_keeps_a_newer_card_and_context_applied_before_it() {
+    let (_d, s) = open();
+    let side = |upto_seq: u64| TopicContext {
+        group_id: G1.into(),
+        topic_id: "T1".into(),
+        upto_seq,
+    };
+    // As 1.0.x left it: seq 1..3 applied, the card and the context dropped.
+    s.apply_events(
+        G1,
+        &[
+            topic_created(1, G1, topic("T1", G1, "M1", 1)),
+            topic_created(2, G1, topic("S1", G1, "SM1", 2)),
+            msg_created(
+                3,
+                Message {
+                    kind: Some(MessageKind::Card),
+                    ..message("C1", G1, "T1", ALICE, 3, "请选择")
+                },
+            ),
+        ],
+    )
+    .unwrap();
+    s.with_writer(|tx| {
+        tx.execute(
+            "INSERT INTO log_refetch (group_id, upto) VALUES (?1, 3)",
+            [G1],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    // The catch-up applies newer edits before the recovery page arrives.
+    s.apply_events(
+        G1,
+        &[
+            ev(
+                4,
+                G1,
+                ALICE,
+                EventData::MessageUpdated(MessageUpdatedData {
+                    message_id: "C1".into(),
+                    body: "已定".into(),
+                    edited_at: 5,
+                    streaming: false,
+                    card_v2: Some(ask_card(2, true)),
+                    ..Default::default()
+                }),
+            ),
+            ev(
+                5,
+                G1,
+                ME,
+                EventData::TopicUpdated(TopicUpdatedData {
+                    topic_id: "S1".into(),
+                    context_of: Some(side(40)),
+                    ..Default::default()
+                }),
+            ),
+        ],
+    )
+    .unwrap();
+    let page = [
+        topic_created(
+            2,
+            G1,
+            Topic {
+                context_of: Some(side(5)),
+                ..topic("S1", G1, "SM1", 2)
+            },
+        ),
+        msg_created(3, card_message("C1", 3, ask_card(1, true))),
+    ];
+    let entries: Vec<LogEntry> = page.into_iter().map(LogEntry::Known).collect();
+    s.apply_recovered(G1, &entries, 3, true).unwrap();
+    assert_eq!(s.message("C1").unwrap().unwrap().card_v2.unwrap().rev, 2);
+    let t = s.topic("S1").unwrap().unwrap();
+    assert_eq!(t.topic.context_of.unwrap().upto_seq, 40);
 }
 
 async fn until(what: &str, mut f: impl FnMut() -> bool) {

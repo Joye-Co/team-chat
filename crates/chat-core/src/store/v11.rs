@@ -193,7 +193,24 @@ pub(super) fn set_topic_context(
     Ok(())
 }
 
-/// Sets `cardV2` of a cached message that is not deleted.
+/// Recovery only: sets `contextOf` unless the cached topic has one at the same or a newer
+/// `uptoSeq` (applied by catch-up or a live event after `upto`).
+fn recover_topic_context(
+    tx: &Transaction<'_>,
+    topic_id: &str,
+    c: &TopicContext,
+) -> StoreResult<bool> {
+    let n = tx.execute(
+        "UPDATE topics SET raw = json_set(raw, '$.contextOf', json(?2)) WHERE id = ?1
+           AND (json_extract(raw, '$.contextOf') IS NULL
+                OR json_extract(raw, '$.contextOf.uptoSeq') < ?3)",
+        params![topic_id, serde_json::to_string(c)?, c.upto_seq],
+    )?;
+    Ok(n > 0)
+}
+
+/// Recovery only: sets `cardV2` of a cached message that is not deleted, unless it already
+/// has a card at the same or a newer `rev`.
 pub(super) fn set_message_card_v2(
     tx: &Transaction<'_>,
     message_id: &str,
@@ -213,7 +230,7 @@ pub(super) fn set_message_card_v2(
         return Ok(None);
     }
     let mut m: Message = serde_json::from_str(&raw)?;
-    if m.card_v2.as_ref() == Some(card) {
+    if m.card_v2.as_ref().is_some_and(|c| c.rev >= card.rev) {
         return Ok(None);
     }
     m.card_v2 = Some(card.clone());
@@ -242,14 +259,16 @@ fn recover_one(tx: &Transaction<'_>, ev: &Event, out: &mut ApplyOutcome) -> Stor
             }
         }
         EventData::TopicCreated(d) => {
-            if let Some(c) = &d.topic.context_of {
-                set_topic_context(tx, &d.topic.id, c)?;
+            if let Some(c) = &d.topic.context_of
+                && recover_topic_context(tx, &d.topic.id, c)?
+            {
                 out.topic_list_changed = true;
             }
         }
         EventData::TopicUpdated(d) => {
-            if let Some(c) = &d.context_of {
-                set_topic_context(tx, &d.topic_id, c)?;
+            if let Some(c) = &d.context_of
+                && recover_topic_context(tx, &d.topic_id, c)?
+            {
                 out.topic_list_changed = true;
             }
         }
