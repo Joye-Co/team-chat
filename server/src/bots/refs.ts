@@ -61,8 +61,11 @@ function partExists(block: Block, part: BlockRef["part"]): boolean {
     return true;
   }
   if (block.type === "chart" && keys.series !== undefined) {
-    const series = Array.isArray(block.series) ? (block.series as { id?: unknown; label?: unknown }[]) : [];
-    return series.some((s, i) => s.id === keys.series || (s.id === undefined && (s.label === keys.series || i === keys.series)));
+    // The series id, which defaults to the series name.
+    const series = Array.isArray(block.series) ? (block.series as { id?: unknown; name?: unknown }[]) : [];
+    if (!series.some((s) => (s.id ?? s.name) === keys.series)) return false;
+    if (keys.x !== undefined && Array.isArray(block.x)) return (block.x as unknown[]).includes(keys.x);
+    return true;
   }
   return true;
 }
@@ -81,16 +84,17 @@ export function contextOf(block: unknown): unknown {
   const withFlag = () => (truncated ? { ...b, truncated: true } : b);
   if (fits(withFlag())) return withFlag();
   truncated = true;
-  // Halve the rows (tables) or points (charts) until the block fits.
+  // Halve the rows (tables) or points (charts, with their x labels) until the block fits.
   for (let i = 0; i < 12; i++) {
     if (b.type === "table" && Array.isArray(b.rows) && b.rows.length > 1) {
       const n = Math.ceil(b.rows.length / 2);
       b.rows = b.rows.slice(0, n);
       if (Array.isArray(b.rowKeys)) b.rowKeys = b.rowKeys.slice(0, n);
     } else if (b.type === "chart" && Array.isArray(b.series)) {
-      b.series = (b.series as { points?: unknown[] }[]).map((s) =>
-        Array.isArray(s.points) && s.points.length > 1 ? { ...s, points: s.points.slice(0, Math.ceil(s.points.length / 2)) } : s,
-      );
+      const n = Math.max(1, ...(b.series as { values?: unknown[] }[]).map((s) => Math.ceil((s.values?.length ?? 0) / 2)));
+      b.series = (b.series as { values?: unknown[] }[]).map((s) => (Array.isArray(s.values) ? { ...s, values: s.values.slice(0, n) } : s));
+      if (Array.isArray(b.x)) b.x = b.x.slice(0, n);
+      if (n <= 1) break;
     } else break;
     if (fits(withFlag())) return withFlag();
   }
