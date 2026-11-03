@@ -206,6 +206,14 @@ pub fn thumb(artifact_id: &str) -> Option<ArtifactThumb> {
                 row("#418 告警降噪", None, false),
             ],
         },
+        ART_V4 => ArtifactThumb {
+            title: "夹夹 4.0 需求".into(),
+            rows: vec![
+                row("群相册", Some("P0"), false),
+                row("活动报名", Some("P1"), false),
+                row("群内搜索", Some("P1"), false),
+            ],
+        },
         ART_REPORT => ArtifactThumb {
             title: "10 月数据月报".into(),
             rows: vec![
@@ -370,6 +378,12 @@ fn report_html(version: u32) -> String {
             out.push_str(&page[b..]);
         }
         _ => out.push_str(page),
+    }
+    let check_start = out.find("<svg class=\"r\"");
+    if let Some(a) = check_start
+        && let Some(len) = out[a..].find("</svg>")
+    {
+        out.replace_range(a..a + len + "</svg>".len(), "");
     }
     out.replace("class=\"opt on\"", "class=\"opt\"")
         .replace(

@@ -1,30 +1,148 @@
-//! 产出 in the main window (Artifact.dc.html): the list of every 产出, and
-//! one 产出 with its page in a frame and the 来龙去脉 rail (来自话题, 做的人,
-//! 用到的决定, 版本, 被引用). Also the 产出 pane beside a 话题 (`pane`).
+//! 产出 in the main window (Artifact.dc.html): one 产出 with its page live
+//! in a frame (a child web view from `crates/artifact-view`, [`WebEmbed`]),
+//! the version picker, and the 来龙去脉 side column (来自话题, 做的人,
+//! 版本, 页面里的回应, 用到的决定, 被引用). Without a page on disk it shows
+//! a card with 打开 (the native 产出 window). Also the list of every 产出,
+//! and the 产出 pane beside a 话题 (`pane`).
 //!
-//! Foundation stub: the list, the versions and 来龙去脉 read the provider;
-//! the artifact track embeds the page (WKWebView spike) or its snapshot.
+//! Bridge capabilities follow the author: a version a bot member made that
+//! declares events may call `emitEvent`; each event goes to the bot
+//! (`artifact.event`). Nobody's page reads data through the bridge.
 
 pub mod pane;
 pub mod scenes;
 
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+use artifact_view::{ArtifactEvent, Capabilities, Content, VersionSpec};
 use gpui::{
-    App, Context, InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
-    StatefulInteractiveElement as _, Styled, Subscription, Window, div, px,
+    AnyElement, App, ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement,
+    Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window,
+    div, prelude::FluentBuilder as _, px,
 };
+use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 
 use crate::{
     app::{Place, Services},
-    copy::artifact_page as c,
+    copy::{artifact_page as c, fill},
+    data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
-    ui::{self, Lucide, RowSurface},
-    views::shell::{
-        PageView, TitleBarSpec, clock, member_name, panes::watch, section_label, stub_body,
+    ui::{
+        self, Lucide, MemberAvatar, Ring,
+        web_embed::{WebEmbed, WebEmbedSpec},
+    },
+    views::{
+        group_page::{
+            kind_label,
+            kit::{self, META},
+            short_time,
+        },
+        shell::{PageView, TitleBarSpec, member_name, panes::watch, stub_body},
     },
 };
 
+/// The version folders a view has asked for, by `(产出, version)`.
+#[derive(Clone, Default)]
+pub struct Folders(Rc<RefCell<HashMap<(String, u32), Option<Result<ArtifactFolder, FileError>>>>>);
+
+impl Folders {
+    /// The folder of a version, asking the provider once; the view is
+    /// notified when it arrives.
+    pub fn get<T: 'static>(
+        &self,
+        services: &Services,
+        id: &str,
+        version: u32,
+        cx: &mut Context<T>,
+    ) -> Option<Result<ArtifactFolder, FileError>> {
+        let key = (id.to_string(), version);
+        if let Some(state) = self.0.borrow().get(&key) {
+            return state.clone();
+        }
+        self.0.borrow_mut().insert(key.clone(), None);
+        let rx = services.provider.open_artifact_version(id, Some(version));
+        let map = self.0.clone();
+        cx.spawn(async move |this, cx| {
+            let result = rx.await.unwrap_or(Err(FileError::Other));
+            map.borrow_mut().insert(key, Some(result));
+            let _ = this.update(cx, |_, cx| cx.notify());
+        })
+        .detach();
+        None
+    }
+}
+
+/// What the page bridge of a version may do: `emitEvent` only on a version
+/// a bot member made that declares events.
+pub fn capabilities(
+    provider: &dyn crate::data::ChatProvider,
+    detail: &ArtifactDetail,
+    version: u32,
+) -> Capabilities {
+    let by_bot = detail
+        .versions
+        .iter()
+        .find(|v| v.version == version)
+        .map(|v| v.created_by.clone())
+        .or_else(|| Some(detail.summary.created_by.clone()))
+        .and_then(|id| provider.member(&id))
+        .is_some_and(|m| m.is_bot());
+    let declares = !provider
+        .artifact_page_events(&detail.summary.id, version)
+        .is_empty();
+    Capabilities {
+        get_data: false,
+        emit_event: by_bot && declares,
+    }
+}
+
+/// The live page of a version, sized `height`, forwarding declared page
+/// events to the bot that made it.
+pub fn embed(
+    services: &Services,
+    key: &str,
+    detail: &ArtifactDetail,
+    folder: &ArtifactFolder,
+    height: Pixels,
+    radius: Pixels,
+) -> WebEmbed {
+    let id = detail.summary.id.clone();
+    let spec = VersionSpec::new(folder.version, Content::Folder(folder.dir.clone()))
+        .with_entry(folder.entry.clone());
+    let caps = capabilities(services.provider.as_ref(), detail, folder.version);
+    let provider = services.provider.clone();
+    WebEmbed::new(
+        SharedString::from(format!("{key}-{id}")),
+        WebEmbedSpec::new(id.clone(), spec).capabilities(caps),
+    )
+    .height(height)
+    .rounded(radius)
+    .on_event(move |event, _, _| match event {
+        ArtifactEvent::Emit {
+            version,
+            name,
+            payload,
+        } => {
+            if provider
+                .artifact_page_events(&id, *version)
+                .iter()
+                .any(|n| n == name)
+            {
+                provider.send_artifact_event(&id, *version, name, Some(payload.clone()));
+            }
+        }
+        ArtifactEvent::ExternalLink { url } => {
+            crate::views::artifacts::window::ask_before_link(url.clone())
+        }
+        _ => {}
+    })
+}
+
 pub struct ArtifactPage {
     services: Services,
+    folders: Folders,
+    aside_open: bool,
+    copied: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -33,6 +151,9 @@ impl ArtifactPage {
         Self {
             _subscriptions: watch(&services, cx),
             services,
+            folders: Folders::default(),
+            aside_open: true,
+            copied: false,
         }
     }
 
@@ -50,146 +171,950 @@ impl PageView for ArtifactPage {
             .open(cx)
             .and_then(|(id, _)| self.services.provider.artifact(&id))
         {
-            Some(a) => TitleBarSpec {
-                subtitle: Some(format!(
-                    "v{} · {}",
-                    a.summary.version,
-                    clock(a.summary.updated_at)
-                )),
-                ..TitleBarSpec::page(a.summary.title)
-            },
+            Some(a) => TitleBarSpec::page(a.summary.title),
             None => TitleBarSpec::page(c::ARTIFACTS_TITLE),
         }
     }
+
+    fn draws_own_header(&self, _cx: &App) -> bool {
+        true
+    }
 }
 
-/// 来龙去脉 of one 产出, as rail cards.
-pub fn story(services: &Services, id: &str, cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    let p = &services.provider;
-    let Some(s) = p.artifact_story(id) else {
-        return div();
-    };
-    let card = |label: &'static str, lines: Vec<String>| {
-        (!lines.is_empty()).then(|| {
-            ui::rail_card(cx)
-                .child(section_label(label, None, cx))
-                .children(
-                    lines
-                        .into_iter()
-                        .map(|l| div().t_small().text_color(k.ink).child(l)),
-                )
-        })
-    };
-    let topic = s
-        .topic
-        .as_ref()
-        .and_then(|(g, t)| p.topic(g, t))
-        .map(|t| t.title);
-    let people: Vec<String> = s
-        .made_by
+/// The note of a version: the provider's, else the 来龙去脉 one.
+fn version_note(services: &Services, detail: &ArtifactDetail, v: u32) -> Option<String> {
+    detail
+        .versions
         .iter()
-        .chain(s.asked_by.iter())
-        .map(|m| member_name(services, m))
-        .collect();
-    div()
-        .flex()
-        .flex_col()
-        .gap(space::S10)
-        .children(card(c::ARTIFACT_FROM_TOPIC, topic.into_iter().collect()))
-        .children(card(c::ARTIFACT_MADE_BY, vec![people.join(" · ")]))
-        .children(card(
-            c::ARTIFACT_DECISIONS,
-            s.decisions.iter().map(|d| d.text.clone()).collect(),
-        ))
-        .children(card(
-            c::ARTIFACT_VERSIONS,
-            s.version_notes
-                .iter()
-                .map(|(v, n)| format!("v{v} · {n}"))
-                .collect(),
-        ))
-        .children(card(
-            c::ARTIFACT_CITED_BY,
-            s.cited_by.iter().map(|(_, _, t)| t.clone()).collect(),
-        ))
+        .find(|x| x.version == v)
+        .and_then(|x| x.note.clone())
+        .or_else(|| {
+            services
+                .provider
+                .artifact_story(&detail.summary.id)
+                .and_then(|s| {
+                    s.version_notes
+                        .into_iter()
+                        .find(|(n, _)| *n == v)
+                        .map(|(_, t)| t)
+                })
+        })
 }
 
-impl Render for ArtifactPage {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+/// `今天 09:40`, `昨天` or `10-31`.
+fn version_time(now: Millis, at: Millis) -> String {
+    kit::day_and_time(now, at, false)
+}
+
+impl ArtifactPage {
+    fn header(&self, detail: &ArtifactDetail, shown: u32, cx: &mut Context<Self>) -> AnyElement {
         let k = theme::colors(cx);
         let p = self.services.provider.clone();
-        if let Some((id, _version)) = self.open(cx) {
-            let title = p.artifact(&id).map(|a| a.summary.title).unwrap_or_default();
-            return div()
-                .size_full()
+        let now = p.clock_now();
+        let a = &detail.summary;
+        let group = p
+            .groups()
+            .into_iter()
+            .find(|g| g.id == detail.group_id)
+            .map(|g| g.name)
+            .unwrap_or_default();
+        let nav = self.services.nav.clone();
+        let (gid, tid) = (detail.group_id.clone(), a.topic_id.clone());
+        let crumb = div()
+            .id("artifact-crumb")
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(space::S6)
+            .h(px(28.))
+            .px(space::S6)
+            .ml(-space::S6)
+            .rounded(px(7.))
+            .cursor_pointer()
+            .t_small()
+            .text_color(k.ink_3)
+            .hover(|s| s.bg(k.hover))
+            .child(group)
+            .child("/")
+            .on_click(move |_, _, cx| {
+                let (gid, tid) = (gid.clone(), tid.clone());
+                nav.update(cx, |n, cx| n.open_topic(gid, tid, cx))
+            });
+        let at = detail
+            .versions
+            .iter()
+            .find(|v| v.version == shown)
+            .map(|v| v.created_at)
+            .unwrap_or(a.updated_at);
+        let versions = detail.versions.clone();
+        let services = self.services.clone();
+        let id = a.id.clone();
+        let picker = ui::button(
+            "artifact-version",
+            "",
+            ui::ButtonKind::Secondary,
+            ui::ButtonSize::Md,
+            cx,
+        )
+        .pl(space::S12)
+        .pr(space::S8)
+        .child(
+            div()
                 .flex()
+                .items_center()
+                .gap(space::S8)
+                .t_small()
                 .child(
-                    div().flex_1().min_w(px(0.)).h_full().p(space::S24).child(
-                        ui::card(cx).size_full().child(stub_body(
-                            Lucide::FileText,
-                            &title,
-                            None,
-                            cx,
-                        )),
-                    ),
+                    div()
+                        .mono()
+                        .type_role(META)
+                        .semibold()
+                        .text_color(k.ink)
+                        .child(format!("v{shown}")),
                 )
                 .child(
                     div()
-                        .id("artifact-story")
-                        .flex_none()
-                        .w(theme::ARTIFACT_RAIL_WIDTH)
-                        .h_full()
-                        .overflow_y_scroll()
-                        .bg(k.rail)
-                        .p(space::S16)
-                        .child(section_label(c::ARTIFACT_STORY, None, cx))
-                        .child(story(&self.services, &id, cx)),
+                        .font_weight(gpui::FontWeight::NORMAL)
+                        .text_color(k.ink_3)
+                        .child(version_time(now, at)),
                 )
+                .child(ui::icon(Lucide::ChevronDown, px(14.), k.ink_3)),
+        )
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+            let mut menu = menu.label(c::ARTIFACT_VERSIONS);
+            for v in &versions {
+                let note = services
+                    .provider
+                    .artifact(&id)
+                    .and_then(|d| version_note(&services, &d, v.version))
+                    .unwrap_or_default();
+                let label = format!(
+                    "v{}  {}  {}",
+                    v.version,
+                    note,
+                    version_time(services.provider.clock_now(), v.created_at)
+                );
+                let nav = services.nav.clone();
+                let (id, ver) = (id.clone(), v.version);
+                menu = menu.item(PopupMenuItem::new(label).checked(ver == shown).on_click(
+                    move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |n, cx| n.open_artifact(id, Some(ver), cx))
+                    },
+                ));
+            }
+            menu
+        });
+        let share_text = fill(
+            c::ARTIFACT_SHARE_TEXT,
+            &[("title", &a.title), ("v", &shown.to_string())],
+        );
+        let share = ui::button(
+            "artifact-share",
+            if self.copied {
+                c::ARTIFACT_COPIED
+            } else {
+                c::ARTIFACT_SHARE
+            },
+            ui::ButtonKind::Secondary,
+            ui::ButtonSize::Md,
+            cx,
+        )
+        .text_size(px(13.))
+        .font_weight(gpui::FontWeight::NORMAL)
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(share_text.clone()));
+            this.copied = true;
+            cx.notify();
+        }));
+        let provider = self.services.provider.clone();
+        let open_id = a.id.clone();
+        let nav = self.services.nav.clone();
+        let (sg, st) = (detail.group_id.clone(), a.topic_id.clone());
+        let made_by = a.created_by.clone();
+        kit::bar()
+            .child(crumb)
+            .child(
+                div()
+                    .ml(-space::S2)
+                    .min_w_0()
+                    .one_line()
+                    .t_page_title()
+                    .text_color(k.ink)
+                    .child(a.title.clone()),
+            )
+            .child(
+                div()
+                    .ml(space::S4)
+                    .child(ui::JobTag::new(kind_label(a.kind))),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(picker)
+                    .child(share)
+                    .child(div().mx(space::S2).child(kit::bar_divider(cx)))
+                    .child(
+                        kit::icon_button(
+                            "artifact-open-window",
+                            Lucide::ExternalLink,
+                            c::ARTIFACT_OPEN_WINDOW,
+                            false,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            crate::views::artifacts::window::open_artifact(
+                                &provider,
+                                &open_id,
+                                Some(shown),
+                                cx,
+                            )
+                        }),
+                    )
+                    .child(
+                        kit::icon_button(
+                            "artifact-side-chat",
+                            Lucide::MessageCircle,
+                            c::ARTIFACT_SIDE_CHAT,
+                            false,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            let (g, t, m) = (sg.clone(), st.clone(), made_by.clone());
+                            nav.update(cx, |n, cx| {
+                                n.open_topic(g, t, cx);
+                                n.toggle_side_chat(Some(m), cx);
+                            })
+                        }),
+                    ),
+            )
+            .into_any_element()
+    }
+
+    fn frame(
+        &mut self,
+        detail: &ArtifactDetail,
+        shown: u32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let k = theme::colors(cx);
+        let p = self.services.provider.clone();
+        let now = p.clock_now();
+        let latest = detail.summary.version;
+        let old = shown < latest;
+        let band = old.then(|| {
+            let at = detail
+                .versions
+                .iter()
+                .find(|v| v.version == shown)
+                .map(|v| v.created_at)
+                .unwrap_or(detail.summary.updated_at);
+            let nav = self.services.nav.clone();
+            let id = detail.summary.id.clone();
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .h(px(40.))
+                .pl(space::S16)
+                .pr(space::S8)
+                .border_b_1()
+                .border_color(k.line)
+                .bg(k.raised)
+                .t_small()
+                .text_color(k.ink_2)
+                .child(ui::icon(Lucide::Clock, px(14.), k.ink_3))
+                .child(c::ARTIFACT_OLD_VERSION)
+                .child(div().text_color(k.ink_3).child(fill(
+                    c::ARTIFACT_OLD_VERSION_LINE,
+                    &[
+                        ("v", &shown.to_string()),
+                        ("time", &version_time(now, at)),
+                        (
+                            "note",
+                            &version_note(&self.services, detail, shown).unwrap_or_default(),
+                        ),
+                    ],
+                )))
+                .child(div().flex_1())
+                .child(
+                    ui::button(
+                        "artifact-back-latest",
+                        fill(c::ARTIFACT_BACK_TO, &[("v", &latest.to_string())]),
+                        ui::ButtonKind::Ghost,
+                        ui::ButtonSize::Sm,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |n, cx| n.open_artifact(id, None, cx))
+                    }),
+                )
+        });
+        let height = window.viewport_size().height
+            - theme::TITLE_BAR
+            - space::S24
+            - px(2.)
+            - if old { px(40.) } else { px(0.) };
+        let folder = self
+            .folders
+            .get(&self.services, &detail.summary.id, shown, cx);
+        let body = match folder {
+            Some(Ok(folder)) if folder.is_page => embed(
+                &self.services,
+                "artifact-page",
+                detail,
+                &folder,
+                height,
+                px(0.),
+            )
+            .into_any_element(),
+            Some(Ok(_)) | Some(Err(_)) => {
+                let provider = self.services.provider.clone();
+                let id = detail.summary.id.clone();
+                div()
+                    .size_full()
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(space::S12)
+                    .child(kit::artifact_thumb(
+                        &self.services,
+                        &detail.summary,
+                        px(192.),
+                        px(144.),
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .t_small()
+                            .text_color(k.ink_3)
+                            .child(c::ARTIFACT_PAGE_SNAPSHOT),
+                    )
+                    .child(
+                        ui::button(
+                            "artifact-open",
+                            c::ARTIFACT_OPEN,
+                            ui::ButtonKind::Primary,
+                            ui::ButtonSize::Md,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            crate::views::artifacts::window::open_artifact(
+                                &provider,
+                                &id,
+                                Some(shown),
+                                cx,
+                            )
+                        }),
+                    )
+                    .into_any_element()
+            }
+            None => div().size_full().into_any_element(),
+        };
+        ui::motion::rise(
+            "artifact-frame",
+            0,
+            ui::card(cx)
+                .flex_1()
+                .min_h(px(0.))
+                .overflow_hidden()
+                .flex()
+                .flex_col()
+                .children(band)
+                .child(div().flex_1().min_h(px(0.)).child(body)),
+            cx,
+        )
+    }
+
+    fn story(&self, detail: &ArtifactDetail, shown: u32, cx: &mut Context<Self>) -> AnyElement {
+        let k = theme::colors(cx);
+        let p = self.services.provider.clone();
+        let now = p.clock_now();
+        let story = p.artifact_story(&detail.summary.id).unwrap_or_default();
+        let mut cards: Vec<AnyElement> = Vec::new();
+        // 来自话题, 做的人, 要求.
+        let topic = story
+            .topic
+            .clone()
+            .or_else(|| Some((detail.group_id.clone(), detail.summary.topic_id.clone())))
+            .and_then(|(g, t)| p.topic(&g, &t));
+        let made_by = story
+            .made_by
+            .clone()
+            .unwrap_or_else(|| detail.summary.created_by.clone());
+        let person = |label: &'static str, id: &str| {
+            let m = p.member(id);
+            let busy = p.active_runs().iter().any(|r| r.bot_id == id);
+            (
+                div()
+                    .type_role(META)
+                    .text_color(k.ink_3)
+                    .child(label)
+                    .into_any_element(),
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .t_small()
+                    .child(MemberAvatar::new(m.as_ref(), px(20.)).ring(busy.then_some(Ring::Live)))
+                    .child(
+                        div()
+                            .medium()
+                            .text_color(k.ink)
+                            .child(m.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
+                    )
+                    .children(m.and_then(|m| m.role).map(ui::JobTag::new))
+                    .into_any_element(),
+            )
+        };
+        let mut people = vec![person(c::ARTIFACT_MADE_BY, &made_by)];
+        if let Some(asked) = &story.asked_by {
+            people.push(person(c::ARTIFACT_ASKED_BY, asked));
+        }
+        let topic_row = topic.map(|t| {
+            let group = p
+                .groups()
+                .into_iter()
+                .find(|g| g.id == t.group_id)
+                .map(|g| g.name)
+                .unwrap_or_default();
+            let done = t.status == TopicStatus::Done;
+            let meta = if done {
+                fill(
+                    c::ARTIFACT_TOPIC_DONE,
+                    &[
+                        ("group", &group),
+                        ("time", &short_time(now, t.last_activity_at)),
+                    ],
+                )
+            } else {
+                fill(c::ARTIFACT_TOPIC_ACTIVE, &[("group", &group)])
+            };
+            let nav = self.services.nav.clone();
+            let (g, id) = (t.group_id.clone(), t.id.clone());
+            div()
+                .id("artifact-from-topic")
+                .mt(space::S6)
+                .mx(-space::S6)
+                .p(space::S6)
+                .rounded(theme::radius::MD)
+                .flex()
+                .items_center()
+                .gap(space::S10)
+                .cursor_pointer()
+                .hover(|s| s.bg(k.hover))
+                .child(
+                    div()
+                        .flex_none()
+                        .w(px(16.))
+                        .flex()
+                        .justify_center()
+                        .child(if done {
+                            ui::icon(Lucide::Check, px(14.), k.ok).into_any_element()
+                        } else {
+                            kit::live_dot("artifact-topic-live", 6., cx)
+                        }),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            div()
+                                .one_line()
+                                .t_small()
+                                .medium()
+                                .text_color(k.ink)
+                                .child(t.title.clone()),
+                        )
+                        .child(div().type_role(META).text_color(k.ink_3).child(meta)),
+                )
+                .child(ui::icon(Lucide::ChevronRight, px(14.), k.ink_3))
+                .on_click(move |_, _, cx| {
+                    let (g, id) = (g.clone(), id.clone());
+                    nav.update(cx, |n, cx| n.open_topic(g, id, cx))
+                })
+        });
+        cards.push(
+            kit::side_card(cx)
+                .child(kit::card_label(c::ARTIFACT_FROM_TOPIC, None, cx).h(px(18.)))
+                .children(topic_row)
+                .child(
+                    div()
+                        .mt(space::S8)
+                        .pt(space::S10)
+                        .border_t_1()
+                        .border_color(k.line)
+                        .flex()
+                        .flex_col()
+                        .gap(space::S8)
+                        .children(people.into_iter().map(|(label, value)| {
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(space::S8)
+                                .child(div().flex_none().w(px(44.)).child(label))
+                                .child(value)
+                        })),
+                )
+                .into_any_element(),
+        );
+        // 版本.
+        if !detail.versions.is_empty() {
+            let id = detail.summary.id.clone();
+            let compare = (shown > 1).then(|| {
+                let nav = self.services.nav.clone();
+                let id = id.clone();
+                kit::text_link(
+                    "artifact-compare",
+                    &fill(c::ARTIFACT_COMPARE, &[("v", &(shown - 1).to_string())]),
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    let id = id.clone();
+                    nav.update(cx, |n, cx| n.open_artifact(id, Some(shown - 1), cx))
+                })
+            });
+            let rows =
+                detail.versions.iter().map(|v| {
+                    let on = v.version == shown;
+                    let nav = self.services.nav.clone();
+                    let (id, ver) = (id.clone(), v.version);
+                    let latest = detail.summary.version;
+                    div()
+                        .id(SharedString::from(format!("artifact-v{}", v.version)))
+                        .flex()
+                        .items_center()
+                        .gap(space::S10)
+                        .h(px(36.))
+                        .px(space::S6)
+                        .rounded(theme::radius::MD)
+                        .cursor_pointer()
+                        .t_small()
+                        .text_color(if on { k.ink } else { k.ink_2 })
+                        .when(on, |el| el.bg(k.sel))
+                        .when(!on, |el| el.hover(|s| s.bg(k.hover)))
+                        .child(
+                            div()
+                                .flex_none()
+                                .w(px(24.))
+                                .mono()
+                                .type_role(META)
+                                .when(on, |el| el.semibold().text_color(k.ink))
+                                .when(!on, |el| el.text_color(k.ink_3))
+                                .child(format!("v{}", v.version)),
+                        )
+                        .child(div().flex_1().min_w_0().one_line().child(
+                            version_note(&self.services, detail, v.version).unwrap_or_default(),
+                        ))
+                        .child(
+                            div()
+                                .flex_none()
+                                .type_role(META)
+                                .text_color(k.ink_3)
+                                .child(version_time(now, v.created_at)),
+                        )
+                        .on_click(move |_, _, cx| {
+                            let id = id.clone();
+                            let ver = (ver != latest).then_some(ver);
+                            nav.update(cx, |n, cx| n.open_artifact(id, ver, cx))
+                        })
+                });
+            cards.push(
+                kit::side_card(cx)
+                    .child(
+                        kit::card_label(c::ARTIFACT_VERSIONS, None, cx)
+                            .h(px(18.))
+                            .child(div().flex_1())
+                            .children(compare.map(|el| el.mr(-space::S6))),
+                    )
+                    .child(
+                        div()
+                            .mt(space::S6)
+                            .mx(-space::S6)
+                            .flex()
+                            .flex_col()
+                            .gap(space::S2)
+                            .children(rows),
+                    )
+                    .into_any_element(),
+            );
+        }
+        // 页面里的回应.
+        let responses = p.artifact_responses(&detail.summary.id);
+        if !responses.is_empty() {
+            let rows = responses.into_iter().enumerate().map(|(i, r)| {
+                let m = p.member(&r.member_id);
+                let row = div()
+                    .id(SharedString::from(format!("artifact-response-{i}")))
+                    .flex()
+                    .items_center()
+                    .gap(space::S10)
+                    .t_small()
+                    .child(MemberAvatar::new(m.as_ref(), px(18.)))
+                    .child(div().flex_1().min_w_0().one_line().child(r.text.clone()));
+                match (r.topic.clone(), r.at) {
+                    (Some((g, t)), _) => {
+                        let nav = self.services.nav.clone();
+                        row.mx(-space::S6)
+                            .px(space::S6)
+                            .py(space::S4)
+                            .rounded(theme::radius::MD)
+                            .cursor_pointer()
+                            .text_color(k.ink_2)
+                            .hover(|s| s.bg(k.hover))
+                            .child(ui::icon(Lucide::ChevronRight, px(14.), k.ink_3))
+                            .on_click(move |_, _, cx| {
+                                let (g, t) = (g.clone(), t.clone());
+                                nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                            })
+                            .into_any_element()
+                    }
+                    (None, at) => row
+                        .text_color(k.ink)
+                        .children(at.map(|at| {
+                            div()
+                                .flex_none()
+                                .mono()
+                                .type_role(META)
+                                .text_color(k.ink_3)
+                                .child(short_time(now, at))
+                        }))
+                        .into_any_element(),
+                }
+            });
+            cards.push(
+                kit::side_card(cx)
+                    .child(kit::card_label(c::ARTIFACT_RESPONSES, None, cx).h(px(18.)))
+                    .child(
+                        div()
+                            .mt(space::S8)
+                            .flex()
+                            .flex_col()
+                            .gap(space::S8)
+                            .children(rows),
+                    )
+                    .into_any_element(),
+            );
+        }
+        // 用到的决定.
+        if !story.decisions.is_empty() {
+            let rows = story.decisions.iter().enumerate().map(|(i, d)| {
+                let group = p
+                    .groups()
+                    .into_iter()
+                    .find(|g| g.id == d.group_id)
+                    .map(|g| g.name)
+                    .unwrap_or_default();
+                let nav = self.services.nav.clone();
+                let g = d.group_id.clone();
+                div()
+                    .id(SharedString::from(format!("artifact-decision-{i}")))
+                    .mx(-space::S6)
+                    .p(space::S6)
+                    .rounded(theme::radius::MD)
+                    .flex()
+                    .gap(space::S10)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(k.hover))
+                    .child(
+                        div()
+                            .mt(px(2.))
+                            .child(ui::icon(Lucide::CircleCheck, px(14.), k.ink_3)),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(div().t_small().text_color(k.ink).child(d.text.clone()))
+                            .child(div().type_role(META).text_color(k.ink_3).child(fill(
+                                c::ARTIFACT_DECISION_META,
+                                &[
+                                    ("name", &member_name(&self.services, &d.by)),
+                                    ("time", &kit::month_day(d.at)),
+                                    ("group", &group),
+                                ],
+                            ))),
+                    )
+                    .on_click(move |_, _, cx| {
+                        let g = g.clone();
+                        nav.update(cx, |n, cx| n.open_group(g, cx))
+                    })
+            });
+            cards.push(
+                kit::side_card(cx)
+                    .child(kit::card_label(c::ARTIFACT_DECISIONS, None, cx).h(px(18.)))
+                    .child(div().mt(space::S6).flex().flex_col().children(rows))
+                    .into_any_element(),
+            );
+        }
+        // 被引用.
+        if !story.cited_by.is_empty() {
+            let rows = story.cited_by.iter().enumerate().map(|(i, (g, t, title))| {
+                let group = p
+                    .groups()
+                    .into_iter()
+                    .find(|x| &x.id == g)
+                    .map(|x| x.name)
+                    .unwrap_or_default();
+                let nav = self.services.nav.clone();
+                let (g, t) = (g.clone(), t.clone());
+                div()
+                    .id(SharedString::from(format!("artifact-cited-{i}")))
+                    .flex()
+                    .items_center()
+                    .gap(space::S10)
+                    .h(px(32.))
+                    .px(space::S6)
+                    .rounded(theme::radius::MD)
+                    .cursor_pointer()
+                    .hover(|s| s.bg(k.hover))
+                    .t_small()
+                    .text_color(k.ink)
+                    .child(ui::icon(Lucide::List, px(14.), k.ink_3))
+                    .child(div().flex_1().min_w_0().one_line().child(title.clone()))
+                    .child(
+                        div()
+                            .flex_none()
+                            .type_role(META)
+                            .text_color(k.ink_3)
+                            .child(group),
+                    )
+                    .on_click(move |_, _, cx| {
+                        let (g, t) = (g.clone(), t.clone());
+                        nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                    })
+            });
+            cards.push(
+                kit::side_card(cx)
+                    .child(kit::card_label(c::ARTIFACT_CITED_BY, None, cx).h(px(18.)))
+                    .child(
+                        div()
+                            .mt(space::S6)
+                            .mx(-space::S6)
+                            .flex()
+                            .flex_col()
+                            .gap(space::S2)
+                            .children(rows),
+                    )
+                    .into_any_element(),
+            );
+        }
+        let this = cx.entity().downgrade();
+        kit::aside(
+            "artifact-story",
+            c::ARTIFACT_STORY,
+            kit::ASIDE_WIDTH,
+            space::S16,
+            move |_, cx| {
+                let _ = this.update(cx, |this, cx| {
+                    this.aside_open = false;
+                    cx.notify();
+                });
+            },
+            cx,
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S10)
+                .children(cards.into_iter().enumerate().map(|(i, el)| {
+                    ui::motion::rise(
+                        SharedString::from(format!("artifact-side-{i}")),
+                        i + 1,
+                        div().child(el),
+                        cx,
+                    )
+                })),
+        )
+        .into_any_element()
+    }
+
+    /// Every 产出, newest first (the 产出 destination of the rail).
+    fn list(&self, cx: &App) -> AnyElement {
+        let k = theme::colors(cx);
+        let p = &self.services.provider;
+        let now = p.clock_now();
+        let all = p.all_artifacts();
+        let header = kit::bar()
+            .child(kit::page_title(c::ARTIFACTS_TITLE, cx))
+            .child(
+                div()
+                    .mono()
+                    .type_role(META)
+                    .text_color(k.ink_3)
+                    .child(all.len().to_string()),
+            );
+        if all.is_empty() {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .px(space::S32.max(kit::leading(&self.services, cx)))
+                .child(header)
+                .child(stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx))
                 .into_any_element();
         }
-        let all = p.all_artifacts();
-        if all.is_empty() {
-            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
-        }
+        let rows = all.into_iter().enumerate().map(|(i, (g, a))| {
+            let nav = self.services.nav.clone();
+            let id = a.id.clone();
+            let group = p
+                .groups()
+                .into_iter()
+                .find(|x| x.id == g)
+                .map(|x| x.name)
+                .unwrap_or_default();
+            let row =
+                div()
+                    .id(SharedString::from(format!("artifact-{}", a.id)))
+                    .flex()
+                    .items_center()
+                    .gap(space::S12)
+                    .p(space::S8)
+                    .mx(-space::S8)
+                    .rounded(px(10.))
+                    .cursor_pointer()
+                    .hover(|s| s.bg(k.hover))
+                    .child(kit::artifact_thumb(
+                        &self.services,
+                        &a,
+                        px(64.),
+                        px(48.),
+                        cx,
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .one_line()
+                                    .t_ui()
+                                    .medium()
+                                    .text_color(k.ink)
+                                    .child(a.title.clone()),
+                            )
+                            .child(div().one_line().type_role(META).text_color(k.ink_3).child(
+                                fill(
+                                    c::ARTIFACT_LIST_META,
+                                    &[
+                                        ("v", &a.version.to_string()),
+                                        ("kind", kind_label(a.kind)),
+                                        ("name", &member_name(&self.services, &a.created_by)),
+                                    ],
+                                ),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .type_role(META)
+                            .text_color(k.ink_3)
+                            .child(group),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .w(px(48.))
+                            .flex()
+                            .justify_end()
+                            .mono()
+                            .type_role(META)
+                            .text_color(k.ink_3)
+                            .child(short_time(now, a.updated_at)),
+                    )
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
+                    });
+            ui::motion::rise(SharedString::from(format!("artifact-row-{i}")), i, row, cx)
+        });
         div()
             .id("artifacts-list")
             .size_full()
             .overflow_y_scroll()
             .px(space::S32)
-            .flex()
-            .flex_col()
-            .gap(px(1.))
-            .children(all.into_iter().map(|(_, a)| {
-                let nav = self.services.nav.clone();
-                let id = a.id.clone();
-                ui::list_row(
-                    SharedString::from(format!("artifact-{}", a.id)),
-                    RowSurface::Content,
-                    false,
-                    cx,
-                )
-                .h(px(44.))
-                .px(space::S12)
-                .gap(space::S10)
-                .child(ui::icon(Lucide::FileText, theme::icon::ROW, k.ink_2))
-                .child(
+            .pb(space::S24)
+            .child(
+                div().max_w(kit::MEASURE).mx_auto().child(header).child(
                     div()
-                        .flex_1()
-                        .t_ui()
-                        .text_color(k.ink)
-                        .child(a.title.clone()),
-                )
-                .child(div().t_mono().text_color(k.ink_3).child(format!(
-                    "v{} · {}",
-                    a.version,
-                    clock(a.updated_at)
-                )))
-                .on_click(move |_, _, cx| {
-                    let id = id.clone();
-                    nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
-                })
+                        .mt(space::S4)
+                        .flex()
+                        .flex_col()
+                        .gap(space::S2)
+                        .children(rows),
+                ),
+            )
+            .into_any_element()
+    }
+}
+
+impl Render for ArtifactPage {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = theme::colors(cx);
+        let Some((id, version)) = self.open(cx) else {
+            return self.list(cx);
+        };
+        let Some(detail) = self.services.provider.artifact(&id) else {
+            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
+        };
+        let shown = version
+            .filter(|v| detail.versions.iter().any(|x| x.version == *v))
+            .unwrap_or(detail.summary.version);
+        let header = self.header(&detail, shown, cx);
+        let frame = self.frame(&detail, shown, window, cx);
+        let aside = self.aside_open.then(|| self.story(&detail, shown, cx));
+        let reopen = (!self.aside_open).then(|| {
+            kit::icon_button(
+                "artifact-aside-open",
+                Lucide::PanelRight,
+                c::ARTIFACT_EXPAND,
+                false,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.aside_open = true;
+                cx.notify();
             }))
+        });
+        div()
+            .size_full()
+            .flex()
+            .bg(k.bg)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .pl(space::S24.max(kit::leading(&self.services, cx)))
+                    .pr(space::S24)
+                    .pb(space::S24)
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .child(div().flex_1().min_w_0().child(header))
+                            .children(reopen),
+                    )
+                    .child(frame),
+            )
+            .children(aside)
             .into_any_element()
     }
 }
