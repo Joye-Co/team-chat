@@ -465,3 +465,76 @@ mod tests {
         assert_eq!(after[0].by, ME);
     }
 }
+
+/// The preview images of the sample cards (CardsCompose.dc.html 01 对比: a phone screen of
+/// each prototype), written once to a temporary folder. Shapes only: an SVG draws no text
+/// without fonts.
+pub fn sample_image(file_id: &str) -> Option<std::path::PathBuf> {
+    let svg = match file_id {
+        "f-proto-a" => proto_by_event(),
+        "f-proto-b" => proto_by_time(),
+        _ => return None,
+    };
+    let dir = std::env::temp_dir().join("team-chat-v2-samples").join("images");
+    let path = dir.join(format!("{file_id}.svg"));
+    if !path.exists() {
+        std::fs::create_dir_all(&dir).ok()?;
+        std::fs::write(&path, svg).ok()?;
+    }
+    Some(path)
+}
+
+/// 按活动整理: a phone with three albums, each a cover and a row of photos.
+fn proto_by_event() -> String {
+    let mut rows = String::new();
+    for (i, tint) in ["#C9B9A6", "#B7C4CF", "#D4C2B0"].iter().enumerate() {
+        let y = 92 + i * 52;
+        rows.push_str(&format!(
+            r##"<rect x="196" y="{y}" width="40" height="40" rx="6" fill="{tint}"/>
+<rect x="246" y="{}" width="96" height="8" rx="4" fill="#2B2724" opacity=".72"/>
+<rect x="246" y="{}" width="56" height="6" rx="3" fill="#2B2724" opacity=".32"/>
+<rect x="352" y="{}" width="12" height="12" rx="3" fill="#2B2724" opacity=".18"/>"##,
+            y + 9,
+            y + 25,
+            y + 14
+        ));
+    }
+    phone("#E8E1D7", &rows)
+}
+
+/// 按时间排: a phone with date headers over a grid of photos.
+fn proto_by_time() -> String {
+    let mut cells = String::new();
+    let tints = ["#B9C7C4", "#CDBFAF", "#A9B8C6", "#D6CDBF"];
+    for (row, y) in [100, 182].iter().enumerate() {
+        cells.push_str(&format!(
+            r##"<rect x="196" y="{}" width="60" height="7" rx="3.5" fill="#2B2724" opacity=".5"/>"##,
+            y - 14
+        ));
+        for c in 0..4 {
+            let x = 196 + c * 44;
+            let tint = tints[(c + row) % tints.len()];
+            cells.push_str(&format!(
+                r##"<rect x="{x}" y="{y}" width="40" height="40" rx="4" fill="{tint}"/>"##
+            ));
+        }
+        cells.push_str(&format!(
+            r##"<rect x="196" y="{}" width="172" height="20" rx="4" fill="#2B2724" opacity=".06"/>"##,
+            y + 46
+        ));
+    }
+    phone("#DCE4E2", &cells)
+}
+
+fn phone(bg: &str, screen: &str) -> String {
+    format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="560" height="240" viewBox="0 0 560 240">
+<rect width="560" height="240" fill="{bg}"/>
+<rect x="180" y="28" width="200" height="240" rx="22" fill="#FFFFFF"/>
+<rect x="180" y="28" width="200" height="240" rx="22" fill="none" stroke="#2B2724" stroke-opacity=".12" stroke-width="2"/>
+<rect x="196" y="50" width="64" height="10" rx="5" fill="#2B2724" opacity=".8"/>
+<rect x="196" y="68" width="40" height="6" rx="3" fill="#2B2724" opacity=".3"/>
+{screen}
+</svg>"##
+    )
+}

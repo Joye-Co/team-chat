@@ -986,6 +986,16 @@ impl V2Samples {
 }
 
 impl ChatProvider for V2Samples {
+    // v11/pb2-cards: the preview images of the sample compare card.
+    fn card_image(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        file_id: &str,
+    ) -> Option<std::path::PathBuf> {
+        pages_samples::sample_image(file_id)
+    }
+
     fn session(&self) -> SessionState {
         match self.inner.session() {
             SessionState::SignedIn { server_url, .. } => SessionState::SignedIn {
