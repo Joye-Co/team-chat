@@ -14,6 +14,9 @@
 
 pub mod app_glue;
 mod cards;
+// --- cards v2 track ---
+mod cards_v2;
+// --- end cards v2 track ---
 pub mod convert;
 // Desk track (1.1.0 首页).
 mod desk;
@@ -146,6 +149,9 @@ struct Shared {
     cards: cards::CardCache,
     // panes track (1.1.0): 单独问 and 实时查看.
     panes: panes::PanesCache,
+    // --- cards v2 track ---
+    cards_v2: cards_v2::CardV2Cache,
+    // --- end cards v2 track ---
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -179,6 +185,7 @@ impl CoreProvider {
                 runs: process::RunCache::default(),
                 cards: cards::CardCache::default(),
                 panes: panes::PanesCache::default(),
+                cards_v2: cards_v2::CardV2Cache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -371,6 +378,7 @@ impl CoreProvider {
         };
         self.shared.files.reset();
         self.shared.cards.clear();
+        self.shared.cards_v2.clear();
         self.spawn_pump(generation, updates);
         self.emit(vec![
             Change::Session,
@@ -400,6 +408,7 @@ impl CoreProvider {
         self.shared.drafts.clear_all();
         self.shared.files.reset();
         self.shared.cards.clear();
+        self.shared.cards_v2.clear();
         if let Some(a) = &account {
             a.client.stop();
         }
@@ -644,6 +653,8 @@ impl CoreProvider {
                 out.extend([Change::Topics { group_id }, Change::Todo]);
             }
             ClientUpdate::MessagesChanged { group_id, topic_id } => {
+                // --- cards v2 track: an edit replaces a card in place ---
+                self.shared.cards_v2.forget_topic(&topic_id);
                 out.push(Change::Messages { group_id, topic_id });
             }
             ClientUpdate::HistoryLoaded {
@@ -719,6 +730,13 @@ impl CoreProvider {
                 {
                     self.shared.cards.on_refused(&a.client, &f.id, f.code);
                 }
+                // --- cards v2 track ---
+                if f.kind == "card_answer"
+                    && let Some(a) = self.account()
+                {
+                    self.shared.cards_v2.on_refused(&a.client, &f.id, f.code);
+                }
+                // --- end cards v2 track ---
                 match f.topic_id {
                     Some(topic_id) => out.push(Change::Messages {
                         group_id: f.group_id,
@@ -750,6 +768,23 @@ impl CoreProvider {
                 out.push(Change::Runs { group_id, topic_id });
             }
             ClientUpdate::GroupEvent(ev) => {
+                // --- cards v2 track ---
+                if let chat_core::proto::EventData::CardAnswered(d) = &ev.data
+                    && let Some(a) = self.account()
+                {
+                    let mine = ev.actor_id == a.me.id;
+                    self.shared.cards_v2.on_answered(&d.message_id, mine, d.rev);
+                    if let Some(m) = a.client.store().message(&d.message_id).ok().flatten() {
+                        out.extend([
+                            Change::Messages {
+                                group_id: m.group_id,
+                                topic_id: m.topic_id,
+                            },
+                            Change::Todo,
+                        ]);
+                    }
+                }
+                // --- end cards v2 track ---
                 if let chat_core::proto::EventData::CardActioned(d) = &ev.data
                     && let Some(a) = self.account()
                 {
@@ -1037,6 +1072,7 @@ impl ChatProvider for CoreProvider {
             let n = limit.max(1) + extra;
             let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
             self.shared.cards.remember(&msgs);
+            self.shared.cards_v2.remember(&msgs);
             let cached_more = msgs.len() > n;
             if cached_more {
                 msgs.remove(0);
@@ -1662,6 +1698,63 @@ impl ChatProvider for CoreProvider {
         }
     }
 
+    // --- cards v2 track ---
+    fn card_v2(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Option<crate::data::cards_v2::CardV2Message> {
+        let a = self.account()?;
+        self.shared.cards_v2.card(&a.client, message_id)
+    }
+
+    fn card_v2_answers(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Vec<crate::data::cards_v2::CardV2Answer> {
+        match self.account() {
+            Some(a) => self.shared.cards_v2.answers(&a.client, message_id),
+            None => Vec::new(),
+        }
+    }
+
+    fn card_v2_pending(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Option<crate::data::cards_v2::CardV2Pending> {
+        let a = self.account()?;
+        self.shared.cards_v2.pending(&a.client, message_id)
+    }
+
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        answer: crate::data::cards_v2::CardV2AnswerRequest,
+    ) {
+        if let Some(a) = self.account() {
+            self.shared.cards_v2.answer(&a.client, message_id, answer);
+            self.emit(vec![Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
+        }
+    }
+
+    fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        if let Some(a) = self.account() {
+            self.shared.cards_v2.withdraw(&a.client, message_id);
+            self.emit(vec![Change::Messages {
+                group_id: group_id.to_string(),
+                topic_id: topic_id.to_string(),
+            }]);
+        }
+    }
+    // --- end cards v2 track ---
+
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
         let a = self.account()?;
         let this = self.clone();
@@ -1680,34 +1773,7 @@ impl ChatProvider for CoreProvider {
         self.desk_asks()
     }
 
-    fn card_v2(&self, _group_id: &str, message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
-        self.desk_card_v2(message_id)
-    }
-
-    fn card_v2_answers(
-        &self,
-        _group_id: &str,
-        message_id: &str,
-    ) -> Vec<crate::data::v2::CardAnswer> {
-        let topic = self
-            .account()
-            .and_then(|a| a.client.store().message(message_id).ok().flatten())
-            .map(|m| m.topic_id)
-            .unwrap_or_default();
-        self.desk_card_v2_answers(&topic, message_id)
-    }
-
-    fn answer_card_v2(
-        &self,
-        group_id: &str,
-        topic_id: &str,
-        message_id: &str,
-        rev: u32,
-        action_id: &str,
-        inputs: std::collections::BTreeMap<String, serde_json::Value>,
-    ) {
-        self.desk_answer_card_v2(group_id, topic_id, message_id, rev, action_id, inputs)
-    }
+    // Card v2 reads and answers come from the cards v2 track above.
 
     // --- end of the desk track block ---
 
