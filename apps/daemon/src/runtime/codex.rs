@@ -544,17 +544,11 @@ pub fn thread_policy(spec: &RunSpec) -> (String, String) {
     )
 }
 
-/// The override that lets a command in the `workspace-write` sandbox connect to the run's
-/// `chat-run` socket. Codex's sandbox (Seatbelt on macOS, seccomp on Linux) treats an `AF_UNIX`
-/// connect as network, so without it `chat-run` gets "Operation not permitted" wherever the
-/// socket is. Codex's narrower unix-socket allow-list needs its experimental network proxy and
-/// a permission profile, which the `sandbox` of `thread/start` replaces, so this uses the
-/// stable switch.
-pub const CHAT_RUN_NETWORK: &str = "sandbox_workspace_write.network_access=true";
-
-/// Whether `chat-run` can reach its socket from a command Codex runs in this run: the sandbox
-/// is `danger-full-access`, or `workspace-write` with [`CHAT_RUN_NETWORK`]. A `read-only` or
-/// unknown sandbox blocks it, so the run gets no `chat-run` note.
+/// Whether `chat-run` works from a command Codex runs in this run: the sandbox is
+/// `workspace-write` or `danger-full-access`, so the command can write the run's request folder
+/// in the working folder (the file transport of [`crate::chat_run`]; the sandbox blocks unix
+/// socket connects, and the daemon never opens the network for it). A `read-only` or unknown
+/// sandbox blocks it, so the run gets no `chat-run` note.
 pub fn chat_run_works(spec: &RunSpec) -> bool {
     let (_, sandbox) = thread_policy(spec);
     !spec.aside && matches!(sandbox.as_str(), "workspace-write" | "danger-full-access")
@@ -600,8 +594,8 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<(String, bool)>, String>
     Ok(names)
 }
 
-/// `codex app-server` arguments. A run with `chat-run` in the `workspace-write` sandbox gets
-/// [`CHAT_RUN_NETWORK`]. A side chat run ignores the configured args (they could widen
+/// `codex app-server` arguments: the configured args as they are (the daemon adds no sandbox or
+/// network override, so a user's own network setting stays). A side chat run ignores the configured args (they could widen
 /// the sandbox) and turns off [`ASIDE_CONFIG`] and every configured MCP server: MCP tools run
 /// outside the sandbox. The sandbox (`thread_policy`) blocks writes and network for commands.
 ///
@@ -613,10 +607,6 @@ pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
     let mut args = vec!["app-server".to_string()];
     if !spec.aside {
         args.extend(spec.cfg.args.iter().cloned());
-        if spec.note.is_some() && thread_policy(spec).1 == "workspace-write" {
-            args.push("-c".into());
-            args.push(CHAT_RUN_NETWORK.into());
-        }
         return Ok(args);
     }
     let plain = |n: &str| {

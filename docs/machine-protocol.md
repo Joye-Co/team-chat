@@ -335,14 +335,28 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 | `artifact.reply` | `{ eventId, ok: true, payload? }` or `{ eventId, ok: false, error: { code: "declined", message } }` | `chat-run artifact reply --event ev --file reply.json` or `--decline "…"` |
 
 `chat-run` is the daemon binary started by the name `chat-run` (argv0). The daemon links it as
-`<run folder>/bin/chat-run`, puts that folder first on the CLI's `PATH`, and sets
-`CHAT_RUN_SOCKET` to a unix socket of the run (`<run folder>/chat-run.sock`, or a short path in
-`$TMPDIR` when that one is too long for a socket address), mode 0600, accepting only the
-daemon's own user. The socket is removed when the run ends. Side chat runs (`aside`) get
-neither. One request is one JSON line `{ op, body }`; the daemon sends the `output` run event
-(redacted like every frame) and answers one JSON line `{ ok, result? , error? }` when
-`run.output.result` comes, or after 15 s `{ ok: false, error: { code: "timeout", reason:
-"server.too_old" } }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
+`<run folder>/bin/chat-run` and puts that folder first on the CLI's `PATH`. Side chat runs
+(`aside`) get no `chat-run`. One request is one JSON document `{ op, body }`; the daemon sends the
+`output` run event (redacted like every frame) and answers one JSON document `{ ok, result? ,
+error? }` when `run.output.result` comes, or after 15 s `{ ok: false, error: { code: "timeout",
+reason: "server.too_old" } }`. The transport depends on the runtime:
+
+- Socket (Claude Code, ACP agents, the PTY): `CHAT_RUN_SOCKET` names a unix socket of the run
+  (`<run folder>/chat-run.sock`, or a short path in `$TMPDIR` when that one is too long for a
+  socket address), mode 0600, accepting only the daemon's own user. A request and its answer
+  are one JSON line each. The socket is removed when the run ends.
+- Files (Codex): Codex's sandbox counts a unix socket connect as network, and the daemon does
+  not open the network (`sandbox_workspace_write.network_access`) for it; it never adds a
+  sandbox or network override to the user's Codex args. `CHAT_RUN_DIR` names
+  `<working folder>/.chat-run`, inside the writable workspace, mode 0700, with a `.gitignore`
+  of `*`. `chat-run` writes `<id>.req` atomically (a temp file renamed into place, mode 0600);
+  the daemon watches the folder, takes (reads and removes) the request and writes `<id>.res`
+  the same way; `chat-run` reads and removes it, waiting at most 20 s. A request nobody takes
+  is removed and reported as `unavailable`. The folder is removed when the run ends. Codex runs
+  in the `read-only` sandbox cannot write the folder and get no note.
+
+A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", reason:
+"sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
 `reason` (exit 1). The CLI learns about `chat-run` from a short note: Claude Code
 `--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP the text before the
 first prompt; the PTY gets none.
@@ -427,7 +441,7 @@ name in `run.assign.envAllowlist` that the machine's config also lists in `env_p
 (so the server can choose per bot among the variables the machine owner allowed, never more);
 the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
 `CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`; 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
-and `<run folder>/bin` (with `chat-run`) first on `PATH`.
+(Codex runs: `CHAT_RUN_DIR`) and `<run folder>/bin` (with `chat-run`) first on `PATH`.
 
 Group members read run events, so the daemon redacts every frame before it sends or stores
 it, and the session file before upload: the exact values of the `env_passthrough` variables

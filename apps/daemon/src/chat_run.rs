@@ -2,11 +2,17 @@
 //!
 //! The daemon binary started by the name `chat-run` (argv0) is the client. Each run that is not
 //! a side chat gets `<run folder>/bin/chat-run` (a link to the daemon binary) first on `PATH`
-//! and `CHAT_RUN_SOCKET`, a unix socket of that run (mode 0600, only the daemon's own user may
-//! connect). One request is one JSON line `{op, body}`. The daemon sends it up as the run event
-//! `output {outputId, op, body}` (redacted like every frame), waits up to 15 s for
-//! `run.output.result`, and answers one JSON line `{ok, result?, error?}`. The socket is removed
-//! when the run ends.
+//! and one transport. One request is one JSON document `{op, body}`. The daemon sends it up as
+//! the run event `output {outputId, op, body}` (redacted like every frame), waits up to 15 s for
+//! `run.output.result`, and answers one JSON document `{ok, result?, error?}`.
+//!
+//! - Socket (`CHAT_RUN_SOCKET`): a unix socket of the run (mode 0600, only the daemon's own user
+//!   may connect), removed when the run ends. Runtimes without a sandbox use it.
+//! - Files (`CHAT_RUN_DIR`): Codex runs. Codex's sandbox counts a unix socket connect as
+//!   network, so `chat-run` uses `<working folder>/.chat-run` (a folder git ignores, inside the
+//!   writable workspace): it writes `<id>.req` atomically, the daemon watches the folder, takes
+//!   the request and writes `<id>.res` atomically; `chat-run` reads and removes it. Files are
+//!   mode 0600; the folder is removed when the run ends.
 
 use crate::proto::{RunEvent, RunOutputError, RunOutputResult, output_op};
 use serde_json::{Value, json};
@@ -24,6 +30,12 @@ use tokio::sync::oneshot;
 pub const NAME: &str = "chat-run";
 /// The variable that names the run's socket.
 pub const ENV_SOCKET: &str = "CHAT_RUN_SOCKET";
+/// The variable that names the run's request folder (file transport).
+pub const ENV_DIR: &str = "CHAT_RUN_DIR";
+/// The request folder in the run's working folder (file transport).
+pub const DIR_NAME: &str = ".chat-run";
+/// How often the daemon and `chat-run` look at the request folder.
+const POLL: Duration = Duration::from_millis(25);
 /// How long the daemon waits for `run.output.result`.
 pub const TIMEOUT: Duration = Duration::from_secs(15);
 /// Largest request line (a machine frame is at most 1 MiB).
@@ -185,6 +197,140 @@ impl Drop for Server {
         self.task.abort();
         let _ = std::fs::remove_file(&self.path);
     }
+}
+
+/// `<working folder>/.chat-run`.
+pub fn spool_dir(cwd: &Path) -> PathBuf {
+    cwd.join(DIR_NAME)
+}
+
+/// A request id that `chat-run` makes: 1-64 of `[A-Za-z0-9-]`.
+fn valid_id(s: &str) -> bool {
+    (1..=64).contains(&s.len()) && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
+
+/// Writes `path` atomically (a temp file renamed into place), mode 0600.
+fn write_atomic(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let _ = std::fs::remove_file(&tmp);
+    let res = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)
+        .and_then(|mut f| f.write_all(data))
+        .and_then(|_| std::fs::rename(&tmp, path));
+    if res.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    res
+}
+
+/// The request folder of one run (file transport). Dropping it stops the watcher and removes
+/// the folder.
+pub struct Spool {
+    dir: PathBuf,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Spool {
+    pub fn path(&self) -> &Path {
+        &self.dir
+    }
+
+    /// Makes `dir` (mode 0700, with a `.gitignore` of `*`) and serves the `<id>.req` files that
+    /// appear in it. `emit` is as for [`Server::start`].
+    pub fn start(
+        dir: PathBuf,
+        outputs: Arc<Outputs>,
+        emit: impl Fn(RunEvent) + Send + Sync + 'static,
+        timeout: Duration,
+    ) -> std::io::Result<Spool> {
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir(&dir)?;
+        let made = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
+            .and_then(|_| write_atomic(&dir.join(".gitignore"), b"*\n"));
+        if let Err(e) = made {
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+        let emit: Arc<dyn Fn(RunEvent) + Send + Sync> = Arc::new(emit);
+        let watched = dir.clone();
+        let task = tokio::spawn(async move {
+            // SAFETY: plain syscall without arguments.
+            let me = unsafe { libc::geteuid() };
+            let mut tick = tokio::time::interval(POLL);
+            loop {
+                tick.tick().await;
+                for (id, line) in take_requests(&watched, me) {
+                    let (outputs, emit, dir) = (outputs.clone(), emit.clone(), watched.clone());
+                    tokio::spawn(async move {
+                        let answer = match line {
+                            Some(l) => handle(&l, &outputs, emit.as_ref(), timeout).await,
+                            None => error("too_large", None, "request over 1 MiB"),
+                        };
+                        let mut out = serde_json::to_vec(&answer).unwrap_or_default();
+                        out.push(b'\n');
+                        if let Err(e) = write_atomic(&dir.join(format!("{id}.res")), &out) {
+                            eprintln!(
+                                "{} chat-run {id}: cannot write the answer: {e}",
+                                crate::proto::now_ms()
+                            );
+                        }
+                    });
+                }
+            }
+        });
+        Ok(Spool { dir, task })
+    }
+}
+
+impl Drop for Spool {
+    fn drop(&mut self) {
+        self.task.abort();
+        let _ = std::fs::remove_dir_all(&self.dir);
+    }
+}
+
+/// Takes (reads and removes) each `<id>.req` in `dir`: a regular file of the daemon's own user.
+/// `None` is a request over 1 MiB.
+fn take_requests(dir: &Path, me: u32) -> Vec<(String, Option<Vec<u8>>)> {
+    use std::os::unix::fs::MetadataExt;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for e in entries.flatten() {
+        let name = e.file_name();
+        let Some(id) = name
+            .to_str()
+            .and_then(|n| n.strip_suffix(".req"))
+            .filter(|id| valid_id(id))
+        else {
+            continue;
+        };
+        let path = e.path();
+        let Ok(meta) = std::fs::symlink_metadata(&path) else {
+            continue;
+        };
+        if !meta.file_type().is_file() || meta.uid() != me {
+            let _ = std::fs::remove_file(&path);
+            continue;
+        }
+        let mut buf = Vec::new();
+        let read = std::fs::File::open(&path)
+            .and_then(|f| f.take(MAX_REQUEST as u64 + 1).read_to_end(&mut buf));
+        let _ = std::fs::remove_file(&path);
+        if read.is_err() {
+            continue;
+        }
+        let line = (buf.len() <= MAX_REQUEST).then_some(buf);
+        out.push((id.to_string(), line));
+    }
+    out
 }
 
 fn error(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value {
@@ -548,6 +694,69 @@ Allow unix sockets (network) for its commands, or answer in the group without ch
     }
 }
 
+/// Sends one request through the run's request folder and waits for the answer file.
+pub fn call_files(dir: &Path, op: &str, body: Value, wait: Duration) -> Result<Value, String> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    let id = format!("{}-{nanos}", std::process::id());
+    let mut line =
+        serde_json::to_vec(&json!({ "op": op, "body": body })).map_err(|e| e.to_string())?;
+    if line.len() > MAX_REQUEST {
+        return Err("request over 1 MiB".into());
+    }
+    line.push(b'\n');
+    let req = dir.join(format!("{id}.req"));
+    let res = dir.join(format!("{id}.res"));
+    match write_atomic(&req, &line) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Ok(error(
+                "unavailable",
+                Some("sandbox.blocked"),
+                format!(
+                    "the sandbox of this CLI blocks writes to {}: {e}. Answer in the group \
+without chat-run",
+                    dir.display()
+                ),
+            ));
+        }
+        Err(e) => {
+            return Err(format!(
+                "cannot write the request in {}: {e}",
+                dir.display()
+            ));
+        }
+    }
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match std::fs::read(&res) {
+            Ok(answer) => {
+                let _ = std::fs::remove_file(&res);
+                return serde_json::from_slice(&answer).map_err(|e| format!("bad answer: {e}"));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("cannot read the answer: {e}")),
+        }
+        if std::time::Instant::now() >= deadline {
+            // Still there: the daemon never took it.
+            if std::fs::remove_file(&req).is_ok() {
+                return Err(format!(
+                    "the daemon did not take the request in {}",
+                    dir.display()
+                ));
+            }
+            return Ok(error(
+                "timeout",
+                Some("server.too_old"),
+                "server too old: no answer in time",
+            ));
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
 /// `chat-run <args>`: returns the exit code.
 pub fn main(args: Vec<String>) -> i32 {
     if args.is_empty() || args.iter().any(|a| a == "--help" || a == "-h") {
@@ -565,19 +774,20 @@ pub fn main(args: Vec<String>) -> i32 {
             return fail("invalid", e);
         }
     };
-    let Some(socket) = std::env::var_os(ENV_SOCKET).filter(|s| !s.is_empty()) else {
-        return fail(
-            "unavailable",
-            format!("{ENV_SOCKET} is not set: chat-run works only inside a run"),
-        );
-    };
+    let var = |k: &str| std::env::var_os(k).filter(|s| !s.is_empty());
     // The daemon answers within TIMEOUT; the extra time covers a slow machine.
-    match call(
-        Path::new(&socket),
-        op,
-        body,
-        TIMEOUT + Duration::from_secs(5),
-    ) {
+    let wait = TIMEOUT + Duration::from_secs(5);
+    let answer = match (var(ENV_SOCKET), var(ENV_DIR)) {
+        (Some(socket), _) => call(Path::new(&socket), op, body, wait),
+        (None, Some(dir)) => call_files(Path::new(&dir), op, body, wait),
+        (None, None) => {
+            return fail(
+                "unavailable",
+                format!("{ENV_SOCKET} is not set: chat-run works only inside a run"),
+            );
+        }
+    };
+    match answer {
         Ok(v) if v["ok"] == json!(true) => {
             println!("{}", v["result"]);
             0
@@ -835,6 +1045,109 @@ mod tests {
         assert_eq!(v["error"]["code"], "unavailable");
         assert_eq!(v["error"]["reason"], "sandbox.blocked");
         assert!(v["error"]["message"].as_str().unwrap().contains("sandbox"));
+    }
+
+    #[tokio::test]
+    async fn the_request_folder_answers_with_the_result_and_goes_away() {
+        use std::os::unix::fs::MetadataExt;
+        let cwd = tempfile::tempdir().unwrap();
+        let outputs = Arc::new(Outputs::default());
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let spool = Spool::start(
+            spool_dir(cwd.path()),
+            outputs.clone(),
+            move |e| {
+                let _ = tx.send(e);
+            },
+            TIMEOUT,
+        )
+        .unwrap();
+        let dir = spool.path().to_path_buf();
+        assert_eq!(dir, cwd.path().join(".chat-run"));
+        assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
+        assert_eq!(
+            std::fs::read_to_string(dir.join(".gitignore")).unwrap(),
+            "*\n"
+        );
+
+        let d2 = dir.clone();
+        let client = tokio::task::spawn_blocking(move || {
+            call_files(
+                &d2,
+                "card.patch",
+                json!({ "messageId": "M", "baseRev": 1, "ops": [] }),
+                TIMEOUT,
+            )
+        });
+        let RunEvent::Output {
+            output_id, body, ..
+        } = rx.recv().await.unwrap()
+        else {
+            panic!("not an output event");
+        };
+        assert_eq!(body["messageId"], "M");
+        // The daemon took the request file; only the folder's own files are left.
+        let names = |d: &Path| {
+            let mut v: Vec<String> = std::fs::read_dir(d)
+                .unwrap()
+                .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+                .collect();
+            v.sort();
+            v
+        };
+        assert_eq!(names(&dir), [".gitignore"]);
+        assert!(outputs.resolve(RunOutputResult {
+            run_id: "r".into(),
+            output_id,
+            ok: false,
+            result: None,
+            error: Some(RunOutputError {
+                code: "conflict".into(),
+                reason: Some("card.stale_rev".into()),
+                message: "the card changed".into(),
+            }),
+        }));
+        let v = client.await.unwrap().unwrap();
+        assert_eq!(
+            v,
+            json!({ "ok": false, "error": { "code": "conflict", "reason": "card.stale_rev", "message": "the card changed" } })
+        );
+        assert_eq!(names(&dir), [".gitignore"], "answer file left");
+
+        let bad = tokio::task::spawn_blocking({
+            let d = dir.clone();
+            move || call_files(&d, "card.delete", json!({}), TIMEOUT)
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(bad["error"]["code"], "invalid");
+        drop(spool);
+        assert!(!dir.exists());
+    }
+
+    #[test]
+    fn a_request_nobody_takes_is_removed_and_reported() {
+        let dir = tempfile::tempdir().unwrap();
+        let e = call_files(
+            dir.path(),
+            "card.patch",
+            json!({}),
+            Duration::from_millis(100),
+        )
+        .unwrap_err();
+        assert!(e.contains("did not take"), "{e}");
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_folder_the_sandbox_will_not_write_names_the_sandbox() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let v = call_files(dir.path(), "card.patch", json!({}), TIMEOUT).unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert_eq!(v["error"]["code"], "unavailable");
+        assert_eq!(v["error"]["reason"], "sandbox.blocked");
     }
 
     #[test]

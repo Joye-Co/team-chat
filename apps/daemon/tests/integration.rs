@@ -1321,3 +1321,78 @@ async fn interaction_envelope_and_chat_run() {
         .unwrap()
         .unwrap();
 }
+
+/// A Codex run gets `chat-run` through the request folder in its working folder (Codex's
+/// sandbox blocks unix sockets): no socket variable, the folder is 0700 and git-ignored, the
+/// files go away after use and the folder after the run.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn codex_chat_run_uses_the_request_folder() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let fake = format!("{}/tests/fake/fake_codex.py", env!("CARGO_MANIFEST_DIR"));
+    let cfg = write_config_with(
+        tmp.path(),
+        &m.url,
+        &format!("[runtimes.cx]\nkind = \"codex\"\ncommand = \"{fake}\"\n"),
+    );
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("x1", "cx", "chatrun", None)).await;
+    let work = tmp.path().join("work/runs/x1/work");
+    let frames = collect(&mut ws, "x1", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::Output { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let Some(Up::RunEvent {
+        event: RunEvent::Output { output_id, op, .. },
+        ..
+    }) = frames.last().cloned()
+    else {
+        panic!("no output event");
+    };
+    assert_eq!(op, "interaction.resolve");
+    send(
+        &mut ws,
+        &Down::RunOutputResult(RunOutputResult {
+            run_id: "x1".into(),
+            output_id,
+            ok: true,
+            result: Some(serde_json::json!({ "resolved": true })),
+            error: None,
+        }),
+    )
+    .await;
+    let r: serde_json::Value =
+        serde_json::from_str(&wait_file(&work.join("chatrun.json")).await).unwrap();
+    assert_eq!(r["code"], 0, "{r}");
+    assert_eq!(r["out"], "{\"resolved\":true}\n");
+    assert_eq!(r["socket"], serde_json::Value::Null);
+    assert_eq!(
+        Path::new(r["dir"].as_str().unwrap()),
+        work.join(".chat-run")
+    );
+    assert_eq!(r["mode"], "0o700");
+    assert_eq!(r["files"], serde_json::json!([".gitignore"]));
+    collect(&mut ws, "x1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(!work.join(".chat-run").exists(), "request folder left");
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
