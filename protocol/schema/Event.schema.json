@@ -2762,7 +2762,7 @@
                               },
                               "series": {
                                 "minItems": 1,
-                                "maxItems": 8,
+                                "maxItems": 5,
                                 "type": "array",
                                 "items": {
                                   "type": "object",
@@ -6254,7 +6254,7 @@
                                         },
                                         "series": {
                                           "minItems": 1,
-                                          "maxItems": 8,
+                                          "maxItems": 5,
                                           "type": "array",
                                           "items": {
                                             "type": "object",
@@ -11723,7 +11723,7 @@
                           },
                           "series": {
                             "minItems": 1,
-                            "maxItems": 8,
+                            "maxItems": 5,
                             "type": "array",
                             "items": {
                               "type": "object",
@@ -15215,7 +15215,7 @@
                                     },
                                     "series": {
                                       "minItems": 1,
-                                      "maxItems": 8,
+                                      "maxItems": 5,
                                       "type": "array",
                                       "items": {
                                         "type": "object",

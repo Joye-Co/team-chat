@@ -847,7 +847,7 @@ CardV2Block =
   | { type: "metric", id, label /* 1..100 */, value: number, unit? /* <= 16 */, delta?: number,
       better?: "up" | "down", note? /* <= 200 */ }
   | { type: "chart", id, kind: "line" | "bar" | "area" | "spark", label?, unit?,
-      x?: string[] /* <= 200, each <= 40 */, series: { name, values: number[] /* <= 200 */ }[] /* 1..8 */ }
+      x?: string[] /* <= 200, each <= 40 */, series: { name, values: number[] /* <= 200 */ }[] /* 1..5 */ }
   | { type: "diff", id, path? /* <= 1024 */, text /* unified diff <= 32768 */, additions?, deletions? }
   | { type: "evidence", id, label /* 1..200 */, state?: "pass" | "fail" | "info", detail? /* <= 1000 */,
       fileId?, url?, artifact?: ArtifactRef }

@@ -35,7 +35,7 @@ pub const MAX_CARD_V2_ACTIONS: usize = 10;
 pub const MAX_GROUP_BLOCKS: usize = 20;
 pub const MAX_DECISION_OPTIONS: usize = 10;
 pub const MAX_INPUT_OPTIONS: usize = 50;
-pub const MAX_CHART_SERIES: usize = 8;
+pub const MAX_CHART_SERIES: usize = 5;
 pub const MAX_CHART_POINTS: usize = 200;
 pub const MAX_ASK_FROM: usize = 20;
 /// Max UTF-8 bytes of `data` as JSON.

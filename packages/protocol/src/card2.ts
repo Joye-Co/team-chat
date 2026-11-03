@@ -39,7 +39,7 @@ export const MAX_CARD_V2_ACTIONS = 10;
 export const MAX_GROUP_BLOCKS = 20;
 export const MAX_DECISION_OPTIONS = 10;
 export const MAX_INPUT_OPTIONS = 50;
-export const MAX_CHART_SERIES = 8;
+export const MAX_CHART_SERIES = 5;
 export const MAX_CHART_POINTS = 200;
 export const MAX_ASK_FROM = 20;
 /** Max UTF-8 bytes of `data` as JSON. */

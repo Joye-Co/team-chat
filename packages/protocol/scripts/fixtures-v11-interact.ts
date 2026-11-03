@@ -296,6 +296,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     { id: "q", type: "input", kind: "text", label: "一" },
     leaf("a"),
   ]), "questionnaire children are leaves", "card.limits");
+  bad("entities/card-v2-chart-6-series.json", "CardV2", card21([{ id: "c", type: "chart", kind: "line", series: Array.from({ length: 6 }, (_, i) => ({ name: `s${i}`, values: [i] })) }]), "a chart has 1..5 series (V11-INTERACT §2.5)", "card.limits");
   bad("entities/card-v2-embed-too-tall.json", "CardV2", card21([{ id: "e", type: "embed", artifactId: ART, version: 1, height: 600, fallbackText: "页面" }]), "embed height is 160..480", "card.limits");
   bad("entities/card-v2-table-row-keys-mismatch.json", "CardV2", card21([{ id: "t", type: "table", columns: ["a"], rows: [["1"], ["2"]], rowKeys: ["only"] }]), "one row key per row", "card.limits");
   bad("entities/card-v2-diagram-too-long.json", "CardV2", card21([{ id: "d", type: "diagram", syntax: "mermaid", source: `flowchart LR\n${"  a --> b\n".repeat(1700)}`, fallbackText: "图" }]), "diagram source over 16384 bytes", "card.limits");
