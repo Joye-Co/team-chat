@@ -551,7 +551,12 @@ mod tests {
                     if !(rest.starts_with("icon_button(") || rest.starts_with("icon_button_sm(")) {
                         continue;
                     }
-                    let chain = &rest[..rest.len().min(400)];
+                    // 400 bytes, cut back to a char boundary (CJK copy nearby).
+                    let end = (0..=rest.len().min(400))
+                        .rev()
+                        .find(|&i| rest.is_char_boundary(i))
+                        .unwrap_or(0);
+                    let chain = &rest[..end];
                     let named = chain.find(".named(");
                     let tooltip = chain.find(".tooltip(");
                     // The hover toolbar builds its buttons in a closure and
