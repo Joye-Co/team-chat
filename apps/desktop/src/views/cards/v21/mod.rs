@@ -126,8 +126,6 @@ pub struct CardUi {
     pub queued: HashMap<String, crate::data::cards_v2::CardEventRequest>,
     /// Debounce generations of text inputs.
     pub debounce: HashMap<String, u64>,
-    /// Blocks the server said are not interactive (`expect.mode: none`).
-    pub inert: HashSet<String>,
     /// The block under the pointer and since when (问这里 after 300 ms).
     pub hover: Option<(String, Instant)>,
 }
@@ -144,7 +142,6 @@ impl CardUi {
             unfolded: false,
             queued: HashMap::new(),
             debounce: HashMap::new(),
-            inert: HashSet::new(),
             hover: None,
         }
     }
@@ -180,7 +177,6 @@ impl CardUi {
             matches!((old.block(id), card.block(id)), (Some(a), Some(b))
                 if a.type_name() == b.type_name())
         });
-        self.inert.clear();
         self.diff = Some(RevDiff {
             to: card.rev,
             changed,
@@ -311,7 +307,6 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         unfolded,
         queued: HashMap::new(),
         debounce: HashMap::new(),
-        inert: ui.inert.clone(),
         hover: None,
     };
     let node = Node {

@@ -166,9 +166,6 @@ fn framed(node: &Node, b: &CardV2Block, body: AnyElement, cx: &App) -> AnyElemen
 fn live(node: &Node, b: &CardV2Block) -> bool {
     let ctx = node.ctx;
     let id = b.id().unwrap_or("");
-    if node.ui.inert.contains(id) {
-        return false;
-    }
     if matches!(ctx.state, CardState::Sending { .. }) {
         return false;
     }

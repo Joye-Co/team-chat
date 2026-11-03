@@ -9,6 +9,8 @@
 //! - Pending shows only to the emitter: nothing for 400 ms, then 等 {name} 回应, then
 //!   {name} 还在处理, then {name} 没有回应 with 重试 and 不等了 (§4.4, soft and hard from
 //!   `expect.mode`, §6.4).
+//! - `expect.mode: none` on a live event says {name} 现在接不了，稍后再试 for 4 s at the
+//!   block and in the band; the block stays usable (INTERACT §6.2).
 //! - A conflict re-renders the latest rev, keeps local values whose ids still exist and
 //!   toasts 卡片刚更新了，请再看一眼 once.
 //! - A block a new rev inserted or changed fades in with a live tint that fades out, and
@@ -149,9 +151,6 @@ impl Emitter {
         if !sends(&self.card, b, event) || !self.may.get(block).copied().unwrap_or(false) {
             return;
         }
-        if self.ui.read(cx).inert.contains(block) {
-            return;
-        }
         let request = CardEventRequest {
             rev: self.card.rev,
             block_id: Some(block.to_string()),
@@ -247,7 +246,7 @@ pub enum Stage {
     OfflineLive,
     /// The author is offline; my answer is stored and they will see it.
     OfflineAnswer,
-    /// Refused because of limits.
+    /// Refused because of limits, or `expect.mode: none`: 现在接不了，稍后再试 (4 s).
     Busy,
 }
 
@@ -298,7 +297,15 @@ pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
                     }
                     (Stage::OfflineLive, Some(at + ms(t::OFFLINE_NOTE)))
                 }
-                ExpectMode::None | ExpectMode::Unknown => return None,
+                // The author cannot take it now (a runner over its limit, INTERACT §6.2):
+                // {name} 现在接不了，稍后再试 for 4 s; the block stays usable.
+                ExpectMode::None => {
+                    if age >= ms(t::OFFLINE_NOTE) {
+                        return None;
+                    }
+                    (Stage::Busy, Some(at + ms(t::OFFLINE_NOTE)))
+                }
+                ExpectMode::Unknown => return None,
                 mode => {
                     let (soft, hard) = waits(mode)?;
                     if age < ms(t::PENDING_QUIET) {
@@ -429,17 +436,6 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
             }
         });
     }
-    // Blocks the server says are not interactive render read-only.
-    let inert: Vec<String> = events
-        .iter()
-        .filter_map(|e| match &e.phase {
-            CardEventPhase::Acked { ack, .. } if ack.expect.mode == ExpectMode::None => {
-                e.request.block_id.clone()
-            }
-            _ => None,
-        })
-        .filter(|b| !ui.read(cx).inert.contains(b))
-        .collect();
     // A conflict: toast once.
     let conflicts: Vec<String> = events
         .iter()
@@ -455,12 +451,11 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
         .map(|e| e.client_event_id.clone())
         .filter(|id| !ui.read(cx).toasted.contains(id))
         .collect();
-    if !conflicts.is_empty() || !inert.is_empty() {
+    if !conflicts.is_empty() {
         let u2 = ui.clone();
         cx.defer(move |cx| {
             u2.update(cx, |u, cx| {
                 u.toasted.extend(conflicts.iter().cloned());
-                u.inert.extend(inert);
                 cx.notify();
             });
             if !conflicts.is_empty() {
@@ -755,7 +750,10 @@ mod tests {
         let mut dropped = ev(ExpectMode::Live, 0, false);
         dropped.dropped = true;
         assert!(stage_of(&dropped, 10_000).is_none(), "不等了");
-        assert!(stage_of(&ev(ExpectMode::None, 0, false), 10_000).is_none());
+        let none = ev(ExpectMode::None, 0, false);
+        assert_eq!(stage_of(&none, 100).unwrap().stage, Stage::Busy, "现在接不了");
+        assert!(stage_of(&none, 5_000).is_none(), "the note goes after 4 s");
+        assert!(stage_of(&ev(ExpectMode::None, 0, true), 100).is_none(), "an answer");
     }
 
     #[test]
