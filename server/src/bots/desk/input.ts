@@ -194,7 +194,7 @@ export abstract class DeskInput extends DeskStall {
    */
   async artifactEvent(botId: string, e: PageEventIn): Promise<void> {
     this.bind(botId);
-    const key = `artifact:${e.groupId}:${e.seq}`;
+    const key = `artifact:${e.groupId}:${e.eventId}`;
     if (e.actorKind !== "human" || this.handledMessage(key)) return;
     if (!(await this.botActive())) return;
     const byRun = e.runId ? this.run(e.runId) : undefined;

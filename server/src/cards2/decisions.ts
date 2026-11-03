@@ -36,7 +36,7 @@ registerRoomMigration({
 export function chosenLabels(card: CardV2, inputs: Record<string, unknown> | undefined): string[] {
   const out: string[] = [];
   const visit = (b: CardV2Block) => {
-    if (b.type === "group") return b.blocks.forEach(visit);
+    if (b.type === "group") return (b.blocks ?? []).forEach(visit);
     if (b.type !== "decision") return;
     const v = inputs?.[b.id];
     const ids = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];

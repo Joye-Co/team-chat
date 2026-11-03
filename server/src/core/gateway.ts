@@ -267,7 +267,10 @@ export class MemberGateway extends DurableObject<Env> {
     const t = obj.t;
     if (typeof t !== "string") return { ok: false, rid, error: { code: "invalid", message: "missing frame type" } };
     const feature = frameHandlers.get(t);
-    const schema = t in CORE_RATE ? ClientFrame : feature?.schema ?? (feature ? ClientFrame : undefined);
+    // A frame type of the protocol without a feature handler yet still gets its schema checked,
+    // then `dispatch` answers that the type is not handled.
+    const known = ClientFrame.options.some((o) => ("shape" in o ? o.shape.t.value : undefined) === t);
+    const schema = t in CORE_RATE ? ClientFrame : feature?.schema ?? (feature || known ? ClientFrame : undefined);
     if (!schema) return { ok: false, rid, error: { code: "invalid", message: `unknown frame type ${t}` } };
     const result = schema.safeParse(raw);
     if (!result.success) {

@@ -6,6 +6,7 @@ import type { BotRun, CardV2, Event, Message, TopicContext } from "@chat/protoco
 import { ApiError } from "../core/errors";
 import {
   type ArchivedEvent,
+  type RoomContext,
   registerAfterCommit,
   registerEventImporter,
   registerEventWriter,
@@ -204,7 +205,8 @@ export interface CardAnswerIn {
 export interface PageEventIn {
   groupId: string;
   topicId: string;
-  seq: number;
+  /** The event id (page events are not stored, so they have no seq). */
+  eventId: string;
   event: PageEventData;
   /** The run that made the version, when the bot named it. */
   runId: string | null;
@@ -247,7 +249,7 @@ type OutboxCard = { botId: string; messageId: string; actionId: string; actorId:
 type OutboxMessage = Omit<TopicMessage, "mentioned" | "groupId"> & { mentions: string[] };
 /** The card as it was answered: the author may edit it before the hand-off is delivered. */
 type OutboxAnswer = { botId: string; seq: number; answer: AnswerData; actorId: string; card: CardV2 };
-type OutboxPageEvent = { botId: string; seq: number; event: PageEventData; runId: string | null; actorId: string; title: string | null };
+type OutboxPageEvent = { botId: string; eventId: string; event: PageEventData; runId: string | null; actorId: string; title: string | null };
 
 type OutboxRow = {
   id: number;
@@ -279,22 +281,6 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     if (!stored || stored.authorId === event.actorId) return;
     const payload: OutboxAnswer = { botId: stored.authorId, seq: event.seq, answer, actorId: event.actorId, card: stored.card };
     enqueue(sql, "answer", stored.topicId, payload);
-    return;
-  }
-  if (event.type === "artifact.evented") {
-    // To the bot that made the version (only versions that declare events get these events).
-    const e = event.data as PageEventData;
-    const v = sql
-      .exec<{ created_by: string; run_id: string | null; topic_id: string; title: string }>(
-        `SELECT v.created_by, v.run_id, a.topic_id, a.title FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
-         WHERE v.artifact_id = ? AND v.version = ?`,
-        e.artifactId,
-        e.version,
-      )
-      .toArray()[0];
-    if (!v || v.created_by === event.actorId) return;
-    const payload: OutboxPageEvent = { botId: v.created_by, seq: event.seq, event: e, runId: v.run_id, actorId: event.actorId, title: v.title };
-    enqueue(sql, "artifact", v.topic_id, payload);
     return;
   }
   if (event.type !== "message.created") return;
@@ -413,7 +399,7 @@ async function deliverToAuthor(c: DeliverContext, row: OutboxRow): Promise<void>
   const args: PageEventIn = {
     groupId: c.groupId,
     topicId: row.topic_id,
-    seq: e.seq,
+    eventId: e.eventId,
     event: e.event,
     runId: e.runId,
     actorId: e.actorId,
@@ -476,7 +462,33 @@ export async function drainOutbox(c: DeliverContext): Promise<void> {
   if (next !== null && next !== undefined) c.wakeAt(Math.max(next, Date.now() + 1000));
 }
 
-const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered", "artifact.evented"]);
+const HANDED_OFF = new Set(["message.created", "card.actioned", "card.answered"]);
+
+/**
+ * A 产出 page event (1.1): not stored in the group log, so it is handed to the version's
+ * creator bot here instead of from a stored event. Returns the creator, or null when the
+ * creator is the actor.
+ */
+export async function handOffPageEvent(
+  room: RoomContext,
+  e: { eventId: string; actorId: string } & PageEventData,
+): Promise<string | null> {
+  const v = room.sql
+    .exec<{ created_by: string; run_id: string | null; topic_id: string; title: string }>(
+      `SELECT v.created_by, v.run_id, a.topic_id, a.title FROM artifact_versions v JOIN artifacts a ON a.id = v.artifact_id
+       WHERE v.artifact_id = ? AND v.version = ?`,
+      e.artifactId,
+      e.version,
+    )
+    .toArray()[0];
+  if (!v || v.created_by === e.actorId) return null;
+  const event: PageEventData = { artifactId: e.artifactId, version: e.version, name: e.name };
+  if (e.payload !== undefined) event.payload = e.payload;
+  const payload: OutboxPageEvent = { botId: v.created_by, eventId: e.eventId, event, runId: v.run_id, actorId: e.actorId, title: v.title };
+  enqueue(room.sql, "artifact", v.topic_id, payload);
+  room.waitUntil(drainOutbox(room));
+  return v.created_by;
+}
 
 registerAfterCommit(async (event: Event, h) => {
   if (!HANDED_OFF.has(event.type)) return;

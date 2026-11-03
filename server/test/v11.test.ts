@@ -210,7 +210,7 @@ async function htmlFile(m: TestMember, groupId: string): Promise<string> {
 }
 
 describe("产出 events", () => {
-  it("keep declared events of bot versions and store artifact.evented only for declared names", async () => {
+  it("keep declared events of bot versions and give page events to the version's creator, not the log", async () => {
     const owner = await createMember({ level: "owner" });
     const bot = await createMember({ kind: "bot", name: "maker" });
     const gid = await createGroup(owner, [bot.id]);
@@ -232,9 +232,19 @@ describe("产出 events", () => {
     expect(mine.body.version.events).toBeUndefined();
 
     const id = made.body.artifact.id;
-    expect(await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { option: "B" } })).toMatchObject({ ok: true });
-    const ev = await co.waitEvent((e) => e.type === "artifact.evented");
-    expect(ev).toMatchObject({ actorId: owner.id, data: { artifactId: id, version: 1, name: "pick", payload: { option: "B" } } });
+    const cb = (await Client.connect(bot.token)).c;
+    const ack = await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { option: "B" } });
+    expect(ack).toMatchObject({ ok: true, result: { expect: { by: bot.id } } });
+    const tr = await cb.next((f) => f.t === "transient" && f.event.type === "artifact.event");
+    expect(tr.event).toMatchObject({ actorId: owner.id, artifactId: id, version: 1, name: "pick", kind: "emit", payload: { option: "B" }, eventId: ack.result.eventId });
+    // Page events are not stored (V11-INC R5).
+    expect(co.events().some((e: { type: string }) => e.type === "artifact.evented")).toBe(false);
+    // A declared name with the wrong kind is refused.
+    expect(await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", kind: "ask" })).toMatchObject({
+      ok: false,
+      error: { code: "forbidden" },
+    });
+    cb.close();
     expect(await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "delete" })).toMatchObject({
       ok: false,
       error: { code: "forbidden" },
@@ -246,6 +256,31 @@ describe("产出 events", () => {
     expect(
       await co.request({ t: "artifact.event", groupId: gid, artifactId: mine.body.artifact.id, version: 1, name: "pick" }),
     ).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    co.close();
+  });
+});
+
+describe("1.1 interaction loop boundary", () => {
+  it("accept the new fields and check the new frames before a feature handles them", async () => {
+    const owner = await createMember({ level: "owner" });
+    const gid = await createGroup(owner, []);
+    const co = (await Client.connect(owner.token)).c;
+    const sent = await co.ok({
+      t: "send",
+      groupId: gid,
+      clientMsgId: clientMsgId(),
+      body: "为什么？",
+      causeEventId: "01JC0EV0000000000000000001",
+      blockRefs: [{ messageId: "01JC0MSG00000000000000000A", blockId: "md:0", label: "表格 · 第 1 行" }],
+    });
+    expect(sent.message.body).toContain("为什么");
+    // A malformed card.event is refused by the schema.
+    const bad = await co.request({ t: "card.event", groupId: gid, messageId: sent.message.id, rev: 1, clientEventId: "c1", blockId: "a", actionId: "b", event: "action.press" });
+    expect(bad).toMatchObject({ ok: false, error: { code: "invalid" } });
+    expect(bad.error.message).toContain("blockId");
+    // A well-formed one passes the schema (a later feature answers it).
+    const good = await co.request({ t: "card.event", groupId: gid, messageId: sent.message.id, rev: 1, clientEventId: "c2", blockId: "a", event: "choice.change", value: { value: "x" } });
+    expect(good.ok === true || !String(good.error?.message ?? "").startsWith("invalid frame")).toBe(true);
     co.close();
   });
 });

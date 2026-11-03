@@ -1,8 +1,8 @@
 // Card v2 answers and 产出 page events (docs/protocol.md, "Cards v2" and "产出 events"). A
 // `card.answer` frame goes to the group room, which checks it against the stored card and
-// appends `card.answered`; an `artifact.event` frame appends `artifact.evented` when the
-// version declares the event. Routing answers and events to the bot's run is the bots
-// feature's job (its event writer and outbox).
+// appends `card.answered`. An `artifact.event` frame is not stored (1.1, D9): when the
+// version declares the event, it goes to the version's creator bot as a transient
+// `artifact.event` and through the bots feature's outbox to a runner bot's run.
 import {
   type ArtifactEventDecl,
   type CardAnswerFrame,
@@ -14,6 +14,8 @@ import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
 import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc } from "../core/registry";
+import { ulid } from "../core/ids";
+import { handOffPageEvent } from "../bots/room";
 
 import "./decisions";
 
@@ -35,7 +37,7 @@ function blockIds(blocks: CardV2Block[]): Set<string> {
   const ids = new Set<string>();
   for (const b of blocks) {
     ids.add(b.id);
-    if (b.type === "group") for (const c of b.blocks) ids.add(c.id);
+    if (b.type === "group") for (const c of b.blocks ?? []) ids.add(c.id);
   }
   return ids;
 }
@@ -112,19 +114,26 @@ registerFrameHandler<ClientFrameOf<"card.answer">>("card.answer", {
 // 产出 page events
 // ---------------------------------------------------------------------------
 
-type PageEventArgs = { artifactId: string; version: number; name: string; payload?: unknown };
+type PageEventArgs = { artifactId: string; version: number; name: string; kind?: "emit" | "ask"; payload?: unknown };
 
-registerRoomRpc(ARTIFACT_EVENT_RPC, (room: RoomContext, actor, args) => {
+registerRoomRpc(ARTIFACT_EVENT_RPC, async (room: RoomContext, actor, args) => {
   if (!actor) throw new ApiError("internal", "actor required");
   if (!room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
   const a = args as PageEventArgs;
   const art = room.sql.exec<{ topic_id: string }>("SELECT topic_id FROM artifacts WHERE id = ?", a.artifactId).toArray()[0];
   const v = room.sql
-    .exec<{ events: string | null }>("SELECT events FROM artifact_versions WHERE artifact_id = ? AND version = ?", a.artifactId, a.version)
+    .exec<{ events: string | null; created_by: string }>(
+      "SELECT events, created_by FROM artifact_versions WHERE artifact_id = ? AND version = ?",
+      a.artifactId,
+      a.version,
+    )
     .toArray()[0];
   if (!art || !v) throw new ApiError("not_found", "产出 version not found");
   const declared = v.events ? (JSON.parse(v.events) as ArtifactEventDecl[]) : [];
-  if (!declared.some((d) => d.name === a.name)) throw new ApiError("forbidden", "the page does not declare this event");
+  const decl = declared.find((d) => d.name === a.name);
+  if (!decl || (a.kind !== undefined && (decl.kind ?? "emit") !== a.kind)) {
+    throw new ApiError("forbidden", "the page does not declare this event");
+  }
   const key = `${room.groupId}:${actor.id}`;
   let bucket = pageBuckets.get(key);
   if (!bucket) {
@@ -132,21 +141,34 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, (room: RoomContext, actor, args) => {
     pageBuckets.set(key, bucket);
   }
   if (!bucket.take()) throw new ApiError("rate_limited", "too many page events");
-  const data: PageEventArgs = { artifactId: a.artifactId, version: a.version, name: a.name };
-  if (a.payload !== undefined) data.payload = a.payload;
-  const event = room.commit((tx) => {
-    const seq = tx.nextSeq();
-    room.sql.exec("UPDATE topics SET last_seq = ? WHERE id = ?", seq, art.topic_id);
-    return tx.append({ type: "artifact.evented", actorId: actor.id, topicId: art.topic_id, data });
-  });
-  return { seq: event.seq };
+  const eventId = ulid();
+  const at = Date.now();
+  const kind = decl.kind ?? "emit";
+  await handOffPageEvent(room, { eventId, actorId: actor.id, artifactId: a.artifactId, version: a.version, name: a.name, payload: a.payload });
+  // To the version's creator (SDK bots). Runner bots get it through the outbox above.
+  const transient: Record<string, unknown> = {
+    type: "artifact.event",
+    groupId: room.groupId,
+    topicId: art.topic_id,
+    artifactId: a.artifactId,
+    version: a.version,
+    eventId,
+    name: a.name,
+    kind,
+    actorId: actor.id,
+    at,
+  };
+  if (a.payload !== undefined) transient.payload = a.payload;
+  if (v.created_by !== actor.id) room.broadcast({ t: "transient", event: transient }, { to: [v.created_by] });
+  // `expect` is refined by the delivery feature (presence, runs); this is the author.
+  return { eventId, expect: { by: v.created_by, mode: "live" } };
 });
 
 registerFrameHandler<ClientFrameOf<"artifact.event">>("artifact.event", {
   rate: "write",
   async handle(frame, c) {
     await c.requireMember(frame.groupId);
-    const { artifactId, version, name, payload } = frame;
-    unwrap(await roomStub(c.env, frame.groupId).rpc(frame.groupId, ARTIFACT_EVENT_RPC, c.actor, { artifactId, version, name, payload }));
+    const { artifactId, version, name, kind, payload } = frame;
+    return unwrap(await roomStub(c.env, frame.groupId).rpc(frame.groupId, ARTIFACT_EVENT_RPC, c.actor, { artifactId, version, name, kind, payload }));
   },
 });
