@@ -14,7 +14,8 @@
 //! only that window with `screencapture -l <windowNumber> -o -x`, writes
 //! `<dir>/<scene>-<theme>.png` (`-worst` before `.png` with `--worst-case`)
 //! and `<dir>/screenshots.json`, closes the window and finally exits
-//! (0 = every PNG written). Scenes live in [`scenes::all`].
+//! (0 = every PNG written and every ready and verify check passed, else 1).
+//! Scenes live in [`scenes::all`].
 
 pub mod capture;
 pub mod clock;
@@ -228,7 +229,9 @@ fn run(options: Options) -> i32 {
                     started.elapsed().as_secs_f32()
                 );
                 code.set(if ok { 0 } else { 1 });
-                cx.update(|cx| cx.quit());
+                // AppKit ends the process with 0 when the app quits, so `run` never
+                // returns: exit here with the result.
+                exit_now(code.get());
             })
             .detach();
             // Never hang: quit after a generous per-shot budget.
@@ -237,11 +240,20 @@ fn run(options: Options) -> i32 {
                     .timer(Duration::from_secs(60 + 15 * shots))
                     .await;
                 eprintln!("screenshot self-test timed out");
-                cx.update(|cx| cx.quit());
+                exit_now(1);
             })
             .detach();
         });
     result.get()
+}
+
+/// Ends the self-test with `code`. `cx.quit()` would end it with 0 on macOS
+/// whatever the result, because AppKit's terminate exits the process itself.
+fn exit_now(code: i32) -> ! {
+    use std::io::Write as _;
+    let _ = std::io::stderr().flush();
+    let _ = std::io::stdout().flush();
+    std::process::exit(code)
 }
 
 async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
