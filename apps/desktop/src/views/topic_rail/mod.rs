@@ -5,6 +5,8 @@
 //! The rail shows status only: the merge decision is the pinned card above
 //! the composer, never a second button here.
 
+use std::{collections::HashMap, rc::Rc};
+
 use gpui::{
     AnyElement, App, ClickEvent, Context, ElementId, Hsla, InteractiveElement as _, IntoElement,
     ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled,
@@ -12,30 +14,120 @@ use gpui::{
 };
 
 use crate::{
-    app::{RightPane, Services},
+    app::{Changes, RightPane, Services},
     copy::{fill, topic_rail as c},
     data::{
-        ArtifactKind, BotRunSummary, Millis, PlanState,
-        v2::{ArtifactPreview, ChangeState, Proof},
+        ArtifactKind, ArtifactSummary, BotRunSummary, Member, MemberId, Millis, PlanState, Topic,
+        v2::{ArtifactPreview, ChangeState, Decision, Proof, TopicChanges, TopicCost},
     },
     theme::{self, Type as _, space},
     ui::{self, Lucide},
-    views::shell::{PaneView, clock, member_name, panes::watch, stub_body},
+    views::shell::{PaneView, clock, panes::watch, stub_body},
 };
+
+/// What the rail of one 话题 shows, read from the provider once per change
+/// or 话题 switch. A breathing ring renders the rail on every frame it asks
+/// for, so render reads only this.
+struct Data {
+    group_id: String,
+    topic_id: String,
+    topic: Option<Topic>,
+    /// The newest run.
+    run: Option<BotRunSummary>,
+    step_times: Vec<Millis>,
+    changes: Option<TopicChanges>,
+    artifacts: Vec<ArtifactSummary>,
+    /// The preview of the newest 产出.
+    preview: Option<ArtifactPreview>,
+    decisions: Vec<Decision>,
+    cost: Option<TopicCost>,
+    recording: Option<u64>,
+    /// The members the cards name.
+    members: HashMap<MemberId, Member>,
+}
+
+impl Data {
+    fn read(services: &Services, g: &str, t: &str) -> Self {
+        let p = &services.provider;
+        let topic = p.topic(g, t);
+        let run = p.runs(g, t).into_iter().next();
+        let artifacts = p.artifacts(g, t);
+        let preview = artifacts
+            .first()
+            .and_then(|a| p.artifact_preview(&a.id, a.version));
+        let decisions = p.topic_decisions(g, t);
+        let mut ids: Vec<&str> = Vec::new();
+        if let Some(t) = &topic {
+            ids.extend(t.owner_id.as_deref());
+            ids.push(&t.created_by);
+        }
+        if let Some(r) = &run {
+            ids.push(&r.bot_id);
+        }
+        ids.extend(decisions.first().map(|d| d.by.as_str()));
+        let members = ids
+            .into_iter()
+            .filter_map(|id| p.member(id).map(|m| (id.to_string(), m)))
+            .collect();
+        Self {
+            group_id: g.to_string(),
+            topic_id: t.to_string(),
+            step_times: run.as_ref().map(|r| p.run_step_times(&r.id)).unwrap_or_default(),
+            changes: p.topic_changes(g, t),
+            cost: p.topic_cost(g, t),
+            recording: topic_recording(services, g, t),
+            topic,
+            run,
+            artifacts,
+            preview,
+            decisions,
+            members,
+        }
+    }
+
+    fn member(&self, id: &str) -> Option<Member> {
+        self.members.get(id).cloned()
+    }
+
+    fn name(&self, id: &str) -> String {
+        self.members.get(id).map(|m| m.name.clone()).unwrap_or_default()
+    }
+}
 
 pub struct TopicRail {
     services: Services,
     /// The finished plan is opened to its steps.
     plan_open: bool,
+    data: Option<Rc<Data>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl TopicRail {
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
+        let subscriptions = vec![
+            cx.subscribe(&services.hub, |this, _, _: &Changes, cx| {
+                this.data = None;
+                cx.notify();
+            }),
+            cx.observe(&services.nav, |_, _, cx| cx.notify()),
+        ];
         Self {
-            _subscriptions: watch(&services, cx),
+            _subscriptions: subscriptions,
             services,
             plan_open: false,
+            data: None,
+        }
+    }
+
+    /// The rail of 话题 `t`, read again only after a change.
+    fn data(&mut self, g: &str, t: &str) -> Rc<Data> {
+        match &self.data {
+            Some(d) if d.group_id == g && d.topic_id == t => d.clone(),
+            _ => {
+                let d = Rc::new(Data::read(&self.services, g, t));
+                self.data = Some(d.clone());
+                d
+            }
         }
     }
 }
@@ -193,14 +285,14 @@ impl TopicRail {
 
     fn owner_card(
         &self,
+        d: &Data,
         owner: &str,
         run: Option<&BotRunSummary>,
         by: Option<(String, Millis)>,
         cx: &App,
     ) -> AnyElement {
         let k = theme::colors(cx);
-        let p = &self.services.provider;
-        let member = p.member(owner);
+        let member = d.member(owner);
         let live = run.is_some_and(|r| r.status.is_active());
         let state: Option<AnyElement> = match run {
             Some(r) if r.status.is_active() => {
@@ -243,7 +335,7 @@ impl TopicRail {
             _ => None,
         };
         let asker = by.map(|(id, at)| {
-            let m = p.member(&id);
+            let m = d.member(&id);
             div()
                 .flex()
                 .items_center()
@@ -264,7 +356,7 @@ impl TopicRail {
                         .gap(space::S4)
                         .child(fill(
                             c::ASKED_BY_NAME,
-                            &[("name", &member_name(&self.services, &id))],
+                            &[("name", &d.name(&id))],
                         ))
                         .child(div().mono().child(clock(at))),
                 )
@@ -304,9 +396,9 @@ impl TopicRail {
             .into_any_element()
     }
 
-    fn plan_card(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
+    fn plan_card(&self, d: &Data, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
         let k = theme::colors(cx);
-        let starts = self.services.provider.run_step_times(&run.id);
+        let starts = &d.step_times;
         let minutes = step_minutes(run, &starts);
         let all_done = run.plan.iter().all(|i| i.state == PlanState::Done);
         let open = !all_done || self.plan_open;
@@ -469,9 +561,9 @@ impl TopicRail {
             .into_any_element()
     }
 
-    fn changes_card(&self, g: &str, t: &str, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn changes_card(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
         let k = theme::colors(cx);
-        let ch = self.services.provider.topic_changes(g, t)?;
+        let ch = d.changes.clone()?;
         let action = label_action("rail-see-changes", c::SEE_CHANGES, cx)
             .on_click(
                 cx.listener(|this, _: &ClickEvent, _, cx| this.open_pane(RightPane::Changes, cx)),
@@ -594,16 +686,10 @@ impl TopicRail {
         )
     }
 
-    fn outputs_card(
-        &self,
-        g: &str,
-        t: &str,
-        recording: Option<u64>,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    fn outputs_card(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
         let k = theme::colors(cx);
-        let p = self.services.provider.clone();
-        let outputs = p.artifacts(g, t);
+        let recording = d.recording;
+        let outputs = &d.artifacts;
         let first = outputs.first()?.clone();
         let pane = RightPane::Artifact {
             id: first.id.clone(),
@@ -615,7 +701,7 @@ impl TopicRail {
                 move |this, _: &ClickEvent, _, cx| this.open_pane(pane.clone(), cx)
             }))
             .into_any_element();
-        let thumb = p.artifact_preview(&first.id, first.version).map(|preview| {
+        let thumb = d.preview.clone().map(|preview| {
             div()
                 .id("rail-output-thumb")
                 .mt(space::S8)
@@ -699,11 +785,11 @@ impl TopicRail {
         )
     }
 
-    fn decisions_card(&self, g: &str, t: &str, cx: &App) -> Option<AnyElement> {
+    fn decisions_card(&self, d: &Data, cx: &App) -> Option<AnyElement> {
         let k = theme::colors(cx);
-        let decisions = self.services.provider.topic_decisions(g, t);
+        let decisions = &d.decisions;
         let first = decisions.first()?;
-        let by = self.services.provider.member(&first.by);
+        let by = d.member(&first.by);
         let who = div()
             .flex()
             .items_center()
@@ -732,11 +818,16 @@ impl TopicRail {
         )
     }
 
-    fn machine_card(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> Option<AnyElement> {
+    fn machine_card(
+        &self,
+        d: &Data,
+        run: &BotRunSummary,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let k = theme::colors(cx);
         let name = run.machine_name.clone()?;
         let busy = run.status.is_active();
-        let who = member_name(&self.services, &run.bot_id);
+        let who = d.name(&run.bot_id);
         let line = if busy {
             fill(c::MACHINE_USING, &[("name", &who)])
         } else {
@@ -849,9 +940,9 @@ impl TopicRail {
         )
     }
 
-    fn cost_card(&self, g: &str, t: &str, cx: &App) -> Option<AnyElement> {
+    fn cost_card(&self, d: &Data, cx: &App) -> Option<AnyElement> {
         let k = theme::colors(cx);
-        let cost = self.services.provider.topic_cost(g, t)?;
+        let cost = d.cost.clone()?;
         if cost.duration_ms == 0 && cost.cost_cents.is_none() {
             return None;
         }
@@ -1019,36 +1110,33 @@ impl Render for TopicRail {
         let Some((g, t)) = self.services.nav.read(cx).topic.clone() else {
             return stub_body(Lucide::PanelRight, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
         };
-        let p = self.services.provider.clone();
-        let topic = p.topic(&g, &t);
-        let runs = p.runs(&g, &t);
-        let run = runs.first();
+        let d = self.data(&g, &t);
+        let topic = d.topic.as_ref();
+        let run = d.run.as_ref();
         let mut cards: Vec<AnyElement> = Vec::new();
         // 负责
-        if let Some(owner) = topic.as_ref().and_then(|t| t.owner_id.clone()) {
+        if let Some(owner) = topic.and_then(|t| t.owner_id.clone()) {
             let by = topic
-                .as_ref()
                 .filter(|x| x.created_by != owner)
                 .map(|x| (x.created_by.clone(), x.created_at));
-            cards.push(self.owner_card(&owner, run, by, cx));
+            cards.push(self.owner_card(&d, &owner, run, by, cx));
         }
         // 计划
         if let Some(r) = run.filter(|r| !r.plan.is_empty()) {
-            cards.push(self.plan_card(r, cx));
+            cards.push(self.plan_card(&d, r, cx));
         }
         // 改动
-        cards.extend(self.changes_card(&g, &t, cx));
+        cards.extend(self.changes_card(&d, cx));
         // 产出
-        let recording = topic_recording(&self.services, &g, &t);
-        cards.extend(self.outputs_card(&g, &t, recording, cx));
+        cards.extend(self.outputs_card(&d, cx));
         // 用到的决定
-        cards.extend(self.decisions_card(&g, &t, cx));
+        cards.extend(self.decisions_card(&d, cx));
         // 电脑
         if let Some(r) = run {
-            cards.extend(self.machine_card(r, cx));
+            cards.extend(self.machine_card(&d, r, cx));
         }
         // 用时和成本
-        cards.extend(self.cost_card(&g, &t, cx));
+        cards.extend(self.cost_card(&d, cx));
         if cards.is_empty() {
             return stub_body(Lucide::PanelRight, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
         }
