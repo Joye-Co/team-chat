@@ -31,6 +31,8 @@ pub mod shell;
 pub mod side_chat;
 pub mod topic_page;
 pub mod topic_rail;
+// --- rail track: ⌘K 交代或搜索.
+pub mod ask;
 
 use chrono::{Datelike, Local, TimeZone};
 use gpui::{App, Div, IntoElement, ParentElement, Pixels, Styled, div, px};

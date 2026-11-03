@@ -104,7 +104,8 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
     cx.on_action(|_: &QuickSwitch, cx| {
         in_main_window(cx, |window, cx| {
             if !window.has_active_dialog(cx) {
-                switcher::open(services_of(cx), window, cx);
+                // 1.1.0: ⌘K is 交代或搜索 (the rail track's `views::ask`).
+                crate::views::ask::open(services_of(cx), window, cx);
             }
         });
     });
