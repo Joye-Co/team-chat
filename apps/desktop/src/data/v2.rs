@@ -223,6 +223,8 @@ pub struct AcceptanceItem {
     pub text: String,
     /// `None` while not checked yet.
     pub met: Option<bool>,
+    /// What the run measured (`现在 57 fps`), when it said.
+    pub evidence: Option<String>,
 }
 
 /// A machine as the 成员 page and the topic rail show it.

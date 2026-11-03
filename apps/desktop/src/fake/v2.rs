@@ -1387,14 +1387,17 @@ impl ChatProvider for V2Samples {
             run_id: run_id.into(),
             machine_name: Some("Mac mini".into()),
             lines: vec![
+                // panes track: the 实时查看 artboard's terminal, one screen per step.
                 line(K::Command, "rg -n \"uniform_list\" apps/desktop/src", 32, 0),
                 line(K::Output, "views/topic_list.rs:412  uniform_list(", 32, 0),
                 line(K::Command, "cargo build -p desktop", 40, 1),
                 line(K::Output, "Finished `dev` profile in 38.2s", 41, 1),
-                line(K::Command, "bun run stress --messages 10000", 48, 2),
-                line(K::Output, "生成 10,000 条消息… 完成", 49, 2),
-                line(K::Result, "滚动 60 秒：平均 118 fps，最低 57 fps", 50, 2),
-                line(K::Output, "内存 212 MB", 50, 2),
+                line(K::Command, "cargo run -p stress -- -n 10000", 46, 2),
+                line(K::Output, "生成 10,000 条消息… 完成", 47, 2),
+                line(K::Output, "打开话题列表，自动滚动 60 秒", 47, 2),
+                line(K::Result, "滚动 60 秒：平均 118 fps，最低 57 fps", 48, 2),
+                line(K::Result, "内存 212 MB", 48, 2),
+                line(K::Output, "跳到第 8,000 条，检查滚动位置…", 49, 2),
             ],
             started_at: Some(at(9, 31)),
             takeover_url: None,
@@ -1406,17 +1409,21 @@ impl ChatProvider for V2Samples {
             return Vec::new();
         }
         vec![
+            // panes track: the 实时查看 artboard's 验收标准.
             AcceptanceItem {
-                text: "一万条消息滚动平均不低于 60 fps".into(),
+                text: "一万条消息滚动不卡".into(),
                 met: Some(true),
+                evidence: Some("现在 57 fps".into()),
             },
             AcceptanceItem {
-                text: "最低帧率不低于 50 fps".into(),
+                text: "内存不涨".into(),
                 met: Some(true),
+                evidence: Some("现在 212 MB".into()),
             },
             AcceptanceItem {
-                text: "新消息到来时滚动位置不跳".into(),
+                text: "跳到第 8,000 条后位置不跳".into(),
                 met: None,
+                evidence: None,
             },
         ]
     }

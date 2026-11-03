@@ -23,6 +23,7 @@ mod files_live;
 #[cfg(target_os = "macos")]
 pub mod macos;
 pub mod persist;
+mod panes;
 mod process;
 mod realtime;
 #[cfg(test)]
@@ -141,6 +142,8 @@ struct Shared {
     /// Run logs and machine names for the process view (`process.rs`).
     runs: process::RunCache,
     cards: cards::CardCache,
+    // panes track (1.1.0): 单独问 and 实时查看.
+    panes: panes::PanesCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -173,6 +176,7 @@ impl CoreProvider {
                 files: files::FilesState::default(),
                 runs: process::RunCache::default(),
                 cards: cards::CardCache::default(),
+                panes: panes::PanesCache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -1704,6 +1708,53 @@ impl ChatProvider for CoreProvider {
     }
 
     // --- end of the desk track block ---
+
+    // --- panes track (1.1.0): 单独问 and 实时查看 (provider/panes.rs) ---
+
+    fn side_chat(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        member_id: &str,
+    ) -> crate::data::v2::SideChatThread {
+        self.side_chat_inner(group_id, topic_id, member_id)
+    }
+
+    fn send_side_chat(&self, group_id: &str, topic_id: &str, member_id: &str, body: String) {
+        self.send_side_chat_inner(group_id, topic_id, member_id, body)
+    }
+
+    fn post_side_chat_suggestion(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        member_id: &str,
+        message_id: &str,
+    ) {
+        self.post_side_chat_suggestion_inner(group_id, topic_id, member_id, message_id)
+    }
+
+    fn machine_screen(&self, run_id: &str) -> Option<crate::data::v2::MachineScreen> {
+        self.machine_screen_inner(run_id)
+    }
+
+    fn acceptance_criteria(&self, run_id: &str) -> Vec<crate::data::v2::AcceptanceItem> {
+        self.acceptance_inner(run_id)
+    }
+
+    fn run_step_times(&self, run_id: &str) -> Vec<crate::data::Millis> {
+        self.run_step_times_inner(run_id)
+    }
+
+    fn take_over_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.pause_inner(group_id, topic_id, run_id, true)
+    }
+
+    fn hand_back_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.pause_inner(group_id, topic_id, run_id, false)
+    }
+
+    // --- end of the panes track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();
