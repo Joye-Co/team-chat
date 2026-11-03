@@ -906,7 +906,9 @@ impl ArtifactWindow {
             return;
         }
         let backing = self.window.backingScaleFactor().max(1.0);
-        let config = unsafe { objc2_web_kit::WKSnapshotConfiguration::new(MainThreadMarker::from(&*self.controller)) };
+        let config = unsafe {
+            objc2_web_kit::WKSnapshotConfiguration::new(MainThreadMarker::from(&*self.controller))
+        };
         unsafe {
             config.setRect(objc2_foundation::NSRect::new(
                 NSPoint::new(rect.x, rect.y),
@@ -917,24 +919,26 @@ impl ArtifactWindow {
             config.setAfterScreenUpdates(true);
         }
         let done = RefCell::new(Some(done));
-        let block = RcBlock::new(move |image: *mut objc2_app_kit::NSImage, error: *mut NSError| {
-            let Some(done) = done.borrow_mut().take() else {
-                return;
-            };
-            // SAFETY: WebKit passes a valid (or null) image and error.
-            let image = unsafe { Retained::retain(image) };
-            let result = match image {
-                Some(image) => png_of(&image),
-                None => {
-                    let error = unsafe { Retained::retain(error) };
-                    Err(error.map_or_else(
-                        || "no image".to_string(),
-                        |e| format!("{} {}", e.domain(), e.code()),
-                    ))
-                }
-            };
-            done(result);
-        });
+        let block = RcBlock::new(
+            move |image: *mut objc2_app_kit::NSImage, error: *mut NSError| {
+                let Some(done) = done.borrow_mut().take() else {
+                    return;
+                };
+                // SAFETY: WebKit passes a valid (or null) image and error.
+                let image = unsafe { Retained::retain(image) };
+                let result = match image {
+                    Some(image) => png_of(&image),
+                    None => {
+                        let error = unsafe { Retained::retain(error) };
+                        Err(error.map_or_else(
+                            || "no image".to_string(),
+                            |e| format!("{} {}", e.domain(), e.code()),
+                        ))
+                    }
+                };
+                done(result);
+            },
+        );
         unsafe {
             self.web_view
                 .takeSnapshotWithConfiguration_completionHandler(Some(&config), &block)

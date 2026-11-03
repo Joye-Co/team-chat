@@ -202,7 +202,13 @@ impl DiskCache {
         Some(err)
     }
 
-    pub fn write_ok(&mut self, key: &str, png: &[u8], svg: &str, meta: &Meta) -> std::io::Result<()> {
+    pub fn write_ok(
+        &mut self,
+        key: &str,
+        png: &[u8],
+        svg: &str,
+        meta: &Meta,
+    ) -> std::io::Result<()> {
         std::fs::create_dir_all(&self.dir)?;
         let json = serde_json::to_vec(meta).unwrap_or_default();
         std::fs::write(self.png_path(key), png)?;
@@ -253,13 +259,19 @@ impl DiskCache {
         if total <= self.limit {
             return;
         }
-        let mut order: Vec<(String, Entry)> = self.index.iter().map(|(k, e)| (k.clone(), *e)).collect();
+        let mut order: Vec<(String, Entry)> =
+            self.index.iter().map(|(k, e)| (k.clone(), *e)).collect();
         order.sort_by_key(|(_, e)| e.at);
         for (key, e) in order {
             if total <= self.limit {
                 break;
             }
-            for p in [self.png_path(&key), self.svg_path(&key), self.meta_path(&key), self.err_path(&key)] {
+            for p in [
+                self.png_path(&key),
+                self.svg_path(&key),
+                self.meta_path(&key),
+                self.err_path(&key),
+            ] {
                 let _ = std::fs::remove_file(p);
             }
             self.index.remove(&key);
@@ -273,7 +285,11 @@ impl DiskCache {
         if !self.dirty {
             return;
         }
-        if !force && self.last_write.is_some_and(|t| t.elapsed() < INDEX_WRITE_EVERY) {
+        if !force
+            && self
+                .last_write
+                .is_some_and(|t| t.elapsed() < INDEX_WRITE_EVERY)
+        {
             return;
         }
         if std::fs::create_dir_all(&self.dir).is_ok()
@@ -377,7 +393,10 @@ mod tests {
         assert_ne!(base, k(2, "abc", ThemeId::Light, 2, "graph TD\nA-->B"));
         assert_ne!(base, k(1, "abd", ThemeId::Light, 2, "graph TD\nA-->B"));
         assert_ne!(base, k(1, "abc", ThemeId::Dark, 2, "graph TD\nA-->B"));
-        assert_ne!(base, k(1, "abc", ThemeId::LightContrast, 2, "graph TD\nA-->B"));
+        assert_ne!(
+            base,
+            k(1, "abc", ThemeId::LightContrast, 2, "graph TD\nA-->B")
+        );
         assert_ne!(base, k(1, "abc", ThemeId::Light, 4, "graph TD\nA-->B"));
         assert_ne!(base, k(1, "abc", ThemeId::Light, 2, "graph TD\nA-->C"));
         // A known value: the key must not change between releases of the same renderer.
@@ -406,7 +425,10 @@ mod tests {
         let (png, m) = c.read_ok("k1").unwrap();
         assert_eq!((png.as_slice(), m), (&b"png"[..], meta()));
         assert!(c.read_err("k1").is_none());
-        let err = ErrMeta { reason: "parse".into(), detail: "line 2".into() };
+        let err = ErrMeta {
+            reason: "parse".into(),
+            detail: "line 2".into(),
+        };
         c.write_err("k2", &err).unwrap();
         assert_eq!(c.read_err("k2"), Some(err));
         assert!(c.read_ok("k2").is_none());

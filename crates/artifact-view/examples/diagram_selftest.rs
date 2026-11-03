@@ -35,11 +35,31 @@ mod selftest {
             true,
             "gantt\n  dateFormat YYYY-MM-DD\n  section 发布\n  构建 :done, a1, 2026-11-01, 1d\n  验收 :active, a2, after a1, 2d\n  回滚演练 :crit, a3, after a2, 1d\n  上线 :a4, after a3, 1d",
         ),
-        ("state", true, "stateDiagram-v2\n  [*] --> 排队\n  排队 --> 正在做\n  正在做 --> 做完了\n  做完了 --> [*]"),
-        ("class", true, "classDiagram\n  class Topic {\n    +String id\n    +title()\n  }\n  Topic <|-- Group"),
-        ("er", true, "erDiagram\n  GROUP ||--o{ TOPIC : has\n  TOPIC ||--|{ MESSAGE : holds"),
-        ("timeline", true, "timeline\n  title 1.1.0\n  11 月 : 设计 : 开发\n  12 月 : 发布"),
-        ("parse-error", false, "sequenceDiagram\n  客户端 -> > 服务器: 重连"),
+        (
+            "state",
+            true,
+            "stateDiagram-v2\n  [*] --> 排队\n  排队 --> 正在做\n  正在做 --> 做完了\n  做完了 --> [*]",
+        ),
+        (
+            "class",
+            true,
+            "classDiagram\n  class Topic {\n    +String id\n    +title()\n  }\n  Topic <|-- Group",
+        ),
+        (
+            "er",
+            true,
+            "erDiagram\n  GROUP ||--o{ TOPIC : has\n  TOPIC ||--|{ MESSAGE : holds",
+        ),
+        (
+            "timeline",
+            true,
+            "timeline\n  title 1.1.0\n  11 月 : 设计 : 开发\n  12 月 : 发布",
+        ),
+        (
+            "parse-error",
+            false,
+            "sequenceDiagram\n  客户端 -> > 服务器: 重连",
+        ),
         ("unsupported", false, "pie\n  \"a\" : 1"),
     ];
 
@@ -80,7 +100,10 @@ mod selftest {
                 r.out.join("report.json"),
                 serde_json::to_vec_pretty(&report).unwrap(),
             );
-            println!("diagram selftest: {}", if r.ok { "passed" } else { "FAILED" });
+            println!(
+                "diagram selftest: {}",
+                if r.ok { "passed" } else { "FAILED" }
+            );
             std::process::exit(if r.ok { 0 } else { 1 });
         };
         r.current = Some((i, name, expect));

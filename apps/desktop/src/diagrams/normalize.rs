@@ -223,7 +223,11 @@ mod tests {
                 }
                 Err(r) => {
                     assert_eq!(case["ok"], false, "{source:?}");
-                    assert_eq!(case["reason"].as_str(), Some(refusal_reason(&r).as_str()), "{source:?}");
+                    assert_eq!(
+                        case["reason"].as_str(),
+                        Some(refusal_reason(&r).as_str()),
+                        "{source:?}"
+                    );
                 }
             }
         }
@@ -234,7 +238,10 @@ mod tests {
         let t = |s: &str| check_source(s);
         assert_eq!(t("flowchart LR\nA-->B"), Ok(DiagramType::Flowchart));
         assert_eq!(t("graph TD\nA-->B"), Ok(DiagramType::Flowchart));
-        assert_eq!(t("%% note\n\nsequenceDiagram\nA->>B: hi"), Ok(DiagramType::Sequence));
+        assert_eq!(
+            t("%% note\n\nsequenceDiagram\nA->>B: hi"),
+            Ok(DiagramType::Sequence)
+        );
         assert_eq!(t("stateDiagram-v2\n[*]-->A"), Ok(DiagramType::State));
         assert_eq!(t("stateDiagram\n[*]-->A"), Ok(DiagramType::State));
         assert_eq!(t("classDiagram\nclass A"), Ok(DiagramType::Class));
@@ -242,7 +249,10 @@ mod tests {
         assert_eq!(t("gantt\ntitle x"), Ok(DiagramType::Gantt));
         assert_eq!(t("timeline\n2026 : a"), Ok(DiagramType::Timeline));
         assert_eq!(t("pie\n\"a\" : 1"), Err(Refusal::Unsupported("pie".into())));
-        assert_eq!(t("mindmap\n root"), Err(Refusal::Unsupported("mindmap".into())));
+        assert_eq!(
+            t("mindmap\n root"),
+            Err(Refusal::Unsupported("mindmap".into()))
+        );
         assert_eq!(t("graphTD"), Err(Refusal::Unsupported("graphTD".into())));
         assert_eq!(t("graph TD;\nA-->B"), Ok(DiagramType::Flowchart));
         assert_eq!(t("flowchart;A-->B"), Ok(DiagramType::Flowchart));
@@ -260,15 +270,42 @@ mod tests {
             f("---\ntitle: x\n---\ngraph TD\nA-->B"),
             Err(Refusal::Forbidden("front matter"))
         );
-        assert_eq!(f("graph TD\nA-->B\nclick A \"x\""), Err(Refusal::Forbidden("click ")));
-        assert_eq!(f("graph TD\nA-->B\nCLICK A cb"), Err(Refusal::Forbidden("click ")));
-        assert_eq!(f("graph TD\nA[\"<a href=x>\"]"), Err(Refusal::Forbidden("href")));
-        assert_eq!(f("graph TD\nA-->B\ncall foo()"), Err(Refusal::Forbidden("call ")));
-        assert_eq!(f("graph TD\nA[JavaScript:alert]"), Err(Refusal::Forbidden("javascript:")));
-        assert_eq!(f("graph TD\nA[<Script>]"), Err(Refusal::Forbidden("<script")));
-        assert_eq!(f("graph TD\nA[<iframe>]"), Err(Refusal::Forbidden("<iframe")));
-        assert_eq!(f("graph TD\nA[<foreignObject>]"), Err(Refusal::Forbidden("<foreignobject")));
-        assert_eq!(f(&format!("graph TD\n{}", "A-->B\n".repeat(3000))), Err(Refusal::TooLong));
+        assert_eq!(
+            f("graph TD\nA-->B\nclick A \"x\""),
+            Err(Refusal::Forbidden("click "))
+        );
+        assert_eq!(
+            f("graph TD\nA-->B\nCLICK A cb"),
+            Err(Refusal::Forbidden("click "))
+        );
+        assert_eq!(
+            f("graph TD\nA[\"<a href=x>\"]"),
+            Err(Refusal::Forbidden("href"))
+        );
+        assert_eq!(
+            f("graph TD\nA-->B\ncall foo()"),
+            Err(Refusal::Forbidden("call "))
+        );
+        assert_eq!(
+            f("graph TD\nA[JavaScript:alert]"),
+            Err(Refusal::Forbidden("javascript:"))
+        );
+        assert_eq!(
+            f("graph TD\nA[<Script>]"),
+            Err(Refusal::Forbidden("<script"))
+        );
+        assert_eq!(
+            f("graph TD\nA[<iframe>]"),
+            Err(Refusal::Forbidden("<iframe"))
+        );
+        assert_eq!(
+            f("graph TD\nA[<foreignObject>]"),
+            Err(Refusal::Forbidden("<foreignobject"))
+        );
+        assert_eq!(
+            f(&format!("graph TD\n{}", "A-->B\n".repeat(3000))),
+            Err(Refusal::TooLong)
+        );
     }
 
     #[test]

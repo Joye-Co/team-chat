@@ -11,9 +11,9 @@ mod source;
 use std::hash::{Hash, Hasher};
 
 use gpui::{
-    App, ElementId, InteractiveElement as _, IntoElement, Overflow, ParentElement as _, SharedString,
-    StatefulInteractiveElement as _, StyleRefinement, Styled as _, WhiteSpace, Window, div,
-    prelude::FluentBuilder as _, px,
+    App, ElementId, InteractiveElement as _, IntoElement, Overflow, ParentElement as _,
+    SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled as _, WhiteSpace,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     clipboard::Clipboard,

@@ -326,9 +326,7 @@ impl RenderOutcome {
 }
 
 fn num(v: &Value, key: &str) -> Option<f64> {
-    v.get(key)
-        .and_then(Value::as_f64)
-        .filter(|n| n.is_finite())
+    v.get(key).and_then(Value::as_f64).filter(|n| n.is_finite())
 }
 
 fn text(v: &Value, key: &str, max: usize) -> String {
@@ -433,7 +431,11 @@ pub fn sanitize_svg(input: &str) -> String {
             let n = rest.find("]]>").map_or(rest.len(), |n| n + 3);
             if skip.is_empty() {
                 let inner = &rest[9..n.saturating_sub(3).max(9)];
-                let inner = if in_style { clean_css(inner) } else { inner.to_string() };
+                let inner = if in_style {
+                    clean_css(inner)
+                } else {
+                    inner.to_string()
+                };
                 out.push_str("<![CDATA[");
                 out.push_str(&inner.replace("]]>", ""));
                 out.push_str("]]>");
@@ -485,7 +487,8 @@ pub fn sanitize_svg(input: &str) -> String {
             "script" | "foreignobject" => true,
             "image" => !attrs.iter().any(|(k, v)| {
                 let k = k.to_ascii_lowercase();
-                (k == "href" || k == "xlink:href") && v.trim_start().to_ascii_lowercase().starts_with("data:")
+                (k == "href" || k == "xlink:href")
+                    && v.trim_start().to_ascii_lowercase().starts_with("data:")
             }),
             _ => false,
         };
@@ -564,7 +567,12 @@ fn parse_attrs(s: &str) -> Vec<(String, String)> {
             i += 1;
         }
         let start = i;
-        while i < chars.len() && !chars[i].is_whitespace() && chars[i] != '=' && chars[i] != '>' && chars[i] != '/' {
+        while i < chars.len()
+            && !chars[i].is_whitespace()
+            && chars[i] != '='
+            && chars[i] != '>'
+            && chars[i] != '/'
+        {
             i += 1;
         }
         if start == i {
@@ -612,7 +620,8 @@ fn parse_attrs(s: &str) -> Vec<(String, String)> {
 fn has_external_url(lower: &str) -> bool {
     let mut rest = lower;
     while let Some(n) = rest.find("url(") {
-        let after = rest[n + 4..].trim_start_matches(|c: char| c.is_whitespace() || c == '"' || c == '\'');
+        let after =
+            rest[n + 4..].trim_start_matches(|c: char| c.is_whitespace() || c == '"' || c == '\'');
         if !after.starts_with('#') {
             return true;
         }
@@ -719,7 +728,9 @@ mod mac {
                         on_event(RendererEvent::Outcome(outcome));
                     }
                 }
-                ArtifactEvent::LoadFailed { reason, .. } => on_event(RendererEvent::Crashed(reason)),
+                ArtifactEvent::LoadFailed { reason, .. } => {
+                    on_event(RendererEvent::Crashed(reason))
+                }
                 _ => {}
             })?;
             Ok(Self { window })
@@ -740,9 +751,13 @@ mod mac {
             done: impl FnOnce(Result<Vec<u8>, String>) + 'static,
         ) {
             let scale = raster_scale(width, height, scale);
-            self.window.set_content_size(width.ceil().max(64.0), height.ceil().max(64.0));
             self.window
-                .snapshot(Rect::new(0.0, 0.0, width.ceil(), height.ceil()), scale, done);
+                .set_content_size(width.ceil().max(64.0), height.ceil().max(64.0));
+            self.window.snapshot(
+                Rect::new(0.0, 0.0, width.ceil(), height.ceil()),
+                scale,
+                done,
+            );
         }
 
         /// Loads the page again (after a timeout).
@@ -847,10 +862,17 @@ mod tests {
         assert_eq!(r.svg, "<svg><g/></svg>");
         assert_eq!(r.nodes.len(), 1);
         assert_eq!(r.nodes[0].label, "开始");
-        let f = parse_event("failed", &json!({"reqId": 4, "reason": "nope", "detail": "d"}));
+        let f = parse_event(
+            "failed",
+            &json!({"reqId": 4, "reason": "nope", "detail": "d"}),
+        );
         assert_eq!(
             f,
-            Some(RenderOutcome::Failed { req_id: 4, reason: FailReason::Internal, detail: "d".into() })
+            Some(RenderOutcome::Failed {
+                req_id: 4,
+                reason: FailReason::Internal,
+                detail: "d".into()
+            })
         );
         assert_eq!(parse_event("rendered", &json!({"reqId": 1})), None);
         assert_eq!(parse_event("other", &json!({"reqId": 1})), None);
@@ -868,17 +890,32 @@ mod tests {
         let out = sanitize_svg(svg);
         assert!(!out.contains("script"), "{out}");
         assert!(!out.contains("onload") && !out.contains("onclick"), "{out}");
-        assert!(!out.contains("foreignObject") && !out.contains("<div"), "{out}");
+        assert!(
+            !out.contains("foreignObject") && !out.contains("<div"),
+            "{out}"
+        );
         assert!(!out.contains("<a") && !out.contains("</a>"), "{out}");
-        assert!(out.contains(r#"<g id="n" class="node"><text>A &amp; B</text></g>"#), "{out}");
-        assert!(!out.contains("https://x/p.png") && !out.contains("file:///"), "{out}");
-        assert!(out.contains(r#"<image href="data:image/png;base64,AA"/>"#), "{out}");
+        assert!(
+            out.contains(r#"<g id="n" class="node"><text>A &amp; B</text></g>"#),
+            "{out}"
+        );
+        assert!(
+            !out.contains("https://x/p.png") && !out.contains("file:///"),
+            "{out}"
+        );
+        assert!(
+            out.contains(r#"<image href="data:image/png;base64,AA"/>"#),
+            "{out}"
+        );
         assert!(out.contains(r##"<use href="#m"/>"##), "{out}");
         assert!(out.contains("<use/>"), "{out}");
         assert!(out.contains(r##"<rect style="fill:url(#g)"/>"##), "{out}");
         assert!(out.contains("<rect/>"), "{out}");
         assert!(out.contains(".a{fill:url(#g)}"), "{out}");
-        assert!(!out.contains("https://x/y.png") && !out.contains("@import"), "{out}");
+        assert!(
+            !out.contains("https://x/y.png") && !out.contains("@import"),
+            "{out}"
+        );
         assert!(!out.contains("<!--"), "{out}");
         assert!(out.ends_with("</svg>"), "{out}");
     }

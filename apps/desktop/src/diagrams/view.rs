@@ -94,7 +94,12 @@ pub fn inline_fit(w: f32, h: f32, avail: f32, expanded: bool) -> Fit {
 
 /// A node's box at a display scale: `(x, y, w, h)` in display px.
 pub fn hit_rect(node: &Node, scale: f32) -> (f32, f32, f32, f32) {
-    (node.x * scale, node.y * scale, node.w * scale, node.h * scale)
+    (
+        node.x * scale,
+        node.y * scale,
+        node.w * scale,
+        node.h * scale,
+    )
 }
 
 struct Ui {
@@ -200,7 +205,14 @@ pub fn inline(spec: InlineSpec, window: &mut Window, cx: &mut App) -> AnyElement
             on_key(e, &key_spec, key_norm.as_ref(), &key_ui, window, cx)
         })
         .child(header)
-        .child(div().relative().w_full().child(measure).p(px(PAD)).child(body))
+        .child(
+            div()
+                .relative()
+                .w_full()
+                .child(measure)
+                .p(px(PAD))
+                .child(body),
+        )
         .when_some(spec.caption.clone(), |el, caption| {
             el.child(
                 div()
@@ -299,7 +311,9 @@ fn header(
     let show_source = ui.read(cx).show_source;
     let toggle_ui = ui.clone();
     let source = spec.source.clone();
-    let viewer = normalized.cloned().map(|n| (spec.clone(), n, ui.read(cx).focus.clone()));
+    let viewer = normalized
+        .cloned()
+        .map(|n| (spec.clone(), n, ui.read(cx).focus.clone()));
     div()
         .h(px(36.))
         .px(space::S12)
@@ -419,15 +433,11 @@ fn image_with_hits(
     let fit = inline_fit(ready.meta.width, ready.meta.height, avail, expanded);
     let full_h = ready.meta.height * fit.scale;
     let id = spec.id.clone();
-    let mut layer = div()
-        .relative()
-        .w(px(fit.w))
-        .h(px(full_h))
-        .child(
-            img(ImageSource::Image(ready.image.clone()))
-                .w(px(fit.w))
-                .h(px(full_h)),
-        );
+    let mut layer = div().relative().w(px(fit.w)).h(px(full_h)).child(
+        img(ImageSource::Image(ready.image.clone()))
+            .w(px(fit.w))
+            .h(px(full_h)),
+    );
     for (i, node) in ready.meta.nodes.iter().enumerate() {
         let (x, y, w, h) = hit_rect(node, fit.scale);
         let ring = if focused == Some(i) {
@@ -440,7 +450,8 @@ fn image_with_hits(
         let hover_ui = ui.clone();
         let origin = spec.origin.clone();
         let (nid, label) = (node.id.clone(), node.label.clone());
-        let (ask_origin, ask_id, ask_label) = (spec.origin.clone(), node.id.clone(), node.label.clone());
+        let (ask_origin, ask_id, ask_label) =
+            (spec.origin.clone(), node.id.clone(), node.label.clone());
         layer = layer.child(
             div()
                 .id(ElementId::Name(format!("dnode-{id}-{i}").into()))
@@ -454,7 +465,13 @@ fn image_with_hits(
                 .when_some(ring, |el, (wd, color)| el.border(wd).border_color(color))
                 .on_hover(move |on, _, cx| {
                     hover_ui.update(cx, |s, cx| {
-                        let next = if *on { Some(i) } else if s.hovered == Some(i) { None } else { s.hovered };
+                        let next = if *on {
+                            Some(i)
+                        } else if s.hovered == Some(i) {
+                            None
+                        } else {
+                            s.hovered
+                        };
                         if next != s.hovered {
                             s.hovered = next;
                             cx.notify();
@@ -546,7 +563,11 @@ fn source_listing(id: &SharedString, source: &str, ui: &gpui::Entity<Ui>, cx: &A
     let expanded = ui.read(cx).source_expanded;
     let lines: Vec<&str> = source.lines().collect();
     let total = lines.len();
-    let shown = if expanded { total } else { total.min(SOURCE_LINES) };
+    let shown = if expanded {
+        total
+    } else {
+        total.min(SOURCE_LINES)
+    };
     let digits = total.max(1).to_string().len();
     let toggle = ui.clone();
     div()
@@ -618,7 +639,13 @@ fn error_frame(
     let red = error == ErrorKind::Failed;
     let source = spec.source.clone();
     let (border, head_bg, icon, icon_color, text_color) = if red {
-        (k.bad.opacity(0.35), k.bad.opacity(0.07), Lucide::CircleX, k.bad_ink, k.bad_ink)
+        (
+            k.bad.opacity(0.35),
+            k.bad.opacity(0.07),
+            Lucide::CircleX,
+            k.bad_ink,
+            k.bad_ink,
+        )
     } else {
         (k.line, k.raised, Lucide::Workflow, k.ink_3, k.ink)
     };
@@ -665,7 +692,11 @@ fn error_frame(
                         }),
                 ),
         )
-        .child(div().p(space::S12).child(source_listing(&id, &spec.source, ui, cx)))
+        .child(
+            div()
+                .p(space::S12)
+                .child(source_listing(&id, &spec.source, ui, cx)),
+        )
         .into_any_element()
 }
 

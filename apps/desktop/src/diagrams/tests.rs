@@ -37,7 +37,9 @@ fn finds_closed_mermaid_fences_case_insensitively() {
 
 #[test]
 fn at_most_four_diagrams_per_message() {
-    let body: String = (0..6).map(|i| fence(&format!("graph TD\nA{i}-->B{i}"))).collect();
+    let body: String = (0..6)
+        .map(|i| fence(&format!("graph TD\nA{i}-->B{i}")))
+        .collect();
     let d = diagram_fences(&body, false);
     assert_eq!(d.len(), MAX_PER_MESSAGE);
     let all = fences(&body);
@@ -53,20 +55,44 @@ fn streaming_bodies_and_unclosed_fences_show_code() {
     assert!(!fences(open)[0].closed);
     assert!(diagram_fences(open, false).is_empty());
     // A longer closing fence closes; a shorter one does not.
-    assert_eq!(diagram_fences("````mermaid\ngraph TD\n```\n````\n", false).len(), 1);
+    assert_eq!(
+        diagram_fences("````mermaid\ngraph TD\n```\n````\n", false).len(),
+        1
+    );
     // Indented four spaces is not a fence.
     assert!(fences("    ```mermaid\n    graph TD\n    ```\n").is_empty());
 }
 
 #[test]
 fn alt_text_prefers_given_text_then_generates() {
-    let labels: Vec<String> = ["构建", "验收", "生产"].iter().map(|s| s.to_string()).collect();
+    let labels: Vec<String> = ["构建", "验收", "生产"]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     assert_eq!(
-        alt_text(Some("发布流程"), Some("c"), Some("t"), DiagramType::Flowchart, &labels),
+        alt_text(
+            Some("发布流程"),
+            Some("c"),
+            Some("t"),
+            DiagramType::Flowchart,
+            &labels
+        ),
         "发布流程"
     );
-    assert_eq!(alt_text(None, Some("说明"), Some("t"), DiagramType::Flowchart, &labels), "说明");
-    assert_eq!(alt_text(None, None, Some("标题"), DiagramType::Flowchart, &labels), "标题");
+    assert_eq!(
+        alt_text(
+            None,
+            Some("说明"),
+            Some("t"),
+            DiagramType::Flowchart,
+            &labels
+        ),
+        "说明"
+    );
+    assert_eq!(
+        alt_text(None, None, Some("标题"), DiagramType::Flowchart, &labels),
+        "标题"
+    );
     assert_eq!(
         alt_text(None, None, None, DiagramType::Flowchart, &labels),
         "流程图：3 个节点。构建 → 验收 → 生产"
@@ -92,12 +118,30 @@ fn nodes_sort_in_source_order() {
 #[test]
 fn error_kinds_map_reasons_and_refusals() {
     assert_eq!(ErrorKind::from_reason(FailReason::Parse), ErrorKind::Failed);
-    assert_eq!(ErrorKind::from_reason(FailReason::Timeout), ErrorKind::Failed);
-    assert_eq!(ErrorKind::from_reason(FailReason::Internal), ErrorKind::Failed);
-    assert_eq!(ErrorKind::from_reason(FailReason::TooBig), ErrorKind::TooBig);
-    assert_eq!(ErrorKind::from_reason(FailReason::Unsupported), ErrorKind::Unsupported);
-    assert_eq!(ErrorKind::from_refusal(&Refusal::TooLong), ErrorKind::TooBig);
-    assert_eq!(ErrorKind::from_refusal(&Refusal::Forbidden("click ")), ErrorKind::Forbidden);
+    assert_eq!(
+        ErrorKind::from_reason(FailReason::Timeout),
+        ErrorKind::Failed
+    );
+    assert_eq!(
+        ErrorKind::from_reason(FailReason::Internal),
+        ErrorKind::Failed
+    );
+    assert_eq!(
+        ErrorKind::from_reason(FailReason::TooBig),
+        ErrorKind::TooBig
+    );
+    assert_eq!(
+        ErrorKind::from_reason(FailReason::Unsupported),
+        ErrorKind::Unsupported
+    );
+    assert_eq!(
+        ErrorKind::from_refusal(&Refusal::TooLong),
+        ErrorKind::TooBig
+    );
+    assert_eq!(
+        ErrorKind::from_refusal(&Refusal::Forbidden("click ")),
+        ErrorKind::Forbidden
+    );
     assert_eq!(
         ErrorKind::from_refusal(&Refusal::Unsupported("pie".into())),
         ErrorKind::Unsupported
@@ -106,25 +150,47 @@ fn error_kinds_map_reasons_and_refusals() {
 
 #[test]
 fn theme_vars_are_greyscale_except_gantt_states() {
-    for id in [ThemeId::Light, ThemeId::Dark, ThemeId::LightContrast, ThemeId::DarkContrast] {
+    for id in [
+        ThemeId::Light,
+        ThemeId::Dark,
+        ThemeId::LightContrast,
+        ThemeId::DarkContrast,
+    ] {
         let v = theme_vars(id);
-        for c in [&v.raised, &v.line, &v.line_2, &v.ink, &v.ink_3, &v.sunken, &v.bg] {
+        for c in [
+            &v.raised, &v.line, &v.line_2, &v.ink, &v.ink_3, &v.sunken, &v.bg,
+        ] {
             assert!(c.starts_with('#') && (c.len() == 7 || c.len() == 9), "{c}");
         }
         assert_ne!(v.live_mix, v.ok_mix);
         assert_ne!(v.ok_mix, v.bad_mix);
     }
-    assert_ne!(theme_vars(ThemeId::Light).ink, theme_vars(ThemeId::Dark).ink);
-    assert_ne!(theme_vars(ThemeId::Light).ink_3, theme_vars(ThemeId::LightContrast).ink_3);
+    assert_ne!(
+        theme_vars(ThemeId::Light).ink,
+        theme_vars(ThemeId::Dark).ink
+    );
+    assert_ne!(
+        theme_vars(ThemeId::Light).ink_3,
+        theme_vars(ThemeId::LightContrast).ink_3
+    );
 }
 
 #[test]
 fn bundle_hash_is_part_of_every_key() {
     assert_eq!(renderer::MERMAID_SHA256.len(), 64);
-    let n = Normalized { source: "graph TD".into(), kind: DiagramType::Flowchart };
+    let n = Normalized {
+        source: "graph TD".into(),
+        kind: DiagramType::Flowchart,
+    };
     let k = key_for(&n, ThemeId::Light, INLINE_SCALE);
     assert_eq!(
         k,
-        cache::key(renderer::RENDERER_VERSION, renderer::MERMAID_SHA256, ThemeId::Light, 2, "graph TD")
+        cache::key(
+            renderer::RENDERER_VERSION,
+            renderer::MERMAID_SHA256,
+            ThemeId::Light,
+            2,
+            "graph TD"
+        )
     );
 }

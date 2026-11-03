@@ -12,17 +12,15 @@ use std::sync::Mutex;
 
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Context, ElementId, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, StatefulInteractiveElement as _,
-    Render, SharedString, Styled, Window, WindowBounds, div, prelude::FluentBuilder as _, px,
-    size,
+    IntoElement, ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _,
+    Styled, Window, WindowBounds, div, prelude::FluentBuilder as _, px, size,
 };
 
 use super::{INLINE_SCALE, normalize};
 use crate::{
     app::{Services, main_window_options},
     data::Member,
-    fake,
-    markdown,
+    fake, markdown,
     selftest::scenes::capture_bounds,
     theme::{self, Type as _, space},
     ui::MemberAvatar,
@@ -60,7 +58,9 @@ pub fn big_flowchart(n: usize, long: bool) -> String {
     let mut s = String::from("flowchart TD\n");
     for i in 0..n {
         if long {
-            s.push_str(&format!("  n{i}[第 {i} 步：按 seq 去重后放进话题列表并记下确认位置]\n"));
+            s.push_str(&format!(
+                "  n{i}[第 {i} 步：按 seq 去重后放进话题列表并记下确认位置]\n"
+            ));
         } else {
             s.push_str(&format!("  n{i}[检查 {i}]\n"));
         }
@@ -84,17 +84,28 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
     };
     if worst {
         return vec![
-            m("m-xiaowang", "10:00", "整条同步链路画出来看看，每一步都写清楚。".into()),
+            m(
+                "m-xiaowang",
+                "10:00",
+                "整条同步链路画出来看看，每一步都写清楚。".into(),
+            ),
             m(
                 "m-coder",
                 "10:02",
-                format!("全部 150 步都在这里：\n\n{}", fence(&big_flowchart(150, true))),
+                format!(
+                    "全部 150 步都在这里：\n\n{}",
+                    fence(&big_flowchart(150, true))
+                ),
             ),
         ];
     }
     match scene {
         Scene::Inline | Scene::Viewer => vec![
-            m("m-xiaowang", "10:00", "重连那块现在到底怎么走？画一下吧，我好写到文档里。".into()),
+            m(
+                "m-xiaowang",
+                "10:00",
+                "重连那块现在到底怎么走？画一下吧，我好写到文档里。".into(),
+            ),
             m(
                 "m-coder",
                 "10:02",
@@ -103,8 +114,16 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
                     fence(SEQUENCE)
                 ),
             ),
-            m("m-alex", "10:05", format!("发布流程也补一张：\n\n{}", fence(FLOW))),
-            m("m-sentry", "10:06", format!("这周的排期：\n\n{}", fence(GANTT))),
+            m(
+                "m-alex",
+                "10:05",
+                format!("发布流程也补一张：\n\n{}", fence(FLOW)),
+            ),
+            m(
+                "m-sentry",
+                "10:06",
+                format!("这周的排期：\n\n{}", fence(GANTT)),
+            ),
         ],
         Scene::Error => vec![
             m(
@@ -112,13 +131,18 @@ fn messages(scene: Scene, worst: bool) -> Vec<Msg> {
                 "10:12",
                 format!(
                     "发布前后的顺序也画一下：\n\n{}",
-                    fence("sequenceDiagram\n  participant 客户端\n  客户端 -> > 服务器: 重连\n  服务器 -->> 客户端: 从 1042 推到 1050\n  客户端 -->> 服务器: 确认到 1050")
+                    fence(
+                        "sequenceDiagram\n  participant 客户端\n  客户端 -> > 服务器: 重连\n  服务器 -->> 客户端: 从 1042 推到 1050\n  客户端 -->> 服务器: 确认到 1050"
+                    )
                 ),
             ),
             m(
                 "m-alex",
                 "10:13",
-                format!("夹夹 4.0 的结构：\n\n{}", fence("mindmap\n  root((夹夹 4.0))\n    首页\n    群相册\n    分享")),
+                format!(
+                    "夹夹 4.0 的结构：\n\n{}",
+                    fence("mindmap\n  root((夹夹 4.0))\n    首页\n    群相册\n    分享")
+                ),
             ),
             m(
                 "m-sentry",
@@ -172,7 +196,9 @@ fn sources(scene: Scene, worst: bool) -> Vec<normalize::Normalized> {
             if !offsets.contains(&f.offset) {
                 continue;
             }
-            let start = msg.body[f.offset..].find('\n').map_or(msg.body.len(), |n| f.offset + n + 1);
+            let start = msg.body[f.offset..]
+                .find('\n')
+                .map_or(msg.body.len(), |n| f.offset + n + 1);
             let rest = &msg.body[start..];
             let end = rest.find("\n```").unwrap_or(rest.len());
             if let Ok(n) = normalize::normalize(&rest[..end]) {
@@ -238,11 +264,11 @@ impl DiagramPreview {
                             .flex()
                             .items_center()
                             .gap(space::S8)
-                            .child(
-                                div().t_small().semibold().text_color(k.ink).child(SharedString::from(
+                            .child(div().t_small().semibold().text_color(k.ink).child(
+                                SharedString::from(
                                     member.map(|m| m.name.clone()).unwrap_or_default(),
-                                )),
-                            )
+                                ),
+                            ))
                             .child(div().t_mono().text_color(k.ink_3).child(msg.time)),
                     )
                     .child(view.w_full().text_color(k.ink)),
@@ -272,7 +298,12 @@ impl Render for DiagramPreview {
                     .border_b_1()
                     .border_color(k.line)
                     .child(div().t_small().text_color(k.ink_3).child("开发 /"))
-                    .child(div().t_bar_title().text_color(k.ink).child("断线重连后消息重复")),
+                    .child(
+                        div()
+                            .t_bar_title()
+                            .text_color(k.ink)
+                            .child("断线重连后消息重复"),
+                    ),
             )
             .child(
                 div()
@@ -338,7 +369,11 @@ pub fn open(
                         super::viewer::ViewerSpec {
                             normalized: n,
                             raw,
-                            title: Some(if worst { "同步链路".into() } else { "重连的顺序".into() }),
+                            title: Some(if worst {
+                                "同步链路".into()
+                            } else {
+                                "重连的顺序".into()
+                            }),
                             origin: super::DiagramSource {
                                 message_id: Some("dprev-1".into()),
                                 topic_id: Some("dprev-topic".into()),
@@ -367,8 +402,8 @@ pub fn ready(scene: Scene, cx: &App) -> bool {
     });
     let zoomed = scene != Scene::Viewer
         || worst
-        || sources(scene, worst)
-            .first()
-            .is_none_or(|n| matches!(super::peek(n, super::ZOOM_SCALE, cx), Some(s) if !s.is_pending()));
+        || sources(scene, worst).first().is_none_or(
+            |n| matches!(super::peek(n, super::ZOOM_SCALE, cx), Some(s) if !s.is_pending()),
+        );
     all && zoomed && super::idle(cx)
 }

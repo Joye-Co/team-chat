@@ -375,12 +375,7 @@ fn pump(cx: &mut App) {
 fn queue_other_theme(cx: &mut App) {
     let theme = current_theme(cx).other();
     let s = cx.global_mut::<Service>();
-    let sources: Vec<(String, DiagramType)> = s
-        .recent
-        .newest_first()
-        .into_iter()
-        .take(8)
-        .collect();
+    let sources: Vec<(String, DiagramType)> = s.recent.newest_first().into_iter().take(8).collect();
     for (source, kind) in sources {
         let n = Normalized { source, kind };
         let key = key_for(&n, theme, INLINE_SCALE);
@@ -412,7 +407,13 @@ fn fail(job: Job, reason: FailReason, detail: &str, store: bool, cx: &mut App) {
     // The parse detail may quote the source: redacted, and only its length and the
     // first line go to the log, never to UI text.
     let redacted = chat_core::diagnostics::redact(detail);
-    let first = redacted.lines().next().unwrap_or("").chars().take(120).collect::<String>();
+    let first = redacted
+        .lines()
+        .next()
+        .unwrap_or("")
+        .chars()
+        .take(120)
+        .collect::<String>();
     tracing::info!(target: "diagrams", reason = reason.as_str(), detail = %first, "diagram not drawn");
     if store {
         let _ = cx.global_mut::<Service>().disk.write_err(
@@ -455,8 +456,11 @@ fn handle(msg: Msg, cx: &mut App) {
                     let meta = Meta {
                         width: rendered.width as f32,
                         height: rendered.height as f32,
-                        scale: renderer::raster_scale(rendered.width, rendered.height, job.scale as f64)
-                            as f32,
+                        scale: renderer::raster_scale(
+                            rendered.width,
+                            rendered.height,
+                            job.scale as f64,
+                        ) as f32,
                         kind: kind.as_str().to_string(),
                         alt: alt_text(None, None, None, kind, &labels),
                         nodes,
@@ -552,7 +556,11 @@ pub fn source_order(source: &str, nodes: &[renderer::DiagramNode]) -> Vec<Node> 
         .enumerate()
         .map(|(i, n)| {
             let at = first_word_at(source, &n.id)
-                .or_else(|| (!n.label.is_empty()).then(|| source.find(&n.label)).flatten())
+                .or_else(|| {
+                    (!n.label.is_empty())
+                        .then(|| source.find(&n.label))
+                        .flatten()
+                })
                 .unwrap_or(usize::MAX);
             (
                 at,
@@ -614,7 +622,11 @@ pub fn alt_text(
         crate::copy::diagrams::ALT,
         &[("type", kind.word()), ("n", &labels.len().to_string())],
     );
-    let sep = if kind == DiagramType::Flowchart { " → " } else { "、" };
+    let sep = if kind == DiagramType::Flowchart {
+        " → "
+    } else {
+        "、"
+    };
     let text = format!("{head}{}", labels.join(sep));
     crate::markdown::clip(&text, 300)
 }
@@ -660,8 +672,9 @@ pub fn theme_vars(id: ThemeId) -> ThemeVars {
         live_mix: mix(k.live, k.raised, 0.2),
         ok_mix: mix(k.ok, k.raised, 0.2),
         bad_mix: mix(k.bad, k.raised, 0.2),
-        font_family: "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Helvetica Neue\", sans-serif"
-            .into(),
+        font_family:
+            "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Helvetica Neue\", sans-serif"
+                .into(),
         font_size_px: 13,
     }
 }
@@ -704,11 +717,15 @@ pub fn fences(body: &str) -> Vec<Fence> {
         match &mut open {
             Some((c, n, _)) => {
                 if *c == ch && run >= *n && t[run..].trim().is_empty() {
-                    let (_, _, mut f) = open.take().unwrap_or((ch, run, Fence {
-                        offset: at,
-                        info: String::new(),
-                        closed: false,
-                    }));
+                    let (_, _, mut f) = open.take().unwrap_or((
+                        ch,
+                        run,
+                        Fence {
+                            offset: at,
+                            info: String::new(),
+                            closed: false,
+                        },
+                    ));
                     f.closed = true;
                     out.push(f);
                 }

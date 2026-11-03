@@ -62,7 +62,11 @@ mod spike {
                         std::fs::write(&path, &png).expect("write png");
                         let w = u32::from_be_bytes([png[16], png[17], png[18], png[19]]);
                         let h = u32::from_be_bytes([png[20], png[21], png[22], png[23]]);
-                        println!("spike {mode}: {} bytes, {w}x{h} px -> {}", png.len(), path.display());
+                        println!(
+                            "spike {mode}: {} bytes, {w}x{h} px -> {}",
+                            png.len(),
+                            path.display()
+                        );
                         std::process::exit(0);
                     }
                     Err(e) => {

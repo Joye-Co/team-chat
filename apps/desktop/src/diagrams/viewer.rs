@@ -6,7 +6,7 @@
 use gpui::{
     AnyElement, App, AppContext as _, ClipboardItem, Context, ElementId, Entity, FocusHandle,
     ImageSource, InteractiveElement as _, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent,
-    MouseMoveEvent, ParentElement as _, Pixels, Point, Render, ScrollHandle, ScrollEvent,
+    MouseMoveEvent, ParentElement as _, Pixels, Point, Render, ScrollEvent, ScrollHandle,
     StatefulInteractiveElement as _, Styled as _, Window, canvas, div, img,
     prelude::FluentBuilder as _, px,
 };
@@ -212,13 +212,20 @@ impl DiagramViewer {
             .border_color(k.line)
             .child(ui::icon(Lucide::Workflow, px(16.), k.ink_3))
             .child(
-                div()
-                    .t_bar_title()
-                    .text_color(k.ink)
-                    .child(self.spec.title.clone().unwrap_or_else(|| kind.word().to_string())),
+                div().t_bar_title().text_color(k.ink).child(
+                    self.spec
+                        .title
+                        .clone()
+                        .unwrap_or_else(|| kind.word().to_string()),
+                ),
             )
             .when(self.spec.title.is_some(), |el| {
-                el.child(div().t_meta().text_color(k.ink_3).child(DiagramType::word(kind)))
+                el.child(
+                    div()
+                        .t_meta()
+                        .text_color(k.ink_3)
+                        .child(DiagramType::word(kind)),
+                )
             })
             .child(div().flex_1())
             .child(
@@ -232,7 +239,11 @@ impl DiagramViewer {
                     .child(
                         ui::icon_button_sm("dv-out", Lucide::Minus)
                             .named(c::ZOOM_OUT)
-                            .on_click(cx.listener(|this, _, _, cx| this.set_zoom(zoom_out(this.zoom), cx))),
+                            .on_click(
+                                cx.listener(|this, _, _, cx| {
+                                    this.set_zoom(zoom_out(this.zoom), cx)
+                                }),
+                            ),
                     )
                     .child(
                         div()
@@ -249,37 +260,65 @@ impl DiagramViewer {
                     .child(
                         ui::icon_button_sm("dv-in", Lucide::Plus)
                             .named(c::ZOOM_IN)
-                            .on_click(cx.listener(|this, _, _, cx| this.set_zoom(zoom_in(this.zoom), cx))),
+                            .on_click(
+                                cx.listener(|this, _, _, cx| this.set_zoom(zoom_in(this.zoom), cx)),
+                            ),
                     ),
             )
             .child(
-                ui::button("dv-fit", c::FIT, ui::ButtonKind::Ghost, ui::ButtonSize::Sm, cx)
-                    .icon(ui::icon(Lucide::Scan, px(14.), k.ink_2))
-                    .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
+                ui::button(
+                    "dv-fit",
+                    c::FIT,
+                    ui::ButtonKind::Ghost,
+                    ui::ButtonSize::Sm,
+                    cx,
+                )
+                .icon(ui::icon(Lucide::Scan, px(14.), k.ink_2))
+                .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
             )
             .child(
-                ui::button("dv-src", c::VIEW_SOURCE, ui::ButtonKind::Ghost, ui::ButtonSize::Sm, cx)
-                    .icon(ui::icon(Lucide::Code, px(14.), k.ink_2))
-                    .selected(self.show_source)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.show_source = !this.show_source;
-                        cx.notify();
-                    })),
+                ui::button(
+                    "dv-src",
+                    c::VIEW_SOURCE,
+                    ui::ButtonKind::Ghost,
+                    ui::ButtonSize::Sm,
+                    cx,
+                )
+                .icon(ui::icon(Lucide::Code, px(14.), k.ink_2))
+                .selected(self.show_source)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.show_source = !this.show_source;
+                    cx.notify();
+                })),
             )
             .child(
-                ui::button("dv-copy", c::COPY_SOURCE, ui::ButtonKind::Ghost, ui::ButtonSize::Sm, cx)
-                    .icon(ui::icon(Lucide::Copy, px(14.), k.ink_2))
-                    .on_click(move |_, _, cx| cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))),
+                ui::button(
+                    "dv-copy",
+                    c::COPY_SOURCE,
+                    ui::ButtonKind::Ghost,
+                    ui::ButtonSize::Sm,
+                    cx,
+                )
+                .icon(ui::icon(Lucide::Copy, px(14.), k.ink_2))
+                .on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
+                }),
             )
             .child(
-                ui::button("dv-img", c::COPY_IMAGE, ui::ButtonKind::Ghost, ui::ButtonSize::Sm, cx)
-                    .icon(ui::icon(Lucide::Image, px(14.), k.ink_2))
-                    .disabled(image.is_none())
-                    .on_click(move |_, _, cx| {
-                        if let Some(i) = &image {
-                            cx.write_to_clipboard(ClipboardItem::new_image(i));
-                        }
-                    }),
+                ui::button(
+                    "dv-img",
+                    c::COPY_IMAGE,
+                    ui::ButtonKind::Ghost,
+                    ui::ButtonSize::Sm,
+                    cx,
+                )
+                .icon(ui::icon(Lucide::Image, px(14.), k.ink_2))
+                .disabled(image.is_none())
+                .on_click(move |_, _, cx| {
+                    if let Some(i) = &image {
+                        cx.write_to_clipboard(ClipboardItem::new_image(i));
+                    }
+                }),
             )
             .child(
                 ui::icon_button_sm("dv-close", Lucide::X)
@@ -292,11 +331,11 @@ impl DiagramViewer {
         let k = theme::colors(cx);
         let z = self.zoom;
         let (w, h) = (ready.meta.width * z, ready.meta.height * z);
-        let mut layer = div()
-            .relative()
-            .w(px(w))
-            .h(px(h))
-            .child(img(ImageSource::Image(ready.image.clone())).w(px(w)).h(px(h)));
+        let mut layer = div().relative().w(px(w)).h(px(h)).child(
+            img(ImageSource::Image(ready.image.clone()))
+                .w(px(w))
+                .h(px(h)),
+        );
         for (i, node) in ready.meta.nodes.iter().enumerate() {
             let (x, y, nw, nh) = hit_rect(node, z);
             let origin = self.spec.origin.clone();
@@ -313,7 +352,13 @@ impl DiagramViewer {
                     .rounded(radius::MD)
                     .when(hovered, |el| el.border_1().border_color(k.line_2))
                     .on_hover(cx.listener(move |this, on: &bool, _, cx| {
-                        let next = if *on { Some(i) } else if this.hovered == Some(i) { None } else { this.hovered };
+                        let next = if *on {
+                            Some(i)
+                        } else if this.hovered == Some(i) {
+                            None
+                        } else {
+                            this.hovered
+                        };
                         if next != this.hovered {
                             this.hovered = next;
                             cx.notify();
@@ -348,7 +393,12 @@ impl Render for DiagramViewer {
         let ready = self.ready(cx);
         if !self.fitted && ready.is_some() && self.viewport.0 > 0. {
             if let Some(r) = &ready {
-                self.zoom = fit_zoom(r.meta.width, r.meta.height, self.viewport.0, self.viewport.1);
+                self.zoom = fit_zoom(
+                    r.meta.width,
+                    r.meta.height,
+                    self.viewport.0,
+                    self.viewport.1,
+                );
                 self.fitted = true;
             }
         }
@@ -357,7 +407,9 @@ impl Render for DiagramViewer {
             move |bounds, window, cx| {
                 let size = (f32::from(bounds.size.width), f32::from(bounds.size.height));
                 entity.update(cx, |this, cx| {
-                    if (this.viewport.0 - size.0).abs() > 0.5 || (this.viewport.1 - size.1).abs() > 0.5 {
+                    if (this.viewport.0 - size.0).abs() > 0.5
+                        || (this.viewport.1 - size.1).abs() > 0.5
+                    {
                         this.viewport = size;
                         cx.notify();
                         window.refresh();
@@ -436,20 +488,24 @@ impl Render for DiagramViewer {
                                         MouseButton::Left,
                                         cx.listener(|this, _, _, _| this.drag = None),
                                     )
-                                    .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
-                                        let Some((start, offset)) = this.drag else { return };
-                                        if e.pressed_button != Some(MouseButton::Left) {
-                                            this.drag = None;
-                                            return;
-                                        }
-                                        let max = this.scroll.max_offset();
-                                        let x = f32::from(offset.x + (e.position.x - start.x))
-                                            .clamp(-f32::from(max.x), 0.);
-                                        let y = f32::from(offset.y + (e.position.y - start.y))
-                                            .clamp(-f32::from(max.y), 0.);
-                                        this.scroll.set_offset(Point::new(px(x), px(y)));
-                                        cx.notify();
-                                    }))
+                                    .on_mouse_move(cx.listener(
+                                        |this, e: &MouseMoveEvent, _, cx| {
+                                            let Some((start, offset)) = this.drag else {
+                                                return;
+                                            };
+                                            if e.pressed_button != Some(MouseButton::Left) {
+                                                this.drag = None;
+                                                return;
+                                            }
+                                            let max = this.scroll.max_offset();
+                                            let x = f32::from(offset.x + (e.position.x - start.x))
+                                                .clamp(-f32::from(max.x), 0.);
+                                            let y = f32::from(offset.y + (e.position.y - start.y))
+                                                .clamp(-f32::from(max.y), 0.);
+                                            this.scroll.set_offset(Point::new(px(x), px(y)));
+                                            cx.notify();
+                                        },
+                                    ))
                                     .child(body),
                             ),
                     )
@@ -473,8 +529,20 @@ impl Render for DiagramViewer {
                                         .t_code()
                                         .text_size(px(12.))
                                         .line_height(px(20.))
-                                        .child(div().w(px(20.)).flex_none().text_color(k.ink_3).child(format!("{}", i + 1)))
-                                        .child(div().flex_1().min_w_0().text_color(k.ink).child(line.to_string()))
+                                        .child(
+                                            div()
+                                                .w(px(20.))
+                                                .flex_none()
+                                                .text_color(k.ink_3)
+                                                .child(format!("{}", i + 1)),
+                                        )
+                                        .child(
+                                            div()
+                                                .flex_1()
+                                                .min_w_0()
+                                                .text_color(k.ink)
+                                                .child(line.to_string()),
+                                        )
                                 })),
                         )
                     }),
