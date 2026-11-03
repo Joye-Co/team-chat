@@ -2,41 +2,27 @@
 //! whole block) to [`refs::ask_about`]. The 引用提问 track decides where the chip goes and
 //! who is asked; this file says what the part is.
 //!
-//! - Hover 问这里: after the pointer rests 300 ms on a block, a ghost `问这里` at its
-//!   top-right edge (not on the controls of a pending ask).
-//! - ⌥-click: adds the block (or the clicked part: a table row, a chart point, a metric)
-//!   at once, controls included.
-//! - Context menu: 就这里提问, 单独问这里, 复制.
+//! The affordances themselves are the 引用提问 track's ([`refs::affordance::part`]: hover
+//! 问这里 after 300 ms, ⌥-click, the context menu 就这里提问 / 单独问这里 / 复制), so
+//! v1 cards, Markdown and v2 blocks look and behave the same. A plain table gets cell,
+//! row and column parts ([`table_refs`]) instead of the whole block. Nothing shows when
+//! the server does not take references (`welcome.features` without `refs/1`).
 //!
 //! [`refs::ask_about`]: crate::views::refs::ask_about
 
-use std::time::Instant;
-
-use gpui::{
-    AnyElement, App, InteractiveElement as _, IntoElement, MouseButton, MouseDownEvent,
-    ParentElement, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
-};
-use gpui_component::menu::{ContextMenuExt as _, PopupMenuItem};
+use gpui::{AnyElement, App, InteractiveElement as _, ParentElement, Styled, Window, div, px};
 use serde_json::{Value, json};
 
 use super::Node;
 use crate::{
     copy::cards21 as c,
     data::cards_v2::{CardV2, CardV2Block, PartRef},
-    theme::{self, card_v21 as t},
-    ui::{self, ButtonKind, ButtonSize, Lucide},
     views::{
         cards::v2::Ctx,
-        refs::{self, PartTarget, RefIntent, RefSource},
+        refs::{self, PartTarget, RefSource, affordance::PartSpec, markdown::TableRefs},
     },
 };
 
-/// Most code points of each label segment and of the whole label (REFS §A2.2).
-const SOURCE_MAX: usize = 24;
-const BLOCK_MAX: usize = 16;
-const PART_MAX: usize = 60;
-const LABEL_MAX: usize = 120;
 /// Most bytes of a value snapshot.
 const VALUE_MAX: usize = 2048;
 
@@ -79,23 +65,22 @@ fn block_title(b: &CardV2Block) -> Option<String> {
 /// `{source} · {block} · {part}`: the card title, the block's title or its type name
 /// (omitted when the card has one block of that type and no title), and the part.
 pub fn label(card: &CardV2, b: &CardV2Block, part: Option<&str>) -> String {
-    let mut segs = vec![cut(&card.title, SOURCE_MAX)];
+    refs::label::build(&card.title, block_segment(card, b).as_deref(), part).text
+}
+
+/// The `{block}` segment: the block's title, else its type name when the card has more
+/// than one block of that type, else omitted.
+fn block_segment(card: &CardV2, b: &CardV2Block) -> Option<String> {
     let same_type = card
         .blocks
         .iter()
         .filter(|x| x.type_name() == b.type_name())
         .count();
     match block_title(b) {
-        Some(t) => segs.push(cut(&t, BLOCK_MAX)),
-        None if same_type > 1 && !default_name(b).is_empty() => {
-            segs.push(default_name(b).to_string())
-        }
-        None => {}
+        Some(t) => Some(t),
+        None if same_type > 1 && !default_name(b).is_empty() => Some(default_name(b).to_string()),
+        None => None,
     }
-    if let Some(p) = part.filter(|p| !p.is_empty()) {
-        segs.push(cut(p, PART_MAX));
-    }
-    cut(&segs.join(" · "), LABEL_MAX)
 }
 
 /// A snapshot of the whole block, at most 2048 bytes as JSON.
@@ -187,103 +172,103 @@ fn control(node: &Node, b: &CardV2Block) -> bool {
     b.takes_input() && node.ctx.live()
 }
 
-/// Adds the affordances to one block.
+/// True where the 引用提问 affordances show: a 话题 or the desk, and the server takes
+/// references.
+fn shown(node: &Node, cx: &App) -> bool {
+    use crate::views::cards::v2::CardMode;
+    matches!(node.ctx.mode, CardMode::Topic | CardMode::Desk) && refs::enabled(cx)
+}
+
+/// A table drawn with cell, row and column parts (the plain table: no selection or sort).
+fn table_parts(b: &CardV2Block) -> bool {
+    matches!(
+        b,
+        CardV2Block::Table {
+            select: None,
+            sortable: None | Some(false),
+            ..
+        }
+    )
+}
+
+/// The cell, row and column references of a plain table block (R4: `rowKeys`, else the
+/// row index), or `None` where the affordances do not show.
+pub fn table_refs(node: &Node, b: &CardV2Block, cx: &App) -> Option<TableRefs> {
+    let CardV2Block::Table {
+        id,
+        columns,
+        rows,
+        row_keys,
+        ..
+    } = b
+    else {
+        return None;
+    };
+    if !shown(node, cx) || !table_parts(b) {
+        return None;
+    }
+    let ctx = node.ctx;
+    let source = RefSource::Message {
+        group_id: ctx.msg.group_id.clone(),
+        topic_id: ctx.msg.topic_id.clone(),
+        message_id: ctx.msg.message_id.clone(),
+    };
+    let (columns, rows, keys) = (columns.clone(), rows.clone(), row_keys.clone());
+    let (title, block, block_id, rev) = (
+        ctx.card.title.clone(),
+        block_segment(ctx.card, b),
+        id.clone(),
+        ctx.card.rev as u64,
+    );
+    Some(TableRefs {
+        prefix: format!("{}-t-{id}", ctx.msg.message_id),
+        target: std::rc::Rc::new(move |pick| {
+            let data = refs::parts::TableData {
+                columns: &columns,
+                rows: &rows,
+                row_keys: keys.as_deref().filter(|k| k.len() == rows.len()),
+            };
+            refs::parts::table(&data, pick).map(|p| {
+                p.target(
+                    source.clone(),
+                    &title,
+                    block_id.clone(),
+                    block.as_deref(),
+                    Some(rev),
+                )
+            })
+        }),
+    })
+}
+
+/// Adds the affordances to one block (a plain table has its own per cell).
 pub fn wrap(
     node: &Node,
     b: &CardV2Block,
     el: AnyElement,
-    _window: &mut Window,
+    window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    if !referenceable(b)
-        || node.ctx.mode != crate::views::cards::v2::CardMode::Topic
-            && node.ctx.mode != crate::views::cards::v2::CardMode::Desk
-    {
+    if !referenceable(b) || !shown(node, cx) || table_parts(b) {
         return el;
     }
     let ctx = node.ctx;
     let Some(id) = b.id() else { return el };
-    let k = theme::colors(cx);
     let whole = target(ctx, b, None, None, snapshot(b));
-    let rested = ctx
-        .ui
-        .read(cx)
-        .hover
-        .as_ref()
-        .filter(|(h, _)| h == id)
-        .is_some_and(|(_, at)| at.elapsed() >= t::HOVER_ASK);
-    let show_ask = rested && !control(node, b);
-    let (ui, block) = (ctx.ui.clone(), id.to_string());
-    let (alt_target, menu_target, side_target, ask_target) =
-        (whole.clone(), whole.clone(), whole.clone(), whole.clone());
-    let copy_text = whole.label.clone();
-    div()
-        .id(ctx.id(format!("part-{id}")))
-        .relative()
-        .min_w(px(0.))
-        .on_mouse_down(MouseButton::Left, move |e: &MouseDownEvent, window, cx| {
-            if e.modifiers.alt {
-                refs::ask_about(alt_target.clone(), RefIntent::Topic, window, cx);
-                cx.stop_propagation();
-            }
-        })
-        .on_hover(move |on, _, cx| {
-            let block = block.clone();
-            let on = *on;
-            ui.update(cx, |u, cx| {
-                if on {
-                    u.hover = Some((block.clone(), Instant::now()));
-                } else if u.hover.as_ref().is_some_and(|(h, _)| *h == block) {
-                    u.hover = None;
-                }
-                cx.notify();
-            });
-            if on {
-                let ui = ui.clone();
-                cx.spawn(async move |cx: &mut gpui::AsyncApp| {
-                    cx.background_executor().timer(t::HOVER_ASK).await;
-                    cx.update(|cx| ui.update(cx, |_, cx| cx.notify()));
-                })
-                .detach();
-            }
-        })
-        .context_menu(move |menu, _, _| {
-            let (a, b2, text) = (menu_target.clone(), side_target.clone(), copy_text.clone());
-            menu.item(
-                PopupMenuItem::new(c::PART_ASK_TOPIC).on_click(move |_, window, cx| {
-                    refs::ask_about(a.clone(), RefIntent::Topic, window, cx)
-                }),
-            )
-            .item(
-                PopupMenuItem::new(c::PART_ASK_SIDE).on_click(move |_, window, cx| {
-                    refs::ask_about(b2.clone(), RefIntent::SideChat, window, cx)
-                }),
-            )
-            .item(PopupMenuItem::new(c::PART_COPY).on_click(move |_, _, cx| {
-                cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
-            }))
-        })
-        .child(el)
-        .when(show_ask, |el| {
-            el.child(
-                div().absolute().top(px(-4.)).right(px(-4.)).child(
-                    ui::button(
-                        ctx.id(format!("ask-{id}")),
-                        c::PART_ASK_HERE,
-                        ButtonKind::Ghost,
-                        ButtonSize::Sm,
-                        cx,
-                    )
-                    .icon(ui::icon(Lucide::CornerDownRight, px(12.), k.ink_2))
-                    .bg(k.bg)
-                    .shadow(k.sec_hi())
-                    .on_click(move |_, window, cx| {
-                        refs::ask_about(ask_target.clone(), RefIntent::Topic, window, cx)
-                    }),
-                ),
-            )
-        })
-        .into_any_element()
+    let spec = PartSpec::new(format!("{}-b-{id}", ctx.msg.message_id), move |_| {
+        whole.clone()
+    })
+    .control(control(node, b))
+    .radius(px(6.));
+    refs::affordance::part(
+        div()
+            .id(ctx.id(format!("part-{id}")))
+            .min_w(px(0.))
+            .child(el),
+        spec,
+        window,
+        cx,
+    )
 }
 
 #[cfg(test)]
@@ -312,7 +297,7 @@ mod tests {
             "10 月数据月报 · 日活 2,340"
         );
         let long = "字".repeat(200);
-        assert!(label(&card, m, Some(&long)).chars().count() <= LABEL_MAX);
+        assert!(label(&card, m, Some(&long)).chars().count() <= refs::label::LABEL_MAX);
     }
 
     #[test]

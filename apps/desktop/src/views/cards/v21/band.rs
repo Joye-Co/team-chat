@@ -358,6 +358,29 @@ pub fn pending(ctx: &Ctx) -> Option<(interact::Pending, String, String)> {
     Some((p, c::BAND_WORKING.to_string(), words))
 }
 
+/// A page event from an embed in this card still waits for the author (the page host's
+/// band of that version): the card band says 处理中 with the host's words, for the
+/// emitter only (the host keeps only my own events).
+pub fn page_pending(ctx: &Ctx, cx: &gpui::App) -> Option<(String, String)> {
+    use crate::views::artifacts::host::{self, BandView};
+    if !is_21(ctx.card) {
+        return None;
+    }
+    ctx.card.blocks.iter().find_map(|b| match b {
+        CardV2Block::Embed {
+            artifact_id,
+            version,
+            ..
+        } => match host::band(artifact_id, *version, cx)? {
+            BandView::Waiting(t) | BandView::Working(t) | BandView::NoAnswer(t) => {
+                Some((c::BAND_WORKING.to_string(), t))
+            }
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
 /// The quiet mark above the decision surface of a non-blocking ask inside a report:
 /// 问你 for the asked viewer, 等{名字} for everyone else.
 pub enum Mark {

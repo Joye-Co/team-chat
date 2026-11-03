@@ -453,7 +453,7 @@ fn leaf(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         CardV2Block::Diagram { .. } => leaves::diagram(node, b, window, cx),
         CardV2Block::Embed { .. } => leaves::embed(node, b, window, cx),
         CardV2Block::Unknown => leaves::unknown(node, cx),
-        CardV2Block::Table { .. } => data::table(node, b, cx),
+        CardV2Block::Table { .. } => data::table(node, b, window, cx),
         CardV2Block::Chart { .. } => data::chart(node, b, cx),
         CardV2Block::Metric { .. } => data::metric(node, b, cx),
         CardV2Block::Input { .. } => leaves::input(node, b, window, cx),

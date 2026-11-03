@@ -296,6 +296,19 @@ fn percent(s: &str) -> Option<f32> {
 }
 
 pub(crate) fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
+    table_with_refs(columns, rows, None, None, cx)
+}
+
+/// [`table`] with the 引用提问 parts of its cells, rows and header (inc-integrate): the
+/// same look, plus the 问这里 slot at the end of each row.
+pub(crate) fn table_with_refs(
+    columns: &[String],
+    rows: &[Vec<String>],
+    refs: Option<&crate::views::refs::markdown::TableRefs>,
+    window: Option<&gpui::Window>,
+    cx: &App,
+) -> AnyElement {
+    let refs = refs.zip(window);
     let k = theme::colors(cx);
     let numeric_col: Vec<bool> = (0..columns.len())
         .map(|ci| {
@@ -352,31 +365,48 @@ pub(crate) fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyEl
                 .border_b_1()
                 .border_color(k.line)
                 .text_color(k.ink_3)
-                .children(
-                    columns
-                        .iter()
-                        .enumerate()
-                        .map(|(ci, col)| cell(ci, col, true, false)),
-                ),
+                .children(columns.iter().enumerate().map(|(ci, col)| {
+                    let el = cell(ci, col, true, false);
+                    match refs {
+                        Some((r, w)) => r.header(el, ci, w, cx),
+                        None => el.into_any_element(),
+                    }
+                }))
+                .when(refs.is_some(), |el| {
+                    el.child(
+                        div()
+                            .w(px(crate::views::refs::markdown::ROW_BUTTON_SLOT))
+                            .flex_none(),
+                    )
+                }),
         )
         .children(rows.iter().enumerate().map(|(ri, r)| {
             let total = ri == last && r.first().is_some_and(|x| x.trim() == c::TABLE_TOTAL);
-            div()
+            let line = div()
                 .flex()
                 .items_center()
                 .gap(space::S12)
                 .h(m::TABLE_ROW)
                 .when(ri < last, |el| el.border_b_1().border_color(k.line))
                 .when(total, |el| el.border_t_1().border_color(k.line_2))
-                .text_color(k.ink)
-                .children((0..columns.len()).map(|ci| {
-                    cell(
-                        ci,
-                        r.get(ci).map(String::as_str).unwrap_or(""),
-                        false,
-                        total,
-                    )
-                }))
+                .text_color(k.ink);
+            let line = match refs {
+                Some((rf, _)) => rf.row(line, ri, cx),
+                None => line,
+            };
+            line.children((0..columns.len()).map(|ci| {
+                let el = cell(
+                    ci,
+                    r.get(ci).map(String::as_str).unwrap_or(""),
+                    false,
+                    total,
+                );
+                match refs {
+                    Some((rf, w)) => rf.cell(el, ri, ci, w, cx),
+                    None => el.into_any_element(),
+                }
+            }))
+            .when_some(refs, |el, (rf, _)| el.child(rf.row_end(ri, cx)))
         }))
         .into_any_element()
 }

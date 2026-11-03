@@ -2026,45 +2026,39 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
         .unwrap_or_default();
     let declared: Vec<String> = b.base().map(|x| x.events().to_vec()).unwrap_or_default();
     let body: AnyElement = match (folder(ctx, artifact_id, *version, cx), detail.as_ref()) {
-        (Some(Ok(f)), Some(d)) if f.is_page => {
-            let spec = artifact_view::VersionSpec::new(
-                f.version,
-                artifact_view::Content::Folder(f.dir.clone()),
-            )
-            .with_entry(f.entry.clone());
-            let caps =
-                crate::views::artifact_page::capabilities(ctx.env.provider.as_ref(), d, f.version);
-            let provider = ctx.env.provider.clone();
-            let aid = artifact_id.clone();
+        (Some(Ok(f)), Some(_)) if f.is_page => {
+            // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
+            // live data, asks, refs, the pending band); the block narrows the declared
+            // events to its own `events` (embed.events ⊆ the version's events).
+            use crate::views::artifacts::host;
+            let p = ctx.env.provider.as_ref();
+            let (mut spec, caps) =
+                host::version_spec(p, artifact_id, f.version, f.dir.clone(), f.entry.clone());
+            if !declared.is_empty()
+                && let Some(events) = spec.events.take()
+            {
+                spec.events = Some(
+                    events
+                        .into_iter()
+                        .filter(|e| declared.iter().any(|d| *d == e.name))
+                        .collect(),
+                );
+            }
             crate::ui::web_embed::WebEmbed::new(
                 eid(node, format!("embed-{id}-{version}")),
                 crate::ui::web_embed::WebEmbedSpec::new(artifact_id.clone(), spec)
-                    .capabilities(caps),
+                    .capabilities(caps)
+                    .viewer(host::viewer(p))
+                    .ref_menu(Some(host::ref_menu(cx))),
             )
             .height(px(h))
             .rounded(px(0.))
             .pass_scroll(true)
-            .on_event(move |event, _, cx| match event {
-                artifact_view::ArtifactEvent::Emit {
-                    version,
-                    name,
-                    payload,
-                    user_action,
-                } if declared.is_empty() || declared.iter().any(|d| d == name) => {
-                    crate::views::artifact_page::forward_page_event(
-                        &provider,
-                        &aid,
-                        *version,
-                        name,
-                        payload,
-                        *user_action,
-                        cx,
-                    )
-                }
-                artifact_view::ArtifactEvent::ExternalLink { url } => {
+            .on_host(host::embed_handler(artifact_id.clone()))
+            .on_event(move |event, _, _| {
+                if let artifact_view::ArtifactEvent::ExternalLink { url } = event {
                     crate::views::artifacts::window::ask_before_link(url.clone())
                 }
-                _ => {}
             })
             .into_any_element()
         }

@@ -19,5 +19,4 @@ crate::copy! {
     PAGE_NEWER = "有 v{n}",
     PAGE_REF_MENU = "就这里提问",
     PAGE_REF_ADDED = "已放进话题的输入框",
-    PAGE_REF_LABEL = "{title} v{n} · {label}",
 }

@@ -1071,7 +1071,10 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
 pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let k = theme::colors(cx);
     // --- inc-cards21: my live event waits (blue 处理中), 2.1 words, the deadline ---
-    let waiting = super::v21::band::pending(ctx);
+    // inc-integrate: a page event of an embed in this card waits too (the page host).
+    let waiting = super::v21::band::pending(ctx)
+        .map(|(_, l, d)| (l, d))
+        .or_else(|| super::v21::band::page_pending(ctx, cx));
     let t = match &waiting {
         Some(_) => Tone {
             mark: k.live,
@@ -1082,7 +1085,7 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         None => tone(ctx.state, &k)?,
     };
     let (label, detail) = match &waiting {
-        Some((_, l, d)) => (l.clone(), d.clone()),
+        Some((l, d)) => (l.clone(), d.clone()),
         None => super::v21::band::words(ctx, strip_words(ctx, cx)),
     };
     let right = waiting
@@ -1310,6 +1313,25 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     let waits = matches!(ctx.state, CardState::Pending);
     let strip = strip(ctx, cx);
     let header = header(ctx, cx);
+    // --- inc-integrate: 就这张卡提问 on the header (the whole card, `blockId` `card`) ---
+    let header = match (ctx.mode, ctx.msg.message_id.is_empty()) {
+        (CardMode::Topic | CardMode::Desk, false) => {
+            let target = crate::views::refs::parts::whole(&ctx.card.title).target(
+                crate::views::refs::RefSource::Message {
+                    group_id: ctx.msg.group_id.clone(),
+                    topic_id: ctx.msg.topic_id.clone(),
+                    message_id: ctx.msg.message_id.clone(),
+                },
+                &ctx.card.title,
+                "card",
+                None,
+                Some(ctx.card.rev as u64),
+            );
+            crate::views::refs::affordance::whole_card(div().child(header), Some(target), cx)
+        }
+        _ => header,
+    };
+    // --- end inc-integrate ---
     let title = title(ctx, cx);
     // --- inc-cards21 ---
     let body = if super::v21::is_21(ctx.card) {

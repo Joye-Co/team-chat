@@ -51,7 +51,7 @@ pub fn sorted(rows: &[Vec<String>], col: usize, asc: bool) -> Vec<usize> {
     ix
 }
 
-pub fn table(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
+pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {
     let CardV2Block::Table {
         id,
         columns,
@@ -69,7 +69,9 @@ pub fn table(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let k = theme::colors(cx);
     let plain = select.is_none() && !sortable.unwrap_or(false);
     if plain {
-        let t = b20::table(columns, rows, cx);
+        // inc-integrate: cell, row and column parts for 引用提问 (REFS §A2.2, R4).
+        let refs = super::parts::table_refs(node, b, cx);
+        let t = b20::table_with_refs(columns, rows, refs.as_ref(), Some(window), cx);
         return match title {
             Some(tt) => div()
                 .flex()

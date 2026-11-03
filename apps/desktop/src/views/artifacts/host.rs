@@ -799,15 +799,14 @@ fn ask_about(
     let Some(detail) = provider.artifact(artifact_id) else {
         return;
     };
-    let chip = fill(
-        cp::PAGE_REF_LABEL,
-        &[
-            ("title", &detail.summary.title),
-            ("n", &version.to_string()),
-            ("label", label),
-        ],
-    );
-    let chip: String = chip.chars().take(120).collect();
+    // inc-integrate: the 引用提问 label builder (REFS §A2.2: `{title} v{n} · {label}`, each
+    // segment cut at its limit), so the chip draws its lead and part like every other.
+    let chip = refs::label::build(
+        &refs::parts::artifact_source(&detail.summary.title, version),
+        None,
+        Some(label),
+    )
+    .text;
     let mut keys = std::collections::BTreeMap::new();
     if let Some(s) = selector {
         keys.insert(
@@ -828,7 +827,7 @@ fn ask_about(
             keys: (!keys.is_empty()).then_some(keys),
         }),
         label: chip,
-        value: value.clone(),
+        value: value.clone().map(refs::value::cap),
         card_rev: None,
     };
     match window {
