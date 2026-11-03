@@ -993,8 +993,9 @@ Rules:
   links, then GitHub pull request URLs in the result; at most 5); one `ref` block `artifact-N`
   per 产出 the run made (versions with its `runId`, or by the bot in the topic since the run
   started; the newest version each; at most 10). A card that does not fit the Card v2 limits
-  falls back to a text message. Its v1 `card` is the derived one without the `result` block
-  (the fallback text block already holds the result). Side chat runs answer with a text message.
+  falls back to a text message. Its v1 `card` is the derived one without the fallback text
+  block and the `result` block (the message body holds the result, and 1.0.x draws the body).
+  Side chat runs answer with a text message.
 - `usage` and `durationMs` are set when the run ends, from `run.done` (also when `run.done`
   comes after a member stopped the run). `acceptance` comes from
   the run event `acceptance` (runner-backed bots) or `PUT /v1/runs/:id/acceptance` (the run's

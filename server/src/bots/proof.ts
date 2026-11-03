@@ -147,11 +147,11 @@ export function doneCard(opts: {
 }
 
 /**
- * The v1 card 1.0.x clients get for a done card: the derived one without the `result` text
- * block, which would repeat the fallback text block above it.
+ * The v1 card 1.0.x clients get for a done card: the derived one without the fallback text
+ * and the `result` block. The message body holds the result, and 1.0.x draws it above the card.
  */
 export function doneCardV1(card: CardV2): Card {
-  return cardV2ToV1({ ...card, blocks: card.blocks.filter((b) => b.id !== "result") });
+  return cardV2ToV1({ ...card, fallback: "", blocks: card.blocks.filter((b) => b.id !== "result") });
 }
 
 /** What `bots.runProof` returns. */
