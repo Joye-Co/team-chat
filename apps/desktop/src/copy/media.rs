@@ -59,7 +59,7 @@ crate::copy! {
     PDF_PAGES = "{n} 页",
     PDF_OPEN = "打开",
     PDF_OPEN_PREVIEW = "用「预览」打开",
-    PDF_NOTE = "页面在本机渲染；PDF 里的链接先问你再打开",
+    PDF_NOTE = "页面在本机生成；要选中文字或打开链接，用「预览」打开",
     PDF_PAGE_OF = "{i} / {n}",
     PDF_ZOOM_IN = "放大",
     PDF_ZOOM_OUT = "缩小",
@@ -89,4 +89,15 @@ crate::copy! {
     CANCEL = "取消",
     REMOVE = "移除",
     OPEN = "打开",
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn media_text_has_no_developer_words() {
+        // REFS: never "render" (渲染) in UI text.
+        for (name, text) in super::ENTRIES {
+            assert!(!text.contains("渲染"), "{name}: {text}");
+        }
+    }
 }
