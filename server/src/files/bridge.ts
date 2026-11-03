@@ -191,7 +191,8 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
   if (a.kind !== "human") throw new ApiError("forbidden", "only people send page events", "interact.bot_emitter");
   const { v, topicId, title } = versionOf(room, e.artifactId, e.version);
   const now = Date.now();
-  if (e.clientEventId) {
+  const repeat = (): PageEventAck | undefined => {
+    if (!e.clientEventId) return undefined;
     const seen = room.sql
       .exec<PageEventRow>(
         "SELECT * FROM page_events WHERE actor_id = ? AND artifact_id = ? AND version = ? AND client_event_id = ? AND at > ?",
@@ -202,8 +203,10 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
         now - KEEP_EVENTS_MS,
       )
       .toArray()[0] as PageEventRow | undefined;
-    if (seen) return { ...(JSON.parse(seen.ack) as PageEventAck), duplicate: true };
-  }
+    return seen ? { ...(JSON.parse(seen.ack) as PageEventAck), duplicate: true } : undefined;
+  };
+  const first = repeat();
+  if (first) return first;
   if (!(await bridgeOpen(room, v.created_by))) throw new ApiError("forbidden", "this page sends nothing back", "artifact.no_bridge");
   const declared = v.events ? (JSON.parse(v.events) as ArtifactEventDecl[]) : [];
   const decl = declared.find((d) => d.name === e.name);
@@ -219,7 +222,26 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
   if (!takeRate(rateKey, () => [new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst), new TokenBucket(PAGE_EVENT_HOURLY / 3600, PAGE_EVENT_HOURLY)])) {
     throw new ApiError("rate_limited", "too many page events");
   }
+  // The row exists before the event goes out (F3): a fast reply or data push finds it, and a
+  // repeat that comes while delivery waits is a duplicate. Same order as cards2 (insertEvent,
+  // then finishAck).
+  const again = repeat();
+  if (again) return again;
   const eventId = ulid(now);
+  room.sql.exec("DELETE FROM page_events WHERE at < ?", now - KEEP_EVENTS_MS);
+  room.sql.exec(
+    `INSERT INTO page_events (event_id, artifact_id, version, actor_id, bot_id, kind, client_event_id, ack, at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    eventId,
+    e.artifactId,
+    e.version,
+    a.id,
+    v.created_by,
+    kind,
+    e.clientEventId ?? null,
+    JSON.stringify({ eventId, expect: { by: v.created_by, mode: "none" } } satisfies PageEventAck),
+    now,
+  );
   const expect = await deliverPageEvent(room, v.created_by, {
     eventId,
     topicId,
@@ -234,20 +256,7 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
     runId: v.run_id ?? null,
   });
   const ack: PageEventAck = { eventId, expect };
-  room.sql.exec("DELETE FROM page_events WHERE at < ?", now - KEEP_EVENTS_MS);
-  room.sql.exec(
-    `INSERT OR IGNORE INTO page_events (event_id, artifact_id, version, actor_id, bot_id, kind, client_event_id, ack, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    eventId,
-    e.artifactId,
-    e.version,
-    a.id,
-    v.created_by,
-    kind,
-    e.clientEventId ?? null,
-    JSON.stringify(ack),
-    now,
-  );
+  room.sql.exec("UPDATE page_events SET ack = ? WHERE event_id = ?", JSON.stringify(ack), eventId);
   const details: Record<string, unknown> = { groupId: room.groupId, artifactId: e.artifactId, version: e.version, name: e.name, kind, eventId };
   const payload = auditValue(e.payload);
   if (payload !== undefined) details.payload = payload;

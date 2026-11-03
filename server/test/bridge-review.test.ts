@@ -7,12 +7,12 @@ import type { CardV2 } from "@chat/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import type { BotsEnv } from "../src/bots/env";
 import type { Actor } from "../src/core/registry";
+import type { GroupRoom } from "../src/core/room";
 import { ARTIFACT_EVENT_RPC, ARTIFACT_REPLY_RPC, tcSchemaViolation } from "../src/files/bridge";
 import { Daemon, downViolations, HEALTH, mention, world, type World } from "./daemon";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
-const roomOf = (groupId: string) => benv.GROUP_ROOM.get(benv.GROUP_ROOM.idFromName(groupId));
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 const INTERACT = { features: ["interact/1"] };
 
@@ -102,6 +102,59 @@ describe("TcSchema pattern (SEC-4)", () => {
     const ok = await makePage(bot, gid, topicId, [{ name: "pick", schema: { type: "object", properties: { v: { type: "string", pattern: "^(a+)+$" } } } }]);
     expect(ok.status, JSON.stringify(ok.body)).toBe(200);
     co.close();
+  });
+});
+
+describe("a page event row exists before delivery (F3)", () => {
+  it("take a reply and a repeat that come while the room still waits for the receiver's presence", async () => {
+    const w = await pageWorld();
+    w.cb.close();
+    const owner: Actor = { id: w.owner.id, level: "owner", kind: "human" };
+    const bot: Actor = { id: w.bot.id, level: "member", kind: "bot" };
+    const args = { artifactId: w.artifactId, version: 1, name: "ask.total", kind: "ask", clientEventId: "fast-1" };
+    const seen: { reply?: unknown; repeat?: unknown } = {};
+    const rooms = (env as unknown as { GROUP_ROOM: DurableObjectNamespace<GroupRoom> }).GROUP_ROOM;
+    let ack: any;
+    await runInDurableObject(rooms.get(rooms.idFromName(w.gid)), async (room: GroupRoom): Promise<void> => {
+      const instance = room as any;
+      const orig = instance.env;
+      const frames: any[] = [];
+      const ns = orig.MEMBER_GATEWAY;
+      // The bot's gateway: it takes the transient, and while the room waits for its presence the
+      // bot answers at once and the page sends the same event again.
+      const fake = {
+        deliver: async (batch: unknown[]) => {
+          frames.push(...batch);
+        },
+        onlineWith: async () => {
+          const ev = frames.find((f) => f.event?.type === "artifact.event");
+          seen.reply = await instance.rpc(w.gid, ARTIFACT_REPLY_RPC, bot, { eventId: ev?.event.eventId, ok: true, payload: { total: 13 } });
+          seen.repeat = await instance.rpc(w.gid, ARTIFACT_EVENT_RPC, owner, args);
+          return true;
+        },
+      };
+      instance.env = {
+        ...orig,
+        MEMBER_GATEWAY: {
+          idFromName: (name: string) => ({ name }),
+          get: (id: { name: string }, opts: unknown) => (id.name === w.bot.id ? fake : ns.get(ns.idFromName(id.name), opts)),
+        },
+      };
+      try {
+        ack = await instance.rpc(w.gid, ARTIFACT_EVENT_RPC, owner, args);
+      } finally {
+        instance.env = orig;
+      }
+    });
+    expect(ack, JSON.stringify(ack)).toMatchObject({ ok: true, value: { expect: { by: w.bot.id, mode: "live" } } });
+    expect(seen.reply, JSON.stringify(seen.reply)).toMatchObject({ ok: true });
+    expect(seen.repeat, JSON.stringify(seen.repeat)).toMatchObject({ ok: true, value: { eventId: ack.value.eventId, duplicate: true } });
+    const reply = await w.co.next((f) => f.t === "transient" && f.event.type === "artifact.reply" && f.event.eventId === ack.value.eventId);
+    expect(reply.event).toMatchObject({ ok: true, payload: { total: 13 } });
+    // The stored ack has the receiver's presence.
+    const again = await w.co.ok({ t: "artifact.event", groupId: w.gid, ...args });
+    expect(again).toMatchObject({ eventId: ack.value.eventId, duplicate: true, expect: { by: w.bot.id, mode: "live" } });
+    w.co.close();
   });
 });
 
