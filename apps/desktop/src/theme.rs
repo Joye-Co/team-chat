@@ -1699,6 +1699,8 @@ pub mod card_v2 {
     pub const OK_FILL: f32 = 0.09;
     pub const OK_EDGE: f32 = 0.22;
     pub const LIVE_FILL: f32 = 0.08;
+    /// v11/r3-cards: the band of a rev a member's event caused (live over `sunken`).
+    pub const UPDATED_FILL: f32 = 0.06;
     pub const LIVE_EDGE: f32 = 0.22;
     pub const QUIET_FILL: f32 = 0.09;
     pub const QUIET_EDGE: f32 = 0.16;
@@ -1909,6 +1911,14 @@ pub mod card_v21 {
     pub const PREVIEW: Pixels = px(120.);
     /// Matrix option columns.
     pub const MATRIX_COL: Pixels = px(72.);
+    /// v11/r3-cards: a pickable bar chart as rows (Interact.dc.html 02): row height, the
+    /// name column, the track height and radius, the value column, the row radius.
+    pub const BAR_ROW: Pixels = px(30.);
+    pub const BAR_NAME: Pixels = px(60.);
+    pub const BAR_TRACK: Pixels = px(10.);
+    pub const BAR_TRACK_RADIUS: Pixels = px(3.);
+    pub const BAR_VALUE: Pixels = px(22.);
+    pub const BAR_ROW_RADIUS: Pixels = px(7.);
     /// Inline page height range (CARD21 §8).
     pub const EMBED_MIN: f32 = 160.;
     pub const EMBED_MAX: f32 = 480.;
@@ -1917,6 +1927,8 @@ pub mod card_v21 {
     /// a block a new rev changed.
     pub const SURFACE_FILL: f32 = 0.07;
     pub const CHANGE_FILL: f32 = 0.14;
+    /// v11/r3-cards: the tint a block the rev inserted keeps after its flash (Interact 02).
+    pub const INSERTED_FILL: f32 = 0.07;
 
     /// Pending (INTERACT §4.4): nothing shows before this.
     pub const PENDING_QUIET: Duration = Duration::from_millis(400);

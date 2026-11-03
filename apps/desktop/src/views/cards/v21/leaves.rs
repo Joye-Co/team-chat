@@ -125,7 +125,11 @@ fn heading(node: &Node, b: &CardV2Block, cx: &App) -> Option<Div> {
         .iter()
         .filter(|x| x.takes_input())
         .count();
-    (!in_q && inputs > 1 && !text.is_empty() && text != node.ctx.card.title)
+    // A question inside a report (a non-blocking ask, INTERACT §3.6) is not the title.
+    let card = node.ctx.card;
+    let in_report = card.intent != crate::data::cards_v2::CardIntent::Ask
+        && card.ask.as_ref().is_some_and(|a| a.blocking != Some(true));
+    (!in_q && (inputs > 1 || in_report) && !text.is_empty() && text != card.title)
         .then(|| question(&text, cx))
 }
 

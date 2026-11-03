@@ -746,8 +746,21 @@ pub fn decorate(
     let pend = pending_at(&events, id, now);
     let note = resolved_note(&events, id, now);
     let mark = super::band::surface_mark(ctx, node.tree, id);
+    // Interact.dc.html 02 step 3: a block the rev inserted keeps a live tint and
+    // `Ledger 刚加的` at its top right until the next rev; a changed block only flashes. Who
+    // caused the rev is said once, in the band (`band::updated`).
+    let inserted = changed && diff.is_some_and(|d| d.inserted.contains(id));
+    let added = inserted.then(|| {
+        meta(div())
+            .flex_none()
+            .ml_auto()
+            .one_line()
+            .text_color(k.live_ink)
+            .child(fill(c::JUST_ADDED, &[("name", &ctx.author)]))
+    });
 
     let mut col = div().flex().flex_col().min_w(px(0.));
+    let mut added = added;
     if let Some(m) = mark {
         let (ink, dot, text) = match m {
             super::band::Mark::You => (k.you_ink, k.you, c::BAND_SURFACE_YOU.to_string()),
@@ -763,10 +776,18 @@ pub fn decorate(
                 .flex()
                 .items_center()
                 .gap(space::S6)
-                .text_color(ink)
-                .font_weight(theme::MEDIUM_WEIGHT)
-                .child(div().size(px(6.)).rounded_full().bg(dot))
-                .child(text),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .text_color(ink)
+                        .font_weight(theme::MEDIUM_WEIGHT)
+                        .child(div().size(px(6.)).rounded_full().bg(dot))
+                        .child(text),
+                )
+                // The mark and 刚加的 share the row (the artboard's 问你 … Ledger 刚加的).
+                .children(added.take()),
         );
     }
     col = col.child(inner);
@@ -794,27 +815,10 @@ pub fn decorate(
             &[("name", &ctx.author), ("note", &n)],
         )));
     }
-    if changed && let Some(d) = diff {
-        if let Some(cause) = &d.cause {
-            let text = if Some(cause.actor_id.as_str()) == ctx.me.as_deref() {
-                c::ATTRIBUTION_SELF.to_string()
-            } else {
-                fill(
-                    c::ATTRIBUTION_OTHER,
-                    &[
-                        ("name", &ctx.name(&cause.actor_id)),
-                        ("time", &crate::views::shell::clock(cause.at as Millis)),
-                    ],
-                )
-            };
-            // At the block's top right, as Interact.dc.html 02 step 3 marks an inserted
-            // block: on the title row of a block that has one at its left, else on a line
-            // of its own above the block.
-            let attr = meta(div())
-                .flex_none()
-                .one_line()
-                .text_color(k.live_ink)
-                .child(text);
+    if changed {
+        if let Some(a) = added {
+            // On the title row of a block that has one at its left, else on a line of its
+            // own above the block.
             col = if titled(b) {
                 div()
                     .relative()
@@ -822,28 +826,53 @@ pub fn decorate(
                     .flex_col()
                     .min_w(px(0.))
                     .child(col)
-                    .child(div().absolute().top(px(5.)).right_0().child(attr))
+                    .child(div().absolute().top(px(5.)).right_0().child(a))
             } else {
                 div()
                     .flex()
                     .flex_col()
                     .min_w(px(0.))
-                    .child(div().flex().justify_end().mb(space::S4).child(attr))
+                    .child(div().flex().mb(space::S4).child(a))
                     .child(col)
             };
         }
-        let tinted = div()
-            .mx(px(-8.))
-            .px(px(8.))
-            .py(px(6.))
-            .my(px(-6.))
-            .rounded(theme::radius::MD)
-            .child(col);
+        // A top-level block spans the card's width (its 16 pt padding), as the artboard
+        // draws it; a nested one gets a small rounded tint.
+        let top = node.depth == 0;
+        let after_inserted = top
+            && diff.is_some_and(|d| {
+                let pos = node.tree.top.iter().position(|x| x.id() == Some(id));
+                pos.and_then(|i| i.checked_sub(1))
+                    .and_then(|i| node.tree.top[i].id())
+                    .is_some_and(|prev| d.inserted.contains(prev))
+            });
+        let tinted = if top {
+            div()
+                .mx(-space::S16)
+                .px(space::S16)
+                .py(space::S12)
+                .when(after_inserted && inserted, |el| {
+                    el.border_t_1().border_color(k.line)
+                })
+                .child(col)
+        } else {
+            div()
+                .mx(px(-8.))
+                .px(px(8.))
+                .py(px(6.))
+                .my(px(-6.))
+                .rounded(theme::radius::MD)
+                .child(col)
+        };
+        let rest = if inserted {
+            mix(k.live, k.bg, t::INSERTED_FILL)
+        } else {
+            k.bg
+        };
         if cx.reduce_motion() {
-            return tinted.into_any_element();
+            return if inserted { tinted.bg(rest) } else { tinted }.into_any_element();
         }
         let tint = mix(k.live, k.bg, t::CHANGE_FILL);
-        let bg = k.bg;
         let rev = ctx.card.rev;
         return crate::ui::motion::once(
             ctx.id(format!("chg-{id}-{rev}")),
@@ -852,8 +881,7 @@ pub fn decorate(
             move |el, p| {
                 let fade_in = (p * (t::CHANGE_FLASH.as_secs_f32() / t::CHANGE_IN.as_secs_f32()))
                     .clamp(0., 1.);
-                let tint_left = 1. - p;
-                el.opacity(fade_in).bg(mix(tint, bg, tint_left))
+                el.opacity(fade_in).bg(mix(tint, rest, 1. - p))
             },
         );
     }

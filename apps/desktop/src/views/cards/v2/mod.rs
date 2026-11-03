@@ -1119,7 +1119,18 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         .or_else(|| {
             super::v21::band::page_pending(ctx, cx).map(|(l, tone)| (l, String::new(), tone))
         });
+    // v11/r3-cards: a rev a member's event caused (Interact.dc.html 02 step 3).
+    let updated = waiting
+        .is_none()
+        .then(|| super::v21::band::updated(ctx))
+        .flatten();
     let t = match waiting.as_ref().map(|w| w.2) {
+        _ if updated.is_some() => Tone {
+            mark: k.ink_2,
+            ink: k.ink,
+            fill: mix(k.live, k.sunken, m::UPDATED_FILL),
+            edge: k.line,
+        },
         Some(PendTone::Live) => Tone {
             mark: k.live,
             ink: k.live_ink,
@@ -1135,15 +1146,15 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         Some(PendTone::Bad) => tone(&CardState::Failed { answer: None }, &k)?,
         None => tone(ctx.state, &k)?,
     };
-    let (label, detail) = match &waiting {
-        Some((l, d, _)) => (l.clone(), d.clone()),
-        None => super::v21::band::words(ctx, strip_words(ctx, cx)),
+    let (label, detail) = match (&waiting, &updated) {
+        (Some((l, d, _)), _) => (l.clone(), d.clone()),
+        (None, Some((l, d))) => (l.clone(), d.clone()),
+        (None, None) => super::v21::band::words(ctx, strip_words(ctx, cx)),
     };
-    let right = waiting
-        .is_none()
+    let right = (waiting.is_none() && updated.is_none())
         .then(|| super::v21::band::right(ctx))
         .flatten();
-    let action = if waiting.is_some() {
+    let action = if waiting.is_some() || updated.is_some() {
         None
     } else {
         strip_action(ctx, cx)
@@ -1171,6 +1182,9 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .items_center()
             .gap(space::S8)
             .child(match waiting.as_ref().map(|w| w.2) {
+                _ if updated.is_some() => {
+                    ui::icon(Lucide::RotateCw, px(16.), t.mark).into_any_element()
+                }
                 Some(PendTone::Live) => ui::motion::spinner().color(t.mark).into_any_element(),
                 Some(PendTone::Quiet) => {
                     ui::icon(Lucide::CircleAlert, px(16.), t.mark).into_any_element()

@@ -97,6 +97,9 @@ pub struct BlockUi {
     pub point: Option<(String, usize)>,
     /// The chart column under the pointer.
     pub hot: Option<usize>,
+    /// v11/r3-cards: I cleared the chart's point, so the pick that caused the rev no longer
+    /// marks it.
+    pub cleared: bool,
     /// The focused rank item.
     pub focus: Option<String>,
 }
@@ -107,6 +110,8 @@ pub struct RevDiff {
     pub to: u32,
     /// Inserted or changed block ids, with when the viewer first saw the change.
     pub changed: HashMap<String, Instant>,
+    /// The ones among `changed` that the rev inserted (marked 刚加的 until the next rev).
+    pub inserted: HashSet<String>,
     pub cause: Option<Cause>,
     /// Top-level blocks the rev removed, after which kept block they stood, and when the
     /// viewer first saw the removal (they fade out).
@@ -205,10 +210,16 @@ impl CardUi {
                 b.tab = None;
             }
         }
+        let inserted = ids
+            .iter()
+            .filter(|id| old.block(id).is_none())
+            .cloned()
+            .collect();
         let changed = ids.into_iter().map(|id| (id, now)).collect();
         self.diff = Some(RevDiff {
             to: card.rev,
             changed,
+            inserted,
             cause: cause.cloned(),
             removed: interact::removed_blocks(&old, card),
             at: Some(now),
@@ -390,7 +401,17 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
             continue;
         }
         let el = render_node(&node, b, window, cx);
+        // Two inserted blocks in a row share one tint, with a hairline between them.
+        let inserted = |x: &CardV2Block| {
+            snapshot
+                .diff
+                .as_ref()
+                .filter(|d| d.to == ctx.card.rev)
+                .zip(x.id())
+                .is_some_and(|(d, id)| d.inserted.contains(id))
+        };
         let gap = match (prev, b) {
+            (Some(p), b) if inserted(p) && inserted(b) => px(0.),
             (Some(CardV2Block::Row { .. }), _) | (_, CardV2Block::Row { .. }) => space::S16,
             (Some(_), CardV2Block::Group { .. }) => space::S14,
             _ => space::S12,

@@ -275,6 +275,15 @@ fn report_rev1() -> Value {
     )
 }
 
+// Interact.dc.html 02: the bars read as rows with no title; the hint asks for a click.
+fn bars_block() -> Value {
+    json!({ "id": "bars", "type": "chart", "kind": "bar",
+            "x": ["小红书", "群内邀请", "B 站", "抖音"],
+            "series": [ { "id": "groups", "name": "新增群", "values": [14, 10, 9, 5] } ],
+            "summary": "小红书 14、群内邀请 10、B 站 9、抖音 5。",
+            "events": ["chart.select", "chart.clear"], "emitBy": "members" })
+}
+
 fn bars_rev1() -> Value {
     with(
         base(
@@ -284,17 +293,15 @@ fn bars_rev1() -> Value {
         ),
         json!({
             "blocks": [
-                { "id": "bars", "type": "chart", "kind": "bar", "label": "新增群 · 按渠道",
-                  "x": ["小红书", "群内邀请", "B 站", "抖音"],
-                  "series": [ { "id": "groups", "name": "新增群", "values": [14, 10, 9, 5] } ],
-                  "summary": "小红书 14、群内邀请 10、B 站 9、抖音 5。",
-                  "events": ["chart.select", "chart.clear"], "emitBy": "members" },
-                { "id": "hint", "type": "text", "text": "点一根柱子，看这个渠道每周的数和带来最多群的内容。" }
+                bars_block(),
+                { "id": "hint", "type": "text", "text": "点一个渠道，Ledger 会拆开给你看。" }
             ]
         }),
     )
 }
 
+// Interact.dc.html 02 step 3: Ledger answers the click on B 站 with two blocks, the
+// breakdown by source and a follow-up question.
 fn bars_rev2() -> Value {
     with(
         base(
@@ -304,21 +311,15 @@ fn bars_rev2() -> Value {
         ),
         json!({
             "rev": 2,
+            "ask": { "id": "follow", "from": [ME] },
             "blocks": [
-                { "id": "bars", "type": "chart", "kind": "bar", "label": "新增群 · 按渠道",
-                  "x": ["小红书", "群内邀请", "B 站", "抖音"],
-                  "series": [ { "id": "groups", "name": "新增群", "values": [14, 10, 9, 5] } ],
-                  "summary": "小红书 14、群内邀请 10、B 站 9、抖音 5。",
-                  "events": ["chart.select", "chart.clear"], "emitBy": "members" },
-                { "id": "detail", "type": "group", "title": "B 站 · 按来源", "collapsible": false, "children": ["d_row", "d_posts"] },
-                { "id": "d_row", "type": "row", "weights": [1, 2], "children": ["d_metric", "d_weeks"] },
-                { "id": "d_metric", "type": "metric", "label": "B 站新增群", "value": 9, "delta": -1, "better": "up", "note": "比 9 月" },
-                { "id": "d_weeks", "type": "chart", "kind": "bar", "label": "每周",
-                  "x": ["10-06", "10-13", "10-20", "10-27"], "series": [ { "name": "新增群", "values": [3, 2, 2, 2] } ],
-                  "summary": "第一周最多，之后每周 2 个。" },
+                bars_block(),
+                { "id": "detail", "type": "group", "title": "B 站 · 按来源", "collapsible": false, "children": ["d_posts"] },
                 { "id": "d_posts", "type": "table", "columns": ["来源", "新增群", "比 9 月"],
-                  "rows": [ ["夹夹教程视频", "5", "+1"], ["UP 主合作", "3", "−1"], ["直播间", "1", "−1"] ],
-                  "rowKeys": ["tutorial", "up", "live"], "select": "single", "events": ["table.rowSelect"] }
+                  "rows": [ ["夹夹教程视频", "5", "+1"], ["UP 主合作", "3", "−1"], ["直播间", "1", "−1"], ["合计", "9", "−1"] ] },
+                { "id": "follow", "type": "decision", "label": "UP 主合作少了 1 个群。要我查一下是哪位 UP 主停更了吗？",
+                  "fallbackText": "好，去查 / 先不用", "deliver": "immediate",
+                  "options": [ { "id": "yes", "label": "好，去查" }, { "id": "no", "label": "先不用" } ] }
             ]
         }),
     )
@@ -814,16 +815,31 @@ pub fn all() -> Vec<Sample21> {
         out.push(s);
     }
     let mut drill = sample(DRILL, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev2());
-    drill.msg.edited_at = Some(at(10, 14));
+    drill.msg.edited_at = Some(at(10, 21));
     drill.msg.cause = Some(Cause {
         event_id: "ev-drill".into(),
         actor_id: ME.into(),
-        at: at(10, 14) as u64,
+        at: at(10, 21) as u64,
         event: "chart.select".into(),
         block_id: Some("bars".into()),
         action_id: None,
     });
     drill.prev = Some(Arc::new(card(bars_rev1())));
+    // My click on B 站 that caused rev 2 (its value names the bar).
+    let mut click = acked(
+        DRILL,
+        "bars",
+        "chart.select",
+        json!({ "series": "groups", "x": "B 站", "y": 9, "index": 2 }),
+        ExpectMode::Live,
+        LEDGER,
+    );
+    click.phase = CardEventPhase::Resolved {
+        result: crate::data::cards_v2::InteractionResult::Patched,
+        note: None,
+        at: 0,
+    };
+    drill.events.push((1_000, click));
     out.push(drill);
     let mut conflict = sample(
         CONFLICT,

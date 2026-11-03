@@ -381,6 +381,73 @@ pub fn right(ctx: &Ctx) -> Option<String> {
     }
 }
 
+/// The band of a rev that a member's event caused (Interact.dc.html 02 step 3, INTERACT
+/// §4.4 attribution): `Ledger 更新了这张卡` with `刚刚 · 按你点的「B 站」` for the viewer whose
+/// event caused it, `10:14 · 按 Joye 的选择` for everyone else. It stands in for the band of
+/// a done or info card until a rev without a cause; an open question or work keeps its own.
+pub fn updated(ctx: &Ctx) -> Option<(String, String)> {
+    if !is_21(ctx.card) || ctx.card.rev < 2 {
+        return None;
+    }
+    if !matches!(
+        ctx.state,
+        CardState::Info | CardState::Done { answer: None }
+    ) {
+        return None;
+    }
+    let cause = ctx.msg.cause.as_ref()?;
+    let at = cause.at as Millis;
+    let time = if ctx.env.now().saturating_sub(at) < 60_000 {
+        crate::copy::common::JUST_NOW.to_string()
+    } else {
+        crate::views::shell::clock(at)
+    };
+    let why = if Some(cause.actor_id.as_str()) == ctx.me.as_deref() {
+        match picked(ctx, cause) {
+            Some(what) => fill(c::ATTRIBUTION_PICK, &[("what", &what)]),
+            None => c::ATTRIBUTION_SELF.to_string(),
+        }
+    } else {
+        fill(
+            c::ATTRIBUTION_OTHER,
+            &[("name", &ctx.name(&cause.actor_id))],
+        )
+    };
+    Some((
+        fill(c::BAND_UPDATED, &[("name", &ctx.author)]),
+        fill(c::BAND_UPDATED_DETAIL, &[("time", &time), ("why", &why)]),
+    ))
+}
+
+/// What my event that caused the rev picked, in the card's words: the bar's x, the
+/// option's label, the selected row's first cell. `None` when my outbox no longer has it.
+fn picked(ctx: &Ctx, cause: &crate::data::cards_v2::Cause) -> Option<String> {
+    let block = cause.block_id.as_deref()?;
+    let events = ctx
+        .env
+        .provider
+        .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    let e = events.iter().rev().find(|e| {
+        e.event_id() == Some(cause.event_id.as_str())
+            || (e.request.block_id.as_deref() == Some(block) && e.request.event == cause.event)
+    })?;
+    let v = e.request.value.as_ref()?;
+    match (cause.event.as_str(), ctx.card.block(block)) {
+        ("chart.select", _) => v.get("x")?.as_str().map(str::to_string),
+        ("choice.change", Some(CardV2Block::Decision { options, .. })) => {
+            let id = v.get("value")?.as_str()?;
+            options.iter().find(|o| o.id == id).map(|o| o.label.clone())
+        }
+        ("table.rowSelect", Some(CardV2Block::Table { rows, row_keys, .. })) => {
+            let key = v.get("values")?.get(0)?.as_str()?;
+            let keys = super::data::row_keys(rows, row_keys.as_deref());
+            let i = keys.iter().position(|k| k == key)?;
+            rows.get(i)?.first().cloned()
+        }
+        _ => None,
+    }
+}
+
 /// The look of a band that follows my event, not the card.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PendTone {

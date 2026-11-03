@@ -295,27 +295,63 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         && !series.is_empty()
         && *kind != ChartKind::Spark;
     // The chosen point: mine now, else the one my waiting event names (optimistic).
-    let point = node.ui.block(id).point.clone().or_else(|| {
-        let events = ctx
-            .env
-            .provider
-            .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
-        let now = ctx.env.now();
-        events.iter().rev().find_map(|e| {
-            (e.request.block_id.as_deref() == Some(id.as_str())
-                && e.request.event == "chart.select"
-                && super::interact::stage_of(e, now).is_some()
-                && !super::interact::undone(e, now))
-            .then(|| {
-                let v = e.request.value.as_ref()?;
-                Some((
-                    v.get("series")?.as_str()?.to_string(),
-                    v.get("index")?.as_u64()? as usize,
-                ))
+    let point = node
+        .ui
+        .block(id)
+        .point
+        .clone()
+        .or_else(|| {
+            let events = ctx
+                .env
+                .provider
+                .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+            let now = ctx.env.now();
+            events.iter().rev().find_map(|e| {
+                (e.request.block_id.as_deref() == Some(id.as_str())
+                    && e.request.event == "chart.select"
+                    && super::interact::stage_of(e, now).is_some()
+                    && !super::interact::undone(e, now))
+                .then(|| {
+                    let v = e.request.value.as_ref()?;
+                    Some((
+                        v.get("series")?.as_str()?.to_string(),
+                        v.get("index")?.as_u64()? as usize,
+                    ))
+                })
+                .flatten()
             })
-            .flatten()
         })
-    });
+        .or_else(|| {
+            // My pick that caused this rev stays marked in it (Interact.dc.html 02 step 3), until
+            // I clear it.
+            let cause = ctx.msg.cause.as_ref()?;
+            if node.ui.block(id).cleared
+                || Some(cause.actor_id.as_str()) != ctx.me.as_deref()
+                || cause.block_id.as_deref() != Some(id.as_str())
+                || cause.event != "chart.select"
+            {
+                return None;
+            }
+            let events = ctx
+                .env
+                .provider
+                .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+            let e = events.iter().rev().find(|e| {
+                e.event_id() == Some(cause.event_id.as_str())
+                    || (e.request.block_id.as_deref() == Some(id.as_str())
+                        && e.request.event == "chart.select")
+            })?;
+            let v = e.request.value.as_ref()?;
+            Some((
+                v.get("series")?.as_str()?.to_string(),
+                v.get("index")?.as_u64()? as usize,
+            ))
+        });
+    // A single-series bar chart the viewer can pick from reads as a list of bars, one row
+    // per x (Interact.dc.html 02: 各渠道新增群，点一个看明细).
+    if selectable && *kind == ChartKind::Bar && series.len() == 1 {
+        return bar_rows(node, b, point, parts, window, cx);
+    }
     let mut out = div()
         .relative()
         .flex()
@@ -445,7 +481,9 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                                     if on {
                                         // A second click clears (chart.clear when declared).
                                         uie.update(cx, |u, cx| {
-                                            u.block_mut(&block).point = None;
+                                            let b = u.block_mut(&block);
+                                            b.point = None;
+                                            b.cleared = true;
                                             cx.notify();
                                         });
                                         if clear {
@@ -454,7 +492,9 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                                         return;
                                     }
                                     uie.update(cx, |u, cx| {
-                                        u.block_mut(&block).point = Some((skey.clone(), i));
+                                        let b = u.block_mut(&block);
+                                        b.point = Some((skey.clone(), i));
+                                        b.cleared = false;
                                         cx.notify();
                                     });
                                     let part = PartRef {
@@ -510,6 +550,206 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         out = out.child(meta(div()).text_color(k.ink_3).child(s.clone()));
     }
     out.into_any_element()
+}
+
+/// The bars of a pickable single-series bar chart as rows (Interact.dc.html 02): the x at
+/// the left, the bar, the value at the right. Before a pick every bar is `ink-3`; after one
+/// the chosen bar is `ink` with its name in 600 and the others fall back to `line-2`.
+fn bar_rows(
+    node: &Node,
+    b: &CardV2Block,
+    point: Option<(String, usize)>,
+    parts: Option<crate::views::refs::cards::BlockParts>,
+    window: &gpui::Window,
+    cx: &mut App,
+) -> AnyElement {
+    let CardV2Block::Chart {
+        id,
+        label,
+        unit,
+        x,
+        series,
+        ..
+    } = b
+    else {
+        return div().into_any_element();
+    };
+    let ctx = node.ctx;
+    let k = theme::colors(cx);
+    let xs = x.clone().unwrap_or_default();
+    let Some(main) = series.first() else {
+        return div().into_any_element();
+    };
+    let values: Vec<Option<f64>> = main.values.iter().map(|v| v.as_f64()).collect();
+    let max = values
+        .iter()
+        .flatten()
+        .copied()
+        .fold(0f64, f64::max)
+        .max(f64::EPSILON);
+    let picked = point.as_ref().map(|(_, i)| *i);
+    let hot = node.ui.block(id).hot;
+    let emit = Emitter::of(ctx);
+    let clear = super::interact::sends(ctx.card, b, "chart.clear");
+    let skey = main.key().to_string();
+    let mut list = div().flex().flex_col().gap(px(2.)).min_w(px(0.));
+    for (i, xv) in xs.iter().enumerate() {
+        let on = picked == Some(i);
+        let (name_ink, weight, bar) = match picked {
+            None => (k.ink, gpui::FontWeight::NORMAL, k.ink_3),
+            Some(_) if on => (k.ink, gpui::FontWeight::SEMIBOLD, k.ink),
+            Some(_) => (k.ink_3, gpui::FontWeight::NORMAL, k.line_2),
+        };
+        let y = values.get(i).copied().flatten();
+        let shown = y.map(|v| match unit {
+            Some(u) => format!("{} {u}", b20::fmt_number(v)),
+            None => b20::fmt_number(v),
+        });
+        let (emit, uie, block, skey, xv2) = (
+            emit.clone(),
+            ctx.ui.clone(),
+            id.clone(),
+            skey.clone(),
+            xv.clone(),
+        );
+        let (uih, blockh) = (ctx.ui.clone(), id.clone());
+        let row = div()
+            .id(eid(node, format!("bar-{id}-{i}")))
+            .flex()
+            .items_center()
+            .gap(space::S10)
+            .h(t::BAR_ROW)
+            .px(space::S6)
+            .mx(-space::S6)
+            .rounded(t::BAR_ROW_RADIUS)
+            .cursor_pointer()
+            .when(hot == Some(i), |el| el.bg(k.hover))
+            .text_size(px(13.))
+            .relative()
+            .child(
+                div()
+                    .id(eid(node, format!("bar-hot-{id}-{i}")))
+                    .absolute()
+                    .inset_0()
+                    .on_hover(move |over, _, cx| {
+                        uih.update(cx, |u, cx| {
+                            let b = u.block_mut(&blockh);
+                            let next = if *over {
+                                Some(i)
+                            } else if b.hot == Some(i) {
+                                None
+                            } else {
+                                b.hot
+                            };
+                            if b.hot != next {
+                                b.hot = next;
+                                cx.notify();
+                            }
+                        })
+                    }),
+            )
+            .on_click(move |_, _, cx| {
+                if on {
+                    // A second click clears (chart.clear when declared).
+                    uie.update(cx, |u, cx| {
+                        let b = u.block_mut(&block);
+                        b.point = None;
+                        b.cleared = true;
+                        cx.notify();
+                    });
+                    if clear {
+                        emit.send(&block, "chart.clear", json!({}), None, cx);
+                    }
+                    return;
+                }
+                uie.update(cx, |u, cx| {
+                    let b = u.block_mut(&block);
+                    b.point = Some((skey.clone(), i));
+                    b.cleared = false;
+                    cx.notify();
+                });
+                let part = PartRef {
+                    kind: "bar".into(),
+                    keys: Some(
+                        [
+                            ("series".to_string(), PartKey::Key(skey.clone())),
+                            ("x".to_string(), PartKey::Key(xv2.clone())),
+                        ]
+                        .into(),
+                    ),
+                };
+                emit.send(
+                    &block,
+                    "chart.select",
+                    json!({ "series": skey, "x": xv2, "y": y, "index": i }),
+                    Some(part),
+                    cx,
+                );
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .w(t::BAR_NAME)
+                    .one_line()
+                    .text_color(name_ink)
+                    .font_weight(weight)
+                    .child(xv.clone()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .h(t::BAR_TRACK)
+                    .rounded(t::BAR_TRACK_RADIUS)
+                    .bg(k.sunken)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .h_full()
+                            .rounded(t::BAR_TRACK_RADIUS)
+                            .bg(bar)
+                            .w(gpui::relative((y.unwrap_or(0.) / max).clamp(0., 1.) as f32)),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .min_w(t::BAR_VALUE)
+                    .flex()
+                    .justify_end()
+                    .mono()
+                    .text_size(px(12.))
+                    .text_color(k.ink_2)
+                    .children(shown),
+            );
+        // A bar that answers is a control: ⌥-click and the menu reference it, a plain
+        // click still picks it.
+        list = list.child(match &parts {
+            Some(p) => crate::views::refs::affordance::part(
+                row,
+                p.spec(crate::views::refs::cards::Pick::Point { series: 0, x: i })
+                    .control(true),
+                window,
+                cx,
+            ),
+            None => row.into_any_element(),
+        });
+    }
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S6)
+        .min_w(px(0.))
+        .when_some(label.clone(), |el, l| {
+            el.child(
+                meta(div())
+                    .font_weight(theme::MEDIUM_WEIGHT)
+                    .text_color(k.ink)
+                    .child(l),
+            )
+        })
+        .child(list)
+        .into_any_element()
 }
 
 pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) -> AnyElement {

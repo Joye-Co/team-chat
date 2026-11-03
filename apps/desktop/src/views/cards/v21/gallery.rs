@@ -466,7 +466,7 @@ impl Gallery21 {
                     ),
                     item(
                         c::I_DRILL_OTHER,
-                        "",
+                        c::I_DRILL_OTHER_NOTE,
                         self.card(
                             DRILL,
                             XIAOWANG,
