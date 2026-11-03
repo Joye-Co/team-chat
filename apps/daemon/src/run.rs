@@ -118,6 +118,61 @@ pub struct RunCtx {
     pub control_rx: mpsc::UnboundedReceiver<RunCtl>,
     pub out: RunOut,
     pub redactor: Arc<crate::redact::Redactor>,
+    /// `chat-run` outputs waiting for `run.output.result` (shared with the daemon loop).
+    pub outputs: Arc<crate::chat_run::Outputs>,
+}
+
+/// `chat-run` for one run: the link on PATH and the socket. Side chat runs get none.
+fn start_chat_run(
+    run_dir: &std::path::Path,
+    run_id: &str,
+    out: &RunOut,
+    outputs: Arc<crate::chat_run::Outputs>,
+    env: &mut Vec<(String, String)>,
+) -> Option<crate::chat_run::Server> {
+    let bin = match crate::chat_run::install_link(run_dir) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("{} run {run_id}: no chat-run link: {e}", now_ms());
+            return None;
+        }
+    };
+    let out = out.clone();
+    let id = run_id.to_string();
+    let emit = move |ev: RunEvent| {
+        let _ = out.send((
+            id.clone(),
+            RunMsg::Frame(Up::RunEvent {
+                run_id: id.clone(),
+                seq: 0,
+                at: now_ms(),
+                event: ev,
+            }),
+        ));
+    };
+    let server = match crate::chat_run::Server::start(
+        crate::chat_run::socket_path(run_dir),
+        outputs,
+        emit,
+        crate::chat_run::TIMEOUT,
+    ) {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("{} run {run_id}: no chat-run socket: {e}", now_ms());
+            return None;
+        }
+    };
+    let path = match env.iter().find(|(k, _)| k == "PATH") {
+        Some((_, p)) if !p.is_empty() => format!("{}:{p}", bin.display()),
+        _ => bin.display().to_string(),
+    };
+    env.retain(|(k, _)| k != "PATH" && k != crate::chat_run::ENV_SOCKET);
+    env.push(("PATH".into(), path));
+    env.push((
+        crate::chat_run::ENV_SOCKET.into(),
+        server.path().display().to_string(),
+    ));
+    Some(server)
 }
 
 pub async fn supervise(ctx: RunCtx) {
@@ -129,6 +184,7 @@ pub async fn supervise(ctx: RunCtx) {
         control_rx,
         out,
         redactor,
+        outputs,
     } = ctx;
     let run_id = assign.run_id.clone();
     let started = Instant::now();
@@ -159,6 +215,14 @@ pub async fn supervise(ctx: RunCtx) {
                 state: "running".into(),
                 message: None,
             });
+            let aside = assign.kind.as_deref() == Some(KIND_ASIDE);
+            let mut env = build_env(&cfg, &rt, &assign);
+            // Lives until the CLI is done; dropping it removes the socket.
+            let chat_run = if aside {
+                None
+            } else {
+                start_chat_run(&dir, &run_id, &out, outputs, &mut env)
+            };
             let spec = RunSpec {
                 run_id: run_id.clone(),
                 runtime_name: assign.runtime.clone(),
@@ -167,10 +231,13 @@ pub async fn supervise(ctx: RunCtx) {
                 model: assign.model.clone(),
                 cwd,
                 run_dir: dir.clone(),
-                env: build_env(&cfg, &rt, &assign),
-                aside: assign.kind.as_deref() == Some(KIND_ASIDE),
+                env,
+                aside,
+                note: chat_run.as_ref().map(|_| crate::chat_run::note()),
             };
-            run_runtime(&cfg, &assign, spec, control_rx, &event).await
+            let res = run_runtime(&cfg, &assign, spec, control_rx, &event).await;
+            drop(chat_run);
+            res
         }
     };
 

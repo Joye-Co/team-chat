@@ -253,7 +253,9 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 let sid = r["sessionId"].as_str().unwrap_or_default().to_string();
                                 let _ = emit.send(RunEvent::Session { session_id: sid.clone(), runtime: spec.runtime_name.clone(), model: None });
                                 session = Some(sid);
-                                send_prompt(&mut p, &mut ids, &mut pending, &mut norm, &emit, session.as_deref().unwrap_or_default(), &spec.prompt).await;
+                                // ACP has no system prompt: the run note goes before the first prompt.
+                                let first = first_prompt(&spec);
+                                send_prompt(&mut p, &mut ids, &mut pending, &mut norm, &emit, session.as_deref().unwrap_or_default(), &first).await;
                                 prompting = true;
                             }
                             Pending::Prompt => {
@@ -347,6 +349,14 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_id: session,
         session_file: None,
         usage: None,
+    }
+}
+
+/// The first prompt: the run note (how to use `chat-run`), when set, then the prompt.
+pub fn first_prompt(spec: &RunSpec) -> String {
+    match &spec.note {
+        Some(n) => format!("{n}\n\n{}", spec.prompt),
+        None => spec.prompt.clone(),
     }
 }
 

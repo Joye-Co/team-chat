@@ -41,6 +41,8 @@ pub struct RunSpec {
     /// A read-only side chat run (`run.assign.kind = "aside"`): the runtime forces its
     /// read-only mode and ignores the configured args and tool grants.
     pub aside: bool,
+    /// Run instructions for the CLI's system prompt (how to use `chat-run`), when the run has it.
+    pub note: Option<String>,
 }
 
 impl RunSpec {

@@ -411,6 +411,10 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     .collect();
     args.push(session_id.clone());
     args.extend(permission_args(&spec));
+    if let Some(n) = &spec.note {
+        args.push("--append-system-prompt".into());
+        args.push(n.clone());
+    }
     if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
         args.push("--model".into());
         args.push(m);

@@ -37,6 +37,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
             ("HOME".into(), dir.to_string_lossy().into()),
         ],
         aside: false,
+        note: None,
     }
 }
 

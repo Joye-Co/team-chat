@@ -341,8 +341,8 @@ neither. One request is one JSON line `{ op, body }`; the daemon sends the `outp
 `run.output.result` comes, or after 15 s `{ ok: false, error: { code: "timeout", reason:
 "server.too_old" } }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
 `reason` (exit 1). The CLI learns about `chat-run` from a short note: Claude Code
-`--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP a first text block of
-the first prompt; the PTY gets none.
+`--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP the text before the
+first prompt; the PTY gets none.
 
 The envelope JSON holds `messageId`, `rev`, `askId`, `answerId`, `eventId`, `event`, `actionId`,
 `blockId`, `value`, `inputs`, `editedValues`, `actor` and `block` (card), or `artifactId`,

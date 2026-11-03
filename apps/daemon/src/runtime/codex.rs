@@ -390,6 +390,9 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
                                     params["model"] = json!(m);
                                 }
+                                if let Some(n) = &spec.note {
+                                    params["developerInstructions"] = json!(n);
+                                }
                                 let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
                             }
                             Pending::ThreadStart => {
