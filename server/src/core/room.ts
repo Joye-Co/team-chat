@@ -529,7 +529,24 @@ export class GroupRoom extends DurableObject<Env> {
       broadcast: (frame, opts) => this.broadcast(frame, opts),
       waitUntil: (p) => this.ctx.waitUntil(p),
       wakeAt: (at) => this.wakeAt(at),
+      serial: (key, fn) => this.serial(key, fn),
     };
+  }
+
+  // cards2: one read-await-write of a message at a time (edits, card patches, answers).
+  private readonly serials = new Map<string, Promise<unknown>>();
+  private serial<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.serials.get(key) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.serials.set(key, tail);
+    void tail.then(() => {
+      if (this.serials.get(key) === tail) this.serials.delete(key);
+    });
+    return run;
   }
 
   /** Sets the alarm to `at` unless it is already set earlier. */
@@ -899,61 +916,69 @@ export class GroupRoom extends DurableObject<Env> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
-      const row = this.messageRow(frame.messageId);
-      if (!row) throw new ApiError("not_found", "message not found");
-      if (row.author_id !== actor.id) throw new ApiError("forbidden", "only the author can edit");
-      if (row.deleted_at !== null) throw new ApiError("conflict", "message is deleted");
-      if ((frame.card || frame.cardV2) && row.kind !== "card") throw new ApiError("invalid", "only a card message can get a card");
-      const current = this.toMessage(row);
-      let ext: Record<string, unknown> = row.ext ? (JSON.parse(row.ext) as Record<string, unknown>) : {};
-      const changed: Record<string, unknown> = {};
-      if (frame.card) changed.card = frame.card;
-      const room = this.roomContext();
-      for (const e of editExtensions) {
-        const add = e(frame as Record<string, unknown>, room, actor, current);
-        if (add) Object.assign(changed, add);
-      }
-      const merged = { ...ext, ...changed };
-      const card = (merged.card as Card | undefined) ?? null;
-      const fallback = (merged.cardV2 as CardV2 | undefined)?.fallback;
-      const draft = { body: row.kind === "card" && frame.body === "" && card ? fallback || card.title : frame.body, changed };
-      // Card v2 revs, causes and refs (cards2 feature).
-      const writes: MessageWriteResult[] = [];
-      for (const h of messageWriteHooks) {
-        if (!h.edit) continue;
-        const w = await h.edit(frame as Record<string, unknown>, room, actor, current, draft);
-        if (w) writes.push(w);
-      }
-      ext = { ...ext, ...changed };
-      const body = draft.body;
-      const streaming = row.streaming === 1 && frame.streaming === true;
-      if (!streaming) this.dropDelta(row.id);
-      const now = Date.now();
-      const edited = this.commit((tx) => {
-        const seq = tx.nextSeq();
-        this.sql.exec(
-          "UPDATE messages SET body = ?, edited_at = ?, streaming = ?, ext = ? WHERE id = ?",
-          body,
-          now,
-          streaming ? 1 : 0,
-          Object.keys(ext).length > 0 ? JSON.stringify(ext) : null,
-          row.id,
-        );
-        tx.append({
-          type: "message.updated",
-          actorId: actor.id,
-          topicId: row.topic_id,
-          messageId: row.id,
-          data: { ...changed, messageId: row.id, body, editedAt: now, streaming },
-        });
-        this.touchTopic(row.topic_id, seq);
-        const message = this.toMessage(this.messageRow(row.id) as MessageRow);
-        for (const w of writes) w.inTx?.(tx, message);
-        return { message };
-      });
+      // Card writes of this message wait for this edit (its hooks await) and the reverse.
+      const { edited, writes } = await this.serial(`message:${frame.messageId}`, () => this.editLocked(actor, frame));
       for (const w of writes) w.after?.(edited.message);
       return edited;
     });
+  }
+
+  private async editLocked(actor: Actor, frame: EditFrame): Promise<{ edited: { message: Message }; writes: MessageWriteResult[] }> {
+    const row = this.messageRow(frame.messageId);
+    if (!row) throw new ApiError("not_found", "message not found");
+    if (row.author_id !== actor.id) throw new ApiError("forbidden", "only the author can edit");
+    if (row.deleted_at !== null) throw new ApiError("conflict", "message is deleted");
+    if ((frame.card || frame.cardV2) && row.kind !== "card") throw new ApiError("invalid", "only a card message can get a card");
+    const current = this.toMessage(row);
+    let ext: Record<string, unknown> = row.ext ? (JSON.parse(row.ext) as Record<string, unknown>) : {};
+    const changed: Record<string, unknown> = {};
+    if (frame.card) changed.card = frame.card;
+    const room = this.roomContext();
+    for (const e of editExtensions) {
+      const add = e(frame as Record<string, unknown>, room, actor, current);
+      if (add) Object.assign(changed, add);
+    }
+    const merged = { ...ext, ...changed };
+    const card = (merged.card as Card | undefined) ?? null;
+    const fallback = (merged.cardV2 as CardV2 | undefined)?.fallback;
+    const draft = { body: row.kind === "card" && frame.body === "" && card ? fallback || card.title : frame.body, changed };
+    // Card v2 revs, causes and refs (cards2 feature).
+    const writes: MessageWriteResult[] = [];
+    for (const h of messageWriteHooks) {
+      if (!h.edit) continue;
+      const w = await h.edit(frame as Record<string, unknown>, room, actor, current, draft);
+      if (w) writes.push(w);
+    }
+    ext = { ...ext, ...changed };
+    const body = draft.body;
+    const streaming = row.streaming === 1 && frame.streaming === true;
+    if (!streaming) this.dropDelta(row.id);
+    const now = Date.now();
+    const edited = this.commit((tx) => {
+      // The hooks awaited: a delete may have come in between.
+      if (this.messageRow(row.id)?.deleted_at !== null) throw new ApiError("conflict", "message is deleted");
+      const seq = tx.nextSeq();
+      this.sql.exec(
+        "UPDATE messages SET body = ?, edited_at = ?, streaming = ?, ext = ? WHERE id = ?",
+        body,
+        now,
+        streaming ? 1 : 0,
+        Object.keys(ext).length > 0 ? JSON.stringify(ext) : null,
+        row.id,
+      );
+      tx.append({
+        type: "message.updated",
+        actorId: actor.id,
+        topicId: row.topic_id,
+        messageId: row.id,
+        data: { ...changed, messageId: row.id, body, editedAt: now, streaming },
+      });
+      this.touchTopic(row.topic_id, seq);
+      const message = this.toMessage(this.messageRow(row.id) as MessageRow);
+      for (const w of writes) w.inTx?.(tx, message);
+      return { message };
+    });
+    return { edited, writes };
   }
 
   async remove(

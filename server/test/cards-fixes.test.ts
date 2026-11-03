@@ -4,7 +4,8 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
-import { Client, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
+import { registerRequesterResolver } from "../src/cards2/delivery";
+import { Client, clientMsgId, createGroup, createMember, protocolViolations, type TestMember, waitUntil } from "./helpers";
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
@@ -194,5 +195,97 @@ describe("ask.from requester", () => {
     const r2 = await cbot.ok({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 3, ops: [{ op: "card", props: { ask: { id: "go2", from: ["requester"], blocking: false } } }] });
     expect(r2.message.cardState.ask.from).toEqual([bob.id]);
     for (const c of [ca, cb, cbot]) c.close();
+  });
+});
+
+/**
+ * Holds the requester lookup of one group's card writes until the test lets it go. Plain
+ * flags: a promise made in the test cannot be awaited inside the room.
+ */
+const gate = { groupId: "", held: false, inside: false };
+registerRequesterResolver(async (room) => {
+  if (room.groupId !== gate.groupId || !gate.held) return undefined;
+  gate.inside = true;
+  while (gate.held) await new Promise((r) => setTimeout(r, 10));
+  return undefined;
+});
+function hold(gid: string) {
+  Object.assign(gate, { groupId: gid, held: true, inside: false });
+  return {
+    inside: waitUntil(() => gate.inside, 5000, "the write waits on the lookup"),
+    open: () => {
+      gate.held = false;
+    },
+  };
+}
+
+describe("concurrent card writes", () => {
+  /** The card with one more block whose emitters are resolved on write (so the write waits on the lookup). */
+  const more = (card: CardV2, id: string): CardV2 => ({
+    ...card,
+    blocks: [...card.blocks, { id, type: "buttons", buttons: [{ id: "b", label: "看看" }], emitBy: "requester", events: ["button.press"], fallbackText: "看看" }],
+  });
+
+  it("an edit or a patch that waits keeps an answer stored meanwhile", async () => {
+    const { alice, gid, ca, cbot } = await setup();
+    const card = quick([alice.id]);
+    // Edit.
+    const m = (await send(cbot, gid, card)).message;
+    let h = hold(gid);
+    const edit = cbot.request({ t: "edit", groupId: gid, messageId: m.id, body: "", baseRev: 1, cardV2: more(card, "x1") });
+    await h.inside;
+    const a = ev(ca, gid, m.id, { blockId: "pick", event: "choice.submit", value: { value: "yes" } });
+    await sleep(100);
+    h.open();
+    expect(await edit).toMatchObject({ ok: true });
+    expect(await a).toMatchObject({ ok: true, result: { stored: true } });
+    let page = await ca.request({ t: "history", groupId: gid, topicId: m.topicId });
+    let now = page.messages.find((x: any) => x.id === m.id);
+    expect(now.cardState.ask.status).toBe("answered");
+    expect(now.cardState.answers).toHaveLength(1);
+    // Patch.
+    const p = (await send(cbot, gid, card)).message;
+    h = hold(gid);
+    const patch = cbot.request({ t: "card.patch", groupId: gid, messageId: p.id, baseRev: 1, ops: [{ op: "insert", block: more(card, "x2").blocks[2] }] });
+    await h.inside;
+    await sleep(1100);
+    const b = ev(ca, gid, p.id, { blockId: "pick", event: "choice.submit", value: { value: "no" } });
+    await sleep(100);
+    h.open();
+    expect(await patch).toMatchObject({ ok: true });
+    expect(await b).toMatchObject({ ok: true, result: { stored: true } });
+    page = await ca.request({ t: "history", groupId: gid, topicId: p.topicId });
+    now = page.messages.find((x: any) => x.id === p.id);
+    expect(now.cardState.ask.status).toBe("answered");
+    expect(now.cardState.answers).toHaveLength(1);
+    for (const c of [ca, cbot]) c.close();
+  });
+
+  it("an edit or a patch of a message deleted while it waits fails and writes nothing", async () => {
+    const { alice, gid, co, ca, cbot } = await setup();
+    const card = quick([alice.id]);
+    for (const kind of ["edit", "patch"]) {
+      const m = (await send(cbot, gid, card)).message;
+      const h = hold(gid);
+      const write =
+        kind === "edit"
+          ? cbot.request({ t: "edit", groupId: gid, messageId: m.id, body: "", baseRev: 1, cardV2: more(card, "x1") })
+          : cbot.request({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 1, ops: [{ op: "insert", block: more(card, "x2").blocks[2] }] });
+      await h.inside;
+      // An owner deletes it (the author's own writes keep their socket's order).
+      const del = co.request({ t: "delete", groupId: gid, messageId: m.id });
+      await sleep(100);
+      h.open();
+      expect((await write).ok, kind).toBe(false);
+      expect(await del).toMatchObject({ ok: true });
+      const page = await ca.request({ t: "history", groupId: gid, topicId: m.topicId });
+      const now = page.messages.find((x: any) => x.id === m.id);
+      expect(now.deletedAt).not.toBeNull();
+      expect(now.cardV2).toBeUndefined();
+      const log = await ca.request({ t: "fetch", groupId: gid, afterSeq: m.createdSeq });
+      const mine = log.events.filter((e: any) => e.data?.messageId === m.id);
+      expect(mine.map((e: any) => e.type), kind).toEqual(["message.deleted"]);
+    }
+    for (const c of [co, ca, cbot]) c.close();
   });
 });

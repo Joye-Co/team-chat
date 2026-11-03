@@ -4,6 +4,7 @@
 // (./hooks). 产出 page events (`artifact.event`) are the files feature's (server/src/files/bridge.ts).
 import {
   type CardPatchAck,
+  type Cause,
   type ClientFrameOf,
   type Message,
   type PatchOp,
@@ -13,7 +14,7 @@ import { ApiError, unwrap } from "../core/errors";
 import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc } from "../core/registry";
 import { ulid } from "../core/ids";
-import { type CardEventArgs, cardEvent, loadCard, writeCardUpdate } from "./events";
+import { type CardEventArgs, cardEvent, cardLock, loadCard, writeCardUpdate } from "./events";
 import { closeRetractWindow } from "./delivery";
 import { checkCause, resolved } from "./hooks";
 import { applyPatch } from "./patch";
@@ -113,6 +114,17 @@ registerRoomRpc(CARD_PRESS_RPC, async (room, actor, args) => {
 registerRoomRpc(CARD_PATCH_RPC, async (room, actor, args): Promise<CardPatchAck> => {
   const a = member(room, actor);
   const f = args as { messageId: string; baseRev: number; ops: PatchOp[]; cause?: string; clientPatchId?: string };
+  // Under the message's lock: the state read before the awaits is the state the commit replaces.
+  const { ack, cause, rowId } = await room.serial(cardLock(f.messageId), () => patchLocked(room, a, f));
+  if (cause) resolved(room, cause, "patched", rowId);
+  return ack;
+});
+
+async function patchLocked(
+  room: RoomContext,
+  a: Actor,
+  f: { messageId: string; baseRev: number; ops: PatchOp[]; cause?: string; clientPatchId?: string },
+): Promise<{ ack: CardPatchAck; cause?: Cause; rowId: string }> {
   const now = Date.now();
   if (f.clientPatchId) {
     const dup = room.sql
@@ -124,7 +136,7 @@ registerRoomRpc(CARD_PATCH_RPC, async (room, actor, args): Promise<CardPatchAck>
         now - EVENT_KEEP_MS,
       )
       .toArray()[0];
-    if (dup) return { ...(JSON.parse(dup.ack) as CardPatchAck), duplicate: true };
+    if (dup) return { ack: { ...(JSON.parse(dup.ack) as CardPatchAck), duplicate: true }, rowId: f.messageId };
   }
   const dir = await directory(room);
   const { row, ext, card, state } = await loadCard(room, f.messageId, dir);
@@ -161,9 +173,8 @@ registerRoomRpc(CARD_PATCH_RPC, async (room, actor, args): Promise<CardPatchAck>
     }
     pruneEvents(room.sql, now);
   });
-  if (cause) resolved(room, cause, "patched", row.id);
-  return ack as CardPatchAck;
-});
+  return { ack: ack as CardPatchAck, cause, rowId: row.id };
+}
 
 function toMessage(room: RoomContext, r: Record<string, SqlStorageValue>): Message {
   const m: Message = {

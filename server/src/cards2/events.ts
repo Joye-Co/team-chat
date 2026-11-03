@@ -133,6 +133,8 @@ export function writeCardUpdate(
   dir: Directory,
   change: { card: CardV2; state: CardState; cardChanged: boolean; cause?: Cause; body?: string; now: number },
 ): void {
+  // Every caller read the row before an await; a delete may have come in between.
+  if (messageRow(room.sql, row.id)?.deleted_at !== null) throw new ApiError("not_found", "card message not found");
   const card = deriveV1(change.card, change.state, dir);
   const next: Record<string, unknown> = { ...ext, cardV2: change.card, card, cardState: change.state };
   if (change.cause) next.cause = change.cause;
@@ -187,10 +189,25 @@ function inputSet(card: CardV2, action: CardV2Action | undefined, container: Blo
   return new Set(allBlocks(card).filter((b) => takesInput(b as Block) || b.type === "draft").map((b) => b.id));
 }
 
-/** Handles one card event (all forms). Returns the ack result. */
+/** An accepted event: its ack, and the delivery that gives the ack its `expect`. */
+type Pending = { ack: CardEventAck; d?: CardEventDelivery };
+
+/** The lock of a message's card writes (edits, patches, answers, retracts, expiry). */
+export const cardLock = (messageId: string) => `message:${messageId}`;
+
+/**
+ * Handles one card event (all forms). Returns the ack result. The checks and the write run
+ * under the message's lock, so an edit or patch that awaits cannot overwrite the answer; the
+ * delivery (`expect`) runs after it.
+ */
 export async function cardEvent(room: RoomContext, actor: Actor, a: CardEventArgs): Promise<CardEventAck> {
-  const now = Date.now();
   if (actor.kind === "bot") throw new ApiError("forbidden", "only people send card events", "interact.bot_emitter");
+  const p = await room.serial(cardLock(a.messageId), () => cardEventLocked(room, actor, a));
+  return p.d ? finishAck(room, p.ack, p.d) : p.ack;
+}
+
+async function cardEventLocked(room: RoomContext, actor: Actor, a: CardEventArgs): Promise<Pending> {
+  const now = Date.now();
   if (a.clientEventId) {
     const dup = room.sql
       .exec<{ ack: string }>(
@@ -201,7 +218,7 @@ export async function cardEvent(room: RoomContext, actor: Actor, a: CardEventArg
         now - EVENT_KEEP_MS,
       )
       .toArray()[0];
-    if (dup) return { ...(JSON.parse(dup.ack) as CardEventAck), duplicate: true };
+    if (dup) return { ack: { ...(JSON.parse(dup.ack) as CardEventAck), duplicate: true } };
   }
   const dir = await directory(room);
   const { row, ext, card, state } = await loadCard(room, a.messageId, dir);
@@ -335,12 +352,12 @@ async function finishAck(room: RoomContext, ack: CardEventAck, d: CardEventDeliv
   return out;
 }
 
-async function storeAnswer(
+function storeAnswer(
   room: RoomContext,
   actor: Actor,
   a: CardEventArgs,
   l: Loaded & { block?: Block; action?: CardV2Action },
-): Promise<CardEventAck> {
+): Pending {
   const { row, card, now } = l;
   const ask = l.state.ask as NonNullable<CardState["ask"]>;
   const eventId = ulid(now);
@@ -371,28 +388,31 @@ async function storeAnswer(
     writeCardUpdate(room, tx, row, l.ext, actor.id, l.dir, { card, state, cardChanged: false, now });
     insertEvent(room, { eventId, row, actor, a, stored: true, now, ack, cardRev: card.rev });
   });
-  return finishAck(room, ack, {
-    groupId: room.groupId,
-    topicId: row.topic_id,
-    messageId: row.id,
-    authorId: row.author_id,
-    eventId,
-    rev: a.rev,
-    event: a.event,
-    blockId: a.blockId,
-    actionId: a.actionId,
-    value: a.value,
-    inputs: a.inputs,
-    part: a.part,
-    actorId: actor.id,
-    at: now,
-    stored: true,
-    answerId,
-    askId: ask.id,
-  });
+  return {
+    ack,
+    d: {
+      groupId: room.groupId,
+      topicId: row.topic_id,
+      messageId: row.id,
+      authorId: row.author_id,
+      eventId,
+      rev: a.rev,
+      event: a.event,
+      blockId: a.blockId,
+      actionId: a.actionId,
+      value: a.value,
+      inputs: a.inputs,
+      part: a.part,
+      actorId: actor.id,
+      at: now,
+      stored: true,
+      answerId,
+      askId: ask.id,
+    },
+  };
 }
 
-async function liveEvent(room: RoomContext, actor: Actor, a: CardEventArgs, l: { row: MessageRow; card: CardV2; now: number }): Promise<CardEventAck> {
+function liveEvent(room: RoomContext, actor: Actor, a: CardEventArgs, l: { row: MessageRow; card: CardV2; now: number }): Pending {
   const { row, now } = l;
   const eventId = ulid(now);
   const ack: CardEventAck = { eventId, stored: false, expect: { by: row.author_id, mode: "none" } };
@@ -425,27 +445,30 @@ async function liveEvent(room: RoomContext, actor: Actor, a: CardEventArgs, l: {
       .run()
       .catch((err) => room.log.error("card event audit failed", { err })),
   );
-  return finishAck(room, ack, {
-    groupId: room.groupId,
-    topicId: row.topic_id,
-    messageId: row.id,
-    authorId: row.author_id,
-    eventId,
-    rev: a.rev,
-    event: a.event,
-    blockId: a.blockId,
-    actionId: a.actionId,
-    value: a.value,
-    inputs: a.inputs,
-    part: a.part,
-    actorId: actor.id,
-    at: now,
-    stored: false,
-  });
+  return {
+    ack,
+    d: {
+      groupId: room.groupId,
+      topicId: row.topic_id,
+      messageId: row.id,
+      authorId: row.author_id,
+      eventId,
+      rev: a.rev,
+      event: a.event,
+      blockId: a.blockId,
+      actionId: a.actionId,
+      value: a.value,
+      inputs: a.inputs,
+      part: a.part,
+      actorId: actor.id,
+      at: now,
+      stored: false,
+    },
+  };
 }
 
 /** `answer.retract`: the answerer takes an answer back while the author has not acted on it. */
-async function retract(room: RoomContext, actor: Actor, a: CardEventArgs, l: Loaded): Promise<CardEventAck> {
+function retract(room: RoomContext, actor: Actor, a: CardEventArgs, l: Loaded): Pending {
   const { row, card, now } = l;
   const v = a.value as { answerId?: unknown } | undefined;
   const answerId = typeof v?.answerId === "string" ? v.answerId : undefined;
@@ -486,19 +509,22 @@ async function retract(room: RoomContext, actor: Actor, a: CardEventArgs, l: Loa
     writeCardUpdate(room, tx, row, l.ext, actor.id, l.dir, { card, state, cardChanged: false, now });
     insertEvent(room, { eventId, row, actor, a, stored: true, now, ack });
   });
-  return finishAck(room, ack, {
-    groupId: room.groupId,
-    topicId: row.topic_id,
-    messageId: row.id,
-    authorId: row.author_id,
-    eventId,
-    rev: a.rev,
-    event: a.event,
-    value: a.value,
-    actorId: actor.id,
-    at: now,
-    stored: true,
-    answerId,
-    askId: answer.askId,
-  });
+  return {
+    ack,
+    d: {
+      groupId: room.groupId,
+      topicId: row.topic_id,
+      messageId: row.id,
+      authorId: row.author_id,
+      eventId,
+      rev: a.rev,
+      event: a.event,
+      value: a.value,
+      actorId: actor.id,
+      at: now,
+      stored: true,
+      answerId,
+      askId: answer.askId,
+    },
+  };
 }

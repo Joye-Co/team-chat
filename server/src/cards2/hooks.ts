@@ -5,7 +5,7 @@ import type { BlockRef, BlockRefInput, CardState, CardV2, Cause, Message } from 
 import { MAX_CARD_V2_REVS } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import { type RoomContext, registerMessageWriteHook, registerRoomAlarm } from "../core/registry";
-import { writeCardUpdate } from "./events";
+import { cardLock, writeCardUpdate } from "./events";
 import { checkBodyLength, clearRefsTo, indexRefs, resolveRefs, withPrefix, withoutPrefix } from "./refs";
 import { checkEmbeds, deriveV1, directory, recordRev, refreshTopicWaiting, rememberRequester, stateForWrite, syncTimer } from "./state";
 import { CAUSE_MAX_AGE_MS, causeOf, eventRow, extOf, messageRow } from "./store";
@@ -138,18 +138,20 @@ registerRoomAlarm(async (room) => {
   if (due.length > 0) {
     const dir = await directory(room);
     for (const { message_id } of due) {
-      const row = messageRow(room.sql, message_id);
-      const ext = row ? extOf(row) : {};
-      const card = ext.cardV2;
-      const state = ext.cardState;
-      if (!row || row.deleted_at !== null || !card || !state?.ask || state.ask.status !== "open") {
-        room.sql.exec("DELETE FROM card_timers WHERE message_id = ?", message_id);
-        continue;
-      }
-      if ((state.ask.expiresAt ?? Number.POSITIVE_INFINITY) > now) continue;
-      const poll = card.blocks.some((b) => b.type === "poll");
-      const next: CardState = { ...state, ask: { ...state.ask, status: poll ? "closed" : "expired" } };
-      room.commit((tx) => writeCardUpdate(room, tx, row, ext, row.author_id, dir, { card, state: next, cardChanged: false, now }));
+      await room.serial(cardLock(message_id), async () => {
+        const row = messageRow(room.sql, message_id);
+        const ext = row ? extOf(row) : {};
+        const card = ext.cardV2;
+        const state = ext.cardState;
+        if (!row || row.deleted_at !== null || !card || !state?.ask || state.ask.status !== "open") {
+          room.sql.exec("DELETE FROM card_timers WHERE message_id = ?", message_id);
+          return;
+        }
+        if ((state.ask.expiresAt ?? Number.POSITIVE_INFINITY) > now) return;
+        const poll = card.blocks.some((b) => b.type === "poll");
+        const next: CardState = { ...state, ask: { ...state.ask, status: poll ? "closed" : "expired" } };
+        room.commit((tx) => writeCardUpdate(room, tx, row, ext, row.author_id, dir, { card, state: next, cardChanged: false, now }));
+      });
     }
   }
   const next = room.sql.exec<{ at: number | null }>("SELECT min(at) AS at FROM card_timers").toArray()[0]?.at;

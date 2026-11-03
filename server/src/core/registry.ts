@@ -138,6 +138,9 @@ export interface RoomContext {
   waitUntil(p: Promise<unknown>): void;
   /** Wakes the room's alarm handlers (`registerRoomAlarm`) at `at` or earlier. */
   wakeAt(at: number): void;
+  // cards2: card writes that read a message, await, then write it run one at a time per key.
+  /** Runs `fn` after every earlier `serial` call with the same key has settled. */
+  serial<T>(key: string, fn: () => Promise<T>): Promise<T>;
 }
 
 export type RoomRpcHandler = (room: RoomContext, actor: Actor | null, args: unknown) => Promise<unknown> | unknown;
