@@ -64,6 +64,11 @@ gpui_kit::assets::icon_assets!(
         Link,
         ListOrdered,
         Quote,
+        // v2 shell (1.1.0): 首页, 单独问, 改动, the rail toggle.
+        House,
+        MessageCircle,
+        GitPullRequest,
+        PanelRightOpen,
     ]
 );
 

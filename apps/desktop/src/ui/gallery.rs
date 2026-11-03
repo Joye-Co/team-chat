@@ -14,6 +14,8 @@ use gpui_component::{
     scroll::ScrollableElement as _,
 };
 
+mod v3;
+
 use crate::ui::NamedButton as _;
 use crate::{
     characters::{CharacterId, CharacterStatus},
@@ -981,7 +983,9 @@ impl Render for Gallery {
             .bg(k.content)
             .text_color(k.text_1)
             .overflow_y_scrollbar()
-            .child(if self.page == 0 {
+            .child(if self.page == 2 {
+                v3::page(cx)
+            } else if self.page == 0 {
                 div()
                     .p(space::S32)
                     // Clear the traffic lights: the title bar is transparent.
