@@ -88,4 +88,10 @@ pub const SCENES: &[Scene] = &[
         "INTERACT 7.1 as 小王 sees it: the question read-only with 等 Joye",
         Page::Readonly
     ),
+    // v11/pb-cards
+    scene!(
+        "interact_notes",
+        "INTERACT §4.4 and §6.2: my click offline (the bar goes back), the member busy, a rev that changed the block I typed in (内容变了 · 用新的) and a reply off screen ({name} 回了一条新消息)",
+        Page::Notes
+    ),
 ];

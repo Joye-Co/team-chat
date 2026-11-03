@@ -231,4 +231,9 @@ crate::copy! {
     EMBED_NOT_PAGE = "这个产出不是网页",
     // v11/pb-cards: the step of a working band (CARD21 §2).
     BAND_STEP = "{n}/{total}",
+    // v11/pb-cards: the notes scene.
+    I_NOTES_OFFLINE = "成员不在线",
+    I_NOTES_BUSY = "成员接不了",
+    I_NOTES_DRAFT = "你在写的时候卡片变了",
+    I_NOTES_REPLY = "成员回在了下面",
 }

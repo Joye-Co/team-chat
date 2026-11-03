@@ -221,8 +221,15 @@ pub fn render(
     // --- inc-cards21: 2.1 keeps local values across revs (INTERACT §4.4) ---
     let is21 = super::v21::is_21(&card);
     let prev = env.preset.as_ref().and_then(|p| p.prev.clone());
+    let kept: Vec<String> = env
+        .preset
+        .as_ref()
+        .map(|p| p.drafts_kept.iter().map(|s| s.to_string()).collect())
+        .unwrap_or_default();
     let ui = window.use_keyed_state(SharedString::from(format!("{key}-ui")), cx, |_, _| {
-        super::v21::CardUi::new(prev)
+        let mut u = super::v21::CardUi::new(prev);
+        u.drafts_kept = kept.into_iter().collect();
+        u
     });
     let seen = ui.read(cx).seen.clone();
     if is21 {

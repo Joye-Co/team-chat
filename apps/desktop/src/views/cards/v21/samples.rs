@@ -52,6 +52,15 @@ pub const PEND_HARD: &str = "c21-pend-hard";
 pub const DRILL: &str = "c21-drill";
 /// INTERACT 7.1 rev 3: my submit was refused, the card changed.
 pub const CONFLICT: &str = "c21-conflict";
+// v11/pb-cards: the notes of the loop (INTERACT §4.4, §6.2).
+/// My bar click came back offline: the bar goes back.
+pub const NOTE_OFFLINE: &str = "c21-note-offline";
+/// My bar click came back `expect.mode: none`.
+pub const NOTE_BUSY: &str = "c21-note-busy";
+/// Rev 2 changed the block I typed in.
+pub const NOTE_DRAFT: &str = "c21-note-draft";
+/// Ledger answered my click with a new message off screen.
+pub const NOTE_REPLY: &str = "c21-note-reply";
 
 /// One sample: the card message, stored answers, my answer on its way and my events
 /// (event times are ms before now).
@@ -819,7 +828,46 @@ pub fn all() -> Vec<Sample21> {
     ));
     conflict.prev = Some(Arc::new(card(report_rev1())));
     out.push(conflict);
+    // v11/pb-cards: the notes of the loop.
+    let click = json!({ "series": "groups", "x": "B 站", "y": 9, "index": 2 });
+    for (id, mode) in [(NOTE_OFFLINE, ExpectMode::Offline), (NOTE_BUSY, ExpectMode::None)] {
+        let mut s = sample(id, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev1());
+        s.events.push((
+            1_000,
+            acked(id, "bars", "chart.select", click.clone(), mode, LEDGER),
+        ));
+        out.push(s);
+    }
+    let mut draft = sample(NOTE_DRAFT, GROWTH, T_REPORT, LEDGER, at(9, 40), retro(2, "B 站停更了两周，新增群少了 1 个"));
+    draft.msg.edited_at = Some(at(10, 2));
+    draft.prev = Some(Arc::new(card(retro(1, "B 站和上月差不多"))));
+    out.push(draft);
+    let mut reply = sample(NOTE_REPLY, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev1());
+    let mut e = acked(NOTE_REPLY, "bars", "chart.select", click, ExpectMode::Live, LEDGER);
+    e.phase = CardEventPhase::Resolved {
+        result: crate::data::cards_v2::InteractionResult::Patched,
+        note: None,
+        at: 0,
+    };
+    e.reply = Some("c21-note-reply-answer".into());
+    reply.events.push((2_000, e));
+    out.push(reply);
     out
+}
+
+/// A weekly review with Ledger's note and my view (rev `rev` changes the note).
+fn retro(rev: u32, note: &str) -> Value {
+    with(
+        base("10 月复盘", "info", "Ledger：10 月复盘"),
+        json!({
+            "rev": rev,
+            "blocks": [
+                { "id": "why", "type": "text", "text": note },
+                { "id": "view", "type": "input", "kind": "text", "label": "你的看法",
+                  "default": note, "events": ["input.change"] }
+            ]
+        }),
+    )
 }
 
 #[cfg(test)]

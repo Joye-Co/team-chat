@@ -40,6 +40,8 @@ pub enum Page {
     Pending,
     /// Interact: rev 2 after my click, as I see it and as others see it.
     Drill,
+    /// v11/pb-cards: offline, busy, a kept draft and a reply off screen.
+    Notes,
     /// Interact: my answer refused because the card changed.
     Conflict,
     /// Interact: the report as someone the card does not ask.
@@ -501,6 +503,54 @@ impl Gallery21 {
                 ),
                 div().into_any_element(),
             ),
+            Page::Notes => {
+                let cell = |caption: &'static str, el: Option<AnyElement>, cx: &mut App| {
+                    item(caption, "", el, Some(420.), cx)
+                };
+                let left = div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S24)
+                    .child(cell(
+                        c::I_NOTES_OFFLINE,
+                        self.card(NOTE_OFFLINE, me, None, "a", CardMode::Topic, window, cx),
+                        cx,
+                    ))
+                    .child(cell(
+                        c::I_NOTES_DRAFT,
+                        self.card(
+                            NOTE_DRAFT,
+                            me,
+                            Some(Preset {
+                                values: vec![("view", Val::Text("我觉得是活动少了".into()))],
+                                drafts_kept: vec!["view"],
+                                ..Default::default()
+                            }),
+                            "a",
+                            CardMode::Topic,
+                            window,
+                            cx,
+                        ),
+                        cx,
+                    ))
+                    .into_any_element();
+                let right = div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S24)
+                    .child(cell(
+                        c::I_NOTES_BUSY,
+                        self.card(NOTE_BUSY, me, None, "a", CardMode::Topic, window, cx),
+                        cx,
+                    ))
+                    .child(cell(
+                        c::I_NOTES_REPLY,
+                        self.card(NOTE_REPLY, me, None, "a", CardMode::Topic, window, cx),
+                        cx,
+                    ))
+                    .into_any_element();
+                (left, right)
+            }
             Page::Readonly => (
                 item(
                     c::I_READONLY,

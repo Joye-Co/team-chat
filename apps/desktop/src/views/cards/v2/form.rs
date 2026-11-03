@@ -285,6 +285,8 @@ pub struct Preset {
     pub expanded: bool,
     /// inc-cards21: the rev the viewer saw before (screenshot scenes of a new rev).
     pub prev: Option<std::sync::Arc<CardV2>>,
+    /// v11/pb-cards: blocks whose typed text a new rev kept (内容变了 · 用新的).
+    pub drafts_kept: Vec<&'static str>,
 }
 
 /// v11/pb-cards: the picked values of one block at one moment.
