@@ -13,7 +13,7 @@ use super::{Node, eid, interact::Emitter};
 use crate::{
     copy::{cards21 as c, fill},
     data::cards_v2::{CardV2Block, ChartKind, PartKey, PartRef, TableSelect},
-    theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
+    theme::{self, Type as _, card_v2 as m, card_v2::mix, card_v21 as t, space},
     ui::{self, Lucide},
     views::cards::v2::{blocks as b20, meta},
 };
@@ -328,8 +328,30 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             ],
         ))
     });
-    out = out.child(div().relative().child(drawn).when(selectable, |el| {
-        let n = xs.len();
+    // The chosen and the hovered column get a quiet tint drawn under the series, so the
+    // bar or point stays in sight; a clear hit layer on top takes the clicks.
+    let hot = node.ui.block(id).hot;
+    let n = xs.len();
+    let tint = div()
+        .absolute()
+        .inset_0()
+        .flex()
+        .children((0..n).map(|i| {
+            let on = point.as_ref().is_some_and(|(_, p)| *p == i);
+            let fill = if on {
+                Some(mix(k.ink, k.bg, t::CHART_PICK_FILL))
+            } else if hot == Some(i) {
+                Some(mix(k.ink, k.bg, t::CHART_HOVER_FILL))
+            } else {
+                None
+            };
+            div()
+                .flex_1()
+                .h_full()
+                .rounded(theme::radius::SM)
+                .when_some(fill.filter(|_| selectable), |el, f| el.bg(f))
+        }));
+    out = out.child(div().relative().child(tint).child(drawn).when(selectable, |el| {
         let emit = Emitter::of(ctx);
         let uie = ctx.ui.clone();
         let block = id.clone();
@@ -342,10 +364,7 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         el.child(
             div()
                 .absolute()
-                .left_0()
-                .top(px(24.))
-                .w_full()
-                .h(m::CHART)
+                .inset_0()
                 .flex()
                 .children((0..n).map(|i| {
                     let on = point.as_ref().is_some_and(|(_, p)| *p == i);
@@ -356,15 +375,29 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                         skey.clone(),
                         xs[i].clone(),
                     );
+                    let (uih, blockh) = (uie.clone(), block.clone());
                     let y = values.get(i).copied().flatten();
                     div()
                         .id(eid(node, format!("pt-{block}-{i}")))
                         .flex_1()
                         .h_full()
-                        .rounded(px(4.))
                         .cursor_pointer()
-                        .when(on, |el| el.bg(mix(k.ink, k.bg, 0.06)))
-                        .hover(|s| s.bg(mix(k.ink, k.bg, 0.04)))
+                        .on_hover(move |over, _, cx| {
+                            uih.update(cx, |u, cx| {
+                                let b = u.block_mut(&blockh);
+                                let next = if *over {
+                                    Some(i)
+                                } else if b.hot == Some(i) {
+                                    None
+                                } else {
+                                    b.hot
+                                };
+                                if b.hot != next {
+                                    b.hot = next;
+                                    cx.notify();
+                                }
+                            })
+                        })
                         .on_click(move |_, _, cx| {
                             if on {
                                 // A second click clears (chart.clear when declared).

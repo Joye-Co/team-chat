@@ -95,6 +95,8 @@ pub struct BlockUi {
     pub sort: Option<(usize, bool)>,
     /// Series key and point index.
     pub point: Option<(String, usize)>,
+    /// The chart column under the pointer.
+    pub hot: Option<usize>,
     /// The focused rank item.
     pub focus: Option<String>,
 }

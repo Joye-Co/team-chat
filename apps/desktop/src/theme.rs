@@ -1941,5 +1941,11 @@ pub mod card_v21 {
     pub const HOVER_ASK: Duration = Duration::from_millis(300);
     /// A part that was just added flashes `--sel`.
     pub const PART_FLASH: Duration = Duration::from_millis(600);
+    // v11/pb-cards
+    /// The column tint under a chosen and a hovered chart point (drawn under the series).
+    pub const CHART_PICK_FILL: f32 = 0.06;
+    pub const CHART_HOVER_FILL: f32 = 0.035;
+    /// A block a new rev removed fades out over this.
+    pub const REMOVE_OUT: Duration = Duration::from_millis(240);
 }
 // --- end inc-cards21 ---
