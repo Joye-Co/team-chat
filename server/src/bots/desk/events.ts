@@ -240,8 +240,8 @@ export abstract class DeskEvents extends DeskRuns {
     }
     // Follow-ups the CLI never took start a new run with the topic context.
     const left = this.sql
-      .exec<{ message_id: string; author_id: string; body: string }>(
-        "SELECT message_id, author_id, body FROM inputs WHERE run_id = ? AND accepted = 0 ORDER BY at",
+      .exec<{ message_id: string; author_id: string; body: string; ack_message_id: string | null }>(
+        "SELECT message_id, author_id, body, ack_message_id FROM inputs WHERE run_id = ? AND accepted = 0 ORDER BY at",
         r.id,
       )
       .toArray();
@@ -257,7 +257,15 @@ export abstract class DeskEvents extends DeskRuns {
     const last = left[left.length - 1];
     try {
       await this.start(
-        { groupId: r.group_id, topicId: r.topic_id, messageId: last.message_id, authorId: last.author_id, body: last.body, mentioned: true },
+        {
+          groupId: r.group_id,
+          topicId: r.topic_id,
+          messageId: last.message_id,
+          ackMessageId: last.ack_message_id ?? undefined,
+          authorId: last.author_id,
+          body: last.body,
+          mentioned: true,
+        },
         r,
         left.slice(0, -1).map((x) => ({ authorId: x.author_id, body: x.body })),
       );

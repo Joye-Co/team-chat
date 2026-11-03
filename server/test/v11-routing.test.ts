@@ -185,6 +185,28 @@ describe("answers to runner bots", () => {
     expect(d.frames.filter((f) => f.t === "run.input")).toHaveLength(1);
     for (const x of [c, cb, co, d]) x.close();
   });
+
+  it("acknowledge a follow-up run started by an answer the CLI never took on the answered card", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["answer"] });
+    const { c } = await Client.connect(w.human.token);
+    const { c: cb } = await Client.connect(w.bot.token);
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+
+    const card = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("初稿") })).message;
+    await c.ok({ t: "card.answer", groupId: w.gid, messageId: card.id, rev: 1, actionId: "again" });
+    await d.next((f) => f.t === "run.input" && f.answer);
+    // The run ends before the CLI takes the answer: a follow-up run starts from it.
+    d.done(runId, { status: "succeeded", resultText: "ok" });
+    const follow = await d.next((f) => f.t === "run.assign" && f.runId !== runId);
+    expect(follow.prompt).toContain('answered your card "初稿"');
+    const ack = await c.waitEvent((e) => e.type === "reaction.changed" && e.data.messageId === card.id);
+    expect(ack.actorId).toBe(w.bot.id);
+    for (const x of [c, cb, d]) x.close();
+  });
 });
 
 async function sha(bytes: Uint8Array): Promise<string> {

@@ -227,6 +227,12 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
             ALTER TABLE runs ADD COLUMN kind TEXT;
           `,
         },
+        {
+          // 1.1: the card a Card v2 answer input answers, for the acknowledgement of a follow-up
+          // run. Old rows read as NULL and acknowledge on message_id.
+          name: "desk-5-input-ack",
+          up: `ALTER TABLE inputs ADD COLUMN ack_message_id TEXT;`,
+        },
       ]);
       const row = this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = 'bot_id'").toArray()[0];
       this.botId = row?.value ?? null;

@@ -160,13 +160,14 @@ export abstract class DeskInput extends DeskStall {
         if (r.ended_at !== null) return this.start(m);
         const inputId = ulid();
         this.sql.exec(
-          "INSERT INTO inputs (id, run_id, message_id, author_id, body, at) VALUES (?, ?, ?, ?, ?, ?)",
+          "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, ack_message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
           inputId,
           r.id,
           key,
           a.actorId,
           a.text,
           Date.now(),
+          a.answer.messageId,
         );
         if (!r.machine_id || r.external) return;
         await linkStub(this.env, r.machine_id).toRun({
