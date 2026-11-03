@@ -1382,12 +1382,12 @@ async fn codex_chat_run_uses_the_request_folder() {
     assert_eq!(r["socket"], serde_json::Value::Null);
     assert_eq!(
         Path::new(r["dir"].as_str().unwrap()),
-        work.join(".chat-run")
+        work.join(".chat-run-x1")
     );
     assert_eq!(r["mode"], "0o700");
     assert_eq!(r["files"], serde_json::json!([".gitignore"]));
     collect(&mut ws, "x1", true, |f| matches!(f, Up::RunDone(_))).await;
-    assert!(!work.join(".chat-run").exists(), "request folder left");
+    assert!(!work.join(".chat-run-x1").exists(), "request folder left");
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

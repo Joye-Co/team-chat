@@ -9,10 +9,12 @@
 //! - Socket (`CHAT_RUN_SOCKET`): a unix socket of the run (mode 0600, only the daemon's own user
 //!   may connect), removed when the run ends. Runtimes without a sandbox use it.
 //! - Files (`CHAT_RUN_DIR`): Codex runs. Codex's sandbox counts a unix socket connect as
-//!   network, so `chat-run` uses `<working folder>/.chat-run` (a folder git ignores, inside the
-//!   writable workspace): it writes `<id>.req` atomically, the daemon watches the folder, takes
-//!   the request and writes `<id>.res` atomically; `chat-run` reads and removes it. Files are
-//!   mode 0600; the folder is removed when the run ends.
+//!   network, so `chat-run` uses `<working folder>/.chat-run-<run id>` (a new folder that git
+//!   ignores, inside the writable workspace): it writes `<id>.req` atomically, the daemon
+//!   watches the folder, takes the request and writes `<id>.res` atomically; `chat-run` reads
+//!   and removes it. Files are mode 0600. When the run ends the daemon removes only the files
+//!   of this transport and then the folder if it is empty; it never takes over a folder that
+//!   is already there.
 
 use crate::proto::{RunEvent, RunOutputError, RunOutputResult, output_op};
 use serde_json::{Value, json};
@@ -32,8 +34,9 @@ pub const NAME: &str = "chat-run";
 pub const ENV_SOCKET: &str = "CHAT_RUN_SOCKET";
 /// The variable that names the run's request folder (file transport).
 pub const ENV_DIR: &str = "CHAT_RUN_DIR";
-/// The request folder in the run's working folder (file transport).
-pub const DIR_NAME: &str = ".chat-run";
+/// The prefix of the request folder in the run's working folder (file transport); the run id
+/// follows, so a folder of the repository is never used.
+pub const DIR_PREFIX: &str = ".chat-run-";
 /// How often the daemon and `chat-run` look at the request folder.
 const POLL: Duration = Duration::from_millis(25);
 /// How long the daemon waits for `run.output.result`.
@@ -232,9 +235,39 @@ impl Drop for Server {
     }
 }
 
-/// `<working folder>/.chat-run`.
-pub fn spool_dir(cwd: &Path) -> PathBuf {
-    cwd.join(DIR_NAME)
+/// `<working folder>/.chat-run-<run id>` (the run id keeps only `[A-Za-z0-9-]`, at most 64).
+pub fn spool_dir(cwd: &Path, run_id: &str) -> PathBuf {
+    let id: String = run_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-')
+        .take(64)
+        .collect();
+    cwd.join(format!("{DIR_PREFIX}{id}"))
+}
+
+/// True for a file name that the file transport makes: `.gitignore`, `<id>.req`, `<id>.res`
+/// and their `.tmp` files.
+fn spool_file(name: &str) -> bool {
+    let name = name.strip_suffix(".tmp").unwrap_or(name);
+    name == ".gitignore"
+        || [".req", ".res"]
+            .iter()
+            .any(|ext| name.strip_suffix(ext).is_some_and(valid_id))
+}
+
+/// Removes the files of the file transport from `dir`, then `dir` when it is empty. Other
+/// files (and the folder that holds them) stay.
+fn remove_spool(dir: &Path) {
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().to_string();
+            let is_file = e.file_type().map(|t| t.is_file()).unwrap_or(false);
+            if is_file && spool_file(&name) {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    let _ = std::fs::remove_dir(dir);
 }
 
 /// A request id that `chat-run` makes: 1-64 of `[A-Za-z0-9-]`.
@@ -275,19 +308,18 @@ impl Spool {
     }
 
     /// Makes `dir` (mode 0700, with a `.gitignore` of `*`) and serves the `<id>.req` files that
-    /// appear in it. `emit` is as for [`Server::start`].
+    /// appear in it. `emit` is as for [`Server::start`]. Fails when `dir` is already there.
     pub fn start(
         dir: PathBuf,
         outputs: Arc<Outputs>,
         emit: impl Fn(RunEvent) + Send + Sync + 'static,
         timeout: Duration,
     ) -> std::io::Result<Spool> {
-        let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir(&dir)?;
         let made = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700))
             .and_then(|_| write_atomic(&dir.join(".gitignore"), b"*\n"));
         if let Err(e) = made {
-            let _ = std::fs::remove_dir_all(&dir);
+            remove_spool(&dir);
             return Err(e);
         }
         let emit: Arc<dyn Fn(RunEvent) + Send + Sync> = Arc::new(emit);
@@ -324,7 +356,7 @@ impl Spool {
 impl Drop for Spool {
     fn drop(&mut self) {
         self.task.abort();
-        let _ = std::fs::remove_dir_all(&self.dir);
+        remove_spool(&self.dir);
     }
 }
 
@@ -1135,13 +1167,57 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_request_folder_never_takes_or_deletes_a_folder_it_did_not_make() {
+        let cwd = tempfile::tempdir().unwrap();
+        // The repository's own `.chat-run` folder and an earlier folder of the same run stay.
+        let tracked = cwd.path().join(".chat-run");
+        std::fs::create_dir(&tracked).unwrap();
+        std::fs::write(tracked.join("notes.md"), "kept").unwrap();
+        let taken = spool_dir(cwd.path(), "r2");
+        std::fs::create_dir(&taken).unwrap();
+        std::fs::write(taken.join("keep.txt"), "kept").unwrap();
+        let outputs = Arc::new(Outputs::default());
+        assert!(Spool::start(taken.clone(), outputs.clone(), |_| {}, TIMEOUT).is_err());
+        assert_eq!(
+            std::fs::read_to_string(taken.join("keep.txt")).unwrap(),
+            "kept"
+        );
+
+        // A run-unique folder: on drop only the transport's files go, then the empty folder.
+        let spool = Spool::start(
+            spool_dir(cwd.path(), "r/3"),
+            outputs.clone(),
+            |_| {},
+            TIMEOUT,
+        )
+        .unwrap();
+        let dir = spool.path().to_path_buf();
+        assert_eq!(dir, cwd.path().join(".chat-run-r3"));
+        std::fs::write(dir.join("a1.res"), "{}").unwrap();
+        drop(spool);
+        assert!(!dir.exists());
+        let spool = Spool::start(dir.clone(), outputs, |_| {}, TIMEOUT).unwrap();
+        std::fs::write(dir.join("report.txt"), "not ours").unwrap();
+        drop(spool);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("report.txt")).unwrap(),
+            "not ours"
+        );
+        assert!(!dir.join(".gitignore").exists());
+        assert_eq!(
+            std::fs::read_to_string(tracked.join("notes.md")).unwrap(),
+            "kept"
+        );
+    }
+
+    #[tokio::test]
     async fn the_request_folder_answers_with_the_result_and_goes_away() {
         use std::os::unix::fs::MetadataExt;
         let cwd = tempfile::tempdir().unwrap();
         let outputs = Arc::new(Outputs::default());
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         let spool = Spool::start(
-            spool_dir(cwd.path()),
+            spool_dir(cwd.path(), "r1"),
             outputs.clone(),
             move |e| {
                 let _ = tx.send(e);
@@ -1150,7 +1226,7 @@ mod tests {
         )
         .unwrap();
         let dir = spool.path().to_path_buf();
-        assert_eq!(dir, cwd.path().join(".chat-run"));
+        assert_eq!(dir, cwd.path().join(".chat-run-r1"));
         assert_eq!(std::fs::metadata(&dir).unwrap().mode() & 0o777, 0o700);
         assert_eq!(
             std::fs::read_to_string(dir.join(".gitignore")).unwrap(),

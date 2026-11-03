@@ -559,7 +559,7 @@ async fn codex_sandbox_lets_chat_run_answer_without_network() {
     )
     .unwrap();
     let spool = daemon::chat_run::Spool::start(
-        daemon::chat_run::spool_dir(&s.cwd),
+        daemon::chat_run::spool_dir(&s.cwd, "x1"),
         outputs.clone(),
         move |e| {
             let _ = tx.send(e);

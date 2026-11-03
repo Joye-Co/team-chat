@@ -163,7 +163,7 @@ fn start_chat_run(
     };
     let started = if files {
         crate::chat_run::Spool::start(
-            crate::chat_run::spool_dir(cwd),
+            crate::chat_run::spool_dir(cwd, run_id),
             outputs,
             emit,
             crate::chat_run::TIMEOUT,

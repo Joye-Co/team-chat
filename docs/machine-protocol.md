@@ -353,11 +353,14 @@ daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
 - Files (Codex): Codex's sandbox counts a unix socket connect as network, and the daemon does
   not open the network (`sandbox_workspace_write.network_access`) for it; it never adds a
   sandbox or network override to the user's Codex args. `CHAT_RUN_DIR` names
-  `<working folder>/.chat-run`, inside the writable workspace, mode 0700, with a `.gitignore`
-  of `*`. `chat-run` writes `<id>.req` atomically (a temp file renamed into place, mode 0600);
+  `<working folder>/.chat-run-<run id>`, a new folder inside the writable workspace (never one
+  that is already there, so a folder of the repository is never used), mode 0700, with a
+  `.gitignore` of `*`. `chat-run` writes `<id>.req` atomically (a temp file renamed into place, mode 0600);
   the daemon watches the folder, takes (reads and removes) the request and writes `<id>.res`
   the same way; `chat-run` reads and removes it, waiting at most 20 s. A request nobody takes
-  is removed and reported as `unavailable`. The folder is removed when the run ends. Codex runs
+  is removed and reported as `unavailable`. When the run ends the daemon removes only the
+  transport's own files (`.gitignore`, `<id>.req`, `<id>.res` and their temp files), then the
+  folder if it is empty. Codex runs
   in the `read-only` sandbox cannot write the folder and get no note.
 
 A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", reason:
