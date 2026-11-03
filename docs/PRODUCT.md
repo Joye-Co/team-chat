@@ -79,7 +79,7 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   did it, which credential, and what changed.
 - Sign-in for V1 is an invite code that becomes a token in the macOS Keychain. Email or OAuth
   sign-in is later.
-- Distribution: an unsigned DMG. GitHub Releases keeps every build; the server also serves the
+- Distribution: a DMG signed with the team's own certificate (not notarized). GitHub Releases keeps every build; the server also serves the
   latest DMG to holders of an invite code and to members, and the app updates itself from it.
 
 ## Bot members (first roster)
