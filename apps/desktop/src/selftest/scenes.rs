@@ -434,6 +434,20 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::timeline::preview::open_main,
     },
     Scene {
+        name: "stop",
+        about: "main-* with the 过程 tab: 停止 on the pending row and in the 过程 header, for the member who asked",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_stop,
+    },
+    Scene {
+        name: "stop-stopping",
+        about: "The stop scene after 停止 was pressed: both show 正在停止… until the run ends",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: crate::views::timeline::preview::open_stopping,
+    },
+    Scene {
         name: "topic-short",
         about: "short-topic-*: the start block, a draft card and the hover toolbar",
         start: Start::SignedIn,

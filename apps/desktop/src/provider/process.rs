@@ -4,7 +4,7 @@
 //! steps by `chat_core::ProcessView`, one cache entry per run.
 
 use std::{
-    collections::{HashMap, VecDeque},
+    collections::{HashMap, HashSet, VecDeque},
     path::PathBuf,
     sync::Mutex,
     time::{Duration, Instant},
@@ -15,7 +15,7 @@ use futures::channel::oneshot;
 
 use super::{CoreProvider, lock};
 use crate::data::{
-    BotRunSummary, Change, FileChangeKind, FileChangeView, ProcessStep, RawRunEntry, RunLoadError,
+    AdminError, AdminReply, BotRunSummary, Change, FileChangeKind, FileChangeView, ProcessStep, RawRunEntry, RunLoadError,
     RunProcess, RunStatus, SearchError, SearchHit, SearchQuery, SearchReply, SessionDownload,
 };
 
@@ -37,6 +37,8 @@ struct Inner {
     machines: HashMap<String, String>,
     machines_at: Option<Instant>,
     machines_loading: bool,
+    /// Runs whose stop was asked and not answered yet.
+    stopping: HashSet<String>,
 }
 
 #[derive(Default)]
@@ -423,6 +425,70 @@ impl CoreProvider {
             this.emit(vec![Change::RunLog { run_id: id }]);
         });
         self.emit(changed);
+    }
+
+    /// `POST /v1/runs/:id/cancel` through chat-core, which stores the ended run
+    /// (or, when it had already ended, reads it again). `Change::Runs` goes out
+    /// when the stop starts and when its answer is in.
+    pub(super) fn cancel_run_inner(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        run_id: &str,
+    ) -> AdminReply<()> {
+        let (tx, rx) = oneshot::channel();
+        let Some(account) = self.account() else {
+            let _ = tx.send(Err(AdminError::Offline));
+            return rx;
+        };
+        let generation = self.run_generation();
+        let first = lock(&self.shared.runs.inner)
+            .for_generation(generation)
+            .stopping
+            .insert(run_id.to_string());
+        if !first {
+            // The first stop answers; this one has nothing to add.
+            let _ = tx.send(Ok(()));
+            return rx;
+        }
+        let changed = vec![Change::Runs {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }];
+        self.emit(changed.clone());
+        let handle = account.client.cancel_run(run_id);
+        let this = self.clone();
+        let id = run_id.to_string();
+        account.client.spawn(async move {
+            let result = match handle.await {
+                Ok(r) => r,
+                Err(e) => Err(ClientError::Runtime(e.to_string())),
+            };
+            lock(&this.shared.runs.inner)
+                .for_generation(generation)
+                .stopping
+                .remove(&id);
+            this.emit(changed);
+            let _ = tx.send(match result {
+                Ok(outcome) => {
+                    tracing::info!(?outcome, "run stop answered");
+                    Ok(())
+                }
+                Err(e) => {
+                    tracing::warn!(error = %e, "cannot stop a run");
+                    Err(super::settings::admin_error(&e))
+                }
+            });
+        });
+        rx
+    }
+
+    pub(super) fn run_stopping_inner(&self, run_id: &str) -> bool {
+        let generation = self.run_generation();
+        lock(&self.shared.runs.inner)
+            .for_generation(generation)
+            .stopping
+            .contains(run_id)
     }
 
     pub(super) fn download_session_inner(&self, run_id: &str, dir: PathBuf) -> SessionDownload {

@@ -55,4 +55,8 @@ crate::copy! {
     MORE_LINES = "还有 {n} 行",
     STEP_SAID_LINE = "{name} 说：{text}",
     STEP_INPUT_LINE = "收到：{text}",
+    STOP = "停止",
+    STOPPING = "正在停止…",
+    STOP_FAILED = "没能停止：{reason}",
+    STOP_FORBIDDEN = "只有群里的成员可以停止",
 }

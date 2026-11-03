@@ -22,7 +22,7 @@ use crate::{
     app::{Changes, Services},
     copy::{dev, fill, process as p},
     data::{
-        BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess, RunStatus,
+        AdminError, BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess, RunStatus,
         TopicId,
     },
     theme::{self, Type as _, space},
@@ -79,6 +79,42 @@ pub fn run_duration(run: &BotRunSummary, now: Millis) -> Option<u64> {
         run.updated_at
     });
     Some(end.saturating_sub(start).max(0) as u64)
+}
+
+/// Asks the provider to stop a run (`停止`, DESIGN.md §9.2). No confirmation:
+/// a stop loses nothing. The views show `正在停止…` from
+/// `ChatProvider::run_stopping` until the run ends. A run that already ended
+/// answers `Ok`; any other failure shows the standard error toast.
+pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
+    let reply = services
+        .provider
+        .cancel_run(&run.group_id, &run.topic_id, &run.id);
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        let result = reply.await.unwrap_or(Err(AdminError::Other));
+        if let Err(e) = result {
+            cx.update(|cx| {
+                crate::views::files::notify_error(
+                    fill(p::STOP_FAILED, &[("reason", stop_error_text(e))]),
+                    cx,
+                )
+            });
+        }
+    })
+    .detach();
+}
+
+/// Why a stop failed, for the toast.
+pub fn stop_error_text(e: AdminError) -> &'static str {
+    match e {
+        // Only people in the run's 群 stop runs; the server says forbidden.
+        AdminError::Forbidden => p::STOP_FORBIDDEN,
+        other => crate::views::settings::widgets::error_text(other),
+    }
+}
+
+/// The member may stop this run from its pending row: the person who asked.
+pub fn asked_by(run: &BotRunSummary, me: Option<&str>) -> bool {
+    run.requested_by.is_some() && run.requested_by.as_deref() == me
 }
 
 fn load_error_text(error: RunLoadError) -> &'static str {
@@ -221,7 +257,8 @@ impl ProcessView {
         }
     }
 
-    fn selected_run(&self) -> Option<&BotRunSummary> {
+    /// The run the view shows.
+    pub fn selected_run(&self) -> Option<&BotRunSummary> {
         let id = self.selected.as_ref()?;
         self.runs.iter().find(|r| &r.id == id)
     }

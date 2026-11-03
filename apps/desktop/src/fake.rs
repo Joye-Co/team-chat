@@ -48,6 +48,10 @@ struct State {
     muted: HashSet<GroupId>,
     saved_navigation: Option<SavedNavigation>,
     cards: crate::views::cards::samples::FakeCards,
+    /// Sample runs that were stopped, and when.
+    stopped_runs: HashMap<String, Millis>,
+    /// Sample runs whose stop is held unanswered (screenshot scenes).
+    stopping_runs: HashSet<String>,
 }
 
 fn now_ms() -> Millis {
@@ -93,6 +97,12 @@ impl FakeProvider {
         provider
     }
 
+    /// Holds a stop of a sample run unanswered, so `run_stopping` stays true
+    /// (screenshot scenes of `正在停止…`).
+    pub fn hold_stop(&self, run_id: &str) {
+        self.with(|s| s.stopping_runs.insert(run_id.to_string()));
+    }
+
     fn emit(&self, changes: Vec<Change>) {
         let mut subs = self.subscribers.lock().unwrap();
         subs.retain(|tx| tx.unbounded_send(changes.clone()).is_ok());
@@ -120,6 +130,8 @@ impl State {
             muted: HashSet::new(),
             saved_navigation: None,
             cards: Default::default(),
+            stopped_runs: HashMap::new(),
+            stopping_runs: HashSet::new(),
         };
         s.fill_sample();
         s.fill_cards();
@@ -1527,11 +1539,42 @@ impl ChatProvider for FakeProvider {
     }
 
     fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
-        let now = self.with(|s| s.now);
+        let (now, stopped) = self.with(|s| (s.now, s.stopped_runs.clone()));
         crate::fake_extra::sample_runs(now)
             .into_iter()
             .filter(|r| r.group_id == group_id && r.topic_id == topic_id)
+            .map(|mut r| {
+                if let Some(at) = stopped.get(&r.id) {
+                    r.status = RunStatus::Cancelled;
+                    r.ended_at = Some(*at);
+                    r.updated_at = *at;
+                }
+                r
+            })
             .collect()
+    }
+
+    /// Stops a sample run at once (the sample server answers immediately).
+    fn cancel_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        let active = self
+            .runs(group_id, topic_id)
+            .iter()
+            .any(|r| r.id == run_id && r.status.is_active());
+        if active {
+            self.with(|s| {
+                s.stopping_runs.remove(run_id);
+                s.stopped_runs.insert(run_id.to_string(), now_ms());
+            });
+            self.emit(vec![Change::Runs {
+                group_id: group_id.into(),
+                topic_id: topic_id.into(),
+            }]);
+        }
+        reply_now(Ok(()))
+    }
+
+    fn run_stopping(&self, run_id: &str) -> bool {
+        self.with(|s| s.stopping_runs.contains(run_id))
     }
 
     fn run_process(&self, run_id: &str) -> RunProcess {

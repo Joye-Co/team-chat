@@ -1550,6 +1550,14 @@ impl ChatProvider for CoreProvider {
         self.download_session_inner(run_id, dir)
     }
 
+    fn cancel_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.cancel_run_inner(group_id, topic_id, run_id)
+    }
+
+    fn run_stopping(&self, run_id: &str) -> bool {
+        self.run_stopping_inner(run_id)
+    }
+
     // --- settings window (provider/settings.rs) ---
 
     fn update_profile(&self, name: String, role: Option<String>) -> AdminReply<Member> {

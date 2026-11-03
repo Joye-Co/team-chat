@@ -2,7 +2,8 @@
 //!
 //! - the pending row: one 28 pt row per bot that works and has not posted
 //!   yet, 12 pt under the last message (the working character, the bot's
-//!   latest step, three pulsing dots, the elapsed time and `查看过程`);
+//!   latest step, three pulsing dots, the elapsed time, `查看过程` and, for
+//!   the person who asked, `停止`);
 //! - the steps row: one collapsed 24 pt row above a reply that came out of a
 //!   run (`改了 6 个文件，运行 3 条命令 · 4 分 12 秒`), which opens the
 //!   steps inline;
@@ -16,10 +17,12 @@ use gpui::{
     SharedString, StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
 };
 
+use gpui_component::Disableable as _;
+
 use super::TimelineView;
 use crate::{
     characters::CharacterStatus,
-    copy::{fill, timeline as t},
+    copy::{fill, process as pr, timeline as t},
     data::{BotRunSummary, Message, Millis, ProcessStep, RunStatus},
     theme::{self, Type as _, space},
     ui::{self, Lucide},
@@ -379,14 +382,61 @@ impl TimelineView {
         self.live_leaving.clear();
     }
 
+    /// `· 停止` for the person who asked (§9.2), or `· 正在停止…` (disabled)
+    /// once pressed, until the run ends. A leaving row keeps the control,
+    /// disabled, so its text does not jump while it fades.
+    fn stop_control(
+        &self,
+        run: &BotRunSummary,
+        leaving: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<[AnyElement; 2]> {
+        if !crate::views::process::asked_by(run, self.me.as_deref()) {
+            return None;
+        }
+        let colors = theme::colors(cx);
+        let stopping = if leaving {
+            self.runs
+                .iter()
+                .any(|r| r.id == run.id && r.status == RunStatus::Cancelled)
+        } else {
+            self.services.provider.run_stopping(&run.id)
+        };
+        let button = ui::text_button(
+            ElementId::Name(format!("live-stop-{}", run.id).into()),
+            if stopping { pr::STOPPING } else { pr::STOP },
+            cx,
+        )
+        .ml(-space::S6)
+        .disabled(stopping || leaving)
+        .when(stopping || leaving, |b| b.text_color(colors.text_3))
+        .on_click({
+            let run = run.clone();
+            cx.listener(move |this, _, _, cx| {
+                crate::views::process::stop_run(&this.services, &run, cx);
+                cx.notify();
+            })
+        });
+        Some([
+            div()
+                .flex_none()
+                .text_color(colors.text_3)
+                .child("·")
+                .into_any_element(),
+            button.into_any_element(),
+        ])
+    }
+
     /// One 28 pt pending row.
     fn live_row(
         &self,
         run: &BotRunSummary,
         now: Millis,
         reduce: bool,
+        leaving: bool,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
+        let stop = self.stop_control(run, leaving, cx);
         let colors = theme::colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id);
         let name = bot.map(|m| m.name.clone()).unwrap_or_default();
@@ -451,7 +501,8 @@ impl TimelineView {
                         )
                         .ml(-space::S6)
                         .on_click(cx.listener(|this, _, _, cx| this.open_process(cx))),
-                    ),
+                    )
+                    .children(stop.into_iter().flatten()),
             )
     }
 
@@ -476,7 +527,7 @@ impl TimelineView {
         let now = Utc::now().timestamp_millis();
         let mut rows: Vec<AnyElement> = Vec::new();
         for run in runs.iter().take(MAX_LIVE) {
-            let row = self.live_row(run, now, reduce, cx);
+            let row = self.live_row(run, now, reduce, false, cx);
             // Enter: 200 ms opacity + a 6 pt rise, opacity only with reduce
             // motion (§12), and only the first time the run shows: the
             // animation state lives in the element, so a row is wrapped only
@@ -504,7 +555,7 @@ impl TimelineView {
             // fade stays with reduce motion (§12). The opacity comes from the
             // clock, not a GPUI animation, which would snap under reduce motion.
             let t = (at.elapsed().as_secs_f32() / leave_time().as_secs_f32()).min(1.);
-            let row = self.live_row(run, now, reduce, cx);
+            let row = self.live_row(run, now, reduce, true, cx);
             rows.push(row.opacity(leave_opacity(t, &ease)).into_any_element());
             window.request_animation_frame();
         }

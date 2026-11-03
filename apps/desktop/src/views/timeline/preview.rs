@@ -10,7 +10,7 @@
 //! Everything else goes to the wrapped provider.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     sync::{Arc, Mutex},
 };
@@ -51,6 +51,11 @@ pub enum Sample {
     Compose,
     /// The short topic with the hover toolbar's emoji picker open.
     React,
+    /// `main-*` with the 过程 tab open: the pending row and the 过程 header
+    /// both offer 停止 to the member who asked.
+    Stop,
+    /// [`Sample::Stop`] after 停止 was pressed: both show `正在停止…`.
+    Stopping,
 }
 
 struct Topics {
@@ -70,6 +75,9 @@ pub struct TopicSamples {
     offline: bool,
     data: Topics,
     now: Millis,
+    /// Sample runs whose stop was asked. A scene never gets the answer, so
+    /// they stay at `正在停止…`.
+    stopping: Mutex<HashSet<String>>,
 }
 
 fn today_at(hour: u32, minute: u32, days_ago: i64) -> Millis {
@@ -460,6 +468,7 @@ impl TopicSamples {
                 artifacts,
             },
             now,
+            stopping: Mutex::new(HashSet::new()),
         })
     }
 
@@ -656,15 +665,35 @@ impl ChatProvider for TopicSamples {
     }
     fn runs(&self, group_id: &str, topic_id: &str) -> Vec<BotRunSummary> {
         if self.mine(group_id, topic_id) {
-            return self
+            let mut runs: Vec<BotRunSummary> = self
                 .data
                 .runs
                 .iter()
                 .filter(|r| r.topic_id == topic_id)
                 .cloned()
                 .collect();
+            // Newest first, like every provider.
+            runs.sort_by_key(|r| std::cmp::Reverse(r.created_at));
+            return runs;
         }
         self.inner.runs(group_id, topic_id)
+    }
+    fn cancel_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        if self.mine(group_id, topic_id) {
+            self.stopping
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(run_id.to_string());
+            return reply_now(Ok(()));
+        }
+        self.inner.cancel_run(group_id, topic_id, run_id)
+    }
+    fn run_stopping(&self, run_id: &str) -> bool {
+        self.stopping
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(run_id)
+            || self.inner.run_stopping(run_id)
     }
     fn run_process(&self, run_id: &str) -> RunProcess {
         let tool = |title: &str, ok: bool| ProcessStep::Tool {
@@ -734,11 +763,18 @@ fn open(
     sample: Sample,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let provider: Arc<dyn ChatProvider> =
-        TopicSamples::new(services.provider.clone(), sample == Sample::Compose);
+    let samples = TopicSamples::new(services.provider.clone(), sample == Sample::Compose);
+    if sample == Sample::Stopping {
+        samples
+            .stopping
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(RUN_LIVE.to_string());
+    }
+    let provider: Arc<dyn ChatProvider> = samples;
     let services = Services::new(provider, cx);
     let topic = match sample {
-        Sample::Main => MAIN,
+        Sample::Main | Sample::Stop | Sample::Stopping => MAIN,
         Sample::Short => SHORT,
         Sample::Worst => WORST,
         Sample::Compose | Sample::React => SHORT,
@@ -747,8 +783,15 @@ fn open(
         nav.open_group(GROUP.into(), cx);
         nav.open_topic(GROUP.into(), topic.into(), cx);
         // main-* and worst-case-* show the topic view without the side panel.
-        if nav.side_panel_open != matches!(sample, Sample::Short | Sample::React) {
+        let panel = matches!(
+            sample,
+            Sample::Short | Sample::React | Sample::Stop | Sample::Stopping
+        );
+        if nav.side_panel_open != panel {
             nav.toggle_side_panel(cx);
+        }
+        if matches!(sample, Sample::Stop | Sample::Stopping) {
+            nav.set_side_panel_tab(1, cx);
         }
     });
     let mut options = crate::app::main_window_options(false, cx);
@@ -771,7 +814,7 @@ fn open(
                 Sample::Short => {
                     timeline.update(cx, |t, cx| t.preview_hover(1, cx));
                 }
-                Sample::Worst => {}
+                Sample::Worst | Sample::Stop | Sample::Stopping => {}
                 Sample::React => {
                     timeline.update(cx, |t, cx| t.preview_reacting(1, cx));
                 }
@@ -798,6 +841,18 @@ pub fn open_compose(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWin
 
 pub fn open_worst(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
     open(s, c, Sample::Worst, cx)
+}
+
+pub fn open_stop(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::Stop, cx)
+}
+
+pub fn open_stopping(
+    s: Services,
+    c: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open(s, c, Sample::Stopping, cx)
 }
 
 pub fn open_react(s: Services, c: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {

@@ -440,6 +440,12 @@ impl ChatProvider for WorstCase {
             })
             .collect()
     }
+    fn cancel_run(&self, group_id: &str, topic_id: &str, run_id: &str) -> AdminReply<()> {
+        self.inner.cancel_run(group_id, topic_id, run_id)
+    }
+    fn run_stopping(&self, run_id: &str) -> bool {
+        self.inner.run_stopping(run_id)
+    }
     fn sign_out(&self, wipe_cache: bool) {
         self.inner.sign_out(wipe_cache)
     }

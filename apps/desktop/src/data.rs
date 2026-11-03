@@ -1419,6 +1419,19 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// Fetches the log entries of a run that are newer than the ones loaded.
     /// Emits `Change::RunLog`. Does nothing while a fetch of that run runs.
     fn follow_run(&self, _run_id: &str) {}
+    /// Stops an active run (`POST /v1/runs/:id/cancel`; any person in the run's
+    /// 群 may). Returns at once. [`ChatProvider::run_stopping`] is true until the
+    /// answer is in; the provider emits `Change::Runs` for the topic when the stop
+    /// starts and when it ends, and the run's end shows in [`ChatProvider::runs`]
+    /// (from the answer, then `run.updated`). A run that already ended answers
+    /// `Ok`: that is not an error for the user.
+    fn cancel_run(&self, _group_id: &str, _topic_id: &str, _run_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// A stop of this run was asked and its answer is not in yet. Cheap.
+    fn run_stopping(&self, _run_id: &str) -> bool {
+        false
+    }
     /// Saves the raw session of a run (owners only) into `dir`.
     fn download_run_session(&self, _run_id: &str, _dir: PathBuf) -> SessionDownload {
         let (tx, rx) = futures::channel::oneshot::channel();

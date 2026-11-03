@@ -16,6 +16,7 @@ use gpui::{
     StatefulInteractiveElement as _, Styled, Subscription, Window, div,
     prelude::FluentBuilder as _, px, relative,
 };
+use gpui_component::Disableable as _;
 use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
 
 use crate::ui::NamedButton as _;
@@ -565,6 +566,35 @@ impl SidePanel {
         crate::copy::ltr(parts.join(" · "))
     }
 
+    /// `停止` in the 过程 header while the shown run is active (§9.2): a
+    /// secondary `md` button; once pressed it is disabled and reads
+    /// `正在停止…` until the run ends. Any person in the 群 may stop a run.
+    fn stop_button(&self, cx: &mut Context<Self>) -> Option<Button> {
+        let run = self.process.read(cx).selected_run()?.clone();
+        if !run.status.is_active() || self.services.me().is_none() {
+            return None;
+        }
+        let k = theme::colors(cx);
+        let stopping = self.services.provider.run_stopping(&run.id);
+        Some(
+            ui::button(
+                "panel-stop",
+                if stopping { pc::STOPPING } else { pc::STOP },
+                ui::ButtonKind::Secondary,
+                ui::ButtonSize::Md,
+                cx,
+            )
+            .mr(space::S4)
+            .disabled(stopping)
+            .when(stopping, |b| b.text_color(k.text_3))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                crate::views::process::stop_run(&this.services, &run, cx);
+                cx.notify();
+            })),
+        )
+    }
+
     fn header(&self, topic: Option<&Topic>, sub: bool, cx: &mut Context<Self>) -> gpui::Div {
         let k = theme::colors(cx);
         let title_row = ui::toolbar_band("panel-toolbar")
@@ -590,6 +620,9 @@ impl SidePanel {
                     .one_line()
                     .child(if sub { pc::TAB_PROCESS } else { p::HEADER }),
             )
+            .when_some(sub.then(|| self.stop_button(cx)).flatten(), |el, b| {
+                el.child(b)
+            })
             .child(
                 ui::icon_button("panel-close", Lucide::X)
                     .named(p::CLOSE)
