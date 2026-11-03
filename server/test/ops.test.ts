@@ -678,3 +678,43 @@ describe("member gateway state", () => {
     expect((await api(`/v1/admin/import/members/${b.id}/state`, { method: "POST", raw: bytes as unknown as string })).status).toBe(401);
   });
 });
+
+describe("card state updates after restore", () => {
+  it("keep a message that was never edited without editedAt", async () => {
+    const [a, b] = await Promise.all([createMember({ level: "owner" }), createMember()]);
+    const bot = await createMember({ kind: "bot", name: "Ledger" });
+    const gid = await createGroup(a, [b.id, bot.id]);
+    const { c: cbot } = await Client.connect(bot.token, { features: ["interact/1"] });
+    const { c: cb } = await Client.connect(b.token, { features: ["interact/1"] });
+    const card = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "ask",
+      title: "发版吗？",
+      fallback: "发版吗？",
+      ask: { from: [b.id] },
+      blocks: [{ id: "pick", type: "decision", deliver: "immediate", options: [{ id: "yes", label: "发" }, { id: "no", label: "不发" }] }],
+    };
+    const m = (await cbot.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: card })).message;
+    const r = await cb.request({ t: "card.event", groupId: gid, messageId: m.id, rev: 1, clientEventId: crypto.randomUUID(), blockId: "pick", event: "choice.submit", value: { value: "yes" } });
+    expect(r).toMatchObject({ ok: true });
+    const upd = await cb.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id);
+    // A state update: editedAt is the creation time, and the message was not edited.
+    expect(upd.data.editedAt).toBe(m.createdAt);
+    const hist = await cb.request({ t: "history", groupId: gid, topicId: m.topicId });
+    expect(hist.messages.find((x: any) => x.id === m.id).editedAt).toBeNull();
+    const rows = unwrap(await roomStub(env, gid).exportRows(gid, 0)).rows;
+    const target = await emptyGroupLike([a.id, b.id, bot.id]);
+    const imp = await importChunk(target, await gzip(rows.map((x) => JSON.stringify(x)).join("\n") + "\n"));
+    expect(imp.status, JSON.stringify(imp.body)).toBe(200);
+    const edited = await runInDurableObject(env.GROUP_ROOM.get(env.GROUP_ROOM.idFromName(target)), async (_o, state) =>
+      state.storage.sql.exec<{ edited_at: number | null }>("SELECT edited_at FROM messages WHERE id = ?", m.id).one().edited_at,
+    );
+    expect(edited).toBeNull();
+    // Let the room and the gateways finish their work (bots outbox, presence, close) before the test ends.
+    await new Promise((r) => setTimeout(r, 300));
+    for (const x of [cbot, cb]) x.close();
+    await new Promise((r) => setTimeout(r, 300));
+  });
+});

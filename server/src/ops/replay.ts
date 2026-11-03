@@ -140,14 +140,17 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
     }
     case "message.updated": {
       const id = data.messageId as string;
-      const row = sql.exec<{ ext: string | null }>("SELECT ext FROM messages WHERE id = ?", id).toArray()[0];
+      const row = sql.exec<{ ext: string | null; edited_at: number | null }>("SELECT ext, edited_at FROM messages WHERE id = ?", id).toArray()[0];
       if (!row) return;
       const extra = extOf(data, CORE_UPDATE_KEYS);
       const ext = extra ? { ...(row.ext ? (JSON.parse(row.ext) as Obj) : {}), ...extra } : null;
+      // cards2: a server-made state update (card answer, retract, expiry; a cleared ref) has no
+      // cardV2 and carries cardState or blockRefs. It is not an edit: edited_at stays.
+      const stateOnly = data.cardV2 === undefined && (data.cardState !== undefined || data.blockRefs !== undefined);
       sql.exec(
         "UPDATE messages SET body = ?, edited_at = ?, streaming = ?, ext = COALESCE(?, ext) WHERE id = ?",
         (data.body as string) ?? "",
-        (data.editedAt as number) ?? e.at,
+        stateOnly ? row.edited_at : ((data.editedAt as number) ?? e.at),
         data.streaming === true ? 1 : 0,
         ext ? JSON.stringify(ext) : null,
         id,

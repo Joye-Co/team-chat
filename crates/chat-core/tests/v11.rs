@@ -1318,3 +1318,73 @@ async fn an_answer_is_acked_when_its_event_arrives_first() {
     assert!(client.pending_card_events("T1").unwrap().is_empty());
     client.stop();
 }
+
+#[test]
+fn state_updates_of_a_card_and_cleared_refs_are_not_edits() {
+    let (_d, s) = open();
+    let card = ask_card(1, false);
+    let state: CardState = serde_json::from_value(json!({
+        "ask": { "id": "a1", "status": "answered", "from": [ME], "blocking": true, "answeredBy": ME, "answeredAt": 1004 },
+        "answers": []
+    }))
+    .unwrap();
+    s.apply_events(
+        G1,
+        &[
+            topic_created(1, G1, topic("T1", G1, "M1", 1)),
+            msg_created(2, message("M1", G1, "T1", ME, 2, "> ↳ 表格\n\nroot")),
+            msg_created(3, card_message("C1", 3, card.clone())),
+            // The server's state update of an answer: editedAt is the creation time.
+            ev(
+                4,
+                G1,
+                ME,
+                EventData::MessageUpdated(MessageUpdatedData {
+                    message_id: "C1".into(),
+                    body: "请选择".into(),
+                    edited_at: 1003,
+                    streaming: false,
+                    card_state: Some(state.clone()),
+                    ..Default::default()
+                }),
+            ),
+            // A cleared ref of a deleted source.
+            ev(
+                5,
+                G1,
+                ME,
+                EventData::MessageUpdated(MessageUpdatedData {
+                    message_id: "M1".into(),
+                    body: "> ↳ 原消息已删除\n\nroot".into(),
+                    edited_at: 1002,
+                    streaming: false,
+                    block_refs: Some(vec![]),
+                    ..Default::default()
+                }),
+            ),
+        ],
+    )
+    .unwrap();
+    assert_eq!(s.message("C1").unwrap().unwrap().edited_at(), None);
+    assert_eq!(s.message("M1").unwrap().unwrap().edited_at(), None);
+    // A new rev is an edit.
+    s.apply_events(
+        G1,
+        &[ev(
+            6,
+            G1,
+            ALICE,
+            EventData::MessageUpdated(MessageUpdatedData {
+                message_id: "C1".into(),
+                body: "请选择".into(),
+                edited_at: 2000,
+                streaming: false,
+                card_v2: Some(ask_card(2, false)),
+                card_state: Some(state),
+                ..Default::default()
+            }),
+        )],
+    )
+    .unwrap();
+    assert_eq!(s.message("C1").unwrap().unwrap().edited_at(), Some(2000));
+}

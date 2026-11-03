@@ -1167,6 +1167,12 @@ other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
 
+Edit marks: a `message.updated` that the server makes for a state change (an answer, a
+retract or an expiry of a card ask; a ref whose source was deleted) has no `cardV2` and carries
+`cardState` or `blockRefs`. Its `editedAt` is the stored `editedAt`, or `createdAt` for a message
+that was never edited. It is not an edit: a 1.1 client keeps its stored `editedAt` (no edited
+mark), and so does a restore. (1.0.x clients copy `editedAt` and show the mark.)
+
 Topic status with blocking asks: while a blocking ask in the topic is open, the topic is
 `waiting_answer` and `waitingOn` is the union of the open asks' `from` and the people of a
 `waiting_answer` set by `topic.update` (a run's approval). A `topic.update` in that time (for

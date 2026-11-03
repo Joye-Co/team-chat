@@ -596,11 +596,16 @@ fn apply_one(
             block_refs,
         }) => {
             out.replaced_bodies.push(message_id.clone());
+            // A server-made state update (a card answer, retract or expiry; a cleared ref) has
+            // no `cardV2` and carries `cardState` or `blockRefs`: not an edit, so the stored
+            // `edited_at` stays (docs/protocol.md, "Edit marks").
+            let state_only = card_v2.is_none() && (card_state.is_some() || block_refs.is_some());
             let topic: Option<String> = tx
                 .query_row(
-                    "UPDATE messages SET body = ?2, edited_at = ?3, streaming = ?4 WHERE id = ?1 AND deleted_at IS NULL
+                    "UPDATE messages SET body = ?2, edited_at = CASE WHEN ?5 THEN edited_at ELSE ?3 END, streaming = ?4
+                     WHERE id = ?1 AND deleted_at IS NULL
                      RETURNING topic_id",
-                    params![message_id, body, edited_at, streaming],
+                    params![message_id, body, edited_at, streaming, state_only],
                     |r| r.get(0),
                 )
                 .optional()?;
