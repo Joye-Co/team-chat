@@ -15,6 +15,8 @@ import { ApiError, unwrap } from "../core/errors";
 import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc } from "../core/registry";
 
+import "./decisions";
+
 export const CARD_ANSWER_RPC = "cards.answer";
 export const ARTIFACT_EVENT_RPC = "artifacts.event";
 
