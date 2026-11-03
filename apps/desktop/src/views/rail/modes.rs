@@ -61,10 +61,10 @@ pub(super) enum Item {
         count: usize,
         folded: bool,
     },
-    Topic(TopicItem),
+    Topic(Box<TopicItem>),
     /// C: a member and its state.
     MemberHead {
-        row: MemberRow,
+        row: Box<MemberRow>,
         expanded: bool,
     },
     /// C: `空闲 · …` and `不在 · …`.
@@ -78,6 +78,12 @@ pub(super) enum Item {
     PeopleLabel,
     /// C: an online person with nothing on.
     Plain(Member),
+}
+
+impl Item {
+    fn topic(t: TopicItem) -> Self {
+        Item::Topic(Box::new(t))
+    }
 }
 
 /// A 话题 row.
@@ -163,7 +169,7 @@ pub(super) fn work(p: &dyn ChatProvider, i: &Inputs) -> Vec<Entry> {
         if !folded {
             for t in topics {
                 let (state, meta) = model::row_state(p, me, &t);
-                section.push(Item::Topic(TopicItem {
+                section.push(Item::topic(TopicItem {
                     key: "topic".into(),
                     selected: is_open(open, &g.id, &t.id),
                     tile: tile(p, &state),
@@ -227,7 +233,7 @@ pub(super) fn attention(p: &dyn ChatProvider, i: &Inputs, side: &SideChats) -> V
                             mono: false,
                         });
                 }
-                section.push(Item::Topic(TopicItem {
+                section.push(Item::topic(TopicItem {
                     key: "bucket".into(),
                     selected: is_open(i.open.as_ref(), &t.group_id, &t.id),
                     tile: tile(p, &state),
@@ -273,7 +279,7 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
                 .iter()
                 .enumerate()
                 .map(|(ix, mt)| {
-                    Item::Topic(TopicItem {
+                    Item::topic(TopicItem {
                         key: format!("member-{}", r.member.id),
                         topic: mt.topic.clone(),
                         state: mt.state.clone(),
@@ -287,10 +293,16 @@ pub(super) fn by_member(p: &dyn ChatProvider, i: &mut Inputs, side: &SideChats) 
                     })
                 })
                 .collect();
-            out.push(Item::MemberHead { row: r, expanded });
+            out.push(Item::MemberHead {
+                row: Box::new(r),
+                expanded,
+            });
             out.extend(topics);
         } else {
-            out.push(Item::MemberHead { row: r, expanded });
+            out.push(Item::MemberHead {
+                row: Box::new(r),
+                expanded,
+            });
         }
     };
     let mut idle: Vec<Member> = Vec::new();
