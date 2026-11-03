@@ -7,6 +7,10 @@
 //! temporary folder that is removed at the end; the token is kept in memory
 //! only and never written to the report.
 //!
+//! With `--read-only` it only signs in with the token, connects, waits for the catch-up
+//! of every group and reports counts: no window, no topic, no message, no read
+//! position, so it is safe against production.
+//!
 //! The file may hold a token (`tc_...`) or an invite code. With an invite
 //! code the token is this test's own, so the test also signs out with
 //! "wipe": it checks that the server revoked the token and the cache is gone.
@@ -35,6 +39,7 @@ pub struct LiveArgs {
     pub url: String,
     pub token_file: PathBuf,
     pub report: PathBuf,
+    pub read_only: bool,
 }
 
 /// Runs inside the app. Calls `finish(report_json, ok, cx)` at the end.
@@ -64,6 +69,38 @@ pub fn run(
         tokens: tokens.clone(),
         restore: false,
     });
+    if args.read_only {
+        if matches!(credential, Credential::InviteCode(_)) {
+            // Redeeming an invite is a write.
+            let json = serde_json::json!({ "ok": false, "error": "--read-only needs a token" });
+            finish(&args.report, json, false, cx);
+            return;
+        }
+        let login_at = Instant::now();
+        provider.login(LoginRequest {
+            server_url: args.url.clone(),
+            credential,
+            device_name: "selftest".into(),
+        });
+        let report = args.report.clone();
+        cx.spawn(async move |cx: &mut AsyncApp| {
+            let (ok, json) = match drive_read_only(&provider, login_at, started, cx).await {
+                Ok(json) => (true, json),
+                Err((step, mut json)) => {
+                    json["ok"] = false.into();
+                    json["error"] = format!("timed out or failed at: {step}").into();
+                    (false, json)
+                }
+            };
+            cx.update(|cx| {
+                provider.sign_out_local_for_selftest();
+                finish(&report, json, ok, cx);
+            });
+            let _ = std::fs::remove_dir_all(&data_root);
+        })
+        .detach();
+        return;
+    }
     let dyn_provider: Arc<dyn ChatProvider> = provider.clone();
     let services = Services::new(dyn_provider, cx);
     let root = match app::open_main_window(services.clone(), false, None, cx) {
@@ -128,6 +165,46 @@ async fn wait_for<T>(
 }
 
 type Step = (&'static str, serde_json::Value);
+
+/// Signed in, online, and every group caught up (its cache has applied events).
+async fn drive_read_only(
+    provider: &Arc<CoreProvider>,
+    login_at: Instant,
+    started: Instant,
+    cx: &mut AsyncApp,
+) -> Result<serde_json::Value, Step> {
+    let deadline = Instant::now() + TIMEOUT;
+    let ms = |t: Instant| (t.elapsed().as_secs_f64() * 1000.0).round();
+    let mut json = serde_json::json!({ "ok": false, "read_only": true });
+    wait_for(cx, deadline, |_| {
+        let signed_in = matches!(provider.session(), SessionState::SignedIn { .. });
+        (signed_in && provider.connection() == ConnectionState::Online).then_some(())
+    })
+    .await
+    .ok_or(("sign in and connect", json.clone()))?;
+    json["online_ms"] = ms(login_at).into();
+    let client = provider.client().ok_or(("client", json.clone()))?;
+    let synced = wait_for(cx, deadline, |_| {
+        let groups = provider.groups();
+        if groups.is_empty() {
+            return None;
+        }
+        let seqs: Option<Vec<u64>> = groups
+            .iter()
+            .map(|g| client.store().last_applied(&g.id).ok().filter(|s| *s > 0))
+            .collect();
+        seqs.map(|s| (groups.len(), s.iter().sum::<u64>()))
+    })
+    .await
+    .ok_or(("catch-up of every group", json.clone()))?;
+    json["synced_ms"] = ms(login_at).into();
+    json["groups"] = synced.0.into();
+    json["applied_events"] = synced.1.into();
+    json["members"] = provider.members().len().into();
+    json["total_ms"] = ms(started).into();
+    json["ok"] = true.into();
+    Ok(json)
+}
 
 async fn drive(
     provider: &Arc<CoreProvider>,

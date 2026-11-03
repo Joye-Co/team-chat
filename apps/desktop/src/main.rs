@@ -14,6 +14,8 @@
 //!       sign in to a real server with the token in the file, open the first
 //!       group, start a topic and send a message, wait for the acks and the
 //!       event, write a JSON report and exit (0 on success). No focus taken.
+//!       With `--read-only`: sign in with the token, connect and catch up every
+//!       group, and write nothing (no window).
 //!   desktop --screenshot <dir> [--theme light|dark|both] [--scenes ...] [--worst-case]
 //!       capture every scene's window in each theme; see `selftest/mod.rs`.
 //!   desktop --selftest-nav --report <path>
@@ -85,6 +87,7 @@ struct Args {
     hold_ms: u64,
     live_url: Option<String>,
     token_file: Option<PathBuf>,
+    read_only: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -112,6 +115,7 @@ fn parse_args() -> Result<Args, String> {
             "--token-file" => {
                 args.token_file = Some(it.next().ok_or("--token-file needs a path")?.into())
             }
+            "--read-only" => args.read_only = true,
             "--hold-ms" => {
                 args.hold_ms = it
                     .next()
@@ -166,7 +170,7 @@ fn main() {
                 eprintln!("{error}");
             }
             eprintln!(
-                "usage: desktop [--fake | --signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]\n       desktop --selftest-live <url> --token-file <path> --report <path>"
+                "usage: desktop [--fake | --signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]\n       desktop --selftest-live <url> --token-file <path> --report <path> [--read-only]"
             );
             std::process::exit(2);
         }
@@ -183,6 +187,7 @@ fn main() {
                 url,
                 token_file: args.token_file.clone().unwrap(),
                 report: args.report.clone().unwrap(),
+                read_only: args.read_only,
             };
             provider::selftest_live::run(live, started, finish, cx);
             return;
