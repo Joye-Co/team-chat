@@ -189,6 +189,8 @@ pub struct WebEmbedState {
     cover_covered: bool,
     check_pending: bool,
     focused: bool,
+    /// The frame color the inline page's cut edge fades into, as last given to the page.
+    fade: Option<String>,
     #[cfg(target_os = "macos")]
     native: Option<artifact_view::EmbeddedArtifact>,
     _events: Option<gpui::Task<()>>,
@@ -224,6 +226,7 @@ impl WebEmbedState {
             cover_covered: false,
             check_pending: false,
             focused: false,
+            fade: None,
             #[cfg(target_os = "macos")]
             native: None,
             _events: None,
@@ -425,6 +428,8 @@ impl WebEmbedState {
         match &event {
             ArtifactEvent::Loaded { .. } => {
                 self.phase = Phase::Ready;
+                // A new document: it has no fade yet.
+                self.fade = None;
                 // Let the page draw, then keep a picture for overlays.
                 self.snapshot_later(cx, 250);
             }
@@ -463,6 +468,32 @@ impl WebEmbedState {
             cx.defer(move |cx| {
                 let _ = handle.update(cx, |_, window, cx| handler(&event, window, cx));
             });
+        }
+    }
+
+    /// An inline page (wheel scrolling passes to the list) starts at its top and is cut at
+    /// the frame's height: while more of the page lies below, its bottom edge fades into
+    /// the frame's surface instead of cutting through a row (MEDIA §1 inline HTML). The
+    /// fade is a click-through layer the page cannot see in its layout; it follows the
+    /// page's scroll position and size, and the theme.
+    fn apply_fade(&mut self, cx: &App) {
+        if !self.pass_scroll || self.phase != Phase::Ready {
+            return;
+        }
+        let c = gpui::Rgba::from(theme::colors(cx).raised);
+        let rgb = format!(
+            "{},{},{}",
+            (c.r * 255.).round() as u8,
+            (c.g * 255.).round() as u8,
+            (c.b * 255.).round() as u8
+        );
+        if self.fade.as_deref() == Some(rgb.as_str()) {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(n) = &self.native {
+            n.evaluate_script(&fade_script(&rgb));
+            self.fade = Some(rgb);
         }
     }
 
@@ -578,6 +609,7 @@ impl WebEmbedState {
                 n.set_hidden(covered);
             }
         }
+        self.apply_fade(cx);
         // Right after this frame shows, test whether an overlay that blocks the mouse lies
         // over the page (its hitbox is not the top one at a sample point).
         if !self.check_pending {
@@ -601,6 +633,28 @@ impl WebEmbedState {
             });
         }
     }
+}
+
+/// Height of the fade at the cut edge of an inline page, in points.
+const FADE_H: f32 = 48.;
+
+/// The script that puts the fade into a page (or recolors it): `rgb` is `r,g,b`.
+fn fade_script(rgb: &str) -> String {
+    format!(
+        "(function(){{var d=document.getElementById('__tc_fade');\
+if(!d){{d=document.createElement('div');d.id='__tc_fade';d.setAttribute('aria-hidden','true');\
+var s=d.style;s.position='fixed';s.left='0';s.right='0';s.bottom='0';s.height='{h}px';\
+s.pointerEvents='none';s.zIndex='2147483647';s.margin='0';s.padding='0';\
+document.documentElement.appendChild(d);\
+var u=function(){{var e=document.scrollingElement||document.documentElement;\
+d.style.opacity=(e.scrollHeight-(window.scrollY+window.innerHeight)>1)?'1':'0';}};\
+window.addEventListener('scroll',u,{{passive:true}});window.addEventListener('resize',u);\
+try{{var o=new ResizeObserver(u);o.observe(document.documentElement);\
+if(document.body)o.observe(document.body);}}catch(_){{}}d.__tcUpdate=u;}}\
+d.style.background='linear-gradient(to bottom,rgba({rgb},0),rgba({rgb},1))';\
+d.__tcUpdate();}})()",
+        h = FADE_H,
+    )
 }
 
 /// Points spread over the visible part (corners inset by 2 pt, edges and a 3 x 3 grid).

@@ -289,6 +289,11 @@ async fn until(
 
 const REV: &str = "document.body.dataset.rev||''";
 const SCRIPTED: &str = "document.body.dataset.scripted||''";
+/// The fade at the cut edge shows exactly while more of the page lies below.
+const FADE: &str = "(function(){var d=document.getElementById('__tc_fade');if(!d)return 'none';\
+var e=document.scrollingElement||document.documentElement;\
+var more=e.scrollHeight-(window.scrollY+window.innerHeight)>1;\
+return d.style.opacity===(more?'1':'0')?'ok':'opacity '+d.style.opacity+', more '+more;})()";
 const ASK_AT: &str = "(function(){var r=document.getElementById('ask').getBoundingClientRect();\
 return JSON.stringify({x:r.left+r.width/2,y:r.top+r.height/2});})()";
 
@@ -309,6 +314,7 @@ async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
     if cx.update(|cx| asks_before(cx)) != 0 {
         return Err("an ask without a click reached the member".into());
     }
+    let mut shown = p3.clone();
     match mode {
         Mode::LiveData => {
             cx.update(|cx| {
@@ -341,6 +347,7 @@ async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
                 .await
                 .ok_or("the page did not reload in place to v4")?;
             until(cx, &p4, REV, "1").await?;
+            shown = p4.clone();
             let notice = cx.update(|cx| host::notice(d::ART_REPORT, 4, 4, cx));
             if notice.as_deref() != Some("已更新到 v4") {
                 return Err(format!("the header note is {notice:?}"));
@@ -375,11 +382,8 @@ async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
             if !matches!(band, Some(host::BandView::Waiting(_))) {
                 return Err(format!("the footer does not wait: {band:?}"));
             }
-            // Show the question in the page (it is below the chart).
-            cx.update(|cx| {
-                p3.read(cx)
-                    .evaluate_script("window.scrollTo(0,document.body.scrollHeight)")
-            });
+            // The inline page stays at its top: the question below the chart is under the
+            // fade at the cut edge, and 展开 shows it.
             // Still waiting in the page.
             let state = eval(cx, &p3, "document.body.dataset.ask||'waiting'").await;
             if state != "waiting" {
@@ -387,6 +391,10 @@ async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
             }
         }
     }
+    // The inline page starts at its top, and its cut edge fades into the frame when the
+    // page is taller than the frame.
+    until(cx, &shown, "String(window.scrollY)", "0").await?;
+    until(cx, &shown, FADE, "ok").await?;
     // Let the last frame draw.
     cx.background_executor()
         .timer(Duration::from_millis(250))
