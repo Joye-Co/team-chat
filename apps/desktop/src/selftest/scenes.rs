@@ -672,7 +672,7 @@ pub const SCENES: &[Scene] = &[
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 14] = [
+    let slices: [&'static [Scene]; 15] = [
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -693,6 +693,9 @@ pub fn all() -> Vec<&'static Scene> {
         // --- inc-cards21 ---
         crate::views::cards::v21::scenes::SCENES,
         // --- end inc-cards21 ---
+        // --- inc-host track ---
+        HOST_SCENES,
+        // --- end inc-host track ---
     ];
     slices.into_iter().flatten().collect()
 }
@@ -728,6 +731,43 @@ const V2_SHARED: &[Scene] = &[
     // cards-v2: moved to the cards v2 track's slice (views/cards/v2/scenes.rs).
 ];
 
+// --- inc-host track: the 产出 page host ---
+
+use crate::views::artifacts::host_preview::{self, Mode as HostMode};
+
+const HOST_SCENES: &[Scene] = &[
+    Scene {
+        name: "artifact_live_data",
+        about: "产出 page inline in its 话题: Ledger pushes the B 站 numbers and the page redraws",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| host_preview::open(s, c, HostMode::LiveData, cx),
+    },
+    Scene {
+        name: "artifact_reloaded_v2",
+        about: "产出 page inline: a new version arrives and the page reloads in place (已更新到 v4)",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| host_preview::open(s, c, HostMode::Reloaded, cx),
+    },
+    Scene {
+        name: "artifact_ask_pending",
+        about: "产出 page inline: a real click on 数据有问题 sends one ask; the footer waits for Ledger",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| host_preview::open(s, c, HostMode::AskPending, cx),
+    },
+];
+
+fn host_check(name: &str) -> bool {
+    matches!(
+        name,
+        "artifact_live_data" | "artifact_reloaded_v2" | "artifact_ask_pending"
+    )
+}
+
+// --- end inc-host track ---
+
 // --- web-embed: scenes that wait for native content and check their capture ---
 
 use crate::views::artifacts::embed_preview::{self, Mode as EmbedMode};
@@ -735,6 +775,11 @@ use crate::views::artifacts::embed_preview::{self, Mode as EmbedMode};
 /// For a scene whose window shows native content (a web page) that GPUI's frames do not
 /// cover: true once it is ready to capture.
 pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
+    // --- inc-host track ---
+    if host_check(name) {
+        return Some(host_preview::ready);
+    }
+    // --- end inc-host track ---
     // --- v11/media ---
     if let Some(check) = media_ready(name) {
         return Some(check);
@@ -764,6 +809,11 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
 
 /// For a scene that checks its own capture: runs after the PNG is written.
 pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+    // --- inc-host track ---
+    if host_check(name) {
+        return Some(host_preview::verify);
+    }
+    // --- end inc-host track ---
     // --- v11/media ---
     if let Some(check) = media_verify(name) {
         return Some(check);

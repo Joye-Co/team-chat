@@ -6,6 +6,7 @@ pub mod embed_preview;
 pub mod extra;
 // --- inc-host track ---
 pub mod host;
+pub mod host_preview;
 // --- end inc-host track ---
 pub mod panel;
 pub mod window;
