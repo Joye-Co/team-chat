@@ -202,7 +202,7 @@ describe("answers to runner bots", () => {
     d.send({ t: "run.accept", runId });
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
 
-    const card = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("初稿") })).message;
+    const card = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("初稿", [w.human.id]) })).message;
     await c.ok({ t: "card.answer", groupId: w.gid, messageId: card.id, rev: 1, actionId: "again" });
     await d.next((f) => f.t === "run.input" && f.answer);
     // The run ends before the CLI takes the answer: a follow-up run starts from it.
