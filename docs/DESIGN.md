@@ -464,8 +464,8 @@ skip the confirm step before an irreversible action.
 **Anatomy.** Card: radius 12, 1 pt `line`, `bg`, `lift`, width `min(680, box)` (首页) or the
 message column. Body padding 14 16 16:
 1. Header (18 pt): 20 tile + name `ui` 500 + 岗位 tag + `群 / 话题` breadcrumb (`meta` `ink-3`, topic in
-   `ink-2`, a link) + mono time at the right. Omitted inside the topic of the card's own message
-   (the message row already names the author).
+   `ink-2`, a link) + mono time at the right. In the card's own topic the breadcrumb is dropped and
+   the intent state takes its place (`✓ 做完了`); the 28 pt gutter avatar stays beside the card.
 2. Title: `card-title` 16/24, 10 pt below the header; one sentence that says what is wanted.
 3. Blocks (below), 10 to 12 pt apart.
 4. Footer: padding 10 16, 1 pt `line` top, `raised` fill: primary, secondary, text actions, gap 8,
