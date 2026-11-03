@@ -457,6 +457,33 @@ describe("BotDesk delivery", () => {
     for (const x of [c, d]) x.close();
   });
 
+  it("start a side chat run from an anonymous live event with the side chat's own person as the asker", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "aside"] });
+    const { c: cs } = await Client.connect(w.owner.token);
+    const src = await cs.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "发布卡在签名上" });
+    const context = { groupId: w.gid, topicId: src.topic.id, uptoSeq: src.message.createdSeq };
+    const dm = await api("/v1/dms", { token: w.human.token, body: { memberId: w.bot.id } });
+    expect(dm.status, JSON.stringify(dm.body)).toBe(200);
+    const dmId = dm.body.group.id as string;
+    const { c } = await Client.connect(w.human.token, INTERACT);
+    const side = await c.ok({ t: "send", groupId: dmId, clientMsgId: clientMsgId(), body: "现在卡在哪？", context });
+    const sideTopic = side.topic.id as string;
+    const first = await d.next((f) => f.t === "run.assign" && f.topicId === sideTopic);
+    d.send({ t: "run.accept", runId: first.runId });
+    await d.acked(first.runId, d.done(first.runId, { status: "succeeded", resultText: "在签名。" }));
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === first.runId && e.data.run.status === "done");
+
+    // A private card's live event names no person; the run still reads the source topic.
+    const x = { ...interaction(w, sideTopic, ulid(), "channels", { values: ["bili"] }), groupId: dmId, actorId: "anonymous" };
+    expect(await deskOf(w.bot.id).interaction(w.bot.id, x)).toEqual({ mode: "starting", etaMs: 40_000 });
+    const second = await d.next((f) => f.t === "run.assign" && f.topicId === sideTopic && f.runId !== first.runId);
+    expect(second).toMatchObject({ groupId: dmId, kind: "aside" });
+    expect(second.prompt).toContain("发布卡在签名上");
+    expect(second.prompt).toContain('kind="card.event"');
+    for (const x of [c, cs, d]) x.close();
+  });
+
   it("take a runner's own card from the group room to its run: live events, answers, the retract window and requester asks", async () => {
     const w = await world();
     const { d, c, topicId, runId } = await runningRun(w, { features: ["interact", "output"] });

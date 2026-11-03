@@ -131,11 +131,13 @@ export abstract class DeskRuns extends DeskCore {
     followUps: { authorId: string; body: string }[],
   ): Promise<string> {
     const botId = this.botId as string;
+    // The asker is the side chat's own person: a run that an answer or a live event starts
+    // can carry "anonymous" (a private card) as its author.
     const source = unwrap(
       await roomStub(this.env, ctx.groupId).rpc(ctx.groupId, "bots.context", this.actor(), {
         topicId: ctx.topicId,
         uptoSeq: ctx.uptoSeq,
-        askerId: m.authorId,
+        askerId: claim.askerId ?? m.authorId,
       }),
     ) as SourceContext;
     const chat = claim.messages.filter((x) => x.body !== "" && x.id !== m.messageId);

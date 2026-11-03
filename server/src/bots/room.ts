@@ -61,6 +61,8 @@ export interface ClaimResult {
   messages: ContextMessage[];
   /** The topic is a side chat about this topic (1.1, `Topic.contextOf`). */
   contextOf?: TopicContext;
+  /** With `contextOf`: the side chat's own person (the DM's other member), the asker. */
+  askerId?: string;
 }
 
 /** What `bots.context` returns: the side chat's source topic up to `uptoSeq`. */
@@ -96,7 +98,11 @@ registerRoomRpc("bots.claim", (room, actor, args): ClaimResult => {
     .map((m) => ({ id: m.id, authorId: m.author_id, body: m.body }));
   const out: ClaimResult = { botId: claimedBot(room.sql, topicId) as string, title: topic.title, messages };
   // Only a DM topic can be a side chat (the room checks this when it stores the context).
-  if (topic.context && room.groupKind === "dm") out.contextOf = JSON.parse(topic.context) as TopicContext;
+  if (topic.context && room.groupKind === "dm") {
+    out.contextOf = JSON.parse(topic.context) as TopicContext;
+    const asker = room.memberIds().find((id) => id !== actor.id);
+    if (asker) out.askerId = asker;
+  }
   return out;
 });
 
