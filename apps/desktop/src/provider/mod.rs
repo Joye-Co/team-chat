@@ -15,6 +15,8 @@
 pub mod app_glue;
 mod cards;
 pub mod convert;
+// Desk track (1.1.0 首页).
+mod desk;
 pub mod files;
 #[cfg(test)]
 mod files_live;
@@ -1665,6 +1667,43 @@ impl ChatProvider for CoreProvider {
             .cards
             .image(&a.client, file_id, move || this.emit(vec![change]))
     }
+
+    // --- desk track (1.1.0 首页): provider/desk.rs ---
+
+    fn asks_for_me(&self) -> Vec<crate::data::v2::AskItem> {
+        self.desk_asks()
+    }
+
+    fn card_v2(&self, _group_id: &str, message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
+        self.desk_card_v2(message_id)
+    }
+
+    fn card_v2_answers(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Vec<crate::data::v2::CardAnswer> {
+        let topic = self
+            .account()
+            .and_then(|a| a.client.store().message(message_id).ok().flatten())
+            .map(|m| m.topic_id)
+            .unwrap_or_default();
+        self.desk_card_v2_answers(&topic, message_id)
+    }
+
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        rev: u32,
+        action_id: &str,
+        inputs: std::collections::BTreeMap<String, serde_json::Value>,
+    ) {
+        self.desk_answer_card_v2(group_id, topic_id, message_id, rev, action_id, inputs)
+    }
+
+    // --- end of the desk track block ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

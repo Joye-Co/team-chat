@@ -1809,6 +1809,35 @@ pub trait ChatProvider: Send + Sync + 'static {
         None
     }
 
+    // --- desk track (1.1.0 首页, views/desk): v2 cards on the desk ---
+
+    /// The v2 card of a card message (`Message.cardV2`), from memory, when it
+    /// has one. Cheap, like [`ChatProvider::card`]. A message that has one
+    /// still has the server-derived v1 `card` for older readers.
+    fn card_v2(&self, _group_id: &str, _message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
+        None
+    }
+    /// Answers to a v2 card (`card.answered`), oldest first, my queued
+    /// answer last with `pending` set.
+    fn card_v2_answers(&self, _group_id: &str, _message_id: &str) -> Vec<v2::CardAnswer> {
+        Vec::new()
+    }
+    /// Answers a v2 card (`card.answer`) on the `rev` I saw. `inputs` are
+    /// keyed by block id (a `decision` block's value is the option id).
+    /// Emits `Change::Messages` for the topic when the answers change.
+    fn answer_card_v2(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _rev: u32,
+        _action_id: &str,
+        _inputs: std::collections::BTreeMap<String, serde_json::Value>,
+    ) {
+    }
+
+    // --- end of the desk track block ---
+
     // --- changes ---
 
     /// A new stream of change batches. Each call gives a new receiver; all

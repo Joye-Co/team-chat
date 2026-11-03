@@ -276,3 +276,17 @@ pub struct ArtifactStory {
     /// 话题 that point to it: (group, topic, title).
     pub cited_by: Vec<(GroupId, TopicId, String)>,
 }
+
+// --- desk track (1.1.0 首页): appended ---
+
+/// One answer to a v2 card (`card.answered`), as the 首页 shows it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CardAnswer {
+    pub actor_id: MemberId,
+    pub action_id: String,
+    /// Values by block id: a `decision` block's option id (or ids).
+    pub inputs: std::collections::BTreeMap<String, serde_json::Value>,
+    pub at: Millis,
+    /// My answer is queued and the server has not stored it yet.
+    pub pending: bool,
+}
