@@ -241,7 +241,17 @@ pub fn render(
         match seen.filter(|_| is21) {
             Some(old) => {
                 let kept = form.update(cx, |f, cx| f.rebase(&old, &card, cx));
-                ui.update(cx, |u, _| u.drafts_kept = kept.into_iter().collect());
+                let f = form.read(cx);
+                let holds: Vec<String> = ui
+                    .read(cx)
+                    .drafts_kept
+                    .iter()
+                    .filter(|id| f.holds_text(id))
+                    .cloned()
+                    .collect();
+                ui.update(cx, |u, _| {
+                    u.keep_drafts(kept, &card, |id| holds.iter().any(|h| h == id))
+                });
             }
             None => form.update(cx, |f, _| f.reset(&card)),
         }

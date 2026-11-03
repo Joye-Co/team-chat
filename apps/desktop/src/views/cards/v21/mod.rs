@@ -212,6 +212,15 @@ impl CardUi {
         self.seen = Some(card.clone());
     }
 
+    /// Blocks that keep my typed text after a rebase onto `card`: the ones this rev kept
+    /// (`kept`), and the ones an earlier rev kept whose text I still hold (`holds`), so
+    /// 内容变了 · 用新的 stays on block A when a later rev changes only block B.
+    pub fn keep_drafts(&mut self, kept: Vec<String>, card: &CardV2, holds: impl Fn(&str) -> bool) {
+        self.drafts_kept
+            .retain(|id| card.block(id).is_some() && holds(id));
+        self.drafts_kept.extend(kept);
+    }
+
     /// 用新的 on `block`: its text is the card's again, set without a keystroke, so the
     /// next draw sends no `input.change`.
     pub fn use_new(&mut self, block: &str) {
@@ -980,5 +989,18 @@ mod ui_tests {
         ui.use_new("b");
         assert_eq!(ui.block("b").tab, None);
         assert!(!ui.drafts_kept.contains("b"));
+    }
+
+    #[test]
+    fn a_kept_draft_stays_marked_when_a_later_rev_changes_another_block() {
+        let mut ui = CardUi::new(None);
+        // Rev 2 changed block a while I had typed in it.
+        ui.keep_drafts(vec!["a".into()], &card(2, "新", "补"), |_| true);
+        // Rev 3 changes only block b (untouched by me): a keeps its 内容变了.
+        ui.keep_drafts(Vec::new(), &card(3, "新", "补二"), |id| id == "a");
+        assert!(ui.drafts_kept.contains("a"));
+        // Once a's text is gone (用新的, or the block went), the mark goes.
+        ui.keep_drafts(Vec::new(), &card(4, "新", "补二"), |_| false);
+        assert!(ui.drafts_kept.is_empty());
     }
 }

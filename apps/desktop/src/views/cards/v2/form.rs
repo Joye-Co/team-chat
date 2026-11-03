@@ -426,6 +426,14 @@ impl CardForm {
         kept
     }
 
+    /// v11/pb2-cards: true while the viewer holds a text of `block` (a field of it is
+    /// drawn and not dropped by 用新的 or a rebase).
+    pub fn holds_text(&self, block: &str) -> bool {
+        self.fields
+            .keys()
+            .any(|k| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#')))
+    }
+
     /// v11/pb-cards: 用新的: drops the viewer's text of `block` for the card's new one.
     pub fn use_new(&mut self, card: &CardV2, block: &str, cx: &mut Context<Self>) {
         let mine =
