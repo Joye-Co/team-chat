@@ -898,7 +898,9 @@ Rules:
   actions). Clients show a card as answered when a `card.answered` for its current rev exists,
   as expired after `ask.expiresAt`, and as superseded when a later rev exists.
 - Answers reach a runner bot's run as `run.input.answer` (machine-protocol.md) and an SDK bot
-  as the `card.answered` event.
+  as the `card.answered` event. A runner bot gets only answers by people to its own cards: the
+  topic's active run takes the answer as input; with no active run, the answer starts a run in
+  the card's topic like a mention, with the answer as the request.
 - Group decisions (群里的决定): every `card.answered` of a card whose `ask.record` was true at
   the answered rev, with the question (title), the choice (action, chosen option labels and
   inputs), who and when. Clients may derive them from their cache; the server also lists them
@@ -913,7 +915,7 @@ GroupDecision = { seq /* of card.answered */, messageId, topicId, rev, title, ac
                   actionLabel, choices?: string[], inputs?, editedValues?, answeredBy, answeredAt }
 ```
 
-  A deleted card's decisions are not listed.
+A deleted card's decisions are not listed.
 - Readers are lenient: unknown block types, intents, kinds and styles read as unknown (Rust
   `Unknown`, rendered as nothing or the safe default), and a `cardV2` that does not parse is
   dropped while the v1 `card` stays. The server rejects all of these on write.
@@ -996,7 +998,9 @@ Rules:
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
 - `artifact.event`: any member of the group; the version must exist (`not_found`) and declare
   `name` in `events` (`forbidden` otherwise); at most 5 events per member per second
-  (`rate_limited`). The event goes to the author bot's run as `run.input.artifactEvent`.
+  (`rate_limited`). The event goes to the author bot's run as `run.input.artifactEvent`: the
+  run named by the version's `runId` while it is active, else the topic's active run. A page
+  event never starts a run, and one the CLI does not take is not given to a later run.
 - The desktop gives a page the `emitEvent` bridge only when its version was made by a bot of
   the group and declares events. Page events never approve anything: a bot that needs a
   decision posts a Card v2 ask.
