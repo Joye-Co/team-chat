@@ -290,6 +290,10 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   bad("entities/card-v2-poll-7-options.json", "CardV2", card21([{ id: "p", type: "poll", label: "投", voters: "group", closesAt: T0, options: Array.from({ length: 7 }, (_, i) => ({ id: `o${i}`, label: `${i}` })), fallbackText: "投" }]), "poll has 2..6 options", "card.limits");
   bad("entities/card-v2-compare-5-options.json", "CardV2", card21([{ id: "c", type: "compare", options: Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `${i}` })) }]), "compare has 2..4 options", "card.limits");
   bad("entities/card-v2-group-13-children.json", "CardV2", card21([{ id: "g", type: "group", title: "多", children: Array.from({ length: 13 }, (_, i) => `x${i}`) }, ...Array.from({ length: 13 }, (_, i) => leaf(`x${i}`))]), "group has 1..12 children", "card.limits");
+  bad("entities/card-v2-group-blocks-and-children.json", "CardV2", card21([{ id: "g", type: "group", title: "两", blocks: [], children: ["a"] }, leaf("a")]), "a group has blocks or children, even an empty blocks list", "card.limits");
+  const inlineGroup = { id: "g", type: "group", title: "填", blocks: [{ id: "i", type: "input", kind: "text", label: "名字" }] };
+  bad("entities/card-v2-deliver-on-group.json", "CardV2", card21([{ ...inlineGroup, deliver: "onSubmit" }]), "deliver is for input blocks, not a group of them", "card.limits");
+  bad("entities/card-v2-action-inputs-group.json", "CardV2", card21([inlineGroup], { actions: [{ id: "s", label: "交", inputs: ["g"] }] }), "action inputs name input blocks, not a group", "card.limits");
   bad("entities/card-v2-questionnaire-container-child.json", "CardV2", card21([
     { id: "qs", type: "questionnaire", children: ["s", "q"] },
     { id: "s", type: "stack", children: ["a"] },

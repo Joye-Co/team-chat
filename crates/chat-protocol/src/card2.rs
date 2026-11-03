@@ -1443,8 +1443,13 @@ pub enum CardV2Block {
             skip_serializing_if = "Option::is_none"
         )]
         label: Option<String>,
-        #[serde(default, skip_serializing_if = "Vec::is_empty")]
-        blocks: Vec<CardV2Block>,
+        /// 2.0: inline leaves. `Some(vec![])` is kept so the write rules see it (TS does).
+        #[serde(
+            default,
+            deserialize_with = "non_null",
+            skip_serializing_if = "Option::is_none"
+        )]
+        blocks: Option<Vec<CardV2Block>>,
         #[serde(
             default,
             deserialize_with = "non_null",
@@ -1759,7 +1764,7 @@ impl CardV2Block {
             | Self::Compare { .. } => true,
             Self::Draft { editable, .. } => editable.unwrap_or(false),
             Self::Table { select, .. } => select.is_some(),
-            Self::Group { blocks, .. } => blocks.iter().any(Self::takes_input),
+            // A group is never an input itself (TS `takesInput`): its leaves are.
             _ => false,
         }
     }
@@ -2005,7 +2010,11 @@ impl CardV2 {
         let mut out = Vec::new();
         for b in &self.blocks {
             out.push(b);
-            if let CardV2Block::Group { blocks, .. } = b {
+            if let CardV2Block::Group {
+                blocks: Some(blocks),
+                ..
+            } = b
+            {
                 out.extend(blocks.iter());
             }
         }
@@ -2257,7 +2266,7 @@ impl CardV2 {
                 CardV2Block::Group {
                     blocks, children, ..
                 } => {
-                    if blocks.is_empty() == children.is_none() {
+                    if blocks.is_some() == children.is_some() {
                         bad(
                             "card.limits",
                             format!("group {id} has either blocks or children"),
@@ -2265,7 +2274,12 @@ impl CardV2 {
                     } else if children.is_some() {
                         count(1, 12, kids.len(), "children")
                     } else {
-                        count(1, MAX_GROUP_BLOCKS, blocks.len(), "blocks")
+                        count(
+                            1,
+                            MAX_GROUP_BLOCKS,
+                            blocks.as_ref().map_or(0, Vec::len),
+                            "blocks",
+                        )
                     }
                 }
                 CardV2Block::Row { weights, .. } => {
@@ -2390,10 +2404,7 @@ impl CardV2 {
             return bad("card.depth", format!("block {id} is in a cycle"));
         }
         // Counts over the card.
-        let leaf_inputs = all
-            .iter()
-            .filter(|b| b.takes_input() && !matches!(b, CardV2Block::Group { .. }))
-            .count();
+        let leaf_inputs = all.iter().filter(|b| b.takes_input()).count();
         if leaf_inputs > MAX_CARD_V2_INPUT_BLOCKS {
             return bad(
                 "card.limits",
@@ -3115,6 +3126,7 @@ impl CardV2Block {
                 opt_chars("cardV2.blocks.label", label, 200)?;
                 opt_short("cardV2.blocks.title", title, 40)?;
                 opt_short("cardV2.blocks.summary", summary, 60)?;
+                let blocks = blocks.as_deref().unwrap_or(&[]);
                 if blocks.len() > MAX_GROUP_BLOCKS {
                     return fail(
                         "cardV2.blocks.blocks",
