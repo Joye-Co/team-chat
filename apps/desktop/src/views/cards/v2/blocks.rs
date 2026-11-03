@@ -2205,6 +2205,89 @@ fn ref_tile(glyph: Lucide, dashed: bool, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
+/// How a PR ref's state reads: its icon and color.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PrTone {
+    Merged,
+    /// Waits for the viewer's review.
+    Waits,
+    /// A check failed.
+    Bad,
+    /// Checks or a merge are running.
+    Running,
+    Plain,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PrState {
+    text: String,
+    tone: PrTone,
+}
+
+/// The shown text and tone of a PR ref state. The protocol values (`open`,
+/// `draft`, `merged`, `closed`) show in Chinese; other text from the bot
+/// shows unchanged. Tones come from exact words, never from a substring, so
+/// 未合并 and 合并中 do not read as merged.
+fn pr_state(raw: &str) -> PrState {
+    use crate::copy::{common, group_page, topic_rail as rail};
+    let raw = raw.trim();
+    let (text, tone) = match raw {
+        "open" => (rail::CHANGES_OPEN, PrTone::Plain),
+        "draft" => (c::REF_PR_DRAFT, PrTone::Plain),
+        "merged" => (rail::CHANGES_MERGED, PrTone::Merged),
+        "closed" => (rail::CHANGES_CLOSED, PrTone::Plain),
+        "failed" => (c::STRIP_FAILED, PrTone::Bad),
+        _ => {
+            // A free-text state such as "已合并 11-02" or
+            // "3 项检查通过 · 未合并": look at each part and its first word.
+            let tone = raw
+                .split('·')
+                .map(str::trim)
+                .map(|part| {
+                    let head = part.split_whitespace().next().unwrap_or("");
+                    let last = part.split_whitespace().last().unwrap_or("");
+                    if head == rail::CHANGES_MERGED {
+                        PrTone::Merged
+                    } else if part == group_page::GROUP_PAGE_NEEDS_REVIEW
+                        || part == common::STATUS_WAITING_REVIEW_ME
+                    {
+                        PrTone::Waits
+                    } else if part.ends_with(c::STRIP_FAILED) {
+                        PrTone::Bad
+                    } else if part == rail::CHANGES_MERGING || is_count(last) {
+                        PrTone::Running
+                    } else {
+                        PrTone::Plain
+                    }
+                })
+                // The strongest tone of the parts wins.
+                .min_by_key(|t| match t {
+                    PrTone::Bad => 0,
+                    PrTone::Waits => 1,
+                    PrTone::Running => 2,
+                    PrTone::Merged => 3,
+                    PrTone::Plain => 4,
+                })
+                .unwrap_or(PrTone::Plain);
+            return PrState {
+                text: raw.to_string(),
+                tone,
+            };
+        }
+    };
+    PrState {
+        text: text.to_string(),
+        tone,
+    }
+}
+
+/// `2/3`: checks done of all.
+fn is_count(word: &str) -> bool {
+    word.split_once('/').is_some_and(|(a, b)| {
+        !a.is_empty() && !b.is_empty() && a.bytes().all(|x| x.is_ascii_digit()) && b.bytes().all(|x| x.is_ascii_digit())
+    })
+}
+
 fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let p = &ctx.env.provider;
@@ -2215,28 +2298,25 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
         let (lead, name, line, right, right_color): (AnyElement, String, String, Option<String>, Hsla) =
             match target {
                 RefTarget::Pr { state, number, repo, .. } => {
-                    let merged = state.as_deref().is_some_and(|s| s.contains("合并") || s == "merged");
-                    let waits = state.as_deref().is_some_and(|s| s.contains("你"));
-                    let bad = state
-                        .as_deref()
-                        .is_some_and(|s| s.contains("没过") || s.contains("失败") || s == "failed");
-                    let running = state.as_deref().is_some_and(|s| s.contains('/'));
+                    let state = state.as_deref().map(pr_state);
+                    let tone = state.as_ref().map_or(PrTone::Plain, |s| s.tone);
                     (
-                        ref_tile(if merged { Lucide::GitMerge } else { Lucide::GitPullRequest }, false, cx),
+                        ref_tile(
+                            if tone == PrTone::Merged { Lucide::GitMerge } else { Lucide::GitPullRequest },
+                            false,
+                            cx,
+                        ),
                         match number {
                             Some(n) if !label.contains(&format!("#{n}")) => format!("#{n} {label}"),
                             _ => label.clone(),
                         },
                         repo.clone().unwrap_or_default(),
-                        state.clone(),
-                        if waits {
-                            k.you_ink
-                        } else if bad {
-                            k.bad_ink
-                        } else if running {
-                            k.live_ink
-                        } else {
-                            k.ink_2
+                        state.map(|s| s.text),
+                        match tone {
+                            PrTone::Waits => k.you_ink,
+                            PrTone::Bad => k.bad_ink,
+                            PrTone::Running => k.live_ink,
+                            PrTone::Merged | PrTone::Plain => k.ink_2,
                         },
                     )
                 }
@@ -2375,4 +2455,37 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
         .overflow_hidden()
         .children(rows)
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::copy::topic_rail as rail;
+
+    #[test]
+    fn protocol_pr_states_show_in_chinese() {
+        assert_eq!(pr_state("open").text, rail::CHANGES_OPEN);
+        assert_eq!(pr_state("draft").text, c::REF_PR_DRAFT);
+        assert_eq!(pr_state("closed").text, rail::CHANGES_CLOSED);
+        let merged = pr_state("merged");
+        assert_eq!((merged.text.as_str(), merged.tone), (rail::CHANGES_MERGED, PrTone::Merged));
+        assert_eq!(pr_state("open").tone, PrTone::Plain);
+    }
+
+    #[test]
+    fn pr_tones_match_exact_words_only() {
+        assert_eq!(pr_state("未合并").tone, PrTone::Plain);
+        assert_eq!(pr_state("合并中").tone, PrTone::Running);
+        assert_eq!(pr_state("3 项检查通过 · 未合并").tone, PrTone::Plain);
+        assert_eq!(pr_state("未合并 · 等你审").tone, PrTone::Waits);
+        assert_eq!(pr_state("已合并").tone, PrTone::Merged);
+        assert_eq!(pr_state("已合并 11-02").tone, PrTone::Merged);
+        assert_eq!(pr_state("需要你审").tone, PrTone::Waits);
+        assert_eq!(pr_state("1 项检查没过").tone, PrTone::Bad);
+        assert_eq!(pr_state("检查 2/3").tone, PrTone::Running);
+        assert_eq!(pr_state("你好").tone, PrTone::Plain);
+        // Free text shows unchanged.
+        assert_eq!(pr_state("已合并 11-02").text, "已合并 11-02");
+        assert_eq!(pr_state("reopened").text, "reopened");
+    }
 }

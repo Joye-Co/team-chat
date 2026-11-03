@@ -209,4 +209,6 @@ crate::copy! {
     GALLERY_S_PAGE = "交互产出",
     GALLERY_S_PAGE_NOTE = "话题里只放快照。页面里的操作会回到做它的成员。",
     GALLERY_SNAPSHOT = "快照和回执",
+    // PR ref states (docs/protocol.md TopicLink.state).
+    REF_PR_DRAFT = "草稿",
 }
