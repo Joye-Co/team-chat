@@ -7,6 +7,8 @@ import type { Expect, PartRef } from "@chat/protocol";
 import { type Env, gatewayStub } from "../core/env";
 import { featureTransient } from "../core/gateway";
 import type { RoomContext } from "../core/registry";
+import { type CardEventDelivery, registerCardEventHandler, registerRequesterResolver } from "../cards2/delivery";
+import { answerBlocks } from "./answers";
 import { deskStub } from "./env";
 import { memberInfo } from "./room";
 
@@ -181,3 +183,56 @@ export async function deliverPageEvent(room: RoomContext, creatorId: string, e: 
   room.broadcast(featureTransient(INTERACT_FEATURE, event), { to: [creatorId] });
   return liveExpect(room.env, creatorId);
 }
+
+type CardRow = { ext: string | null };
+
+/** The block (or footer action) a card event names, and the card's title, from the room's copy. */
+function cardContext(room: RoomContext, e: CardEventDelivery): { block?: unknown; title?: string } {
+  const row = room.sql.exec<CardRow>("SELECT ext FROM messages WHERE id = ?", e.messageId).toArray()[0];
+  const card = row?.ext ? (JSON.parse(row.ext) as { cardV2?: { title?: string; blocks: unknown[]; actions?: { id: string }[] } }).cardV2 : undefined;
+  if (!card) return {};
+  const out: { block?: unknown; title?: string } = {};
+  if (card.title) out.title = card.title;
+  if (e.blockId) out.block = answerBlocks(card as never, { blockId: e.blockId })[e.blockId];
+  else if (e.actionId) out.block = card.actions?.find((a) => a.id === e.actionId);
+  return out;
+}
+
+/**
+ * The cards feature's hand-off (INTERACT §6.2): a live card event for a runner member goes to
+ * its run through BotDesk (the transient to SDK connections is the cards feature's). A stored
+ * answer reaches the run through the bots outbox; here it only gets the runner's `expect`.
+ * SDK members and people are left to the default (connection presence).
+ */
+registerCardEventHandler(async (room, e) => {
+  const r = await responder(room.env, e.authorId);
+  if (r.kind === "none") return { by: e.authorId, mode: "none" };
+  if (r.kind !== "runner") return undefined;
+  if (e.stored) return expectFor(room.env, e.authorId, e.topicId);
+  const ctx = cardContext(room, e);
+  const live: LiveCardEvent = {
+    eventId: e.eventId,
+    messageId: e.messageId,
+    topicId: e.topicId,
+    rev: e.rev,
+    event: e.event,
+    actorId: e.actorId,
+    at: e.at,
+  };
+  for (const k of ["blockId", "actionId", "value", "inputs", "part"] as const) if (e[k] !== undefined) (live as unknown as Record<string, unknown>)[k] = e[k];
+  if (ctx.block !== undefined) live.block = ctx.block;
+  if (ctx.title) live.title = ctx.title;
+  return deliverCardEvent(room, e.authorId, live);
+});
+
+/** "requester" of a runner member's card: the person who asked its active run in the topic. */
+registerRequesterResolver(async (room, authorId, topicId) => {
+  const r = await responder(room.env, authorId);
+  if (r.kind !== "runner") return undefined;
+  try {
+    return (await deskStub(room.env, authorId).requesterFor(authorId, topicId)) ?? undefined;
+  } catch (err) {
+    room.log.warn("requester lookup failed", { err });
+    return undefined;
+  }
+});

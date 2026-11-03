@@ -14,6 +14,7 @@ import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc } from "../core/registry";
 import { ulid } from "../core/ids";
 import { type CardEventArgs, cardEvent, loadCard, writeCardUpdate } from "./events";
+import { closeRetractWindow } from "./delivery";
 import { checkCause, resolved } from "./hooks";
 import { applyPatch } from "./patch";
 import { checkEmbeds, directory, isPick, recordRev, stateForWrite } from "./state";
@@ -34,6 +35,7 @@ export const CARD_EVENT_RPC = "cards.event";
 export const CARD_PRESS_RPC = "cards.press";
 export const CARD_PATCH_RPC = "cards.patch";
 export const CARD_RESOLVE_RPC = "cards.resolve";
+export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
 /** Patches: bursts of 3 per message, then 1 per second. */
 const PATCH_RATE = { rate: 1, burst: 3 };
@@ -62,6 +64,24 @@ function member(room: RoomContext, actor: Actor | null): Actor {
 }
 
 registerRoomRpc(CARD_EVENT_RPC, (room, actor, args) => cardEvent(room, member(room, actor), args as CardEventArgs));
+
+/**
+ * BotDesk: the card author's run took an answer (`input.accepted` of its `run.answer`), so the
+ * answerer can no longer retract it (INTERACT §3.6). `seq` is the `card.answered` event's seq.
+ */
+registerRoomRpc(CARD_ANSWER_TAKEN_RPC, (room, actor, args) => {
+  const a = member(room, actor);
+  const { seq } = args as { seq: number };
+  const ev = room.sql
+    .exec<{ data: string; message_id: string | null }>("SELECT data, message_id FROM events WHERE seq = ? AND type = 'card.answered'", seq)
+    .toArray()[0];
+  if (!ev?.message_id) throw new ApiError("not_found", "answer not found");
+  const author = room.sql.exec<{ author_id: string }>("SELECT author_id FROM messages WHERE id = ?", ev.message_id).toArray()[0];
+  if (author?.author_id !== a.id) throw new ApiError("forbidden", "only the card's author takes its answers");
+  const answerId = (JSON.parse(ev.data) as { answerId?: string }).answerId;
+  if (answerId) closeRetractWindow(room.sql, answerId);
+  return { ok: true };
+});
 
 /**
  * A v1 `card.action` on a v2 card (1.0.x clients press the derived v1 buttons): a pick

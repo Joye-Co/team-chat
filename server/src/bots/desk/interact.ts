@@ -6,10 +6,10 @@
 // WebSocket frames and answered with `run.output.result`.
 import { ClientFrame, type ExpectMode, type RunInteractionFrame } from "@chat/protocol";
 import { isGroupMember } from "../../core/db";
-import { ApiError, type Result, toErrorBody } from "../../core/errors";
+import { ApiError, type Result, schemaReason, toErrorBody } from "../../core/errors";
 import { ulid } from "../../core/ids";
 import { type FrameContext, frameHandlers, frameValidators } from "../../core/registry";
-import { cardEventText, pageEventText } from "../answers";
+import { answerBlocks, cardEventText, pageEventText } from "../answers";
 import { linkStub } from "../env";
 import { ETA_MS, type InteractionIn } from "../interact";
 import type { CardAnswerIn } from "../room";
@@ -62,6 +62,12 @@ export abstract class DeskInteract extends DeskTakeover {
     const active = this.activeRun(topicId);
     if (active && !active.external) return this.runExpect(active);
     return { mode: "starting", etaMs: ETA_MS.starting };
+  }
+
+  /** The requester of this bot's active run in the topic (INTERACT §3.5 "requester"). */
+  async requesterFor(botId: string, topicId: string): Promise<string | null> {
+    this.bind(botId);
+    return this.activeRun(topicId)?.requested_by ?? null;
   }
 
   // -------------------------------------------------------------------------
@@ -155,6 +161,8 @@ export abstract class DeskInteract extends DeskTakeover {
       fallback: { text: this.interactionText(x, actor, inputId), authorId: actor.id },
     };
     if (x.value !== undefined) frame.value = x.value as never;
+    if (x.eventId) frame.eventId = x.eventId;
+    if (x.block !== undefined) frame.block = x.block as never;
     return frame;
   }
 
@@ -293,8 +301,12 @@ export abstract class DeskInteract extends DeskTakeover {
       actor: { id: a.actorId, name: a.actorName },
       fallback,
     };
-    for (const k of ["actionId", "blockId", "value", "inputs", "editedValues"] as const) {
+    for (const k of ["actionId", "blockId", "value", "inputs", "editedValues", "eventId"] as const) {
       if (a.answer[k] !== undefined) frame[k] = a.answer[k];
+    }
+    if (a.answer.blockId) {
+      const block = answerBlocks(a.card, a.answer)[a.answer.blockId];
+      if (block !== undefined) frame.block = block;
     }
     return frame;
   }
@@ -366,7 +378,7 @@ export abstract class DeskInteract extends DeskTakeover {
       const parsed = schema.safeParse(raw);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
-        throw new ApiError("invalid", `invalid output: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim());
+        throw new ApiError("invalid", `invalid output: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim(), schemaReason(raw, issue?.message));
       }
       const frame = parsed.data as Record<string, unknown> & { t: string };
       const c = this.outputContext();
