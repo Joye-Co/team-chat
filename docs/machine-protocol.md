@@ -240,7 +240,43 @@ server frames and ignores unknown fields, so it must never get work it cannot do
 | `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only`, Claude Code permission mode `plan`, no repo write) whatever `daemon.toml` says. |
 | `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
 
+How the 1.1 daemon does each one:
+
+- **pause**: the daemon stops the CLI's process group (`SIGSTOP`, the group from `run.json`) for
+  every runtime kind, also Codex: one mechanism, no CLI-specific interrupt. A pause that comes
+  while the run is still `preparing` stops the CLI as soon as it starts. While paused, no
+  `stalled` status is sent and the `maxDurationMs` clock stands still. `run.resume` sends
+  `SIGCONT`, moves the deadline by the paused time, emits `paused { paused: false }`, and sends
+  `note` (cut to 2000 characters) as the next input with `inputId` `resume-<n>`. A
+  `run.cancel` while paused sends `SIGCONT` first (a stopped process cannot handle
+  `SIGTERM`), emits `paused { paused: false }`, then cancels as usual. A repeated pause, or a
+  resume of a run that is not paused, does nothing.
+- **answer**: the CLI gets `text` (when not empty) followed by a fenced `json` block for
+  `answer` and one for `artifactEvent`, each after a line that labels it as untrusted data from a
+  member of the group. The fence is longer than any backtick run in the data, so the data cannot
+  close it. It is the CLI's next turn in the same session (Claude Code: one more stream-json user
+  line; Codex: `turn/steer`, or the next `turn/start`). When the CLI has already ended, the input
+  is not taken (see "Follow-up input"), and BotDesk starts a new run.
+- **aside**: `run.assign.kind = "aside"` is accepted only for runtimes of kind `claude` and
+  `codex`; others are rejected with `runtime_unavailable` (ACP agents and the PTY have no
+  read-only mode the daemon can force). A `kind` this daemon does not know is rejected with
+  `invalid`. Claude Code gets `--permission-mode plan --disallowedTools "Edit Write MultiEdit
+  NotebookEdit"`; Codex gets `approvalPolicy: "never"` and `sandbox: "read-only"`. The
+  runtime's `args`, `allowed_tools`, `permission_mode`, `sandbox` and `approval_policy` from
+  `daemon.toml` are ignored, and the CLI gets none of the `envAllowlist` variables. The run
+  folder is made as for any run; the answer is the run's `run.done.resultText`.
+- **acceptance**: until the daemon has a tool server, the CLI reports its criteria as a fenced
+  block with the info string `acceptance` in an assistant message, holding a JSON array of
+  `AcceptanceItem` (or `{ "items": [...] }`). The last block of a message wins. The daemon
+  cuts texts to the limits (text 500, evidence text 1000 characters, at most 20 items), reads
+  `passed`/`met`/`done` as `pass` and `failed`/`unmet` as `fail`, drops unknown states and
+  malformed evidence, and sends the `acceptance` event only when the list changed. The message
+  itself is sent unchanged.
+
 `takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://mac-mini.tailnet`).
+It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
+doctor` reports a bad one, and the daemon does not send it). A value that redaction would
+change is not sent either.
 The owner turns on macOS Screen Sharing by hand; the daemon never changes system settings, and
 no credentials pass through chat. The server shows the address to owners and run requesters.
 
@@ -317,7 +353,7 @@ secret split over two deltas is redacted whole.
 `~/.config/<slug>/daemon.toml` (or `--config`, or `CHAT_DAEMON_CONFIG`); `daemon
 example-config` prints a commented example. Keys: `server_url`, `token_file`, `machine_id`,
 `name`, `labels`, `work_root`, `max_parallel_runs`, `keep_runs_hours`, `min_free_gb`,
-`stall_minutes`, `repo_roots`, `env_passthrough`, and `[runtimes.<name>]` with `kind`,
+`stall_minutes`, `repo_roots`, `env_passthrough`, `takeover_url` (1.1), and `[runtimes.<name>]` with `kind`,
 `command`, `args`, `env`, `model`, `approval_policy`, `sandbox` (Codex), `permission_mode`,
 `allowed_tools` (Claude Code). Without `[runtimes.*]`, `codex` and `claude` are added when
 found on PATH.
