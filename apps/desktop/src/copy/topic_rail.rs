@@ -109,7 +109,6 @@ crate::copy! {
     PLAN_USED = "已用 {n} 分钟",
     PLAN_USED_HOURS = "已用 {h} 小时 {m} 分钟",
     PLAN_STARTED_AT = "{time} 开始",
-    PLAN_OPEN_MACHINE = "看电脑",
     COMPOSER_INTERJECT = "插一句…",
     COMPOSER_NEXT_STEP = "{name} 会在下一步前看到",
 }
