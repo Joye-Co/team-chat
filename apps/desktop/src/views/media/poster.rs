@@ -80,7 +80,11 @@ pub fn make(src: &Path, kind: MediaKind) -> Option<PathBuf> {
 
 /// The poster of a local file, made once in the background. `done` runs (on that thread)
 /// when a new poster is ready.
-pub fn poster(src: &Path, kind: MediaKind, done: impl FnOnce() + Send + 'static) -> Option<PathBuf> {
+pub fn poster(
+    src: &Path,
+    kind: MediaKind,
+    done: impl FnOnce() + Send + 'static,
+) -> Option<PathBuf> {
     if kind == MediaKind::Image {
         return Some(src.to_path_buf());
     }
@@ -173,8 +177,8 @@ pub fn describe(path: &Path, name: &str, mime: &str) -> (MediaInfo, Option<PathB
         MediaKind::Video => match native::video_info(path) {
             Some(v) => {
                 info.duration = Number::from_f64((v.duration * 10.).round() / 10.);
-                info.width = Some(v.width as u32);
-                info.height = Some(v.height as u32);
+                info.width = Some(v.width);
+                info.height = Some(v.height);
                 poster = make(path, kind);
                 if poster.is_none() {
                     info.preview = MediaPreview::Failed;
@@ -234,7 +238,10 @@ mod tests {
         let p = dir.path().join("a.csv");
         std::fs::write(&p, b"a,b\n1,2\n").unwrap();
         let (info, _) = describe(&p, "a.csv", "text/csv");
-        assert_eq!((info.kind, info.preview), (WireKind::Table, MediaPreview::Ready));
+        assert_eq!(
+            (info.kind, info.preview),
+            (WireKind::Table, MediaPreview::Ready)
+        );
     }
 
     #[test]

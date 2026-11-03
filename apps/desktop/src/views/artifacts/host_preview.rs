@@ -87,8 +87,10 @@ pub fn verify(_png: &std::path::Path, _cx: &mut App) -> Result<(), String> {
 /// The page of a version on disk (v4 says what it added).
 fn write_version(version: u32) -> std::path::PathBuf {
     let html = if version >= 4 {
-        PAGE.replace("<!--v-->", " · v4 加了「B 站动态」")
-            .replace("<!--ch-->", "<button data-ch=\"B 站动态\">B 站动态</button>")
+        PAGE.replace("<!--v-->", " · v4 加了「B 站动态」").replace(
+            "<!--ch-->",
+            "<button data-ch=\"B 站动态\">B 站动态</button>",
+        )
     } else {
         PAGE.to_string()
     };
@@ -139,7 +141,10 @@ impl Render for HostPreview {
                             .font_weight(gpui::FontWeight::SEMIBOLD)
                             .text_color(k.text_1)
                             .child(SharedString::from(
-                                self.ledger.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
+                                self.ledger
+                                    .as_ref()
+                                    .map(|m| m.name.clone())
+                                    .unwrap_or_default(),
                             )),
                     )
                     .child(div().t_body().text_color(k.text_1).child(SAID))
@@ -155,7 +160,12 @@ impl Render for HostPreview {
                 toolbar_band("host-scene-bar")
                     .pl(theme::TRAFFIC_LIGHTS_INSET + space::S12)
                     .pr(space::S16)
-                    .child(div().t_title().text_color(k.text_1).child(self.title.clone())),
+                    .child(
+                        div()
+                            .t_title()
+                            .text_color(k.text_1)
+                            .child(self.title.clone()),
+                    ),
             )
             .child(hairline(cx))
             .child(
@@ -183,6 +193,7 @@ pub fn open(
         .artifact(d::ART_REPORT)
         .map(|a| a.summary.title)
         .unwrap_or_default();
+    host::set_latest(d::ART_REPORT, 3, cx);
     for v in [3, 4] {
         store::request_folder(
             &MediaKey::new(d::ART_REPORT, v),
@@ -352,10 +363,7 @@ async fn run(mode: Mode, cx: &mut AsyncApp) -> Result<(), String> {
                 .timer(Duration::from_millis(700))
                 .await;
             let sent: Vec<_> = cx.update(|cx| host::sent(cx));
-            let asks: Vec<_> = sent
-                .iter()
-                .filter(|s| s.3 == PageEventKind::Ask)
-                .collect();
+            let asks: Vec<_> = sent.iter().filter(|s| s.3 == PageEventKind::Ask).collect();
             match asks.as_slice() {
                 [(id, 3, name, _)] if id == d::ART_REPORT && name == "question" => {}
                 other => return Err(format!("expected one question ask, got {other:?}")),

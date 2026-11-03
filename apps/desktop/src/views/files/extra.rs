@@ -545,16 +545,32 @@ mod media_state_tests {
     #[test]
     fn uploads_of_media_follow_the_real_progress() {
         let v = f("录屏.mov", "video/quicktime");
-        let running = TransferState::Running { done: 62, total: 100 };
+        let running = TransferState::Running {
+            done: 62,
+            total: 100,
+        };
         assert!(matches!(
             media_state(&v, &running, false),
-            Some((_, Status::Uploading { done: 62, total: 100 }))
+            Some((
+                _,
+                Status::Uploading {
+                    done: 62,
+                    total: 100
+                }
+            ))
         ));
         assert!(matches!(
             media_state(&v, &running, true),
             Some((_, Status::Generating { .. }))
         ));
-        assert!(media_state(&v, &TransferState::Failed(crate::data::FileError::Other), false).is_none());
+        assert!(
+            media_state(
+                &v,
+                &TransferState::Failed(crate::data::FileError::Other),
+                false
+            )
+            .is_none()
+        );
         assert!(media_state(&f("a.txt", "text/plain"), &running, false).is_none());
     }
 }

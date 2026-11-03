@@ -28,7 +28,9 @@ mod mac_embed;
 
 use std::path::PathBuf;
 
-pub use bridge::{Capabilities, DataCause, EventDecl, EventKind, RefMenu, Reject, Snapshot, Viewer};
+pub use bridge::{
+    Capabilities, DataCause, EventDecl, EventKind, RefMenu, Reject, Snapshot, Viewer,
+};
 pub use embed::{EmbedOptions, Placement, Rect};
 pub use resolve::{Content, origin_host};
 use serde_json::Value;

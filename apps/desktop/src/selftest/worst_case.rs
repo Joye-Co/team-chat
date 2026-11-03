@@ -586,6 +586,44 @@ impl ChatProvider for WorstCase {
             .send_artifact_event(artifact_id, version, name, payload)
     }
     // --- end r2-trust ---
+    // --- inc-host track: the 产出 page host and media ---
+    fn page_bridge(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::page_host::PageBridge> {
+        self.inner.page_bridge(artifact_id, version)
+    }
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        kind: crate::data::page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, crate::data::page_host::PageSendError> {
+        self.inner
+            .send_page_event(artifact_id, version, name, kind, payload)
+    }
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        self.inner.fetch_page_data(artifact_id, version)
+    }
+    fn file_poster(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<std::path::PathBuf> {
+        self.inner.file_poster(group_id, topic_id, file)
+    }
+    fn artifact_poster(&self, artifact_id: &str, version: u32) -> Option<std::path::PathBuf> {
+        self.inner.artifact_poster(artifact_id, version)
+    }
+    // --- end inc-host track ---
     fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
         self.inner.create_artifact(request)
     }

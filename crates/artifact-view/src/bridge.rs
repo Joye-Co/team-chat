@@ -274,7 +274,11 @@ impl Bridge {
     /// `events: None` puts no declaration rule on `emit` (self-tests and the diagram
     /// renderer). `initial: None` makes `getData` and `subscribe` wait for the host's first
     /// [`push_data`](Self::push_data) (the `GET …/data` when the page opens).
-    pub fn new(caps: Capabilities, events: Option<Vec<EventDecl>>, initial: Option<Snapshot>) -> Self {
+    pub fn new(
+        caps: Capabilities,
+        events: Option<Vec<EventDecl>>,
+        initial: Option<Snapshot>,
+    ) -> Self {
         Self {
             caps,
             events,
@@ -338,11 +342,21 @@ impl Bridge {
             return err(&Value::Null, Reject::TooLarge, "message too large");
         }
         let Ok(Value::Object(msg)) = serde_json::from_slice::<Value>(raw) else {
-            return err(&Value::Null, Reject::BadRequest, "message must be an object");
+            return err(
+                &Value::Null,
+                Reject::BadRequest,
+                "message must be an object",
+            );
         };
         let id = match msg.get("id") {
             Some(v @ (Value::String(_) | Value::Number(_))) => v.clone(),
-            _ => return err(&Value::Null, Reject::BadRequest, "id must be a string or number"),
+            _ => {
+                return err(
+                    &Value::Null,
+                    Reject::BadRequest,
+                    "id must be a string or number",
+                );
+            }
         };
         if let Value::String(s) = &id
             && s.len() > 128
@@ -386,16 +400,24 @@ impl Bridge {
         }
     }
 
-    fn event_params(&self, id: &Value, params: &Value) -> Result<(String, Value), Outcome> {
+    fn event_params(&self, id: &Value, params: &Value) -> Result<(String, Value), Box<Outcome>> {
         let Some(name) = params.get("name").and_then(Value::as_str) else {
-            return Err(err(id, Reject::BadRequest, "params.name must be a string"));
+            return Err(Box::new(err(
+                id,
+                Reject::BadRequest,
+                "params.name must be a string",
+            )));
         };
         if name.is_empty() || name.len() > MAX_EVENT_NAME {
-            return Err(err(id, Reject::BadRequest, "params.name length"));
+            return Err(Box::new(err(id, Reject::BadRequest, "params.name length")));
         }
         let payload = params.get("payload").cloned().unwrap_or(Value::Null);
         if serde_json::to_vec(&payload).map_or(usize::MAX, |b| b.len()) > MAX_PAYLOAD_BYTES {
-            return Err(err(id, Reject::TooLarge, "payload exceeds 16 KiB"));
+            return Err(Box::new(err(
+                id,
+                Reject::TooLarge,
+                "payload exceeds 16 KiB",
+            )));
         }
         Ok((name.to_string(), payload))
     }
@@ -406,7 +428,7 @@ impl Bridge {
         }
         let (name, payload) = match self.event_params(&id, params) {
             Ok(p) => p,
-            Err(o) => return o,
+            Err(o) => return *o,
         };
         if !self.declared(&name, EventKind::Emit) {
             return err(&id, Reject::NotAllowed, "event not declared");
@@ -435,7 +457,7 @@ impl Bridge {
         }
         let (name, payload) = match self.event_params(&id, params) {
             Ok(p) => p,
-            Err(o) => return o,
+            Err(o) => return *o,
         };
         if !self.declared(&name, EventKind::Ask) {
             return err(&id, Reject::NotAllowed, "event not declared");
@@ -448,7 +470,13 @@ impl Bridge {
             None | Some(Value::Null) => ASK_TIMEOUT_DEFAULT_MS,
             Some(v) => match v.as_f64() {
                 Some(ms) if ms.is_finite() && ms > 0. => (ms as u64).clamp(1, ASK_TIMEOUT_MAX_MS),
-                _ => return err(&id, Reject::BadRequest, "timeoutMs must be a positive number"),
+                _ => {
+                    return err(
+                        &id,
+                        Reject::BadRequest,
+                        "timeoutMs must be a positive number",
+                    );
+                }
             },
         };
         self.open.insert(key(&id), (id.clone(), Open::Ask));
@@ -518,11 +546,7 @@ impl Bridge {
     /// run in the page, in order. An older or equal rev than the one the page has is
     /// ignored (a `GET` that comes back after a push).
     pub fn push_data(&mut self, snap: Snapshot) -> Vec<String> {
-        if self
-            .snapshot
-            .as_ref()
-            .is_some_and(|s| snap.rev <= s.rev)
-        {
+        if self.snapshot.as_ref().is_some_and(|s| snap.rev <= s.rev) {
             return Vec::new();
         }
         let first = self.snapshot.is_none();
@@ -787,11 +811,18 @@ mod tests {
         ] {
             let raw = serde_json::to_vec(&json!({"id": m, "method": m, "params": p})).unwrap();
             let o = b.handle(&raw, now());
-            assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "not_allowed", "{m}");
+            assert_eq!(
+                reply_of(&o.reply.unwrap())["error"]["code"],
+                "not_allowed",
+                "{m}"
+            );
             assert_eq!(o.request, None);
         }
         let o = b.handle(br#"{"id":"x","method":"readFile"}"#, now());
-        assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "unknown_method");
+        assert_eq!(
+            reply_of(&o.reply.unwrap())["error"]["code"],
+            "unknown_method"
+        );
         let o = b.handle(br#"{"id":{},"method":"getData"}"#, now());
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "bad_request");
         let o = b.handle(b"[1]", now());
@@ -800,9 +831,16 @@ mod tests {
 
     #[test]
     fn a_person_s_page_reads_and_points_but_never_sends() {
-        let mut b = Bridge::new(Capabilities::READ, None, Some(Snapshot::new(json!({"a":1}), 3)));
+        let mut b = Bridge::new(
+            Capabilities::READ,
+            None,
+            Some(Snapshot::new(json!({"a":1}), 3)),
+        );
         let o = b.handle(br#"{"id":1,"method":"getData"}"#, now());
-        assert_eq!(reply_of(&o.reply.unwrap()), json!({"id":1,"result":{"a":1}}));
+        assert_eq!(
+            reply_of(&o.reply.unwrap()),
+            json!({"id":1,"result":{"a":1}})
+        );
         let o = b.handle(br#"{"id":2,"method":"emit","params":{"name":"x"}}"#, now());
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "not_allowed");
         let init = b.init(None, None);
@@ -814,11 +852,20 @@ mod tests {
     #[test]
     fn only_declared_names_of_the_declared_kind_go_out() {
         let mut b = bot_page();
-        let o = b.handle(br#"{"id":1,"method":"emit","params":{"name":"question"}}"#, now());
+        let o = b.handle(
+            br#"{"id":1,"method":"emit","params":{"name":"question"}}"#,
+            now(),
+        );
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "not_allowed");
-        let o = b.handle(br#"{"id":2,"method":"ask","params":{"name":"filter"}}"#, now());
+        let o = b.handle(
+            br#"{"id":2,"method":"ask","params":{"name":"filter"}}"#,
+            now(),
+        );
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "not_allowed");
-        let o = b.handle(br#"{"id":3,"method":"emitEvent","params":{"name":"other"}}"#, now());
+        let o = b.handle(
+            br#"{"id":3,"method":"emitEvent","params":{"name":"other"}}"#,
+            now(),
+        );
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "not_allowed");
         // emit waits for the ack and resolves with the event id.
         let o = b.handle(
@@ -838,9 +885,15 @@ mod tests {
         assert_eq!(reply_of(&s), json!({"id":4,"result":{"eventId":"e1"}}));
         assert_eq!(b.finish(&json!(4), Ok(Value::Null)), None);
         // The legacy emitEvent answers at once.
-        let o = b.handle(br#"{"id":5,"method":"emitEvent","params":{"name":"filter"}}"#, now());
+        let o = b.handle(
+            br#"{"id":5,"method":"emitEvent","params":{"name":"filter"}}"#,
+            now(),
+        );
         assert_eq!(reply_of(&o.reply.unwrap())["result"], true);
-        assert!(matches!(o.request, Some(Request::Emit { reply_id: None, .. })));
+        assert!(matches!(
+            o.request,
+            Some(Request::Emit { reply_id: None, .. })
+        ));
         assert_eq!(
             b.init(None, None)["can"]["events"],
             json!([{"name":"filter","kind":"emit"},{"name":"question","kind":"ask"}])
@@ -860,7 +913,13 @@ mod tests {
         };
         assert_eq!(timeout_ms, ASK_TIMEOUT_DEFAULT_MS);
         let o = b.handle(ask(2, r#","timeoutMs":999999"#).as_bytes(), now());
-        assert!(matches!(o.request, Some(Request::Ask { timeout_ms: ASK_TIMEOUT_MAX_MS, .. })));
+        assert!(matches!(
+            o.request,
+            Some(Request::Ask {
+                timeout_ms: ASK_TIMEOUT_MAX_MS,
+                ..
+            })
+        ));
         let o = b.handle(ask(3, r#","timeoutMs":"soon""#).as_bytes(), now());
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "bad_request");
         b.handle(ask(3, "").as_bytes(), now());
@@ -897,8 +956,14 @@ mod tests {
     #[test]
     fn get_data_waits_for_the_first_snapshot_then_pushes_follow() {
         let mut b = Bridge::new(Capabilities::READ, None, None);
-        assert_eq!(b.handle(br#"{"id":"g","method":"getData"}"#, now()).reply, None);
-        assert_eq!(b.handle(br#"{"id":"s","method":"subscribe"}"#, now()).reply, None);
+        assert_eq!(
+            b.handle(br#"{"id":"g","method":"getData"}"#, now()).reply,
+            None
+        );
+        assert_eq!(
+            b.handle(br#"{"id":"s","method":"subscribe"}"#, now()).reply,
+            None
+        );
         let out = b.push_data(Snapshot::new(json!({"total":38}), 2));
         assert_eq!(out.len(), 2);
         assert_eq!(reply_of(&out[0]), json!({"id":"g","result":{"total":38}}));
@@ -941,7 +1006,10 @@ mod tests {
                 selector: Some("#bili".into())
             })
         );
-        let long = format!(r#"{{"id":2,"method":"ref","params":{{"label":"{}"}}}}"#, "长".repeat(81));
+        let long = format!(
+            r#"{{"id":2,"method":"ref","params":{{"label":"{}"}}}}"#,
+            "长".repeat(81)
+        );
         let o = b.handle(long.as_bytes(), t0);
         assert_eq!(reply_of(&o.reply.unwrap())["error"]["code"], "bad_request");
         let big = format!(
@@ -975,7 +1043,10 @@ mod tests {
             r#"{{"id":1,"method":"emitEvent","params":{{"name":"n","payload":"{}"}}}}"#,
             "x".repeat(MAX_PAYLOAD_BYTES - 100)
         );
-        assert_eq!(reply_of(&b.handle(ok.as_bytes(), now()).reply.unwrap())["result"], true);
+        assert_eq!(
+            reply_of(&b.handle(ok.as_bytes(), now()).reply.unwrap())["result"],
+            true
+        );
     }
 
     #[test]

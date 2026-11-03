@@ -1882,8 +1882,7 @@ impl ChatProvider for V2Samples {
         file: &FileAttachment,
     ) -> Option<std::path::PathBuf> {
         // The sample recording's poster: a frame of the bundled sample clip, made once.
-        static POSTER: std::sync::OnceLock<Option<std::path::PathBuf>> =
-            std::sync::OnceLock::new();
+        static POSTER: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
         if file.file_id != "f-v2-video" {
             return None;
         }

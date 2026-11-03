@@ -2187,11 +2187,20 @@ impl ChatProvider for CoreProvider {
         self.file_media_inner(file)
     }
 
-    fn artifact_media(&self, artifact_id: &str, version: u32) -> Option<chat_core::proto::MediaInfo> {
+    fn artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
         self.artifact_media_inner(artifact_id, version)
     }
 
-    fn file_poster(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Option<PathBuf> {
+    fn file_poster(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<PathBuf> {
         self.file_poster_inner(group_id, topic_id, file)
     }
 

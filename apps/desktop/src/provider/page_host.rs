@@ -100,7 +100,7 @@ impl CoreProvider {
             .groups()
             .into_iter()
             .find(|g| g.id == row.artifact.group_id)
-            .is_some_and(|g| g.member_ids.iter().any(|m| *m == v.created_by));
+            .is_some_and(|g| g.member_ids.contains(&v.created_by));
         let events = v
             .events
             .iter()
@@ -117,7 +117,9 @@ impl CoreProvider {
         Some(PageBridge {
             author_id: v.created_by.clone(),
             author_active_bot: in_group
-                && author.as_ref().is_some_and(|m| m.is_bot() && !m.deactivated),
+                && author
+                    .as_ref()
+                    .is_some_and(|m| m.is_bot() && !m.deactivated),
             runner: v.run_id.is_some(),
             events,
             data_rev: v.data_rev.unwrap_or(0),
@@ -194,8 +196,7 @@ use crate::data::{Change, FileAttachment};
 
 /// `FileRef.media` by file id, kept when messages are converted (the view type has no
 /// room for it).
-static FILE_MEDIA: OnceLock<Mutex<HashMap<String, chat_core::proto::MediaInfo>>> =
-    OnceLock::new();
+static FILE_MEDIA: OnceLock<Mutex<HashMap<String, chat_core::proto::MediaInfo>>> = OnceLock::new();
 
 /// Notes the media of a message file the cache converts.
 pub(super) fn note_file_media(f: &chat_core::proto::FileRef) {
@@ -243,10 +244,7 @@ impl CoreProvider {
         file: &FileAttachment,
     ) -> Option<PathBuf> {
         // The sender's poster first (receivers compute nothing).
-        if let Some(id) = self
-            .file_media_inner(file)
-            .and_then(|m| m.poster_file_id)
-        {
+        if let Some(id) = self.file_media_inner(file).and_then(|m| m.poster_file_id) {
             return self.card_image(group_id, topic_id, &id);
         }
         let kind = crate::views::media::file_kind(&file.name, &file.mime);
@@ -287,15 +285,21 @@ impl CoreProvider {
             .media
             .as_ref()
             .is_some_and(|m| m.preview == chat_core::proto::MediaPreview::Pending)
-            .then(|| (a.client.clone(), path.clone(), v.entry.clone(), mime.clone()));
+            .then(|| {
+                (
+                    a.client.clone(),
+                    path.clone(),
+                    v.entry.clone(),
+                    mime.clone(),
+                )
+            });
         let (id, version) = (artifact_id.to_string(), version);
         crate::views::media::poster::poster(&path, kind, move || {
             this.emit(vec![change]);
             if let Some((client, path, name, mime)) = fallback {
                 let c = client.clone();
                 client.spawn(async move {
-                    let (info, poster) =
-                        crate::views::media::poster::describe(&path, &name, &mime);
+                    let (info, poster) = crate::views::media::poster::describe(&path, &name, &mime);
                     send_version_media(&c, &g, &t, &id, version, info, poster).await;
                 });
             }
@@ -319,11 +323,9 @@ pub(super) fn set_generating(key: &str, on: bool) {
 }
 
 pub(super) fn is_generating(key: &str) -> bool {
-    GENERATING.get().is_some_and(|g| {
-        g.lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .contains(key)
-    })
+    GENERATING
+        .get()
+        .is_some_and(|g| g.lock().unwrap_or_else(|e| e.into_inner()).contains(key))
 }
 
 /// Uploads a version's poster (when there is one) and sends its media metadata

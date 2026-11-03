@@ -87,9 +87,7 @@ pub fn capabilities(
     version: u32,
 ) -> Capabilities {
     crate::views::artifacts::host::capabilities_for(
-        provider
-            .page_bridge(&detail.summary.id, version)
-            .as_ref(),
+        provider.page_bridge(&detail.summary.id, version).as_ref(),
     )
 }
 

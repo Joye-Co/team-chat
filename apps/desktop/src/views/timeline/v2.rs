@@ -745,11 +745,14 @@ impl TimelineView {
                             .rounded(theme::radius::SM)
                             .bg(k.screen)
                             .children(poster.map(|path| {
-                                gpui::StyledImage::object_fit(gpui::img(path), gpui::ObjectFit::Cover)
-                                    .absolute()
-                                    .top_0()
-                                    .left_0()
-                                    .size_full()
+                                gpui::StyledImage::object_fit(
+                                    gpui::img(path),
+                                    gpui::ObjectFit::Cover,
+                                )
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full()
                             }))
                             // The screen is the card's own color in dark.
                             .when(theme::is_dark(cx), |el| {

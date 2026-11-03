@@ -229,7 +229,10 @@ impl HttpClient {
         media.validate().map_err(invalid)?;
         self.call(
             Method::PUT,
-            &format!("/v1/artifacts/{}/versions/{version}/media", enc(artifact_id)),
+            &format!(
+                "/v1/artifacts/{}/versions/{version}/media",
+                enc(artifact_id)
+            ),
             Some(&serde_json::json!({ "media": media })),
             true,
         )

@@ -36,9 +36,7 @@ use crate::{
     copy::{fill, page_host as cp},
     data::{
         Change, ChatProvider, SessionState,
-        page_host::{
-            ExpectMode, PageBridge, PageEventKind, PageSendError, PageSignal,
-        },
+        page_host::{ExpectMode, PageBridge, PageEventKind, PageSendError, PageSignal},
     },
     theme,
     ui::web_embed::{self, WebEmbedState},
@@ -512,7 +510,13 @@ fn time_out(cid: &str, cx: &mut App) {
 }
 
 /// Answers an open request of one page.
-fn finish(page: &PageRef, version: u32, reply_id: &Value, result: Result<Value, Reject>, cx: &mut App) {
+fn finish(
+    page: &PageRef,
+    version: u32,
+    reply_id: &Value,
+    result: Result<Value, Reject>,
+    cx: &mut App,
+) {
     let done = match page {
         PageRef::Window(id) => super::window::finish_in_window(id, version, reply_id, result, cx),
         PageRef::Embed(e) => e
@@ -680,8 +684,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                     actor = Some(e);
                 }
             }
-            h.bands
-                .insert((artifact_id.clone(), version), Band::Pushed);
+            h.bands.insert((artifact_id.clone(), version), Band::Pushed);
             let me = h
                 .provider
                 .as_deref()
@@ -842,8 +845,7 @@ fn ask_about(
         }
     }
     crate::views::files::notify(
-        gpui_component::notification::Notification::new()
-            .message(cp::PAGE_REF_ADDED.to_string()),
+        gpui_component::notification::Notification::new().message(cp::PAGE_REF_ADDED.to_string()),
         cx,
     );
 }
@@ -867,9 +869,7 @@ pub fn band(artifact_id: &str, version: u32, cx: &App) -> Option<BandView> {
             if waited < QUIET_FOR {
                 return None;
             }
-            let (soft, hard) = mode
-                .and_then(|m| m.timings())
-                .unwrap_or((8_000, 45_000));
+            let (soft, hard) = mode.and_then(|m| m.timings()).unwrap_or((8_000, 45_000));
             let ms = waited.as_millis() as u64;
             Some(if ms >= hard {
                 BandView::NoAnswer(fill(cp::PAGE_NO_ANSWER, &n))
@@ -948,21 +948,17 @@ pub fn page_footer(
     lead: Option<gpui::AnyElement>,
     cx: &App,
 ) -> gpui::Div {
-    use gpui::{InteractiveElement as _, ParentElement as _, Styled as _, div, px};
-    use gpui_component::Sizable as _;
     use crate::{
         theme::{Type as _, radius, space},
         ui::{self, Lucide},
     };
+    use gpui::{InteractiveElement as _, ParentElement as _, Styled as _, div, px};
+    use gpui_component::Sizable as _;
     let k = theme::colors(cx);
     let line = capability_line(provider, artifact_id, version);
-    let base = crate::views::media::parts::footer(cx).children(lead).child(
-        div()
-            .flex_1()
-            .min_w(px(0.))
-            .one_line()
-            .child(line),
-    );
+    let base = crate::views::media::parts::footer(cx)
+        .children(lead)
+        .child(div().flex_1().min_w(px(0.)).one_line().child(line));
     let pill = || {
         div()
             .flex_none()
@@ -1033,8 +1029,8 @@ pub fn page_footer(
 
 /// A chip for the header of a page frame: 已更新到 v{n} or 有 v{n}.
 pub fn notice_chip(text: String, cx: &App) -> gpui::Div {
-    use gpui::{ParentElement as _, Styled as _, div, px};
     use crate::theme::{Type as _, radius, space};
+    use gpui::{ParentElement as _, Styled as _, div, px};
     let k = theme::colors(cx);
     div()
         .flex_none()
@@ -1146,6 +1142,12 @@ pub fn sent(cx: &App) -> Vec<(String, u32, String, PageEventKind)> {
         .unwrap_or_default()
 }
 
+/// Sets the latest version this host knows of a 产出 (self-tests start from a known
+/// version, also on the worst-case data).
+pub fn set_latest(artifact_id: &str, version: u32, cx: &mut App) {
+    host(cx).latest.insert(artifact_id.to_string(), version);
+}
+
 /// Starts clean, with `provider` (self-tests that run without the app's services).
 pub fn reset_for_test(provider: Arc<dyn ChatProvider>, cx: &mut App) {
     cx.set_global(PageHost::new(Some(provider)));
@@ -1191,7 +1193,10 @@ mod tests {
 
     #[test]
     fn declarations_keep_their_kind() {
-        let d = decls(Some(&bridge(true, &[PageEventKind::Emit, PageEventKind::Ask])));
+        let d = decls(Some(&bridge(
+            true,
+            &[PageEventKind::Emit, PageEventKind::Ask],
+        )));
         assert_eq!(
             d,
             vec![

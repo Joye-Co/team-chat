@@ -32,8 +32,8 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, sync::Arc};
 
 use artifact_view::{ArtifactEvent, Capabilities, RefMenu, Reject, Snapshot, VersionSpec, Viewer};
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Bounds, Context, DispatchPhase, Element, ElementId, Entity,
-    GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _,
+    AnyWindowHandle, App, AppContext as _, Bounds, Context, DispatchPhase, Element, ElementId,
+    Entity, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _,
     IntoElement, LayoutId, MouseDownEvent, ParentElement, Pixels, Point, RenderOnce, SharedString,
     Style, Styled, Window, WindowId, div, img, point, px, relative,
 };
@@ -813,7 +813,10 @@ impl gpui::Global for EmbedCache {}
 /// render it.
 fn cached_state(embed: &WebEmbed, window: &mut Window, cx: &mut App) -> Entity<WebEmbedState> {
     let key = (window.window_handle().window_id(), embed.id.clone());
-    if let Some(e) = cx.try_global::<EmbedCache>().and_then(|c| c.entries.get(&key)) {
+    if let Some(e) = cx
+        .try_global::<EmbedCache>()
+        .and_then(|c| c.entries.get(&key))
+    {
         return e.state.clone();
     }
     let spec = embed.spec.clone();

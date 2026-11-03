@@ -1167,7 +1167,10 @@ mod tests {
         switch_version(&state, v2, bot).unwrap();
         {
             let st = state.borrow();
-            assert_eq!((st.version, st.bridge.caps(), st.last_input), (2, bot, None));
+            assert_eq!(
+                (st.version, st.bridge.caps(), st.last_input),
+                (2, bot, None)
+            );
             assert_eq!(st.host, resolve::origin_host("a1", 2).unwrap());
         }
         let ask = br#"{"id":1,"method":"emitEvent","params":{"name":"approve"}}"#;
@@ -1190,7 +1193,10 @@ mod tests {
     fn a_live_version_waits_for_the_host_s_first_snapshot() {
         let state = new_state("a1".into(), spec(1).live_data(), Capabilities::READ).unwrap();
         let get = br#"{"id":"g","method":"getData"}"#;
-        assert_eq!(state.borrow_mut().bridge.handle(get, Instant::now()).reply, None);
+        assert_eq!(
+            state.borrow_mut().bridge.handle(get, Instant::now()).reply,
+            None
+        );
         let out = state
             .borrow_mut()
             .bridge
