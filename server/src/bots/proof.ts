@@ -2,7 +2,7 @@
 // one Card v2 with intent "done" and its proof: the result, pull requests it names, the test
 // counts it reports, its 验收标准 and the 产出 versions it made. Pure rules here; the group room
 // side (`bots.runProof`) reads what the room knows about the run.
-import { type AcceptanceItem, CardV2, type CardV2Block } from "@chat/protocol";
+import { type AcceptanceItem, type Card, CardV2, type CardV2Block, cardV2ToV1 } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import { registerRoomRpc } from "../core/registry";
 import { firstLine } from "./dispatch";
@@ -144,6 +144,14 @@ export function doneCard(opts: {
   };
   const parsed = CardV2.safeParse(card);
   return parsed.success ? parsed.data : null;
+}
+
+/**
+ * The v1 card 1.0.x clients get for a done card: the derived one without the `result` text
+ * block, which would repeat the fallback text block above it.
+ */
+export function doneCardV1(card: CardV2): Card {
+  return cardV2ToV1({ ...card, blocks: card.blocks.filter((b) => b.id !== "result") });
 }
 
 /** What `bots.runProof` returns. */

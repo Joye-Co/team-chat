@@ -5,7 +5,7 @@ import { ApiError, unwrap } from "../../core/errors";
 import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
-import { type RunProof, doneCard, mergePrs, prRefs } from "../proof";
+import { type RunProof, doneCard, doneCardV1, mergePrs, prRefs } from "../proof";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage } from "./core";
 import { DeskRuns } from "./runs";
 
@@ -323,7 +323,7 @@ export abstract class DeskEvents extends DeskRuns {
           artifacts: proof.artifacts,
           acceptance: this.acceptanceOf(r) ?? [],
         });
-        if (card) return await this.post(r, cmid, body, { cardV2: card });
+        if (card) return await this.post(r, cmid, body, { cardV2: card, card: doneCardV1(card) });
       } catch (err) {
         this.log.warn("done card failed, posting text", { runId: r.id, err });
       }

@@ -275,8 +275,9 @@ describe("runner-backed bots", () => {
       label: "acme/app#42",
       target: { kind: "pr", url: "https://github.com/acme/app/pull/42", repo: "acme/app", number: 42 },
     });
-    // Old clients get a derived v1 card.
+    // Old clients get a derived v1 card that shows the result once.
     expect(card.card).toMatchObject({ v: 1, tone: "success" });
+    expect(card.card.blocks.filter((b: any) => b.type === "text" && b.text === result)).toHaveLength(1);
     await waitUntil(() => topicStatuses(c, topicId).at(-1) === "done", 5000, "done");
     const doneRun = await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "done");
     expect(doneRun.data.run).toMatchObject({
