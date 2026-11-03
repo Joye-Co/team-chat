@@ -478,16 +478,20 @@ pub async fn handle(
                     "timeout",
                     Some("server.too_old"),
                     format!(
-                        "server too old: no answer in {secs} s (the server may not support chat-run)"
+                        "server too old: no answer in {secs} s (the server may not support \
+chat-run); the result is unknown"
                     ),
                 )
             } else {
+                // No ack is not proof that the server never got it: the ack can be lost with
+                // the link. The result is unknown.
                 error(
                     "unavailable",
                     Some("server.not_connected"),
                     format!(
-                        "not connected: the server did not get this in {secs} s (the daemon's \
-link to the server is down); nothing was done"
+                        "not connected: the server did not confirm this in {secs} s (the \
+daemon's link to the server is down); the result is unknown: it may have been done, so check \
+before you try again"
                     ),
                 )
             }
@@ -1072,6 +1076,9 @@ mod tests {
         assert_eq!(v["error"]["reason"], "server.not_connected");
         let msg = v["error"]["message"].as_str().unwrap();
         assert!(msg.contains("not connected"), "{msg}");
+        assert!(msg.contains("the result is unknown"), "{msg}");
+        assert!(msg.contains("may have been done"), "{msg}");
+        assert!(!msg.contains("nothing was done"), "{msg}");
         assert!(!msg.contains("too old"), "{msg}");
     }
 

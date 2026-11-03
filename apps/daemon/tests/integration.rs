@@ -1445,6 +1445,13 @@ async fn chat_run_without_a_link_is_not_connected() {
             .contains("not connected"),
         "{err}"
     );
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("the result is unknown"),
+        "{err}"
+    );
 
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)

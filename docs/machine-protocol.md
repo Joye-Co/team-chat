@@ -342,7 +342,8 @@ error? }` when `run.output.result` comes. With no result in 15 s it answers `{ o
 { code: "timeout", reason: "server.too_old" } }` ("server too old") when the server acked the
 `output` event (it got it and did not understand it), else `{ ok: false, error: { code:
 "unavailable", reason: "server.not_connected" } }` ("not connected": the daemon's link to the
-server was down, and the server refuses the output as `output.expired` if it comes later). A
+server was down; the result is unknown, because a lost ack does not show that the server never
+got the output, and the server refuses the output as `output.expired` if it comes later). A
 daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
 "daemon.no_answer" }`. The transport depends on the runtime:
 
