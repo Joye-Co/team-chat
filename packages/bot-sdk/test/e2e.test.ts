@@ -610,7 +610,7 @@ describe("1.1 cards, side chats and page events", () => {
         expect(ctx.card?.title).toBe("重启后选");
         expect(ctx.action?.id).toBe("submit");
         expect(ctx.cancelled).toBe(false);
-        const m = await ctx.resolve({ intent: "info" });
+        const m = await ctx.markAnswered({ intent: "info" });
         resolved.push(m.cardV2?.rev ?? 0);
       }
     });
