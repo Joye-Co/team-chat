@@ -47,4 +47,6 @@ crate::copy! {
     GROUP_PAGE_KIND_DECISION = "决定",
     GROUP_PAGE_MATCHES = "{n} 条",
     GROUP_PAGE_DECISION_FROM = "{question}：{choice}",
+    // dfix-topic: the hint beside the send button of the 群 page composer.
+    GROUP_PAGE_COMPOSER_HINT = "{name} 会先看一眼，再交给合适的成员",
 }

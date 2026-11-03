@@ -383,3 +383,14 @@ fn placeholders_name_untitled_topics_and_keep_their_fixed_text() {
         "在「产品讨论」发起新话题，第一行是标题"
     );
 }
+
+#[test]
+fn the_group_page_placeholder_names_the_group_and_keeps_its_fixed_text() {
+    use super::group_page_placeholder;
+    assert_eq!(
+        group_page_placeholder("开发"),
+        "在开发里开个话题，或 @ 成员交代…"
+    );
+    let long = group_page_placeholder(&"二零二六年第四季度跨部门产品规划讨论群".repeat(2));
+    assert!(long.ends_with("…里开个话题，或 @ 成员交代…"), "{long}");
+}

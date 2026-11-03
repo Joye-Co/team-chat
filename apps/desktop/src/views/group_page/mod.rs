@@ -1161,12 +1161,9 @@ impl Render for GroupPage {
                     .child(ui::motion::rise(
                         "group-composer",
                         0,
-                        // The shared composer keeps its own 24 pt gutter and
-                        // 8 / 16 pt bands; the page lines it up with the cards.
-                        div()
-                            .mx(-theme::CONTENT_GUTTER)
-                            .mb(-space::S16)
-                            .child(self.composer.clone()),
+                        // The shared composer in its v2 style has no gutter of
+                        // its own: it lines up with the cards (Group.dc.html).
+                        div().mt(space::S8).child(self.composer.clone()),
                         cx,
                     ))
                     .when(!cards.is_empty(), |el| {
