@@ -1325,10 +1325,18 @@ impl MembersPage {
                             .text_size(px(13.))
                             .on_click(cx.listener(
                                 move |this, _, _, cx| {
-                                    let _ =
+                                    let rx =
                                         this.services.provider.retry_member_problem(&member, &run);
-                                    this.retried.insert(run.clone());
-                                    cx.notify();
+                                    let run = run.clone();
+                                    cx.spawn(async move |this, cx| {
+                                        if let Ok(Ok(())) = rx.await {
+                                            let _ = this.update(cx, |this, cx| {
+                                                this.retried.insert(run);
+                                                cx.notify();
+                                            });
+                                        }
+                                    })
+                                    .detach();
                                 },
                             )),
                         )
