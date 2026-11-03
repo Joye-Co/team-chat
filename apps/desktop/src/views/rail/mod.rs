@@ -5,7 +5,8 @@
 //!
 //! - A 以工作为中心: 话题 by 群 (then 私聊), each row with its state slot
 //!   and meta; the header filter 我参与的 / 全部话题.
-//! - B 以「需要我」为中心: 群 chips, then 需要你 / 在做 / 等别人 /
+//! - B 以「需要我」为中心: the `话题` header with the options menu (the
+//!   群 filter and the rail style), 群 chips, then 需要你 / 在做 / 等别人 /
 //!   做完了 · 今天 (collapsed).
 //! - C 以成员为中心: members that are busy first, each expandable to its
 //!   话题; idle members in one row; 同事 below. 话题 replaces 成员 among the
@@ -224,8 +225,8 @@ pub fn choose_mode(services: &Services, mode: RailMode, cx: &mut App) {
 }
 
 impl RailView {
-    /// The menu of the list header: what the list shows (mode A and C) and
-    /// the rail style.
+    /// The menu of the list header: what the list shows (A: 我参与的 or
+    /// 全部话题, B: the 群, C: the member order) and the rail style.
     fn options_menu(
         &self,
         menu: PopupMenu,
@@ -270,7 +271,25 @@ impl RailView {
                 }
                 menu = menu.separator();
             }
-            RailMode::Attention => {}
+            RailMode::Attention => {
+                // The same 群 filter as the chips.
+                menu = menu.label(c::RAIL_SHOW_LABEL);
+                for (id, name) in self.group_choices() {
+                    let this = this.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(SharedString::from(name))
+                            .checked(self.chip == id)
+                            .on_click(move |_, _, cx| {
+                                let id = id.clone();
+                                let _ = this.update(cx, |this, cx| {
+                                    this.chip = id;
+                                    cx.notify();
+                                });
+                            }),
+                    );
+                }
+                menu = menu.separator();
+            }
         }
         menu = menu.label(c::RAIL_MODE_LABEL);
         for (m, label) in [
@@ -288,7 +307,8 @@ impl RailView {
         menu
     }
 
-    /// `我参与的 ⌄`: the header menu button.
+    /// The header menu button: `我参与的 ⌄` with a label, else the options
+    /// icon (B).
     fn menu_button(
         &self,
         id: &'static str,
@@ -579,7 +599,17 @@ impl Render for RailView {
                 ),
                 cx,
             ),
-            RailMode::Attention => self.chips(cx),
+            RailMode::Attention => div()
+                .flex_none()
+                .flex()
+                .flex_col()
+                .child(self.list_header(
+                    c::RAIL_TOPICS,
+                    self.menu_button("rail-options", None, mode, cx),
+                    cx,
+                ))
+                .child(self.chips(cx))
+                .into_any_element(),
             RailMode::Member => self.list_header(
                 c::RAIL_MEMBERS,
                 self.menu_button(
@@ -731,21 +761,27 @@ impl RailView {
             .into_any_element()
     }
 
-    /// B: 全部 and one chip per 群 (RailOptions.dc.html B: no button in the
-    /// row; the rail style is in 设置 → 外观). The chips wrap, so every 群
-    /// stays readable and reachable; a long name ends with an ellipsis and
-    /// shows whole in a tooltip.
-    fn chips(&self, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
+    /// B's 群 filter, as the chips and the header menu show it: 全部
+    /// (`None`), then each 群.
+    fn group_choices(&self) -> Vec<(Option<GroupId>, String)> {
         let groups = self
             .cache
             .as_ref()
             .map(|c| c.groups.clone())
             .unwrap_or_default();
+        std::iter::once((None, c::RAIL_FILTER_ALL_GROUPS.to_string()))
+            .chain(groups.into_iter().map(|(id, name)| (Some(id), name)))
+            .collect()
+    }
+
+    /// B: 全部 and one chip per 群, under the list header whose menu holds
+    /// the same filter and the rail style. The chips wrap, so every 群
+    /// stays readable and reachable; a long name ends with an ellipsis and
+    /// shows whole in a tooltip.
+    fn chips(&self, cx: &mut Context<Self>) -> AnyElement {
+        let k = theme::colors(cx);
         let mut chips: Vec<AnyElement> = Vec::new();
-        let entries = std::iter::once((None, c::RAIL_FILTER_ALL_GROUPS.to_string()))
-            .chain(groups.into_iter().map(|(id, name)| (Some(id), name)));
-        for (i, (id, name)) in entries.enumerate() {
+        for (i, (id, name)) in self.group_choices().into_iter().enumerate() {
             let on = self.chip == id;
             let this = cx.entity().downgrade();
             let long = name.chars().count() > CHIP_TOOLTIP_CHARS;
@@ -787,7 +823,7 @@ impl RailView {
         div()
             .id("rail-chips")
             .flex_none()
-            .mt(space::S16)
+            .mt(space::S4)
             .flex()
             .flex_wrap()
             .items_center()
@@ -807,6 +843,30 @@ mod tests {
         data::{Change, ChatProvider},
         fake::v2::V2Samples,
     };
+
+    /// B's header menu offers the same 群 filter as the chips: 全部 first,
+    /// then every 群 of the rail.
+    #[gpui::test]
+    fn the_b_menu_offers_the_group_filter_of_the_chips(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            RailView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let (choices, groups) = view.update(cx, |this, _| {
+            let groups = this.cache.as_ref().map(|c| c.groups.clone()).unwrap();
+            (this.group_choices(), groups)
+        });
+        assert!(!groups.is_empty());
+        assert_eq!(choices[0], (None, c::RAIL_FILTER_ALL_GROUPS.to_string()));
+        let rest: Vec<_> = choices[1..]
+            .iter()
+            .map(|(id, name)| (id.clone().expect("a 群"), name.clone()))
+            .collect();
+        assert_eq!(rest, groups);
+    }
 
     /// Frames (a breathing ring asks for one 24 times a second) draw the
     /// rail from memory; only a provider change reads it again.
