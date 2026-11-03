@@ -1492,7 +1492,7 @@ impl ChatProvider for V2Samples {
                 disk_used_pct: Some(61),
             });
             stats.problems = vec![MemberProblem {
-                text: "CI 超时".into(),
+                text: "CI 超时，PR #59 的检查没跑完".into(),
                 at: days_ago_at(1, 23, 10),
                 run_id: Some("run-v2-ci".into()),
             }];
@@ -1778,7 +1778,11 @@ impl ChatProvider for V2Samples {
         };
         let version = version.unwrap_or(detail.summary.version);
         let (tx, rx) = futures::channel::oneshot::channel();
-        let _ = tx.send(pages_samples::write_page(artifact_id, version, &detail.summary.title));
+        let _ = tx.send(pages_samples::write_page(
+            artifact_id,
+            version,
+            &detail.summary.title,
+        ));
         rx
     }
 

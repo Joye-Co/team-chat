@@ -12,10 +12,10 @@
 
 pub use crate::characters::CharacterId;
 
-/// View types of the v2 screens (1.1.0).
-pub mod v2;
 /// View types of the 群, 成员 and 产出 pages (pages track).
 pub mod pages;
+/// View types of the v2 screens (1.1.0).
+pub mod v2;
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -2025,9 +2025,7 @@ pub trait ChatProvider: Send + Sync + 'static {
                         });
                     }
                 }
-                extras
-                    .decisions
-                    .extend(self.topic_decisions(&g.id, &t.id));
+                extras.decisions.extend(self.topic_decisions(&g.id, &t.id));
             }
         }
         if !spans.is_empty() {

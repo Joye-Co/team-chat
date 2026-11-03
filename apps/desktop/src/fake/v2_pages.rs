@@ -332,7 +332,11 @@ pub fn responses(artifact_id: &str) -> Vec<ArtifactResponse> {
 }
 
 /// Writes the page of a sample 产出 version to a temporary folder.
-pub fn write_page(artifact_id: &str, version: u32, title: &str) -> Result<ArtifactFolder, FileError> {
+pub fn write_page(
+    artifact_id: &str,
+    version: u32,
+    title: &str,
+) -> Result<ArtifactFolder, FileError> {
     let html = match artifact_id {
         ART_REPORT => report_html(version),
         _ => plain_page(title),
@@ -368,7 +372,10 @@ fn report_html(version: u32) -> String {
         _ => out.push_str(page),
     }
     out.replace("class=\"opt on\"", "class=\"opt\"")
-        .replace("type=\"button\" class=\"opt", "type=\"button\" disabled class=\"opt")
+        .replace(
+            "type=\"button\" class=\"opt",
+            "type=\"button\" disabled class=\"opt",
+        )
         .replace(
             "你选了「B 站」· <span class=\"mono\">10:12</span> · 已发给 Ledger",
             "在 v3 里回应过",
