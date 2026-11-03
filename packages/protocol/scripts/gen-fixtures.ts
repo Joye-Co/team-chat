@@ -13,6 +13,8 @@ type Fixture = {
   kind: string;
   valid: boolean;
   description?: string;
+  /** Invalid fixtures: the `ack.error.reason` both sides give (`card.limits`, …). */
+  reason?: string;
   value: unknown;
   /** Expected value after parse and serialize, when it differs from `value`. */
   normalized?: unknown;
@@ -26,8 +28,8 @@ const add = (path: string, f: Fixture) => {
 };
 const ok = (path: string, kind: string, value: unknown, description?: string) =>
   add(path, { kind, valid: true, ...(description ? { description } : {}), value });
-const bad = (path: string, kind: string, value: unknown, description: string) =>
-  add(path, { kind, valid: false, description, value });
+const bad = (path: string, kind: string, value: unknown, description: string, reason?: string) =>
+  add(path, { kind, valid: false, description, ...(reason ? { reason } : {}), value });
 
 // ---------------------------------------------------------------------------
 // Sample data

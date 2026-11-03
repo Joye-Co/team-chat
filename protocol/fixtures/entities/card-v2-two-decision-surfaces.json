@@ -2,6 +2,7 @@
   "kind": "CardV2",
   "valid": false,
   "description": "card.decision_surfaces: a compare and a questionnaire for one ask",
+  "reason": "card.decision_surfaces",
   "value": {
     "v": 2,
     "catalog": "tc.card/2.1",

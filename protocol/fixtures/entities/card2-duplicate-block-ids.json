@@ -2,6 +2,7 @@
   "kind": "CardV2",
   "valid": false,
   "description": "block ids are unique, nested ones too",
+  "reason": "card.limits",
   "value": {
     "v": 2,
     "rev": 1,

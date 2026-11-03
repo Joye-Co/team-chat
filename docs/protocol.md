@@ -1096,6 +1096,11 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
   `card.retract_closed`, `card.rev_limit`, `interact.bot_emitter`, `interact.no_responder`,
   `interact.bad_cause`, `artifact.no_bridge`, `artifact.undeclared_event`, `artifact.stale_data`,
   `artifact.reply_closed`.
+- A card that breaks a count or range limit of its shape (blocks, children, options, series,
+  points, rows, columns, embed height, rating max) gets `card.limits`, the same on the server
+  and in the Rust pre-check (`CardV2::problem`). An unknown block type gets `card.unknown_block`;
+  an input of kind `secret` gets `card.secret_deferred`. An invalid card fixture names the
+  expected reason in its `reason` field, and both fixture tests check it.
 
 ### Card v2.1
 

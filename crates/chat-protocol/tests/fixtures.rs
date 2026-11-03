@@ -242,6 +242,18 @@ fn fixture_parity() {
             (false, Ok(out)) => failures.push(format!("{name}: invalid fixture parsed as {out}")),
             (false, Err(_)) => {}
         }
+        // Invalid cards name the same `ack.error.reason` as the server.
+        if let (false, Some(want)) = (valid, fixture.get("reason").and_then(Value::as_str)) {
+            let got = match kind {
+                "CardV2" => serde_json::from_value::<CardV2>(fixture["value"].clone())
+                    .map(|c| c.problem().map(|p| p.reason.to_string()))
+                    .unwrap_or_else(|e| Some(format!("serde: {e}"))),
+                _ => Some(format!("no reason check for kind {kind}")),
+            };
+            if got.as_deref() != Some(want) {
+                failures.push(format!("{name}: reason {got:?}, want {want}"));
+            }
+        }
     }
     assert!(
         failures.is_empty(),

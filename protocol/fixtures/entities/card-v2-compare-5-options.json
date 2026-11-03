@@ -2,6 +2,7 @@
   "kind": "CardV2",
   "valid": false,
   "description": "compare has 2..4 options",
+  "reason": "card.limits",
   "value": {
     "v": 2,
     "catalog": "tc.card/2.1",

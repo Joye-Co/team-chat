@@ -2,6 +2,7 @@
   "kind": "CardV2",
   "valid": false,
   "description": "card.style_property: color",
+  "reason": "card.style_property",
   "value": {
     "v": 2,
     "catalog": "tc.card/2.1",

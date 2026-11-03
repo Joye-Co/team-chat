@@ -2,6 +2,7 @@
   "kind": "CardV2",
   "valid": false,
   "description": "default names an unknown option",
+  "reason": "card.limits",
   "value": {
     "v": 2,
     "catalog": "tc.card/2.1",

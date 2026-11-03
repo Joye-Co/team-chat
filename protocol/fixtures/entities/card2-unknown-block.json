@@ -2,6 +2,7 @@
   "kind": "CardV2",
   "valid": false,
   "description": "the server rejects unknown block types",
+  "reason": "card.unknown_block",
   "value": {
     "v": 2,
     "rev": 1,

@@ -74,6 +74,18 @@ export const MAX_CARD_STATE_ANSWERS = 500;
 
 const Short = (max: number) => z.string().min(1).max(max);
 const Text = (max: number) => z.string().max(max);
+
+/** `ack.error.reason` of a card that breaks a count or range limit (V11-INTERACT §2.5). */
+export const CARD_LIMITS = "card.limits";
+/** The reason named at the start of a schema issue message (`card.limits: …`), or undefined. */
+export function issueReason(message: string | undefined): string | undefined {
+  return message ? /^((?:card|interact|artifact)\.[a-z_]+):/.exec(message)?.[1] : undefined;
+}
+/** Error of a count or range check of a card shape: it names `card.limits`, as Rust does. */
+const LIMIT = {
+  error: (i: { code: string; maximum?: unknown; minimum?: unknown }) =>
+    `${CARD_LIMITS}: ${i.code === "too_big" ? `at most ${String(i.maximum)}` : i.code === "too_small" ? `at least ${String(i.minimum)}` : "out of range"}`,
+};
 const jsonMax = (max: number, what: string) =>
   z.json().refine((v) => utf8Bytes(JSON.stringify(v)) <= max, { message: `${what} exceeds ${max} bytes` });
 
@@ -164,7 +176,7 @@ export type AskIrreversible = z.infer<typeof AskIrreversible>;
 export const CardAsk = z.object({
   /** 2.1: the ask round; default "a1". A new id opens a new round. */
   id: BlockId.optional(),
-  from: z.array(AskFrom).min(1).max(MAX_ASK_FROM),
+  from: z.array(AskFrom).min(1, LIMIT).max(MAX_ASK_FROM, LIMIT),
   /** 2.1: a blocking ask sets the topic `waiting_answer`. Default: `intent === "ask"`. */
   blocking: z.boolean().optional(),
   /** After this time the ask takes no answer (`conflict`). */
@@ -198,7 +210,7 @@ const base = {
   id: BlockId,
   emphasis: Emphasis.optional(),
   /** Live events this block sends (`card.event`); absent = none. */
-  events: z.array(CardEventName).max(16).optional(),
+  events: z.array(CardEventName).max(16, LIMIT).optional(),
   /** Input blocks: the commit is the answer (`immediate`) or goes with a submit (`onSubmit`). */
   deliver: Deliver.optional(),
   emitBy: EmitBy.optional(),
@@ -223,7 +235,9 @@ const question = {
   help: Text(300).optional(),
 };
 
-export const InputKind = z.enum(["text", "textarea", "number", "select", "date", "switch", "chips", "slider"]);
+export const InputKind = z.enum(["text", "textarea", "number", "select", "date", "switch", "chips", "slider"], {
+  error: (i) => (i.input === "secret" ? "card.secret_deferred: no secret inputs in 1.1.0" : undefined),
+});
 export type InputKind = z.infer<typeof InputKind>;
 export const ChartKind = z.enum(["line", "bar", "area", "spark"]);
 export type ChartKind = z.infer<typeof ChartKind>;
@@ -244,7 +258,7 @@ export const TableBlockV2 = TableBlock.safeExtend({
   /** 2.1 */
   title: Short(80).optional(),
   /** 2.1: one stable key per row (part refs, `table.rowSelect`); default the row index. */
-  rowKeys: z.array(Short(64)).max(200).optional(),
+  rowKeys: z.array(Short(64)).max(200, LIMIT).optional(),
   /** 2.1: the table is an input; its value is `{value}` / `{values}` of row keys. */
   select: TableSelect.optional(),
   /** 2.1: local sort by header; the member gets `table.sort` only when declared. */
@@ -265,11 +279,11 @@ export const DecisionBlock = z.object({
   label: Short(200).optional(),
   required: z.boolean().optional(),
   help: Text(300).optional(),
-  options: z.array(Option_).min(2).max(MAX_DECISION_OPTIONS),
+  options: z.array(Option_).min(2, LIMIT).max(MAX_DECISION_OPTIONS, LIMIT),
   /** More than one option may be chosen. */
   multiple: z.boolean().optional(),
   /** Option ids chosen at first. */
-  default: z.array(ActionId).max(MAX_DECISION_OPTIONS).optional(),
+  default: z.array(ActionId).max(MAX_DECISION_OPTIONS, LIMIT).optional(),
   /** 2.1, `multiple` only: 1 <= minSelect <= maxSelect <= options. */
   minSelect: z.int().positive().optional(),
   maxSelect: z.int().positive().optional(),
@@ -285,7 +299,7 @@ export const InputBlock = z.object({
   required: z.boolean().optional(),
   help: Text(300).optional(),
   /** Choices of `select` and `chips`. */
-  options: z.array(InputOption).max(MAX_INPUT_OPTIONS).optional(),
+  options: z.array(InputOption).max(MAX_INPUT_OPTIONS, LIMIT).optional(),
   min: z.number().optional(),
   max: z.number().optional(),
   /** 2.1, `slider`: the step (> 0). */
@@ -328,7 +342,7 @@ export const ChartSeries = z.object({
   /** 2.1: the series id of `chart.select` and part refs; default the name. */
   id: BlockId.optional(),
   name: Short(100),
-  values: z.array(z.number()).max(MAX_CHART_POINTS),
+  values: z.array(z.number()).max(MAX_CHART_POINTS, LIMIT),
 });
 export const ChartBlock = z.object({
   type: z.literal("chart"),
@@ -337,8 +351,8 @@ export const ChartBlock = z.object({
   label: Text(200).optional(),
   unit: Text(16).optional(),
   /** Labels of the x axis, one per point. */
-  x: z.array(Text(40)).max(MAX_CHART_POINTS).optional(),
-  series: z.array(ChartSeries).min(1).max(MAX_CHART_SERIES),
+  x: z.array(Text(40)).max(MAX_CHART_POINTS, LIMIT).optional(),
+  series: z.array(ChartSeries).min(1, LIMIT).max(MAX_CHART_SERIES, LIMIT),
   /** 2.1: one sentence that says what the chart shows (v1 card, VoiceOver). */
   summary: Text(280).optional(),
 });
@@ -369,7 +383,7 @@ export const RankBlock = z.object({
   type: z.literal("rank"),
   ...id,
   ...question,
-  items: z.array(z.object({ id: ActionId, label: Short(200), meta: Text(80).optional() })).min(2).max(8),
+  items: z.array(z.object({ id: ActionId, label: Short(200), meta: Text(80).optional() })).min(2, LIMIT).max(8, LIMIT),
   /** A line after the first `after` items, e.g. "前 3 个进 4.0". */
   cut: z.object({ after: z.int().positive(), label: Short(40) }).optional(),
   /** Only the first n ids are the answer. */
@@ -380,7 +394,7 @@ export const RatingBlock = z.object({
   ...id,
   ...question,
   /** Always 5. */
-  max: z.literal(5),
+  max: z.literal(5, LIMIT),
   /** Words for some values, keys "1".."5". */
   labels: z.partialRecord(z.enum(["1", "2", "3", "4", "5"]), Short(20)).optional(),
 });
@@ -408,15 +422,15 @@ export const ImageChoiceBlock = z.object({
   multiple: z.boolean().optional(),
   options: z
     .array(z.object({ id: ActionId, label: Short(80), fileId: Id, recommended: z.boolean().optional() }))
-    .min(2)
-    .max(4),
+    .min(2, LIMIT)
+    .max(4, LIMIT),
 });
 export const MatrixBlock = z.object({
   type: z.literal("matrix"),
   ...id,
   ...question,
-  rows: z.array(z.object({ id: ActionId, label: Short(80), required: z.boolean().optional() })).min(1).max(8),
-  columns: z.array(z.object({ id: ActionId, label: Short(40) })).min(2).max(5),
+  rows: z.array(z.object({ id: ActionId, label: Short(80), required: z.boolean().optional() })).min(1, LIMIT).max(8, LIMIT),
+  columns: z.array(z.object({ id: ActionId, label: Short(40) })).min(2, LIMIT).max(5, LIMIT),
 });
 export const SlotsBlock = z.object({
   type: z.literal("slots"),
@@ -426,16 +440,16 @@ export const SlotsBlock = z.object({
   /** IANA time zone the slots are shown in. */
   tz: Short(64),
   slots: z
-    .array(z.object({ id: ActionId, start: Millis, end: Millis, conflicts: z.array(Id).max(50).optional() }))
-    .min(1)
-    .max(12),
+    .array(z.object({ id: ActionId, start: Millis, end: Millis, conflicts: z.array(Id).max(50, LIMIT).optional() }))
+    .min(1, LIMIT)
+    .max(12, LIMIT),
 });
-export const PollVoters = z.union([z.literal("group"), z.array(Id).min(1).max(200)]);
+export const PollVoters = z.union([z.literal("group"), z.array(Id).min(1, LIMIT).max(200, LIMIT)]);
 export const PollBlock = z.object({
   type: z.literal("poll"),
   ...id,
   ...question,
-  options: z.array(InputOption).min(2).max(6),
+  options: z.array(InputOption).min(2, LIMIT).max(6, LIMIT),
   voters: PollVoters,
   closesAt: Millis,
   /** Voter ids per option are shown (`cardState.tallyBy`). */
@@ -456,8 +470,8 @@ export const ButtonsBlock = z.object({
         confirm: z.object({ title: Short(200), body: Text(1000).optional() }).optional(),
       }),
     )
-    .min(1)
-    .max(3),
+    .min(1, LIMIT)
+    .max(3, LIMIT),
 });
 export const DiagramBlock = z.object({
   type: z.literal("diagram"),
@@ -477,7 +491,7 @@ export const EmbedBlock = z.object({
   artifactId: Id,
   version: z.int().positive(),
   /** 160..480 pt; the client owns scrolling. */
-  height: z.int().min(160).max(480).optional(),
+  height: z.int().min(160, LIMIT).max(480, LIMIT).optional(),
   title: Short(80).optional(),
 });
 
@@ -516,7 +530,7 @@ export const CardV2LeafBlock = z.discriminatedUnion("type", [
 ]);
 export type CardV2LeafBlock = z.infer<typeof CardV2LeafBlock>;
 
-const Children = z.array(BlockId).max(12);
+const Children = z.array(BlockId).max(12, LIMIT);
 /**
  * A titled section. 2.0: children inline in `blocks` (leaves only). 2.1: children by id in
  * `children` (any block of the card). Exactly one of the two.
@@ -525,7 +539,7 @@ export const GroupBlock = z.object({
   type: z.literal("group"),
   ...id,
   label: Text(200).optional(),
-  blocks: z.array(CardV2LeafBlock).max(MAX_GROUP_BLOCKS).optional(),
+  blocks: z.array(CardV2LeafBlock).max(MAX_GROUP_BLOCKS, LIMIT).optional(),
   /** 2.1 */
   children: Children.optional(),
   title: Short(40).optional(),
@@ -540,29 +554,29 @@ export const RowBlock = z.object({
   ...id,
   children: Children,
   /** Relative column widths, one per child; default all 1. */
-  weights: z.array(z.int().min(1).max(3)).max(3).optional(),
+  weights: z.array(z.int().min(1, LIMIT).max(3, LIMIT)).max(3, LIMIT).optional(),
 });
 export const CompareOption = z.object({
   id: ActionId,
   label: Short(24),
-  pros: z.array(Short(40)).max(2).optional(),
-  cons: z.array(Short(40)).max(2).optional(),
+  pros: z.array(Short(40)).max(2, LIMIT).optional(),
+  cons: z.array(Short(40)).max(2, LIMIT).optional(),
   preview: z.union([z.object({ fileId: Id }), z.object({ artifactId: Id, version: z.int().positive() })]).optional(),
   recommended: z.boolean().optional(),
-  children: z.array(BlockId).max(6).optional(),
+  children: z.array(BlockId).max(6, LIMIT).optional(),
 });
 export const CompareBlock = z.object({
   type: z.literal("compare"),
   ...id,
   question: Short(200).optional(),
-  options: z.array(CompareOption).max(4),
+  options: z.array(CompareOption).max(4, LIMIT),
   /** A text note with the pick (`{value, note}`). */
   note: z.object({ label: Short(40), maxLength: z.int().positive().max(1000).optional() }).optional(),
 });
 export const TabsBlock = z.object({
   type: z.literal("tabs"),
   ...id,
-  tabs: z.array(z.object({ id: ActionId, label: Short(16), children: Children })).max(5),
+  tabs: z.array(z.object({ id: ActionId, label: Short(16), children: Children })).max(5, LIMIT),
   /** The tab shown first. */
   selected: ActionId.optional(),
 });
@@ -583,7 +597,7 @@ export const CardV2Block = z.discriminatedUnion("type", [
   CompareBlock,
   TabsBlock,
   QuestionnaireBlock,
-]);
+], { error: (i) => (i.code === "invalid_union" ? "card.unknown_block: unknown block type" : undefined) });
 export type CardV2Block = z.infer<typeof CardV2Block>;
 
 /** Block types of tc.card/2.1 (not in 2.0). */
@@ -625,7 +639,7 @@ export const CardV2Action = z.object({
   /** When set, the client asks before it sends the answer. */
   confirm: z.object({ title: Short(200), body: Text(1000).optional() }).optional(),
   /** 2.1, `submit` and `reject`: the input blocks whose values go in `inputs`. */
-  inputs: z.array(BlockId).max(MAX_CARD_V2_INPUT_BLOCKS).optional(),
+  inputs: z.array(BlockId).max(MAX_CARD_V2_INPUT_BLOCKS, LIMIT).optional(),
 });
 export type CardV2Action = z.infer<typeof CardV2Action>;
 
@@ -643,8 +657,8 @@ export const CardV2Shape = z.object({
   /** Plain text for old clients, notifications and search; also the v1 card's first block. */
   fallback: Text(4000),
   ask: CardAsk.optional(),
-  blocks: z.array(CardV2Block).max(MAX_CARD_V2_BLOCKS),
-  actions: z.array(CardV2Action).max(MAX_CARD_V2_ACTIONS).optional(),
+  blocks: z.array(CardV2Block).max(MAX_CARD_V2_BLOCKS, LIMIT),
+  actions: z.array(CardV2Action).max(MAX_CARD_V2_ACTIONS, LIMIT).optional(),
   /** Bot state, returned to nobody; at most 16 KiB. */
   data: jsonMax(MAX_CARD_DATA_BYTES, "data").optional(),
 });

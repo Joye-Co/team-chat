@@ -9,7 +9,7 @@ import type { CardV2 } from "../src/index.ts";
 type Obj = Record<string, unknown>;
 export type InteractCtx = {
   ok: (path: string, kind: string, value: unknown, description?: string) => void;
-  bad: (path: string, kind: string, value: unknown, description: string) => void;
+  bad: (path: string, kind: string, value: unknown, description: string, reason?: string) => void;
   T0: number;
   ID: Record<string, string>;
   base: Obj;
@@ -255,53 +255,53 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     { id: "s2", type: "stack", children: ["s3"] },
     { id: "s3", type: "stack", children: ["x"] },
     leaf("x"),
-  ]), "card.depth: a container at depth 3");
-  bad("entities/card-v2-row-4-children.json", "CardV2", card21([{ id: "r", type: "row", children: ["a", "b", "c", "d"] }, leaf("a"), leaf("b"), leaf("c"), leaf("d")]), "a row has 2..3 children");
-  bad("entities/card-v2-row-in-row.json", "CardV2", card21([{ id: "r1", type: "row", children: ["r2", "c"] }, { id: "r2", type: "row", children: ["a", "b"] }, leaf("a"), leaf("b"), leaf("c")]), "row inside a row");
+  ]), "card.depth: a container at depth 3", "card.depth");
+  bad("entities/card-v2-row-4-children.json", "CardV2", card21([{ id: "r", type: "row", children: ["a", "b", "c", "d"] }, leaf("a"), leaf("b"), leaf("c"), leaf("d")]), "a row has 2..3 children", "card.limits");
+  bad("entities/card-v2-row-in-row.json", "CardV2", card21([{ id: "r1", type: "row", children: ["r2", "c"] }, { id: "r2", type: "row", children: ["a", "b"] }, leaf("a"), leaf("b"), leaf("c")]), "row inside a row", "card.limits");
   bad("entities/card-v2-tabs-in-row.json", "CardV2", card21([
     { id: "r", type: "row", children: ["tb", "c"] },
     { id: "tb", type: "tabs", tabs: [{ id: "t1", label: "一", children: ["a"] }, { id: "t2", label: "二", children: ["b"] }] },
     leaf("a"),
     leaf("b"),
     leaf("c"),
-  ]), "tabs inside a row");
-  bad("entities/card-v2-shared-child.json", "CardV2", card21([{ id: "s1", type: "stack", children: ["a"] }, { id: "s2", type: "stack", children: ["a"] }, leaf("a")]), "a child has two parents");
-  bad("entities/card-v2-cycle.json", "CardV2", card21([leaf("x"), { id: "s1", type: "stack", children: ["s2"] }, { id: "s2", type: "stack", children: ["s1"] }]), "containers in a cycle");
-  bad("entities/card-v2-style-key.json", "CardV2", card21([{ id: "a", type: "text", text: "红字", color: "red" }]), "card.style_property: color");
-  bad("entities/card-v2-two-primary.json", "CardV2", card21([leaf("a")], { actions: [{ id: "x", label: "X", style: "primary" }, { id: "y", label: "Y", style: "primary" }] }), "two primary actions");
+  ]), "tabs inside a row", "card.limits");
+  bad("entities/card-v2-shared-child.json", "CardV2", card21([{ id: "s1", type: "stack", children: ["a"] }, { id: "s2", type: "stack", children: ["a"] }, leaf("a")]), "a child has two parents", "card.limits");
+  bad("entities/card-v2-cycle.json", "CardV2", card21([leaf("x"), { id: "s1", type: "stack", children: ["s2"] }, { id: "s2", type: "stack", children: ["s1"] }]), "containers in a cycle", "card.depth");
+  bad("entities/card-v2-style-key.json", "CardV2", card21([{ id: "a", type: "text", text: "红字", color: "red" }]), "card.style_property: color", "card.style_property");
+  bad("entities/card-v2-two-primary.json", "CardV2", card21([leaf("a")], { actions: [{ id: "x", label: "X", style: "primary" }, { id: "y", label: "Y", style: "primary" }] }), "two primary actions", "card.limits");
   bad("entities/card-v2-two-decision-surfaces.json", "CardV2", card21([
     { id: "cmp", type: "compare", options: [{ id: "A", label: "A" }, { id: "B", label: "B" }] },
     { id: "qs", type: "questionnaire", children: ["q1", "q2"] },
     { id: "q1", type: "input", kind: "text", label: "一" },
     { id: "q2", type: "input", kind: "text", label: "二" },
-  ], { intent: "ask", ask: { from: ["owners"] } }), "card.decision_surfaces: a compare and a questionnaire for one ask");
-  bad("entities/card-v2-immediate-on-multiple.json", "CardV2", card21([{ id: "c", type: "decision", multiple: true, deliver: "immediate", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }]), "immediate on a multiple choice");
-  bad("entities/card-v2-81-blocks.json", "CardV2", card21(Array.from({ length: MAX_CARD_V2_BLOCKS + 1 }, (_, i) => ({ type: "divider", id: `d${i}` }))), "card.limits: 81 blocks");
-  bad("entities/card-v2-secret-input.json", "CardV2", card21([{ id: "pw", type: "input", kind: "secret", label: "密码" }]), "card.secret_deferred: no secret inputs in 1.1.0");
-  bad("entities/card-v2-unknown-catalog.json", "CardV2", card21([leaf("a")], { catalog: "tc.card/2.2" }), "card.unknown_catalog");
-  bad("entities/card-v2-21-block-in-20.json", "CardV2", { v: 2, rev: 1, intent: "info", title: "t", fallback: "f", blocks: [{ id: "s", type: "stack", children: ["a"] }, leaf("a")] }, "card.unknown_block: stack needs tc.card/2.1");
-  bad("entities/card-v2-unknown-block.json", "CardV2", card21([{ id: "m", type: "map", fallbackText: "地图" }]), "card.unknown_block: a type no catalog has");
-  bad("entities/card-v2-rank-no-fallback.json", "CardV2", card21([{ id: "r", type: "rank", label: "排", items: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }]), "2.1 leaves need fallbackText");
-  bad("entities/card-v2-decision-unknown-default.json", "CardV2", card21([{ id: "c", type: "decision", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], default: ["z"] }]), "default names an unknown option");
-  bad("entities/card-v2-decision-min-max.json", "CardV2", card21([{ id: "c", type: "decision", multiple: true, minSelect: 3, maxSelect: 2, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }] }]), "minSelect > maxSelect");
-  bad("entities/card-v2-rating-max-4.json", "CardV2", card21([{ id: "r", type: "rating", label: "分", max: 4, fallbackText: "分" }]), "rating max is always 5");
-  bad("entities/card-v2-scale-12-steps.json", "CardV2", card21([{ id: "s", type: "scale", label: "分", min: 0, max: 11, fallbackText: "分" }]), "scale spans at most 11 steps");
-  bad("entities/card-v2-matrix-one-column.json", "CardV2", card21([{ id: "m", type: "matrix", label: "选", rows: [{ id: "a", label: "A" }], columns: [{ id: "x", label: "X" }], fallbackText: "选" }]), "matrix has 2..5 columns");
-  bad("entities/card-v2-poll-7-options.json", "CardV2", card21([{ id: "p", type: "poll", label: "投", voters: "group", closesAt: T0, options: Array.from({ length: 7 }, (_, i) => ({ id: `o${i}`, label: `${i}` })), fallbackText: "投" }]), "poll has 2..6 options");
-  bad("entities/card-v2-compare-5-options.json", "CardV2", card21([{ id: "c", type: "compare", options: Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `${i}` })) }]), "compare has 2..4 options");
-  bad("entities/card-v2-group-13-children.json", "CardV2", card21([{ id: "g", type: "group", title: "多", children: Array.from({ length: 13 }, (_, i) => `x${i}`) }, ...Array.from({ length: 13 }, (_, i) => leaf(`x${i}`))]), "group has 1..12 children");
+  ], { intent: "ask", ask: { from: ["owners"] } }), "card.decision_surfaces: a compare and a questionnaire for one ask", "card.decision_surfaces");
+  bad("entities/card-v2-immediate-on-multiple.json", "CardV2", card21([{ id: "c", type: "decision", multiple: true, deliver: "immediate", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }]), "immediate on a multiple choice", "card.limits");
+  bad("entities/card-v2-81-blocks.json", "CardV2", card21(Array.from({ length: MAX_CARD_V2_BLOCKS + 1 }, (_, i) => ({ type: "divider", id: `d${i}` }))), "card.limits: 81 blocks", "card.limits");
+  bad("entities/card-v2-secret-input.json", "CardV2", card21([{ id: "pw", type: "input", kind: "secret", label: "密码" }]), "card.secret_deferred: no secret inputs in 1.1.0", "card.secret_deferred");
+  bad("entities/card-v2-unknown-catalog.json", "CardV2", card21([leaf("a")], { catalog: "tc.card/2.2" }), "card.unknown_catalog", "card.unknown_catalog");
+  bad("entities/card-v2-21-block-in-20.json", "CardV2", { v: 2, rev: 1, intent: "info", title: "t", fallback: "f", blocks: [{ id: "s", type: "stack", children: ["a"] }, leaf("a")] }, "card.unknown_block: stack needs tc.card/2.1", "card.unknown_block");
+  bad("entities/card-v2-unknown-block.json", "CardV2", card21([{ id: "m", type: "map", fallbackText: "地图" }]), "card.unknown_block: a type no catalog has", "card.unknown_block");
+  bad("entities/card-v2-rank-no-fallback.json", "CardV2", card21([{ id: "r", type: "rank", label: "排", items: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }]), "2.1 leaves need fallbackText", "card.limits");
+  bad("entities/card-v2-decision-unknown-default.json", "CardV2", card21([{ id: "c", type: "decision", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], default: ["z"] }]), "default names an unknown option", "card.limits");
+  bad("entities/card-v2-decision-min-max.json", "CardV2", card21([{ id: "c", type: "decision", multiple: true, minSelect: 3, maxSelect: 2, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }, { id: "c", label: "C" }] }]), "minSelect > maxSelect", "card.limits");
+  bad("entities/card-v2-rating-max-4.json", "CardV2", card21([{ id: "r", type: "rating", label: "分", max: 4, fallbackText: "分" }]), "rating max is always 5", "card.limits");
+  bad("entities/card-v2-scale-12-steps.json", "CardV2", card21([{ id: "s", type: "scale", label: "分", min: 0, max: 11, fallbackText: "分" }]), "scale spans at most 11 steps", "card.limits");
+  bad("entities/card-v2-matrix-one-column.json", "CardV2", card21([{ id: "m", type: "matrix", label: "选", rows: [{ id: "a", label: "A" }], columns: [{ id: "x", label: "X" }], fallbackText: "选" }]), "matrix has 2..5 columns", "card.limits");
+  bad("entities/card-v2-poll-7-options.json", "CardV2", card21([{ id: "p", type: "poll", label: "投", voters: "group", closesAt: T0, options: Array.from({ length: 7 }, (_, i) => ({ id: `o${i}`, label: `${i}` })), fallbackText: "投" }]), "poll has 2..6 options", "card.limits");
+  bad("entities/card-v2-compare-5-options.json", "CardV2", card21([{ id: "c", type: "compare", options: Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `${i}` })) }]), "compare has 2..4 options", "card.limits");
+  bad("entities/card-v2-group-13-children.json", "CardV2", card21([{ id: "g", type: "group", title: "多", children: Array.from({ length: 13 }, (_, i) => `x${i}`) }, ...Array.from({ length: 13 }, (_, i) => leaf(`x${i}`))]), "group has 1..12 children", "card.limits");
   bad("entities/card-v2-questionnaire-container-child.json", "CardV2", card21([
     { id: "qs", type: "questionnaire", children: ["s", "q"] },
     { id: "s", type: "stack", children: ["a"] },
     { id: "q", type: "input", kind: "text", label: "一" },
     leaf("a"),
-  ]), "questionnaire children are leaves");
-  bad("entities/card-v2-embed-too-tall.json", "CardV2", card21([{ id: "e", type: "embed", artifactId: ART, version: 1, height: 600, fallbackText: "页面" }]), "embed height is 160..480");
-  bad("entities/card-v2-table-row-keys-mismatch.json", "CardV2", card21([{ id: "t", type: "table", columns: ["a"], rows: [["1"], ["2"]], rowKeys: ["only"] }]), "one row key per row");
-  bad("entities/card-v2-diagram-too-long.json", "CardV2", card21([{ id: "d", type: "diagram", syntax: "mermaid", source: `flowchart LR\n${"  a --> b\n".repeat(1700)}`, fallbackText: "图" }]), "diagram source over 16384 bytes");
-  bad("entities/card-v2-diagram-no-fallback.json", "CardV2", card21([{ id: "d", type: "diagram", syntax: "mermaid", source: "flowchart LR\n  a --> b" }]), "a diagram needs fallbackText");
-  bad("entities/card-v2-diagram-click.json", "CardV2", card21([{ id: "d", type: "diagram", syntax: "mermaid", source: "flowchart LR\n  a --> b\n  click a callback", fallbackText: "图" }]), "click and callback are refused");
-  bad("entities/card-v2-three-diagrams.json", "CardV2", card21(["d1", "d2", "d3"].map((id) => ({ id, type: "diagram", syntax: "mermaid", source: "gantt\n  title x", fallbackText: "图" }))), "at most 2 diagrams per card");
+  ]), "questionnaire children are leaves", "card.limits");
+  bad("entities/card-v2-embed-too-tall.json", "CardV2", card21([{ id: "e", type: "embed", artifactId: ART, version: 1, height: 600, fallbackText: "页面" }]), "embed height is 160..480", "card.limits");
+  bad("entities/card-v2-table-row-keys-mismatch.json", "CardV2", card21([{ id: "t", type: "table", columns: ["a"], rows: [["1"], ["2"]], rowKeys: ["only"] }]), "one row key per row", "card.limits");
+  bad("entities/card-v2-diagram-too-long.json", "CardV2", card21([{ id: "d", type: "diagram", syntax: "mermaid", source: `flowchart LR\n${"  a --> b\n".repeat(1700)}`, fallbackText: "图" }]), "diagram source over 16384 bytes", "card.limits");
+  bad("entities/card-v2-diagram-no-fallback.json", "CardV2", card21([{ id: "d", type: "diagram", syntax: "mermaid", source: "flowchart LR\n  a --> b" }]), "a diagram needs fallbackText", "card.limits");
+  bad("entities/card-v2-diagram-click.json", "CardV2", card21([{ id: "d", type: "diagram", syntax: "mermaid", source: "flowchart LR\n  a --> b\n  click a callback", fallbackText: "图" }]), "click and callback are refused", "card.limits");
+  bad("entities/card-v2-three-diagrams.json", "CardV2", card21(["d1", "d2", "d3"].map((id) => ({ id, type: "diagram", syntax: "mermaid", source: "gantt\n  title x", fallbackText: "图" }))), "at most 2 diagrams per card", "card.limits");
 
   // Derived v1 cards (CARD21 §7): the derivation of 2.1 cards is a valid v1 card.
   ok("entities/card-v1-derived-compose.json", "Card", cardV2ToV1(report), "v1 card derived from the 7.1 report");

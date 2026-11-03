@@ -2,6 +2,7 @@
   "kind": "CardV2",
   "valid": false,
   "description": "card.unknown_block: stack needs tc.card/2.1",
+  "reason": "card.unknown_block",
   "value": {
     "v": 2,
     "rev": 1,
