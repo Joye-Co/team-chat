@@ -31,6 +31,9 @@ pub enum Start {
     /// Signed in with the v2 sample team of the 1.1.0 artboards
     /// (`fake::v2::V2Samples`).
     V2,
+    /// The v2 sample team on a quiet day: nothing waits on me, nothing runs
+    /// (desk track, `desk-empty`).
+    V2Quiet,
 }
 
 pub struct Scene {

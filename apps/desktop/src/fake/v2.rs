@@ -155,6 +155,9 @@ pub struct V2Samples {
     members: Vec<Member>,
     data: Mutex<Data>,
     subscribers: Mutex<Vec<UnboundedSender<Vec<Change>>>>,
+    // Desk track (1.1.0 首页): a quiet day, and the answers made on the desk.
+    quiet: bool,
+    desk: Mutex<super::v2_desk::DeskSamples>,
 }
 
 fn group(id: &str, kind: GroupKind, name: &str, members: &[&str], last: Millis) -> GroupSummary {
@@ -300,6 +303,21 @@ impl V2Samples {
             members: members(),
             data: Mutex::new(Self::data()),
             subscribers: Mutex::new(Vec::new()),
+            quiet: false,
+            desk: Mutex::default(),
+        })
+    }
+
+    /// The sample team on a quiet day (`desk-empty`): nothing waits on me,
+    /// nothing runs, nothing is done yet today.
+    pub fn quiet() -> Arc<Self> {
+        Arc::new(Self {
+            inner: FakeProvider::new(),
+            members: members(),
+            data: Mutex::new(Self::data()),
+            subscribers: Mutex::new(Vec::new()),
+            quiet: true,
+            desk: Mutex::default(),
         })
     }
 
@@ -946,6 +964,9 @@ impl ChatProvider for V2Samples {
                     let msgs = d.messages.get(&t.id).map(|m| m.len()).unwrap_or(0);
                     t.message_count = msgs as u32;
                     t.last_seq = msgs as u64;
+                    if self.quiet {
+                        t.waiting_on.retain(|m| m != ME);
+                    }
                     t
                 })
                 .collect()
@@ -954,6 +975,9 @@ impl ChatProvider for V2Samples {
         out
     }
     fn todo(&self) -> Vec<TodoItem> {
+        if self.quiet {
+            return Vec::new();
+        }
         let groups = self.groups();
         let mut out: Vec<TodoItem> = groups
             .iter()
@@ -1079,6 +1103,7 @@ impl ChatProvider for V2Samples {
             d.runs
                 .iter()
                 .filter(|r| r.topic_id == topic_id)
+                .filter(|r| !(self.quiet && r.status.is_active()))
                 .cloned()
                 .collect()
         });
@@ -1092,6 +1117,9 @@ impl ChatProvider for V2Samples {
     // --- v2 ---
 
     fn desk_note(&self) -> Option<DeskNote> {
+        if self.quiet {
+            return None;
+        }
         Some(DeskNote {
             member_id: JOJO.into(),
             text: "先批 Watch 的发布。晚上 8 点是群里的高峰，越早发越稳。".into(),
@@ -1099,6 +1127,9 @@ impl ChatProvider for V2Samples {
         })
     }
     fn asks_for_me(&self) -> Vec<AskItem> {
+        if self.quiet {
+            return Vec::new();
+        }
         let ask =
             |g: &str, t: &str, msg: Option<String>, from: &str, kind, title: &str, when| AskItem {
                 group_id: g.into(),
@@ -1149,6 +1180,9 @@ impl ChatProvider for V2Samples {
         ]
     }
     fn done_today(&self) -> Vec<DoneItem> {
+        if self.quiet {
+            return Vec::new();
+        }
         vec![
             DoneItem {
                 group_id: GROWTH.into(),
@@ -1166,7 +1200,7 @@ impl ChatProvider for V2Samples {
                 group_id: OPS.into(),
                 topic_id: T_STAGING.into(),
                 member_id: SCOUT.into(),
-                title: "staging 每日巡检 24 项都通过".into(),
+                title: "巡检了 staging".into(),
                 at: at(9, 12),
                 proof: vec![Proof::Checks {
                     passed: 24,
@@ -1176,6 +1210,9 @@ impl ChatProvider for V2Samples {
         ]
     }
     fn queue(&self) -> Vec<QueuedItem> {
+        if self.quiet {
+            return Vec::new();
+        }
         vec![
             QueuedItem {
                 member_id: POCKET.into(),
@@ -1458,6 +1495,62 @@ impl ChatProvider for V2Samples {
             _ => None,
         }
     }
+
+    // --- desk track (1.1.0 首页): fake/v2_desk.rs ---
+
+    fn card_v2(&self, _group_id: &str, message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
+        super::v2_desk::card_v2(message_id)
+    }
+    fn card_v2_answers(&self, _group_id: &str, message_id: &str) -> Vec<CardAnswer> {
+        let desk = self.desk.lock().unwrap_or_else(|e| e.into_inner());
+        desk.answers.get(message_id).cloned().unwrap_or_default()
+    }
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        _rev: u32,
+        action_id: &str,
+        inputs: std::collections::BTreeMap<String, serde_json::Value>,
+    ) {
+        let now = Local::now().timestamp_millis();
+        self.desk
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .answer(message_id, action_id, inputs, now);
+        self.emit(vec![Change::Messages {
+            group_id: group_id.into(),
+            topic_id: topic_id.into(),
+        }]);
+    }
+    fn card_presses(&self, _group_id: &str, message_id: &str) -> Vec<CardPress> {
+        let desk = self.desk.lock().unwrap_or_else(|e| e.into_inner());
+        desk.presses.get(message_id).cloned().unwrap_or_default()
+    }
+    fn press_card_action(&self, group_id: &str, topic_id: &str, message_id: &str, action_id: &str) {
+        let label = self.with(|d| {
+            d.cards.get(message_id).and_then(|c| {
+                c.actions
+                    .as_deref()
+                    .unwrap_or(&[])
+                    .iter()
+                    .find(|a| a.id == action_id)
+                    .map(|a| a.label.clone())
+            })
+        });
+        let now = Local::now().timestamp_millis();
+        self.desk
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .press(message_id, action_id, label, now);
+        self.emit(vec![Change::Messages {
+            group_id: group_id.into(),
+            topic_id: topic_id.into(),
+        }]);
+    }
+
+    // --- end of the desk track block ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

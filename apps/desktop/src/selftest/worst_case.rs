@@ -401,6 +401,76 @@ impl ChatProvider for WorstCase {
     fn set_typing(&self, group_id: &str, topic_id: &str) {
         self.inner.set_typing(group_id, topic_id)
     }
+    // --- desk track (1.1.0 首页): the desk's data at its worst ---
+
+    fn desk_note(&self) -> Option<v2::DeskNote> {
+        self.inner.desk_note().map(|mut n| {
+            n.text = pick(BODIES, 4).to_string();
+            n
+        })
+    }
+    fn asks_for_me(&self) -> Vec<v2::AskItem> {
+        self.inner
+            .asks_for_me()
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut a)| {
+                a.title = pick(TITLES, i).to_string();
+                a.at = if i == 1 { 0 } else { a.at };
+                a
+            })
+            .collect()
+    }
+    fn card_v2(&self, group_id: &str, message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
+        self.inner.card_v2(group_id, message_id).map(|c| {
+            let mut c = (*c).clone();
+            c.title = pick(TITLES, 0).to_string();
+            for b in c.blocks.iter_mut() {
+                if let chat_core::proto::CardV2Block::Text { text, .. } = b {
+                    *text = pick(BODIES, 4).to_string();
+                }
+            }
+            Arc::new(c)
+        })
+    }
+    fn card_v2_answers(&self, group_id: &str, message_id: &str) -> Vec<v2::CardAnswer> {
+        self.inner.card_v2_answers(group_id, message_id)
+    }
+    fn done_today(&self) -> Vec<v2::DoneItem> {
+        self.inner
+            .done_today()
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut d)| {
+                d.title = pick(TITLES, i * 3).to_string();
+                d
+            })
+            .collect()
+    }
+    fn queue(&self) -> Vec<v2::QueuedItem> {
+        self.inner
+            .queue()
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut q)| {
+                q.title = pick(PLAN_TEXTS, i).to_string();
+                q
+            })
+            .collect()
+    }
+    fn machine_screen(&self, run_id: &str) -> Option<v2::MachineScreen> {
+        self.inner.machine_screen(run_id).map(|mut s| {
+            for (i, l) in s.lines.iter_mut().enumerate() {
+                if i % 2 == 0 {
+                    l.text = pick(BODIES, i).to_string();
+                }
+            }
+            s
+        })
+    }
+
+    // --- end of the desk track block ---
+
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         self.inner.subscribe()
     }

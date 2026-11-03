@@ -151,6 +151,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::SignedOut => fake::FakeProvider::signed_out(),
         Start::SignedIn | Start::Empty => fake::FakeProvider::new(),
         Start::V2 => fake::v2::V2Samples::new(),
+        Start::V2Quiet => fake::v2::V2Samples::quiet(),
         Start::Offline => {
             let fake = fake::FakeProvider::new();
             fake.set_connection(crate::data::ConnectionState::Reconnecting {

@@ -18,6 +18,8 @@ use crate::{data::*, drafts::DraftStore};
 mod settings;
 /// The v2 sample team of the 1.1.0 artboards.
 pub mod v2;
+// Desk track (1.1.0 首页).
+pub mod v2_desk;
 
 pub const ME: &str = "m-joye";
 /// The topic with 10,000 messages.
