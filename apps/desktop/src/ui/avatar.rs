@@ -187,9 +187,11 @@ impl RenderOnce for MemberAvatar {
                         .child(art),
                 )
                 .children(pip.map(dot))
-                .children(self.ring.map(|r| {
-                    ring_element(&self.id, r, size, Some(theme::radius::bot(size)), cx)
-                }))
+                .children(
+                    self.ring.map(|r| {
+                        ring_element(&self.id, r, size, Some(theme::radius::bot(size)), cx)
+                    }),
+                )
                 .into_any_element();
         }
 

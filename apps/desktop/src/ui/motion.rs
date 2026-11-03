@@ -596,7 +596,10 @@ mod tests {
     fn staggers_wait_then_run_on_the_out_curve() {
         assert_eq!(stagger_delay(0), Duration::ZERO);
         assert_eq!(stagger_delay(2), motion::STAGGER * 2);
-        assert_eq!(stagger_delay(100), motion::STAGGER * motion::STAGGER_MAX as u32);
+        assert_eq!(
+            stagger_delay(100),
+            motion::STAGGER * motion::STAGGER_MAX as u32
+        );
         let (d, r) = (Duration::from_millis(100), Duration::from_millis(300));
         assert_eq!(delayed_progress(0., d, r), 0.);
         assert_eq!(delayed_progress(0.25, d, r), 0.);
