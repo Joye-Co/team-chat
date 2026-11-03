@@ -18,8 +18,10 @@ import {
   desiredTopic,
   linkedTopicId,
   prKey,
+  topicLink,
   topicTitle,
 } from "./github";
+import { TOPIC_LINK_RPC } from "./links";
 
 registerGatewayMigration({
   name: "integrations-1",
@@ -39,6 +41,12 @@ registerGatewayMigration({
     CREATE TABLE hook_deliveries (id TEXT PRIMARY KEY, at INTEGER NOT NULL);
     CREATE INDEX hook_deliveries_at ON hook_deliveries(at);
   `,
+});
+
+// 1.1: the last `topic.linked` value stored for the key, so only changes are sent.
+registerGatewayMigration({
+  name: "integrations-2-links",
+  up: `ALTER TABLE hook_keys ADD COLUMN link TEXT;`,
 });
 
 /** Delivery ids are kept this long for dedupe; GitHub redeliveries come within days. */
@@ -121,6 +129,7 @@ type KeyRow = {
   state: string | null;
   card: string | null;
   applied: string | null;
+  link?: string | null;
 };
 
 function keyRow(sql: SqlStorage, key: string): KeyRow | undefined {
@@ -258,12 +267,13 @@ async function deliverGithub(
   // Topic status, waitingOn, owner and title follow the PR or issue. Only changes are sent, so a
   // status a person sets by hand stays until GitHub changes the computed value.
   applied = await syncTopic(env, a, topicId as string, state, ownTopic, applied);
+  const linkJson = await syncLink(env, log, a, topicId as string, state, row?.link ?? null);
 
   sql.exec(
-    `INSERT INTO hook_keys (key, topic_id, message_id, own_topic, state, card, applied, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO hook_keys (key, topic_id, message_id, own_topic, state, card, applied, updated_at, link)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET message_id = excluded.message_id, state = excluded.state,
-       card = excluded.card, applied = excluded.applied, updated_at = excluded.updated_at`,
+       card = excluded.card, applied = excluded.applied, updated_at = excluded.updated_at, link = excluded.link`,
     key,
     topicId,
     messageId,
@@ -272,6 +282,7 @@ async function deliverGithub(
     cardJson,
     JSON.stringify(applied),
     now,
+    linkJson,
   );
   if (state.kind === "pr" && state.headSha) {
     sql.exec("INSERT OR REPLACE INTO hook_shas (sha, key, at) VALUES (?, ?, ?)", state.headSha, key, now);
@@ -333,6 +344,32 @@ async function syncTopic(
     ownerId: update.ownerId !== undefined ? update.ownerId : applied.ownerId,
     title: update.title ?? applied.title ?? topic.title,
   };
+}
+
+/**
+ * Stores `topic.linked` when the pull request's link changed. Returns the link JSON that is now
+ * stored. A failure is logged and not stored, so the next delivery tries again; the card and
+ * the topic state of this delivery stay.
+ */
+async function syncLink(
+  env: Env,
+  log: Logger,
+  a: Extract<DeliverArgs, { op: "github" }>,
+  topicId: string,
+  state: GhState,
+  stored: string | null,
+): Promise<string | null> {
+  const link = topicLink(state);
+  if (!link) return stored;
+  const json = JSON.stringify(link);
+  if (json === stored) return stored;
+  try {
+    unwrap(await roomStub(env, a.hook.groupId).rpc(a.hook.groupId, TOPIC_LINK_RPC, actorOf(a.hook), { topicId, link }));
+    return json;
+  } catch (err) {
+    log.warn("topic link not stored", { hookId: a.hook.id, err });
+    return stored;
+  }
 }
 
 async function shortHash(text: string): Promise<string> {
