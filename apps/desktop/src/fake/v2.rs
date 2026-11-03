@@ -75,14 +75,25 @@ pub const ART_V4: &str = "art-v2-v4-draft";
 
 const MIN: i64 = 60_000;
 
-/// Today at `hh:mm` local time (the artboards' day runs 09:00 to 10:45).
+/// Today at `hh:mm` local time. The sample day runs from 09:00 to the
+/// pinned 10:21: nothing that already happened is later than now.
 pub fn at(hour: u32, minute: u32) -> Millis {
     days_ago_at(0, hour, minute)
 }
 
+/// Today at `hh:mm:ss`: events between 10:20 and 10:21 keep their order
+/// and still show a time no later than now.
+fn at_s(hour: u32, minute: u32, second: u32) -> Millis {
+    days_ago_at_s(0, hour, minute, second)
+}
+
 fn days_ago_at(days: i64, hour: u32, minute: u32) -> Millis {
+    days_ago_at_s(days, hour, minute, 0)
+}
+
+fn days_ago_at_s(days: i64, hour: u32, minute: u32, second: u32) -> Millis {
     let date = crate::selftest::clock::local_now().date_naive() - chrono::Duration::days(days);
-    let t = date.and_hms_opt(hour, minute, 0).unwrap_or_default();
+    let t = date.and_hms_opt(hour, minute, second).unwrap_or_default();
     Local
         .from_local_datetime(&t)
         .single()
@@ -345,7 +356,7 @@ impl V2Samples {
                 GroupKind::Group,
                 "运维",
                 &[ME, JOJO, WATCH, SCOUT, FORGE, ALEX],
-                at(10, 42),
+                at_s(10, 20, 45),
             ),
             group(
                 GROWTH,
@@ -394,7 +405,7 @@ impl V2Samples {
                 owner: FORGE,
                 by: ME,
                 created: at(9, 30),
-                last: at(10, 38),
+                last: at_s(10, 20, 30),
             }),
             topic(TopicSpec {
                 id: T_INVITE,
@@ -427,7 +438,7 @@ impl V2Samples {
                 owner: WATCH,
                 by: JOJO,
                 created: at(9, 20),
-                last: at(10, 42),
+                last: at_s(10, 20, 45),
             }),
             topic(TopicSpec {
                 id: T_STAGING,
@@ -510,7 +521,7 @@ impl V2Samples {
         let mut done = message(
             DEV,
             t,
-            5,
+            6,
             FORGE,
             at(9, 55),
             "**改好了：重连后不再重复**\n\n原因是客户端重连后从旧的 seq 重新拉取，服务器把已经收到的消息又推了一遍。现在按 seq 去重，重连时从最后一个确认过的 seq 继续；重连间隔也改成了指数退避。",
@@ -519,15 +530,27 @@ impl V2Samples {
             artifact_id: ART_RECONNECT.into(),
             version: 2,
         });
+        // The question my decision answers (看问题 on the decision record).
+        let question = message(
+            DEV,
+            t,
+            4,
+            FORGE,
+            at(9, 30),
+            "重连间隔用固定 5 秒，还是改成指数退避？要不要放进同一个 PR？",
+        );
+        let mut decision = message(DEV, t, 5, ME, at(9, 31), "改成指数退避，放进同一个 PR。");
+        decision.quote_of = Some(question.id.clone());
         messages.insert(
             t.into(),
             vec![
                 video,
                 message(DEV, t, 2, JOJO, at(9, 13), "转给 @Forge。"),
                 message(DEV, t, 3, FORGE, at(9, 14), "收到，先复现，大约 30 分钟。"),
-                message(DEV, t, 4, ME, at(9, 31), "改成指数退避，放进同一个 PR。"),
+                question,
+                decision,
                 done,
-                message(DEV, t, 6, XIAOWANG, at(10, 20), "本地试了，没再出现重复。"),
+                message(DEV, t, 7, XIAOWANG, at(10, 20), "本地试了，没再出现重复。"),
             ],
         );
         // 开发 / 话题列表虚拟滚动 (Live.dc.html).
@@ -614,7 +637,7 @@ impl V2Samples {
             t,
             2,
             WATCH,
-            at(10, 42),
+            at_s(10, 20, 45),
             "把 qqbot v2.14 发布到生产吗？",
         );
         approval.id = format!("{t}-ask");
@@ -887,7 +910,7 @@ impl V2Samples {
                 id: "sc-1".into(),
                 author_id: ME.into(),
                 body: "这个 PR 合进去有什么风险？".into(),
-                at: at(10, 31),
+                at: at_s(10, 20, 15),
                 refs: Vec::new(),
                 sources: Vec::new(),
                 suggestion: None,
@@ -898,7 +921,7 @@ impl V2Samples {
                 author_id: JOJO.into(),
                 // panes track: the 单独问 artboard's answer.
                 body: "风险不大，有三处值得留意：\n1. 去重靠客户端记住的 seq。缓存清空后会从头拉一次，不会重复，只是首次打开慢一点。\n2. 断网久了，重试间隔会拉长到 30 秒，网恢复后最多等半分钟才连上。\n3. 旧版客户端不带 seq，服务器照旧推送。\n\nForge 的测试覆盖了 6 个场景，没覆盖多端同时在线。".into(),
-                at: at(10, 31),
+                at: at_s(10, 20, 15),
                 refs: vec![
                     "reconnect.ts seq 去重".into(),
                     "指数退避上限 30 秒".into(),
@@ -1148,7 +1171,7 @@ impl ChatProvider for V2Samples {
         Some(DeskNote {
             member_id: JOJO.into(),
             text: "先批 Watch 的发布。晚上 8 点是群里的高峰，越早发越稳。".into(),
-            at: at(10, 43),
+            at: at(10, 21),
         })
     }
     fn asks_for_me(&self) -> Vec<AskItem> {
@@ -1174,12 +1197,12 @@ impl ChatProvider for V2Samples {
                 WATCH,
                 AskKind::Approval,
                 "把 qqbot v2.14 发布到生产吗？",
-                at(10, 42),
+                at_s(10, 20, 45),
             ),
             ask(
                 DEV,
                 T_RECONNECT,
-                Some(format!("{T_RECONNECT}-m5")),
+                Some(format!("{T_RECONNECT}-m6")),
                 FORGE,
                 AskKind::Review,
                 "改好了，请你审 PR #61",
@@ -1589,7 +1612,7 @@ impl ChatProvider for V2Samples {
     // --- topic track (v11/topic) ---
 
     fn message_proof(&self, _group_id: &str, message_id: &str) -> Vec<Proof> {
-        if message_id != format!("{T_RECONNECT}-m5") {
+        if message_id != format!("{T_RECONNECT}-m6") {
             return Vec::new();
         }
         vec![
@@ -1878,6 +1901,56 @@ impl ChatProvider for V2Samples {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The sample day ends at the artboards' 10:21: nothing that already
+    /// happened is later, so no scene shows a time after its pinned now.
+    #[test]
+    fn no_sample_time_is_later_than_the_artboard_morning() {
+        let p = V2Samples::new();
+        let now = at(10, 21);
+        let mut times: Vec<(String, Millis)> = Vec::new();
+        for g in p.groups() {
+            times.push((format!("group {}", g.id), g.last_activity_at));
+            for t in p.topics(&g.id) {
+                times.push((format!("topic {}", t.id), t.last_activity_at));
+                times.push((format!("topic {}", t.id), t.created_at));
+                for m in p.messages(&g.id, &t.id, 200).messages {
+                    times.push((format!("message {}", m.id), m.created_at));
+                }
+                for member in p.members() {
+                    for m in p.side_chat(&g.id, &t.id, &member.id).messages {
+                        times.push((format!("side chat {}", m.id), m.at));
+                    }
+                }
+            }
+        }
+        for a in p.asks_for_me() {
+            times.push((format!("ask {}", a.title), a.at));
+        }
+        for d in p.done_today() {
+            times.push((format!("done {}", d.topic_id), d.at));
+        }
+        if let Some(n) = p.desk_note() {
+            times.push(("desk note".into(), n.at));
+        }
+        for (what, t) in times {
+            assert!(t <= now, "{what} is later than 10:21");
+        }
+    }
+
+    /// Joye's decision in 断线重连后消息重复 quotes the question it answers,
+    /// which comes just before it (看问题 on the decision record).
+    #[test]
+    fn the_decision_quotes_the_question_before_it() {
+        let p = V2Samples::new();
+        let msgs = p.messages(DEV, T_RECONNECT, 50).messages;
+        let i = msgs
+            .iter()
+            .position(|m| m.author_id == ME && m.quote_of.is_some())
+            .expect("the decision");
+        assert_eq!(msgs[i].quote_of.as_ref(), Some(&msgs[i - 1].id));
+        assert_eq!(msgs[i - 1].author_id, FORGE);
+    }
 
     #[test]
     fn the_sample_team_is_consistent() {

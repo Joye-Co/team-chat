@@ -62,7 +62,7 @@ fn alias(message_id: &str) -> Option<&'static str> {
         m if m == format!("{T_RELEASE}-ask") => APPROVE,
         m if m == format!("{T_INVITE}-ask") => CHOICE,
         m if m == format!("{T_PROMO}-ask") => DRAFT,
-        m if m == format!("{T_RECONNECT}-m5") => DIFF,
+        m if m == format!("{T_RECONNECT}-m6") => DIFF,
         _ => return None,
     })
 }
@@ -247,7 +247,7 @@ fn all() -> Vec<Sample> {
         1,
         "pick",
         json!({ "style": "eight" }),
-        at(10, 36),
+        at(10, 16),
     ));
     out.push(picked);
     out.push(sample(
@@ -281,7 +281,7 @@ fn all() -> Vec<Sample> {
         OPS,
         T_RELEASE,
         WATCH,
-        at(10, 38),
+        at(10, 14),
         None,
         approve_card(),
     ));
@@ -290,8 +290,8 @@ fn all() -> Vec<Sample> {
         OPS,
         T_RELEASE,
         WATCH,
-        at(10, 38),
-        Some(at(10, 41)),
+        at(10, 14),
+        Some(at(10, 17)),
         json!({
             "v": 2, "rev": 2, "intent": "working", "title": "正在发布 qqbot v2.14",
             "fallback": "正在发布 qqbot v2.14",
@@ -307,18 +307,18 @@ fn all() -> Vec<Sample> {
     );
     shipping
         .answers
-        .push(answer(ME, 1, "ship", json!({}), at(10, 40)));
+        .push(answer(ME, 1, "ship", json!({}), at(10, 16)));
     out.push(shipping);
     let mut shipped = sample(
         SHIPPED,
         OPS,
         T_RELEASE,
         WATCH,
-        at(10, 38),
-        Some(at(10, 44)),
+        at(10, 14),
+        Some(at(10, 19)),
         json!({
             "v": 2, "rev": 3, "intent": "done", "title": "已发布 qqbot v2.14",
-            "fallback": "10:44 上线",
+            "fallback": "10:19 上线",
             "blocks": [
                 { "type": "evidence", "id": "online", "label": "24/24 个群在线", "state": "pass" },
                 { "type": "evidence", "id": "alerts", "label": "新告警 0", "state": "pass" }
@@ -329,7 +329,7 @@ fn all() -> Vec<Sample> {
     );
     shipped
         .answers
-        .push(answer(ME, 1, "ship", json!({}), at(10, 40)));
+        .push(answer(ME, 1, "ship", json!({}), at(10, 16)));
     out.push(shipped);
 
     // 03 草稿
@@ -338,7 +338,7 @@ fn all() -> Vec<Sample> {
         GROWTH,
         T_PROMO,
         TARO,
-        at(10, 20),
+        at(10, 10),
         None,
         draft_card(1, "这条小红书确认后，周四 20:00 发出"),
     ));
@@ -347,11 +347,11 @@ fn all() -> Vec<Sample> {
         GROWTH,
         T_PROMO,
         TARO,
-        at(10, 20),
-        Some(at(10, 31)),
+        at(10, 10),
+        Some(at(10, 18)),
         draft_card(1, "周四 20:00 发出这条小红书"),
     );
-    let mut a = answer(ME, 1, "publish", json!({}), at(10, 31));
+    let mut a = answer(ME, 1, "publish", json!({}), at(10, 18));
     a.edited_values = Some(
         [
             ("title".to_string(), "夹夹 3.0｜群里的照片一键分享回群".to_string()),
@@ -370,8 +370,8 @@ fn all() -> Vec<Sample> {
         GROWTH,
         T_PROMO,
         TARO,
-        at(10, 20),
-        Some(at(10, 26)),
+        at(10, 10),
+        Some(at(10, 16)),
         draft_card(2, "这条小红书确认后，周四 20:00 发出"),
     );
     void.pending = Some(CardV2Pending {
@@ -380,7 +380,7 @@ fn all() -> Vec<Sample> {
         inputs: None,
         edited_values: None,
         phase: CardV2SendPhase::Failed(CardPressError::Gone),
-        at: at(10, 25),
+        at: at(10, 15),
     });
     out.push(void);
 
@@ -543,7 +543,7 @@ fn all() -> Vec<Sample> {
         DEV,
         T_RECONNECT,
         FORGE,
-        at(10, 30),
+        at(10, 10),
         None,
         json!({
             "v": 2, "rev": 1, "intent": "info", "title": "这周的 PR",
@@ -565,7 +565,7 @@ fn all() -> Vec<Sample> {
         DEV,
         T_RECONNECT,
         FORGE,
-        at(10, 34),
+        at(10, 12),
         None,
         json!({
             "v": 2, "rev": 1, "intent": "ask", "title": "PR #63 撤回时同步删除通知",
@@ -648,7 +648,7 @@ fn all() -> Vec<Sample> {
         GROWTH,
         T_REPORT,
         JOJO,
-        at(10, 43),
+        at(10, 19),
         None,
         json!({
             "v": 2, "rev": 1, "intent": "info", "title": "今天要看的四样",
@@ -705,12 +705,12 @@ fn all() -> Vec<Sample> {
         OPS,
         T_STAGING,
         WATCH,
-        at(10, 20),
+        at(10, 0),
         None,
         json!({
             "v": 2, "rev": 1, "intent": "ask", "title": "PR #418 告警降噪",
             "fallback": "Watch 请你审 PR #418",
-            "ask": { "from": [ME], "expiresAt": at(10, 30) },
+            "ask": { "from": [ME], "expiresAt": at(10, 20) },
             "blocks": [{ "type": "text", "id": "t", "text": "合并后同一个群 5 分钟内的告警只发一条。" }],
             "actions": [{ "id": "approve", "label": "通过", "style": "primary" }]
         }),
@@ -730,7 +730,7 @@ fn all() -> Vec<Sample> {
         inputs: serde_json::from_value(json!({ "style": "one" })).ok(),
         edited_values: None,
         phase: CardV2SendPhase::Sending,
-        at: at(10, 37),
+        at: at(10, 20),
     });
     out.push(sending);
 

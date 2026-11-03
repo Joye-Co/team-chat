@@ -26,7 +26,7 @@ pub fn release_ask() -> String {
 }
 /// The id of Forge's done message with PR #61.
 pub fn review_ask() -> String {
-    format!("{T_RECONNECT}-m5")
+    format!("{T_RECONNECT}-m6")
 }
 /// The id of Taro's draft.
 pub fn draft_ask() -> String {
