@@ -45,7 +45,7 @@ fn migrations_are_named_and_run_once() {
         .unwrap();
     assert_eq!(
         names,
-        vec!["characters-1", "core-1", "ext-1", "v11-1", "v11-2"]
+        vec!["characters-1", "core-1", "ext-1", "v11-1", "v11-2", "v11-3"]
     );
     let mode: String = s
         .with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
@@ -71,6 +71,34 @@ fn a_cache_from_before_ext_1_upgrades_and_keeps_its_rows() {
     assert_eq!(s.member("M1").unwrap().unwrap().name, "old");
     assert!(s.artifacts("T1").unwrap().is_empty());
     assert!(s.runs("T1").unwrap().is_empty());
+}
+
+#[test]
+fn a_cache_from_v11_2_upgrades_and_keeps_its_answers() {
+    use chat_core::store::migrations::{MIGRATIONS, run};
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("c.sqlite3");
+    {
+        let mut conn = rusqlite::Connection::open(&path).unwrap();
+        let upto = MIGRATIONS.iter().position(|m| m.name == "v11-2").unwrap();
+        run(&mut conn, &MIGRATIONS[..=upto]).unwrap();
+        conn.execute(
+            "INSERT INTO card_answers (group_id, seq, message_id, rev, actor_id, action_id, at, answer_id)
+             VALUES ('G1', 5, 'C1', 1, 'M1', 'ok', 1000, 'AN5')",
+            [],
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    let a = &s.card_answers("C1").unwrap()[0];
+    assert_eq!(
+        (a.action_id.as_str(), a.answer_id.as_deref()),
+        ("ok", Some("AN5"))
+    );
+    assert_eq!(
+        (a.event.as_deref(), a.block_id.as_deref(), a.value.as_ref()),
+        (None, None, None)
+    );
 }
 
 #[test]

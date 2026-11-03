@@ -1083,3 +1083,40 @@ async fn a_live_card_event_fails_at_once_when_not_connected() {
     assert!(client.store().outbox_all().unwrap().is_empty());
     client.stop();
 }
+
+#[test]
+fn an_immediate_answer_keeps_its_event_block_and_value() {
+    let (_d, s) = open();
+    s.apply_events(
+        G1,
+        &[
+            topic_created(1, G1, topic("T1", G1, "M1", 1)),
+            msg_created(2, message("M1", G1, "T1", ME, 2, "root")),
+            msg_created(3, card_message("C1", 3, ask_card(1, true))),
+            ev(
+                4,
+                G1,
+                ME,
+                EventData::CardAnswered(CardAnsweredData {
+                    message_id: "C1".into(),
+                    rev: 1,
+                    answer_id: Some("AN4".into()),
+                    ask_id: Some("a1".into()),
+                    event: Some("choice.submit".into()),
+                    block_id: Some("when".into()),
+                    value: Some(json!({ "value": "later" })),
+                    ..Default::default()
+                }),
+            ),
+        ],
+    )
+    .unwrap();
+    let a = &s.card_answers("C1").unwrap()[0];
+    assert_eq!(a.action_id, "");
+    assert_eq!(a.event.as_deref(), Some("choice.submit"));
+    assert_eq!(a.block_id.as_deref(), Some("when"));
+    assert_eq!(a.value, Some(json!({ "value": "later" })));
+    // 群里的决定 can show what was chosen from the cache.
+    let d = s.decisions(Some(G1), 10).unwrap();
+    assert_eq!(d[0].answer.value, Some(json!({ "value": "later" })));
+}

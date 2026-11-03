@@ -66,6 +66,15 @@ CREATE INDEX card_answers_by_answer ON card_answers(message_id, answer_id);
 DROP TABLE IF EXISTS artifact_events;
 "#;
 
+/// 1.1 step `v11-3`: the event, block and value of a 2.1 answer (an immediate commit has a
+/// block and a value, no action and no inputs). A separate step, so caches that already ran
+/// `v11-2` get the columns too.
+pub(super) const MIGRATION_SQL_3: &str = r#"
+ALTER TABLE card_answers ADD COLUMN event TEXT;
+ALTER TABLE card_answers ADD COLUMN block_id TEXT;
+ALTER TABLE card_answers ADD COLUMN value TEXT;
+"#;
+
 /// One answer to a v2 card (`card.answered`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardAnswerRow {
@@ -83,6 +92,11 @@ pub struct CardAnswerRow {
     pub ask_id: Option<String>,
     /// 2.1: when the answerer took it back (`card.retracted`).
     pub retracted_at: Option<u64>,
+    /// 2.1: the event that answered (`choice.submit`, `action.press`, …).
+    pub event: Option<String>,
+    /// 2.1: the block of an immediate commit, and its value (`{value}`, `{values}`, …).
+    pub block_id: Option<String>,
+    pub value: Option<serde_json::Value>,
 }
 
 /// A group decision (群里的决定): an answer to a v2 card whose `ask.record` is true.
@@ -118,8 +132,8 @@ pub(super) fn insert_card_answer(
     d: &CardAnsweredData,
 ) -> StoreResult<()> {
     tx.execute(
-        "INSERT OR IGNORE INTO card_answers (group_id, seq, message_id, rev, actor_id, action_id, inputs, edited_values, at, answer_id, ask_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+        "INSERT OR IGNORE INTO card_answers (group_id, seq, message_id, rev, actor_id, action_id, inputs, edited_values, at, answer_id, ask_id, event, block_id, value)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             ev.group_id,
             ev.seq,
@@ -131,7 +145,10 @@ pub(super) fn insert_card_answer(
             json_opt(&d.edited_values)?,
             ev.at,
             d.answer_id,
-            d.ask_id
+            d.ask_id,
+            d.event,
+            d.block_id,
+            json_opt(&d.value)?
         ],
     )?;
     Ok(())
@@ -356,10 +373,13 @@ fn answer_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CardAnswerRow> {
         answer_id: r.get(9)?,
         ask_id: r.get(10)?,
         retracted_at: r.get(11)?,
+        event: r.get(12)?,
+        block_id: r.get(13)?,
+        value: parse_opt(r.get(14)?)?,
     })
 }
 
-const ANSWER_COLS: &str = "a.group_id, a.seq, a.message_id, a.rev, a.actor_id, a.action_id, a.inputs, a.edited_values, a.at, a.answer_id, a.ask_id, a.retracted_at";
+const ANSWER_COLS: &str = "a.group_id, a.seq, a.message_id, a.rev, a.actor_id, a.action_id, a.inputs, a.edited_values, a.at, a.answer_id, a.ask_id, a.retracted_at, a.event, a.block_id, a.value";
 
 const ACTIVE_RUN: &str =
     "json_extract(raw, '$.status') IN ('created', 'running', 'waiting', 'blocked')";
@@ -392,8 +412,8 @@ impl Store {
             ))?;
             let rows = st.query_map(params![group_id, limit as u64], |r| {
                 let answer = answer_from_row(r)?;
-                let topic_id: String = r.get(12)?;
-                let raw: String = r.get(13)?;
+                let topic_id: String = r.get(15)?;
+                let raw: String = r.get(16)?;
                 Ok((answer, topic_id, raw))
             })?;
             let mut out = Vec::new();
