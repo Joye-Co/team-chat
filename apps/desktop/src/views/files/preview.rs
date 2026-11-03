@@ -294,6 +294,10 @@ impl ChatProvider for FilesPreview {
                     note: None,
                     created_by: bot.clone(),
                     created_at: now - 1_000_000 + v as i64,
+                    // --- v11/media ---
+                    entry: "index.html".into(),
+                    files: Vec::new(),
+                    // --- end v11/media ---
                 })
                 .collect(),
         })

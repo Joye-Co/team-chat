@@ -47,3 +47,12 @@ block2 = "0.6"
 libc = "0.2"
 objc2-user-notifications = "0.3"
 dispatch2 = "0.3"
+# --- v11/media: 产出 media previews (src/views/media/native.rs): video frames and
+# duration (AVFoundation), audio peaks and playback, PDF pages (PDFKit).
+objc2-av-foundation = { version = "0.3", features = ["objc2-core-media"] }
+objc2-core-media = "0.3"
+objc2-pdf-kit = "0.3"
+objc2-avf-audio = "0.3"
+objc2-core-graphics = "0.3"
+objc2-core-foundation = "0.3"
+# --- end v11/media

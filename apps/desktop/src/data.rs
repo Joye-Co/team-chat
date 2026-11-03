@@ -355,7 +355,23 @@ pub struct ArtifactVersionInfo {
     pub note: Option<String>,
     pub created_by: MemberId,
     pub created_at: Millis,
+    // --- v11/media: what the version holds, so the timeline picks a preview before the
+    // files are on disk (the wire `ArtifactVersion.entry` and `files`). ---
+    /// Path of the file to open: the HTML page, or the only file.
+    pub entry: String,
+    pub files: Vec<ArtifactVersionFile>,
+    // --- end v11/media ---
 }
+
+// --- v11/media ---
+/// One file of a 产出 version (the wire `ArtifactFile` without its id).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactVersionFile {
+    pub path: String,
+    pub size: u64,
+    pub mime: String,
+}
+// --- end v11/media ---
 
 /// A 产出 with its known versions, newest first.
 #[derive(Clone, Debug, PartialEq)]

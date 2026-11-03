@@ -1121,6 +1121,18 @@ impl CoreProvider {
                     note: v.note.clone(),
                     created_by: v.created_by.clone(),
                     created_at: v.created_at.min(i64::MAX as u64) as i64,
+                    // --- v11/media ---
+                    entry: v.entry.clone(),
+                    files: v
+                        .files
+                        .iter()
+                        .map(|f| crate::data::ArtifactVersionFile {
+                            path: f.path.clone(),
+                            size: f.size,
+                            mime: f.mime.clone(),
+                        })
+                        .collect(),
+                    // --- end v11/media ---
                 })
                 .collect(),
         })
