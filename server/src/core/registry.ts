@@ -1,7 +1,7 @@
 // Extension points. Feature modules (server/src/<feature>/) call these at module load time;
 // server/src/features.ts imports every feature module so the registrations run in the Worker
 // and in both Durable Object classes (they share one module graph).
-import type { ClientFrame, Event, Member, Message } from "@chat/protocol";
+import type { ClientFrame, Event, Member, Message, TopicStatus } from "@chat/protocol";
 import type { z } from "zod";
 import type { AuthContext } from "./auth";
 import type { Env } from "./env";
@@ -256,6 +256,18 @@ export type EventDecorator = (event: Event, memberId: string, c: DecorateContext
 export const eventDecorators: EventDecorator[] = [];
 export function registerEventDecorator(d: EventDecorator): void {
   eventDecorators.push(d);
+}
+
+// cards2: the topic status a `topic.update` stores while server-owned waits are open.
+/**
+ * Called in the `topic.update` transaction with the status and `waitingOn` the frame asks for
+ * (after defaults); returns what the topic gets. A feature that owns a wait (open blocking card
+ * asks) keeps the asked status as the one to come back to and returns the combined status.
+ */
+export type TopicStatusFilter = (sql: SqlStorage, topicId: string, next: { status: TopicStatus; waitingOn: string[] }) => { status: TopicStatus; waitingOn: string[] };
+export const topicStatusFilters: TopicStatusFilter[] = [];
+export function registerTopicStatusFilter(f: TopicStatusFilter): void {
+  topicStatusFilters.push(f);
 }
 
 // cards2: what one member may see of a stored event or a message (non-public polls and

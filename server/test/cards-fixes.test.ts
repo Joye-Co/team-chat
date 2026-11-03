@@ -449,3 +449,55 @@ describe("retract window of a runner's card", () => {
     for (const x of [c, d]) x.close();
   });
 });
+
+describe("topic status with blocking asks", () => {
+  const topicOf = (_c: Client, gid: string, topicId: string) =>
+    runInDurableObject(roomOf(gid), async (_o, state) => {
+      const r = state.storage.sql.exec<{ status: string; waiting_on: string }>("SELECT status, waiting_on FROM topics WHERE id = ?", topicId).one();
+      return { status: r.status, waitingOn: JSON.parse(r.waiting_on ?? "[]") as string[] };
+    });
+
+  it("keeps waiting_answer while a blocking ask is open, then takes the status set meanwhile", async () => {
+    const { owner, alice, gid, co, ca, cbot } = await setup();
+    const root = await co.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "发版" });
+    const topicId = root.topic.id;
+    await cbot.ok({ t: "topic.update", groupId: gid, topicId, status: "in_progress", waitingOn: [] });
+    const b = (await send(cbot, gid, quick([alice.id]), { topicId })).message;
+    await co.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status === "waiting_answer");
+    // The run ends (BotDesk sets done) while the ask is open: the topic still waits on Alice.
+    const upd = await cbot.ok({ t: "topic.update", groupId: gid, topicId, status: "done", waitingOn: [] });
+    expect(upd.topic).toMatchObject({ status: "waiting_answer", waitingOn: [alice.id] });
+    expect(await topicOf(co, gid, topicId)).toMatchObject({ status: "waiting_answer", waitingOn: [alice.id] });
+    // Alice answers: the topic takes the status set while it waited.
+    expect(await ev(ca, gid, b.id, { blockId: "pick", event: "choice.submit", value: { value: "yes" } })).toMatchObject({ ok: true });
+    await co.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status === "done");
+    expect(await topicOf(co, gid, topicId)).toMatchObject({ status: "done", waitingOn: [] });
+    void owner;
+    for (const c of [co, ca, cbot]) c.close();
+  });
+
+  it("keeps a run's approval wait when a card answer comes, and adds a blocking ask's people to it", async () => {
+    const { owner, alice, gid, co, ca, cbot } = await setup();
+    const root = await co.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "发版" });
+    const topicId = root.topic.id;
+    // The run waits on the owner's approval.
+    await cbot.ok({ t: "topic.update", groupId: gid, topicId, status: "waiting_answer", waitingOn: [owner.id] });
+    // A non-blocking ask is answered: the approval wait stays.
+    const nb = (await send(cbot, gid, quick([alice.id], { intent: "info", ask: { from: [alice.id], blocking: false } }), { topicId })).message;
+    expect(await ev(ca, gid, nb.id, { blockId: "pick", event: "choice.submit", value: { value: "yes" } })).toMatchObject({ ok: true });
+    await ca.waitEvent((e) => e.type === "message.updated" && e.data.messageId === nb.id);
+    await sleep(200);
+    expect(await topicOf(co, gid, topicId)).toMatchObject({ status: "waiting_answer", waitingOn: [owner.id] });
+    // A blocking ask opens: it waits on both; when it is answered, on the owner again.
+    await sleep(1100);
+    const b = (await send(cbot, gid, quick([alice.id]), { topicId })).message;
+    await co.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.waitingOn?.length === 2);
+    expect((await topicOf(co, gid, topicId)).waitingOn.sort()).toEqual([owner.id, alice.id].sort());
+    expect(await ev(ca, gid, b.id, { blockId: "pick", event: "choice.submit", value: { value: "no" } })).toMatchObject({ ok: true });
+    await co.waitEvent((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.waitingOn?.length === 1);
+    expect(await topicOf(co, gid, topicId)).toMatchObject({ status: "waiting_answer", waitingOn: [owner.id] });
+    // The approval is resolved.
+    expect((await cbot.ok({ t: "topic.update", groupId: gid, topicId, status: "in_progress", waitingOn: [] })).topic).toMatchObject({ status: "in_progress", waitingOn: [] });
+    for (const c of [co, ca, cbot]) c.close();
+  });
+});

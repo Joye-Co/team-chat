@@ -1167,6 +1167,14 @@ other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
 
+Topic status with blocking asks: while a blocking ask in the topic is open, the topic is
+`waiting_answer` and `waitingOn` is the union of the open asks' `from` and the people of a
+`waiting_answer` set by `topic.update` (a run's approval). A `topic.update` in that time (for
+example a run that ends with `done`) is kept and comes back when the last blocking ask closes;
+its ack and `topic.updated` show the combined status. When the last blocking ask closes, the topic
+gets that status (or the one it had when the first ask opened; `open` becomes `in_progress`). A
+non-blocking ask never changes the topic status.
+
 Private answers: a card with a `poll` whose `public` is not true, or with a `questionnaire` with
 `anonymous: true`, is private from its first such rev on. The server keeps every answer; each
 member gets its own view, live, in `fetch` pages, in `history` and in acks. The answerer sees

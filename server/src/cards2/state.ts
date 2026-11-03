@@ -10,6 +10,7 @@ import {
   type CardV2Action,
   type CardV2Block,
   type Cause,
+  type TopicStatus,
   cardV2ToV1,
   childIds,
   pressableAsV1,
@@ -17,7 +18,7 @@ import {
 } from "@chat/protocol";
 import { listMembers } from "../core/db";
 import { ApiError } from "../core/errors";
-import type { RoomContext, RoomTx } from "../core/registry";
+import { type RoomContext, type RoomTx, registerRoomMigration, registerTopicStatusFilter } from "../core/registry";
 import { setFollowing } from "../core/topicstate";
 import { requesterResolvers } from "./delivery";
 import { privacyOf } from "./privacy";
@@ -288,17 +289,34 @@ export function syncTimer(room: RoomContext, messageId: string, state: CardState
   room.wakeAt(at);
 }
 
+// ---------------------------------------------------------------------------
+// Topic status: blocking asks and the status members set
+// ---------------------------------------------------------------------------
+
 /**
- * Keeps the topic status in step with its open blocking asks: `waiting_answer` with
- * `waitingOn` = the union of their `from` while one is open; back to `in_progress` when the
- * last one closes (only from `waiting_answer`). Non-blocking asks change nothing.
+ * One owner of topic status (INTERACT §3.6, V11-SPEC §3.11). Two sources set it: members
+ * (`topic.update`, which BotDesk uses for a run: in_progress, waiting_answer for an approval,
+ * done) and the open blocking card asks of the topic. The rule:
+ * - While a blocking ask in the topic is open, the topic is `waiting_answer` and `waitingOn` is
+ *   the union of the open asks' `from`, plus the people of a member-set `waiting_answer` (an
+ *   approval). A `topic.update` in that time is kept as the base status, not shown.
+ * - When the last blocking ask closes, the topic gets the base status: the one set while it
+ *   waited, else the one it had when the first ask opened; `open` becomes `in_progress` (the
+ *   author acts on the answer). A member-set `waiting_answer` keeps its people.
+ * - Without an open blocking ask the cards feature leaves the topic alone, so a non-blocking
+ *   answer never ends an approval wait.
+ * The base lives in `card_topic_base` only while a blocking ask is open.
  */
-export function refreshTopicWaiting(room: RoomContext, tx: RoomTx, topicId: string, actorId: string): void {
-  const topic = room.sql
-    .exec<{ status: string; waiting_on: string }>("SELECT status, waiting_on FROM topics WHERE id = ?", topicId)
-    .toArray()[0];
-  if (!topic) return;
-  const rows = room.sql
+registerRoomMigration({
+  name: "cards2-6",
+  up: "CREATE TABLE card_topic_base (topic_id TEXT PRIMARY KEY, status TEXT NOT NULL, waiting_on TEXT NOT NULL);",
+});
+
+type TopicWait = { status: TopicStatus; waitingOn: string[] };
+
+/** The people the open blocking asks of the topic wait on; undefined when none is open. */
+function blockingWait(sql: SqlStorage, topicId: string): string[] | undefined {
+  const rows = sql
     .exec<{ from_ids: string }>(
       `SELECT json_extract(ext, '$.cardState.ask.from') AS from_ids FROM messages
        WHERE topic_id = ? AND deleted_at IS NULL AND json_extract(ext, '$.cardState.ask.status') = 'open'
@@ -306,18 +324,61 @@ export function refreshTopicWaiting(room: RoomContext, tx: RoomTx, topicId: stri
       topicId,
     )
     .toArray();
+  if (rows.length === 0) return undefined;
+  const ids = new Set<string>();
+  for (const r of rows) for (const id of JSON.parse(r.from_ids ?? "[]") as string[]) ids.add(id);
+  return [...ids];
+}
+
+function baseOf(sql: SqlStorage, topicId: string): TopicWait | undefined {
+  const r = sql.exec<{ status: string; waiting_on: string }>("SELECT status, waiting_on FROM card_topic_base WHERE topic_id = ?", topicId).toArray()[0];
+  return r ? { status: r.status as TopicStatus, waitingOn: JSON.parse(r.waiting_on) as string[] } : undefined;
+}
+
+function saveBase(sql: SqlStorage, topicId: string, base: TopicWait): void {
+  sql.exec("INSERT OR REPLACE INTO card_topic_base (topic_id, status, waiting_on) VALUES (?, ?, ?)", topicId, base.status, JSON.stringify(base.waitingOn));
+}
+
+/** The status the topic shows: the base while no blocking ask is open, else waiting on both. */
+function combined(base: TopicWait, asks: string[]): TopicWait {
+  const ids = new Set(asks);
+  if (base.status === "waiting_answer") for (const id of base.waitingOn) ids.add(id);
+  return { status: "waiting_answer", waitingOn: [...ids] };
+}
+
+// A `topic.update` while a blocking ask is open sets the base and keeps the topic waiting.
+registerTopicStatusFilter((sql, topicId, next) => {
+  const asks = blockingWait(sql, topicId);
+  if (!asks) {
+    sql.exec("DELETE FROM card_topic_base WHERE topic_id = ?", topicId);
+    return next;
+  }
+  saveBase(sql, topicId, next);
+  return combined(next, asks);
+});
+
+/** Puts the topic in step with its open blocking asks after a card write (the rule above). */
+export function refreshTopicWaiting(room: RoomContext, tx: RoomTx, topicId: string, actorId: string): void {
+  const topic = room.sql
+    .exec<{ status: string; waiting_on: string }>("SELECT status, waiting_on FROM topics WHERE id = ?", topicId)
+    .toArray()[0];
+  if (!topic) return;
   const before = JSON.parse(topic.waiting_on ?? "[]") as string[];
-  let status = topic.status;
-  let waitingOn = before;
-  if (rows.length > 0) {
-    const ids = new Set<string>();
-    for (const r of rows) for (const id of JSON.parse(r.from_ids ?? "[]") as string[]) ids.add(id);
-    status = "waiting_answer";
-    waitingOn = [...ids];
-  } else if (topic.status === "waiting_answer") {
-    status = "in_progress";
-    waitingOn = [];
-  } else return;
+  const asks = blockingWait(room.sql, topicId);
+  let base = baseOf(room.sql, topicId);
+  let next: TopicWait;
+  if (asks) {
+    if (!base) {
+      base = { status: topic.status as TopicStatus, waitingOn: before };
+      saveBase(room.sql, topicId, base);
+    }
+    next = combined(base, asks);
+  } else {
+    if (!base) return;
+    room.sql.exec("DELETE FROM card_topic_base WHERE topic_id = ?", topicId);
+    next = base.status === "open" ? { status: "in_progress", waitingOn: [] } : { status: base.status, waitingOn: base.status === "waiting_answer" ? base.waitingOn : [] };
+  }
+  const { status, waitingOn } = next;
   const same = status === topic.status && waitingOn.length === before.length && waitingOn.every((id) => before.includes(id));
   if (same) return;
   const seq = tx.nextSeq();

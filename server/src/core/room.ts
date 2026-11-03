@@ -44,6 +44,7 @@ import {
   type MessageWriteResult,
   eventViews,
   messageViews,
+  topicStatusFilters,
   messageWriteHooks,
   roomAlarmHandlers,
   roomMigrations,
@@ -1063,18 +1064,26 @@ export class GroupRoom extends DurableObject<Env> {
       ) {
         throw new ApiError("invalid", "nothing to update");
       }
-      const waitingOn = frame.waitingOn === undefined ? undefined : [...new Set(frame.waitingOn)];
+      let waitingOn = frame.waitingOn === undefined ? undefined : [...new Set(frame.waitingOn)];
       for (const id of [...(waitingOn ?? []), ...(frame.ownerId ? [frame.ownerId] : [])]) {
         if (!this.members.has(id)) throw new ApiError("invalid", "waitingOn and ownerId must be members of this group");
       }
       const before = JSON.parse(row.waiting_on ?? "[]") as string[];
-      const waitingAdded = (waitingOn ?? []).filter((id) => !before.includes(id));
       return this.commit((tx) => {
+        // cards2: open blocking card asks keep the topic waiting (registerTopicStatusFilter).
+        let status = frame.status;
+        if (status !== undefined || waitingOn !== undefined) {
+          let next = { status: status ?? row.status, waitingOn: waitingOn ?? before };
+          for (const f of topicStatusFilters) next = f(this.sql, row.id, next);
+          if (status !== undefined || next.status !== row.status) status = next.status;
+          if (waitingOn !== undefined || next.waitingOn.length !== before.length || next.waitingOn.some((id) => !before.includes(id))) waitingOn = next.waitingOn;
+        }
+        const waitingAdded = (waitingOn ?? []).filter((id) => !before.includes(id));
         const seq = tx.nextSeq();
         this.sql.exec(
           "UPDATE topics SET title = ?, status = ?, waiting_on = ?, owner_id = ?, last_seq = ? WHERE id = ?",
           frame.title ?? row.title,
-          frame.status ?? row.status,
+          status ?? row.status,
           waitingOn === undefined ? row.waiting_on : JSON.stringify(waitingOn),
           frame.ownerId === undefined ? row.owner_id : frame.ownerId,
           seq,
@@ -1092,7 +1101,7 @@ export class GroupRoom extends DurableObject<Env> {
           ownerId?: string | null;
         } = { topicId: row.id };
         if (frame.title !== undefined) data.title = frame.title;
-        if (frame.status !== undefined) data.status = frame.status;
+        if (status !== undefined) data.status = status;
         if (waitingOn !== undefined) data.waitingOn = waitingOn;
         if (frame.ownerId !== undefined) data.ownerId = frame.ownerId;
         tx.append({ type: "topic.updated", actorId: actor.id, topicId: row.id, data, hints: { waitingAdded } });
