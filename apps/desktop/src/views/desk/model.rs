@@ -1,13 +1,16 @@
 //! What the 首页 shows, read once per change from the provider.
 
-use std::{collections::BTreeMap, sync::Arc};
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::Arc,
+};
 
 use chat_core::proto::CardV2;
 
 use crate::{
     app::Services,
     data::{
-        BotRunSummary, PlanState,
+        BotRunSummary, Member, MemberId, PlanState,
         card::Card,
         v2::{AskItem, AskKind, DeskNote, DoneItem, MachineScreen, QueuedItem},
     },
@@ -97,13 +100,30 @@ pub struct Snapshot {
     pub queue: Vec<QueuedItem>,
     /// The kind of each 产出 a result proves with.
     pub artifact_kinds: std::collections::HashMap<String, crate::data::ArtifactKind>,
+    /// The members the page names.
+    pub members: HashMap<MemberId, Member>,
+    /// The 群 name and 话题 title of each ask, by ask key.
+    pub places: HashMap<String, (String, String)>,
+}
+
+impl Snapshot {
+    pub fn member(&self, id: &str) -> Option<Member> {
+        self.members.get(id).cloned()
+    }
+
+    pub fn name(&self, id: &str) -> String {
+        self.members
+            .get(id)
+            .map(|m| m.name.clone())
+            .unwrap_or_default()
+    }
 }
 
 impl Snapshot {
     pub fn read(services: &Services) -> Self {
         let p = &services.provider;
         let me = services.me();
-        let asks = p
+        let asks: Vec<AskCard> = p
             .asks_for_me()
             .into_iter()
             .map(|item| {
@@ -140,7 +160,7 @@ impl Snapshot {
         // 单独问 asides are not work on the desk.
         let side = p.side_chat_topics();
         let aside = |g: &str, t: &str| side.contains(&(g.to_string(), t.to_string()));
-        let runs = p
+        let runs: Vec<RunCard> = p
             .active_runs()
             .into_iter()
             .filter(|run| !aside(&run.group_id, &run.topic_id))
@@ -176,13 +196,45 @@ impl Snapshot {
                 _ => None,
             })
             .collect();
+        let note = p.desk_note();
+        let queue = p.queue();
+        let groups: HashMap<String, String> =
+            p.groups().into_iter().map(|g| (g.id, g.name)).collect();
+        let places = asks
+            .iter()
+            .map(|a: &AskCard| {
+                let topic = p
+                    .topic(&a.item.group_id, &a.item.topic_id)
+                    .map(|t| t.title)
+                    .unwrap_or_default();
+                let group = groups.get(&a.item.group_id).cloned().unwrap_or_default();
+                (a.key(), (group, topic))
+            })
+            .collect();
+        let ids = note
+            .iter()
+            .map(|n| n.member_id.as_str())
+            .chain(asks.iter().map(|a: &AskCard| a.item.from.as_str()))
+            .chain(done.iter().map(|d| d.member_id.as_str()))
+            .chain(runs.iter().map(|r: &RunCard| r.run.bot_id.as_str()))
+            .chain(queue.iter().map(|q| q.member_id.as_str()));
+        let mut members = HashMap::new();
+        for id in ids {
+            if !members.contains_key(id)
+                && let Some(m) = p.member(id)
+            {
+                members.insert(id.to_string(), m);
+            }
+        }
         Self {
-            note: p.desk_note(),
+            note,
             asks,
             done,
             runs,
-            queue: p.queue(),
+            queue,
             artifact_kinds,
+            members,
+            places,
         }
     }
 }

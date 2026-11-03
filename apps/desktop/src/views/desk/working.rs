@@ -21,7 +21,7 @@ use crate::{
     },
     theme::{self, Type as _, desk_screen, space},
     ui::{self, Ring},
-    views::shell::{clock, member_name},
+    views::shell::clock,
 };
 
 pub fn render(snap: &Snapshot, services: &Services, cx: &mut Context<DeskPage>) -> AnyElement {
@@ -50,7 +50,7 @@ pub fn render(snap: &Snapshot, services: &Services, cx: &mut Context<DeskPage>) 
         .child(div().flex_1())
         .child(side_toggle("desk-hide-side", true, cx));
     let cards = snap.runs.iter().enumerate().map(|(i, r)| {
-        let card = run_card(r, services, cx);
+        let card = run_card(r, snap, services, cx);
         ui::motion::rise(
             SharedString::from(format!("desk-run-rise-{}", r.run.id)),
             i + 2,
@@ -62,7 +62,7 @@ pub fn render(snap: &Snapshot, services: &Services, cx: &mut Context<DeskPage>) 
         ui::motion::rise(
             "desk-queue-rise",
             snap.runs.len() + 2,
-            queue_card(&snap.queue, services, cx),
+            queue_card(&snap.queue, snap, cx),
             cx,
         )
     });
@@ -104,9 +104,14 @@ fn elapsed(since: Millis) -> Option<String> {
     })
 }
 
-fn run_card(r: &RunCard, services: &Services, cx: &App) -> gpui::Stateful<gpui::Div> {
+fn run_card(
+    r: &RunCard,
+    snap: &Snapshot,
+    services: &Services,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
     let k = theme::colors(cx);
-    let member = services.provider.member(&r.run.bot_id);
+    let member = snap.member(&r.run.bot_id);
     let (n, total) = r.step();
     let mut line = r.current_text().unwrap_or_default();
     if r.screen.is_some()
@@ -155,7 +160,7 @@ fn run_card(r: &RunCard, services: &Services, cx: &App) -> gpui::Stateful<gpui::
                                 .flex_none()
                                 .medium()
                                 .text_color(k.ink)
-                                .child(member_name(services, &r.run.bot_id)),
+                                .child(snap.name(&r.run.bot_id)),
                         )
                         .child(
                             div()
@@ -339,7 +344,7 @@ fn screen(r: &RunCard, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn queue_card(queue: &[QueuedItem], services: &Services, cx: &App) -> gpui::Div {
+fn queue_card(queue: &[QueuedItem], snap: &Snapshot, cx: &App) -> gpui::Div {
     let k = theme::colors(cx);
     ui::card(cx)
         .p(space::S12)
@@ -353,7 +358,7 @@ fn queue_card(queue: &[QueuedItem], services: &Services, cx: &App) -> gpui::Div 
                 .child(c::DESK_QUEUE),
         )
         .children(queue.iter().map(|q| {
-            let member = services.provider.member(&q.member_id);
+            let member = snap.member(&q.member_id);
             div()
                 .flex()
                 .items_center()
@@ -363,7 +368,7 @@ fn queue_card(queue: &[QueuedItem], services: &Services, cx: &App) -> gpui::Div 
                 .child(ui::MemberAvatar::new(member.as_ref(), px(18.)))
                 .child(div().flex_1().min_w(px(0.)).one_line().child(format!(
                     "{} {}",
-                    member_name(services, &q.member_id),
+                    snap.name(&q.member_id),
                     q.title
                 )))
                 .children(q.at.map(|at| {

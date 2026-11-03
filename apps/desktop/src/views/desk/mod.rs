@@ -16,7 +16,7 @@ pub mod model;
 pub mod scenes;
 pub mod working;
 
-use std::{collections::HashMap, time::Duration};
+use std::{collections::HashMap, rc::Rc, time::Duration};
 
 use gpui::{
     App, Context, InteractiveElement as _, IntoElement, ParentElement, Render, SharedString,
@@ -57,7 +57,7 @@ pub struct LocalAnswer {
 
 pub struct DeskPage {
     services: Services,
-    snapshot: Option<Snapshot>,
+    snapshot: Option<Rc<Snapshot>>,
     /// Answers by ask key (message id, else topic id).
     answers: HashMap<String, LocalAnswer>,
     /// Asks I answered this session, so they stay in place as records.
@@ -88,18 +88,29 @@ impl DeskPage {
         }
     }
 
-    fn snapshot(&mut self) -> Snapshot {
-        if self.snapshot.is_none() {
-            self.snapshot = Some(Snapshot::read(&self.services));
-        }
-        let mut snap = self.snapshot.clone().unwrap_or_default();
+    /// What the page shows: read once per change (a breathing dot renders
+    /// the page on every frame it asks for, so frames read only this).
+    fn snapshot(&mut self) -> Rc<Snapshot> {
+        let snap = self
+            .snapshot
+            .get_or_insert_with(|| Rc::new(Snapshot::read(&self.services)));
         // Answered asks stay where the provider dropped them.
-        for kept in &self.kept {
-            if !snap.asks.iter().any(|a| a.key() == kept.key()) {
-                snap.asks.push(kept.clone());
-            }
+        let missing: Vec<&AskCard> = self
+            .kept
+            .iter()
+            .filter(|kept| !snap.asks.iter().any(|a| a.key() == kept.key()))
+            .collect();
+        if !missing.is_empty() {
+            let mut merged = (**snap).clone();
+            merged.asks.extend(missing.into_iter().cloned());
+            *snap = Rc::new(merged);
         }
-        snap
+        snap.clone()
+    }
+
+    /// The snapshot being drawn.
+    pub fn snap(&self) -> Rc<Snapshot> {
+        self.snapshot.clone().unwrap_or_default()
     }
 
     /// Answers an ask: the card collapses into `record` now, and the answer
@@ -286,7 +297,7 @@ impl Render for DeskPage {
             });
 
         let note = snap.note.as_ref().map(|n| {
-            let member = self.services.provider.member(&n.member_id);
+            let member = snap.member(&n.member_id);
             let name = member.as_ref().map(|m| m.name.clone()).unwrap_or_default();
             let from = crate::copy::fill(c::DESK_NOTE_FROM, &[("name", &name)]);
             let text = gpui::StyledText::new(format!("{from}{}", n.text)).with_highlights([(
@@ -370,13 +381,7 @@ impl Render for DeskPage {
                 ))
                 .child(div().mt(space::S6).flex().flex_col().children(
                     snap.done.iter().enumerate().map(|(i, d)| {
-                        done::render(
-                            d,
-                            ask_count + 1 + i,
-                            &snap.artifact_kinds,
-                            &self.services,
-                            cx,
-                        )
+                        done::render(d, ask_count + 1 + i, &snap, &self.services, cx)
                     }),
                 ))
         });

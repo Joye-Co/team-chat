@@ -16,7 +16,7 @@ use crate::{
     },
     theme::{self, Type as _, space},
     ui::{self, Lucide},
-    views::shell::{clock, member_name},
+    views::shell::clock,
 };
 
 /// A proof chip: 26 pt, 1 pt `line`, radius 7, 12 pt `ink-2`, an optional
@@ -199,14 +199,14 @@ fn artifact_card(
 pub fn render(
     d: &DoneItem,
     ix: usize,
-    kinds: &std::collections::HashMap<String, ArtifactKind>,
+    snap: &super::Snapshot,
     services: &Services,
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);
-    let p = &services.provider;
-    let member = p.member(&d.member_id);
-    let name = member_name(services, &d.member_id);
+    let kinds = &snap.artifact_kinds;
+    let member = snap.member(&d.member_id);
+    let name = snap.name(&d.member_id);
     let key = format!("{}-{}", d.topic_id, d.at);
 
     let mut detail = None;

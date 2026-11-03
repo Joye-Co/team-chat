@@ -35,7 +35,7 @@ use crate::{
     },
     theme::{self, Type as _, space},
     ui::{self, ButtonKind, ButtonSize, Lucide},
-    views::shell::{clock, member_name},
+    views::shell::clock,
 };
 
 /// `你选了「批准合并」`.
@@ -144,7 +144,7 @@ pub fn render(
     let key = a.key();
     let done = answered(a, page);
     let s = &page.services().clone();
-    let asker = member_name(s, &a.item.from);
+    let asker = page.snap().name(&a.item.from);
     let top = ui::card_padding(div())
         .flex()
         .flex_col()
@@ -171,18 +171,9 @@ pub fn render(
 fn header(a: &AskCard, page: &DeskPage, cx: &mut Context<DeskPage>) -> impl IntoElement {
     let k = theme::colors(cx);
     let services = page.services();
-    let p = &services.provider;
-    let member = p.member(&a.item.from);
-    let group = p
-        .groups()
-        .into_iter()
-        .find(|g| g.id == a.item.group_id)
-        .map(|g| g.name)
-        .unwrap_or_default();
-    let topic = p
-        .topic(&a.item.group_id, &a.item.topic_id)
-        .map(|t| t.title)
-        .unwrap_or_default();
+    let snap = page.snap();
+    let member = snap.member(&a.item.from);
+    let (group, topic) = snap.places.get(&a.key()).cloned().unwrap_or_default();
     let nav = services.nav.clone();
     let (g, t) = (a.item.group_id.clone(), a.item.topic_id.clone());
     div()

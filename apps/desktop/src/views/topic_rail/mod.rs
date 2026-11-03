@@ -72,7 +72,10 @@ impl Data {
         Self {
             group_id: g.to_string(),
             topic_id: t.to_string(),
-            step_times: run.as_ref().map(|r| p.run_step_times(&r.id)).unwrap_or_default(),
+            step_times: run
+                .as_ref()
+                .map(|r| p.run_step_times(&r.id))
+                .unwrap_or_default(),
             changes: p.topic_changes(g, t),
             cost: p.topic_cost(g, t),
             recording: topic_recording(services, g, t),
@@ -90,7 +93,10 @@ impl Data {
     }
 
     fn name(&self, id: &str) -> String {
-        self.members.get(id).map(|m| m.name.clone()).unwrap_or_default()
+        self.members
+            .get(id)
+            .map(|m| m.name.clone())
+            .unwrap_or_default()
     }
 }
 
@@ -354,10 +360,7 @@ impl TopicRail {
                     div()
                         .flex()
                         .gap(space::S4)
-                        .child(fill(
-                            c::ASKED_BY_NAME,
-                            &[("name", &d.name(&id))],
-                        ))
+                        .child(fill(c::ASKED_BY_NAME, &[("name", &d.name(&id))]))
                         .child(div().mono().child(clock(at))),
                 )
         });
