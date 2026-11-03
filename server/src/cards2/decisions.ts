@@ -32,15 +32,36 @@ registerRoomMigration({
   `,
 });
 
-/** Labels of the options an answer chose in the card's `decision` blocks, in block order. */
-export function chosenLabels(card: CardV2, inputs: Record<string, unknown> | undefined): string[] {
+/** Option ids of an input value: `"a"`, `["a"]`, `{value}`, `{values}`. */
+function pickedIds(v: unknown): unknown[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") return [v];
+  if (v && typeof v === "object") {
+    const o = v as { value?: unknown; values?: unknown };
+    if (Array.isArray(o.values)) return o.values;
+    if (o.value !== undefined) return [o.value];
+  }
+  return [];
+}
+
+/**
+ * Labels of the options an answer chose, in block order: `decision`, `compare`, `imageChoice`,
+ * `poll` and `confirm` blocks, from `inputs` and from the value of an immediate commit.
+ */
+export function chosenLabels(card: CardV2, inputs: Record<string, unknown> | undefined, commit?: { blockId: string; value: unknown }): string[] {
   const out: string[] = [];
   const visit = (b: CardV2Block) => {
     if (b.type === "group") return (b.blocks ?? []).forEach(visit);
-    if (b.type !== "decision") return;
-    const v = inputs?.[b.id];
-    const ids = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
-    for (const o of b.options) if (ids.includes(o.id)) out.push(o.label);
+    const v = commit && commit.blockId === b.id ? commit.value : inputs?.[b.id];
+    if (v === undefined) return;
+    const ids = pickedIds(v);
+    if (b.type === "confirm") {
+      if (ids[0] === true) out.push(b.yes);
+      if (ids[0] === false) out.push(b.no);
+      return;
+    }
+    if (b.type !== "decision" && b.type !== "compare" && b.type !== "imageChoice" && b.type !== "poll") return;
+    for (const o of b.options as { id: string; label: string }[]) if (ids.includes(o.id)) out.push(o.label);
   };
   card.blocks.forEach(visit);
   return out;
@@ -61,9 +82,11 @@ registerEventWriter((event: ArchivedEvent, sql) => {
   const d = event.data as CardAnswerArgs;
   const stored = storedCard(sql, d.messageId);
   if (!stored || stored.card.rev !== d.rev || stored.card.ask?.record !== true) return;
-  const action = stored.card.actions?.find((a) => a.id === d.actionId);
+  // An immediate commit (2.1) has no action: the block is the "action", its pick the label.
+  const commit = d.actionId === undefined && d.blockId ? { blockId: d.blockId, value: d.value } : undefined;
+  const choices = chosenLabels(stored.card, d.inputs, commit);
+  const action = d.actionId !== undefined ? stored.card.actions?.find((a) => a.id === d.actionId) : commit && choices[0] ? { id: commit.blockId, label: [...choices[0]].slice(0, 40).join("") } : undefined;
   if (!action) return;
-  const choices = chosenLabels(stored.card, d.inputs);
   sql.exec(
     `INSERT OR IGNORE INTO card_decisions (seq, message_id, topic_id, rev, title, action_id, action_label, choices, actor_id, at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,

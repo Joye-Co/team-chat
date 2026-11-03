@@ -389,6 +389,20 @@ export function deriveV1(card: CardV2, state: CardState | undefined, dir: Direct
   if (!allV1 && card.fallback !== "" && v1.blocks[0]?.type === "text") {
     v1.blocks[0] = { type: "text", text: cut(`这部分需要新版本：${card.fallback}`, 8000) };
   }
+  // Metrics read "label: value (delta)" (INTERACT §4.5).
+  const fmt = (n: number) => (Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100));
+  const done = new Set<object>();
+  for (const b of card.blocks) {
+    if (b.type !== "metric" || b.delta === undefined) continue;
+    const value = `${fmt(b.value)}${b.unit ?? ""}`;
+    const hit = v1.blocks.find(
+      (x) => x.type === "fields" && !done.has(x) && x.fields.length === 1 && x.fields[0].label === b.label && x.fields[0].value === value,
+    );
+    if (hit && hit.type === "fields") {
+      done.add(hit);
+      hit.fields[0] = { label: b.label, value: cut(`${value} (${b.delta > 0 ? "+" : ""}${fmt(b.delta)}${b.unit ?? ""})`, 1000) };
+    }
+  }
   const label = statusLabel(card, state, dir);
   if (label) v1.status = { label: cut(label, 40) };
   const open = state?.ask?.status === "open";

@@ -4,7 +4,7 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
-import { Client, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
+import { Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
@@ -464,6 +464,8 @@ describe("1.0.x readers", () => {
     expect(upd.data.card.actions).toBeUndefined();
     // Live events and resolves never reach a 1.0.x socket.
     const r = (await send(cbot, gid, report([bob.id]))).message;
+    expect(r.card.blocks).toContainEqual({ type: "fields", fields: [{ label: "日活", value: "2340 (+90)" }] });
+    expect(r.card.blocks).toContainEqual({ type: "text", text: "**新增群**：10 月每周都在涨。" });
     const live = await ev(oldBot, gid, r.id, { blockId: "check", event: "choice.change", value: { value: "ok" } });
     expect(live).toMatchObject({ ok: true });
     await cbot.ok({ t: "interaction.resolve", groupId: gid, eventId: live.result.eventId, result: "ignored" });
@@ -473,6 +475,18 @@ describe("1.0.x readers", () => {
     await new Promise((res) => setTimeout(res, 200));
     for (const c of [oldAlice, oldBot]) expect(c.frames.some((f) => f.t === "transient" && ["card.event", "interaction.resolved"].includes(f.event.type))).toBe(false);
     for (const c of [oldAlice, oldBot, cbot]) c.close();
+  });
+});
+
+describe("group decisions of 2.1 asks", () => {
+  it("record an immediate pick with the option as its label", async () => {
+    const { owner, alice, gid, ca, cbot } = await setup();
+    const m = (await send(cbot, gid, quick([alice.id], { ask: { from: [alice.id], record: true } }))).message;
+    await ev(ca, gid, m.id, { blockId: "pick", event: "choice.submit", value: { value: "yes" } });
+    const r = await api(`/v1/groups/${gid}/decisions`, { token: owner.token });
+    expect(r.status, JSON.stringify(r.body)).toBe(200);
+    expect(r.body.decisions[0]).toMatchObject({ messageId: m.id, actionId: "pick", actionLabel: "发", choices: ["发"], answeredBy: alice.id });
+    for (const c of [ca, cbot]) c.close();
   });
 });
 
