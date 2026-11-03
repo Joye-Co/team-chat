@@ -3539,8 +3539,23 @@ impl CardEventFrame {
         {
             return fail("inputs", "inputs exceed 16 KiB");
         }
-        self.part.as_ref().map_or(Ok(()), PartRef::validate)
+        if let Some(p) = &self.part {
+            if !part_allowed(&self.event, &p.kind) {
+                return fail(
+                    "part",
+                    "part only with chart.select (point or bar) and metric.press (metric)",
+                );
+            }
+            p.validate()?;
+        }
+        Ok(())
     }
+}
+
+/// V11-INC R3: only `chart.select` (a point or a bar) and `metric.press` (the metric) name a part.
+pub fn part_allowed(event: &str, kind: &str) -> bool {
+    (event == "chart.select" && (kind == "point" || kind == "bar"))
+        || (event == "metric.press" && kind == "metric")
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

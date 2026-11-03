@@ -1050,6 +1050,11 @@ export const CardAnswerRetractFrame = z.object({
 });
 export type CardAnswerRetractFrame = z.infer<typeof CardAnswerRetractFrame>;
 
+/** V11-INC R3: only `chart.select` (a point or a bar) and `metric.press` (the metric) name a part. */
+export function partAllowed(event: string, kind: string): boolean {
+  return (event === "chart.select" && (kind === "point" || kind === "bar")) || (event === "metric.press" && kind === "metric");
+}
+
 /**
  * `{ t: "card.event" }` (2.1): one interaction with a v2 card. Exactly one of `blockId` /
  * `actionId`, except `answer.retract` (neither). `inputs` only with `action.press`. `part`
@@ -1075,6 +1080,10 @@ export const CardEventFrame = z
     message: "exactly one of blockId and actionId (neither for answer.retract)",
   })
   .refine((f) => f.inputs === undefined || f.event === "action.press", { message: "inputs only with action.press", path: ["inputs"] })
+  .refine((f) => f.part === undefined || partAllowed(f.event, f.part.kind), {
+    message: "part only with chart.select (point or bar) and metric.press (metric)",
+    path: ["part"],
+  })
   .refine((f) => jsonBytes(f.value) <= MAX_CARD_EVENT_VALUE_BYTES, { message: "value exceeds 4 KiB", path: ["value"] })
   .refine((f) => jsonBytes(f.inputs) <= MAX_CARD_EVENT_INPUTS_BYTES, { message: "inputs exceed 16 KiB", path: ["inputs"] });
 export type CardEventFrame = z.infer<typeof CardEventFrame>;

@@ -1,0 +1,24 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "chart.select names a point or a bar",
+  "value": {
+    "t": "card.event",
+    "rid": "r101",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "rev": 1,
+    "clientEventId": "01JC0CEV000000000000000013",
+    "blockId": "trend",
+    "event": "chart.select",
+    "value": {
+      "series": "oct",
+      "x": "10-13",
+      "y": 2268,
+      "index": 1
+    },
+    "part": {
+      "kind": "metric"
+    }
+  }
+}

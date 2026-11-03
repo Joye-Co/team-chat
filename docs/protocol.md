@@ -1162,7 +1162,8 @@ transient card.event: { groupId, topicId, messageId, eventId, rev, blockId?, act
 Event catalog: `choice.change choice.submit input.change input.submit chart.select chart.clear
 metric.press table.rowSelect table.sort button.press draft.edit compare.pick tab.open action.press
 answer.retract`. `chart.select` sends `part {kind: "point"|"bar", keys: {series, x}}` next to its
-`value {series, x, y, index}`; `metric.press` sends `part {kind: "metric"}`. A live event goes to
+`value {series, x, y, index}`; `metric.press` sends `part {kind: "metric"}`. Other events, and
+other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
 
