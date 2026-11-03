@@ -159,6 +159,8 @@ struct Shared {
     // --- end cards v2 track ---
     /// 群里的决定 from the server (`provider/pages.rs`).
     decisions: pages::DecisionsCache,
+    /// R5: page events this window saw (they are not in the group log).
+    page_events: pages::PageEventLog,
     // --- provider track: v2 topic surfaces (provider/topic_v2.rs) ---
     topic_v2: topic_v2::TopicV2Cache,
     // --- end provider track ---
@@ -197,6 +199,7 @@ impl CoreProvider {
                 panes: panes::PanesCache::default(),
                 cards_v2: cards_v2::CardV2Cache::default(),
                 decisions: pages::DecisionsCache::default(),
+                page_events: pages::PageEventLog::default(),
                 topic_v2: topic_v2::TopicV2Cache::default(),
             }),
         });
@@ -813,12 +816,18 @@ impl CoreProvider {
                 }
             }
             ClientUpdate::SearchResults { .. } | ClientUpdate::SearchFailed { .. } => {}
+            ClientUpdate::ArtifactEvent(t) => {
+                self.shared.page_events.record_transient(&t);
+                out.push(Change::Artifacts {
+                    group_id: t.group_id.clone(),
+                    topic_id: t.topic_id.clone(),
+                });
+            }
             // 1.1 interaction loop: the card and 产出 host tracks handle these.
             ClientUpdate::CardEventAcked { .. }
             | ClientUpdate::ArtifactEventAcked { .. }
             | ClientUpdate::CardEvent(_)
             | ClientUpdate::InteractionResolved(_)
-            | ClientUpdate::ArtifactEvent(_)
             | ClientUpdate::ArtifactData(_)
             | ClientUpdate::ArtifactReply(_) => {}
         }
