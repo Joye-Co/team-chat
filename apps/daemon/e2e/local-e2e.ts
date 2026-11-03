@@ -2,7 +2,9 @@
 // Local end-to-end run of a runner-backed bot: `wrangler dev` (fresh local state) plus the real
 // machine daemon with the fake Claude Code CLI. A member mentions the bot in a topic; the run
 // must show the acknowledgement, streamed progress, the result and the topic status `done`,
-// the run log and the uploaded raw session.
+// the run log and the uploaded raw session. Then 停止: a second run hangs in the fake CLI, a member
+// stops it through the client API (the chat-core `cancel_run` example), and the run must end as
+// cancelled with the fake CLI stopped by the daemon's run.cancel, one bot note and the topic open.
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
 // Against a deployed env (no wrangler; the owner token comes from a file, and the run makes its
@@ -12,7 +14,7 @@
 // Needs: `bun install`, and the daemon binary (built here with cargo when missing).
 // Tokens stay in memory or in files of mode 600 inside the temp folder; nothing is printed.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
@@ -241,7 +243,9 @@ async function runDaemonCheck(
     const res = await fetch(`${BASE}/v1/runs/${runId}/session`, { headers: { authorization: `Bearer ${owner}` } });
     return res.ok ? new Uint8Array(await res.arrayBuffer()) : undefined;
   });
+  const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
   ws.close();
+  report.cancel = stop;
   Object.assign(report, {
     ok: true,
     topicId,
@@ -260,6 +264,105 @@ async function runDaemonCheck(
   });
   if (!report.sessionIsGzip) throw new Error("session is not gzip");
   step("run log and raw session checked");
+}
+
+/** The first file named `name` under `dir`, at any depth. */
+function findFile(dir: string, name: string): string | undefined {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isFile() && entry.name === name) return p;
+    if (entry.isDirectory()) {
+      const found = findFile(p, name);
+      if (found) return found;
+    }
+  }
+  return undefined;
+}
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 停止: a member asks the bot for work that hangs (the fake CLI sleeps), then stops the run
+ * through the client API (`chat_core::Client::cancel_run`, the call behind the desktop's 停止).
+ * The run must end as cancelled at once, the daemon must get run.cancel and stop the fake CLI,
+ * the bot must post one note and the topic must go back to open. A second stop is a conflict,
+ * which the client takes as "already ended".
+ */
+async function cancelCheck(
+  groupId: string,
+  alice: { token: string; member?: { id: string } },
+  bot: { member: { id: string } },
+  work: string,
+  events: any[],
+  ws: WebSocket,
+) {
+  const example = join(process.env.CARGO_TARGET_DIR ?? join(ROOT, "target"), "debug", "examples", "cancel_run");
+  if (!existsSync(example)) {
+    const b = spawnSync("cargo", ["build", "-p", "chat-core", "--example", "cancel_run"], { cwd: ROOT, stdio: "inherit" });
+    if (b.status !== 0) throw new Error("cargo build -p chat-core --example cancel_run failed");
+  }
+  const aliceTokenFile = secretFile("alice-token", alice.token);
+  const cancel = (runId: string) => {
+    const r = spawnSync(example, [BASE, aliceTokenFile, runId, join(TMP, "client-data")], { encoding: "utf8" });
+    const line = (r.stdout ?? "").trim().split("\n").at(-1) ?? "";
+    let out: any = {};
+    try {
+      out = JSON.parse(line);
+    } catch {
+      out = { error: `no JSON (exit ${r.status})` };
+    }
+    if (r.status !== 0 || out.error) throw new Error(`client cancel_run failed: ${out.error ?? r.status}`);
+    return out as { outcome: string; status: string | null };
+  };
+
+  const rmPid = findFile(work, "fake.pid");
+  if (rmPid) rmSync(rmPid);
+  ws.send(JSON.stringify({ t: "send", rid: "r2", groupId, clientMsgId: crypto.randomUUID(), body: "@dev hang", mentions: [bot.member.id] }));
+  const ack = await until("send ack (hang)", () => events.find((e) => e.frame?.rid === "r2"));
+  if (!ack.frame.ok) throw new Error("send failed");
+  const topicId = ack.frame.result.message.topicId as string;
+  const runsOf = () => events.filter((e) => e.type === "run.updated" && e.data.run.topicId === topicId).map((e) => e.data.run);
+  const running = await until("run running", () => runsOf().find((r: any) => r.status === "running"), 60_000);
+  const pidFile = await until("fake CLI hangs", () => findFile(work, "fake.pid"), 60_000);
+  const pid = Number(readFileSync(pidFile, "utf8").trim());
+  if (!alive(pid)) throw new Error("the fake CLI is not running");
+  step(`run ${running.id} works (fake CLI pid ${pid} hangs)`);
+
+  const first = cancel(running.id);
+  if (first.outcome !== "cancelled" || first.status !== "cancelled") throw new Error(`stop answered ${JSON.stringify(first)}`);
+  step("a member stopped the run through the client API");
+  const ended = await until("run.updated cancelled", () => runsOf().find((r: any) => r.id === running.id && r.status === "cancelled"));
+  await until("daemon got run.cancel and stopped the fake CLI", () => !alive(pid), 30_000);
+  const statuses = () => events.filter((e) => e.type === "topic.updated" && e.data.topicId === topicId && e.data.status).map((e) => e.data.status);
+  await until("topic back to open", () => statuses().at(-1) === "open");
+  const notes = () =>
+    events
+      .filter((e) => e.type === "message.created" && e.data.message.topicId === topicId && e.data.message.authorId === bot.member.id)
+      .map((e) => e.data.message)
+      .filter((m: any) => m.body.includes("已停止"));
+  const note = await until("bot note", () => notes()[0]);
+  const again = cancel(running.id);
+  if (again.outcome !== "already_ended" || again.status !== "cancelled") throw new Error(`second stop answered ${JSON.stringify(again)}`);
+  if (notes().length !== 1) throw new Error(`the bot posted ${notes().length} stop notes`);
+  step("run cancelled: fake CLI stopped, bot note posted, topic open; a second stop is already ended");
+  return {
+    topicId,
+    runId: running.id,
+    first,
+    again,
+    runStatuses: runsOf().map((r: any) => r.status),
+    endedAt: ended.endedAt ?? null,
+    cliStopped: !alive(pid),
+    note: note.body,
+    topicStatuses: statuses(),
+  };
 }
 
 let code = 0;
