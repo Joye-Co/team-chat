@@ -249,7 +249,9 @@ How the 1.1 daemon does each one:
   the daemon then finds the CLI's descendants (libproc on macOS, `/proc` on Linux) and stops
   each of their groups, scanning again until a scan finds nothing new. It never signals its own
   group, pid 1, or a process outside the run's tree. Resume and cancel send `SIGCONT` to the
-  same groups. A pause that comes
+  same groups. The daemon keeps each target's start time (libproc, or the `starttime` field of
+  `/proc/<pid>/stat`) and checks it before each later signal, so a pid that now belongs to
+  another process gets no signal. A pause that comes
   while the run is still `preparing` stops the CLI as soon as it starts. While paused, no
   `stalled` status is sent and the `maxDurationMs` clock stands still. `run.resume` sends
   `SIGCONT`, moves the deadline by the paused time, emits `paused { paused: false }`, and sends

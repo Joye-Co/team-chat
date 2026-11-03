@@ -7,11 +7,66 @@
 use std::collections::HashSet;
 
 /// What one signal goes to: a process group whose leader is in the run's tree, or one process
-/// whose group leader is not.
+/// whose group leader is not. Each keeps the start time of its process (the group's leader),
+/// so a later signal skips a pid that now belongs to another process.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Target {
-    Group(i32),
-    Pid(i32),
+    Group(i32, Option<u64>),
+    Pid(i32, u64),
+}
+
+/// Start time of process `pid` (microseconds since the epoch), from libproc.
+#[cfg(target_os = "macos")]
+pub fn start_time(pid: i32) -> Option<u64> {
+    if pid <= 0 {
+        return None;
+    }
+    // SAFETY: a plain C struct; zeroes are a valid value.
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    // SAFETY: the buffer holds `size` bytes; libproc writes at most that many.
+    let n = unsafe {
+        libc::proc_pidinfo(
+            pid,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            (&mut info as *mut libc::proc_bsdinfo).cast(),
+            size,
+        )
+    };
+    (n == size).then(|| info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec)
+}
+
+/// Start time of process `pid` (clock ticks since boot), from `/proc/<pid>/stat` (the 20th
+/// field after the command).
+#[cfg(target_os = "linux")]
+pub fn start_time(pid: i32) -> Option<u64> {
+    if pid <= 0 {
+        return None;
+    }
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = &stat[stat.rfind(')')? + 1..];
+    rest.split_whitespace().nth(19)?.parse().ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn start_time(_pid: i32) -> Option<u64> {
+    None
+}
+
+impl Target {
+    /// Whether the target still is the process (group) it was when it was found. A group
+    /// whose leader is gone stays a target: its pid cannot be reused while the group has
+    /// members, and without members the signal reaches nobody.
+    pub fn is_current(&self) -> bool {
+        match *self {
+            Target::Pid(p, start) => start_time(p) == Some(start),
+            Target::Group(g, start) => match start_time(g) {
+                None => true,
+                now => start.is_some() && now == start,
+            },
+        }
+    }
 }
 
 /// Direct children of `pid`.
@@ -103,9 +158,12 @@ pub fn targets(root: i32) -> Vec<Target> {
             continue;
         }
         let t = if g > 1 && g != own_group && tree.contains(&g) {
-            Target::Group(g)
+            Target::Group(g, start_time(g))
         } else {
-            Target::Pid(pid)
+            let Some(start) = start_time(pid) else {
+                continue;
+            };
+            Target::Pid(pid, start)
         };
         if !out.contains(&t) {
             out.push(t);
@@ -120,13 +178,17 @@ fn pgid(pid: i32) -> Option<i32> {
     (g > 0).then_some(g)
 }
 
+/// Sends `sig` to each target that [`Target::is_current`]; skips a reused pid.
 pub fn signal(targets: &[Target], sig: i32) {
     for t in targets {
+        if !t.is_current() {
+            continue;
+        }
         // SAFETY: plain syscalls; a negative pid addresses a process group.
         unsafe {
             match *t {
-                Target::Group(g) if g > 1 => libc::kill(-g, sig),
-                Target::Pid(p) if p > 1 => libc::kill(p, sig),
+                Target::Group(g, _) if g > 1 => libc::kill(-g, sig),
+                Target::Pid(p, _) if p > 1 => libc::kill(p, sig),
                 _ => 0,
             };
         }
@@ -164,5 +226,49 @@ pub fn resume(root: i32, stopped: &[Target]) {
         unsafe {
             libc::kill(-root, libc::SIGCONT);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::process::Command;
+
+    fn alive(pid: i32) -> bool {
+        // SAFETY: signal 0 only checks that the process exists.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[test]
+    fn signal_skips_a_pid_that_is_another_process_now() {
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id() as i32;
+        let start = start_time(pid).expect("start time of a live child");
+        assert_eq!(start_time(pid), Some(start), "start time is stable");
+        assert!(Target::Pid(pid, start).is_current());
+
+        // A target saved for an earlier process with this pid: the signal must not reach the
+        // process that has the pid now.
+        let old = Target::Pid(pid, start - 1);
+        assert!(!old.is_current());
+        signal(&[old], libc::SIGTERM);
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "reused pid got the signal"
+        );
+        assert!(alive(pid));
+        // The same for a group whose leader is another process now.
+        assert!(!Target::Group(pid, Some(start - 1)).is_current());
+        assert!(!Target::Group(pid, None).is_current());
+
+        signal(&[Target::Pid(pid, start)], libc::SIGTERM);
+        child.wait().unwrap();
+        assert!(
+            !Target::Pid(pid, start).is_current(),
+            "a reaped pid is not current"
+        );
+        // A group whose leader is gone stays a target (its pid is not reused while the group
+        // has members).
+        assert!(Target::Group(pid, Some(start)).is_current());
     }
 }
