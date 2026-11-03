@@ -135,25 +135,26 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
             .into_iter()
             .map(|(version, label)| artifact_view::VersionItem { version, label })
             .collect();
-        if let Some(win) = windows(cx).open.get(&folder.artifact_id)
-            && !win.is_closed()
-        {
-            win.set_title(&title);
-            win.set_versions(&items);
-            if let Err(e) = win.show_version(spec) {
-                tracing::warn!(error = %e, "cannot show the version");
-            }
-            win.focus();
-            return;
-        }
         // pages track: bridge capabilities by author (a bot's version that
-        // declares events may send them; nobody reads data).
+        // declares events may send them; nobody reads data). They follow the
+        // version shown, also in a window that is open already.
         let caps = provider
             .artifact(&folder.artifact_id)
             .map(|d| {
                 crate::views::artifact_page::capabilities(provider.as_ref(), &d, folder.version)
             })
             .unwrap_or(artifact_view::Capabilities::NONE);
+        if let Some(win) = windows(cx).open.get(&folder.artifact_id)
+            && !win.is_closed()
+        {
+            win.set_title(&title);
+            win.set_versions(&items);
+            if let Err(e) = win.show_version(spec, caps) {
+                tracing::warn!(error = %e, "cannot show the version");
+            }
+            win.focus();
+            return;
+        }
         open_window(
             provider.clone(),
             folder.artifact_id.clone(),

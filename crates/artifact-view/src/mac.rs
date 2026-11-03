@@ -649,7 +649,11 @@ pub(crate) fn start_loading(
 }
 
 /// Loads another version (new origin, content and data) into an existing page state.
-pub(crate) fn switch_version(state: &RefCell<State>, spec: VersionSpec) -> Result<(), Error> {
+pub(crate) fn switch_version(
+    state: &RefCell<State>,
+    spec: VersionSpec,
+    caps: Capabilities,
+) -> Result<(), Error> {
     let host = {
         let st = state.borrow();
         if st.closed {
@@ -667,7 +671,16 @@ pub(crate) fn switch_version(state: &RefCell<State>, spec: VersionSpec) -> Resul
     st.content = content;
     st.entry = spec.entry;
     st.data = spec.data;
+    // The bridge follows the version shown: another author may grant other capabilities.
+    st.caps = caps;
+    // Input in the previous page does not count for this one.
+    st.last_input = None;
     Ok(())
+}
+
+/// Changes what the page bridge allows, for the page that shows now.
+pub(crate) fn set_capabilities(state: &RefCell<State>, caps: Capabilities) {
+    state.borrow_mut().caps = caps;
 }
 
 /// A window that shows one 产出. Main thread only. Dropping it closes the window.
@@ -751,10 +764,11 @@ impl ArtifactWindow {
         Ok(this)
     }
 
-    /// Shows another version (new origin, content and data) in the same window.
-    pub fn show_version(&self, spec: VersionSpec) -> Result<(), Error> {
+    /// Shows another version (new origin, content and data) in the same window. `caps` are
+    /// that version's bridge capabilities.
+    pub fn show_version(&self, spec: VersionSpec, caps: Capabilities) -> Result<(), Error> {
         let version = spec.version;
-        switch_version(&self.state, spec)?;
+        switch_version(&self.state, spec, caps)?;
         if let Some(popup) = self.popup.borrow().as_ref() {
             popup.selectItemWithTag(version as isize);
         }
@@ -810,6 +824,16 @@ impl ArtifactWindow {
         self.state.borrow().version
     }
 
+    /// The bridge capabilities of the page that shows now.
+    pub fn capabilities(&self) -> Capabilities {
+        self.state.borrow().caps
+    }
+
+    /// Changes the bridge capabilities of the page that shows now.
+    pub fn set_capabilities(&self, caps: Capabilities) {
+        set_capabilities(&self.state, caps);
+    }
+
     pub fn is_closed(&self) -> bool {
         self.state.borrow().closed
     }
@@ -854,4 +878,48 @@ pub fn open_external_url(url: &str) -> bool {
         return false;
     };
     NSWorkspace::sharedWorkspace().openURL(&nsurl)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn spec(version: u32) -> VersionSpec {
+        VersionSpec::new(version, Content::memory([("index.html".to_string(), b"<p>".to_vec())]))
+    }
+
+    #[test]
+    fn the_bridge_follows_the_version_shown() {
+        // v1 by a person: no bridge. v2 by a bot that declares events: emitEvent.
+        let state = new_state("a1".into(), spec(1), Capabilities::NONE).unwrap();
+        let bot = Capabilities {
+            get_data: false,
+            emit_event: true,
+        };
+        state.borrow_mut().last_input = Some(Instant::now());
+        switch_version(&state, spec(2), bot).unwrap();
+        {
+            let st = state.borrow();
+            assert_eq!((st.version, st.caps, st.last_input), (2, bot, None));
+            assert_eq!(st.host, resolve::origin_host("a1", 2).unwrap());
+        }
+        let ask = br#"{"id":1,"method":"emitEvent","params":{"name":"approve"}}"#;
+        let st = state.borrow();
+        assert!(bridge::handle(ask, st.caps, &st.data).event.is_some());
+        drop(st);
+        // Back to the person's v1: the bridge closes again.
+        switch_version(&state, spec(1), Capabilities::NONE).unwrap();
+        let st = state.borrow();
+        assert_eq!(st.caps, Capabilities::NONE);
+        assert_eq!(
+            bridge::handle(ask, st.caps, &st.data).reply["error"]["code"],
+            "not_allowed"
+        );
+        drop(st);
+        // A failed switch keeps the version and capabilities it had.
+        let mut bad = spec(3);
+        bad.entry = "../x".into();
+        assert_eq!(switch_version(&state, bad, bot), Err(Error::InvalidEntry));
+        assert_eq!(state.borrow().caps, Capabilities::NONE);
+    }
 }

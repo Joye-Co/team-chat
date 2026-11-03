@@ -252,6 +252,15 @@ impl WebEmbedState {
             n.set_pass_scroll(embed.pass_scroll);
         }
         if same {
+            // The same page, but what its bridge may do can change (the author's member
+            // record arrived, or the version's declared events did).
+            if self.spec.capabilities != embed.spec.capabilities {
+                self.spec.capabilities = embed.spec.capabilities;
+                #[cfg(target_os = "macos")]
+                if let Some(n) = &self.native {
+                    n.set_capabilities(self.spec.capabilities);
+                }
+            }
             return;
         }
         let new_id = self.spec.artifact_id != embed.spec.artifact_id;
@@ -264,7 +273,8 @@ impl WebEmbedState {
                 // A different 产出: a new view (the origin family changes).
                 self.native = None;
             } else if let Some(n) = &self.native
-                && let Err(e) = n.show_version(self.spec.version.clone())
+                && let Err(e) =
+                    n.show_version(self.spec.version.clone(), self.spec.capabilities)
             {
                 self.phase = Phase::Failed(e.to_string());
             }

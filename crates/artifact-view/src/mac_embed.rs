@@ -24,7 +24,7 @@ use objc2_web_kit::{WKWebView, WKWebViewConfiguration};
 
 use crate::embed::{EmbedOptions, Placement, Rect, place};
 use crate::mac::{self, Controller, State};
-use crate::{ArtifactEvent, Error, VersionSpec};
+use crate::{ArtifactEvent, Capabilities, Error, VersionSpec};
 
 /// Wrapper that lets main-thread values ride a block onto the main queue.
 struct MainOnly<T>(T);
@@ -354,15 +354,26 @@ impl EmbeddedArtifact {
         };
     }
 
-    /// Shows another version (new origin, content and data) in the same view.
-    pub fn show_version(&self, spec: VersionSpec) -> Result<(), Error> {
-        mac::switch_version(&self.state, spec)?;
+    /// Shows another version (new origin, content and data) in the same view. `caps` are
+    /// that version's bridge capabilities.
+    pub fn show_version(&self, spec: VersionSpec, caps: Capabilities) -> Result<(), Error> {
+        mac::switch_version(&self.state, spec, caps)?;
         self.controller.load_current(&self.web_view);
         Ok(())
     }
 
     pub fn version(&self) -> u32 {
         self.state.borrow().version
+    }
+
+    /// The bridge capabilities of the page that shows now.
+    pub fn capabilities(&self) -> Capabilities {
+        self.state.borrow().caps
+    }
+
+    /// Changes the bridge capabilities of the page that shows now.
+    pub fn set_capabilities(&self, caps: Capabilities) {
+        mac::set_capabilities(&self.state, caps);
     }
 
     pub fn is_closed(&self) -> bool {

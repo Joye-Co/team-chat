@@ -227,7 +227,7 @@ mod demo {
                         .with_data(v2_data())
                     };
                     if let Some(w) = slot2.borrow().as_ref() {
-                        let _ = w.show_version(spec);
+                        let _ = w.show_version(spec, Capabilities::ALL);
                     }
                 }
                 ArtifactEvent::Closed => NSApplication::sharedApplication(mtm).terminate(None),
@@ -362,7 +362,7 @@ mod demo {
                             let ok = slot2
                                 .borrow()
                                 .as_ref()
-                                .map(|w| w.show_version(spec).is_ok())
+                                .map(|w| w.show_version(spec, Capabilities::ALL).is_ok())
                                 .unwrap_or(false);
                             report2.lock().unwrap().check("showVersionAccepted", ok);
                         }
