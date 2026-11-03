@@ -435,23 +435,47 @@ fn source_author(target: &PartTarget, cx: &App) -> Option<MemberId> {
 /// for there or when it had focus last, else to the composer of the part's 话题, which opens.
 /// The same part again flashes its chip; a sixth part shows 最多引用 5 处.
 pub fn ask_about(target: PartTarget, intent: RefIntent, window: &mut Window, cx: &mut App) {
+    ask_about_outcome(target, intent, window, cx);
+}
+
+/// Where [`ask_about_outcome`] put the chip, and what happened to it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Asked {
+    /// [`AddRef::Unsupported`] when nothing could take the chip (no `refs/1`, no 话题).
+    pub added: AddRef,
+    /// The chip went to the 单独问 composer, not the 话题 one.
+    pub side_chat: bool,
+}
+
+/// [`ask_about`], and says what happened, so a caller that confirms the add (a 产出 page)
+/// confirms it only when the chip was really added.
+pub fn ask_about_outcome(
+    target: PartTarget,
+    intent: RefIntent,
+    window: &mut Window,
+    cx: &mut App,
+) -> Asked {
     let _ = window;
+    let nothing = Asked {
+        added: AddRef::Unsupported,
+        side_chat: false,
+    };
     let Some(services) = services(cx) else {
-        return;
+        return nothing;
     };
     let provider = services.provider.clone();
     if !provider.refs_supported() {
-        return;
+        return nothing;
     }
     let (g, t) = target.place();
     let topic_id = t.to_string();
     if topic_id.is_empty() {
-        return;
+        return nothing;
     }
     let group_id = if g.is_empty() {
         match group_of(&topic_id, cx) {
             Some(g) => g,
-            None => return,
+            None => return nothing,
         }
     } else {
         g.to_string()
@@ -487,7 +511,7 @@ pub fn ask_about(target: PartTarget, intent: RefIntent, window: &mut Window, cx:
         intent == RefIntent::SideChat || (pane_member.is_some() && h.read(cx).side_chat_focused);
     if to_side {
         let member = pane_member.or_else(|| provider.side_chat_default_member());
-        let Some(member) = member else { return };
+        let Some(member) = member else { return nothing };
         let (gg, tt, mm) = (group_id.clone(), topic_id.clone(), member.clone());
         services.nav.update(cx, |nav, cx| {
             if nav.topic.as_ref() != Some(&(gg.clone(), tt.clone())) {
@@ -505,13 +529,17 @@ pub fn ask_about(target: PartTarget, intent: RefIntent, window: &mut Window, cx:
         if added == AddRef::Full {
             toast(c::TOO_MANY, cx);
         }
-        return;
+        return Asked {
+            added,
+            side_chat: true,
+        };
     }
 
     // Rule 2: the composer of the part's 话题.
     let key = DraftKey::topic(group_id.clone(), topic_id.clone());
     let before = provider.draft(&key);
-    match provider.add_draft_ref(&key, chip) {
+    let added = provider.add_draft_ref(&key, chip);
+    match added {
         AddRef::Added => {
             if before.refs.is_empty() && !names_someone(&before.body, &before.mentions) {
                 let owner = provider
@@ -546,6 +574,10 @@ pub fn ask_about(target: PartTarget, intent: RefIntent, window: &mut Window, cx:
         }
         AddRef::Full => toast(c::TOO_MANY, cx),
         AddRef::Unsupported => {}
+    }
+    Asked {
+        added,
+        side_chat: false,
     }
 }
 

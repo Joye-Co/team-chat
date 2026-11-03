@@ -240,7 +240,19 @@ pub fn version_spec(
         .with_entry(entry)
         .live_data()
         .with_events(decls(bridge.as_ref()));
-    (spec, capabilities_for(bridge.as_ref()))
+    (
+        spec,
+        page_capabilities(bridge.as_ref(), provider.refs_supported()),
+    )
+}
+
+/// [`capabilities_for`], and `ref` (the ⌥-click outline, 就这里提问 and `teamchat.ref`)
+/// only when the server takes references to a part (`refs/1`): without it nothing could
+/// take the chip.
+fn page_capabilities(bridge: Option<&PageBridge>, refs_on: bool) -> Capabilities {
+    let mut caps = capabilities_for(bridge);
+    caps.r#ref &= refs_on;
+    caps
 }
 
 /// `window.teamchat.viewer`: me.
@@ -830,23 +842,41 @@ fn ask_about(
         value: value.clone().map(refs::value::cap),
         card_rev: None,
     };
-    match window {
-        Some(w) => refs::ask_about(target, refs::RefIntent::Topic, w, cx),
-        None => {
-            let main = cx
-                .active_window()
-                .or_else(|| cx.windows().into_iter().next());
-            if let Some(handle) = main {
-                let _ = handle.update(cx, |_, w, cx| {
-                    refs::ask_about(target, refs::RefIntent::Topic, w, cx)
-                });
-            }
-        }
+    let asked = match window {
+        Some(w) => Some(refs::ask_about_outcome(
+            target,
+            refs::RefIntent::Topic,
+            w,
+            cx,
+        )),
+        None => cx
+            .active_window()
+            .or_else(|| cx.windows().into_iter().next())
+            .and_then(|handle| {
+                handle
+                    .update(cx, |_, w, cx| {
+                        refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx)
+                    })
+                    .ok()
+            }),
+    };
+    if let Some(text) = asked.and_then(ref_notice) {
+        crate::views::files::notify(
+            gpui_component::notification::Notification::new().message(text.to_string()),
+            cx,
+        );
     }
-    crate::views::files::notify(
-        gpui_component::notification::Notification::new().message(cp::PAGE_REF_ADDED.to_string()),
-        cx,
-    );
+}
+
+/// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
+/// the 话题 composer, 已引用 when the part is a chip already. A sixth part already shows
+/// 最多引用 5 处 (from [`refs::ask_about_outcome`]); a chip in 单独问 shows in its composer.
+fn ref_notice(asked: refs::Asked) -> Option<&'static str> {
+    match asked.added {
+        crate::data::AddRef::Added if !asked.side_chat => Some(cp::PAGE_REF_ADDED),
+        crate::data::AddRef::Duplicate(_) => Some(crate::copy::refs::CITED_HERE),
+        _ => None,
+    }
 }
 
 // --- the footer band ---------------------------------------------------------------------
@@ -1188,6 +1218,32 @@ mod tests {
         assert!(!c.emit && c.ask);
         let c = capabilities_for(Some(&bridge(true, &[])));
         assert!(!c.emit && !c.ask);
+    }
+
+    #[test]
+    fn pages_point_at_parts_only_when_the_server_takes_refs() {
+        let b = bridge(true, &[PageEventKind::Emit]);
+        let on = page_capabilities(Some(&b), true);
+        assert!(on.r#ref && on.emit);
+        let off = page_capabilities(Some(&b), false);
+        assert!(!off.r#ref && off.emit && off.get_data);
+        assert!(!page_capabilities(None, false).r#ref);
+    }
+
+    #[test]
+    fn the_page_confirms_a_ref_only_when_it_was_added() {
+        use crate::data::AddRef;
+        let at = |added, side_chat| ref_notice(refs::Asked { added, side_chat });
+        assert_eq!(at(AddRef::Added, false), Some(cp::PAGE_REF_ADDED));
+        // In 单独问 the chip shows in that composer; 已放进话题的输入框 would be wrong.
+        assert_eq!(at(AddRef::Added, true), None);
+        assert_eq!(
+            at(AddRef::Duplicate(2), false),
+            Some(crate::copy::refs::CITED_HERE)
+        );
+        // 最多引用 5 处 is shown by refs; no second, contradicting toast.
+        assert_eq!(at(AddRef::Full, false), None);
+        assert_eq!(at(AddRef::Unsupported, false), None);
     }
 
     #[test]
