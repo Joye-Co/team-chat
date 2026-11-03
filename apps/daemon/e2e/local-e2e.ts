@@ -231,7 +231,7 @@ async function runDaemonCheck(
   );
   await until("topic in progress", () => statuses().includes("in_progress"));
   step("bot acknowledged with a reaction; topic in progress");
-  await until("topic done", () => statuses().at(-1) === "done", 60_000);
+  const done = await until("topic done", () => statuses().at(-1) === "done", 60_000);
   const result = botMsgs().find((m) => m.cardV2?.intent === "done" && m.body.startsWith("reply 1:"));
   if (!result) throw new Error("no done card");
   // Progress stays in the run (plan, run log): the done card is the bot's only message.
