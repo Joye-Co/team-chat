@@ -112,12 +112,17 @@ export function applyPatch(card: CardV2, ops: PatchOp[]): CardV2 {
           place(list as string[], op.block.id, op, i);
           d.blocks.push(structuredClone(op.block));
         } else {
+          // Top-level reading order is the order of the blocks no container names.
           const named = new Set(d.blocks.flatMap((b) => childIds(b)));
           const top = d.blocks.filter((b) => !named.has(b.id)).map((b) => b.id);
-          place(top, op.block.id, op, i);
-          const after = top[top.indexOf(op.block.id) - 1];
-          const before = top[top.indexOf(op.block.id) + 1];
-          const k = after !== undefined ? at(after) + 1 : before !== undefined ? at(before) : d.blocks.length;
+          let k = d.blocks.length;
+          if (op.before !== undefined) {
+            if (!top.includes(op.before)) fail(i, `no top-level ${op.before} to insert before`);
+            k = at(op.before);
+          } else if (op.after !== undefined) {
+            if (!top.includes(op.after)) fail(i, `no top-level ${op.after} to insert after`);
+            k = at(op.after) + 1;
+          } else if (op.index !== undefined && op.index < top.length) k = at(top[op.index]);
           d.blocks.splice(k, 0, structuredClone(op.block));
         }
         break;
