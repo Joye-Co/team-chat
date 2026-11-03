@@ -208,7 +208,24 @@ registerCardEventHandler(async (room, e) => {
   const r = await responder(room.env, e.authorId);
   if (r.kind === "none") return { by: e.authorId, mode: "none" };
   if (r.kind !== "runner") return undefined;
-  if (e.stored) return expectFor(room.env, e.authorId, e.topicId);
+  if (e.stored) {
+    // cards2 (F5): a retract inside the window reaches the run that has the answer.
+    if (e.event === "answer.retract") {
+      const x: InteractionIn = {
+        groupId: room.groupId,
+        topicId: e.topicId,
+        eventId: e.eventId,
+        source: { kind: "card", messageId: e.messageId, rev: e.rev },
+        event: e.event,
+        value: e.value,
+        actorId: e.actorId,
+      };
+      const title = cardContext(room, e).title;
+      if (title) x.title = title;
+      return toRunner(room.env, e.authorId, x);
+    }
+    return expectFor(room.env, e.authorId, e.topicId);
+  }
   const ctx = cardContext(room, e);
   const live: LiveCardEvent = {
     eventId: e.eventId,

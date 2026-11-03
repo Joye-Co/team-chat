@@ -249,6 +249,28 @@ export abstract class DeskEvents extends DeskRuns {
     }
   }
 
+  // cards2 (F5): the retract window of a card answer, through the room's `cards.answerTaken`.
+  /**
+   * False when the answerer took answer `seq` back. With `close`, the answer starts a run now, so
+   * the room closes its retract window (INTERACT §3.6, "the member starts acting"). A room
+   * without the RPC lets the answer stand.
+   */
+  protected async answerStands(groupId: string, seq: number, close: boolean): Promise<boolean> {
+    try {
+      const res = unwrap(await this.room({ group_id: groupId }).rpc(groupId, CARD_ANSWER_TAKEN_RPC, this.actor(), { seq, close })) as { retracted?: boolean };
+      return res?.retracted !== true;
+    } catch (err) {
+      this.log.warn("answer check failed", { groupId, seq, err });
+      return true;
+    }
+  }
+
+  /** An input a follow-up run starts with: an answer (`answer:{groupId}:{seq}`) closes its window. */
+  protected async answerStartsRun(r: RunRow, messageId: string): Promise<boolean> {
+    const m = /^answer:[^:]+:(\d+)$/.exec(messageId);
+    return m ? this.answerStands(r.group_id, Number(m[1]), true) : true;
+  }
+
   /** Keeps `run.done` usage and time with the run. Returns false when nothing changed. */
   protected storeUsage(r: RunRow, f: Extract<SeqFrame, { t: "run.done" }>): boolean {
     const usage = sanitizeUsage(f.usage);
@@ -273,12 +295,16 @@ export abstract class DeskEvents extends DeskRuns {
       await this.end(r, "failed", TEXT.failed(why), "blocked", cut(TEXT.failed(why), 280));
     }
     // Follow-ups the CLI never took start a new run with the topic context.
-    const left = this.sql
+    const unread = this.sql
       .exec<{ message_id: string; author_id: string; body: string; ack_message_id: string | null }>(
         "SELECT message_id, author_id, body, ack_message_id FROM inputs WHERE run_id = ? AND accepted = 0 ORDER BY at",
         r.id,
       )
       .toArray();
+    // cards2 (F5): the follow-up acts on the card answers it carries, so their retract windows
+    // close now; an answer taken back in the meantime is left out.
+    const left: typeof unread = [];
+    for (const x of unread) if (await this.answerStartsRun(r, x.message_id)) left.push(x);
     if (left.length === 0) return;
     if (this.followUpDepth(r) >= MAX_FOLLOW_UPS) {
       try {

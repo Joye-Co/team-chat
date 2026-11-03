@@ -173,11 +173,19 @@ export abstract class DeskInput extends DeskStall {
         mentioned: true,
       };
       const active = this.activeRun(a.topicId);
-      if (!active) return await this.start(m);
+      // cards2 (F5): an answer that starts a run closes its retract window first.
+      if (!active) {
+        if (!(await this.answerStands(a.groupId, a.seq, true))) return;
+        return await this.start(m);
+      }
       await this.serial(active.id, async () => {
         const r = this.run(active.id);
         if (!r) return;
-        if (r.ended_at !== null) return this.start(m);
+        if (r.ended_at !== null) {
+          if (!(await this.answerStands(a.groupId, a.seq, true))) return;
+          return this.start(m);
+        }
+        if (!(await this.answerStands(a.groupId, a.seq, false))) return;
         this.sql.exec(
           "INSERT INTO inputs (id, run_id, message_id, author_id, body, at, ack_message_id) VALUES (?, ?, ?, ?, ?, ?, ?)",
           inputId,

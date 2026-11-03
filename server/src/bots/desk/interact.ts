@@ -94,6 +94,8 @@ export abstract class DeskInteract extends DeskTakeover {
         return this.runExpect(target);
       }
       if (target) return { mode: "none" };
+      // cards2 (F5): a retract never starts a run (no run has the answer).
+      if (x.event === "answer.retract") return { mode: "none" };
       // No run: a short follow-up run, within the limits.
       const key = cardKey(x);
       const now = Date.now();

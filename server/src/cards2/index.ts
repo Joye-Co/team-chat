@@ -20,7 +20,7 @@ import { checkCause, resolved } from "./hooks";
 import { applyPatch } from "./patch";
 import { shownCause, viewMessage } from "./privacy";
 import { checkEmbeds, directory, isPick, recordRev, stateForWrite } from "./state";
-import { EVENT_KEEP_MS, eventRow, pruneEvents } from "./store";
+import { EVENT_KEEP_MS, eventRow, extOf, messageRow, pruneEvents } from "./store";
 
 import "./decisions";
 
@@ -73,7 +73,8 @@ registerRoomRpc(CARD_EVENT_RPC, (room, actor, args) => cardEvent(room, member(ro
  */
 registerRoomRpc(CARD_ANSWER_TAKEN_RPC, (room, actor, args) => {
   const a = member(room, actor);
-  const { seq } = args as { seq: number };
+  // `close: false` only asks whether the answer was taken back (a run that has not taken it yet).
+  const { seq, close = true } = args as { seq: number; close?: boolean };
   const ev = room.sql
     .exec<{ data: string; message_id: string | null }>("SELECT data, message_id FROM events WHERE seq = ? AND type = 'card.answered'", seq)
     .toArray()[0];
@@ -81,8 +82,11 @@ registerRoomRpc(CARD_ANSWER_TAKEN_RPC, (room, actor, args) => {
   const author = room.sql.exec<{ author_id: string }>("SELECT author_id FROM messages WHERE id = ?", ev.message_id).toArray()[0];
   if (author?.author_id !== a.id) throw new ApiError("forbidden", "only the card's author takes its answers");
   const answerId = (JSON.parse(ev.data) as { answerId?: string }).answerId;
-  if (answerId) closeRetractWindow(room.sql, answerId);
-  return { ok: true };
+  if (!answerId) return { ok: true, retracted: false };
+  const row = messageRow(room.sql, ev.message_id);
+  const retracted = (row ? extOf(row).cardState?.answers ?? [] : []).some((x) => x.answerId === answerId && x.retractedAt !== undefined);
+  if (close && !retracted) closeRetractWindow(room.sql, answerId);
+  return { ok: true, retracted };
 });
 
 /**

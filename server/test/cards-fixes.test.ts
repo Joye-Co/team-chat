@@ -4,12 +4,15 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import type { CardV2 } from "@chat/protocol";
+import type { BotsEnv } from "../src/bots/env";
 import { registerRequesterResolver } from "../src/cards2/delivery";
+import { Daemon, downViolations, mention, world } from "./daemon";
 import { Client, clientMsgId, createGroup, createMember, protocolViolations, type TestMember, waitUntil } from "./helpers";
 
 afterAll(async () => {
   await new Promise((r) => setTimeout(r, 300));
   expect(protocolViolations).toEqual([]);
+  expect(downViolations).toEqual([]);
 });
 
 const FEATURES = ["interact/1", "refs/1"];
@@ -387,5 +390,62 @@ describe("private answers", () => {
     const page = await cbot.request({ t: "fetch", groupId: gid, afterSeq: m.createdSeq });
     expect(names(page.events, alice.id)).toBe(false);
     for (const c of [co, ca, cb, cbot]) c.close();
+  });
+});
+
+describe("retract window of a runner's card", () => {
+  it("closes when the answer starts a run or a follow-up run, and a retract inside it reaches the run that has the answer", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token, { features: FEATURES });
+    const topicId = await mention(c, w);
+    const { runId } = await d.next((f) => f.t === "run.assign");
+    d.send({ t: "run.accept", runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
+    const post = async (run: string, outputId: string, title: string) => {
+      d.event(run, { type: "output", outputId, op: "card.post", body: { card: quick([w.human.id], { title, ask: { from: [w.human.id], blocking: false } }) } });
+      const posted = await d.next((f) => f.t === "run.output.result" && f.outputId === outputId);
+      expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+      return posted.result.messageId as string;
+    };
+    const answer = (messageId: string, value: string) =>
+      c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), blockId: "pick", event: "choice.submit", value: { value } });
+    const retract = (messageId: string, answerId: string) => c.request({ t: "card.answer.retract", groupId: w.gid, messageId, answerId });
+    const closed = { ok: false, error: { reason: "card.retract_closed" } };
+
+    // The run has the answer but has not taken it: a retract reaches it.
+    const m1 = await post(runId, "p1", "第一张");
+    const a1 = await answer(m1, "yes");
+    expect((await d.next((f) => f.t === "run.answer")).source.answerId).toBe(a1.answerId);
+    expect(await retract(m1, a1.answerId)).toMatchObject({ ok: true });
+    const rx = await d.next((f) => f.t === "run.interaction" && f.event === "answer.retract");
+    expect(rx).toMatchObject({ runId, source: { kind: "card", messageId: m1 }, value: { answerId: a1.answerId } });
+
+    // The run ends without taking the next answer: the follow-up run acts on it.
+    await sleep(1100);
+    const a2 = await answer(m1, "no");
+    await d.next((f) => f.t === "run.answer" && f.source.answerId === a2.answerId);
+    d.done(runId, { status: "succeeded", resultText: "好" });
+    const follow = await d.next((f) => f.t === "run.assign" && f.runId !== runId);
+    expect(await retract(m1, a2.answerId)).toMatchObject(closed);
+
+    // No run: the answer starts one.
+    d.send({ t: "run.accept", runId: follow.runId });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === follow.runId && e.data.run.status === "running");
+    const m2 = await post(follow.runId, "p2", "第二张");
+    d.done(follow.runId, { status: "succeeded", resultText: "好" });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === follow.runId && e.data.run.status === "done");
+    const desk = (env as unknown as BotsEnv).BOT_DESK.get((env as unknown as BotsEnv).BOT_DESK.idFromName(w.bot.id));
+    for (let i = 0; ; i++) {
+      const open = await runInDurableObject(desk, async (_o, state) => state.storage.sql.exec("SELECT 1 FROM runs WHERE ended_at IS NULL").toArray().length);
+      if (open === 0) break;
+      if (i > 200) throw new Error("the run did not end");
+      await sleep(20);
+    }
+    const a3 = await answer(m2, "yes");
+    await d.next((f) => f.t === "run.assign" && f.runId !== runId && f.runId !== follow.runId);
+    expect(await retract(m2, a3.answerId)).toMatchObject(closed);
+    void topicId;
+    for (const x of [c, d]) x.close();
   });
 });
