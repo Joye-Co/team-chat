@@ -2183,6 +2183,22 @@ impl ChatProvider for CoreProvider {
         Some(self.shared.page_signals.subscribe())
     }
 
+    fn file_media(&self, file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
+        self.file_media_inner(file)
+    }
+
+    fn artifact_media(&self, artifact_id: &str, version: u32) -> Option<chat_core::proto::MediaInfo> {
+        self.artifact_media_inner(artifact_id, version)
+    }
+
+    fn file_poster(&self, group_id: &str, topic_id: &str, file: &FileAttachment) -> Option<PathBuf> {
+        self.file_poster_inner(group_id, topic_id, file)
+    }
+
+    fn artifact_poster(&self, artifact_id: &str, version: u32) -> Option<PathBuf> {
+        self.artifact_poster_inner(artifact_id, version)
+    }
+
     // --- end inc-host track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {

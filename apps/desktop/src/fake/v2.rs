@@ -1875,6 +1875,26 @@ impl ChatProvider for V2Samples {
         let _ = tx.send(data);
         rx
     }
+    fn file_poster(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<std::path::PathBuf> {
+        // The sample recording's poster: a frame of the bundled sample clip, made once.
+        static POSTER: std::sync::OnceLock<Option<std::path::PathBuf>> =
+            std::sync::OnceLock::new();
+        if file.file_id != "f-v2-video" {
+            return None;
+        }
+        POSTER
+            .get_or_init(|| {
+                let clip = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src/views/artifacts/preview/clip.mp4");
+                crate::views::media::poster::make(&clip, crate::views::media::MediaKind::Video)
+            })
+            .clone()
+    }
     // --- end inc-host track ---
     fn open_artifact_version(
         &self,

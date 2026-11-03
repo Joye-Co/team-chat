@@ -452,6 +452,13 @@ pub fn artifact_thumb(
         .bg(k.raised)
         .overflow_hidden();
     let Some(t) = services.provider.artifact_thumb(&a.id) else {
+        // inc-host: a non-page 产出 shows its poster or snapshot (video frame, PDF page,
+        // image) when there is one.
+        if let Some(path) = services.provider.artifact_poster(&a.id, a.version) {
+            return frame.child(
+                gpui::StyledImage::object_fit(gpui::img(path), gpui::ObjectFit::Cover).size_full(),
+            );
+        }
         return frame.flex().items_center().justify_center().child(ui::icon(
             Lucide::FileText,
             theme::icon::ROW,

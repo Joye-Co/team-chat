@@ -185,3 +185,102 @@ impl CoreProvider {
         rx
     }
 }
+
+// --- media metadata and posters (R9) ---
+
+use std::{collections::HashMap, path::PathBuf, sync::OnceLock};
+
+use crate::data::{Change, FileAttachment};
+
+/// `FileRef.media` by file id, kept when messages are converted (the view type has no
+/// room for it).
+static FILE_MEDIA: OnceLock<Mutex<HashMap<String, chat_core::proto::MediaInfo>>> =
+    OnceLock::new();
+
+/// Notes the media of a message file the cache converts.
+pub(super) fn note_file_media(f: &chat_core::proto::FileRef) {
+    if let Some(m) = &f.media
+        && !f.file_id.is_empty()
+    {
+        FILE_MEDIA
+            .get_or_init(Default::default)
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(f.file_id.clone(), m.clone());
+    }
+}
+
+impl CoreProvider {
+    pub(super) fn file_media_inner(
+        &self,
+        file: &FileAttachment,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        FILE_MEDIA
+            .get()?
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(&file.file_id)
+            .cloned()
+    }
+
+    pub(super) fn artifact_media_inner(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        let a = self.account()?;
+        let row = a.client.artifact(artifact_id).ok().flatten()?;
+        row.versions
+            .into_iter()
+            .find(|v| v.version == version)?
+            .media
+    }
+
+    pub(super) fn file_poster_inner(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<PathBuf> {
+        // The sender's poster first (receivers compute nothing).
+        if let Some(id) = self
+            .file_media_inner(file)
+            .and_then(|m| m.poster_file_id)
+        {
+            return self.card_image(group_id, topic_id, &id);
+        }
+        let kind = crate::views::media::file_kind(&file.name, &file.mime);
+        let path = self.cached_file(file)?;
+        let this = self.clone();
+        let change = Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        };
+        crate::views::media::poster::poster(&path, kind, move || this.emit(vec![change]))
+    }
+
+    pub(super) fn artifact_poster_inner(&self, artifact_id: &str, version: u32) -> Option<PathBuf> {
+        let a = self.account()?;
+        let row = a.client.artifact(artifact_id).ok().flatten()?;
+        let v = row.versions.iter().find(|v| v.version == version)?;
+        let (g, t) = (row.artifact.group_id.clone(), row.artifact.topic_id.clone());
+        if let Some(id) = v.media.as_ref().and_then(|m| m.poster_file_id.clone()) {
+            return self.card_image(&g, &t, &id);
+        }
+        let mime = v
+            .files
+            .iter()
+            .find(|f| f.path == v.entry)
+            .map(|f| f.mime.clone())
+            .unwrap_or_default();
+        let kind = crate::views::media::file_kind(&v.entry, &mime);
+        let dir = a.client.cached_artifact_version(artifact_id, version)?;
+        let path = dir.join(v.entry.replace('/', std::path::MAIN_SEPARATOR_STR));
+        let this = self.clone();
+        let change = Change::Artifacts {
+            group_id: g,
+            topic_id: t,
+        };
+        crate::views::media::poster::poster(&path, kind, move || this.emit(vec![change]))
+    }
+}

@@ -2211,6 +2211,35 @@ pub trait ChatProvider: Send + Sync + 'static {
         None
     }
 
+    /// The media metadata of a message file (R9), when its sender sent it.
+    fn file_media(&self, _file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
+        None
+    }
+    /// The media metadata of a 产出 version (R9), when its sender sent it.
+    fn artifact_media(
+        &self,
+        _artifact_id: &str,
+        _version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        None
+    }
+    /// The poster of a video or PDF file (the sender's, else made here from the file on
+    /// disk), or the image itself. `None` while it is not there yet.
+    fn file_poster(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<PathBuf> {
+        let kind = crate::views::media::file_kind(&file.name, &file.mime);
+        let path = self.cached_file(file)?;
+        crate::views::media::poster::poster(&path, kind, || {})
+    }
+    /// The poster or snapshot of a non-page 产出 version (lists and thumbnails).
+    fn artifact_poster(&self, _artifact_id: &str, _version: u32) -> Option<PathBuf> {
+        None
+    }
+
     // --- end inc-host track ---
 
     // --- changes ---

@@ -184,7 +184,13 @@ fn media_preview(
             mime: f.mime.clone(),
         })
         .collect();
-    let kind = media::classify(&v.entry, &files);
+    // inc-host (R9): the sender's metadata decides the kind when it came with the version;
+    // receivers compute nothing.
+    let sent = ctx.provider.artifact_media(&r.artifact_id, r.version);
+    let kind = sent
+        .as_ref()
+        .and_then(|m| media::poster::local_kind(m.kind))
+        .unwrap_or_else(|| media::classify(&v.entry, &files));
     let key = if message.id.is_empty() {
         &message.client_msg_id
     } else {

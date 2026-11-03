@@ -20,6 +20,9 @@ pub mod full;
 pub mod inline;
 pub mod native;
 pub mod parts;
+// --- inc-host track ---
+pub mod poster;
+// --- end inc-host track ---
 pub mod preview;
 pub mod state;
 pub mod states;
