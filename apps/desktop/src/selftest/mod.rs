@@ -149,6 +149,15 @@ fn parse(args: &[String]) -> Result<Options, String> {
     Ok(options)
 }
 
+// --- v11/inc-diagrams: scenes that build their own data read the worst-case flag ---
+static WORST_CASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True while the self-test runs with `--worst-case`.
+pub fn worst_case() -> bool {
+    WORST_CASE.load(std::sync::atomic::Ordering::Relaxed)
+}
+// --- end v11/inc-diagrams ---
+
 fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
     let base: Arc<dyn ChatProvider> = match start {
         Start::SignedOut => fake::FakeProvider::signed_out(),
@@ -189,6 +198,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
 }
 
 fn run(options: Options) -> i32 {
+    WORST_CASE.store(options.worst_case, std::sync::atomic::Ordering::Relaxed);
     if let Err(error) = std::fs::create_dir_all(&options.dir) {
         eprintln!("cannot create {}: {error}", options.dir.display());
         return 1;

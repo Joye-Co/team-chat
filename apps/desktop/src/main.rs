@@ -38,6 +38,9 @@ mod characters;
 mod copy;
 #[allow(dead_code)]
 mod data;
+// --- v11/inc-diagrams ---
+mod diagrams;
+// --- end v11/inc-diagrams ---
 mod drafts;
 #[allow(dead_code)]
 mod fake;

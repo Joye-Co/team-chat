@@ -11,7 +11,7 @@ mod source;
 use std::hash::{Hash, Hasher};
 
 use gpui::{
-    App, ElementId, InteractiveElement as _, Overflow, ParentElement as _, SharedString,
+    App, ElementId, InteractiveElement as _, IntoElement, Overflow, ParentElement as _, SharedString,
     StatefulInteractiveElement as _, StyleRefinement, Styled as _, WhiteSpace, Window, div,
     prelude::FluentBuilder as _, px,
 };
@@ -94,7 +94,7 @@ pub fn message_body(
     text: impl Into<SharedString>,
     mentions: &[MentionTarget],
 ) -> TextView {
-    message_body_marked(id, text, mentions, false).0
+    message_body_marked(id, text, mentions, false, None).0
 }
 
 /// [`message_body`] with the `（已编辑）` mark at the end of the last line
@@ -106,6 +106,7 @@ pub fn message_body_marked(
     text: impl Into<SharedString>,
     mentions: &[MentionTarget],
     edited: bool,
+    diagrams: Option<&DiagramContext>,
 ) -> (TextView, bool) {
     let text: SharedString = text.into();
     let source = link_mentions(&normalize_fences(&text), mentions);
@@ -114,6 +115,11 @@ pub fn message_body_marked(
         .flatten();
     let inline = marked.is_some();
     let source = marked.unwrap_or(source);
+    let diagram_plugin = diagrams.map(|d| DiagramPlugin {
+        allowed: crate::diagrams::diagram_fences(&source, d.streaming),
+        message_id: d.message_id.clone(),
+        topic_id: d.topic_id.clone(),
+    });
     let view = TextView::markdown(id, source)
         .selectable(true)
         .text_size(crate::theme::type_scale::MESSAGE.0)
@@ -121,6 +127,7 @@ pub fn message_body_marked(
         .style(body_style())
         .plugin(MentionPlugin)
         .plugin(EditedPlugin)
+        .when_some(diagram_plugin, |view, p| view.plugin(p))
         .code_block_actions(|code, _window, _cx| {
             let text = code.code();
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -151,6 +158,94 @@ fn body_style() -> TextViewStyle {
     code.text.white_space = Some(WhiteSpace::Nowrap);
     TextViewStyle::default().table(table).code_block(code)
 }
+
+// --- v11/inc-diagrams: ```mermaid fences drawn as diagrams (REFS §B1) ---
+/// The message a body belongs to, for diagrams: refs need its id, and a streaming body
+/// shows its fences as code until the final text arrives.
+#[derive(Clone, Debug)]
+pub struct DiagramContext {
+    pub message_id: String,
+    pub topic_id: String,
+    pub streaming: bool,
+}
+
+/// Draws the first [`crate::diagrams::MAX_PER_MESSAGE`] closed ```mermaid fences of a
+/// finished body as diagrams; every other fence stays a code block.
+struct DiagramPlugin {
+    /// Byte offsets of the opening lines of the fences to draw.
+    allowed: Vec<usize>,
+    message_id: String,
+    topic_id: String,
+}
+
+struct DiagramNode {
+    source: String,
+    offset: usize,
+    message_id: String,
+    topic_id: String,
+}
+
+impl MarkdownPlugin for DiagramPlugin {
+    fn is_block(&self) -> bool {
+        true
+    }
+
+    fn name(&self) -> &str {
+        "diagram"
+    }
+
+    fn parse(
+        &self,
+        node: &markdown_ast::Node,
+        cx: &MarkdownParseContext<'_>,
+    ) -> Option<MarkdownNode> {
+        let markdown_ast::Node::Code(code) = node else {
+            return None;
+        };
+        if code.meta.is_some() || !crate::diagrams::is_diagram_info(code.lang.as_deref()?) {
+            return None;
+        }
+        let at = cx.offset() + node.position()?.start.offset;
+        let offset = *self.allowed.iter().find(|a| at >= **a && at <= **a + 3)?;
+        Some(
+            MarkdownNode::new(
+                "diagram",
+                DiagramNode {
+                    source: code.value.clone(),
+                    offset,
+                    message_id: self.message_id.clone(),
+                    topic_id: self.topic_id.clone(),
+                },
+            )
+            .text(code.value.clone()),
+        )
+    }
+
+    fn render(&self, node: &MarkdownNode, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let Some(d) = node.data::<DiagramNode>() else {
+            return div().into_any_element();
+        };
+        let spec = crate::diagrams::view::InlineSpec {
+            id: format!("{}-{}", d.message_id, d.offset).into(),
+            source: d.source.clone(),
+            title: None,
+            caption: None,
+            alt: None,
+            origin: crate::diagrams::DiagramSource {
+                message_id: Some(d.message_id.clone()),
+                topic_id: Some(d.topic_id.clone()),
+                artifact: None,
+                block: crate::diagrams::DiagramBlock::MarkdownFence { offset: d.offset },
+            },
+        };
+        div()
+            .w_full()
+            .py(theme::space::S4)
+            .child(crate::diagrams::view::inline(spec, window, cx))
+            .into_any_element()
+    }
+}
+// --- end v11/inc-diagrams ---
 
 /// Renders the `（已编辑）` link that [`append_edited_mark`] puts after the
 /// last line: `meta` 12/16 `text-3`, 4 pt after the text, on the line's

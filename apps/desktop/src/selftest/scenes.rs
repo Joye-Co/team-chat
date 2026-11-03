@@ -645,6 +645,29 @@ pub const SCENES: &[Scene] = &[
         },
     },
     // --- end v11/media ---
+    // --- v11/inc-diagrams: diagrams in a 话题 (Refs.dc.html §04, §06, §07) ---
+    Scene {
+        name: "diagram-inline",
+        about: "A sequence diagram, a flowchart and a gantt drawn inline in a 话题",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Inline, cx),
+    },
+    Scene {
+        name: "diagram-error",
+        about: "Each diagram error kind, a fifth fence that stays code and a streaming body",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Error, cx),
+    },
+    Scene {
+        name: "diagram-viewer",
+        about: "The diagram viewer zoomed to 250 %",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Viewer, cx),
+    },
+    // --- end v11/inc-diagrams ---
 ];
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
@@ -714,6 +737,11 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         return Some(check);
     }
     // --- end v11/media ---
+    // --- v11/inc-diagrams ---
+    if let Some(check) = diagram_ready(name) {
+        return Some(check);
+    }
+    // --- end v11/inc-diagrams ---
     match name {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
@@ -752,6 +780,21 @@ pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Resu
 }
 
 // --- end web-embed ---
+
+// --- v11/inc-diagrams: diagram scenes wait until every diagram has an answer ---
+
+use crate::diagrams::preview::Scene as DiagramScene;
+
+fn diagram_ready(name: &str) -> Option<fn(&App) -> bool> {
+    match name {
+        "diagram-inline" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Inline, cx)),
+        "diagram-error" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Error, cx)),
+        "diagram-viewer" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx)),
+        _ => None,
+    }
+}
+
+// --- end v11/inc-diagrams ---
 
 // --- v11/media: media scenes wait until their samples are read and pages drew ---
 

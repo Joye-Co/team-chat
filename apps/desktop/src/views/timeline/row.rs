@@ -272,6 +272,15 @@ impl TimelineView {
                 message.body.clone(),
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
                 edited,
+                Some(&markdown::DiagramContext {
+                    message_id: if message.id.is_empty() {
+                        message.client_msg_id.clone()
+                    } else {
+                        message.id.clone()
+                    },
+                    topic_id: message.topic_id.clone(),
+                    streaming: message.streaming,
+                }),
             );
             mark_inline = inline;
             Some(view.w_full().text_color(colors.text_1).into_any_element())
