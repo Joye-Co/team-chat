@@ -5,7 +5,9 @@ Prompt words: "slow" streams 5 deltas 0.3 s apart; "hang" writes fake.pid and sl
 writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped process stops ticking);
 "spawn" starts two tool children like a CLI's shell tool, one in a new session (setsid) and one
 in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
-to children.txt and then hangs like "hang".
+to children.txt and then hangs like "hang";
+"chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
+mode to chatrun-<n>.json.
 The arguments are written to argv.json in the working directory.
 The session file goes to $CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as ->/<id>.jsonl.
 """
@@ -49,6 +51,13 @@ for line in sys.stdin:
             with open("ticks.txt", "a") as t:
                 t.write("%d\n" % i)
             time.sleep(0.1)
+    if "chatrun" in text:
+        sock = os.environ.get("CHAT_RUN_SOCKET", "")
+        mode = oct(os.stat(sock).st_mode & 0o777) if sock and os.path.exists(sock) else "none"
+        open("ops.json", "w").write(json.dumps([{"op": "set", "id": "note", "props": {"text": "key tm_fakefakefakefakefakefake01"}}]))
+        r = subprocess.run(["chat-run", "card", "patch", "--message", "M", "--base-rev", "1", "--ops", "ops.json", "--cause", "EV1"],
+                           capture_output=True, text=True)
+        open("chatrun-%d.json" % n, "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr, "mode": mode, "socket": sock}))
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
     k = 5 if "slow" in text else 2

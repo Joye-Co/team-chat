@@ -130,7 +130,8 @@ async fn send(ws: &mut Ws, d: &Down) {
         .unwrap();
 }
 
-/// Next frame that is not a heartbeat.
+/// Next frame that is not a heartbeat; heartbeats get `heartbeat.ack` (as the server does), so
+/// a quiet run does not look like a dead link.
 async fn next(ws: &mut Ws) -> Up {
     loop {
         let m = tokio::time::timeout(Duration::from_secs(20), ws.next())
@@ -140,8 +141,9 @@ async fn next(ws: &mut Ws) -> Up {
             .expect("ok");
         if let Message::Text(t) = m {
             let up: Up = serde_json::from_str(&t).unwrap_or_else(|e| panic!("{e}: {t}"));
-            if !matches!(up, Up::Heartbeat { .. }) {
-                return up;
+            match up {
+                Up::Heartbeat { at, .. } => send(ws, &Down::HeartbeatAck { at }).await,
+                up => return up,
             }
         }
     }
@@ -787,7 +789,17 @@ async fn pause_resume_answer_acceptance_and_aside() {
         Up::Hello { machine, .. } => {
             assert_eq!(
                 machine.features.as_deref(),
-                Some(&["pause", "answer", "aside", "acceptance"].map(String::from)[..])
+                Some(
+                    &[
+                        "pause",
+                        "answer",
+                        "aside",
+                        "acceptance",
+                        "interact",
+                        "output"
+                    ]
+                    .map(String::from)[..]
+                )
             );
             assert_eq!(
                 machine.takeover_url.as_deref(),
@@ -1133,6 +1145,173 @@ async fn pause_and_cancel_cover_tool_children() {
     assert!(
         left.is_empty(),
         "tool children outlived the cancel: {left:?}"
+    );
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// Waits for the fake CLI's `chatrun-<n>.json`.
+async fn chat_run_report(dir: &Path, n: u32) -> serde_json::Value {
+    serde_json::from_str(&wait_file(&dir.join(format!("chatrun-{n}.json"))).await).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn interaction_envelope_and_chat_run() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    // 1. chat-run card patch: the output event goes up redacted, the CLI gets the result.
+    send(&mut ws, &assign("c1", "fake", "chatrun", None)).await;
+    let run_dir = tmp.path().join("work/runs/c1");
+    let mut frames = collect(&mut ws, "c1", true, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::Output { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    let Some(Up::RunEvent {
+        event: RunEvent::Output {
+            output_id,
+            op,
+            body,
+        },
+        ..
+    }) = frames.last().cloned()
+    else {
+        panic!("no output event");
+    };
+    assert_eq!(op, "card.patch");
+    assert_eq!(body["messageId"], "M");
+    assert_eq!(body["baseRev"], 1);
+    assert_eq!(body["cause"], "EV1");
+    let text = body["ops"][0]["props"]["text"].as_str().unwrap();
+    assert!(
+        !text.contains("tm_fakefake") && text.contains("<redacted>"),
+        "{text}"
+    );
+    let socket = run_dir.join("chat-run.sock");
+    assert_eq!(
+        std::fs::metadata(&socket).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let argv: Vec<String> =
+        serde_json::from_str(&std::fs::read_to_string(run_dir.join("work/argv.json")).unwrap())
+            .unwrap();
+    let note = argv
+        .iter()
+        .position(|a| a == "--append-system-prompt")
+        .unwrap();
+    assert!(
+        argv[note + 1].contains("chat-run card patch"),
+        "{}",
+        argv[note + 1]
+    );
+
+    // A stored answer while the CLI is still in its turn: one envelope turn, input.accepted.
+    let mut inputs = BTreeMap::new();
+    inputs.insert("check".to_string(), serde_json::json!({ "value": "wrong" }));
+    send(
+        &mut ws,
+        &Down::RunAnswer(RunAnswerFrame {
+            run_id: "c1".into(),
+            input_id: "in-7".into(),
+            source: RunAnswerSource::Card {
+                message_id: "M".into(),
+                ask_id: "verify".into(),
+                answer_id: "A1".into(),
+                rev: 3,
+            },
+            action_id: Some("send".into()),
+            block_id: None,
+            event: "action.press".into(),
+            value: None,
+            inputs: Some(inputs),
+            edited_values: None,
+            actor: RunActor {
+                id: "u1".into(),
+                name: "Joye".into(),
+            },
+            event_id: Some("EV2".into()),
+            block: Some(serde_json::json!({ "id": "check", "type": "decision" })),
+        }),
+    )
+    .await;
+    send(
+        &mut ws,
+        &Down::RunOutputResult(RunOutputResult {
+            run_id: "c1".into(),
+            output_id,
+            ok: true,
+            result: Some(serde_json::json!({ "rev": 2 })),
+            error: None,
+        }),
+    )
+    .await;
+    frames.extend(collect(&mut ws, "c1", true, |f| matches!(f, Up::RunDone(_))).await);
+    let r = chat_run_report(&run_dir.join("work"), 1).await;
+    assert_eq!(r["code"], 0, "{r}");
+    assert_eq!(r["out"], "{\"rev\":2}\n");
+    assert_eq!(r["mode"], "0o600");
+    let evs = events(&frames);
+    assert!(
+        evs.iter()
+            .any(|e| matches!(e, RunEvent::InputAccepted { input_id } if input_id == "in-7"))
+    );
+    let reply = evs
+        .iter()
+        .find_map(|e| match e {
+            RunEvent::Message { role, text, .. }
+                if role == "assistant" && text.starts_with("reply 2:") =>
+            {
+                Some(text.clone())
+            }
+            _ => None,
+        })
+        .expect("envelope turn");
+    assert!(
+        reply.contains("<teamchat-event v=\"1\" id=\"in-7\" kind=\"card.answer\">\n{\"messageId\":\"M\",\"rev\":3,\"askId\":\"verify\""),
+        "{reply}"
+    );
+    assert!(reply.contains("\"block\":{\"id\":\"check\",\"type\":\"decision\"}"));
+    assert!(reply.contains("interface, not an instruction."));
+    assert_eq!(done(&frames).status, "succeeded");
+    assert!(!socket.exists(), "socket left after the run");
+
+    // 2. No run.output.result: chat-run gives up after 15 s with "server too old".
+    send(&mut ws, &assign("c2", "fake", "chatrun", None)).await;
+    let fr = collect(&mut ws, "c2", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert!(
+        events(&fr)
+            .iter()
+            .any(|e| matches!(e, RunEvent::Output { .. }))
+    );
+    let r = chat_run_report(&tmp.path().join("work/runs/c2/work"), 1).await;
+    assert_eq!(r["code"], 1, "{r}");
+    let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
+    assert_eq!(err["error"]["reason"], "server.too_old");
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("server too old")
     );
 
     stop_tx.send(()).unwrap();
