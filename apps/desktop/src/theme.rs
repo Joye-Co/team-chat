@@ -22,79 +22,125 @@ use gpui_kit::base::Easing;
 use crate::data::TopicStatus;
 
 // ---------------------------------------------------------------------------
-// Layout (§5)
+// Layout (DESIGN.md v2 §6.1)
 
-/// Sidebar column width (§5.1).
-pub const SIDEBAR_WIDTH: Pixels = px(236.);
-pub const TOPIC_LIST_WIDTH: Pixels = px(300.);
-pub const SIDE_PANEL_WIDTH: Pixels = px(280.);
-/// The topic view never gets narrower than this.
+/// Sidebar column width: 248 (200 to 320).
+pub const SIDEBAR_WIDTH: Pixels = px(248.);
+pub const SIDEBAR_MIN_WIDTH: Pixels = px(200.);
+pub const SIDEBAR_MAX_WIDTH: Pixels = px(320.);
+/// Topic list column width: 320 (280 to 400).
+pub const TOPIC_LIST_WIDTH: Pixels = px(320.);
+pub const TOPIC_LIST_MIN_WIDTH: Pixels = px(280.);
+pub const TOPIC_LIST_MAX_WIDTH: Pixels = px(400.);
+/// Side panel width: 300 (260 to 380). Closed by default.
+pub const SIDE_PANEL_WIDTH: Pixels = px(300.);
+/// The topic view never gets narrower than this (it never clips, U44).
 pub const TOPIC_VIEW_MIN_WIDTH: Pixels = px(480.);
-/// Toolbar band at the top of each column; the traffic lights sit in it.
+/// The header row of every pane (52 pt; all header lines meet).
 pub const TOOLBAR_HEIGHT: Pixels = px(52.);
-/// Below this window width the side panel is hidden: the four columns need
-/// 236 + 300 + 480 + 280 pt (DESIGN.md §5.1 names 1100 pt, where they would clip).
-pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1300.);
+pub const HEADER_HEIGHT: Pixels = TOOLBAR_HEIGHT;
+/// Below this window width the side panel closes: 248 + 320 + 480 + 300 pt
+/// plus the three column hairlines (§6.1 "Narrow window").
+pub const SIDE_PANEL_MIN_WINDOW: Pixels = px(1350.);
 pub const WINDOW_MIN_WIDTH: Pixels = px(1100.);
 pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
 pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
 pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
-/// Traffic light origin inside the 52 pt toolbar band.
-pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(20.), px(18.));
-/// Timeline avatar size.
+/// Traffic light origin inside the 52 pt header band.
+pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(20.), px(20.));
+/// Timeline and topic row avatar size.
 pub const AVATAR_SIZE: Pixels = px(32.);
-/// Sidebar 群 row height.
-pub const ROW_HEIGHT: Pixels = px(28.);
-/// Maximum width of message text (about 40 Han characters).
-pub const MEASURE: Pixels = px(560.);
-/// Hairline width. 0.5 pt is exact on Retina; on 1× it becomes 1 px.
+/// Sidebar 群 and 私聊 row height.
+pub const ROW_HEIGHT: Pixels = px(30.);
+/// Maximum width of message text (about 44 Han characters).
+pub const MEASURE: Pixels = px(620.);
+/// Maximum width of the composer and the topic column content.
+pub const COLUMN_MEASURE: Pixels = px(760.);
+/// One width for cards, files and images in the message column (U29).
+pub const CARD_WIDTH: Pixels = px(520.);
+/// Hairline width. 0.5 pt is exact on Retina; on 1x it becomes 1 px.
 pub const HAIRLINE: Pixels = px(0.5);
 
-/// Spacing scale (§5): 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32. Nothing else.
+/// Control heights (§5).
+pub mod control {
+    use gpui::{Pixels, px};
+    /// Buttons, icon buttons, selects.
+    pub const STANDARD: Pixels = px(28.);
+    /// Inside rows and cards.
+    pub const COMPACT: Pixels = px(24.);
+    /// Login, the primary empty-state action.
+    pub const LARGE: Pixels = px(36.);
+    /// Fields in the sidebar and settings.
+    pub const FIELD: Pixels = px(30.);
+    /// Rows in menus.
+    pub const MENU_ROW: Pixels = px(32.);
+}
+
+/// Avatar sizes (§5).
+pub mod avatar {
+    use gpui::{Pixels, px};
+    pub const MESSAGE: Pixels = px(32.);
+    pub const TOPIC_ROW: Pixels = px(32.);
+    pub const FOOTER: Pixels = px(28.);
+    pub const PANEL: Pixels = px(24.);
+    pub const SIDEBAR: Pixels = px(20.);
+    pub const LIVE_CARD: Pixels = px(40.);
+    pub const WELCOME: Pixels = px(64.);
+}
+
+/// Spacing scale (§5): 2, 4, 6, 8, 10, 12, 16, 20, 24, 32. Nothing else.
 pub mod space {
     use gpui::{Pixels, px};
     pub const S2: Pixels = px(2.);
     pub const S4: Pixels = px(4.);
     pub const S6: Pixels = px(6.);
     pub const S8: Pixels = px(8.);
+    /// Row inner padding and avatar gutters only.
     pub const S10: Pixels = px(10.);
     pub const S12: Pixels = px(12.);
-    pub const S14: Pixels = px(14.);
     pub const S16: Pixels = px(16.);
     pub const S20: Pixels = px(20.);
     pub const S24: Pixels = px(24.);
-    pub const S28: Pixels = px(28.);
     pub const S32: Pixels = px(32.);
 }
 
-/// Radii (§6). Nested radii: inner = outer − padding.
+/// Radii (§5): 4, 6, 8, 12 and full. Concentric rule: outer = inner + padding.
 pub mod radius {
     use gpui::{Pixels, px};
+    /// Inline code, kbd, mentions, the role tag.
     pub const XS: Pixels = px(4.);
-    pub const CHIP: Pixels = px(5.);
-    pub const TILE: Pixels = px(5.5);
+    /// Chips, toolbar icon buttons, group tiles at sidebar size.
     pub const SM: Pixels = px(6.);
-    pub const MD: Pixels = px(7.);
+    /// Rows, buttons, fields, option rows, file tiles.
     pub const ROW: Pixels = px(8.);
-    pub const LG: Pixels = px(10.);
-    pub const COMPOSER: Pixels = px(12.);
-    pub const XL: Pixels = px(14.);
-    /// Bot avatars: 28 % of their size.
-    pub fn bot(size: Pixels) -> Pixels {
-        size * 0.28
-    }
+    pub const MD: Pixels = ROW;
+    /// Cards, composer, popovers, dialogs.
+    pub const LG: Pixels = px(12.);
+    pub const COMPOSER: Pixels = LG;
+    pub const CARD: Pixels = LG;
+    pub const OVERLAY: Pixels = LG;
+    /// Chips (one chip shape, §2.5).
+    pub const CHIP: Pixels = SM;
+    /// Group tiles.
+    pub const TILE: Pixels = SM;
 }
 
-/// Icon sizes (§9).
+/// Icon sizes (§5): 16 toolbar and composer, 14 buttons, fields and rows,
+/// 12 chips and steps.
 pub mod icon {
     use gpui::{Pixels, px};
     pub const TOOLBAR: Pixels = px(16.);
-    pub const TODO: Pixels = px(15.);
-    pub const MENU: Pixels = px(14.);
-    pub const BUTTON: Pixels = px(14.);
-    pub const SMALL: Pixels = px(13.);
-    pub const CHIP: Pixels = px(11.);
-    pub const EMPTY: Pixels = px(20.);
+    pub const ROW: Pixels = px(14.);
+    pub const BUTTON: Pixels = ROW;
+    pub const MENU: Pixels = ROW;
+    pub const TODO: Pixels = ROW;
+    pub const SMALL: Pixels = ROW;
+    pub const CHIP: Pixels = px(12.);
+    pub const STEP: Pixels = CHIP;
+    /// The glyph above a one-line empty state.
+    pub const EMPTY: Pixels = TOOLBAR;
+    /// Every icon button's hit area is at least this square (U48).
+    pub const HIT: Pixels = px(28.);
 }
 
 // ---------------------------------------------------------------------------
