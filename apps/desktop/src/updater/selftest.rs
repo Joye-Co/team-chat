@@ -1,15 +1,23 @@
 //! Live update self-test against a real server (`wrangler dev` or an environment). No
-//! window, no focus, nothing installed: it runs the whole update path on a fake bundle in
-//! a work folder.
+//! window, no focus, nothing installed outside the given folders.
 //!
 //!   desktop --selftest-update <url> --token-file <path> --workdir <dir> --report <path>
+//!   desktop --selftest-update <url> --token-file <path> --install-dir <dir> --report <path>
+//!           [--workdir <dir>]
 //!
-//! The server must have a release whose DMG holds `<product>.app` with this app's bundle
-//! id, the release version as `CFBundleShortVersionString`, and an executable script that
-//! writes "<anything>" to `$UPDATER_TEST_OUT` (see `e2e.sh` next to this file).
+//! Without `--install-dir` it runs the whole update path on a fake bundle in the work
+//! folder. The server must then have a release whose DMG holds `<product>.app` with this
+//! app's bundle id, the release version as `CFBundleShortVersionString`, and an executable
+//! script that writes "<anything>" to `$UPDATER_TEST_OUT` (see `e2e.sh` next to this file).
 //! Steps: check (as version 0.0.1, and as the release version: no update), download with
 //! progress, verify SHA-256, install over a fake 0.0.1 bundle, relaunch after a stand-in
 //! process exits, and finish the update as the new version.
+//!
+//! With `--install-dir` it updates the real `<product>.app` in that folder (a copy of a
+//! released app, never `/Applications`) as the running app would: check as that bundle's
+//! version, download, verify SHA-256, install (the new bundle must satisfy the old
+//! bundle's designated requirement), read the new version and requirement, and remove the
+//! old bundle. It never starts the new app. The work folder defaults to the install folder.
 
 use std::{
     ffi::OsString,
@@ -29,6 +37,7 @@ struct Args {
     url: String,
     token_file: PathBuf,
     workdir: PathBuf,
+    install_dir: Option<PathBuf>,
     report: PathBuf,
 }
 
@@ -41,6 +50,7 @@ pub fn main_if_requested() -> Option<i32> {
     let mut url = None;
     let mut token_file = None;
     let mut workdir = None;
+    let mut install_dir = None;
     let mut report = None;
     let mut it = args.into_iter();
     while let Some(a) = it.next() {
@@ -48,15 +58,17 @@ pub fn main_if_requested() -> Option<i32> {
             "--selftest-update" => url = it.next(),
             "--token-file" => token_file = it.next().map(PathBuf::from),
             "--workdir" => workdir = it.next().map(PathBuf::from),
+            "--install-dir" => install_dir = it.next().map(PathBuf::from),
             "--report" => report = it.next().map(PathBuf::from),
             _ => {}
         }
     }
+    let workdir = workdir.or_else(|| install_dir.clone());
     let (Some(url), Some(token_file), Some(workdir), Some(report)) =
         (url, token_file, workdir, report)
     else {
         eprintln!(
-            "usage: desktop --selftest-update <url> --token-file <path> --workdir <dir> --report <path>"
+            "usage: desktop --selftest-update <url> --token-file <path> (--workdir <dir> | --install-dir <dir>) --report <path>"
         );
         return Some(2);
     };
@@ -64,11 +76,15 @@ pub fn main_if_requested() -> Option<i32> {
         url,
         token_file,
         workdir,
+        install_dir,
         report,
     };
     let started = Instant::now();
     let mut steps = serde_json::Map::new();
-    let result = run(&args, &mut steps);
+    let result = match &args.install_dir {
+        Some(dir) => run_install_dir(&args, dir, &mut steps),
+        None => run(&args, &mut steps),
+    };
     let ok = result.is_ok();
     let json = serde_json::json!({
         "ok": ok,
@@ -90,15 +106,16 @@ fn step(steps: &mut serde_json::Map<String, serde_json::Value>, name: &str, v: s
     steps.insert(name.into(), v);
 }
 
-fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+/// A fresh folder of its own inside the work folder (only this one is removed) and a
+/// client signed in with the token file.
+fn client_in_workdir(args: &Args) -> Result<(PathBuf, chat_core::Client), String> {
     let token = std::fs::read_to_string(&args.token_file)
         .map_err(|e| format!("token file: {e}"))?
         .trim()
         .to_string();
-    // A fresh folder of its own inside the work folder; only this one is removed.
     let workdir = args
         .workdir
-        .join(format!("update-selftest-{}", std::process::id()));
+        .join(format!(".update-selftest-{}", std::process::id()));
     std::fs::create_dir_all(&workdir).map_err(|e| e.to_string())?;
     let workdir = std::fs::canonicalize(&workdir).map_err(|e| e.to_string())?;
     let client = chat_core::Client::new(chat_core::ClientConfig::new(
@@ -107,26 +124,16 @@ fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> R
         workdir.join("data"),
     ))
     .map_err(|e| format!("client: {e}"))?;
+    Ok((workdir, client))
+}
 
-    // 1. Check as an old version, then as the release version.
-    let info = futures::executor::block_on(client.check_update("0.0.1"))
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("check: {e}"))?
-        .ok_or("check: no update offered to 0.0.1")?;
-    step(
-        steps,
-        "check",
-        serde_json::json!({ "version": info.version, "size": info.size }),
-    );
-    let same = futures::executor::block_on(client.check_update(&info.version))
-        .map_err(|e| e.to_string())?
-        .map_err(|e| format!("check same: {e}"))?;
-    if same.is_some() {
-        return Err("check: an update was offered to the release version itself".into());
-    }
-    step(steps, "check_same_version", serde_json::json!("none"));
-
-    // 2. Download with progress, verify.
+/// Downloads the update with progress into the work folder and checks its SHA-256.
+fn download_verified(
+    client: &chat_core::Client,
+    info: &chat_core::proto::UpdateInfo,
+    workdir: &Path,
+    steps: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<PathBuf, String> {
     let calls = Arc::new(AtomicU64::new(0));
     let last = Arc::new(AtomicU64::new(0));
     let (c, l) = (calls.clone(), last.clone());
@@ -155,6 +162,103 @@ fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> R
             "sha256_ok": true,
         }),
     );
+    Ok(path)
+}
+
+/// Updates the real bundle in `dir` the way the running app updates itself.
+fn run_install_dir(
+    args: &Args,
+    dir: &Path,
+    steps: &mut serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    let bundle = std::fs::canonicalize(dir)
+        .map_err(|e| format!("install dir: {e}"))?
+        .join(format!("{}.app", env!("PRODUCT_NAME")));
+    if !bundle.is_dir() {
+        return Err(format!("install dir: no {}", bundle.display()));
+    }
+    let current = install::bundle_version(&bundle).map_err(|e| format!("bundle: {e}"))?;
+    let required = install::designated_requirement(&bundle);
+    step(
+        steps,
+        "before",
+        serde_json::json!({ "version": current, "requirement": required }),
+    );
+    let (workdir, client) = client_in_workdir(args)?;
+    let result = (|| {
+        let info = futures::executor::block_on(client.check_update(&current))
+            .map_err(|e| e.to_string())?
+            .map_err(|e| format!("check: {e}"))?
+            .ok_or_else(|| format!("check: no update offered to {current}"))?;
+        step(
+            steps,
+            "check",
+            serde_json::json!({ "version": info.version, "size": info.size }),
+        );
+        let path = download_verified(&client, &info, &workdir, steps)?;
+        let plan = install::Plan {
+            bundle: bundle.clone(),
+            dmg: path,
+            version: info.version.clone(),
+            sha256: info.sha256.clone(),
+            bundle_id: env!("PRODUCT_BUNDLE_ID").into(),
+            app_name: Some(format!("{}.app", env!("PRODUCT_NAME"))),
+            marker: workdir.join("data/updates/pending.json"),
+        };
+        let marker = install::install(&plan).map_err(|e| format!("install: {e}"))?;
+        let version = install::bundle_version(&bundle).map_err(|e| format!("installed: {e}"))?;
+        let requirement = install::designated_requirement(&bundle);
+        step(
+            steps,
+            "after",
+            serde_json::json!({ "version": version, "requirement": requirement }),
+        );
+        if version != info.version {
+            return Err(format!(
+                "installed: version {version}, expected {}",
+                info.version
+            ));
+        }
+        if required.is_some() && requirement != required {
+            return Err("installed: the designated requirement changed".into());
+        }
+        if let Some(req) = &required {
+            install::check_signature(&bundle, req).map_err(|e| format!("installed: {e}"))?;
+        }
+        let finish = install::finish_on_launch(&plan.marker, Some(&bundle), &info.version);
+        if finish != install::Finish::RemovedOld || marker.old.exists() {
+            return Err(format!("finish: {finish:?}"));
+        }
+        step(steps, "finish", serde_json::json!("old bundle removed"));
+        Ok(())
+    })();
+    let _ = install::remove_all(&workdir);
+    result
+}
+
+fn run(args: &Args, steps: &mut serde_json::Map<String, serde_json::Value>) -> Result<(), String> {
+    let (workdir, client) = client_in_workdir(args)?;
+
+    // 1. Check as an old version, then as the release version.
+    let info = futures::executor::block_on(client.check_update("0.0.1"))
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("check: {e}"))?
+        .ok_or("check: no update offered to 0.0.1")?;
+    step(
+        steps,
+        "check",
+        serde_json::json!({ "version": info.version, "size": info.size }),
+    );
+    let same = futures::executor::block_on(client.check_update(&info.version))
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("check same: {e}"))?;
+    if same.is_some() {
+        return Err("check: an update was offered to the release version itself".into());
+    }
+    step(steps, "check_same_version", serde_json::json!("none"));
+
+    // 2. Download with progress, verify.
+    let path = download_verified(&client, &info, &workdir, steps)?;
 
     // 3. Install over a fake old bundle.
     let apps = workdir.join("Applications");

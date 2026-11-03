@@ -292,6 +292,14 @@ pub fn check_signature(app: &Path, requirement: &str) -> Result<(), InstallError
     }
 }
 
+/// The `CFBundleShortVersionString` of a bundle.
+pub fn bundle_version(app: &Path) -> Result<String, InstallError> {
+    plist_value(
+        &app.join("Contents/Info.plist"),
+        "CFBundleShortVersionString",
+    )
+}
+
 fn plist_value(plist: &Path, key: &str) -> Result<String, InstallError> {
     let out = Command::new("/usr/bin/plutil")
         .args(["-extract", key, "raw", "-o", "-"])
