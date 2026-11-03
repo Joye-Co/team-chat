@@ -25,6 +25,7 @@ Build: `. "$HOME/.cargo/env"; export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6; c
 | `desktop` | Opens the app with the fake provider (until the chat-core provider lands). |
 | `desktop --signed-out` | Starts at the login view. Any code signs in except `0000-0000` (and the legacy `WRONG-CODE-0000`). |
 | `desktop --screenshot <dir> [--theme light\|dark\|both] [--scenes a,b] [--worst-case] [--size WxH]` | Captures each scene window in each theme to `<dir>/<scene>-<theme>[-worst].png` plus `screenshots.json`, without focus, and exits. `desktop --list-scenes` lists scenes; add one in `src/selftest/scenes.rs`. |
+| `desktop --selftest-live <url> --token-file <path> --report <path> [--read-only]` | Signs in to a real server with the token, starts a topic and sends a message, then restores the session. `--read-only` only connects and catches up every group (no window, no writes): safe against production. |
 | `desktop --selftest-smoke --report <path> [--hold-ms <n>]` | Opens the window on the 10,000-message topic without focus or a Dock icon, writes JSON (`ok`, `first_frame_ms`, counts) and exits (0 = ok). |
 
 ## Module map

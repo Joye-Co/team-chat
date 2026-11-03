@@ -13,7 +13,10 @@ ones first (commands in the step).
 
 ## 1. Sign in on your Mac
 
-1. Install the app (the 1.0.0 DMG, when it is released). Its default server is production.
+1. Install the app: 1.0.0 is released
+   (<https://github.com/Joye-Co/team-chat/releases/tag/v1.0.0>; `gh release download v1.0.0
+   --repo Joye-Co/team-chat --pattern 'TeamChat-*.dmg*'`). Open the DMG, drag the app to
+   Applications, and do the first open once (section 8.1). Its default server is production.
 2. Show your code once, in your own terminal: `cat ~/.config/team-chat/production/joye-signin-code`.
 3. Type the 8 characters into the code boxes of the app and press 加入. The code is single use;
    it gives your existing member `Joye` (owner) a token for this Mac.
@@ -38,11 +41,13 @@ later). For intern `n`:
   `https://chat-api-prod.huangdeshiou.workers.dev/download#code=<code>`. The code is in the
   fragment, so it is not sent in the URL to the server or stored in logs.
 
-1. Wait until the 1.0.0 release is uploaded to production (`GET /v1/updates/latest` answers 200
-   for a member token). Before that, the link opens the page but has no DMG to give.
+1. The 1.0.0 DMG is uploaded to production, so the links give it. (To check again:
+   `GET /v1/updates/latest` with a member token answers 200 with version 1.0.0.)
 2. Send each intern their own link and code in a private message (not in a group). One code per
    person; a code works once.
-3. The intern opens the link, downloads the DMG, installs the app, and types the code.
+3. The intern opens the link, downloads the DMG, installs the app, and types the code. Point
+   them to [ONBOARDING.zh.md](ONBOARDING.zh.md): it covers the first open, the sign-in and
+   the daily use.
 4. Check: `bun server/scripts/admin.ts members --env production` lists the intern as `human member`.
 5. Delete the files you sent.
 
@@ -190,3 +195,38 @@ ROSTER.md). Group membership is changed in the app or with `POST /v1/groups/:id/
   (dashboard, Notifications) for Workers errors of `chat-api-prod` and `chat-monitor`.
 - **GitHub Actions minutes**: the repository is private, so CI uses the org's included minutes.
   Check usage in the Joye-Co org settings (Billing) and set a spending limit.
+
+## 8. The app
+
+### 8.1 First open on each Mac
+
+The app is signed with the team's own certificate, not by Apple, so macOS blocks the first
+open. Once per Mac: open the app, press 完成 (not 移到废纸篓), then System Settings > 隐私与安全性
+> 安全性 > 仍要打开, press 仍要打开 again and confirm with Touch ID or the login password.
+In-app updates do not ask again.
+
+If macOS asks for the login password because the app wants to use the Keychain item
+`co.joye.teamchat` (for example after updating from a 0.x build), type it and press 始终允许.
+
+### 8.2 Back up the signing certificate
+
+`~/.config/team-chat/signing/key.pem` and `cert.pem` on this Mac sign every release (valid until
+2036). Copy both into your password manager or another private place now. If they are lost, a
+new certificate gives the app a new designated requirement: installed apps then refuse the
+in-app update, and everybody installs the next DMG by hand once (and allows the Keychain
+prompt). Never commit or send them.
+
+### 8.3 Later releases
+
+From the repository root, on a clean checkout of `origin/main`:
+
+```sh
+scripts/release.sh <version> --dry-run
+scripts/release.sh <version> --env production --notes docs/releases/<version>.md
+scripts/release.sh <version> --env staging --upload-only
+(cd server && DEPLOY_VERSION=<version> bun run deploy:production)   # only when the server changed
+```
+
+The app checks every 6 hours (and at start) and then shows 有新版本. To pull a bad release
+back: `bun server/scripts/admin.ts withdraw-release --env production --version <version>` (see
+[RUNBOOK.md](RUNBOOK.md)); the GitHub Release stays.
