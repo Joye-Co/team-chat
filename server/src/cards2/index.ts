@@ -16,6 +16,7 @@ import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc } f
 import { ulid } from "../core/ids";
 import { type CardEventArgs, cardEvent, cardLock, loadCard, writeCardUpdate } from "./events";
 import { closeRetractWindow } from "./delivery";
+import { pageCauseOf, pageEventRow } from "../files/page-events";
 import { checkCause, resolved } from "./hooks";
 import { applyPatch } from "./patch";
 import { shownCause, viewMessage } from "./privacy";
@@ -206,7 +207,15 @@ registerRoomRpc(CARD_RESOLVE_RPC, (room, actor, args) => {
   const a = member(room, actor);
   const f = args as { eventId: string; result: "ignored" | "failed"; note?: string };
   const r = eventRow(room.sql, f.eventId);
-  if (!r) throw new ApiError("not_found", "event not found");
+  // files area (review F2): a page event, resolved by the member that received it.
+  if (!r) {
+    const page = pageEventRow(room.sql, f.eventId);
+    if (!page) throw new ApiError("not_found", "event not found");
+    if (page.bot_id !== a.id) throw new ApiError("forbidden", "only the receiver resolves its events");
+    if (page.resolved) throw new ApiError("conflict", "the event was resolved");
+    resolved(room, pageCauseOf(page), f.result, undefined, f.note);
+    return undefined;
+  }
   if (r.author_id !== a.id) throw new ApiError("forbidden", "only the card's author resolves its events");
   if (r.resolved) throw new ApiError("conflict", "the event was resolved");
   resolved(room, { eventId: r.event_id, actorId: r.actor_id, at: r.at, event: r.event }, f.result, r.message_id, f.note);

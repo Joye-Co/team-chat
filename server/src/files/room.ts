@@ -110,6 +110,15 @@ registerRoomMigration({
   `,
 });
 
+// 1.1: a page event's name (its `Cause.event`) and how it was resolved, once (INTERACT §4.3).
+registerRoomMigration({
+  name: "files-5-page-resolve",
+  up: `
+    ALTER TABLE page_events ADD COLUMN name TEXT;
+    ALTER TABLE page_events ADD COLUMN resolved TEXT;
+  `,
+});
+
 // Files that only deleted messages used, waiting for D1 and R2 to forget them (see below).
 registerRoomMigration({
   name: "files-2",

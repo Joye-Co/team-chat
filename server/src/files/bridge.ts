@@ -28,6 +28,7 @@ import { ulid } from "../core/ids";
 import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc, registerRoute } from "../core/registry";
 import { deliverPageEvent, INTERACT_FEATURE } from "../bots/interact";
+import { markPageResolved } from "./page-events";
 import { artifactRow, checkMedia, toVersion, type VersionRow, versionRow } from "./room";
 import { MAX_PATTERN_INPUT, patternProblem, patternTest } from "./pattern";
 import { actorOf } from "./store";
@@ -230,8 +231,8 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
   const eventId = ulid(now);
   room.sql.exec("DELETE FROM page_events WHERE at < ?", now - KEEP_EVENTS_MS);
   room.sql.exec(
-    `INSERT INTO page_events (event_id, artifact_id, version, actor_id, bot_id, kind, client_event_id, ack, at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO page_events (event_id, artifact_id, version, actor_id, bot_id, kind, client_event_id, ack, at, name)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     eventId,
     e.artifactId,
     e.version,
@@ -241,6 +242,7 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
     e.clientEventId ?? null,
     JSON.stringify({ eventId, expect: { by: v.created_by, mode: "none" } } satisfies PageEventAck),
     now,
+    e.name,
   );
   const expect = await deliverPageEvent(room, v.created_by, {
     eventId,
@@ -300,11 +302,19 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
   if (d.clientPushId && cur?.push_id === d.clientPushId) return { dataRev: rev, duplicate: true };
   if (d.baseDataRev !== undefined && d.baseDataRev !== rev) throw new ApiError("conflict", "the data changed", "artifact.stale_data");
   const now = Date.now();
+  let causeActor: string | undefined;
   if (d.cause !== undefined) {
     const cause = room.sql
-      .exec("SELECT 1 FROM page_events WHERE event_id = ? AND artifact_id = ? AND version = ? AND at > ?", d.cause, d.artifactId, d.version, now - CAUSE_WINDOW_MS)
+      .exec<{ actor_id: string }>(
+        "SELECT actor_id FROM page_events WHERE event_id = ? AND artifact_id = ? AND version = ? AND at > ?",
+        d.cause,
+        d.artifactId,
+        d.version,
+        now - CAUSE_WINDOW_MS,
+      )
       .toArray()[0];
     if (!cause) throw new ApiError("invalid", "cause is not a recent event of this page", "interact.bad_cause");
+    causeActor = cause.actor_id;
   }
   if (!takeRate(`data:${room.groupId}:${d.artifactId}:${d.version}`, () => [new TokenBucket(DATA_RATE.rate, DATA_RATE.burst)])) {
     throw new ApiError("rate_limited", "too many data pushes for this version");
@@ -327,6 +337,11 @@ registerRoomRpc(ARTIFACT_DATA_RPC, (room, actor, args): { dataRev: number; dupli
   if (bytes <= MAX_ARTIFACT_DATA_INLINE_BYTES) event.data = d.data;
   if (d.cause !== undefined) event.cause = d.cause;
   room.broadcast(featureTransient(INTERACT_FEATURE, event));
+  // A push that names the event answers it: the emitter's pending state clears (INTERACT §4.3).
+  if (d.cause !== undefined && causeActor) {
+    markPageResolved(room.sql, d.cause, "replied");
+    room.broadcast(featureTransient(INTERACT_FEATURE, { type: "interaction.resolved", groupId: room.groupId, eventId: d.cause, result: "replied" }), { to: [causeActor] });
+  }
   room.waitUntil(
     auditOf(room, a, { action: "artifact.data", target: d.artifactId, details: { groupId: room.groupId, version: d.version, dataRev: next, bytes } }, now)
       .run()
@@ -383,7 +398,7 @@ registerRoomRpc(ARTIFACT_REPLY_RPC, async (room, actor, args): Promise<{ duplica
   }
   const now = Date.now();
   if (now - ev.at > REPLY_WINDOW_MS) throw new ApiError("conflict", "the page stopped waiting", "artifact.reply_closed");
-  room.sql.exec("UPDATE page_events SET reply_hash = ?, replied_at = ? WHERE event_id = ?", hash, now, ev.event_id);
+  room.sql.exec("UPDATE page_events SET reply_hash = ?, replied_at = ?, resolved = coalesce(resolved, 'replied') WHERE event_id = ?", hash, now, ev.event_id);
   const reply: Record<string, unknown> = { type: "artifact.reply", groupId: room.groupId, eventId: ev.event_id, ok: r.ok };
   if (r.ok && r.payload !== undefined) reply.payload = r.payload;
   if (!r.ok) reply.error = r.error;

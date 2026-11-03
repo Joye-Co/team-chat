@@ -105,6 +105,53 @@ describe("TcSchema pattern (SEC-4)", () => {
   });
 });
 
+describe("page emit events are resolved like card events (F2)", () => {
+  it("take interaction.resolve, send.causeEventId and artifact.data cause for a page event, once, from its receiver only", async () => {
+    const w = await pageWorld();
+    const emit = () => w.co.ok({ t: "artifact.event", groupId: w.gid, artifactId: w.artifactId, version: 1, name: "report.problem", payload: { channel: "douyin" } });
+    const resolvedFor = (eventId: string) => w.co.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === eventId);
+
+    // interaction.resolve: the receiver only, once.
+    const e1 = await emit();
+    expect(await w.co.request({ t: "interaction.resolve", groupId: w.gid, eventId: e1.eventId, result: "ignored" })).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    expect(await w.cb.request({ t: "interaction.resolve", groupId: w.gid, eventId: e1.eventId, result: "ignored", note: "没有这个渠道" })).toMatchObject({ ok: true });
+    expect((await resolvedFor(e1.eventId)).event).toMatchObject({ result: "ignored", note: "没有这个渠道" });
+    expect(await w.cb.request({ t: "interaction.resolve", groupId: w.gid, eventId: e1.eventId, result: "failed" })).toMatchObject({ ok: false, error: { code: "conflict" } });
+
+    // send with causeEventId: the message stores the cause, and the emitter's pending clears.
+    const e2 = await emit();
+    const sent = await w.cb.ok({ t: "send", groupId: w.gid, topicId: w.topicId, clientMsgId: clientMsgId(), body: "看板里抖音的数改好了", causeEventId: e2.eventId });
+    expect(sent.message.cause).toMatchObject({ eventId: e2.eventId, actorId: w.owner.id, event: "report.problem" });
+    expect((await resolvedFor(e2.eventId)).event).toMatchObject({ result: "posted", messageId: sent.message.id });
+
+    // A card patch may name it too.
+    const card: CardV2 = { v: 2, rev: 1, intent: "info", title: "10 月数据月报", fallback: "10 月数据", blocks: [{ type: "text", id: "t", text: "抖音 6" }] } as CardV2;
+    const posted = await w.cb.ok({ t: "send", groupId: w.gid, topicId: w.topicId, clientMsgId: clientMsgId(), body: "", cardV2: card });
+    const e3 = await emit();
+    const patched = await w.cb.ok({ t: "card.patch", groupId: w.gid, messageId: posted.message.id, baseRev: 1, cause: e3.eventId, ops: [{ op: "card", props: { title: "10 月数据月报（改）" } }] });
+    expect(patched).toMatchObject({ rev: 2 });
+    expect((await resolvedFor(e3.eventId)).event).toMatchObject({ result: "patched", messageId: posted.message.id });
+
+    // A data push that names it clears it with "replied".
+    const e4 = await emit();
+    expect(await w.cb.ok({ t: "artifact.data", groupId: w.gid, artifactId: w.artifactId, version: 1, data: { douyin: 7 }, cause: e4.eventId })).toMatchObject({ dataRev: 1 });
+    expect((await resolvedFor(e4.eventId)).event).toMatchObject({ result: "replied" });
+    // The event was resolved by the push.
+    expect(await w.cb.request({ t: "interaction.resolve", groupId: w.gid, eventId: e4.eventId, result: "ignored" })).toMatchObject({ ok: false, error: { code: "conflict" } });
+
+    // Another member cannot name the event as its cause.
+    const other = await createMember({ kind: "bot", name: "other" });
+    await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: other.id } });
+    const { c: cOther } = await Client.connect(other.token, INTERACT);
+    const e5 = await emit();
+    expect(await cOther.request({ t: "send", groupId: w.gid, topicId: w.topicId, clientMsgId: clientMsgId(), body: "x", causeEventId: e5.eventId })).toMatchObject({
+      ok: false,
+      error: { code: "invalid", reason: "interact.bad_cause" },
+    });
+    for (const x of [w.co, w.cb, cOther]) x.close();
+  });
+});
+
 describe("a page event row exists before delivery (F3)", () => {
   it("take a reply and a repeat that come while the room still waits for the receiver's presence", async () => {
     const w = await pageWorld();

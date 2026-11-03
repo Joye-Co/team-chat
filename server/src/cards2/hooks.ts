@@ -5,6 +5,7 @@ import type { BlockRef, BlockRefInput, CardState, CardV2, Cause, Message } from 
 import { MAX_CARD_V2_REVS } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import { type RoomContext, registerMessageWriteHook, registerRoomAlarm } from "../core/registry";
+import { markPageResolved, pageCause } from "../files/page-events";
 import { cardLock, writeCardUpdate } from "./events";
 import { markPrivate, shownCause } from "./privacy";
 import { checkBodyLength, clearRefsTo, indexRefs, resolveRefs, withPrefix, withoutPrefix } from "./refs";
@@ -17,6 +18,11 @@ import { CAUSE_MAX_AGE_MS, causeOf, eventRow, extOf, messageRow } from "./store"
  */
 export function checkCause(room: RoomContext, eventId: string, authorId: string, messageId?: string): Cause {
   const r = eventRow(room.sql, eventId);
+  // files area (review F2): a page event of the author's own 产出 version is a cause too.
+  if (!r) {
+    const page = pageCause(room.sql, eventId, authorId);
+    if (page) return page;
+  }
   if (!r || r.author_id !== authorId || (messageId !== undefined && r.message_id !== messageId) || r.at < Date.now() - CAUSE_MAX_AGE_MS) {
     throw new ApiError("invalid", "cause is not a recent event of this card", "interact.bad_cause");
   }
@@ -26,6 +32,8 @@ export function checkCause(room: RoomContext, eventId: string, authorId: string,
 /** Sends `interaction.resolved` to the emitter's connections and marks the event resolved. */
 export function resolved(room: RoomContext, cause: Cause, result: "patched" | "posted" | "replied" | "ignored" | "failed", messageId?: string, note?: string): void {
   room.sql.exec("UPDATE card_events SET resolved = ? WHERE event_id = ?", result, cause.eventId);
+  // files area (review F2): or the page event.
+  markPageResolved(room.sql, cause.eventId, result);
   const event: Record<string, unknown> = { type: "interaction.resolved", groupId: room.groupId, eventId: cause.eventId, result };
   if (messageId) event.messageId = messageId;
   if (note) event.note = note;

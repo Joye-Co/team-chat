@@ -1206,6 +1206,13 @@ send += { causeEventId?, blockRefs? }      edit += { baseRev?, causeEventId? }
 transient interaction.resolved: { groupId, eventId, result: "ignored"|"failed"|"patched"|"posted"|"replied", messageId?, note? }
 ```
 
+A cause (`card.patch.cause`, `send`/`edit` `causeEventId`) and `interaction.resolve` name an
+event of the last 30 minutes that the sender received: a card event on one of its cards, or a
+page event of one of its 产出 versions (`Cause.event` is the page event's name; the card's
+`messageId` is not checked for a page event). `interaction.resolve` is accepted once per event
+(`conflict` after that). `artifact.data` with `cause` and `artifact.reply` also send
+`interaction.resolved {result: "replied"}` to the emitter and mark the event resolved.
+
 ### 产出 bridge
 
 ```ts
