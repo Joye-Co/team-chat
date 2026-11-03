@@ -57,8 +57,8 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
       const t = data.topic as Obj;
       sql.exec(
         `INSERT INTO topics (id, title, status, created_by, created_at, root_message_id, last_seq, message_count,
-                             waiting_on, owner_id, last_message_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)`,
+                             waiting_on, owner_id, last_message_at, context)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?)`,
         t.id as string,
         t.title as string,
         (t.status as string) ?? "open",
@@ -69,6 +69,7 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
         JSON.stringify(Array.isArray(t.waitingOn) ? t.waitingOn : []),
         (t.ownerId as string | null | undefined) ?? (t.createdBy as string),
         (t.lastMessageAt as number | undefined) ?? null,
+        t.contextOf ? JSON.stringify(t.contextOf) : null,
       );
       return;
     }
@@ -96,6 +97,7 @@ export function replayCoreEvent(e: ArchivedEvent, sql: SqlStorage): void {
         if (data.ownerId && data.ownerId !== row.owner_id) setFollowing(sql, data.ownerId as string, topicId, true);
       }
       if (typeof data.lastMessageAt === "number") set("last_message_at", data.lastMessageAt);
+      if (data.contextOf && typeof data.contextOf === "object") set("context", JSON.stringify(data.contextOf));
       // The room writes a topic.updated with only topicId when a delete leaves no message.
       if (Object.keys(data).length === 1) set("last_message_at", null);
       sql.exec(`UPDATE topics SET ${sets.join(", ")} WHERE id = ?`, ...args, topicId);

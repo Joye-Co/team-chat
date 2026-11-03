@@ -270,8 +270,10 @@ export class MemberGateway extends DurableObject<Env> {
     if (!schema) return { ok: false, rid, error: { code: "invalid", message: `unknown frame type ${t}` } };
     const result = schema.safeParse(raw);
     if (!result.success) {
-      if (obj.card !== undefined && new TextEncoder().encode(JSON.stringify(obj.card)).byteLength > MAX_CARD_BYTES) {
-        return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };
+      for (const c of [obj.card, obj.cardV2]) {
+        if (c !== undefined && new TextEncoder().encode(JSON.stringify(c)).byteLength > MAX_CARD_BYTES) {
+          return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };
+        }
       }
       const issue = result.error.issues[0];
       const where = issue?.path.join(".") || "(root)";

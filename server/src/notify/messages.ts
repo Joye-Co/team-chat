@@ -1,6 +1,6 @@
 // HTTP send for bots and scripts: POST /v1/groups/:id/messages runs the `send` path of the
 // group room (same checks, idempotency, events and fan-out) and is audited.
-import { MAX_CARD_BYTES, PostMessageRequest, type SendResult, utf8Bytes } from "@chat/protocol";
+import { MAX_CARD_BYTES, MAX_CARD_V2_BYTES, PostMessageRequest, type SendResult, utf8Bytes } from "@chat/protocol";
 import { z } from "zod";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
@@ -15,9 +15,12 @@ const POST_BODY_LIMIT = 512 * 1024;
 
 /** Throws `too_large` when a raw frame or body carries a card above 64 KiB. */
 export function checkCardSize(raw: unknown): void {
-  if (!raw || typeof raw !== "object" || !("card" in raw)) return;
-  const card = (raw as { card: unknown }).card;
+  if (!raw || typeof raw !== "object") return;
+  const { card, cardV2 } = raw as { card?: unknown; cardV2?: unknown };
   if (card !== undefined && utf8Bytes(JSON.stringify(card)) > MAX_CARD_BYTES) {
+    throw new ApiError("too_large", "card exceeds 64 KiB");
+  }
+  if (cardV2 !== undefined && utf8Bytes(JSON.stringify(cardV2)) > MAX_CARD_V2_BYTES) {
     throw new ApiError("too_large", "card exceeds 64 KiB");
   }
 }
