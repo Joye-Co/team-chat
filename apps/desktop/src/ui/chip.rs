@@ -9,7 +9,7 @@
 //! | [`CountBadge`] | 20 pt pill | red for @ only; neutral `count-solid` for unread; grey for tabs |
 
 use gpui::{
-    App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
+    App, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -359,9 +359,59 @@ impl JobTag {
     }
 }
 
+/// Widest text of a [`JobTag`].
+const JOB_TAG_TEXT_MAX: Pixels = px(120.);
+
+/// `label` cut with `…` to fit `max` at the meta size, measured with the window's font, so a
+/// box that holds it ends at the ellipsis.
+fn cut_to(label: &str, max: Pixels, window: &Window) -> SharedString {
+    let style = window.text_style();
+    let font = style.font();
+    let width = |s: &str| -> Pixels {
+        let run = gpui::TextRun {
+            len: s.len(),
+            font: font.clone(),
+            color: style.color,
+            background_color: None,
+            underline: None,
+            strikethrough: None,
+        };
+        window
+            .text_system()
+            .shape_line(
+                SharedString::from(s.to_string()),
+                theme::type_scale::META.0,
+                &[run],
+                None,
+            )
+            .width
+    };
+    if width(label) <= max {
+        return SharedString::from(label.to_string());
+    }
+    let chars: Vec<char> = label.chars().collect();
+    let cut = |n: usize| -> String {
+        let head: String = chars[..n].iter().collect();
+        format!("{}…", head.trim_end())
+    };
+    let (mut lo, mut hi) = (0, chars.len());
+    while lo < hi {
+        let mid = (lo + hi).div_ceil(2);
+        if width(&cut(mid)) <= max {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    SharedString::from(cut(lo))
+}
+
 impl RenderOnce for JobTag {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
+        // The chip holds its text: a long role is cut to the widest size here, so the
+        // ellipsis ends at the padding with no empty space after it.
+        let text = cut_to(&self.label, JOB_TAG_TEXT_MAX, window);
         div()
             .flex_none()
             .h(theme::TAG_HEIGHT)
@@ -372,7 +422,7 @@ impl RenderOnce for JobTag {
             .items_center()
             .t_meta()
             .text_color(k.ink_2)
-            .child(div().one_line().max_w(px(120.)).child(self.label))
+            .child(div().whitespace_nowrap().child(text))
     }
 }
 
