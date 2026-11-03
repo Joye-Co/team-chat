@@ -24,7 +24,7 @@ mod header;
 mod live;
 mod menu;
 mod model;
-mod plan;
+pub mod plan;
 pub mod preview;
 mod row;
 pub mod selftest;

@@ -33,6 +33,7 @@ use crate::{
     views::{
         process::{ProcessView, stop_run},
         shell::{PaneView, clock, member_name, panes::watch, stub_body},
+        timeline::plan,
     },
 };
 
@@ -915,7 +916,6 @@ impl LivePane {
                 })
             }));
         let now = run.ended_at.unwrap_or_else(now_ms);
-        let minutes = |ms: i64| ((ms.max(0) + 30_000) / 60_000).max(1).to_string();
         let rows = run.plan.iter().enumerate().map(|(i, p)| {
             let started = times.get(i).copied();
             let next = times.get(i + 1).copied();
@@ -971,10 +971,10 @@ impl LivePane {
                                         .child(p.text.clone()),
                                 )
                                 .children(started.map(|s| {
-                                    div().t_meta().text_color(k.ink_2).child(mono_fill(
-                                        c::LIVE_PLAN_FOR,
-                                        &[("n", minutes(now - s), true)],
-                                    ))
+                                    div()
+                                        .t_meta()
+                                        .text_color(k.ink_2)
+                                        .child(span_fill(plan::FOR, now - s))
                                 })),
                         )
                         .when(held, |d| {
@@ -1001,7 +1001,7 @@ impl LivePane {
                             .into_any_element()
                     };
                     let took = done
-                        .then(|| started.zip(next).map(|(a, b)| minutes(b - a)))
+                        .then(|| started.zip(next).map(|(a, b)| b - a))
                         .flatten();
                     div()
                         .h(PLAN_ROW)
@@ -1031,7 +1031,7 @@ impl LivePane {
                             div()
                                 .t_meta()
                                 .text_color(k.ink_3)
-                                .child(mono_fill(c::LIVE_PLAN_TOOK, &[("n", n, true)]))
+                                .child(span_fill(plan::TOOK, n))
                         }))
                         .into_any_element()
                 }
@@ -1274,23 +1274,25 @@ fn mono_fill(template: &str, values: &[(&str, String, bool)]) -> gpui::Div {
         .children(parts)
 }
 
+/// A span in `copy` with its numbers in mono (the timeline's formatter).
+fn span_fill(copy: plan::SpanCopy, ms: i64) -> gpui::Div {
+    let (template, values) = plan::Span::of(ms).parts(copy);
+    let values: Vec<(&str, String, bool)> = values.into_iter().map(|(k, v)| (k, v, true)).collect();
+    mono_fill(template, &values)
+}
+
 /// 已用 19 分钟, or 已用 2 小时 5 分钟.
 fn elapsed_text(ms: i64, cx: &App) -> impl IntoElement {
     let k = theme::colors(cx);
-    let minutes = (ms / 60_000).max(0);
-    let text = if minutes < 60 {
-        mono_fill(c::LIVE_ELAPSED, &[("n", minutes.to_string(), true)]).into_any_element()
-    } else {
-        mono_fill(
-            c::LIVE_ELAPSED_HOURS,
-            &[
-                ("h", (minutes / 60).to_string(), true),
-                ("m", (minutes % 60).to_string(), true),
-            ],
-        )
-        .into_any_element()
+    let copy = plan::SpanCopy {
+        minutes: c::LIVE_ELAPSED,
+        hours: c::LIVE_ELAPSED_HOURS,
     };
-    div().flex_none().t_meta().text_color(k.ink_3).child(text)
+    div()
+        .flex_none()
+        .t_meta()
+        .text_color(k.ink_3)
+        .child(span_fill(copy, ms))
 }
 
 /// The terminal cursor: a block that blinks while the run works (still with

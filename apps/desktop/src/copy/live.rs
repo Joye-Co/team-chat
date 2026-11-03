@@ -52,4 +52,7 @@ crate::copy! {
     LIVE_SHARE_ASK_DETAIL = "{name} 的电脑给了这个屏幕共享地址：\n{url}",
     LIVE_SHARE_ASK_OPEN = "打开",
     LIVE_SHARE_ASK_CANCEL = "取消",
+    // r2-topic (v11/r2-topic): plan step times past an hour.
+    LIVE_PLAN_FOR_HOURS = "已 {h} 小时 {m} 分钟",
+    LIVE_PLAN_TOOK_HOURS = "{h} 小时 {m} 分钟",
 }

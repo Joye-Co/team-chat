@@ -28,29 +28,64 @@ const ROW: gpui::Pixels = px(34.);
 const HEADER: gpui::Pixels = px(40.);
 const FOOTER: gpui::Pixels = px(36.);
 
-/// `已用 19 分钟` or `已用 1 小时 5 分钟`.
-pub fn used_text(ms: i64) -> String {
-    let minutes = (ms.max(0) / 60_000).max(1);
-    if minutes < 60 {
-        fill(c::PLAN_USED, &[("n", &minutes.to_string())])
-    } else {
-        fill(
-            c::PLAN_USED_HOURS,
-            &[
-                ("h", &(minutes / 60).to_string()),
-                ("m", &(minutes % 60).to_string()),
-            ],
-        )
+/// A span of time: whole minutes (rounded, at least 1), and hours and
+/// minutes from 60 minutes on (`已 9 小时 49 分钟`, never `已 589 分钟`).
+/// The one formatter of the plan card, its footer and the 电脑 pane.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Span {
+    Minutes(i64),
+    Hours(i64, i64),
+}
+
+impl Span {
+    pub fn of(ms: i64) -> Self {
+        let minutes = ((ms.max(0) + 30_000) / 60_000).max(1);
+        if minutes < 60 {
+            Span::Minutes(minutes)
+        } else {
+            Span::Hours(minutes / 60, minutes % 60)
+        }
+    }
+
+    /// The template of `copy` for this span and its values (`n`, or `h`
+    /// and `m`).
+    pub fn parts(self, copy: SpanCopy) -> (&'static str, Vec<(&'static str, String)>) {
+        match self {
+            Span::Minutes(n) => (copy.minutes, vec![("n", n.to_string())]),
+            Span::Hours(h, m) => (copy.hours, vec![("h", h.to_string()), ("m", m.to_string())]),
+        }
     }
 }
 
-/// Whole minutes, rounded, at least 1.
-fn minutes(ms: i64) -> String {
-    ((ms.max(0) + 30_000) / 60_000).max(1).to_string()
+/// The copy of one kind of span: in minutes (`{n}`), and in hours and
+/// minutes (`{h}`, `{m}`).
+#[derive(Clone, Copy, Debug)]
+pub struct SpanCopy {
+    pub minutes: &'static str,
+    pub hours: &'static str,
 }
 
-fn now_ms() -> Millis {
-    chrono::Utc::now().timestamp_millis()
+/// `已用 19 分钟`: the time a run has used (the card's footer).
+pub const USED: SpanCopy = SpanCopy {
+    minutes: c::PLAN_USED,
+    hours: c::PLAN_USED_HOURS,
+};
+/// `已 3 分钟`: how long the current step has run.
+pub const FOR: SpanCopy = SpanCopy {
+    minutes: l::LIVE_PLAN_FOR,
+    hours: l::LIVE_PLAN_FOR_HOURS,
+};
+/// `4 分钟`: how long a done step took.
+pub const TOOK: SpanCopy = SpanCopy {
+    minutes: l::LIVE_PLAN_TOOK,
+    hours: l::LIVE_PLAN_TOOK_HOURS,
+};
+
+/// `ms` as text in `copy`.
+pub fn span_text(copy: SpanCopy, ms: i64) -> String {
+    let (template, values) = Span::of(ms).parts(copy);
+    let values: Vec<(&str, &str)> = values.iter().map(|(k, v)| (*k, v.as_str())).collect();
+    fill(template, &values)
 }
 
 impl TimelineView {
@@ -75,7 +110,7 @@ impl TimelineView {
         let name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();
         let open = !self.plan_collapsed.contains(&run.id);
         let progress = crate::views::topic_page::plan_progress(&run.plan);
-        let now = now_ms();
+        let now = crate::selftest::clock::now_ms();
         let current = run
             .plan
             .iter()
@@ -256,9 +291,11 @@ impl TimelineView {
                                             .child(s.text.clone()),
                                     )
                                     .children(started.map(|at| {
-                                        div().flex_none().t_meta().text_color(k.ink_2).child(
-                                            fill(l::LIVE_PLAN_FOR, &[("n", &minutes(now - at))]),
-                                        )
+                                        div()
+                                            .flex_none()
+                                            .t_meta()
+                                            .text_color(k.ink_2)
+                                            .child(span_text(FOR, now - at))
                                     })),
                             )
                             .children(doing.map(|d| {
@@ -285,7 +322,7 @@ impl TimelineView {
                                 .into_any_element()
                         };
                         let took = done
-                            .then(|| started.zip(next).map(|(a, b)| minutes(b - a)))
+                            .then(|| started.zip(next).map(|(a, b)| span_text(TOOK, b - a)))
                             .flatten();
                         div()
                             .h(ROW)
@@ -311,13 +348,11 @@ impl TimelineView {
                                     .text_color(if done { k.ink_3 } else { k.ink_2 })
                                     .child(s.text.clone()),
                             )
-                            .children(took.map(|n| {
-                                div()
-                                    .flex_none()
-                                    .t_meta()
-                                    .text_color(k.ink_3)
-                                    .child(fill(l::LIVE_PLAN_TOOK, &[("n", &n)]))
-                            }))
+                            .children(
+                                took.map(|n| {
+                                    div().flex_none().t_meta().text_color(k.ink_3).child(n)
+                                }),
+                            )
                             .into_any_element()
                     }
                 }
@@ -336,7 +371,7 @@ impl TimelineView {
                 .bg(k.raised)
                 .t_meta()
                 .text_color(k.ink_3)
-                .child(div().flex_none().child(used_text(now - at)))
+                .child(div().flex_none().child(span_text(USED, now - at)))
                 .child(div().flex_1())
                 .child(
                     div()
@@ -394,9 +429,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn time_used_reads_in_minutes_then_hours() {
-        assert_eq!(used_text(19 * 60_000), "已用 19 分钟");
-        assert_eq!(used_text(10_000), "已用 1 分钟");
-        assert_eq!(used_text(65 * 60_000), "已用 1 小时 5 分钟");
+    fn spans_read_in_minutes_then_hours() {
+        const MIN: i64 = 60_000;
+        assert_eq!(span_text(USED, 19 * MIN), "已用 19 分钟");
+        assert_eq!(span_text(USED, 10_000), "已用 1 分钟");
+        assert_eq!(span_text(USED, 65 * MIN), "已用 1 小时 5 分钟");
+        assert_eq!(span_text(FOR, 589 * MIN), "已 9 小时 49 分钟");
+        assert_eq!(span_text(FOR, 59 * MIN + 20_000), "已 59 分钟");
+        assert_eq!(span_text(FOR, 59 * MIN + 40_000), "已 1 小时 0 分钟");
+        assert_eq!(span_text(TOOK, 4 * MIN), "4 分钟");
+        assert_eq!(span_text(TOOK, 125 * MIN), "2 小时 5 分钟");
+        assert_eq!(span_text(TOOK, -5 * MIN), "1 分钟");
     }
 }
