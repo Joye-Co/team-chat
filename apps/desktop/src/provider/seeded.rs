@@ -243,6 +243,7 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
                 action_id: "ok".into(),
                 inputs: Some([("choice".to_string(), json!("backoff"))].into()),
                 edited_values: None,
+                ..Default::default()
             }),
         ),
         ev(

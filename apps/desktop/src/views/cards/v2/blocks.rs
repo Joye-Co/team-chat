@@ -191,6 +191,7 @@ fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut Ap
             options,
             multiple,
             default,
+            ..
         } => decision(
             ctx,
             id,
@@ -228,10 +229,16 @@ fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut Ap
         } => diff(path.as_deref(), text, *additions, *deletions, cx),
         CardV2Block::Evidence { .. } => evidence(ctx, &[b], window, cx),
         CardV2Block::Ref { .. } => refs(ctx, &[b], cx),
-        CardV2Block::Group { label, blocks, .. } => {
-            group(ctx, label.as_deref(), blocks, ix, window, cx)
-        }
-        CardV2Block::Unknown => div().into_any_element(),
+        CardV2Block::Group { label, blocks, .. } => group(
+            ctx,
+            label.as_deref(),
+            blocks.as_deref().unwrap_or(&[]),
+            ix,
+            window,
+            cx,
+        ),
+        // Unknown blocks and the 2.1 blocks (the 2.1 renderer draws those).
+        _ => div().into_any_element(),
     }
 }
 
@@ -1223,7 +1230,11 @@ fn input_control(
                 )
                 .into_any_element()
         }
-        InputKind::Date | InputKind::Number | InputKind::Text | InputKind::Unknown => {
+        InputKind::Date
+        | InputKind::Number
+        | InputKind::Slider
+        | InputKind::Text
+        | InputKind::Unknown => {
             let ph = match kind {
                 InputKind::Date => Some(placeholder.unwrap_or(c::FORM_DATE_PLACEHOLDER)),
                 _ => placeholder,
@@ -1274,6 +1285,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 label,
                 text,
                 editable,
+                ..
             } => Some((
                 id.as_str(),
                 label.as_deref(),

@@ -103,7 +103,7 @@ fn all_blocks(blocks: &[CardV2Block]) -> Vec<&CardV2Block> {
     for b in blocks {
         out.push(b);
         if let CardV2Block::Group { blocks, .. } = b {
-            out.extend(blocks.iter());
+            out.extend(blocks.iter().flatten());
         }
     }
     out
@@ -859,7 +859,7 @@ fn v2_parts(
             }
             CardV2Block::Group { blocks, .. } => {
                 let mut draft = None;
-                for inner in blocks {
+                for inner in blocks.iter().flatten() {
                     match inner {
                         CardV2Block::Image { file_id, .. } => ix_images.push(file_id.clone()),
                         CardV2Block::Draft { label, text, .. } => {

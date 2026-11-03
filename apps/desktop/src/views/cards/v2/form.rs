@@ -98,7 +98,7 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
                 }
                 let text = text_of(values, id);
                 let bad = match kind {
-                    InputKind::Number => match number(text) {
+                    InputKind::Number | InputKind::Slider => match number(text) {
                         None => true,
                         Some(v) => f(min).is_some_and(|m| v < m) || f(max).is_some_and(|m| v > m),
                     },

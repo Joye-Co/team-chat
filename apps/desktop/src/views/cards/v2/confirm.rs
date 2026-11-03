@@ -331,6 +331,7 @@ mod tests {
             kind: None,
             target: None,
             confirm: None,
+            inputs: None,
         };
         let irr = AskIrreversible {
             verb: "发布".into(),

@@ -467,6 +467,7 @@ impl Answerer {
             kind: None,
             target: None,
             confirm: None,
+            inputs: None,
         });
         self.send(&action, cx);
     }
