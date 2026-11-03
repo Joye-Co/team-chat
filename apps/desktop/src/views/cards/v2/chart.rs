@@ -2,11 +2,13 @@
 //! "Chart"). The main series is `ink` (solid, with a dot on its last point),
 //! the others `ink-3` dashed or `line-2` bars; three quiet grid lines; mono
 //! axis labels under the points; a legend at the right of the label row.
-//! Lines draw in once and bars grow from zero once ([`motion::BAR_GROW`]);
-//! with Reduce motion they are drawn whole.
+//! Lines draw in once ([`motion::LINE_DRAW`], each further series
+//! [`motion::SERIES_STAGGER`] later) and bars grow from zero once
+//! ([`motion::BAR_GROW`]), once per chart in the session; with Reduce motion
+//! they are drawn whole.
 
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, App, Bounds, Hsla, IntoElement, ParentElement,
+    AnyElement, App, Bounds, Hsla, IntoElement, ParentElement,
     PathBuilder, Pixels, SharedString, Styled, Window, canvas, div, point,
     prelude::FluentBuilder as _, px, quad,
 };
@@ -14,6 +16,7 @@ use gpui::{
 use super::meta;
 use crate::{
     data::cards_v2::{ChartKind, ChartSeries},
+    ui,
     theme::{self, Type as _, card_v2 as m, motion, space},
 };
 
@@ -61,6 +64,31 @@ struct Paint {
     spark: bool,
 }
 
+/// How long a chart of `kind` with `series` series draws in.
+fn draw_time(kind: ChartKind, series: usize) -> std::time::Duration {
+    if kind == ChartKind::Bar {
+        motion::BAR_GROW
+    } else {
+        motion::LINE_DRAW + motion::SERIES_STAGGER * series.saturating_sub(1) as u32
+    }
+}
+
+/// The eased progress of series `si` at `t` (linear 0 → 1 over
+/// [`draw_time`]): bars grow together, lines start one stagger apart.
+fn series_progress(kind: ChartKind, series: usize, si: usize, t: f32) -> f32 {
+    let total = draw_time(kind, series).as_secs_f32();
+    let (delay, run) = if kind == ChartKind::Bar {
+        (0., total)
+    } else {
+        (
+            motion::SERIES_STAGGER.as_secs_f32() * si as f32,
+            motion::LINE_DRAW.as_secs_f32(),
+        )
+    };
+    motion::out_fn()(((t * total - delay) / run).clamp(0., 1.))
+}
+
+/// Paints the chart at `t`, linear 0 → 1 over [`draw_time`].
 fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
     let n = p.series.iter().map(Vec::len).max().unwrap_or(0);
     if n == 0 {
@@ -87,7 +115,7 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
             for (i, v) in s.iter().enumerate() {
                 let x = px_at(&b, i, n) - bar_w * (groups as f32 / 2.) + bar_w * si as f32;
                 let top = py_at(&b, *v, r);
-                let h = (b.bottom() - top) * t;
+                let h = (b.bottom() - top) * series_progress(p.kind, 1, 0, t);
                 let rect = Bounds {
                     origin: point(x + px(1.), b.bottom() - h),
                     size: gpui::size(bar_w - px(2.), h),
@@ -115,7 +143,8 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
             .enumerate()
             .map(|(i, v)| point(px_at(&b, i, n), py_at(&b, *v, r)))
             .collect();
-        let shown = ((pts.len() - 1) as f32 * t).max(0.);
+        let st = series_progress(p.kind, p.series.len(), si, t);
+        let shown = ((pts.len() - 1) as f32 * st).max(0.);
         let whole = shown.floor() as usize;
         let mut visible: Vec<_> = pts[..=whole.min(pts.len() - 1)].to_vec();
         if whole + 1 < pts.len() {
@@ -148,7 +177,7 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
         if let Ok(path) = line.build() {
             window.paint_path(path, if main { p.main } else { p.other });
         }
-        if main && !p.spark && t >= 0.999 {
+        if main && !p.spark && st >= 0.999 {
             let last = pts[pts.len() - 1];
             let d = px(9.);
             window.paint_quad(quad(
@@ -196,11 +225,7 @@ pub(crate) fn chart(
     });
     let height = if spark { px(28.) } else { m::CHART };
     let still = cx.reduce_motion();
-    let run = if kind == ChartKind::Bar {
-        motion::BAR_GROW
-    } else {
-        motion::BAR_GROW * 2
-    };
+    let run = draw_time(kind, series.len());
     let plot = div().w_full().h(height);
     let plot: AnyElement = if still {
         let p = p.clone();
@@ -213,18 +238,14 @@ pub(crate) fn chart(
         )
         .into_any_element()
     } else {
-        plot.with_animation(
-            id.clone(),
-            Animation::new(run).with_easing(motion::out_fn()),
-            move |el, t| {
-                let p = p.clone();
-                el.child(
-                    canvas(|_, _, _| (), move |b, _, window, _| paint(&p, b, t, window))
-                        .size_full(),
-                )
-            },
-        )
-        .into_any_element()
+        // Drawn once per chart: a remount (scroll back, a return to the
+        // page) shows it whole.
+        ui::motion::once(id.clone(), run, plot, move |el, t| {
+            let p = p.clone();
+            el.child(
+                canvas(|_, _, _| (), move |b, _, window, _| paint(&p, b, t, window)).size_full(),
+            )
+        })
     };
     if spark {
         return plot;
@@ -299,7 +320,7 @@ pub(crate) fn chart(
 
 #[cfg(test)]
 mod tests {
-    use super::range;
+    use super::*;
 
     #[test]
     fn ranges_leave_headroom_and_bars_start_at_zero() {
@@ -309,5 +330,16 @@ mod tests {
         assert_eq!(range(&[], false), (0., 1.));
         let (lo, hi) = range(&[vec![7., 7.]], false);
         assert!(lo < 7. && hi > 7., "a flat series still has a span");
+    }
+
+    #[test]
+    fn lines_draw_in_650_ms_and_later_series_follow() {
+        assert_eq!(draw_time(ChartKind::Line, 1).as_millis(), 650);
+        assert_eq!(draw_time(ChartKind::Line, 3).as_millis(), 750);
+        assert_eq!(draw_time(ChartKind::Bar, 3), motion::BAR_GROW);
+        // At the end every series is whole; early on the second lags.
+        assert!((series_progress(ChartKind::Line, 2, 1, 1.) - 1.).abs() < 1e-4);
+        assert!(series_progress(ChartKind::Line, 2, 1, 0.05) < series_progress(ChartKind::Line, 2, 0, 0.05));
+        assert_eq!(series_progress(ChartKind::Line, 2, 1, 0.), 0.);
     }
 }
