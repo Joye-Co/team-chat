@@ -10,7 +10,7 @@ use std::{
 };
 
 use gpui::{Pixels, px};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 use crate::theme;
 
@@ -70,7 +70,7 @@ pub struct Columns {
     pub persist: bool,
 }
 
-#[derive(Serialize, Deserialize, Default)]
+#[derive(Deserialize, Default)]
 struct Saved {
     sidebar: Option<f32>,
     topic_list: Option<f32>,
@@ -101,7 +101,7 @@ pub fn rubber_width(raw: Pixels, (min, max): (Pixels, Pixels)) -> Pixels {
     }
 }
 
-fn layout_file() -> PathBuf {
+pub(crate) fn layout_file() -> PathBuf {
     crate::provider::session::default_data_root().join("layout.json")
 }
 
@@ -129,17 +129,11 @@ impl Columns {
         if !self.persist {
             return;
         }
-        let saved = Saved {
-            sidebar: Some(f32::from(self.sidebar)),
-            topic_list: Some(f32::from(self.topic_list)),
-        };
-        let path = layout_file();
-        if let (Some(dir), Ok(json)) = (path.parent(), serde_json::to_vec(&saved)) {
-            let _ = std::fs::create_dir_all(dir);
-            if let Err(error) = std::fs::write(&path, json) {
-                tracing::warn!("layout: could not save the column widths: {error}");
-            }
-        }
+        // Merge: `layout.json` also holds the v2 keys (rail mode, theme).
+        crate::views::shell::layout::merge(&[
+            ("sidebar", serde_json::json!(f32::from(self.sidebar))),
+            ("topic_list", serde_json::json!(f32::from(self.topic_list))),
+        ]);
     }
 
     fn width_mut(&mut self, column: Column) -> &mut Pixels {

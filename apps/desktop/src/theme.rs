@@ -309,13 +309,76 @@ pub mod size {
 // ---------------------------------------------------------------------------
 // Theme set (§3)
 
+/// 设置 → 外观 → 主题: follow the system, or keep light or dark.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum ThemeChoice {
+    #[default]
+    System,
+    Light,
+    Dark,
+}
+
+impl ThemeChoice {
+    pub const ALL: [ThemeChoice; 3] = [ThemeChoice::System, ThemeChoice::Light, ThemeChoice::Dark];
+
+    /// The name in `layout.json`.
+    pub fn slug(self) -> &'static str {
+        match self {
+            ThemeChoice::System => "system",
+            ThemeChoice::Light => "light",
+            ThemeChoice::Dark => "dark",
+        }
+    }
+
+    pub fn from_slug(slug: &str) -> Option<ThemeChoice> {
+        ThemeChoice::ALL.into_iter().find(|c| c.slug() == slug)
+    }
+
+    fn mode(self, appearance: ThemeMode) -> ThemeMode {
+        match self {
+            ThemeChoice::System => appearance,
+            ThemeChoice::Light => ThemeMode::Light,
+            ThemeChoice::Dark => ThemeMode::Dark,
+        }
+    }
+}
+
+/// The theme choice of this app run (`layout.json`, app only).
+static THEME_CHOICE: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+
+pub fn theme_choice() -> ThemeChoice {
+    match THEME_CHOICE.load(Ordering::Relaxed) {
+        1 => ThemeChoice::Light,
+        2 => ThemeChoice::Dark,
+        _ => ThemeChoice::System,
+    }
+}
+
+/// Sets the theme choice for the windows that follow the system. The caller
+/// saves it and repaints with [`apply_theme_choice`].
+pub fn set_theme_choice(choice: ThemeChoice) {
+    let v = match choice {
+        ThemeChoice::System => 0,
+        ThemeChoice::Light => 1,
+        ThemeChoice::Dark => 2,
+    };
+    THEME_CHOICE.store(v, Ordering::Relaxed);
+}
+
+/// Applies the theme choice in `window` now.
+pub fn apply_theme_choice(window: &mut Window, cx: &mut App) {
+    set_mode(theme_choice().mode(window.appearance().into()), cx);
+    cx.refresh_windows();
+}
+
 /// Sets the theme from the window's appearance and keeps it in step when the
 /// user switches light or dark mode. Keep the returned subscription alive.
+/// A theme choice other than 跟随系统 wins over the appearance.
 pub fn follow_system(window: &mut Window, cx: &mut App) -> Subscription {
     let appearance = window.appearance();
-    set_mode(appearance.into(), cx);
+    set_mode(theme_choice().mode(appearance.into()), cx);
     window.observe_window_appearance(|window, cx| {
-        set_mode(window.appearance().into(), cx);
+        set_mode(theme_choice().mode(window.appearance().into()), cx);
     })
 }
 
@@ -656,8 +719,7 @@ pub trait Type: Styled + Sized {
     }
     /// Monospace tabular figures at the inherited size (`.mono`).
     fn mono(self) -> Self {
-        self.font_family(MONO_FONT_FAMILY)
-            .font_features(tabular())
+        self.font_family(MONO_FONT_FAMILY).font_features(tabular())
     }
     /// Older name of [`Type::t_heading`].
     fn t_topic_title(self) -> Self {
