@@ -11,6 +11,8 @@
 //!   `expect.mode`, §6.4).
 //! - `expect.mode: none` on a live event says {name} 现在接不了，稍后再试 for 4 s at the
 //!   block and in the band; the block stays usable (INTERACT §6.2).
+//! - A live event that comes back offline or busy puts the block back to its state before
+//!   the gesture (INTERACT §4.4) while the band says why for 4 s.
 //! - A conflict re-renders the latest rev, keeps local values whose ids still exist and
 //!   toasts 卡片刚更新了，请再看一眼 once.
 //! - A top-level block a new rev removed stays where it was and fades out (opacity only).
@@ -26,7 +28,7 @@ use gpui::{
 };
 use serde_json::Value;
 
-use super::{CardUi, Node};
+use super::{BlockUi, CardUi, Node};
 use crate::{
     copy::{cards21 as c, fill},
     data::{
@@ -37,7 +39,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2::mix, card_v21 as t, space},
-    views::cards::v2::{Ctx, blocks as b20, meta},
+    views::cards::v2::{Ctx, blocks as b20, form::FormSnap, meta},
 };
 
 // ---------------------------------------------------------------------------
@@ -437,6 +439,7 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
             }
         });
     }
+    settle_or_revert(ctx, &events, now, cx);
     // A conflict: toast once.
     let conflicts: Vec<String> = events
         .iter()
@@ -489,6 +492,79 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
             .detach();
         }
     }
+}
+
+/// True when the optimistic state of live event `e` must go back: the step was not sent
+/// (offline) or the author cannot take it now (busy, `expect.mode: none`).
+pub fn undone(e: &MyCardEvent, now: Millis) -> bool {
+    !e.durable
+        && stage_of(e, now).is_some_and(|p| matches!(p.stage, Stage::OfflineLive | Stage::Busy))
+}
+
+/// Blocks with a live event of mine on its way, or one whose state is still to go back.
+pub fn in_flight(events: &[MyCardEvent], reverted: &std::collections::HashSet<String>, now: Millis) -> Vec<String> {
+    events
+        .iter()
+        .filter(|e| {
+            !e.durable
+                && (e.phase == CardEventPhase::Sending
+                    || (undone(e, now) && !reverted.contains(&e.client_event_id)))
+        })
+        .filter_map(|e| e.request.block_id.clone())
+        .collect()
+}
+
+/// Keeps each quiet block's state as the one to go back to, and puts it back for a live
+/// event that came back offline or busy (INTERACT §4.4: the optimistic state reverts).
+fn settle_or_revert(ctx: &Ctx, events: &[MyCardEvent], now: Millis, cx: &mut App) {
+    let ui = ctx.ui.read(cx);
+    let mut busy = in_flight(events, &ui.reverted, now);
+    busy.extend(ui.queued.keys().cloned());
+    let form = ctx.form.read(cx);
+    let mut settle = Vec::new();
+    for id in ctx.card.blocks.iter().filter_map(CardV2Block::id) {
+        if busy.iter().any(|b| b == id) {
+            continue;
+        }
+        let mut state = (ui.block(id), form.snap(id));
+        state.0.hot = None;
+        if ui.settled.get(id) != Some(&state) {
+            settle.push((id.to_string(), state));
+        }
+    }
+    let undo: Vec<(String, String)> = events
+        .iter()
+        .filter(|e| undone(e, now) && !ui.reverted.contains(&e.client_event_id))
+        .filter_map(|e| Some((e.client_event_id.clone(), e.request.block_id.clone()?)))
+        .collect();
+    if settle.is_empty() && undo.is_empty() {
+        return;
+    }
+    let (ui, form) = (ctx.ui.clone(), ctx.form.clone());
+    cx.defer(move |cx| {
+        let back: Vec<(String, Option<(BlockUi, FormSnap)>)> = ui.update(cx, |u, cx| {
+            u.settled.extend(settle);
+            let back = undo
+                .iter()
+                .map(|(cid, block)| {
+                    u.reverted.insert(cid.clone());
+                    (block.clone(), u.settled.get(block).cloned())
+                })
+                .collect::<Vec<_>>();
+            for (block, s) in &back {
+                let hot = u.block(block).hot;
+                let mut b = s.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+                b.hot = hot;
+                u.blocks.insert(block.clone(), b);
+            }
+            cx.notify();
+            back
+        });
+        for (block, s) in back {
+            let snap = s.map(|s| s.1).unwrap_or_default();
+            form.update(cx, |f, cx| f.restore(&block, &snap, cx));
+        }
+    });
 }
 
 // ---------------------------------------------------------------------------
@@ -815,6 +891,33 @@ mod tests {
             ]
         }));
         assert_eq!(changed_blocks(&old, &new), ["b", "c"]);
+    }
+
+    #[test]
+    fn an_offline_or_busy_live_event_goes_back_once() {
+        let off = ev(ExpectMode::Offline, 0, false);
+        let busy = ev(ExpectMode::None, 0, false);
+        let live = ev(ExpectMode::Live, 0, false);
+        let answer = ev(ExpectMode::Offline, 0, true);
+        assert!(undone(&off, 100) && undone(&busy, 100));
+        assert!(!undone(&live, 100), "a waiting event keeps its state");
+        assert!(!undone(&answer, 100), "an offline answer is stored and stays");
+        let mut failed = live.clone();
+        failed.phase = CardEventPhase::Failed {
+            failure: CardEventFailure::Offline,
+            at: 0,
+        };
+        assert!(undone(&failed, 100), "client.offline: never left");
+        // The block stays out of the settled snapshots until its state went back.
+        let mut sending = live.clone();
+        sending.client_event_id = "c9".into();
+        sending.request.block_id = Some("t".into());
+        sending.phase = CardEventPhase::Sending;
+        let mut reverted = std::collections::HashSet::new();
+        let events = [off.clone(), sending, live];
+        assert_eq!(in_flight(&events, &reverted, 100), ["bars", "t"]);
+        reverted.insert(off.client_event_id.clone());
+        assert_eq!(in_flight(&events, &reverted, 100), ["t"]);
     }
 
     #[test]

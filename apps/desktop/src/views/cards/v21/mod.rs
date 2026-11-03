@@ -85,7 +85,7 @@ pub fn is_21(card: &CardV2) -> bool {
 
 /// What one viewer did to one block that is not an answer value: a group's collapse, the
 /// open tab, the table sort, the chart point (INTERACT §4.4).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct BlockUi {
     pub collapsed: Option<bool>,
     pub tab: Option<String>,
@@ -134,6 +134,11 @@ pub struct CardUi {
     pub debounce: HashMap<String, u64>,
     /// The block under the pointer and since when (问这里 after 300 ms).
     pub hover: Option<(String, Instant)>,
+    /// v11/pb-cards: each block's state while none of my live events was on its way, put
+    /// back when one comes back offline or busy (INTERACT §4.4).
+    pub settled: HashMap<String, (BlockUi, crate::views::cards::v2::form::FormSnap)>,
+    /// Live events whose optimistic state was put back, by `clientEventId`.
+    pub reverted: HashSet<String>,
 }
 
 impl CardUi {
@@ -149,6 +154,8 @@ impl CardUi {
             queued: HashMap::new(),
             debounce: HashMap::new(),
             hover: None,
+            settled: HashMap::new(),
+            reverted: HashSet::new(),
         }
     }
 
@@ -316,6 +323,8 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         queued: HashMap::new(),
         debounce: HashMap::new(),
         hover: None,
+        settled: HashMap::new(),
+        reverted: HashSet::new(),
     };
     let node = Node {
         ctx,

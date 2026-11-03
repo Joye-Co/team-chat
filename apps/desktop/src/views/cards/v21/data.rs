@@ -294,7 +294,8 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         events.iter().rev().find_map(|e| {
             (e.request.block_id.as_deref() == Some(id.as_str())
                 && e.request.event == "chart.select"
-                && super::interact::stage_of(e, now).is_some())
+                && super::interact::stage_of(e, now).is_some()
+                && !super::interact::undone(e, now))
             .then(|| {
                 let v = e.request.value.as_ref()?;
                 Some((

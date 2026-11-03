@@ -287,6 +287,14 @@ pub struct Preset {
     pub prev: Option<std::sync::Arc<CardV2>>,
 }
 
+/// v11/pb-cards: the picked values of one block at one moment.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FormSnap {
+    choices: Vec<(String, Vec<String>)>,
+    switches: Vec<(String, bool)>,
+    other: Vec<(String, Val)>,
+}
+
 /// The viewer's work on one card.
 pub struct CardForm {
     /// The rev the values were made for.
@@ -400,6 +408,36 @@ impl CardForm {
         cx.notify();
     }
     // --- end inc-cards21 ---
+
+    // --- v11/pb-cards: undo an optimistic pick (INTERACT §4.4) ---
+
+    /// The chosen, switched and 2.1 values of `block` (its own key and `block#…`), not its
+    /// typed text.
+    pub fn snap(&self, block: &str) -> FormSnap {
+        let mine = |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        let mut s = FormSnap {
+            choices: self.choices.iter().filter(|(k, _)| mine(k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            switches: self.switches.iter().filter(|(k, _)| mine(k)).map(|(k, v)| (k.clone(), *v)).collect(),
+            other: self.other.iter().filter(|(k, _)| mine(k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
+        };
+        s.choices.sort();
+        s.switches.sort();
+        s.other.sort_by(|a, b| a.0.cmp(&b.0));
+        s
+    }
+
+    /// Puts back what [`snap`](Self::snap) took for `block`.
+    pub fn restore(&mut self, block: &str, snap: &FormSnap, cx: &mut Context<Self>) {
+        let mine = |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        self.choices.retain(|k, _| !mine(k));
+        self.switches.retain(|k, _| !mine(k));
+        self.other.retain(|k, _| !mine(k));
+        self.choices.extend(snap.choices.iter().cloned());
+        self.switches.extend(snap.switches.iter().cloned());
+        self.other.extend(snap.other.iter().cloned());
+        cx.notify();
+    }
+    // --- end v11/pb-cards ---
 
     pub fn choice(&self, block: &str) -> &[String] {
         self.choices.get(block).map(Vec::as_slice).unwrap_or(&[])
