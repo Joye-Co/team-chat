@@ -603,6 +603,37 @@ describe("refs to parts", () => {
       cardV2: { ...base, blocks: [diagram("d1", "graph TD\n A-->B"), diagram("d2", "graph TD\n A-->B"), diagram("d3", "graph TD\n A-->B")] },
     });
     expect(three).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    // An embed names a 产出 version of this group, and only page events it declares.
+    const ART = "01JC0ART00000000000000EMB1";
+    await runInDurableObject(roomOf(gid), async (_o, state) => {
+      const now = Date.now();
+      state.storage.sql.exec(
+        "INSERT INTO artifacts (id, topic_id, title, kind, current_version, created_by, created_at, updated_at) VALUES (?, ?, '预算', 'html', 1, ?, ?, ?)",
+        ART,
+        m.topicId,
+        m.authorId,
+        now,
+        now,
+      );
+      state.storage.sql.exec(
+        "INSERT INTO artifact_versions (artifact_id, version, entry, files, note, created_by, created_at, run_id, events) VALUES (?, 1, 'index.html', '[]', NULL, ?, ?, NULL, ?)",
+        ART,
+        m.authorId,
+        now,
+        JSON.stringify([{ name: "budget.submit", kind: "emit" }]),
+      );
+    });
+    const embed = (events: string[], version = 1) =>
+      cbot.request({
+        t: "send",
+        groupId: gid,
+        clientMsgId: clientMsgId(),
+        body: "",
+        cardV2: { ...base, blocks: [{ id: "page", type: "embed", artifactId: ART, version, height: 360, events, fallbackText: "预算页面" }] },
+      });
+    expect(await embed(["budget.submit"])).toMatchObject({ ok: true });
+    expect(await embed(["budget.delete"])).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.undeclared_event" } });
+    expect(await embed([], 2)).toMatchObject({ ok: false, error: { code: "invalid" } });
     // A secret input is refused with its own reason.
     const secret = await cbot.request({
       t: "send",

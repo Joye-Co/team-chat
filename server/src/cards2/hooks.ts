@@ -7,7 +7,7 @@ import { ApiError } from "../core/errors";
 import { type RoomContext, registerMessageWriteHook, registerRoomAlarm } from "../core/registry";
 import { writeCardUpdate } from "./events";
 import { checkBodyLength, clearRefsTo, indexRefs, resolveRefs, withPrefix, withoutPrefix } from "./refs";
-import { deriveV1, directory, recordRev, refreshTopicWaiting, stateForWrite, syncTimer } from "./state";
+import { checkEmbeds, deriveV1, directory, recordRev, refreshTopicWaiting, stateForWrite, syncTimer } from "./state";
 import { CAUSE_MAX_AGE_MS, causeOf, eventRow, extOf, messageRow } from "./store";
 
 /**
@@ -51,6 +51,7 @@ registerMessageWriteHook({
       const dir = await directory(room);
       // The server owns the rev: 1 on send.
       card = { ...f.cardV2, rev: 1 };
+      checkEmbeds(room.sql, card);
       state = await stateForWrite(room, dir, card, undefined, actor.id, f.topicId ?? null, now);
       if (cause) state.lastCause = cause;
       ext.cardV2 = card;
@@ -95,6 +96,7 @@ registerMessageWriteHook({
       }
       const dir = await directory(room);
       card = { ...f.cardV2, rev: (stored?.rev ?? 0) + 1 };
+      checkEmbeds(room.sql, card);
       state = await stateForWrite(room, dir, card, current.cardState, current.authorId, current.topicId, Date.now());
       if (cause) state.lastCause = cause;
       draft.changed.cardV2 = card;

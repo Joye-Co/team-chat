@@ -20,7 +20,7 @@ import { handOffPageEvent } from "../bots/room";
 import { type CardEventArgs, cardEvent, loadCard, writeCardUpdate } from "./events";
 import { checkCause, resolved } from "./hooks";
 import { applyPatch } from "./patch";
-import { directory, isPick, recordRev, stateForWrite } from "./state";
+import { checkEmbeds, directory, isPick, recordRev, stateForWrite } from "./state";
 import { EVENT_KEEP_MS, eventRow, pruneEvents } from "./store";
 
 import "./decisions";
@@ -120,6 +120,7 @@ registerRoomRpc(CARD_PATCH_RPC, async (room, actor, args): Promise<CardPatchAck>
   if (f.baseRev !== card.rev) throw new ApiError("conflict", "the card has a newer rev", "card.stale_rev");
   const cause = f.cause ? checkCause(room, f.cause, a.id, row.id) : undefined;
   const next = applyPatch(card, f.ops);
+  checkEmbeds(room.sql, next);
   const key = `${room.groupId}:${row.id}`;
   let bucket = patchBuckets.get(key);
   if (!bucket) {

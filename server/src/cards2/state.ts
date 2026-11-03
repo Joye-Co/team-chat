@@ -16,6 +16,7 @@ import {
   takesInput,
 } from "@chat/protocol";
 import { listMembers } from "../core/db";
+import { ApiError } from "../core/errors";
 import type { RoomContext, RoomTx } from "../core/registry";
 import { setFollowing } from "../core/topicstate";
 import { requesterResolvers } from "./delivery";
@@ -283,6 +284,24 @@ export function refreshTopicWaiting(room: RoomContext, tx: RoomTx, topicId: stri
     data: { topicId, status, waitingOn },
     hints: { waitingAdded },
   });
+}
+
+/**
+ * Checks of a card against the room: an `embed` names a 产出 version of this group, and its
+ * `events` are page events that version declares (V11-INC R5).
+ */
+export function checkEmbeds(sql: SqlStorage, card: CardV2): void {
+  for (const b of card.blocks) {
+    if (b.type !== "embed") continue;
+    const v = sql
+      .exec<{ events: string | null }>("SELECT events FROM artifact_versions WHERE artifact_id = ? AND version = ?", b.artifactId, b.version)
+      .toArray()[0];
+    if (!v) throw new ApiError("invalid", `embed ${b.id}: no such 产出 version in this group`, "card.limits");
+    const declared = new Set(((v.events ? JSON.parse(v.events) : []) as { name: string }[]).map((e) => e.name));
+    for (const name of b.events ?? []) {
+      if (!declared.has(name)) throw new ApiError("invalid", `embed ${b.id}: the page does not declare ${name}`, "card.undeclared_event");
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
