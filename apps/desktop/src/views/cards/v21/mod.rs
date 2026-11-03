@@ -186,14 +186,22 @@ impl CardUi {
             return;
         }
         let now = Instant::now();
-        let changed = interact::changed_blocks(&old, card)
-            .into_iter()
-            .map(|id| (id, now))
-            .collect();
+        let ids = interact::changed_blocks(&old, card);
         self.blocks.retain(|id, _| {
             matches!((old.block(id), card.block(id)), (Some(a), Some(b))
                 if a.type_name() == b.type_name())
         });
+        // A rev that changed a text input may set its text without a keystroke (an
+        // untouched text takes the new default): the next draw only stores that text and
+        // sends no `input.change`.
+        for id in &ids {
+            if matches!(card.block(id), Some(CardV2Block::Input { .. }))
+                && let Some(b) = self.blocks.get_mut(id)
+            {
+                b.tab = None;
+            }
+        }
+        let changed = ids.into_iter().map(|id| (id, now)).collect();
         self.diff = Some(RevDiff {
             to: card.rev,
             changed,
@@ -202,6 +210,15 @@ impl CardUi {
             at: Some(now),
         });
         self.seen = Some(card.clone());
+    }
+
+    /// 用新的 on `block`: its text is the card's again, set without a keystroke, so the
+    /// next draw sends no `input.change`.
+    pub fn use_new(&mut self, block: &str) {
+        self.drafts_kept.remove(block);
+        if let Some(b) = self.blocks.get_mut(block) {
+            b.tab = None;
+        }
     }
 
     pub fn narrow(&self) -> bool {
@@ -921,4 +938,47 @@ pub(crate) fn question(text: &str, cx: &App) -> Div {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(k.ink)
         .child(text.to_string())
+}
+
+#[cfg(test)]
+mod ui_tests {
+    use super::*;
+
+    fn card(rev: u32, note: &str, other: &str) -> Arc<CardV2> {
+        Arc::new(
+            serde_json::from_value(serde_json::json!({
+                "v": 2, "catalog": "tc.card/2.1", "rev": rev, "intent": "info", "title": "复盘",
+                "fallback": "f",
+                "blocks": [
+                    { "id": "a", "type": "input", "kind": "text", "label": "看法", "default": note,
+                      "events": ["input.change"] },
+                    { "id": "b", "type": "input", "kind": "text", "label": "补充", "default": other,
+                      "events": ["input.change"] },
+                    { "id": "t", "type": "tabs", "tabs": [ { "id": "x", "label": "一", "children": [] },
+                                                           { "id": "y", "label": "二", "children": [] } ] }
+                ]
+            }))
+            .unwrap(),
+        )
+    }
+
+    #[test]
+    fn a_rev_that_changes_a_text_input_sends_no_input_change() {
+        let mut ui = CardUi::new(Some(card(1, "旧", "补")));
+        ui.block_mut("a").tab = Some("旧".into());
+        ui.block_mut("b").tab = Some("补".into());
+        ui.block_mut("t").tab = Some("y".into());
+        ui.observe(&card(2, "新", "补"), None);
+        // The changed input forgets the last text it saw, so the draw that shows the new
+        // text only stores it (text_change(None, ..) sends nothing).
+        assert_eq!(ui.block("a").tab, None);
+        assert_eq!(ui.block("b").tab.as_deref(), Some("补"), "untouched block");
+        assert_eq!(ui.block("t").tab.as_deref(), Some("y"), "the open tab stays");
+        // 用新的 sets the text without a keystroke too.
+        ui.block_mut("b").tab = Some("我写的".into());
+        ui.drafts_kept.insert("b".into());
+        ui.use_new("b");
+        assert_eq!(ui.block("b").tab, None);
+        assert!(!ui.drafts_kept.contains("b"));
+    }
 }

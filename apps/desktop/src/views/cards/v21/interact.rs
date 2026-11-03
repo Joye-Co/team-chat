@@ -891,7 +891,7 @@ fn draft_changed(ctx: &Ctx, id: &str, cx: &mut App) -> AnyElement {
                 .on_click(move |_, _, cx| {
                     form.update(cx, |f, cx| f.use_new(&card, &block, cx));
                     ui.update(cx, |u, cx| {
-                        u.drafts_kept.remove(&block);
+                        u.use_new(&block);
                         cx.notify();
                     });
                 }),
