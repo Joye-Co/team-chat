@@ -103,9 +103,12 @@ impl TableRefs {
             })
     }
 
-    /// The slot at the end of a row: 问这里 for the hovered cell.
+    /// The slot at the end of a row: 问这里 for the hovered cell, at the row's right end
+    /// and centered on its height (REFS §A3), however narrow the columns are.
     pub fn row_end(&self, row: usize, cx: &App) -> AnyElement {
         let slot = div()
+            .ml_auto()
+            .self_stretch()
             .w(px(ROW_BUTTON_SLOT))
             .flex_none()
             .flex()
@@ -410,7 +413,7 @@ pub fn table(
         });
     }
     if refs.is_some() {
-        header = header.child(div().w(px(ROW_BUTTON_SLOT)).flex_none());
+        header = header.child(div().ml_auto().w(px(ROW_BUTTON_SLOT)).flex_none());
     }
     let body = rows.iter().enumerate().map(|(ri, row)| {
         let mut line = div()
