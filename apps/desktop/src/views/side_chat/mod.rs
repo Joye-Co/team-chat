@@ -48,6 +48,8 @@ const REF_HEIGHT: Pixels = px(24.);
 const SUGGEST_HEIGHT: Pixels = px(32.);
 /// The privacy note: 32 pt, radius 8.
 const NOTE_HEIGHT: Pixels = px(32.);
+/// The longest suggestion a button shows whole.
+const SUGGEST_MAX_CHARS: usize = 20;
 
 pub struct SideChat {
     services: Services,
@@ -305,7 +307,12 @@ impl SideChat {
                     .text_color(k.ink)
                     .child(member.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
             )
-            .children(member.as_ref().and_then(|m| m.role.clone()).map(ui::JobTag::new))
+            .children(
+                member
+                    .as_ref()
+                    .and_then(|m| m.role.clone())
+                    .map(ui::JobTag::new),
+            )
             .child(div().flex_1())
             .child(div().t_mono().text_color(k.ink_3).child(clock(msg.at)));
 
@@ -466,19 +473,34 @@ impl SideChat {
             );
         }
         let (services, (g, t, m), id) = (self.services.clone(), target.clone(), msg.id.clone());
+        // A button never wraps: a long suggestion is cut, with the whole text in its tooltip.
+        let long = s.text.chars().count() > SUGGEST_MAX_CHARS;
+        let label = if long {
+            let cut: String = s.text.chars().take(SUGGEST_MAX_CHARS - 1).collect();
+            format!("{cut}…")
+        } else {
+            s.text.clone()
+        };
+        let full = s.text.clone();
         div()
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(space::S10)
             .child(
                 ui::button(
                     SharedString::from(format!("side-chat-suggest-{}", msg.id)),
-                    s.text.clone(),
+                    label,
                     ui::ButtonKind::Secondary,
                     ui::ButtonSize::Md,
                     cx,
                 )
-                .icon(ui::icon(Lucide::CornerDownRight, theme::icon::CHIP, k.ink_2))
+                .icon(ui::icon(
+                    Lucide::CornerDownRight,
+                    theme::icon::CHIP,
+                    k.ink_2,
+                ))
+                .when(long, |b| b.tooltip(full))
                 .on_click(move |_, _, _| {
                     services.provider.post_side_chat_suggestion(&g, &t, &m, &id)
                 }),
@@ -526,9 +548,8 @@ impl SideChat {
                             .child(c::SIDE_CHAT_CLOSE_HINT),
                     )
                     .send(
-                        ui::send_button("side-chat-send", ready, c::SIDE_CHAT_SEND, cx).on_click(
-                            cx.listener(|this, _, window, cx| this.send(window, cx)),
-                        ),
+                        ui::send_button("side-chat-send", ready, c::SIDE_CHAT_SEND, cx)
+                            .on_click(cx.listener(|this, _, window, cx| this.send(window, cx))),
                     ),
             )
             .into_any_element()
@@ -580,7 +601,9 @@ fn ref_chip(label: &str, cx: &App) -> impl IntoElement {
         Lucide::GitPullRequest
     };
     div()
-        .flex_none()
+        .max_w_full()
+        .min_w_0()
+        .overflow_hidden()
         .h(REF_HEIGHT)
         .px(space::S8)
         .rounded(theme::radius::SM)
@@ -592,12 +615,27 @@ fn ref_chip(label: &str, cx: &App) -> impl IntoElement {
         .gap(space::S6)
         .t_meta()
         .text_color(k.ink_2)
-        .child(ui::icon(glyph, theme::icon::TAG, k.ink_3))
+        .child(
+            div()
+                .flex_none()
+                .child(ui::icon(glyph, theme::icon::TAG, k.ink_3)),
+        )
         .when(file_like, |d| {
-            d.child(div().mono().text_color(k.ink).child(first.to_string()))
-                .when(!rest.is_empty(), |d| d.child(rest.to_string()))
+            d.child(
+                div()
+                    .min_w_0()
+                    .one_line()
+                    .mono()
+                    .text_color(k.ink)
+                    .child(first.to_string()),
+            )
+            .when(!rest.is_empty(), |d| {
+                d.child(div().flex_none().child(rest.to_string()))
+            })
         })
-        .when(!file_like, |d| d.child(label.to_string()))
+        .when(!file_like, |d| {
+            d.child(div().min_w_0().one_line().child(label.to_string()))
+        })
 }
 
 impl Render for SideChat {
@@ -691,7 +729,8 @@ mod tests {
 
     #[test]
     fn answers_split_into_paragraphs_and_points() {
-        let blocks = answer_blocks("风险不大：\n1. 去重靠 seq。\n2、退避 30 秒\n\n测试覆盖了 6 个场景。");
+        let blocks =
+            answer_blocks("风险不大：\n1. 去重靠 seq。\n2、退避 30 秒\n\n测试覆盖了 6 个场景。");
         assert_eq!(
             blocks,
             vec![
