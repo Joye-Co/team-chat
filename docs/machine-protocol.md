@@ -273,7 +273,10 @@ How the 1.1 daemon does each one:
   `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
   and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
   each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the
-  working directory and the folders above it (MCP tools run outside the sandbox). A server
+  working directory and the folders above it (MCP tools run outside the sandbox): each one is
+  set to a disabled definition with a placeholder of its own transport
+  (`mcp_servers.<name>={command="true",enabled=false}`, or `url=...` for a URL server), which
+  is valid also when Codex does not load that file (an untrusted project). A server
   name that `-c` cannot address fails the run. The
   runtime's `args`, `allowed_tools`, `permission_mode`, `sandbox` and `approval_policy` from
   `daemon.toml` are ignored, and the CLI gets none of the `envAllowlist` variables. The run

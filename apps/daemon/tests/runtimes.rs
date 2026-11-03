@@ -341,9 +341,9 @@ fn aside_runs_ignore_widening_config() {
         "features.browser_use=false",
         "features.browser_use_external=false",
         "features.computer_use=false",
-        "mcp_servers.github.enabled=false",
-        "mcp_servers.writer-2.enabled=false",
-        "mcp_servers.repo_tool.enabled=false",
+        "mcp_servers.github={command=\"true\",enabled=false}",
+        "mcp_servers.writer-2={url=\"http://127.0.0.1/\",enabled=false}",
+        "mcp_servers.repo_tool={command=\"true\",enabled=false}",
     ] {
         assert!(overrides.contains(&want), "{want} missing: {args:?}");
     }
@@ -406,5 +406,65 @@ fn aside_runs_ignore_widening_config() {
         "acceptEdits",
     ] {
         assert!(!args.iter().any(|a| a == widening), "{widening}: {args:?}");
+    }
+}
+
+/// The MCP overrides of a side chat run are valid for the real Codex CLI whether or not it
+/// loads a server's config file: here an untrusted project's `.codex/config.toml`, which Codex
+/// skips, and a user config with a stdio and a URL server. Every server ends up disabled.
+/// `codex mcp list` reads the config without a model call. Skipped without `codex` on PATH.
+#[test]
+fn codex_aside_mcp_overrides_load_in_real_cli() {
+    let Some(codex) = std::env::var_os("PATH").and_then(|p| {
+        std::env::split_paths(&p)
+            .map(|d| d.join("codex"))
+            .find(|f| f.is_file())
+    }) else {
+        eprintln!("codex not on PATH; skipped");
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        home.join("config.toml"),
+        "[mcp_servers.local]\ncommand = \"echo\"\nargs = [\"a\"]\n\
+         [mcp_servers.web]\nurl = \"http://127.0.0.1:9/x\"\nbearer_token_env_var = \"NOPE\"\n",
+    )
+    .unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    s.env
+        .push(("CODEX_HOME".into(), home.to_string_lossy().into()));
+    s.aside = true;
+    std::fs::create_dir_all(s.cwd.join(".codex")).unwrap();
+    std::fs::write(
+        s.cwd.join(".codex/config.toml"),
+        "[mcp_servers.repo_tool]\ncommand = \"t\"\n",
+    )
+    .unwrap();
+    let args = runtime::codex::app_server_args(&s).unwrap();
+    let out = std::process::Command::new(codex)
+        .args(["mcp", "list", "--json"])
+        .args(&args[1..])
+        .current_dir(&s.cwd)
+        .env("CODEX_HOME", &home)
+        .env("HOME", tmp.path())
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "codex rejected {args:?}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let list: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    let list = list.as_array().unwrap();
+    for name in ["local", "web"] {
+        assert!(
+            list.iter().any(|e| e["name"] == name),
+            "{name} missing: {list:?}"
+        );
+    }
+    for e in list {
+        assert_eq!(e["enabled"], false, "{e}");
     }
 }

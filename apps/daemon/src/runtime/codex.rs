@@ -552,16 +552,18 @@ pub const ASIDE_CONFIG: &[&str] = &[
     "features.computer_use=false",
 ];
 
-/// Names of the MCP servers in the Codex config files a run loads: `$CODEX_HOME/config.toml`
-/// and `.codex/config.toml` in the working directory and each folder above it.
-fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<String>, String> {
+/// Names of the MCP servers in the Codex config files a run can load, each with whether its
+/// transport is a URL: `$CODEX_HOME/config.toml` and `.codex/config.toml` in the working
+/// directory and each folder above it (Codex loads these only for a trusted project). The first
+/// file that defines a name gives its transport: the user config, then the nearest folder.
+fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<(String, bool)>, String> {
     let home = spec
         .env_var("CODEX_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(spec.env_var("HOME").unwrap_or("/")).join(".codex"));
     let files = std::iter::once(home.join("config.toml"))
         .chain(spec.cwd.ancestors().map(|d| d.join(".codex/config.toml")));
-    let mut names: Vec<String> = vec![];
+    let mut names: Vec<(String, bool)> = vec![];
     for f in files {
         let Ok(text) = std::fs::read_to_string(&f) else {
             continue;
@@ -569,9 +571,9 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<String>, String> {
         let table: toml::Table =
             toml::from_str(&text).map_err(|_| format!("cannot read {}", f.display()))?;
         if let Some(servers) = table.get("mcp_servers").and_then(toml::Value::as_table) {
-            for n in servers.keys() {
-                if !names.contains(n) {
-                    names.push(n.clone());
+            for (n, def) in servers {
+                if !names.iter().any(|(m, _)| m == n) {
+                    names.push((n.clone(), def.get("url").is_some()));
                 }
             }
         }
@@ -582,6 +584,11 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<String>, String> {
 /// `codex app-server` arguments. A side chat run ignores the configured args (they could widen
 /// the sandbox) and turns off [`ASIDE_CONFIG`] and every configured MCP server: MCP tools run
 /// outside the sandbox. The sandbox (`thread_policy`) blocks writes and network for commands.
+///
+/// Codex has no override that turns off all MCP servers, and `enabled=false` alone for a server
+/// Codex did not load (an untrusted project's) stops `codex app-server` ("invalid transport").
+/// So each server gets a disabled definition with a placeholder of its own transport: Codex
+/// merges it into the loaded server, or adds it as a new disabled one.
 pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
     let mut args = vec!["app-server".to_string()];
     if !spec.aside {
@@ -594,13 +601,18 @@ pub fn app_server_args(spec: &RunSpec) -> Result<Vec<String>, String> {
                 .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
     };
     let mut overrides: Vec<String> = ASIDE_CONFIG.iter().map(|c| c.to_string()).collect();
-    for name in configured_mcp_servers(spec)? {
+    for (name, url) in configured_mcp_servers(spec)? {
         if !plain(&name) {
             return Err(format!(
                 "cannot turn off MCP server {name:?} for a read-only run"
             ));
         }
-        overrides.push(format!("mcp_servers.{name}.enabled=false"));
+        let transport = if url {
+            "url=\"http://127.0.0.1/\""
+        } else {
+            "command=\"true\""
+        };
+        overrides.push(format!("mcp_servers.{name}={{{transport},enabled=false}}"));
     }
     for o in overrides {
         args.push("-c".into());
