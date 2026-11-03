@@ -15,7 +15,7 @@ use gpui::{
 
 use crate::{
     app::{RightPane, Services},
-    data::TopicStatus,
+    data::{BotRunSummary, PlanItem, PlanState, RunStatus, TopicStatus},
     theme::{self, StateTone, space},
     views::{
         composer::ComposerView,
@@ -53,13 +53,102 @@ impl TopicPage {
     }
 }
 
-/// The state sentence of a 话题 and its tone: amber only when it waits on
-/// me, blue while a member works on it.
-pub fn state_sentence(
-    services: &Services,
-    group_id: &str,
-    topic_id: &str,
-) -> Option<(String, StateTone)> {
+/// The state line of a 话题 in the title bar.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StateLine {
+    pub text: String,
+    pub tone: StateTone,
+    /// The quieter tail: the step a member is on, or who holds its computer.
+    pub detail: Option<String>,
+    /// The member's run is paused (someone took over its computer).
+    pub paused: bool,
+}
+
+impl StateLine {
+    fn plain(text: String, tone: StateTone) -> Self {
+        Self {
+            text,
+            tone,
+            detail: None,
+            paused: false,
+        }
+    }
+}
+
+/// Where a run's plan stands: `(n, total, step)`, with `n` the step it is
+/// on (or the steps done when none is on) and `step` the text of that
+/// step. `None` when the run has no plan.
+pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize, Option<String>)> {
+    if plan.is_empty() {
+        return None;
+    }
+    let current = plan
+        .iter()
+        .position(|p| matches!(p.state, PlanState::Current | PlanState::Waiting));
+    let n = current.map_or_else(
+        || plan.iter().filter(|p| p.state == PlanState::Done).count(),
+        |i| i + 1,
+    );
+    Some((n, plan.len(), current.map(|i| plan[i].text.clone())))
+}
+
+/// The run a member works on in this 话题 now: active and not waiting for
+/// a person (an answer or a review is said elsewhere), the latest first.
+pub fn working_run(runs: &[BotRunSummary]) -> Option<&BotRunSummary> {
+    runs.iter()
+        .filter(|r| r.status.is_active() && r.status != RunStatus::Waiting)
+        .max_by_key(|r| r.started_at.unwrap_or(r.created_at))
+}
+
+/// The state line of a member's run: `Forge 在做 3/5 · 跑一万条消息的压测`,
+/// or, while someone holds its computer, `Forge 已暂停 · 你在操作它的电脑`.
+pub fn run_state(
+    run: &BotRunSummary,
+    name: &str,
+    paused_by: Option<&str>,
+    me: Option<&str>,
+    who: impl FnOnce(&str) -> String,
+) -> StateLine {
+    use crate::copy::{fill, topic_rail as c};
+    if let Some(by) = paused_by {
+        let detail = if Some(by) == me {
+            c::STATE_PAUSED_YOU.to_string()
+        } else {
+            fill(c::STATE_PAUSED_OTHER, &[("who", &who(by))])
+        };
+        return StateLine {
+            text: fill(c::STATE_PAUSED, &[("name", name)]),
+            tone: StateTone::Quiet,
+            detail: Some(detail),
+            paused: true,
+        };
+    }
+    match plan_progress(&run.plan) {
+        Some((n, total, step)) => StateLine {
+            text: fill(
+                c::STATE_WORKING,
+                &[
+                    ("name", name),
+                    ("n", &n.to_string()),
+                    ("total", &total.to_string()),
+                ],
+            ),
+            tone: StateTone::Live,
+            detail: step,
+            paused: false,
+        },
+        None => StateLine {
+            text: fill(c::STATE_WORKING_NO_PLAN, &[("name", name)]),
+            tone: StateTone::Live,
+            detail: None,
+            paused: false,
+        },
+    }
+}
+
+/// The state line of a 话题: amber only when it waits on me; while a
+/// member works on it, what it does (Live.dc.html); quiet otherwise.
+pub fn state_sentence(services: &Services, group_id: &str, topic_id: &str) -> Option<StateLine> {
     let p = &services.provider;
     let topic = p.topic(group_id, topic_id)?;
     let members = p.members();
@@ -72,7 +161,7 @@ pub fn state_sentence(
     // The change of the 话题 says it best: it merges, or it waits on my review.
     if let Some(ch) = p.topic_changes(group_id, topic_id) {
         if ch.state == crate::data::v2::ChangeState::Merging {
-            return Some((
+            return Some(StateLine::plain(
                 crate::copy::fill(crate::copy::topic_rail::STATE_MERGING, &[("name", &owner)]),
                 StateTone::Live,
             ));
@@ -80,7 +169,7 @@ pub fn state_sentence(
         if p.pinned_ask(group_id, topic_id)
             .is_some_and(|a| a.kind == crate::data::v2::AskKind::Review)
         {
-            return Some((
+            return Some(StateLine::plain(
                 crate::copy::fill(
                     crate::copy::topic_rail::STATE_REVIEW,
                     &[("n", &ch.number.to_string())],
@@ -89,16 +178,32 @@ pub fn state_sentence(
             ));
         }
     }
+    let mine = me
+        .as_deref()
+        .is_some_and(|me| topic.waiting_on.iter().any(|m| m == me));
+    if !mine {
+        let runs = p.runs(group_id, topic_id);
+        if let Some(run) = working_run(&runs) {
+            let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
+            let name = crate::views::shell::member_name(services, &run.bot_id);
+            return Some(run_state(
+                run,
+                &name,
+                paused_by.as_deref(),
+                me.as_deref(),
+                |id| crate::views::shell::member_name(services, id),
+            ));
+        }
+    }
     let text = crate::views::status_chip_text(&topic, me.as_deref(), &members)?;
-    let mine = me.is_some_and(|me| topic.waiting_on.iter().any(|m| *m == me));
+    // Blue is for a member at work; a 话题 in progress with no run is quiet.
     let tone = match topic.status {
         _ if mine => StateTone::You,
-        TopicStatus::InProgress => StateTone::Live,
         TopicStatus::Blocked => StateTone::Problem,
         TopicStatus::Done => StateTone::Done,
         _ => StateTone::Quiet,
     };
-    Some((text, tone))
+    Some(StateLine::plain(text, tone))
 }
 
 /// The pane buttons of a 话题 page: 单独问, 产出 (when it has one), 电脑
@@ -155,12 +260,15 @@ impl PageView for TopicPage {
             .topic(&g, &t)
             .map(|x| crate::views::sidebar::topic_display_title(&x.title).0)
             .unwrap_or_default();
+        let state = state_sentence(&self.services, &g, &t);
         TitleBarSpec {
             breadcrumb: group,
             title,
             style: TitleStyle::Topic,
             subtitle: None,
-            state: state_sentence(&self.services, &g, &t),
+            state: state.as_ref().map(|s| (s.text.clone(), s.tone)),
+            state_detail: state.as_ref().and_then(|s| s.detail.clone()),
+            state_paused: state.as_ref().is_some_and(|s| s.paused),
             buttons: pane_buttons(&self.services, &g, &t),
         }
     }
@@ -199,5 +307,86 @@ impl Render for TopicPage {
                             .child(self.composer.clone()),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn run(id: &str, status: RunStatus, started: i64, plan: Vec<PlanItem>) -> BotRunSummary {
+        BotRunSummary {
+            id: id.into(),
+            bot_id: "forge".into(),
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            machine_id: None,
+            machine_name: None,
+            status,
+            requested_by: None,
+            created_at: started,
+            started_at: Some(started),
+            ended_at: None,
+            updated_at: started,
+            summary: None,
+            plan,
+        }
+    }
+
+    fn plan() -> Vec<PlanItem> {
+        vec![
+            PlanItem::new("读现有列表实现", PlanState::Done),
+            PlanItem::new("换成虚拟列表", PlanState::Done),
+            PlanItem::new("跑一万条消息的压测", PlanState::Current),
+            PlanItem::new("修滚动锚点", PlanState::Pending),
+            PlanItem::new("提 PR", PlanState::Pending),
+        ]
+    }
+
+    #[test]
+    fn plan_progress_names_the_current_step() {
+        assert_eq!(
+            plan_progress(&plan()),
+            Some((3, 5, Some("跑一万条消息的压测".into())))
+        );
+        let done = vec![
+            PlanItem::new("a", PlanState::Done),
+            PlanItem::new("b", PlanState::Pending),
+        ];
+        assert_eq!(plan_progress(&done), Some((1, 2, None)));
+        assert_eq!(plan_progress(&[]), None);
+    }
+
+    #[test]
+    fn the_working_run_is_active_and_not_waiting() {
+        let runs = vec![
+            run("old", RunStatus::Done, 1, plan()),
+            run("ask", RunStatus::Waiting, 5, plan()),
+            run("now", RunStatus::Running, 3, plan()),
+        ];
+        assert_eq!(working_run(&runs).map(|r| r.id.as_str()), Some("now"));
+        assert!(working_run(&runs[..2]).is_none());
+    }
+
+    #[test]
+    fn a_run_reads_as_member_step_and_progress() {
+        let r = run("now", RunStatus::Running, 3, plan());
+        let line = run_state(&r, "Forge", None, Some("me"), |_| String::new());
+        assert_eq!(line.text, "Forge 在做 3/5");
+        assert_eq!(line.detail.as_deref(), Some("跑一万条消息的压测"));
+        assert_eq!(line.tone, StateTone::Live);
+        assert!(!line.paused);
+    }
+
+    #[test]
+    fn a_taken_over_run_reads_as_paused_and_never_live() {
+        let r = run("now", RunStatus::Running, 3, plan());
+        let mine = run_state(&r, "Forge", Some("me"), Some("me"), |_| String::new());
+        assert_eq!(mine.text, "Forge 已暂停");
+        assert_eq!(mine.detail.as_deref(), Some("你在操作它的电脑"));
+        assert!(mine.paused);
+        assert_ne!(mine.tone, StateTone::Live);
+        let other = run_state(&r, "Forge", Some("w"), Some("me"), |_| "小王".into());
+        assert_eq!(other.detail.as_deref(), Some("小王 在操作它的电脑"));
     }
 }

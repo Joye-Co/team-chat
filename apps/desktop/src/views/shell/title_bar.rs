@@ -93,6 +93,10 @@ pub struct TitleBarSpec {
     pub subtitle: Option<String>,
     /// The state sentence and its tone (amber only for "you").
     pub state: Option<(String, StateTone)>,
+    /// A quieter tail after the state sentence (`· 跑一万条消息的压测`).
+    pub state_detail: Option<String>,
+    /// The state is a paused run: a pause mark in place of the dot.
+    pub state_paused: bool,
     pub buttons: Vec<TitleButton>,
 }
 
@@ -127,8 +131,22 @@ pub fn render(
     let state = spec.state.as_ref().map(|(text, tone)| {
         let (mark, ink) = k.state(*tone);
         let you = *tone == StateTone::You;
+        // A member's run reads as a sentence (Live.dc.html): `ink-2` text,
+        // the step in `ink-3`, a live dot or, while paused, a pause mark.
+        let sentence = spec.state_detail.is_some() || spec.state_paused;
+        let glyph = if spec.state_paused {
+            ui::icon(Lucide::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+        } else {
+            div()
+                .flex_none()
+                .size(px(6.))
+                .rounded_full()
+                .bg(mark)
+                .into_any_element()
+        };
         div()
-            .flex_none()
+            .when(!sentence, |el| el.flex_none())
+            .when(sentence, |el| el.flex_shrink(1.).min_w_0())
             .flex()
             .items_center()
             .gap(space::S6)
@@ -136,10 +154,22 @@ pub fn render(
             .px(space::S8)
             .rounded(theme::radius::SM)
             .when(you, |el| el.bg(k.you_bg))
-            .t_meta_medium()
-            .text_color(ink)
-            .child(div().size(px(6.)).rounded_full().bg(mark))
-            .child(text.clone())
+            .map(|el| {
+                if sentence && !you {
+                    el.t_small().text_color(k.ink_2)
+                } else {
+                    el.t_meta_medium().text_color(ink)
+                }
+            })
+            .child(glyph)
+            .child(div().flex_none().child(text.clone()))
+            .children(spec.state_detail.as_ref().map(|d| {
+                div()
+                    .min_w_0()
+                    .one_line()
+                    .text_color(k.ink_3)
+                    .child(format!("· {d}"))
+            }))
     });
     let buttons = spec.buttons.iter().map(|b| {
         let active = open.same_kind(&b.pane) && *open != RightPane::None;

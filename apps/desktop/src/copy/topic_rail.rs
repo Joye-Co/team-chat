@@ -99,4 +99,17 @@ crate::copy! {
     RESULT_PASS = "通过",
     RESULT_FAIL = "没通过",
     PANE_EMPTY = "这个产出还不能在这里预览",
+    // dfix-topic: the run in the title bar, the timeline plan card and the
+    // composer while a member works (Live.dc.html).
+    STATE_WORKING = "{name} 在做 {n}/{total}",
+    STATE_WORKING_NO_PLAN = "{name} 在做",
+    STATE_PAUSED = "{name} 已暂停",
+    STATE_PAUSED_YOU = "你在操作它的电脑",
+    STATE_PAUSED_OTHER = "{who} 在操作它的电脑",
+    PLAN_USED = "已用 {n} 分钟",
+    PLAN_USED_HOURS = "已用 {h} 小时 {m} 分钟",
+    PLAN_STARTED_AT = "{time} 开始",
+    PLAN_OPEN_MACHINE = "看电脑",
+    COMPOSER_INTERJECT = "插一句…",
+    COMPOSER_NEXT_STEP = "{name} 会在下一步前看到",
 }
