@@ -31,7 +31,7 @@ use std::{
     collections::{BTreeSet, HashMap, HashSet},
     rc::Rc,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use gpui::{
@@ -44,7 +44,7 @@ use super::v2::{Ctx, blocks as b20, meta};
 use crate::{
     copy::{cards21 as c, fill},
     data::cards_v2::{CardV2, CardV2Block, Cause},
-    theme::{self, Type as _, space},
+    theme::{self, Type as _, card_v21 as interact_t, space},
     ui::{self, Lucide},
 };
 
@@ -108,6 +108,10 @@ pub struct RevDiff {
     /// Inserted or changed block ids, with when the viewer first saw the change.
     pub changed: HashMap<String, Instant>,
     pub cause: Option<Cause>,
+    /// Top-level blocks the rev removed, after which kept block they stood, and when the
+    /// viewer first saw the removal (they fade out).
+    pub removed: Vec<(Option<String>, CardV2Block)>,
+    pub at: Option<Instant>,
 }
 
 /// Per card and window: local UI state that survives revs while the block id exists.
@@ -183,6 +187,8 @@ impl CardUi {
             to: card.rev,
             changed,
             cause: cause.cloned(),
+            removed: interact::removed_blocks(&old, card),
+            at: Some(now),
         });
         self.seen = Some(card.clone());
     }
@@ -326,6 +332,13 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
     };
     let mut out: Vec<AnyElement> = Vec::new();
     let mut prev: Option<&CardV2Block> = None;
+    let fading = fading(ctx, &snapshot, cx);
+    let fade_after = |after: Option<&str>, out: &mut Vec<AnyElement>, window: &mut Window, cx: &mut App| {
+        for (_, b) in fading.iter().filter(|(a, _)| a.as_deref() == after) {
+            out.push(removed(&node, b, window, cx));
+        }
+    };
+    fade_after(None, &mut out, window, cx);
     for (i, b) in tree.top.iter().enumerate() {
         if hidden.contains(&i) {
             continue;
@@ -338,6 +351,7 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
         };
         out.push(div().mt(gap).min_w(px(0.)).child(el).into_any_element());
         prev = Some(b);
+        fade_after(b.id(), &mut out, window, cx);
     }
     if !hidden.is_empty() {
         let k = theme::colors(cx);
@@ -393,6 +407,49 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
     );
     interact::after_body(ctx, window, cx);
     out
+}
+
+/// The removed blocks still fading out (none with reduce motion), and a redraw when the
+/// fade ends so they go.
+fn fading(ctx: &Ctx, ui: &CardUi, cx: &mut App) -> Vec<(Option<String>, CardV2Block)> {
+    let Some(d) = ui.diff.as_ref().filter(|d| d.to == ctx.card.rev) else {
+        return Vec::new();
+    };
+    let Some(at) = d.at else { return Vec::new() };
+    if d.removed.is_empty() || cx.reduce_motion() {
+        return Vec::new();
+    }
+    let left = interact_t::REMOVE_OUT.saturating_sub(at.elapsed());
+    if left.is_zero() {
+        return Vec::new();
+    }
+    let ui = ctx.ui.clone();
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        cx.background_executor()
+            .timer(left + Duration::from_millis(20))
+            .await;
+        cx.update(|cx| ui.update(cx, |_, cx| cx.notify()));
+    })
+    .detach();
+    d.removed.clone()
+}
+
+/// A block the new rev removed, fading out where it stood (opacity only, no transforms).
+fn removed(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyElement {
+    let ctx = node.ctx;
+    let inner = match b {
+        CardV2Block::Group { .. } | CardV2Block::Stack { .. } | CardV2Block::Row { .. } => {
+            b20::block(ctx, b, 0, window, cx)
+        }
+        _ => leaf(node, b, window, cx),
+    };
+    let id = b.id().unwrap_or("");
+    crate::ui::motion::once(
+        ctx.id(format!("gone-{id}-{}", ctx.card.rev)),
+        interact_t::REMOVE_OUT,
+        div().mt(space::S12).min_w(px(0.)).child(inner),
+        |el, p| el.opacity(1. - p),
+    )
 }
 
 /// Indices of the top-level blocks in fold priority: `high` first, then the rest in order,

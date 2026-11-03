@@ -13,6 +13,7 @@
 //!   block and in the band; the block stays usable (INTERACT §6.2).
 //! - A conflict re-renders the latest rev, keeps local values whose ids still exist and
 //!   toasts 卡片刚更新了，请再看一眼 once.
+//! - A top-level block a new rev removed stays where it was and fades out (opacity only).
 //! - A block a new rev inserted or changed fades in with a live tint that fades out, and
 //!   gets 按 {name} 的选择 · {time} (按你的选择 for my own cause). Reduce motion: no
 //!   animation.
@@ -513,6 +514,24 @@ pub fn changed_blocks(old: &CardV2, new: &CardV2) -> Vec<String> {
     out
 }
 
+/// Top-level blocks of `old` that `new` removed, each with the id of the nearest earlier
+/// top-level block that `new` still has (`None`: at the start), so the body draws the
+/// removed block where it was while it fades out.
+pub fn removed_blocks(old: &CardV2, new: &CardV2) -> Vec<(Option<String>, CardV2Block)> {
+    let tree = super::Tree::new(old);
+    let mut after: Option<String> = None;
+    let mut out = Vec::new();
+    for b in &tree.top {
+        let Some(id) = b.id() else { continue };
+        if new.block(id).is_some() {
+            after = Some(id.to_string());
+        } else {
+            out.push((after.clone(), (*b).clone()));
+        }
+    }
+    out
+}
+
 /// True when two containers differ only in which children they name.
 fn same_but_children(a: &CardV2Block, b: &CardV2Block) -> bool {
     let strip = |x: &CardV2Block| -> Value {
@@ -796,6 +815,40 @@ mod tests {
             ]
         }));
         assert_eq!(changed_blocks(&old, &new), ["b", "c"]);
+    }
+
+    #[test]
+    fn removed_blocks_keep_their_place() {
+        let card = |v: Value| -> CardV2 { serde_json::from_value(v).unwrap() };
+        let old = card(serde_json::json!({
+            "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": "info", "title": "t", "fallback": "f",
+            "blocks": [
+                { "id": "a", "type": "text", "text": "一" },
+                { "id": "g", "type": "group", "title": "明细", "children": ["x"] },
+                { "id": "x", "type": "text", "text": "组里" },
+                { "id": "b", "type": "text", "text": "二" },
+                { "id": "c", "type": "text", "text": "三" }
+            ]
+        }));
+        let new = card(serde_json::json!({
+            "v": 2, "catalog": "tc.card/2.1", "rev": 2, "intent": "info", "title": "t", "fallback": "f",
+            "blocks": [
+                { "id": "b", "type": "text", "text": "二" }
+            ]
+        }));
+        let r: Vec<(Option<String>, String)> = removed_blocks(&old, &new)
+            .into_iter()
+            .map(|(after, b)| (after, b.id().unwrap().to_string()))
+            .collect();
+        assert_eq!(
+            r,
+            [
+                (None, "a".to_string()),
+                (None, "g".to_string()),
+                (Some("b".to_string()), "c".to_string())
+            ],
+            "the child x goes with its group"
+        );
     }
 
     #[test]
