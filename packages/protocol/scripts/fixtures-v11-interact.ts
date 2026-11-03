@@ -674,6 +674,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     event: "action.press",
     inputs: { check: { value: "wrong" } },
     actor,
+    block: { id: "check", type: "decision", label: "这个数据对不对？", options: [{ id: "right", label: "对" }, { id: "wrong", label: "不对" }] },
   });
   ok("machine/run.interaction-card.json", "MachineDownFrame", {
     t: "run.interaction",
@@ -683,6 +684,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     event: "choice.change",
     value: { value: "wrong" },
     actor,
+    block: { id: "check", type: "decision", options: [{ id: "right", label: "对" }, { id: "wrong", label: "不对" }], events: ["choice.change"] },
   });
   ok("machine/run.interaction-artifact.json", "MachineDownFrame", {
     t: "run.interaction",

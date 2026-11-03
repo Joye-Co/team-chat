@@ -296,6 +296,8 @@ export const RunAnswerFrame = z.object({
   inputs: z.record(z.string(), z.json()).optional(),
   editedValues: z.record(z.string(), z.string()).optional(),
   actor: RunActor,
+  /** The block the answer names, as it was at `source.rev` (the CLI has no copy of the card). */
+  block: z.json().optional(),
 });
 export type RunAnswerFrame = z.infer<typeof RunAnswerFrame>;
 export const RunInteractionSource = z.discriminatedUnion("kind", [
@@ -312,6 +314,8 @@ export const RunInteractionFrame = z.object({
   event: z.string().min(1).max(128),
   value: z.json().optional(),
   actor: RunActor,
+  /** Card events: the block (or the action) as it was at `source.rev`. */
+  block: z.json().optional(),
 });
 export type RunInteractionFrame = z.infer<typeof RunInteractionFrame>;
 /** `run.output.result` (feature "output"): the answer to a RunEvent `output`. */

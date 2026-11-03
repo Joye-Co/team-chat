@@ -22,6 +22,21 @@
     "actor": {
       "id": "01JBX0OWNER0000000000000AA",
       "name": "Joye"
+    },
+    "block": {
+      "id": "check",
+      "type": "decision",
+      "label": "这个数据对不对？",
+      "options": [
+        {
+          "id": "right",
+          "label": "对"
+        },
+        {
+          "id": "wrong",
+          "label": "不对"
+        }
+      ]
     }
   }
 }

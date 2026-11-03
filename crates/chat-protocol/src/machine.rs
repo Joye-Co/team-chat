@@ -202,6 +202,9 @@ pub struct RunAnswerFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub edited_values: Option<BTreeMap<String, String>>,
     pub actor: RunActor,
+    /// The block the answer names, as it was at `source.rev` (the CLI has no copy of the card).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<Value>,
 }
 
 /// `run.interaction.source`: a live card event or a page event.
@@ -238,6 +241,9 @@ pub struct RunInteractionFrame {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub value: Option<Value>,
     pub actor: RunActor,
+    /// Card events: the block (or the action) as it was at `source.rev`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub block: Option<Value>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

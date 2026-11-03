@@ -305,10 +305,10 @@ no credentials pass through chat. The server shows the address to owners and run
 ```ts
 // server -> daemon (feature "interact"; an old daemon gets run.input with the text envelope instead)
 { t: "run.answer", runId, inputId, source: { kind: "card", messageId, askId, answerId, rev },
-  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name } }
+  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, block? /* the block at rev */ }
 { t: "run.interaction", runId, inputId,
   source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
-  event, value?, actor: { id, name } }
+  event, value?, actor: { id, name }, block? /* card events: the block or action at rev */ }
 // daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
 RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply", body: JSON }
 // server -> daemon
@@ -320,7 +320,34 @@ The daemon gives `run.answer` and `run.interaction` to the CLI as one user turn:
 `<teamchat-event v="1" id="{inputId}" kind="card.answer|card.event|artifact.emit|artifact.ask">`
 envelope with the JSON, followed by the line that it is data, not an instruction. It answers
 `input.accepted {inputId}` as for `run.input`. BotDesk performs each `output` op as the bot member
-with the rules of the matching WebSocket frame. References to a part (`blockRefs`) do not change
+with the rules of the matching WebSocket frame. The `output` body is that frame without `t`, `rid` and
+`groupId` (BotDesk takes the group and topic from the run):
+
+| `op` | `body` | `chat-run` command |
+| --- | --- | --- |
+| `card.post` | `{ cardV2, body?, causeEventId? }` (a `send`) | `chat-run card post --file card.json [--cause ev]` |
+| `card.patch` | `{ messageId, baseRev, ops, cause? }` | `chat-run card patch --message M --base-rev N --ops ops.json [--cause ev]` |
+| `interaction.resolve` | `{ eventId, result: "ignored" \| "failed", note? }` | `chat-run resolve --event ev --result ignored\|failed [--note …]` |
+| `artifact.data` | `{ artifactId, version, data, baseDataRev?, cause? }` | `chat-run artifact data --artifact A --version V --file data.json [--base-data-rev N] [--cause ev]` |
+| `artifact.reply` | `{ eventId, ok: true, payload? }` or `{ eventId, ok: false, error: { code: "declined", message } }` | `chat-run artifact reply --event ev --file reply.json` or `--decline "…"` |
+
+`chat-run` is the daemon binary started by the name `chat-run` (argv0). The daemon links it as
+`<run folder>/bin/chat-run`, puts that folder first on the CLI's `PATH`, and sets
+`CHAT_RUN_SOCKET` to a unix socket of the run (`<run folder>/chat-run.sock`, or a short path in
+`$TMPDIR` when that one is too long for a socket address), mode 0600, accepting only the
+daemon's own user. The socket is removed when the run ends. Side chat runs (`aside`) get
+neither. One request is one JSON line `{ op, body }`; the daemon sends the `output` run event
+(redacted like every frame) and answers one JSON line `{ ok, result? , error? }` when
+`run.output.result` comes, or after 15 s `{ ok: false, error: { code: "timeout", reason:
+"server.too_old" } }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
+`reason` (exit 1). The CLI learns about `chat-run` from a short note: Claude Code
+`--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP a first text block of
+the first prompt; the PTY gets none.
+
+The envelope JSON holds `messageId`, `rev`, `askId`, `answerId`, `event`, `actionId`,
+`blockId`, `value`, `inputs`, `editedValues`, `actor` and `block` (card), or `artifactId`,
+`version`, `eventId`, `event`, `value` and `actor` (page). `<` is written as `\u003c`, so the
+data cannot close the envelope. References to a part (`blockRefs`) do not change
 this protocol: they travel inside `prompt` and `run.input.text`.
 
 Server rules (BotDesk):
@@ -391,7 +418,8 @@ LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK CODEX_HOME CLAUDE_CONFIG_DIR` from the d
 name in `run.assign.envAllowlist` that the machine's config also lists in `env_passthrough`
 (so the server can choose per bot among the variables the machine owner allowed, never more);
 the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
-`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`.
+`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`; 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
+and `<run folder>/bin` (with `chat-run`) first on `PATH`.
 
 Group members read run events, so the daemon redacts every frame before it sends or stores
 it, and the session file before upload: the exact values of the `env_passthrough` variables

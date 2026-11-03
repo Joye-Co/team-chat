@@ -37797,6 +37797,9 @@
                 "id",
                 "name"
               ]
+            },
+            "block": {
+              "$ref": "#/$defs/__schema5"
             }
           },
           "required": [
@@ -37898,7 +37901,7 @@
               "maxLength": 128
             },
             "value": {
-              "$ref": "#/$defs/__schema5"
+              "$ref": "#/$defs/__schema6"
             },
             "actor": {
               "type": "object",
@@ -37917,6 +37920,9 @@
                 "id",
                 "name"
               ]
+            },
+            "block": {
+              "$ref": "#/$defs/__schema7"
             }
           },
           "required": [
@@ -37948,7 +37954,7 @@
               "type": "boolean"
             },
             "result": {
-              "$ref": "#/$defs/__schema6"
+              "$ref": "#/$defs/__schema8"
             },
             "error": {
               "type": "object",
@@ -38194,6 +38200,68 @@
               },
               "additionalProperties": {
                 "$ref": "#/$defs/__schema6"
+              }
+            }
+          ]
+        },
+        "__schema7": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema7"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema7"
+              }
+            }
+          ]
+        },
+        "__schema8": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            },
+            {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/__schema8"
+              }
+            },
+            {
+              "type": "object",
+              "propertyNames": {
+                "type": "string"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/__schema8"
               }
             }
           ]
