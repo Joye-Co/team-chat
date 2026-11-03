@@ -116,7 +116,7 @@ export async function loadCard(room: RoomContext, messageId: string, dir: Direct
   const ext = extOf(row);
   const card = ext.cardV2;
   if (!card) throw new ApiError("not_found", "not a v2 card");
-  const state = ext.cardState ?? (await stateForWrite(room, dir, card, undefined, row.author_id, row.topic_id, row.created_at));
+  const state = ext.cardState ?? (await stateForWrite(room, dir, card, undefined, row.author_id, row.topic_id, row.created_at, row.id));
   return { row, ext, card, state };
 }
 

@@ -7,7 +7,7 @@ import { ApiError } from "../core/errors";
 import { type RoomContext, registerMessageWriteHook, registerRoomAlarm } from "../core/registry";
 import { writeCardUpdate } from "./events";
 import { checkBodyLength, clearRefsTo, indexRefs, resolveRefs, withPrefix, withoutPrefix } from "./refs";
-import { checkEmbeds, deriveV1, directory, recordRev, refreshTopicWaiting, stateForWrite, syncTimer } from "./state";
+import { checkEmbeds, deriveV1, directory, recordRev, refreshTopicWaiting, rememberRequester, stateForWrite, syncTimer } from "./state";
 import { CAUSE_MAX_AGE_MS, causeOf, eventRow, extOf, messageRow } from "./store";
 
 /**
@@ -65,6 +65,7 @@ registerMessageWriteHook({
         if (refs) indexRefs(room.sql, message.id, refs);
         if (card && state) {
           recordRev(room.sql, message.id, card);
+          rememberRequester(room.sql, message.id, state);
           syncTimer(room, message.id, state);
           if (state.ask?.status === "open" && state.ask.blocking) refreshTopicWaiting(room, tx, message.topicId, actor.id);
         }
@@ -97,7 +98,7 @@ registerMessageWriteHook({
       const dir = await directory(room);
       card = { ...f.cardV2, rev: (stored?.rev ?? 0) + 1 };
       checkEmbeds(room.sql, card);
-      state = await stateForWrite(room, dir, card, current.cardState, current.authorId, current.topicId, Date.now());
+      state = await stateForWrite(room, dir, card, current.cardState, current.authorId, current.topicId, Date.now(), current.id);
       if (cause) state.lastCause = cause;
       draft.changed.cardV2 = card;
       draft.changed.cardState = state;

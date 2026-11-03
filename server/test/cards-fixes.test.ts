@@ -175,3 +175,24 @@ describe("refs to a deleted source", () => {
     for (const c of [co, ca, cbot]) c.close();
   });
 });
+
+describe("ask.from requester", () => {
+  it("resolves once per ask id and keeps the stored id on later writes of the same round", async () => {
+    const { alice, bob, bot, gid, ca, cb, cbot } = await setup();
+    const t = await ca.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "@Ledger 发版吗？", mentions: [bot.id] });
+    const topicId = t.message.topicId;
+    const m = (await send(cbot, gid, quick(["requester"], { ask: { id: "go", from: ["requester"], blocking: false } }), { topicId })).message;
+    expect(m.cardState.ask.from).toEqual([alice.id]);
+    // Bob now asks the bot in the topic too; the bot changes the card and keeps the ask.
+    await cb.ok({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "@Ledger 我也想知道", mentions: [bot.id] });
+    const p = await cbot.ok({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 1, ops: [{ op: "set", id: "info", props: { text: "再看看。" } }] });
+    expect(p.message.cardState.ask.from).toEqual([alice.id]);
+    const e = await cbot.ok({ t: "edit", groupId: gid, messageId: m.id, body: "", baseRev: 2, cardV2: { ...quick(["requester"]), ask: { id: "go", from: ["requester"], blocking: false } } });
+    expect(e.message.cardState.ask.from).toEqual([alice.id]);
+    expect(await ev(cb, gid, m.id, { rev: 3, blockId: "pick", event: "choice.submit", value: { value: "yes" } })).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    // A new round resolves again.
+    const r2 = await cbot.ok({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 3, ops: [{ op: "card", props: { ask: { id: "go2", from: ["requester"], blocking: false } } }] });
+    expect(r2.message.cardState.ask.from).toEqual([bob.id]);
+    for (const c of [ca, cb, cbot]) c.close();
+  });
+});

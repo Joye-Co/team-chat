@@ -128,13 +128,14 @@ export async function resolveFrom(
   from: string[],
   authorId: string,
   topicId: string | null,
+  requester: () => Promise<string | undefined> = () => requesterOf(room, dir, authorId, topicId),
 ): Promise<string[]> {
   const out = new Set<string>();
   for (const f of from) {
     if (f === "owners") {
       for (const id of room.memberIds()) if (dir.get(id)?.level === "owner") out.add(id);
     } else if (f === "requester") {
-      const id = await requesterOf(room, dir, authorId, topicId);
+      const id = await requester();
       if (id) out.add(id);
     } else if (room.isMember(f)) out.add(f);
   }
@@ -150,6 +151,48 @@ function pollVoters(room: RoomContext, dir: Directory, poll: Extract<Block, { ty
 // State transitions
 // ---------------------------------------------------------------------------
 
+/** The requester resolved for a new ask round of a card not stored yet (a send), by state. */
+const unsavedRequester = new WeakMap<CardState, { askId: string; id: string | null }>();
+
+function storeRequester(sql: SqlStorage, messageId: string, askId: string, id: string | null): void {
+  sql.exec("INSERT OR IGNORE INTO card_requesters (message_id, ask_id, member_id) VALUES (?, ?, ?)", messageId, askId, id);
+}
+
+/** Stores the requester a send resolved for its ask round (call in the send's transaction). */
+export function rememberRequester(sql: SqlStorage, messageId: string, state: CardState): void {
+  const r = unsavedRequester.get(state);
+  if (r) storeRequester(sql, messageId, r.askId, r.id);
+}
+
+/**
+ * The requester of ask round `askId` (INTERACT §3.5): resolved on the round's first write and
+ * stored, then kept for every later write with the same ask id, even when the author's active
+ * run now has another requester.
+ */
+function roundRequester(
+  room: RoomContext,
+  dir: Directory,
+  authorId: string,
+  topicId: string | null,
+  askId: string,
+  sameRound: boolean,
+  messageId: string | undefined,
+  state: CardState,
+): () => Promise<string | undefined> {
+  return async () => {
+    if (messageId !== undefined && sameRound) {
+      const row = room.sql
+        .exec<{ member_id: string | null }>("SELECT member_id FROM card_requesters WHERE message_id = ? AND ask_id = ?", messageId, askId)
+        .toArray()[0];
+      if (row) return row.member_id ?? undefined;
+    }
+    const id = (await requesterOf(room, dir, authorId, topicId)) ?? null;
+    if (messageId !== undefined) storeRequester(room.sql, messageId, askId, id);
+    else unsavedRequester.set(state, { askId, id });
+    return id ?? undefined;
+  };
+}
+
 /**
  * The card state after a write of `card` (send, edit or patch): the ask round (same id keeps
  * the round and its answers; a new id closes an open one as superseded; no ask closes it),
@@ -163,6 +206,8 @@ export async function stateForWrite(
   authorId: string,
   topicId: string | null,
   now: number,
+  /** The stored card's message (unset on send: `rememberRequester` stores the round's requester). */
+  messageId?: string,
 ): Promise<CardState> {
   const state: CardState = { ...(prev ?? {}), answers: prev?.answers ?? [] };
   const ask = card.ask;
@@ -171,7 +216,8 @@ export async function stateForWrite(
   } else {
     const id = ask.id ?? "a1";
     const poll = pollOf(card);
-    const from = poll ? pollVoters(room, dir, poll) : await resolveFrom(room, dir, ask.from, authorId, topicId);
+    const requester = roundRequester(room, dir, authorId, topicId, id, state.ask?.id === id, messageId, state);
+    const from = poll ? pollVoters(room, dir, poll) : await resolveFrom(room, dir, ask.from, authorId, topicId, requester);
     const blocking = ask.blocking ?? card.intent === "ask";
     const expiresAt = ask.expiresAt ?? (poll ? poll.closesAt : undefined);
     if (state.ask && state.ask.id === id) {

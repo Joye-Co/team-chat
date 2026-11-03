@@ -54,6 +54,12 @@ registerRoomMigration({
 /** The card's rev when an answer was stored (the retract window closes on a newer rev). */
 registerRoomMigration({ name: "cards2-3", up: "ALTER TABLE card_events ADD COLUMN card_rev INTEGER;" });
 
+/** `ask.from` "requester" as resolved for an ask round (INTERACT §3.5: resolved once, kept). */
+registerRoomMigration({
+  name: "cards2-4",
+  up: "CREATE TABLE card_requesters (message_id TEXT NOT NULL, ask_id TEXT NOT NULL, member_id TEXT, PRIMARY KEY (message_id, ask_id));",
+});
+
 /** Idempotency keys and causes live this long. */
 export const EVENT_KEEP_MS = 24 * 3600_000;
 /** A cause must be an event of the last 30 minutes. */

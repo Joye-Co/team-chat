@@ -141,7 +141,7 @@ registerRoomRpc(CARD_PATCH_RPC, async (room, actor, args): Promise<CardPatchAck>
     if (patchBuckets.size > 2000) patchBuckets.clear();
   }
   if (!bucket.take()) throw new ApiError("rate_limited", "too many patches for this card");
-  const nextState = await stateForWrite(room, dir, next, state, row.author_id, row.topic_id, now);
+  const nextState = await stateForWrite(room, dir, next, state, row.author_id, row.topic_id, now, row.id);
   if (cause) nextState.lastCause = cause;
   let ack: CardPatchAck | undefined;
   room.commit((tx) => {
