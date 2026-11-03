@@ -338,11 +338,12 @@ describe("BotDesk delivery", () => {
 
     // A stored answer with its ask round.
     const answerId = ulid();
+    const answerEventId = ulid();
     await desk.cardAnswer(w.bot.id, {
       groupId: w.gid,
       topicId,
       seq: 900_001,
-      answer: { messageId, rev: 1, actionId: "ship", answerId, askId: "a1", eventId: ulid(), event: "action.press", inputs: { when: "now" } },
+      answer: { messageId, rev: 1, actionId: "ship", answerId, askId: "a1", eventId: answerEventId, event: "action.press", inputs: { when: "now" } },
       actorId: w.human.id,
       actorKind: "human",
       actorLevel: "member",
@@ -356,6 +357,7 @@ describe("BotDesk delivery", () => {
       inputId: ans.inputId,
       source: { kind: "card", messageId, askId: "a1", answerId, rev: 1 },
       event: "action.press",
+      eventId: answerEventId,
       actionId: "ship",
       inputs: { when: "now" },
       actor: { id: w.human.id, name: "Alice" },
@@ -369,6 +371,7 @@ describe("BotDesk delivery", () => {
     });
     const firstLive = await d.next((f) => f.t === "run.interaction");
     expect(firstLive).toMatchObject({ runId, source: { kind: "card", messageId, blockId: "trend", rev: 1 }, event: "chart.select", actor: { id: w.human.id, name: "Alice" } });
+    expect(typeof firstLive.eventId).toBe("string");
     expect(firstLive.fallback).toBeUndefined();
     for (const x of ["小红书", "B 站", "小红书"]) {
       await desk.interaction(w.bot.id, interaction(w, topicId, messageId, "trend", { series: "new", x, y: 4, index: 1 }));
@@ -451,6 +454,76 @@ describe("BotDesk delivery", () => {
     expect(d.frames.filter((f) => f.t === "run.assign")).toHaveLength(1);
     // A stored answer still starts a run.
     expect(await desk.expectFor(w.bot.id, topicId)).toEqual({ mode: "starting", etaMs: 40_000 });
+    for (const x of [c, d]) x.close();
+  });
+
+  it("take a runner's own card from the group room to its run: live events, answers, the retract window and requester asks", async () => {
+    const w = await world();
+    const { d, c, topicId, runId } = await runningRun(w, { features: ["interact", "output"] });
+    const result = (outputId: string) => d.next((f) => f.t === "run.output.result" && f.outputId === outputId);
+    const report: CardV2 = {
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "done",
+      title: "10 月数据月报",
+      fallback: "10 月数据",
+      ask: { id: "verify", from: ["requester"], blocking: false },
+      blocks: [
+        { type: "chart", id: "trend", kind: "bar", x: ["B 站", "小红书"], series: [{ id: "new", name: "新增群", values: [9, 4] }], events: ["chart.select"] },
+        { type: "decision", id: "check", label: "这个数据对不对？", options: [{ id: "ok", label: "对" }, { id: "wrong", label: "有问题" }] },
+      ],
+      actions: [{ id: "send", label: "发给 dev", style: "primary", inputs: ["check"] }],
+    };
+    d.event(runId, { type: "output", outputId: "p1", op: "card.post", body: { card: report } });
+    const posted = await result("p1");
+    expect(posted, JSON.stringify(posted)).toMatchObject({ ok: true });
+    const messageId = posted.result.messageId as string;
+    // "requester" is the person who asked the active run.
+    const created = await c.waitEvent((e) => e.type === "message.created" && e.data.message.id === messageId);
+    expect(created.data.message.cardState.ask.from).toEqual([w.human.id]);
+
+    // A live event from the room reaches the run with its event id and the block at that rev.
+    const live = await c.ok({
+      t: "card.event",
+      groupId: w.gid,
+      messageId,
+      rev: 1,
+      clientEventId: crypto.randomUUID(),
+      blockId: "trend",
+      event: "chart.select",
+      value: { series: "new", x: "B 站", y: 9, index: 0 },
+      part: { kind: "bar", keys: { series: "new", x: "B 站" } },
+    });
+    expect(live).toMatchObject({ stored: false, expect: { by: w.bot.id, mode: "run" } });
+    const frame = await d.next((f) => f.t === "run.interaction" && f.source.kind === "card");
+    expect(frame).toMatchObject({
+      runId,
+      eventId: live.eventId,
+      source: { kind: "card", messageId, blockId: "trend", rev: 1 },
+      event: "chart.select",
+      value: { series: "new", x: "B 站", y: 9, index: 0 },
+      block: { id: "trend", type: "chart" },
+      actor: { id: w.human.id },
+    });
+
+    // The run patches the card in answer to it; the person gets interaction.resolved.
+    d.event(runId, { type: "output", outputId: "p2", op: "card.patch", body: { messageId, baseRev: 1, cause: live.eventId, ops: [{ op: "card", props: { title: "10 月数据月报（B 站）" } }] } });
+    expect(await result("p2")).toMatchObject({ ok: true, result: { rev: 2 } });
+    const resolved = await c.next((f) => f.t === "transient" && f.event.type === "interaction.resolved" && f.event.eventId === live.eventId);
+    expect(resolved.event).toMatchObject({ result: "patched" });
+
+    // An answer is stored and reaches the run as run.answer with the block.
+    const ans = await c.ok({ t: "card.event", groupId: w.gid, messageId, rev: 2, clientEventId: crypto.randomUUID(), actionId: "send", event: "action.press", inputs: { check: { value: "wrong" } } });
+    expect(ans).toMatchObject({ stored: true, expect: { by: w.bot.id, mode: "run" } });
+    const ra = await d.next((f) => f.t === "run.answer");
+    expect(ra).toMatchObject({ runId, eventId: ans.eventId, source: { kind: "card", messageId, askId: "verify", answerId: ans.answerId }, actionId: "send", inputs: { check: { value: "wrong" } } });
+    // Once the run takes it, the answer can no longer be taken back.
+    d.event(runId, { type: "input.accepted", inputId: ra.inputId });
+    await waitUntil(async () => {
+      const r = await c.request({ t: "card.answer.retract", groupId: w.gid, messageId, answerId: ans.answerId });
+      return r.ok === false && r.error.reason === "card.retract_closed" ? r : undefined;
+    }, 5000);
     for (const x of [c, d]) x.close();
   });
 
