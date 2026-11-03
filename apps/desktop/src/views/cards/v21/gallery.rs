@@ -568,8 +568,10 @@ impl Gallery21 {
 impl Render for Gallery21 {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        let compose_note =
+            crate::copy::fill(c::G_S_COMPOSE_NOTE, &[("product", env!("PRODUCT_NAME"))]);
         let (title, note, number) = match self.page {
-            Page::Compose => (c::G_S_COMPOSE, c::G_S_COMPOSE_NOTE, Some("01")),
+            Page::Compose => (c::G_S_COMPOSE, compose_note.as_str(), Some("01")),
             Page::Choice | Page::Choice2 | Page::Choice3 => {
                 (c::G_S_CHOICE, c::G_S_CHOICE_NOTE, Some("02"))
             }
