@@ -1120,3 +1120,129 @@ fn an_immediate_answer_keeps_its_event_block_and_value() {
     let d = s.decisions(Some(G1), 10).unwrap();
     assert_eq!(d[0].answer.value, Some(json!({ "value": "later" })));
 }
+
+fn ask21(blocks: serde_json::Value, ask: bool) -> CardV2 {
+    let mut card = json!({
+        "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": "ask", "title": "选", "fallback": "选",
+        "blocks": blocks
+    });
+    if ask {
+        card["ask"] = json!({ "id": "a1", "from": [ME] });
+    }
+    serde_json::from_value(card).unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn stored_answers_are_queued_while_offline() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = Client::new(ClientConfig::new("http://127.0.0.1:9", TOKEN, dir.path())).unwrap();
+    client
+        .store()
+        .apply_welcome(
+            &member(ME, "me"),
+            &[member(ME, "me")],
+            &[summary(group(G1, &[ME, BOT]), 0, 0, 0)],
+        )
+        .unwrap();
+    let opts = json!([{ "id": "a", "label": "A" }, { "id": "b", "label": "B" }]);
+    let questionnaire = json!([
+        { "id": "qs", "type": "questionnaire", "children": ["q1", "q2"] },
+        { "id": "q1", "type": "input", "kind": "text", "label": "一" },
+        { "id": "q2", "type": "input", "kind": "text", "label": "二" }
+    ]);
+    let compare = json!([{ "id": "cmp", "type": "compare", "options": opts }]);
+    let poll = json!([{ "id": "vote", "type": "poll", "label": "投", "voters": "group", "closesAt": 9_999, "options": opts, "fallbackText": "投" }]);
+    let confirm = json!([{ "id": "go", "type": "confirm", "label": "发布？", "yes": "发", "no": "不发", "fallbackText": "发布？" }]);
+    client
+        .store()
+        .apply_events(
+            G1,
+            &[
+                topic_created(1, G1, topic("T1", G1, "M1", 1)),
+                msg_created(2, message("M1", G1, "T1", ME, 2, "root")),
+                msg_created(3, card_message("Q", 3, ask21(questionnaire, true))),
+                msg_created(4, card_message("CMP", 4, ask21(compare, true))),
+                msg_created(5, card_message("P", 5, ask21(poll, true))),
+                msg_created(6, card_message("CF", 6, ask21(confirm.clone(), true))),
+                msg_created(7, card_message("NOASK", 7, ask21(confirm, false))),
+            ],
+        )
+        .unwrap();
+    client.start();
+    let send = |message_id: &str,
+                block_id: &str,
+                event: &str,
+                value: Option<serde_json::Value>,
+                inputs: Option<AnswerInputs>| {
+        client
+            .send_card_event(chat_core::CardEventRequest {
+                message_id: message_id.into(),
+                rev: 1,
+                block_id: Some(block_id.into()),
+                event: event.into(),
+                value,
+                inputs,
+                ..Default::default()
+            })
+            .unwrap()
+    };
+    let sent = [
+        send(
+            "Q",
+            "qs",
+            "action.press",
+            None,
+            Some([("q1".to_string(), json!({"value": "x"}))].into()),
+        ),
+        send(
+            "CMP",
+            "cmp",
+            "compare.pick",
+            Some(json!({"value": "a"})),
+            None,
+        ),
+        send(
+            "P",
+            "vote",
+            "choice.submit",
+            Some(json!({"value": "b"})),
+            None,
+        ),
+        send(
+            "CF",
+            "go",
+            "choice.submit",
+            Some(json!({"value": "yes"})),
+            None,
+        ),
+    ];
+    // Each one is an answer the server stores: queued with its clientEventId for the resend.
+    for s in &sent {
+        assert!(s.durable, "{s:?}");
+        let row = client
+            .store()
+            .outbox_get(&s.client_event_id)
+            .unwrap()
+            .unwrap();
+        let OutboxOp::CardEvent {
+            client_event_id, ..
+        } = row.op
+        else {
+            panic!("not a card event row")
+        };
+        assert_eq!(client_event_id, s.client_event_id);
+    }
+    assert_eq!(client.pending_card_events("T1").unwrap().len(), 4);
+    // Without an ask the same commit is a live event.
+    assert!(
+        !send(
+            "NOASK",
+            "go",
+            "choice.submit",
+            Some(json!({"value": "yes"})),
+            None
+        )
+        .durable
+    );
+    client.stop();
+}

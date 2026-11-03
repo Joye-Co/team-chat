@@ -7,8 +7,8 @@ use crate::engine::{Command, LiveWrite};
 use crate::proto::machine::RunLogEntry;
 use crate::proto::{
     AnswerEdits, AnswerInputs, ArtifactDataResponse, ArtifactEventFrame, ArtifactEventKind, BotRun,
-    CardActionKind, CardEventFrame, CardV2Block, ClientFrame, EVENT_ACTION_PRESS,
-    EVENT_ANSWER_RETRACT, GroupDecision, GroupKind, MemberKind, PartRef, TopicContext, TopicLink,
+    CardActionKind, CardEventFrame, ClientFrame, EVENT_ACTION_PRESS, EVENT_ANSWER_RETRACT,
+    GroupDecision, GroupKind, MemberKind, PartRef, TopicContext, TopicLink,
 };
 use crate::runs::{TerminalLine, terminal_lines};
 use crate::store::{CardAnswerRow, DecisionRow, OutboxOp, OutboxState, TopicRow};
@@ -127,7 +127,8 @@ impl Client {
     }
 
     /// Sends one interaction with a v2 card (2.1, `card.event`). An answer (a submit or
-    /// reject press, or the commit of an `immediate` block while the card asks) goes through
+    /// reject press, or a commit on the decision surface while the card asks:
+    /// [`crate::proto::CardV2::is_answer_event`]) goes through
     /// the outbox and is resent after a reconnect; every other event is live: sent now or
     /// failed at once (reason `client.offline`). The ack is `ClientUpdate::CardEventAcked`.
     pub fn send_card_event(&self, req: CardEventRequest) -> Result<CardEventSent, ClientError> {
@@ -162,17 +163,8 @@ impl Client {
                     !matches!(x.kind(), CardActionKind::Press | CardActionKind::Link)
                 })
             }
-            (_, Some(b)) => {
-                card.ask.is_some()
-                    && matches!(
-                        req.event.as_str(),
-                        "choice.submit" | "input.submit" | "compare.pick"
-                    )
-                    && card
-                        .block(b)
-                        .and_then(CardV2Block::base)
-                        .is_some_and(|x| x.is_immediate())
-            }
+            // The server's rule for a stored answer (a commit on the decision surface).
+            (_, Some(b)) => card.is_answer_event(b, &req.event),
             _ => false,
         };
         if durable {

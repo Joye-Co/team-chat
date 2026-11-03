@@ -2024,6 +2024,77 @@ impl CardV2 {
     pub fn block(&self, id: &str) -> Option<&CardV2Block> {
         self.all_blocks().into_iter().find(|b| b.id() == Some(id))
     }
+    /// Block ids of the decision surface of the ask (INTERACT §2.2; the server's `surfaceIds`):
+    /// inputs named by answer actions, immediate blocks, compares, polls, questionnaires and
+    /// their children; on a card whose actions name no inputs (2.0), every input block.
+    pub fn surface_ids(&self) -> BTreeSet<&str> {
+        let answer_action =
+            |a: &&CardV2Action| !matches!(a.kind(), CardActionKind::Press | CardActionKind::Link);
+        let named: Vec<&str> = self
+            .actions()
+            .iter()
+            .filter(answer_action)
+            .flat_map(|a| a.inputs.as_deref().unwrap_or(&[]))
+            .map(String::as_str)
+            .collect();
+        let mut ids: BTreeSet<&str> = named.iter().copied().collect();
+        for b in &self.blocks {
+            let Some(id) = b.id() else { continue };
+            if matches!(b, CardV2Block::Compare { .. } | CardV2Block::Poll { .. })
+                || b.base().is_some_and(BlockBase::is_immediate)
+            {
+                ids.insert(id);
+            }
+            if let CardV2Block::Questionnaire { children, .. } = b {
+                ids.insert(id);
+                ids.extend(children.iter().map(String::as_str));
+            }
+        }
+        if named.is_empty() {
+            let input = |b: &CardV2Block| {
+                (b.takes_input() && !matches!(b, CardV2Block::Table { .. }))
+                    || matches!(b, CardV2Block::Draft { .. })
+            };
+            for b in &self.blocks {
+                if let CardV2Block::Group {
+                    blocks: Some(inline),
+                    ..
+                } = b
+                {
+                    ids.extend(
+                        inline
+                            .iter()
+                            .filter(|c| c.takes_input() || matches!(c, CardV2Block::Draft { .. }))
+                            .filter_map(CardV2Block::id),
+                    );
+                }
+                if input(b) {
+                    ids.extend(b.id());
+                }
+            }
+        }
+        ids
+    }
+    /// True when `event` on block `block_id` answers the card's ask, so the server stores it
+    /// (`card.answered`): a commit (`choice.submit`, `input.submit`, `compare.pick` on an
+    /// immediate block, a confirm, a compare or a poll; `action.press` on a questionnaire) on
+    /// a block of the decision surface while the card asks. The client keeps such an event in
+    /// its outbox and resends it with the same `clientEventId` (INTERACT §3.7).
+    pub fn is_answer_event(&self, block_id: &str, event: &str) -> bool {
+        let Some(b) = self.block(block_id) else {
+            return false;
+        };
+        let commit = (matches!(event, "choice.submit" | "input.submit" | "compare.pick")
+            && (b.base().is_some_and(BlockBase::is_immediate)
+                || matches!(
+                    b,
+                    CardV2Block::Confirm { .. }
+                        | CardV2Block::Compare { .. }
+                        | CardV2Block::Poll { .. }
+                )))
+            || (matches!(b, CardV2Block::Questionnaire { .. }) && event == EVENT_ACTION_PRESS);
+        self.ask.is_some() && commit && self.surface_ids().contains(block_id)
+    }
     /// Blocks in reading order: top-level blocks not named by a container, each container
     /// followed by its children.
     pub fn reading_order(&self) -> Vec<&CardV2Block> {
