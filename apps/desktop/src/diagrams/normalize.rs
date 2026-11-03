@@ -144,30 +144,62 @@ pub fn protocol_type(t: DiagramType) -> &'static str {
     }
 }
 
-/// True for a line that only sets colors (removed: TeamChat owns colors).
-fn is_color_line(line: &str, kind: DiagramType) -> bool {
+/// True for a line that only sets colors (removed: TeamChat owns colors). `class_assigns`:
+/// in flowcharts and state diagrams `class a,b name` assigns a style class; in class
+/// diagrams `class` declares a class and stays.
+fn is_color_line(line: &str, class_assigns: bool) -> bool {
     let t = line.trim_start();
     let starts = |w: &str| {
         t.strip_prefix(w)
             .is_some_and(|r| r.starts_with(char::is_whitespace))
     };
-    if starts("style") || starts("classDef") || starts("linkStyle") {
-        return true;
-    }
-    // `class a,b name` assigns a style class in flowcharts and state diagrams; in class
-    // diagrams `class` declares a class and stays.
-    matches!(kind, DiagramType::Flowchart | DiagramType::State) && starts("class")
+    starts("style")
+        || starts("classDef")
+        || starts("linkStyle")
+        || (class_assigns && starts("class"))
 }
 
-/// Checks and normalizes a source (REFS §B2 step 1).
-pub fn normalize(source: &str) -> Result<Normalized, Refusal> {
-    let kind = check_source(source)?;
-    let cleaned = clean(source);
-    let source = cleaned
+/// True when the first keyword names a flowchart or a state diagram (the protocol's
+/// keyword rule: the first line that is not blank and not a `%%` comment).
+fn assigns_classes(source: &str) -> bool {
+    let keyword = source
         .lines()
-        .filter(|l| !is_color_line(l, kind))
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("%%"))
+        .and_then(|l| {
+            l.split(|c: char| c.is_whitespace() || c == ':' || c == ';')
+                .next()
+        })
+        .unwrap_or("");
+    matches!(
+        keyword,
+        "flowchart" | "graph" | "stateDiagram" | "stateDiagram-v2"
+    )
+}
+
+/// The cleaned source's lines that stay, with their 1-based line numbers in the source
+/// the person sees.
+fn kept_lines(cleaned: &str) -> Vec<(u32, &str)> {
+    let class_assigns = assigns_classes(cleaned);
+    cleaned
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| !is_color_line(l, class_assigns))
+        .map(|(i, l)| (i as u32 + 1, l))
+        .collect()
+}
+
+/// Checks and normalizes a source (REFS §B2 step 1). Color lines go first, so they never
+/// make a diagram fail: not by size, and not by a forbidden word in a style or class name
+/// (`classDef callback …`).
+pub fn normalize(source: &str) -> Result<Normalized, Refusal> {
+    let cleaned = clean(source);
+    let source = kept_lines(&cleaned)
+        .into_iter()
+        .map(|(_, l)| l)
         .collect::<Vec<_>>()
         .join("\n");
+    let kind = check_source(&source)?;
     Ok(Normalized { source, kind })
 }
 
@@ -295,6 +327,36 @@ mod tests {
         let n = normalize("classDiagram\n  class Topic\n  classDef x fill:red\n  Topic <|-- Group")
             .unwrap();
         assert_eq!(n.source, "classDiagram\n  class Topic\n  Topic <|-- Group");
+    }
+
+    #[test]
+    fn style_lines_never_fail_a_diagram() {
+        // Forbidden words only in style and class names.
+        let n = normalize(
+            "flowchart LR\n  A-->B\n  classDef callback fill:#f00\n  class A callback\n  style B fill:url(href)\n  linkStyle 0 stroke:red",
+        )
+        .unwrap();
+        assert_eq!(n.source, "flowchart LR\n  A-->B");
+        let s = normalize("stateDiagram-v2\n  [*]-->A\n  classDef call fill:red\n  class A call ")
+            .unwrap();
+        assert_eq!(s.source, "stateDiagram-v2\n  [*]-->A");
+        // Style lines do not count against the size limit.
+        let big = format!(
+            "graph TD\n  A-->B\n{}",
+            "  style A fill:#ffffff,stroke:#000000\n".repeat(600)
+        );
+        assert!(big.len() > chat_core::proto::diagram::MAX_DIAGRAM_SOURCE_BYTES);
+        assert_eq!(normalize(&big).unwrap().source, "graph TD\n  A-->B");
+        // A forbidden construct outside a style line still refuses.
+        assert_eq!(
+            normalize("flowchart LR\n  style A fill:red\n  click A call x()"),
+            Err(Refusal::Forbidden("click "))
+        );
+        // In class diagrams `class` lines are kept and checked.
+        assert_eq!(
+            normalize("classDiagram\n  class callback"),
+            Err(Refusal::Forbidden("callback"))
+        );
     }
 
     #[test]
