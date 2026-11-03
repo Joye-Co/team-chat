@@ -118,9 +118,9 @@ export class HttpClient {
       }
     }
     if (!res.ok) {
-      const e = (data as { error?: { code?: string; message?: string } } | undefined)?.error;
+      const e = (data as { error?: { code?: string; message?: string; reason?: string } } | undefined)?.error;
       const code = (e?.code as ChatError["code"]) ?? (res.status === 401 ? "unauthorized" : res.status >= 500 ? "internal" : "invalid");
-      throw new ChatError(code, e?.message ?? `HTTP ${res.status}`, res.status);
+      throw new ChatError(code, e?.message ?? `HTTP ${res.status}`, res.status, typeof e?.reason === "string" ? e.reason : undefined);
     }
     return data as T;
   }

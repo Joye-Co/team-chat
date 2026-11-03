@@ -7,12 +7,15 @@ export type ChatErrorCode = ErrorCode | "timeout" | "closed" | "network";
 export class ChatError extends Error {
   readonly code: ChatErrorCode;
   readonly status?: number;
+  /** 1.1: the specific reason from `ack.error.reason`, for example `card.stale_rev`. */
+  readonly reason?: string;
 
-  constructor(code: ChatErrorCode, message: string, status?: number) {
+  constructor(code: ChatErrorCode, message: string, status?: number, reason?: string) {
     super(`${code}: ${message}`);
     this.name = "ChatError";
     this.code = code;
     this.status = status;
+    this.reason = reason;
   }
 }
 

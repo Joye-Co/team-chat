@@ -9,10 +9,12 @@ export {
   type BotOptions,
   type CardActionContext,
   type CardAnswerContext,
+  type CardEventContext,
   type DoneResult,
   type EditInput,
   type EventContext,
   type MessageContext,
+  type ResolvedRef,
   type SendInput,
   type Target,
   type TopicChange,
@@ -40,6 +42,20 @@ export {
   type FormInput,
   formCard,
 } from "./cards.ts";
+export {
+  blocks,
+  type Child,
+  type ComposeCardOptions,
+  checkDiagram,
+  choice,
+  composeCard,
+  diagramLabels,
+  flattenBlocks,
+  mermaid,
+  parts,
+} from "./blocks.ts";
+export { CardDraft, opsFit, type PatchInput } from "./interact.ts";
+export { DELETED_REF_LABEL, findPart, type MarkdownBlock, markdownBlocks, refPrefix, stripRefPrefix } from "./refs.ts";
 export { ChatError, type ChatErrorCode, isRetryable } from "./errors.ts";
 export { HttpClient, type HttpClientOptions, type PostMessageInput, type UploadInput, sha256Hex } from "./http.ts";
 export { consoleLogger, type Logger, type LogLevel, redact } from "./log.ts";

@@ -435,13 +435,13 @@ describe("bot sdk e2e", () => {
 describe("1.1 cards, side chats and page events", () => {
   const ownerId = () => human.me.id;
 
-  test("a decision ask: the answer reaches onCardAnswer with typed inputs, resolve edits the card", async () => {
+  test("a decision ask: the answer reaches onCardAnswer with typed inputs, markAnswered edits the card", async () => {
     const answers: CardAnswerContext<{ choice: string }>[] = [];
     const resolved: number[] = [];
     bot.onCardAnswer<{ choice: string }>(async (ctx) => {
       if (ctx.card?.title !== "发哪个版本") return;
       answers.push(ctx);
-      const m = await ctx.resolve({ intent: "info" });
+      const m = await ctx.markAnswered({ intent: "info" });
       resolved.push(m.cardV2?.rev ?? 0);
     });
     const card = decisionCard({ title: "发哪个版本", text: "选一个", options: ["1.4", "1.5"], from: [ownerId()], record: true });
