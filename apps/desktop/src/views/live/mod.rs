@@ -25,7 +25,7 @@ use crate::{
     app::{RightPane, Services},
     copy::{fill, live as c, nav as n},
     data::{
-        AdminError, BotRunSummary, Millis, PlanState,
+        AdminError, BotRunSummary, Member, MemberLevel, Millis, PlanState,
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
     },
     theme::{self, Type as _, motion, space},
@@ -285,6 +285,7 @@ impl LivePane {
         screen: &MachineScreen,
         run: &BotRunSummary,
         held_by_me: bool,
+        can_control: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = theme::colors(cx);
@@ -351,7 +352,7 @@ impl LivePane {
                 )
                 .child(div().flex_1())
                 .children(share)
-                .children(held_by_me.then_some(hand_back)),
+                .children(can_control.then_some(hand_back)),
             cx,
         )
     }
@@ -1095,12 +1096,13 @@ impl LivePane {
         step: &str,
         held: bool,
         held_by_me: bool,
+        can_control: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let k = theme::colors(cx);
         let active = run.status.is_active();
         let stopping = self.services.provider.run_stopping(&run.id);
-        let take = (!held && active).then(|| {
+        let take = (!held && active && can_control).then(|| {
             let run = run.clone();
             ui::button(
                 "live-take-over",
@@ -1134,7 +1136,7 @@ impl LivePane {
         });
         let hint = if held && held_by_me {
             Some(fill(c::LIVE_HELD_HINT, &[("name", bot), ("step", step)]))
-        } else if active && !held {
+        } else if active && !held && can_control {
             Some(fill(c::LIVE_TAKE_OVER_HINT, &[("name", bot)]))
         } else {
             None
@@ -1199,6 +1201,17 @@ impl PaneView for LivePane {
             theme::live_pane_width(window_w)
         }
     }
+}
+
+/// Who may 接管 or 交还 a run, as the server decides: a person who asked
+/// for the run, or an owner.
+fn may_control(me: Option<&Member>, run: &BotRunSummary) -> bool {
+    me.is_some_and(|m| {
+        !m.is_bot()
+            && !m.deactivated
+            && (run.requested_by.as_deref() == Some(m.id.as_str())
+                || m.level == MemberLevel::Owner)
+    })
 }
 
 /// The screen sharing address to offer, when it is one the app may open
@@ -1319,6 +1332,7 @@ impl Render for LivePane {
         let me = self.services.me();
         let held = screen.paused_by.is_some();
         let held_by_me = held && screen.paused_by == me;
+        let can_control = may_control(me.as_deref().and_then(|id| p.member(id)).as_ref(), &run);
         let times = p.run_step_times(&run_id);
         let current = run
             .plan
@@ -1404,7 +1418,9 @@ impl Render for LivePane {
                         .flex()
                         .flex_col()
                         .children(
-                            held.then(|| self.held_banner(&bot, &screen, &run, held_by_me, cx)),
+                            held.then(|| {
+                                self.held_banner(&bot, &screen, &run, held_by_me, can_control, cx)
+                            }),
                         )
                         .child(self.screen(&screen, &lines, title, live_now, pointer, cx))
                         .children(self.replay(&run, &times, current, replay_step, end, cx))
@@ -1421,7 +1437,15 @@ impl Render for LivePane {
             .bg(k.raised)
             .child(self.header(&bot, &screen, &run, held_by_me, cx))
             .child(body)
-            .child(self.footer(&run, &bot, &step_text, held, held_by_me, cx))
+            .child(self.footer(
+                &run,
+                &bot,
+                &step_text,
+                held,
+                held_by_me,
+                can_control,
+                cx,
+            ))
             .into_any_element()
     }
 }
@@ -1429,6 +1453,55 @@ impl Render for LivePane {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data::{MemberKind, RunStatus};
+
+    fn person(id: &str, level: MemberLevel) -> Member {
+        Member {
+            id: id.into(),
+            kind: MemberKind::Human,
+            name: id.into(),
+            role: None,
+            level,
+            avatar_url: None,
+            deactivated: false,
+            online: true,
+            character: None,
+        }
+    }
+
+    fn run(requested_by: Option<&str>) -> BotRunSummary {
+        BotRunSummary {
+            id: "r1".into(),
+            bot_id: "b1".into(),
+            group_id: "g1".into(),
+            topic_id: "t1".into(),
+            machine_id: Some("m1".into()),
+            machine_name: None,
+            status: RunStatus::Running,
+            requested_by: requested_by.map(Into::into),
+            created_at: 0,
+            started_at: None,
+            ended_at: None,
+            updated_at: 0,
+            summary: None,
+            plan: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn only_the_requester_or_an_owner_controls_a_run() {
+        let r = run(Some("alice"));
+        assert!(may_control(Some(&person("alice", MemberLevel::Member)), &r));
+        assert!(may_control(Some(&person("olga", MemberLevel::Owner)), &r));
+        assert!(!may_control(Some(&person("bob", MemberLevel::Member)), &r));
+        assert!(!may_control(None, &r));
+        let mut bot = person("alice", MemberLevel::Owner);
+        bot.kind = MemberKind::Bot;
+        assert!(!may_control(Some(&bot), &r));
+        // A run nobody asked for: owners only.
+        assert!(!may_control(Some(&person("alice", MemberLevel::Member)), &run(None)));
+        assert!(may_control(Some(&person("olga", MemberLevel::Owner)), &run(None)));
+    }
 
     #[test]
     fn only_screen_sharing_addresses_open() {
