@@ -303,14 +303,20 @@ fn on_event(
             version,
             name,
             payload,
+            user_action,
         } => {
-            // pages track: a declared page event goes to the bot that made it.
-            if let Some(p) = provider
-                && p.artifact_page_events(artifact_id, version)
-                    .iter()
-                    .any(|n| *n == name)
-            {
-                p.send_artifact_event(artifact_id, version, &name, Some(payload));
+            // pages track: a declared page event goes to the bot that made it,
+            // only after the viewer's input and paced.
+            if let Some(p) = provider {
+                crate::views::artifact_page::forward_page_event(
+                    p,
+                    artifact_id,
+                    version,
+                    &name,
+                    &payload,
+                    user_action,
+                    cx,
+                );
             }
         }
         E::Loaded { .. } | E::FocusChanged { .. } => {}

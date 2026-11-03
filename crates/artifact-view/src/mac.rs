@@ -1,6 +1,7 @@
 //! AppKit and WebKit side: the window, the scheme handler, the bridge and the delegates.
 
 use std::cell::{Cell, RefCell};
+use std::ptr::NonNull;
 use std::rc::Rc;
 use std::time::{Duration, Instant};
 
@@ -10,8 +11,9 @@ use objc2::rc::{Retained, Weak};
 use objc2::runtime::{AnyObject, ProtocolObject, Sel};
 use objc2::{AllocAnyThread, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
-    NSBackingStoreType, NSLayoutAttribute, NSPopUpButton, NSTitlebarAccessoryViewController,
-    NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTabbingMode, NSWorkspace,
+    NSBackingStoreType, NSEvent, NSEventMask, NSEventType, NSLayoutAttribute, NSPopUpButton,
+    NSTitlebarAccessoryViewController, NSView, NSWindow, NSWindowDelegate, NSWindowStyleMask,
+    NSWindowTabbingMode, NSWorkspace,
 };
 use objc2_foundation::{
     MainThreadMarker, NSData, NSDictionary, NSError, NSHTTPURLResponse, NSJSONSerialization,
@@ -30,6 +32,7 @@ use serde_json::Value;
 use crate::resolve::{self, Content, SCHEME};
 use crate::{
     ArtifactEvent, Capabilities, Error, OpenOptions, Presentation, VersionItem, VersionSpec, bridge,
+    gate,
 };
 
 const RULE_LIST_ID: &str = "artifact-view-block-network-v1";
@@ -62,6 +65,8 @@ pub(crate) struct State {
     pub(crate) closed: bool,
     pub(crate) rules_ready: bool,
     pub(crate) last_external: Option<Instant>,
+    /// The viewer's last click, drag or key press in this web view (see [`gate`]).
+    pub(crate) last_input: Option<Instant>,
 }
 
 pub(crate) struct Ivars {
@@ -71,6 +76,8 @@ pub(crate) struct Ivars {
     window: RefCell<Option<Weak<NSWindow>>>,
     ucc: RefCell<Option<Weak<WKUserContentController>>>,
     reloads: Cell<u32>,
+    /// The local event monitor that records the viewer's input in the web view.
+    monitor: RefCell<Option<Retained<AnyObject>>>,
 }
 
 /// Wrapper that lets main-thread values ride a block onto the main queue.
@@ -194,6 +201,7 @@ impl Controller {
             window: RefCell::new(None),
             ucc: RefCell::new(None),
             reloads: Cell::new(0),
+            monitor: RefCell::new(None),
         });
         // SAFETY: NSObject's init has this signature.
         unsafe { msg_send![super(this), init] }
@@ -291,7 +299,7 @@ impl Controller {
         }
         let origin = unsafe { frame.securityOrigin() };
         let (proto, host) = unsafe { (origin.protocol().to_string(), origin.host().to_string()) };
-        let (outcome, version) = {
+        let (outcome, version, user_action) = {
             let st = self.ivars().state.borrow();
             if st.closed
                 || !proto.eq_ignore_ascii_case(SCHEME)
@@ -312,7 +320,11 @@ impl Controller {
             } else {
                 Vec::new()
             };
-            (bridge::handle(&raw, st.caps, &st.data), st.version)
+            (
+                bridge::handle(&raw, st.caps, &st.data),
+                st.version,
+                gate::recent_input(st.last_input, Instant::now()),
+            )
         };
         if let Some(web_view) = unsafe { message.webView() } {
             let script = NSString::from_str(&bridge::reply_script(&outcome.reply));
@@ -323,6 +335,7 @@ impl Controller {
                 version,
                 name,
                 payload,
+                user_action,
             });
         }
     }
@@ -386,6 +399,9 @@ impl Controller {
             st.closed = true;
             st.content = Content::memory([]);
             st.data = Value::Null;
+        }
+        if let Some(monitor) = self.ivars().monitor.borrow_mut().take() {
+            unsafe { NSEvent::removeMonitor(&monitor) };
         }
         if let Some(ucc) = self.ivars().ucc.borrow().as_ref().and_then(|w| w.load()) {
             unsafe {
@@ -479,6 +495,7 @@ pub(crate) fn new_state(
         closed: false,
         rules_ready: false,
         last_external: None,
+        last_input: None,
     })))
 }
 
@@ -551,6 +568,56 @@ pub(crate) fn wire(web_view: &WKWebView, controller: &Controller, inspectable: b
         web_view.setInspectable(inspectable);
     }
     *controller.ivars().webview.borrow_mut() = Some(Weak::new(web_view));
+    watch_input(web_view, controller);
+}
+
+/// Records the time of each click, drag or key press that goes to `web_view`, so page
+/// events can be tied to the viewer's own input. AppKit calls the monitor before it
+/// dispatches the event; the event passes on unchanged.
+fn watch_input(web_view: &WKWebView, controller: &Controller) {
+    let view = Weak::new(web_view);
+    let state = Rc::downgrade(&controller.ivars().state);
+    let block = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        // SAFETY: AppKit passes a valid event for the duration of the call.
+        let ev = unsafe { event.as_ref() };
+        if let (Some(view), Some(state)) = (view.load(), state.upgrade())
+            && input_goes_to(ev, &view)
+            && let Ok(mut st) = state.try_borrow_mut()
+            && !st.closed
+        {
+            st.last_input = Some(Instant::now());
+        }
+        event.as_ptr()
+    });
+    let mask = NSEventMask::LeftMouseDown
+        | NSEventMask::RightMouseDown
+        | NSEventMask::OtherMouseDown
+        | NSEventMask::LeftMouseDragged
+        | NSEventMask::KeyDown;
+    let monitor = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &block) };
+    if let Some(old) = controller.ivars().monitor.replace(monitor) {
+        unsafe { NSEvent::removeMonitor(&old) };
+    }
+}
+
+/// True when `event` goes to `view` or one of its subviews: a mouse event over it (hidden
+/// views and views under another view do not count) or a key event while it has focus.
+fn input_goes_to(event: &NSEvent, view: &WKWebView) -> bool {
+    let mtm = MainThreadMarker::from(view);
+    let (Some(win), Some(view_win)) = (event.window(mtm), view.window()) else {
+        return false;
+    };
+    if !std::ptr::eq(&*win, &*view_win) {
+        return false;
+    }
+    let target: Option<Retained<NSView>> = if event.r#type() == NSEventType::KeyDown {
+        win.firstResponder()
+            .and_then(|r| r.downcast::<NSView>().ok())
+    } else {
+        win.contentView()
+            .and_then(|c| c.hitTest(event.locationInWindow()))
+    };
+    target.is_some_and(|t| t.isDescendantOf(view))
 }
 
 /// Installs the network-blocking rule list, then loads the page. If the list cannot be

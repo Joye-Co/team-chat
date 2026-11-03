@@ -7,14 +7,22 @@
 //!
 //! Bridge capabilities follow the author: a version a bot member made that
 //! declares events may call `emitEvent`; each event goes to the bot
-//! (`artifact.event`). Nobody's page reads data through the bridge.
+//! (`artifact.event`). Nobody's page reads data through the bridge. An event
+//! goes only right after the viewer's own input in that page, and at most
+//! about five per second ([`forward_page_event`]).
 
 pub mod pane;
 pub mod scenes;
 
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::Rc,
+    sync::Arc,
+    time::Instant,
+};
 
-use artifact_view::{ArtifactEvent, Capabilities, Content, VersionSpec};
+use artifact_view::{ArtifactEvent, Capabilities, Content, VersionSpec, gate::EventLimiter};
 use gpui::{
     AnyElement, App, ClipboardItem, Context, InteractiveElement as _, IntoElement, ParentElement,
     Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window,
@@ -25,7 +33,7 @@ use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
 use crate::{
     app::{Place, Services},
     copy::{artifact_page as c, fill},
-    data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
+    data::{ArtifactDetail, ArtifactFolder, ChatProvider, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
     ui::{
         self, Lucide, MemberAvatar, Ring,
@@ -96,6 +104,84 @@ pub fn capabilities(
     }
 }
 
+type PendingEvent = (Arc<dyn ChatProvider>, serde_json::Value);
+
+thread_local! {
+    /// Page events by `(产出, version)`, paced for every page of the app.
+    static PAGE_EVENTS: RefCell<EventLimiter<(String, u32), PendingEvent>> =
+        RefCell::new(EventLimiter::new());
+    /// When the next send of waiting page events runs.
+    static FLUSH_AT: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+/// Sends a page event (`emitEvent`) to the bot that made the version, when
+/// the version declares `name` and the viewer used the page just before
+/// (`user_action`). Others are dropped. Events over the limit wait, and a
+/// later one of the same name replaces the waiting one, so a page can never
+/// fill the outbox or get the viewer `rate_limited`.
+pub fn forward_page_event(
+    provider: &Arc<dyn ChatProvider>,
+    artifact_id: &str,
+    version: u32,
+    name: &str,
+    payload: &serde_json::Value,
+    user_action: bool,
+    cx: &mut App,
+) {
+    if !user_action {
+        tracing::debug!(artifact_id, version, name, "page event without user input dropped");
+        return;
+    }
+    if !provider
+        .artifact_page_events(artifact_id, version)
+        .iter()
+        .any(|n| n == name)
+    {
+        return;
+    }
+    let now_go = PAGE_EVENTS.with(|l| {
+        l.borrow_mut().offer(
+            (artifact_id.to_string(), version),
+            name,
+            (provider.clone(), payload.clone()),
+            Instant::now(),
+        )
+    });
+    match now_go {
+        Some((p, payload)) => p.send_artifact_event(artifact_id, version, name, Some(payload)),
+        None => schedule_page_events(cx),
+    }
+}
+
+/// Sends the waiting page events when they may go.
+fn schedule_page_events(cx: &mut App) {
+    let Some(at) = PAGE_EVENTS.with(|l| l.borrow_mut().next_due(Instant::now())) else {
+        return;
+    };
+    if FLUSH_AT.with(|f| f.get()).is_some_and(|t| t <= at) {
+        return;
+    }
+    FLUSH_AT.with(|f| f.set(Some(at)));
+    cx.spawn(async move |cx: &mut gpui::AsyncApp| {
+        cx.background_executor()
+            .timer(at.saturating_duration_since(Instant::now()))
+            .await;
+        cx.update(|cx| {
+            FLUSH_AT.with(|f| {
+                if f.get() == Some(at) {
+                    f.set(None);
+                }
+            });
+            let due = PAGE_EVENTS.with(|l| l.borrow_mut().take_due(Instant::now()));
+            for ((id, version), name, (p, payload)) in due {
+                p.send_artifact_event(&id, version, &name, Some(payload));
+            }
+            schedule_page_events(cx);
+        });
+    })
+    .detach();
+}
+
 /// The live page of a version, sized `height`, forwarding declared page
 /// events to the bot that made it.
 pub fn embed(
@@ -117,20 +203,13 @@ pub fn embed(
     )
     .height(height)
     .rounded(radius)
-    .on_event(move |event, _, _| match event {
+    .on_event(move |event, _, cx| match event {
         ArtifactEvent::Emit {
             version,
             name,
             payload,
-        } => {
-            if provider
-                .artifact_page_events(&id, *version)
-                .iter()
-                .any(|n| n == name)
-            {
-                provider.send_artifact_event(&id, *version, name, Some(payload.clone()));
-            }
-        }
+            user_action,
+        } => forward_page_event(&provider, &id, *version, name, payload, *user_action, cx),
         ArtifactEvent::ExternalLink { url } => {
             crate::views::artifacts::window::ask_before_link(url.clone())
         }

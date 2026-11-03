@@ -303,6 +303,7 @@ mod demo {
                     version,
                     name,
                     payload,
+                    ..
                 } => {
                     r.details.insert(name.clone(), payload.clone());
                     let b = |k: &str| payload.get(k) == Some(&Value::Bool(true));

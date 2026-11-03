@@ -17,6 +17,7 @@
 
 pub mod bridge;
 pub mod embed;
+pub mod gate;
 pub mod resolve;
 
 #[cfg(target_os = "macos")]
@@ -131,11 +132,14 @@ pub enum ArtifactEvent {
     Loaded { version: u32 },
     /// The page could not load, or its web content process ended.
     LoadFailed { version: u32, reason: String },
-    /// The page called `emitEvent(name, payload)`.
+    /// The page called `emitEvent(name, payload)`. `user_action` is true when the viewer
+    /// clicked, dragged or typed in this web view at most [`gate::USER_ACTION_WINDOW`]
+    /// before; the host forwards only those events (see [`gate`]).
     Emit {
         version: u32,
         name: String,
         payload: Value,
+        user_action: bool,
     },
     /// The user activated a link to an `http`, `https` or `mailto` URL. The navigation was
     /// cancelled; the host may ask the user and then call [`open_external_url`].
