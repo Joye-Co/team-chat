@@ -39,6 +39,11 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Rust builds**: every worktree uses its own `CARGO_TARGET_DIR` and shares compiled
   dependencies through sccache: `export RUSTC_WRAPPER=sccache CARGO_BUILD_JOBS=6`. Run
   `. "$HOME/.cargo/env"` first.
+- **Disk space**: a desktop debug target takes 10–30 GB, and parallel worktrees filled the
+  whole disk once. For agent and check builds also set `CARGO_PROFILE_DEV_DEBUG=0
+  CARGO_INCREMENTAL=0`. Before you start builds, check `df -h ~`: stop and report when less
+  than 60 GB is free. When a branch is merged or abandoned, delete its worktree's
+  `CARGO_TARGET_DIR`; delete only target folders whose builds have stopped.
 - **Local processes**: keep PID files, logs and scratch files inside your own worktree under
   `.tmp/` (git ignores it), never in a shared folder such as a scratchpad: other agents run at
   the same time. Stop only processes you started, after checking that `ps -p <pid> -o command=`
