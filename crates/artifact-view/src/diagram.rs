@@ -176,7 +176,10 @@ pub fn mermaid_config(t: &ThemeVars) -> Value {
         "startOnLoad": false,
         "securityLevel": "strict",
         "htmlLabels": false,
-        "flowchart": { "htmlLabels": false, "useMaxWidth": false },
+        "flowchart": {
+            "htmlLabels": false, "useMaxWidth": false, "nodeSpacing": 28, "rankSpacing": 36,
+            "padding": 10, "diagramPadding": 8
+        },
         "sequence": {
             "useMaxWidth": false, "mirrorActors": false, "height": 40,
             "width": 132, "boxMargin": 8, "noteMargin": 8, "messageMargin": 32,
