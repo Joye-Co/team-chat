@@ -45,7 +45,7 @@ crate::copy! {
     ASK_SECTION_DMS = "私聊",
     ASK_GIVE_TO = "交给 {name}",
     ASK_GIVE_TO_JOJO = "交给 {name} 安排",
-    ASK_GIVE_DETAIL = "开一个话题：{task}",
+    ASK_GIVE_DETAIL = "开一个话题：{work}",
     ASK_GIVE_JOJO_DETAIL = "{name} 看完再分给合适的成员",
     ASK_IDLE = "空闲",
     ASK_WORKING_ON = "在做 {title}",

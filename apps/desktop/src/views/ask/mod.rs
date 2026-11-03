@@ -617,7 +617,7 @@ impl AskPalette {
         } else {
             (
                 fill(c::ASK_GIVE_TO, &[("name", &member.name)]),
-                fill(c::ASK_GIVE_DETAIL, &[("task", task)]),
+                fill(c::ASK_GIVE_DETAIL, &[("work", task)]),
                 k.ink_2,
             )
         };
