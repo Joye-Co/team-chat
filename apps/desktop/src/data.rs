@@ -16,6 +16,9 @@ pub use crate::characters::CharacterId;
 pub mod pages;
 /// View types of the v2 screens (1.1.0).
 pub mod v2;
+// --- cards v2 track: Card v2 view types ---
+pub mod cards_v2;
+// --- end cards v2 track ---
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -1811,34 +1814,41 @@ pub trait ChatProvider: Send + Sync + 'static {
         None
     }
 
-    // --- desk track (1.1.0 首页, views/desk): v2 cards on the desk ---
+    // --- cards v2 track (docs/protocol.md "Cards v2"; all have defaults) ---
 
-    /// The v2 card of a card message (`Message.cardV2`), from memory, when it
-    /// has one. Cheap, like [`ChatProvider::card`]. A message that has one
-    /// still has the server-derived v1 `card` for older readers.
-    fn card_v2(&self, _group_id: &str, _message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
+    /// The v2 card of a card message, with its message context, from
+    /// memory. Called on every frame for each visible card, so it must be
+    /// cheap; the same `Arc` of the card comes back while it does not change.
+    fn card_v2(&self, _group_id: &str, _message_id: &str) -> Option<cards_v2::CardV2Message> {
         None
     }
-    /// Answers to a v2 card (`card.answered`), oldest first, my queued
-    /// answer last with `pending` set.
-    fn card_v2_answers(&self, _group_id: &str, _message_id: &str) -> Vec<v2::CardAnswer> {
+    /// Stored answers to a v2 card (`card.answered`), oldest first. Cheap.
+    fn card_v2_answers(&self, _group_id: &str, _message_id: &str) -> Vec<cards_v2::CardV2Answer> {
         Vec::new()
     }
-    /// Answers a v2 card (`card.answer`) on the `rev` I saw. `inputs` are
-    /// keyed by block id (a `decision` block's value is the option id).
-    /// Emits `Change::Messages` for the topic when the answers change.
+    /// My answer to a v2 card while it is on its way or after it was refused.
+    fn card_v2_pending(
+        &self,
+        _group_id: &str,
+        _message_id: &str,
+    ) -> Option<cards_v2::CardV2Pending> {
+        None
+    }
+    /// Sends my answer to a v2 card (`card.answer`). Emits `Change::Messages`
+    /// for the topic when the answer state changes.
     fn answer_card_v2(
         &self,
         _group_id: &str,
         _topic_id: &str,
         _message_id: &str,
-        _rev: u32,
-        _action_id: &str,
-        _inputs: std::collections::BTreeMap<String, serde_json::Value>,
+        _answer: cards_v2::CardV2AnswerRequest,
     ) {
     }
+    /// Takes back my answer while it is still queued (撤回), or forgets a
+    /// refused one. Emits `Change::Messages` for the topic.
+    fn withdraw_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
 
-    // --- end of the desk track block ---
+    // --- end cards v2 track ---
 
     // --- topic track (v11/topic): the 话题 page ---
 
