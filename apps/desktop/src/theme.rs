@@ -1634,6 +1634,9 @@ pub mod card_v2 {
     pub const MAX_WIDTH: Pixels = px(680.);
     /// Header tile and the key letter tile of an option.
     pub const TILE: Pixels = px(20.);
+    /// The least width of the group part of the header path (`群 / 话题`):
+    /// one 12 pt character and an ellipsis.
+    pub const PATH_GROUP_MIN: Pixels = px(24.);
     /// Option rows and buttons, form fields.
     pub const OPTION: Pixels = px(36.);
     pub const OPTION_RADIUS: Pixels = px(9.);

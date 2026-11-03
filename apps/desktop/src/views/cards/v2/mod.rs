@@ -1077,28 +1077,60 @@ fn header(ctx: &Ctx, cx: &App) -> AnyElement {
         let topic = p
             .topic(&ctx.msg.group_id, &ctx.msg.topic_id)
             .map(|t| t.title)
+            .map(|t| {
+                if t.trim().is_empty() {
+                    crate::copy::nav::UNTITLED.to_string()
+                } else {
+                    t
+                }
+            })
             .unwrap_or_default();
-        let a = ctx.answerer();
-        let (g, t) = (ctx.msg.group_id.clone(), ctx.msg.topic_id.clone());
+        // Both parts open the topic.
+        let part = |key: &str, text: String| {
+            let a = ctx.answerer();
+            let (g, t) = (ctx.msg.group_id.clone(), ctx.msg.topic_id.clone());
+            div()
+                .id(ctx.id(key))
+                .min_w(px(0.))
+                .one_line()
+                .cursor_pointer()
+                .hover(|s| s.text_color(k.ink))
+                .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
+                .child(text)
+        };
+        // The path takes the room up to the time, so the group can be
+        // held to 45 % of it: the group gives way first (it shrinks ten
+        // times faster, down to one character and an ellipsis), then the
+        // topic shrinks with its own ellipsis. Both stay readable.
+        // A name of one or two characters never shrinks.
+        let short = group.chars().count() <= 2;
+        let both = !group.trim().is_empty() && !topic.trim().is_empty();
         div()
-            .id(ctx.id("path"))
             .ml(px(2.))
             .min_w(px(0.))
-            .flex_shrink(1.)
+            .flex_1()
             .flex()
             .overflow_hidden()
-            .cursor_pointer()
             .text_color(k.ink_3)
-            .hover(|s| s.text_color(k.ink))
-            .child(div().flex_none().child(format!("{group} / ")))
-            .child(
-                div()
-                    .min_w(px(0.))
-                    .one_line()
-                    .text_color(k.ink_2)
-                    .child(topic),
-            )
-            .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
+            .when(!group.trim().is_empty(), |el| {
+                el.child(
+                    part("path-group", group)
+                        .when(short, |el| el.flex_none())
+                        .when(!short, |el| {
+                            el.min_w(m::PATH_GROUP_MIN)
+                                .max_w(gpui::relative(0.45))
+                                .flex_shrink(10.)
+                        }),
+                )
+            })
+            .when(both, |el| el.child(div().flex_none().px(space::S4).child("/")))
+            .when(!topic.trim().is_empty(), |el| {
+                el.child(
+                    part("path-topic", topic)
+                        .flex_shrink(1.)
+                        .text_color(k.ink_2),
+                )
+            })
     });
     meta(div())
         .flex()
