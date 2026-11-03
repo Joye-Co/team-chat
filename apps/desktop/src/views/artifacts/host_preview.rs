@@ -194,6 +194,9 @@ pub fn open(
         .map(|a| a.summary.title)
         .unwrap_or_default();
     host::set_latest(d::ART_REPORT, 3, cx);
+    // An earlier scene of the same run may have read the provider's own folder of this
+    // 产出 (the sample report page) into the media store; the scene shows its own page.
+    store::clear(cx);
     for v in [3, 4] {
         store::request_folder(
             &MediaKey::new(d::ART_REPORT, v),
