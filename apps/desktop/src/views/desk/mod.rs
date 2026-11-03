@@ -297,7 +297,9 @@ impl Render for DeskPage {
                     ..Default::default()
                 },
             )]);
+            let full = SharedString::from(format!("{from}{}", n.text));
             let row = div()
+                .id("desk-note")
                 .mt(space::S6)
                 .flex()
                 .items_start()
@@ -310,7 +312,18 @@ impl Render for DeskPage {
                         .mt(px(1.))
                         .child(ui::MemberAvatar::new(member.as_ref(), px(18.))),
                 )
-                .child(div().flex_1().min_w_0().line_clamp(2).child(text));
+                // Two lines, then an ellipsis; the whole note is the tooltip.
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .line_clamp(2)
+                        .text_ellipsis()
+                        .child(text),
+                )
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
+                });
             ui::motion::rise("desk-note", 0, row, cx)
         });
 
