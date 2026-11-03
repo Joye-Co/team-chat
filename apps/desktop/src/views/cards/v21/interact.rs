@@ -14,6 +14,8 @@
 //! - A live event that comes back offline or busy puts the block back to its state before
 //!   the gesture (INTERACT §4.4) while the band says why for 4 s.
 //! - A rev that changes a block I typed in keeps my text and says 内容变了 · 用新的.
+//! - When the member answers my event with a new message whose row is not drawn (off
+//!   screen), the block says {name} 回了一条新消息 and jumps to it.
 //! - A conflict re-renders the latest rev, keeps local values whose ids still exist and
 //!   toasts 卡片刚更新了，请再看一眼 once.
 //! - A top-level block a new rev removed stays where it was and fades out (opacity only).
@@ -40,6 +42,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2::mix, card_v21 as t, space},
+    ui,
     views::cards::v2::{Ctx, blocks as b20, form::FormSnap, meta},
 };
 
@@ -473,7 +476,19 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
         });
     }
     // A redraw at the next stage.
-    if let Some(next) = next_stage(&events, now) {
+    let reply_due = events
+        .iter()
+        .filter_map(|e| match &e.phase {
+            CardEventPhase::Resolved { at, .. } if e.reply.is_some() => Some(at + ms(REPLY_QUIET)),
+            _ => None,
+        })
+        .filter(|due| *due > now)
+        .min();
+    let next = match (next_stage(&events, now), reply_due) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
+    };
+    if let Some(next) = next {
         let wait = Duration::from_millis((next - now).max(0) as u64 + 20);
         let due = std::time::Instant::now() + wait;
         let scheduled = ui.read(cx).wake_at;
@@ -566,6 +581,78 @@ fn settle_or_revert(ctx: &Ctx, events: &[MyCardEvent], now: Millis, cx: &mut App
             form.update(cx, |f, cx| f.restore(&block, &snap, cx));
         }
     });
+}
+
+// ---------------------------------------------------------------------------
+// The jump to a reply off screen
+
+/// Message rows the timelines drew in this session (a drawn row was on screen).
+#[derive(Default)]
+pub struct DrawnRows(std::collections::HashSet<String>);
+
+impl gpui::Global for DrawnRows {}
+
+/// Most rows kept; past it the set starts over (a reply drawn before is not a new one).
+const DRAWN_MAX: usize = 4096;
+
+/// A timeline drew the row of message `id`.
+pub fn mark_drawn(id: &str, cx: &mut App) {
+    let rows = &mut cx.default_global::<DrawnRows>().0;
+    if rows.contains(id) {
+        return;
+    }
+    if rows.len() >= DRAWN_MAX {
+        rows.clear();
+    }
+    rows.insert(id.to_string());
+}
+
+/// The reply that ended my newest event on `block`, while its row was never drawn (it
+/// is off screen), [`REPLY_QUIET`] after it came, so a reply that lands on screen in the
+/// same frame never flashes the line.
+pub fn reply_off_screen<'e>(
+    events: &'e [MyCardEvent],
+    block: &str,
+    now: Millis,
+    drawn: impl Fn(&str) -> bool,
+) -> Option<&'e str> {
+    let e = events
+        .iter()
+        .rev()
+        .find(|e| e.request.block_id.as_deref() == Some(block))?;
+    let CardEventPhase::Resolved { at, .. } = &e.phase else {
+        return None;
+    };
+    let reply = e.reply.as_deref()?;
+    (now - at >= ms(REPLY_QUIET) && !drawn(reply)).then_some(reply)
+}
+
+/// How long a reply may take to be drawn before the block offers the jump.
+const REPLY_QUIET: Duration = Duration::from_millis(300);
+
+/// {name} 回了一条新消息: a link at the block to the reply below, off screen.
+fn reply_link(ctx: &Ctx, block: &str, reply: &str, cx: &mut App) -> AnyElement {
+    let k = theme::colors(cx);
+    let a = ctx.answerer();
+    let reply = reply.to_string();
+    meta(div())
+        .mt(space::S6)
+        .flex()
+        .items_center()
+        .gap(space::S6)
+        .text_color(k.live_ink)
+        .child(div().size(px(5.)).rounded_full().bg(k.live))
+        .child(
+            b20::quiet_button(
+                ctx.id(format!("reply-{block}")),
+                &fill(c::NEW_MESSAGE, &[("name", &ctx.author)]),
+                cx,
+            )
+            .text_color(k.live_ink)
+            .on_click(move |_, window, cx| a.open_message(&reply, window, cx)),
+        )
+        .child(ui::icon(ui::Lucide::ArrowDown, px(12.), k.live_ink))
+        .into_any_element()
 }
 
 // ---------------------------------------------------------------------------
@@ -675,6 +762,12 @@ pub fn decorate(
     col = col.child(inner);
     if let Some(p) = pend.as_ref().filter(|p| p.stage != Stage::Quiet) {
         col = col.child(pending_line(ctx, p, cx));
+    }
+    let drawn = cx.try_global::<DrawnRows>();
+    let reply = reply_off_screen(&events, id, now, |m| drawn.is_some_and(|d| d.0.contains(m)))
+        .map(str::to_string);
+    if let Some(r) = reply {
+        col = col.child(reply_link(ctx, id, &r, cx));
     }
     if node.ui.drafts_kept.contains(id) {
         col = col.child(draft_changed(ctx, id, cx));
@@ -847,6 +940,7 @@ mod tests {
                 at,
             },
             dropped: false,
+            reply: None,
         }
     }
 
@@ -949,6 +1043,34 @@ mod tests {
         assert_eq!(in_flight(&events, &reverted, 100), ["bars", "t"]);
         reverted.insert(off.client_event_id.clone());
         assert_eq!(in_flight(&events, &reverted, 100), ["t"]);
+    }
+
+    #[test]
+    fn a_reply_off_screen_gets_a_jump_link() {
+        let mut e = ev(ExpectMode::Live, 0, false);
+        e.phase = CardEventPhase::Resolved {
+            result: InteractionResult::Patched,
+            note: None,
+            at: 1_000,
+        };
+        e.reply = Some("m-reply".into());
+        let events = [e.clone()];
+        let never = |_: &str| false;
+        assert_eq!(reply_off_screen(&events, "bars", 1_100, never), None, "quiet first");
+        assert_eq!(reply_off_screen(&events, "bars", 1_400, never), Some("m-reply"));
+        assert_eq!(
+            reply_off_screen(&events, "bars", 1_400, |m| m == "m-reply"),
+            None,
+            "its row was drawn: on screen"
+        );
+        assert_eq!(reply_off_screen(&events, "t", 1_400, never), None);
+        let mut newer = ev(ExpectMode::Live, 2_000, false);
+        newer.client_event_id = "c2".into();
+        assert_eq!(
+            reply_off_screen(&[e, newer], "bars", 2_500, never),
+            None,
+            "a newer event on the block ends it"
+        );
     }
 
     #[test]

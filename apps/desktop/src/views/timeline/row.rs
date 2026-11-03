@@ -44,6 +44,9 @@ impl TimelineView {
             return div().into_any_element();
         };
         let key = model::key(&message).to_string();
+        // --- v11/pb-cards: a drawn row is on screen (a card's jump to its reply) ---
+        crate::views::cards::v21::interact::mark_drawn(&message.id, cx);
+        // --- end v11/pb-cards ---
         let prev = ix.checked_sub(1).and_then(|i| self.messages.get(i));
         let start = ix == 0 && !self.has_older;
         let new_day = model::starts_day(prev, &message) && !start;

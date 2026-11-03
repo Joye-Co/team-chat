@@ -589,6 +589,22 @@ impl Answerer {
         });
     }
 
+    /// v11/pb-cards: scrolls the card's 话题 to message `id` and highlights it.
+    pub fn open_message(&self, id: &str, window: &mut Window, cx: &mut App) {
+        let Some(nav) = self.nav(window, cx) else {
+            return;
+        };
+        let seq = self
+            .provider
+            .messages(&self.group_id, &self.topic_id, 400)
+            .messages
+            .iter()
+            .find(|m| m.id == id)
+            .map_or(0, |m| m.created_seq);
+        let (g, t, id) = (self.group_id.clone(), self.topic_id.clone(), id.to_string());
+        nav.update(cx, |nav, cx| nav.open_message(g, t, id, seq, cx));
+    }
+
     pub fn open(&self, target: &RefTarget, window: &mut Window, cx: &mut App) {
         match target {
             RefTarget::Pr { url, .. } | RefTarget::Url { url } => cx.open_url(url),

@@ -1162,7 +1162,7 @@ impl ChatProvider for CoreProvider {
             let now = crate::selftest::clock::now_ms();
             for m in msgs.iter().filter(|m| m.cause.is_some()) {
                 if let Some(c) = &m.cause {
-                    self.shared.card_events.caused_anywhere(c, now);
+                    self.shared.card_events.caused_anywhere(c, now, &m.id);
                 }
             }
             // --- end inc-cards21 ---

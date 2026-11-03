@@ -135,6 +135,7 @@ fn acked(
             at: 0,
         },
         dropped: false,
+        reply: None,
     }
 }
 
@@ -813,6 +814,7 @@ pub fn all() -> Vec<Sample21> {
                 at: 0,
             },
             dropped: false,
+            reply: None,
         },
     ));
     conflict.prev = Some(Arc::new(card(report_rev1())));

@@ -177,6 +177,8 @@ pub struct MyCardEvent {
     pub phase: CardEventPhase,
     /// 不等了: the pending state was dropped (the local selection stays).
     pub dropped: bool,
+    /// v11/pb-cards: the new message that named this event as its cause.
+    pub reply: Option<String>,
 }
 
 impl MyCardEvent {

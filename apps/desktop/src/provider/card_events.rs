@@ -81,6 +81,7 @@ impl CardEventLog {
             sent_at: at,
             phase: CardEventPhase::Sending,
             dropped: false,
+            reply: None,
         });
         if list.len() > PER_CARD {
             let extra = list.len() - PER_CARD;
@@ -161,6 +162,12 @@ impl CardEventLog {
 
     /// A new rev or message named one of my events as its cause.
     pub fn caused(&self, message_id: &str, cause: &Cause, at: Millis) -> bool {
+        self.caused_by(message_id, cause, at, None)
+    }
+
+    /// Like [`caused`](Self::caused), and remembers the new message `reply` that named it
+    /// (the block offers a jump to it, INTERACT §4.4).
+    fn caused_by(&self, message_id: &str, cause: &Cause, at: Millis, reply: Option<&str>) -> bool {
         let mut inner = self.lock();
         let Some(list) = inner.cards.get_mut(message_id) else {
             return false;
@@ -175,15 +182,16 @@ impl CardEventLog {
             note: None,
             at,
         };
+        e.reply = reply.map(str::to_string);
         true
     }
 
     /// A new message named an event as its cause: find the card by the event id.
-    pub fn caused_anywhere(&self, cause: &Cause, at: Millis) -> bool {
+    pub fn caused_anywhere(&self, cause: &Cause, at: Millis, reply: &str) -> bool {
         let Some(message_id) = self.lock().by_event.get(&cause.event_id).cloned() else {
             return false;
         };
-        self.caused(&message_id, cause, at)
+        self.caused_by(&message_id, cause, at, Some(reply))
     }
 
     pub fn events(&self, message_id: &str) -> Vec<MyCardEvent> {
@@ -337,6 +345,16 @@ mod tests {
             ..Default::default()
         };
         assert!(log.caused("m", &cause, 6));
+        assert_eq!(log.events("m")[1].reply, None, "a rev of the card itself");
+        // A new message that names my event: the block can jump to it.
+        log.sent("m", "c3".into(), req("y"), false, 7);
+        log.acked("m", "c3", &Ok(ack("EV3")), 8);
+        let cause = Cause {
+            event_id: "EV3".into(),
+            ..Default::default()
+        };
+        assert!(log.caused_anywhere(&cause, 9, "msg-reply"));
+        assert_eq!(log.events("m")[2].reply.as_deref(), Some("msg-reply"));
     }
 
     #[test]

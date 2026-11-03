@@ -965,6 +965,7 @@ impl SampleCards {
                 at: now,
             },
             dropped: false,
+            reply: None,
         });
         if s.events.len() > 20 {
             s.events.remove(0);
