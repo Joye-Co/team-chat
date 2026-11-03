@@ -462,6 +462,10 @@ const MAX_PATCH_OPS = 50;
 const PATCH_INTERVAL_MS = 1000;
 /** How long a rebase waits for the newer rev to arrive before it reads the history. */
 const REBASE_WAIT_MS = 1500;
+/** The server takes a cause only from the last 30 minutes (INTERACT 4.1, `interact.bad_cause`). */
+const CAUSE_WINDOW_MS = 30 * 60_000;
+/** Older causes are left out a little early: clock skew and the time a write waits in a lane. */
+const CAUSE_MARGIN_MS = 2 * 60_000;
 
 function cutSummary(s: string): string {
   const cps = [...s];
@@ -534,6 +538,8 @@ export class Bot {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   private meMember: Member | null = null;
+  /** Server time minus local time (`welcome.serverTime`). */
+  private clockSkew = 0;
   private readonly memberMap = new Map<string, Member>();
   private readonly summaryMap = new Map<string, GroupSummary>();
 
@@ -1376,7 +1382,7 @@ export class Bot {
   private onFrame(f: Record<string, unknown>): void {
     switch (f.t) {
       case "welcome":
-        return this.onWelcome(f as { me: Member; members: Member[]; groups: GroupSummary[]; features?: string[] });
+        return this.onWelcome(f as { me: Member; members: Member[]; groups: GroupSummary[]; features?: string[]; serverTime?: number });
       case "event":
         return this.onEventFrame(f.event as RawEvent, false);
       case "transient": {
@@ -1416,7 +1422,7 @@ export class Bot {
     }
   }
 
-  private onWelcome(f: { me: Member; members: Member[]; groups: GroupSummary[]; features?: string[] }): void {
+  private onWelcome(f: { me: Member; members: Member[]; groups: GroupSummary[]; features?: string[]; serverTime?: number }): void {
     if (this.state.memberId && this.state.memberId !== f.me.id) {
       this.fail(new ChatError("invalid", "the state file belongs to another member; use one state file per bot"));
       return;
@@ -1426,6 +1432,7 @@ export class Bot {
       this.scheduleSave();
     }
     this.meMember = f.me;
+    if (typeof f.serverTime === "number" && Number.isFinite(f.serverTime)) this.clockSkew = f.serverTime - Date.now();
     this.serverFeatureList = Array.isArray(f.features) ? f.features.filter((x) => typeof x === "string") : [];
     this.memberMap.clear();
     for (const m of f.members) this.memberMap.set(m.id, m);
@@ -1787,6 +1794,26 @@ export class Bot {
     return { key, n };
   }
 
+  /** Whether the server still takes the event made at `at` (server time) as a cause. */
+  private causeFresh(at: number | undefined): boolean {
+    return at === undefined || Date.now() + this.clockSkew - at < CAUSE_WINDOW_MS - CAUSE_MARGIN_MS;
+  }
+
+  /**
+   * Runs a write with the cause the SDK added; when the server says `interact.bad_cause` (an
+   * older server, or clock skew), runs it again without one.
+   */
+  private async withCause<T>(cause: string | undefined, write: (cause: string | undefined) => Promise<T>): Promise<T> {
+    if (!cause) return write(undefined);
+    try {
+      return await write(cause);
+    } catch (err) {
+      if (!(err instanceof ChatError && err.reason === "interact.bad_cause")) throw err;
+      this.log.debug("cause not taken; sent without it", { cause });
+      return write(undefined);
+    }
+  }
+
   /** The context of a live event or an answer; `responded` turns true when the handler answered. */
   private cardEventContext(
     src: {
@@ -1806,13 +1833,16 @@ export class Bot {
       answerId?: string;
       askId?: string;
       catchUp: boolean;
+      /** When the server made the event (server time); a cause only within the window. */
+      at?: number;
     },
     card: CardV2,
     latest: { key: string; n: number },
   ): { ctx: CardEventContext; flags: { responded: boolean } } {
     const flags = { responded: false };
-    const { groupId, topicId, messageId, eventId } = src;
-    const cause = eventId || undefined;
+    const { groupId, topicId, messageId, eventId, at, ...rest } = src;
+    // An answer read on catch-up can be older than the server's cause window.
+    const cause = eventId && this.causeFresh(at) ? eventId : undefined;
     let n = 0;
     const nextId = () => `bot:${messageId}:${eventId || latest.n}:${n++}`;
     const answered = <T>(p: Promise<T>): Promise<T> =>
@@ -1822,22 +1852,26 @@ export class Bot {
       });
     const ctx: CardEventContext = {
       bot: this,
-      ...src,
+      ...rest,
+      groupId,
+      topicId,
+      messageId,
+      eventId,
       card,
       cardState: this.cardStates.get(messageId),
       isLatest: () => this.latestEvents.get(latest.key) === latest.n,
-      patch: (ops) => answered(this.patchCard(groupId, messageId, ops, cause ? { cause } : {})),
+      patch: (ops) => answered(this.withCause(cause, (c) => this.patchCard(groupId, messageId, ops, c ? { cause: c } : {}))),
       reply: (input) => {
         const i = typeof input === "string" ? { body: input } : { ...input };
         if (!i.clientMsgId) i.clientMsgId = nextId();
-        if (cause && !i.causeEventId) i.causeEventId = cause;
-        return answered(this.send({ groupId, topicId }, i));
+        const auto = i.causeEventId ? undefined : cause;
+        return answered(this.withCause(auto, (c) => this.send({ groupId, topicId }, c ? { ...i, causeEventId: c } : i)));
       },
       postCard: (c, input = {}) => {
         const i = { ...input };
         if (!i.clientMsgId) i.clientMsgId = nextId();
-        if (cause && !i.causeEventId) i.causeEventId = cause;
-        return answered(this.postCardV2({ groupId, topicId }, c, i));
+        const auto = i.causeEventId ? undefined : cause;
+        return answered(this.withCause(auto, (x) => this.postCardV2({ groupId, topicId }, c, x ? { ...i, causeEventId: x } : i)));
       },
       resolve: async (result, note) => {
         if (!cause) return;
@@ -1900,10 +1934,14 @@ export class Bot {
         answerId: d.answerId,
         askId: d.askId,
         catchUp,
+        at: event.at,
       },
       card,
       latest,
     );
+    const answerCause = d.eventId && this.causeFresh(event.at) ? d.eventId : undefined;
+    const update = (c: CardV2, body?: string) =>
+      this.withCause(answerCause, (x) => this.updateCardV2(event.groupId, messageId, c, body, x ? { causeEventId: x } : {}));
     return {
       ...base,
       event,
@@ -1937,9 +1975,9 @@ export class Bot {
       },
       markAnswered: async (change = {}, from) => {
         const c = from ?? this.cardCache.get(messageId) ?? card;
-        return this.updateCardV2(event.groupId, messageId, answeredCard(c, change), undefined, d.eventId ? { causeEventId: d.eventId } : {});
+        return update(answeredCard(c, change));
       },
-      updateCard: (c, body) => this.updateCardV2(event.groupId, messageId, c, body, d.eventId ? { causeEventId: d.eventId } : {}),
+      updateCard: (c, body) => update(c, body),
     };
   }
 
@@ -1988,6 +2026,7 @@ export class Bot {
           actorId: e.actorId,
           stored: false,
           catchUp: false,
+          at: e.at,
         },
         card,
         latest,

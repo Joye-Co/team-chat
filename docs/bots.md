@@ -264,6 +264,12 @@ so the person never waits for nothing. Outside a handler: `bot.patchCard(groupId
 { baseRev?, cause?, clientPatchId? })` (with `baseRev` it never rebases), `bot.resolveEvent`,
 `bot.updateCardV2(..., { baseRev, causeEventId })`, and `send({ causeEventId })`.
 
+The server takes a cause only from the last 30 minutes (`interact.bad_cause` otherwise). An answer
+read on catch-up after a longer time has no live waiting state, so the context's `patch`,
+`reply`, `postCard`, `markAnswered` and `updateCard` then go without a cause, and `ctx.resolve`
+does nothing. When the server refuses a cause the SDK added (clock skew), it sends the write again
+without one. A cause you pass yourself is never dropped.
+
 **Cards v2.1 builders.** `composeCard({ intent, title, summary?, fallback?, ask?, data?, blocks,
 actions? })` makes a card from top-level blocks, flattens the children of containers into the
 card's flat block list, sets `catalog: "tc.card/2.1"` when a 2.1 type is used, and checks every
@@ -491,7 +497,8 @@ Codex 的计划更新)生成。
   `onCardEvent` 收到实时事件,`onCardAnswer` 收到已存的回答(重启后也能收到)。用 `ctx.patch(ops)`
   原地修改卡片(SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
   被限流时合并排队,每秒最多一次),或用 `ctx.reply`、`ctx.postCard`、`ctx.resolve("ignored")` 回应。
-  实时事件的处理函数没有回应时,SDK 自动发 `ignored`(出错时发 `failed`)。
+  实时事件的处理函数没有回应时,SDK 自动发 `ignored`(出错时发 `failed`)。服务器只接受 30 分钟内的
+  cause:重启后读到的更早的回答,SDK 回应时不带 cause。
 - **Card v2.1 构造函数**:`composeCard({ intent, title, blocks, ... })` 和 `blocks.*`:容器 `stack`、
   `row`、`group`、`compare`、`tabs`、`questionnaire`(子块可以直接传块对象),选择题 `decision`
   (`choice`)、`rank`、`rating`、`scale`、`confirm`、`imageChoice`、`matrix`、`slots`、`poll`、滑块

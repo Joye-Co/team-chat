@@ -34,6 +34,11 @@ export class FakeServer {
     return this;
   }
 
+  /** The handler set for `t`, to wrap it. */
+  handler(t: string): ((f: Frame) => Reply | Promise<Reply>) | undefined {
+    return this.handlers.get(t);
+  }
+
   of(t: string): Frame[] {
     return this.frames.filter((f) => f.t === t);
   }

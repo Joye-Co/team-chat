@@ -20,7 +20,7 @@ import {
   parts,
   stripRefPrefix,
 } from "../src/index.ts";
-import { BOT_ID, FakeServer, type Frame, GROUP_ID, HUMAN_ID, message, TOPIC_ID } from "./fake.ts";
+import { BOT_ID, FakeServer, type Frame, GROUP_ID, HUMAN_ID, message, type Reply, TOPIC_ID } from "./fake.ts";
 
 const FIXTURES = join(import.meta.dir, "../../../protocol/fixtures");
 const fixture = (path: string) => JSON.parse(readFileSync(join(FIXTURES, path), "utf8")).value;
@@ -295,6 +295,75 @@ describe("answers", () => {
     expect(got[0]?.catchUp).toBe(true);
     expect(got[0]?.card.title).toBe("10 月数据月报");
     expect(got[0]?.choice("check")).toBe("ok");
+  });
+});
+
+describe("causes outside the server's window", () => {
+  /** A server that, like the real one, takes no cause older than 30 minutes. */
+  function strictServer(old: Set<string>) {
+    const { server, revs } = cardServer();
+    const bad = { ok: false as const, error: { code: "invalid", message: "cause is not a recent event of this card", reason: "interact.bad_cause" } };
+    const send = server.handler("send") as (f: Frame) => Reply;
+    const patch = server.handler("card.patch") as (f: Frame) => Reply;
+    server.on("send", (f) => (old.has(f.causeEventId as string) ? bad : send(f)));
+    server.on("card.patch", (f) => (old.has(f.cause as string) ? bad : patch(f)));
+    server.on("edit", (f) => {
+      if (old.has(f.causeEventId as string)) return bad;
+      const next = f.cardV2 as CardV2;
+      revs.set(f.messageId as string, next);
+      return { ok: true, result: { message: message({ id: f.messageId as string, kind: "card", card: { v: 1, title: next.title, blocks: [] }, cardV2: next }) } };
+    });
+    return server;
+  }
+
+  test("onCardAnswer on catch-up older than 30 minutes: patch, reply, postCard and markAnswered go without the cause", async () => {
+    const server = strictServer(new Set(["EVOLD"]));
+    const bot = await start(server);
+    const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
+    const done: string[] = [];
+    bot.onCardAnswer(async (ctx) => {
+      await ctx.patch([{ op: "set", id: "m_groups", props: { value: 40 } }]);
+      done.push("patch");
+      await ctx.reply("收到");
+      done.push("reply");
+      await ctx.postCard(report());
+      done.push("postCard");
+      await ctx.markAnswered();
+      done.push("markAnswered");
+    });
+    server.event({
+      seq: 1,
+      groupId: GROUP_ID,
+      at: Date.now() - 60 * 60_000,
+      actorId: HUMAN_ID,
+      type: "card.answered",
+      data: { messageId: r.message.id, eventId: "EVOLD", rev: 1, event: "action.press", actionId: "send", inputs: { check: { value: "wrong" } } },
+    });
+    await server.next((f) => f.t === "edit");
+    for (let i = 0; i < 50 && done.length < 4; i++) await new Promise((res) => setTimeout(res, 10));
+    expect(done).toEqual(["patch", "reply", "postCard", "markAnswered"]);
+    // Nothing was sent with the old cause: the SDK left it out instead of retrying.
+    expect(server.of("card.patch").map((f) => f.cause)).toEqual([undefined]);
+    expect(server.of("send").filter((f) => f.causeEventId !== undefined)).toHaveLength(0);
+    expect(server.of("edit")[0]?.causeEventId).toBeUndefined();
+  });
+
+  test("a cause the server does not take (clock skew, an older server) is dropped and the write sent again", async () => {
+    const server = strictServer(new Set(["EVSKEW"]));
+    const bot = await start(server);
+    const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
+    const errors: unknown[] = [];
+    bot.onError((e) => errors.push(e));
+    let patched: number | undefined;
+    bot.onCardEvent(async (ctx) => {
+      patched = (await ctx.patch([{ op: "set", id: "m_groups", props: { value: 40 } }])).cardV2?.rev;
+    });
+    server.transient(liveEvent(r.message.id, { eventId: "EVSKEW" }));
+    await server.next((f) => f.t === "card.patch" && f.cause === undefined);
+    for (let i = 0; i < 50 && patched === undefined; i++) await new Promise((res) => setTimeout(res, 10));
+    expect(patched).toBe(2);
+    expect(server.of("card.patch").map((f) => f.cause)).toEqual(["EVSKEW", undefined]);
+    expect(errors).toHaveLength(0);
   });
 });
 
