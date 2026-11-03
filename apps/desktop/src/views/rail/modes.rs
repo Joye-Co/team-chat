@@ -166,7 +166,12 @@ impl RailView {
         let me = self.me();
         let names: Vec<(String, String)> = model::groups(p.as_ref());
         let mut out = Vec::new();
-        for (bucket, topics) in model::buckets(p.as_ref(), me.as_deref(), self.chip.as_deref()) {
+        for (bucket, topics) in model::buckets(
+            p.as_ref(),
+            me.as_deref(),
+            self.chip.as_deref(),
+            &p.side_chat_topics(),
+        ) {
             if topics.is_empty() {
                 continue;
             }
@@ -227,7 +232,12 @@ impl RailView {
         let p = self.services.provider.clone();
         let me = self.me();
         let k = theme::colors(cx);
-        let rows = model::member_rows(p.as_ref(), me.as_deref(), self.member_sort);
+        let rows = model::member_rows(
+            p.as_ref(),
+            me.as_deref(),
+            self.member_sort,
+            &p.side_chat_topics(),
+        );
         let opened = self
             .open_members
             .get_or_insert_with(|| {

@@ -1936,6 +1936,27 @@ impl ChatProvider for CoreProvider {
 
     // --- end provider track ---
 
+    // --- dfix-motion track ---
+
+    fn side_chat_topics(&self) -> std::collections::HashSet<(GroupId, crate::data::TopicId)> {
+        let Some(a) = self.account() else {
+            return Default::default();
+        };
+        // Side chats live in my DMs only.
+        a.client
+            .groups()
+            .unwrap_or_default()
+            .iter()
+            .map(|row| convert::group(row, &a.me.id, |_| None))
+            .filter(|g| g.kind == crate::data::GroupKind::Dm)
+            .flat_map(|g| a.client.topics(&g.id, TOPIC_LIMIT).unwrap_or_default())
+            .filter(|row| row.topic.context_of.is_some())
+            .map(|row| (row.topic.group_id.clone(), row.topic.id.clone()))
+            .collect()
+    }
+
+    // --- end dfix-motion track ---
+
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();
         lock(&self.shared.subscribers).push(tx);

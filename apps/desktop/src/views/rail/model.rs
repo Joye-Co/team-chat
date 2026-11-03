@@ -4,6 +4,17 @@
 
 use std::collections::HashSet;
 
+use crate::data::TopicId;
+
+/// The 单独问 topics, which no rail list shows
+/// ([`ChatProvider::side_chat_topics`]).
+pub type SideChats = HashSet<(GroupId, TopicId)>;
+
+/// Whether `topic` is a 单独问 aside.
+pub fn is_side_chat(side: &SideChats, topic: &Topic) -> bool {
+    side.contains(&(topic.group_id.clone(), topic.id.clone()))
+}
+
 use crate::{
     copy::{fill, rail as c},
     data::{ChatProvider, GroupId, GroupKind, Member, MemberId, PlanState, Topic, TopicStatus},
@@ -153,6 +164,7 @@ pub fn buckets(
     p: &dyn ChatProvider,
     me: Option<&str>,
     group: Option<&str>,
+    side: &SideChats,
 ) -> Vec<(Bucket, Vec<Topic>)> {
     let midnight = midnight();
     let mut out: Vec<(Bucket, Vec<Topic>)> = Bucket::ALL.iter().map(|b| (*b, Vec::new())).collect();
@@ -160,7 +172,11 @@ pub fn buckets(
         if group.is_some_and(|f| f != g.id) {
             continue;
         }
-        for t in p.topics(&g.id).into_iter().filter(listed) {
+        for t in p
+            .topics(&g.id)
+            .into_iter()
+            .filter(|t| listed(t) && !is_side_chat(side, t))
+        {
             let bucket = match row_state(p, me, &t).0 {
                 RowState::NeedsYou => Bucket::NeedsYou,
                 RowState::Working(_) => Bucket::Working,
@@ -220,14 +236,19 @@ pub enum MemberSort {
 
 /// Mode C: every member but me, each with the 话题 it works on, waits on me
 /// with, or that wait on it.
-pub fn member_rows(p: &dyn ChatProvider, me: Option<&str>, sort: MemberSort) -> Vec<MemberRow> {
+pub fn member_rows(
+    p: &dyn ChatProvider,
+    me: Option<&str>,
+    sort: MemberSort,
+    side: &SideChats,
+) -> Vec<MemberRow> {
     let topics: Vec<Topic> = p
         .groups()
         .iter()
         .flat_map(|g| p.topics(&g.id))
-        .filter(listed)
+        .filter(|t| listed(t) && !is_side_chat(side, t))
         .collect();
-    let runs = p.active_runs();
+    let runs = active_runs(p, side);
     let mut rows: Vec<MemberRow> = p
         .members()
         .into_iter()
@@ -309,6 +330,7 @@ pub fn team_strip(
     p: &dyn ChatProvider,
     me: Option<&str>,
     max: usize,
+    side: &SideChats,
 ) -> (Vec<(Member, bool)>, usize) {
     let members = p.members();
     let mut ids: Vec<(MemberId, bool)> = Vec::new();
@@ -318,7 +340,7 @@ pub fn team_strip(
         }
     };
     // A member that works shows the live ring, even when it also waits on me.
-    let runs = p.active_runs();
+    let runs = active_runs(p, side);
     for a in p.asks_for_me() {
         if !runs.iter().any(|r| r.bot_id == a.from) {
             push(&a.from, true, &mut ids);
@@ -341,6 +363,14 @@ pub fn team_strip(
     let total = members.iter().filter(|m| !m.deactivated).count();
     let rest = total.saturating_sub(shown.len());
     (shown, rest)
+}
+
+/// The active runs, without those of 单独问 asides.
+pub fn active_runs(p: &dyn ChatProvider, side: &SideChats) -> Vec<crate::data::BotRunSummary> {
+    p.active_runs()
+        .into_iter()
+        .filter(|r| !side.contains(&(r.group_id.clone(), r.topic_id.clone())))
+        .collect()
 }
 
 /// The 群 of the rail in order (mode A sections, mode B chips).
@@ -382,12 +412,12 @@ mod tests {
     #[test]
     fn attention_buckets_hold_each_topic_once() {
         let p = V2Samples::new();
-        let b = buckets(p.as_ref(), Some(d::ME), None);
+        let b = buckets(p.as_ref(), Some(d::ME), None, &SideChats::new());
         let count = |k: Bucket| b.iter().find(|(x, _)| *x == k).unwrap().1.len();
         assert_eq!(count(Bucket::NeedsYou), 4);
         assert_eq!(count(Bucket::Working), 3);
         assert_eq!(count(Bucket::Waiting), 1);
-        let dev = buckets(p.as_ref(), Some(d::ME), Some(d::DEV));
+        let dev = buckets(p.as_ref(), Some(d::ME), Some(d::DEV), &SideChats::new());
         assert!(
             dev.iter()
                 .flat_map(|(_, l)| l)
@@ -398,7 +428,7 @@ mod tests {
     #[test]
     fn busy_members_come_first_and_i_am_not_listed() {
         let p = V2Samples::new();
-        let rows = member_rows(p.as_ref(), Some(d::ME), MemberSort::Busy);
+        let rows = member_rows(p.as_ref(), Some(d::ME), MemberSort::Busy, &SideChats::new());
         assert!(rows.iter().all(|r| r.member.id != d::ME));
         assert_eq!(rows[0].member.id, d::FORGE);
         assert_eq!(rows[0].waiting_on_me, 2);
@@ -417,9 +447,36 @@ mod tests {
     #[test]
     fn team_strip_shows_waiting_then_working_and_counts_the_rest() {
         let p = V2Samples::new();
-        let (shown, rest) = team_strip(p.as_ref(), Some(d::ME), 5);
+        let (shown, rest) = team_strip(p.as_ref(), Some(d::ME), 5, &SideChats::new());
         assert_eq!(shown.len(), 5);
         assert!(shown[0].1, "an amber ring first");
         assert_eq!(rest, p.members().len() - 5);
+    }
+
+    /// A 单独问 aside is not an ordinary 话题: while its member answers it
+    /// is not 在做, and the member's row in mode C does not list it.
+    #[test]
+    fn side_chats_are_left_out() {
+        let p = V2Samples::new();
+        let empty = SideChats::new();
+        let working = |side: &SideChats| {
+            buckets(p.as_ref(), Some(d::ME), None, side)
+                .into_iter()
+                .find(|(b, _)| *b == Bucket::Working)
+                .unwrap()
+                .1
+        };
+        let aside = working(&empty)
+            .into_iter()
+            .find(|t| t.id == d::T_VIRTUAL)
+            .expect("a working 话题");
+        let side = SideChats::from([(aside.group_id.clone(), aside.id.clone())]);
+        assert!(working(&side).iter().all(|t| t.id != d::T_VIRTUAL));
+        assert!(active_runs(p.as_ref(), &side).iter().all(|r| r.topic_id != d::T_VIRTUAL));
+        let forge = member_rows(p.as_ref(), Some(d::ME), MemberSort::Busy, &side)
+            .into_iter()
+            .find(|r| r.member.id == d::FORGE)
+            .unwrap();
+        assert!(forge.topics.iter().all(|t| t.topic.id != d::T_VIRTUAL));
     }
 }

@@ -137,9 +137,13 @@ impl Snapshot {
                 }
             })
             .collect();
+        // 单独问 asides are not work on the desk.
+        let side = p.side_chat_topics();
+        let aside = |g: &str, t: &str| side.contains(&(g.to_string(), t.to_string()));
         let runs = p
             .active_runs()
             .into_iter()
+            .filter(|run| !aside(&run.group_id, &run.topic_id))
             .map(|run| {
                 let topic_title = p
                     .topic(&run.group_id, &run.topic_id)
@@ -160,7 +164,8 @@ impl Snapshot {
                 }
             })
             .collect();
-        let done = p.done_today();
+        let mut done = p.done_today();
+        done.retain(|d| !aside(&d.group_id, &d.topic_id));
         let artifact_kinds = done
             .iter()
             .flat_map(|d| d.proof.iter())

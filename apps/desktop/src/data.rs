@@ -2087,6 +2087,17 @@ pub trait ChatProvider: Send + Sync + 'static {
 
     // --- end pages track ---
 
+    // --- dfix-motion track ---
+
+    /// The 单独问 topics (a topic in my DM whose `contextOf` names another
+    /// 话题), as (群, 话题). They are not ordinary 话题: the rail and the 首页
+    /// leave them out. None by default.
+    fn side_chat_topics(&self) -> std::collections::HashSet<(GroupId, TopicId)> {
+        std::collections::HashSet::new()
+    }
+
+    // --- end dfix-motion track ---
+
     // --- changes ---
 
     /// A new stream of change batches. Each call gives a new receiver; all

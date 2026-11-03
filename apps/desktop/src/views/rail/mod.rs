@@ -279,7 +279,12 @@ impl RailView {
         let k = theme::colors(cx);
         let me = self.me();
         let (shown, rest) =
-            model::team_strip(self.services.provider.as_ref(), me.as_deref(), STRIP_MAX);
+            model::team_strip(
+                self.services.provider.as_ref(),
+                me.as_deref(),
+                STRIP_MAX,
+                &self.services.provider.side_chat_topics(),
+            );
         if shown.is_empty() {
             return None;
         }
