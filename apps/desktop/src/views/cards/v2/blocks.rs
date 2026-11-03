@@ -95,7 +95,12 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
                 let j = run_end(&|x| matches!(x, CardV2Block::Metric { .. }));
                 let parts = CardParts::of(ctx, cx);
                 (
-                    Some(metrics_with(&blocks[i..j], parts.as_ref(), Some(window), cx)),
+                    Some(metrics_with(
+                        &blocks[i..j],
+                        parts.as_ref(),
+                        Some(window),
+                        cx,
+                    )),
                     j,
                     space::S12,
                 )
@@ -276,11 +281,7 @@ pub(crate) fn block(
             match block_parts(ctx, b, cx).and_then(|p| {
                 ref_parts::chart_overlay(&p, ref_parts::chart_plot_top(b), m::CHART, window, cx)
             }) {
-                Some(overlay) => div()
-                    .relative()
-                    .child(el)
-                    .child(overlay)
-                    .into_any_element(),
+                Some(overlay) => div().relative().child(el).child(overlay).into_any_element(),
                 None => el,
             }
         }
@@ -606,12 +607,7 @@ fn code(text: &str, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn image(
-    ctx: &Ctx,
-    file_id: &str,
-    alt: Option<&str>,
-    cx: &App,
-) -> gpui::Stateful<Div> {
+fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Stateful<Div> {
     let k = theme::colors(cx);
     let path = ctx
         .env
@@ -2158,20 +2154,20 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         // as a chip.
         if let Some(d) = detail.as_ref().filter(|d| d.chars().count() > 8) {
             let line = div()
-                    .id(ctx.id(format!("proof-line-{i}")))
-                    .flex()
-                    .flex_col()
-                    .gap(space::S2)
-                    .child(
-                        small(div())
-                            .flex()
-                            .items_center()
-                            .gap(space::S8)
-                            .text_color(k.ink)
-                            .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
-                            .child(label.clone()),
-                    )
-                    .child(meta(div()).text_color(k.ink_3).child(d.clone()));
+                .id(ctx.id(format!("proof-line-{i}")))
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(
+                    small(div())
+                        .flex()
+                        .items_center()
+                        .gap(space::S8)
+                        .text_color(k.ink)
+                        .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
+                        .child(label.clone()),
+                )
+                .child(meta(div()).text_color(k.ink_3).child(d.clone()));
             lines.push(ref_parts::wrap_opt(
                 bp.as_ref(),
                 Pick::Evidence,
@@ -2248,7 +2244,11 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                 ref_parts::wrap_opt(
                     bp.as_ref(),
                     Pick::Evidence,
-                    div().id(ctx.id(format!("proof-shot-part-{file}"))).flex_1().min_w(px(0.)).child(thumb),
+                    div()
+                        .id(ctx.id(format!("proof-shot-part-{file}")))
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(thumb),
                     Anchor::Corner,
                     Some(window),
                     cx,

@@ -98,7 +98,9 @@ impl TableRefs {
         let focused = super::keyboard::part_focused(&self.row_id(row), window, cx);
         el.relative()
             .when(shown, |el| el.bg(k.hover))
-            .when(focused, |el| el.child(super::keyboard::ring(theme::radius::MARK, cx)))
+            .when(focused, |el| {
+                el.child(super::keyboard::ring(theme::radius::MARK, cx))
+            })
     }
 
     /// The slot at the end of a row: 问这里 for the hovered cell.
@@ -166,7 +168,9 @@ impl TableRefs {
         el.id(ElementId::Name(id.clone().into()))
             .relative()
             .rounded(theme::radius::MARK)
-            .when(focused, |el| el.child(super::keyboard::ring(theme::radius::MARK, cx)))
+            .when(focused, |el| {
+                el.child(super::keyboard::ring(theme::radius::MARK, cx))
+            })
             .when(flashing, |el| el.bg(k.sel))
             .when(hovered && alt && !flashing, |el| el.bg(k.hover))
             .on_hover(super::affordance::track_hover(id))

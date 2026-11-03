@@ -154,7 +154,9 @@ pub fn part_of(b: &CardV2Block, pick: Pick) -> Option<Part> {
 /// a list, a plan and the evidence strip are one column; a chart has a row per series.
 pub fn picks(b: &CardV2Block) -> Vec<(Pick, usize, usize)> {
     match b {
-        CardV2Block::List { items, .. } => (0..items.len()).map(|i| (Pick::Item(i), i, 0)).collect(),
+        CardV2Block::List { items, .. } => {
+            (0..items.len()).map(|i| (Pick::Item(i), i, 0)).collect()
+        }
         CardV2Block::Plan { items, .. } => (0..items.as_ref().map_or(0, Vec::len))
             .map(|i| (Pick::Step(i), i, 0))
             .collect(),
@@ -425,7 +427,10 @@ pub fn chart_overlay(
         InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _, div,
         prelude::FluentBuilder as _,
     };
-    let CardV2Block::Chart { x, series, kind, .. } = &parts.0.1 else {
+    let CardV2Block::Chart {
+        x, series, kind, ..
+    } = &parts.0.1
+    else {
         return None;
     };
     let n = x.as_ref().map_or(0, Vec::len);
@@ -502,12 +507,7 @@ pub fn chart_overlay(
                         .child(div().w(gpui::px(1.)).h_full().bg(k.line_2))
                 });
                 let col = col.relative().children(cross).children(tip);
-                affordance::part(
-                    col,
-                    parts.spec(pick).own_button().no_fill(),
-                    window,
-                    cx,
-                )
+                affordance::part(col, parts.spec(pick).own_button().no_fill(), window, cx)
             }))
             .into_any_element(),
     )
@@ -544,12 +544,7 @@ pub fn keyboard_block(b: &CardV2Block) -> bool {
 
 /// `el` (the blocks of `run`, drawn together) as one keyboard stop with the parts of every
 /// block (REFS §A3). `el` is unchanged when no block of the run takes keyboard focus.
-pub fn focus_run(
-    run: &[BlockParts],
-    el: AnyElement,
-    window: &Window,
-    cx: &App,
-) -> AnyElement {
+pub fn focus_run(run: &[BlockParts], el: AnyElement, window: &Window, cx: &App) -> AnyElement {
     let run: Vec<&BlockParts> = run.iter().filter(|b| keyboard_block(&b.0.1)).collect();
     let Some(first) = run.first() else {
         return el;
@@ -640,11 +635,17 @@ mod tests {
     fn list_items_and_plan_steps_are_parts() {
         let c = card();
         let item = target(&c, "todo", Pick::Item(0));
-        assert_eq!(keys(&item), json!({ "kind": "item", "keys": { "item": 0 } }));
+        assert_eq!(
+            keys(&item),
+            json!({ "kind": "item", "keys": { "item": 0 } })
+        );
         assert_eq!(item.label, "10 月的三个数 · 补留存埋点");
         assert_eq!(item.value.as_ref().unwrap()["status"], "in_progress");
         let step = target(&c, "plan", Pick::Step(1));
-        assert_eq!(keys(&step), json!({ "kind": "step", "keys": { "step": 1 } }));
+        assert_eq!(
+            keys(&step),
+            json!({ "kind": "step", "keys": { "step": 1 } })
+        );
         assert_eq!(step.label, "10 月的三个数 · 第 2 步 · 跑一万条消息的压测");
         assert_eq!(step.value.as_ref().unwrap()["state"], "current");
         assert_eq!(step.card_rev, Some(3));
@@ -659,7 +660,11 @@ mod tests {
             json!({ "kind": "bar", "keys": { "series": "oct", "x": "10-13" } })
         );
         assert_eq!(bar.block_id, "trend");
-        assert!(bar.label.starts_with("10 月的三个数 · 日活 · 近 4 周 · "), "{}", bar.label);
+        assert!(
+            bar.label.starts_with("10 月的三个数 · 日活 · 近 4 周 · "),
+            "{}",
+            bar.label
+        );
         assert_eq!(bar.value.as_ref().unwrap()["value"], 2060.0);
         let metric = target(&c, "dau", Pick::Metric);
         assert_eq!(keys(&metric), json!({ "kind": "metric" }));
@@ -671,7 +676,10 @@ mod tests {
     fn evidence_and_images_are_parts() {
         let c = card();
         let check = target(&c, "tests", Pick::Evidence);
-        assert_eq!(keys(&check), json!({ "kind": "item", "keys": { "item": 0 } }));
+        assert_eq!(
+            keys(&check),
+            json!({ "kind": "item", "keys": { "item": 0 } })
+        );
         assert_eq!(check.value.as_ref().unwrap()["passed"], true);
         let shot = target(&c, "shot", Pick::Evidence);
         assert_eq!(keys(&shot)["kind"], "image");

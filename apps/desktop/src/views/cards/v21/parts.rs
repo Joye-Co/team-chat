@@ -281,7 +281,9 @@ mod tests {
             }))
             .unwrap()
         };
-        let one = card(json!([{ "id": "d", "type": "diagram", "syntax": "mermaid", "source": "graph TD\nA-->B" }]));
+        let one = card(
+            json!([{ "id": "d", "type": "diagram", "syntax": "mermaid", "source": "graph TD\nA-->B" }]),
+        );
         assert_eq!(block_segment(&one, one.block("d").unwrap()), None);
         let titled = card(json!([
             { "id": "d", "type": "diagram", "syntax": "mermaid", "title": "上线流程", "source": "graph TD\nA-->B" }

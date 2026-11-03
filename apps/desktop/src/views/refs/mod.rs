@@ -11,8 +11,8 @@
 
 pub mod affordance;
 pub mod cards;
-pub mod keyboard;
 pub mod chips;
+pub mod keyboard;
 pub mod label;
 pub mod markdown;
 pub mod parts;

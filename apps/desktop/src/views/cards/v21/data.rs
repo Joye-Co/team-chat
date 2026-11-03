@@ -331,18 +331,15 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             ],
         ))
     });
-    let overlay = parts
-        .as_ref()
-        .filter(|_| !selectable)
-        .and_then(|p| {
-            crate::views::refs::cards::chart_overlay(
-                p,
-                crate::views::refs::cards::chart_plot_top(b),
-                m::CHART,
-                window,
-                cx,
-            )
-        });
+    let overlay = parts.as_ref().filter(|_| !selectable).and_then(|p| {
+        crate::views::refs::cards::chart_overlay(
+            p,
+            crate::views::refs::cards::chart_plot_top(b),
+            m::CHART,
+            window,
+            cx,
+        )
+    });
     // The chosen and the hovered column get a quiet tint drawn under the series, so the
     // bar or point stays in sight; a clear hit layer on top takes the clicks.
     let hot = node.ui.block(id).hot;

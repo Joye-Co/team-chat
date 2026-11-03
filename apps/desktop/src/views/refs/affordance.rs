@@ -235,9 +235,11 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
             el.child(holder.child(button))
         });
     let focused = super::keyboard::part_focused(&spec.id, window, cx);
-    el.when(focused, |el| el.child(super::keyboard::ring(spec.radius, cx)))
-        .context_menu(move |m, _, _| menu(m, menu_target.clone()))
-        .into_any_element()
+    el.when(focused, |el| {
+        el.child(super::keyboard::ring(spec.radius, cx))
+    })
+    .context_menu(move |m, _, _| menu(m, menu_target.clone()))
+    .into_any_element()
 }
 
 /// The 问这里 button by itself, for renderers that place it (a chart tooltip, a table row's

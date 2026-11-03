@@ -7,8 +7,8 @@ use crate::{
     app::{RightPane, Services},
     data::{DraftKey, DraftRef},
     fake::v2::{self as d, refs_samples as r},
-    views::cards::v2::samples as cards_v2,
     selftest::scenes::{Scene, Start, open_main, v2_open_topic},
+    views::cards::v2::samples as cards_v2,
 };
 
 pub const SCENES: &[Scene] = &[

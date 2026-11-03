@@ -93,7 +93,12 @@ pub fn next(places: &[Place], current: Option<usize>, m: Move, shift: bool) -> O
             Move::Up | Move::Down => (NavKind::Column, p.col, Some(())),
         };
         let found = places.iter().position(|q| {
-            q.kind == want.0 && if want.2.is_some() { q.col == want.1 } else { q.row == want.1 }
+            q.kind == want.0
+                && if want.2.is_some() {
+                    q.col == want.1
+                } else {
+                    q.row == want.1
+                }
         });
         return Some(found.unwrap_or(i));
     }
@@ -171,12 +176,7 @@ fn block_focused(key: &str, window: &Window, cx: &App) -> bool {
     let forced = cx
         .try_global::<super::HubGlobal>()
         .is_some_and(|h| h.0.read(cx).forced_focus.as_deref() == Some(key));
-    forced
-        || HANDLES.with(|h| {
-            h.borrow()
-                .get(key)
-                .is_some_and(|f| f.is_focused(window))
-        })
+    forced || HANDLES.with(|h| h.borrow().get(key).is_some_and(|f| f.is_focused(window)))
 }
 
 /// The part `id` has the keyboard part focus (its block has focus too).

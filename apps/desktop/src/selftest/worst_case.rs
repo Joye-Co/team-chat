@@ -672,7 +672,11 @@ impl ChatProvider for WorstCase {
     fn file_media(&self, file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
         self.inner.file_media(file)
     }
-    fn artifact_media(&self, artifact_id: &str, version: u32) -> Option<chat_core::proto::MediaInfo> {
+    fn artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
         self.inner.artifact_media(artifact_id, version)
     }
     fn upload_generating(&self, key: &str) -> bool {
