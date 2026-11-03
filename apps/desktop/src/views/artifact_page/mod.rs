@@ -11,6 +11,7 @@
 //! goes only right after the viewer's own input in that page, and at most
 //! about five per second ([`forward_page_event`]).
 
+pub mod gate_check;
 pub mod pane;
 pub mod scenes;
 

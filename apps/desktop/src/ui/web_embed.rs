@@ -240,6 +240,34 @@ impl WebEmbedState {
         let _ = script;
     }
 
+    /// Runs JavaScript in the page and gives its string value (self-tests). `done` runs
+    /// once, with `None` when there is no page or the value is not a string.
+    pub fn evaluate_text(&self, script: &str, done: impl FnOnce(Option<String>) + 'static) {
+        #[cfg(target_os = "macos")]
+        if let Some(n) = &self.native {
+            n.evaluate_text(script, done);
+            return;
+        }
+        let _ = script;
+        done(None);
+    }
+
+    /// Posts a real left click (mouse-down, mouse-up) through the app's event queue at a
+    /// point in the page (points from its top-left corner), or with `in_page` false at a
+    /// point in the window's content. Self-tests only. False when it could not be posted.
+    pub fn post_click(&self, x: f64, y: f64, in_page: bool) -> bool {
+        #[cfg(target_os = "macos")]
+        if let Some(n) = &self.native {
+            return if in_page {
+                n.post_click(x, y)
+            } else {
+                n.post_window_click(x, y)
+            };
+        }
+        let _ = (x, y, in_page);
+        false
+    }
+
     fn sync(&mut self, embed: &WebEmbed) {
         self.pass_scroll = embed.pass_scroll;
         self.autoplay = embed.autoplay;
@@ -273,8 +301,7 @@ impl WebEmbedState {
                 // A different 产出: a new view (the origin family changes).
                 self.native = None;
             } else if let Some(n) = &self.native
-                && let Err(e) =
-                    n.show_version(self.spec.version.clone(), self.spec.capabilities)
+                && let Err(e) = n.show_version(self.spec.version.clone(), self.spec.capabilities)
             {
                 self.phase = Phase::Failed(e.to_string());
             }

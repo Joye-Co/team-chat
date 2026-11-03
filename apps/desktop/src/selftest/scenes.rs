@@ -589,6 +589,11 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         "artifact-v2" | "artifact-v2-old" | "artifact-pane-v2" => {
             Some(crate::views::artifact_page::scenes::ready)
         }
+        // --- r2-trust ---
+        "artifact-v2-choose" | "artifact-quiet-page" => {
+            Some(crate::views::artifact_page::gate_check::ready)
+        }
+        // --- end r2-trust ---
         _ => None,
     }
 }
@@ -599,6 +604,11 @@ pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Resu
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
         "web-embed-covered" => Some(|png, cx| embed_preview::verify(EmbedMode::Covered, png, cx)),
+        // --- r2-trust ---
+        "artifact-v2-choose" | "artifact-quiet-page" => {
+            Some(crate::views::artifact_page::gate_check::verify)
+        }
+        // --- end r2-trust ---
         _ => None,
     }
 }

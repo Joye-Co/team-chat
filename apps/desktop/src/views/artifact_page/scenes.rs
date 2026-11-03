@@ -48,6 +48,22 @@ pub const SCENES: &[Scene] = &[
         },
         open: open_main,
     },
+    // --- r2-trust ---
+    Scene {
+        name: "artifact-v2-choose",
+        about: "产出: a real click on 抖音 in 10 月数据月报 sends exactly one choose event to the member",
+        start: Start::V2,
+        setup: super::gate_check::setup_choose,
+        open: open_main,
+    },
+    Scene {
+        name: "artifact-quiet-page",
+        about: "产出: a page that calls emitEvent on load, from a timer and a script click sends nothing",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: super::gate_check::open_quiet,
+    },
+    // --- end r2-trust ---
     Scene {
         name: "artifacts-v2",
         about: "产出 destination: every 产出 with its thumbnail",

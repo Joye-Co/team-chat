@@ -571,6 +571,21 @@ impl ChatProvider for WorstCase {
     ) -> Reply<ArtifactFolder> {
         self.inner.open_artifact_version(artifact_id, version)
     }
+    // --- r2-trust ---
+    fn artifact_page_events(&self, artifact_id: &str, version: u32) -> Vec<String> {
+        self.inner.artifact_page_events(artifact_id, version)
+    }
+    fn send_artifact_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        payload: Option<serde_json::Value>,
+    ) {
+        self.inner
+            .send_artifact_event(artifact_id, version, name, payload)
+    }
+    // --- end r2-trust ---
     fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
         self.inner.create_artifact(request)
     }

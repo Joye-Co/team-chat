@@ -1798,6 +1798,17 @@ impl ChatProvider for V2Samples {
             Vec::new()
         }
     }
+    // --- r2-trust ---
+    fn send_artifact_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        payload: Option<serde_json::Value>,
+    ) {
+        sent_page_events::record(artifact_id, version, name, payload);
+    }
+    // --- end r2-trust ---
     fn open_artifact_version(
         &self,
         artifact_id: &str,
@@ -2022,3 +2033,37 @@ mod tests {
         );
     }
 }
+
+// --- r2-trust ---
+/// The page events (`artifact.event`) the sample provider was asked to send, in order, for
+/// the page-event self-tests.
+pub mod sent_page_events {
+    use std::sync::Mutex;
+
+    /// One sent event: 产出, version, name and payload.
+    pub type Sent = (String, u32, String, Option<serde_json::Value>);
+
+    static SENT: Mutex<Vec<Sent>> = Mutex::new(Vec::new());
+
+    pub(super) fn record(
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        payload: Option<serde_json::Value>,
+    ) {
+        if let Ok(mut s) = SENT.lock() {
+            s.push((artifact_id.into(), version, name.into(), payload));
+        }
+    }
+
+    pub fn take() -> Vec<Sent> {
+        SENT.lock()
+            .map(|mut s| std::mem::take(&mut *s))
+            .unwrap_or_default()
+    }
+
+    pub fn snapshot() -> Vec<Sent> {
+        SENT.lock().map(|s| s.clone()).unwrap_or_default()
+    }
+}
+// --- end r2-trust ---
