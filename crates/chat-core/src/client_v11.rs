@@ -194,7 +194,7 @@ impl Client {
             )?;
         } else {
             self.command(Command::Live {
-                frame: ClientFrame::CardEvent(frame),
+                frame: Box::new(ClientFrame::CardEvent(frame)),
                 what: LiveWrite::Card {
                     client_event_id: client_event_id.clone(),
                     message_id: req.message_id,
@@ -333,7 +333,7 @@ impl Client {
             .validate()
             .map_err(|_| ClientError::Invalid("bad artifact event"))?;
         self.command(Command::Live {
-            frame: ClientFrame::ArtifactEvent(frame),
+            frame: Box::new(ClientFrame::ArtifactEvent(frame)),
             what: LiveWrite::Artifact {
                 client_event_id: client_event_id.clone(),
                 artifact_id: artifact_id.into(),

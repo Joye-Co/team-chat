@@ -96,7 +96,7 @@ pub(crate) enum Command {
     /// 1.1: a live write (card event, page event) that is never queued: it is sent now or
     /// fails at once with reason `client.offline`.
     Live {
-        frame: ClientFrame,
+        frame: Box<ClientFrame>,
         what: LiveWrite,
     },
     ReconnectNow,
@@ -697,12 +697,12 @@ impl Session {
             }
             Command::Live { mut frame, what } => {
                 let rid = self.rid();
-                match &mut frame {
+                match frame.as_mut() {
                     ClientFrame::CardEvent(f) => f.rid = rid.clone(),
                     ClientFrame::ArtifactEvent(f) => f.rid = rid.clone(),
                     _ => {}
                 }
-                self.out.push(frame);
+                self.out.push(*frame);
                 self.track(rid, Pending::Live(what));
             }
             Command::ReconnectNow | Command::Stop => {}
