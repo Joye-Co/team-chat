@@ -111,6 +111,22 @@ struct Pending {
     payload: Value,
     reply_id: Option<Value>,
     event_id: Option<String>,
+    /// When an ask rejects `timeout` (it keeps it when 重试 moves it to a new event).
+    deadline: Option<Instant>,
+    /// Earlier events of this request that 重试 replaced: a reply to any of them
+    /// answers the page.
+    older_events: Vec<String>,
+}
+
+/// The last event a version's pages sent (重试): the page that owns the band and what it
+/// sent, with its client event id while it waits.
+#[derive(Clone)]
+struct Last {
+    page: PageRef,
+    kind: PageEventKind,
+    name: String,
+    payload: Value,
+    cid: Option<String>,
 }
 
 /// The app's page host. A global; [`start`] sets it.
@@ -124,7 +140,7 @@ pub struct PageHost {
     by_event: HashMap<String, String>,
     bands: HashMap<(String, u32), Band>,
     /// The last event of a version (重试).
-    last: HashMap<(String, u32), (PageEventKind, String, Value)>,
+    last: HashMap<(String, u32), Last>,
     /// The latest version this host saw of each 产出.
     latest: HashMap<String, u32>,
     /// 已更新到 v{n} until.
@@ -349,13 +365,7 @@ pub fn on_page_event(
                 cx,
             ) {
                 let ms = (*timeout_ms).min(artifact_view::bridge::ASK_TIMEOUT_MAX_MS);
-                cx.spawn(async move |cx: &mut AsyncApp| {
-                    cx.background_executor()
-                        .timer(Duration::from_millis(ms))
-                        .await;
-                    cx.update(|cx| time_out(&cid, cx));
-                })
-                .detach();
+                time_out_at(cid, Instant::now() + Duration::from_millis(ms), cx);
             }
         }
         ArtifactEvent::Ref {
@@ -425,9 +435,16 @@ fn send(
 ) -> Option<String> {
     let provider = host(cx).provider.clone()?;
     let key = (artifact_id.to_string(), version);
-    host(cx)
-        .last
-        .insert(key.clone(), (kind, name.to_string(), payload.clone()));
+    host(cx).last.insert(
+        key.clone(),
+        Last {
+            page: page.clone(),
+            kind,
+            name: name.to_string(),
+            payload: payload.clone(),
+            cid: None,
+        },
+    );
     let body = (!payload.is_null()).then(|| payload.clone());
     match provider.send_page_event(artifact_id, version, name, kind, body) {
         Ok(cid) => {
@@ -447,7 +464,12 @@ fn send(
                 .map(|(c, _)| c.clone())
                 .collect();
             for c in older {
-                h.pending.remove(&c);
+                if let Some(p) = h.pending.remove(&c) {
+                    forget(h, &p);
+                }
+            }
+            if let Some(last) = h.last.get_mut(&key) {
+                last.cid = Some(cid.clone());
             }
             h.pending.insert(
                 cid.clone(),
@@ -460,6 +482,8 @@ fn send(
                     payload,
                     reply_id,
                     event_id: None,
+                    deadline: None,
+                    older_events: Vec::new(),
                 },
             );
             h.bands.insert(
@@ -507,14 +531,33 @@ fn refresh_at(d: Duration, cx: &mut App) {
     .detach();
 }
 
+/// Drops the server event ids of a request that ends.
+fn forget(h: &mut PageHost, p: &Pending) {
+    for e in p.event_id.iter().chain(&p.older_events) {
+        h.by_event.remove(e);
+    }
+}
+
+/// The ask `cid` rejects `timeout` at `deadline` unless it ended before.
+fn time_out_at(cid: String, deadline: Instant, cx: &mut App) {
+    if let Some(p) = host(cx).pending.get_mut(&cid) {
+        p.deadline = Some(deadline);
+    }
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.background_executor()
+            .timer(deadline.saturating_duration_since(Instant::now()))
+            .await;
+        cx.update(|cx| time_out(&cid, cx));
+    })
+    .detach();
+}
+
 /// An ask that got no reply in time.
 fn time_out(cid: &str, cx: &mut App) {
     let Some(p) = host(cx).pending.remove(cid) else {
         return;
     };
-    if let Some(e) = &p.event_id {
-        host(cx).by_event.remove(e);
-    }
+    forget(host(cx), &p);
     if let Some(id) = &p.reply_id {
         finish(&p.page, p.version, id, Err(Reject::Timeout), cx);
     }
@@ -529,6 +572,8 @@ fn finish(
     result: Result<Value, Reject>,
     cx: &mut App,
 ) {
+    #[cfg(test)]
+    tests::FINISHED.with(|f| f.borrow_mut().push((reply_id.clone(), result.clone())));
     let done = match page {
         PageRef::Window(id) => super::window::finish_in_window(id, version, reply_id, result, cx),
         PageRef::Embed(e) => e
@@ -586,7 +631,9 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                     match ack.mode {
                         ExpectMode::Offline | ExpectMode::None => {
                             let p = h.pending.remove(&client_event_id);
-                            h.by_event.remove(&ack.event_id);
+                            if let Some(p) = &p {
+                                forget(h, p);
+                            }
                             h.bands.insert(
                                 key,
                                 Band::Offline {
@@ -616,6 +663,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                     let Some(p) = host(cx).pending.remove(&client_event_id) else {
                         return;
                     };
+                    forget(host(cx), &p);
                     let reject = reject_for(&reason);
                     if let Some(id) = &p.reply_id {
                         finish(&p.page, p.version, id, Err(reject), cx);
@@ -653,6 +701,7 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
             let Some(p) = h.pending.remove(&cid) else {
                 return;
             };
+            forget(h, &p);
             h.bands
                 .insert((p.artifact_id.clone(), p.version), Band::Answered);
             if let Some(id) = &p.reply_id {
@@ -689,11 +738,9 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                 .collect();
             let mut actor = None;
             for c in done {
-                if let Some(p) = h.pending.remove(&c)
-                    && let Some(e) = p.event_id
-                {
-                    h.by_event.remove(&e);
-                    actor = Some(e);
+                if let Some(p) = h.pending.remove(&c) {
+                    forget(h, &p);
+                    actor = p.event_id.or(actor);
                 }
             }
             h.bands.insert((artifact_id.clone(), version), Band::Pushed);
@@ -934,14 +981,45 @@ pub fn band(artifact_id: &str, version: u32, cx: &App) -> Option<BandView> {
     }
 }
 
-/// 重试: sends the version's last event again (a new event, same value).
+/// 重试: sends the version's last event again (a new event, same value) from the page
+/// that sent it. A request that still waits moves to the new event with its deadline,
+/// so the reply to either event answers the page's promise once.
 pub fn retry(artifact_id: &str, version: u32, cx: &mut App) {
     let key = (artifact_id.to_string(), version);
-    let Some((kind, name, payload)) = host(cx).last.get(&key).cloned() else {
+    let Some(last) = host(cx).last.get(&key).cloned() else {
         return;
     };
-    let page = PageRef::Window(artifact_id.to_string());
-    send(page, artifact_id, version, kind, &name, payload, None, cx);
+    let old = last.cid.as_ref().and_then(|c| host(cx).pending.remove(c));
+    let reply_id = old.as_ref().and_then(|p| p.reply_id.clone());
+    let sent = send(
+        last.page,
+        artifact_id,
+        version,
+        last.kind,
+        &last.name,
+        last.payload,
+        reply_id,
+        cx,
+    );
+    let Some(old) = old else {
+        return;
+    };
+    let h = host(cx);
+    let Some(cid) = sent else {
+        // Nothing went out: send() ended the page's request.
+        forget(h, &old);
+        return;
+    };
+    let events: Vec<String> = old.older_events.into_iter().chain(old.event_id).collect();
+    for e in &events {
+        h.by_event.insert(e.clone(), cid.clone());
+    }
+    if let Some(p) = h.pending.get_mut(&cid) {
+        p.older_events = events;
+    }
+    if let Some(deadline) = old.deadline {
+        time_out_at(cid, deadline, cx);
+    }
 }
 
 /// 不等了: drops the waiting state; open asks of that version end with `timeout`.
@@ -1202,7 +1280,138 @@ pub fn reset_for_test(provider: Arc<dyn ChatProvider>, cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::data::page_host::PageEventDecl;
+    use crate::data::page_host::{PageAck, PageEventDecl};
+    use std::cell::RefCell;
+
+    type Finished = Vec<(Value, Result<Value, Reject>)>;
+
+    thread_local! {
+        /// Page requests [`finish`] answered on this test's thread.
+        pub(super) static FINISHED: RefCell<Finished> = const { RefCell::new(Vec::new()) };
+    }
+
+    fn finished() -> Finished {
+        FINISHED.with(|f| std::mem::take(&mut *f.borrow_mut()))
+    }
+
+    const ART: &str = crate::fake::v2::ART_REPORT;
+
+    /// A page host on the v2 samples (Ledger's report v3 declares `filter` and
+    /// `question`).
+    fn start_host(cx: &mut App) {
+        let provider: Arc<dyn ChatProvider> = crate::fake::v2::V2Samples::new();
+        reset_for_test(provider, cx);
+        finished();
+    }
+
+    fn ask(page: PageRef, reply: i64, cx: &mut App) -> String {
+        let before: HashSet<String> = host(cx).pending.keys().cloned().collect();
+        on_page_event(
+            page,
+            ART,
+            &ArtifactEvent::Ask {
+                version: 3,
+                reply_id: json!(reply),
+                name: "question".into(),
+                payload: json!({ "q": "B 站" }),
+                timeout_ms: 120_000,
+                user_action: true,
+            },
+            None,
+            cx,
+        );
+        new_cid(&before, cx)
+    }
+
+    fn new_cid(before: &HashSet<String>, cx: &mut App) -> String {
+        let now: Vec<String> = host(cx)
+            .pending
+            .keys()
+            .filter(|c| !before.contains(*c))
+            .cloned()
+            .collect();
+        assert_eq!(now.len(), 1, "expected one new request");
+        now[0].clone()
+    }
+
+    fn ack(cid: &str, event: &str, mode: ExpectMode, cx: &mut App) {
+        on_signal(
+            PageSignal::Acked {
+                client_event_id: cid.into(),
+                result: Ok(PageAck {
+                    event_id: event.into(),
+                    mode,
+                }),
+            },
+            cx,
+        );
+    }
+
+    fn reply(event: &str, cx: &mut App) {
+        on_signal(
+            PageSignal::Reply {
+                event_id: event.into(),
+                ok: true,
+                payload: Some(json!({ "answer": event })),
+                declined: false,
+            },
+            cx,
+        );
+    }
+
+    fn retry_now(cx: &mut App) -> String {
+        let before: HashSet<String> = host(cx).pending.keys().cloned().collect();
+        retry(ART, 3, cx);
+        new_cid(&before, cx)
+    }
+
+    #[gpui::test]
+    fn retry_of_an_ask_answers_the_page_from_the_new_event(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            // The ask came from an inline page, not the 产出 window.
+            let first = ask(PageRef::Embed(WeakEntity::new_invalid()), 7, cx);
+            ack(&first, "ev-1", ExpectMode::Live, cx);
+            let second = retry_now(cx);
+            assert_ne!(first, second);
+            let p = &host(cx).pending[&second];
+            assert!(
+                matches!(p.page, PageRef::Embed(_)),
+                "retry bound to another page"
+            );
+            assert_eq!(p.reply_id, Some(json!(7)));
+            assert!(p.deadline.is_some(), "the retried ask lost its deadline");
+            assert!(!host(cx).pending.contains_key(&first));
+            ack(&second, "ev-2", ExpectMode::Live, cx);
+            // The member answers the retried event: the page's promise resolves once.
+            reply("ev-2", cx);
+            assert_eq!(
+                finished(),
+                vec![(json!(7), Ok(json!({ "answer": "ev-2" })))]
+            );
+            // A late answer to the first event finds nothing open.
+            reply("ev-1", cx);
+            assert!(finished().is_empty());
+            assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn a_reply_to_the_replaced_event_still_answers_the_page(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            let first = ask(PageRef::Window(ART.into()), 8, cx);
+            ack(&first, "ev-1", ExpectMode::Run, cx);
+            let second = retry_now(cx);
+            ack(&second, "ev-2", ExpectMode::Run, cx);
+            reply("ev-1", cx);
+            assert_eq!(
+                finished(),
+                vec![(json!(8), Ok(json!({ "answer": "ev-1" })))]
+            );
+            assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
+        });
+    }
 
     fn bridge(active: bool, kinds: &[PageEventKind]) -> PageBridge {
         PageBridge {
