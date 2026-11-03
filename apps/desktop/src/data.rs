@@ -1895,6 +1895,11 @@ pub trait ChatProvider: Send + Sync + 'static {
     fn withdraw_changes_approval(&self, _group_id: &str, _topic_id: &str) -> AdminReply<()> {
         reply_now(Err(AdminError::Unsupported))
     }
+    /// r2-topic: my approval is still queued on this computer, so 撤回 can
+    /// take it back; `false` once the server stored it.
+    fn changes_approval_queued(&self, _group_id: &str, _topic_id: &str) -> bool {
+        false
+    }
 
     // --- pages track: the 群, 成员 and 产出 pages (1.1.0; all have defaults) ---
 

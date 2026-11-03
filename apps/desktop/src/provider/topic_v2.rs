@@ -664,6 +664,20 @@ impl CoreProvider {
         }
     }
 
+    /// My answer to the review card is still queued (in the outbox, not stored).
+    fn review_answer_queued(&self, group_id: &str, review: &ReviewCard) -> bool {
+        review.v2.is_some()
+            && self
+                .card_v2_pending(group_id, &review.message_id)
+                .is_some_and(|p| p.phase == crate::data::cards_v2::CardV2SendPhase::Sending)
+    }
+
+    /// My approval is still queued: 撤回 can take it back.
+    pub(super) fn changes_approval_queued_inner(&self, group_id: &str, topic_id: &str) -> bool {
+        self.review_card(group_id, topic_id)
+            .is_some_and(|review| self.review_answer_queued(group_id, &review))
+    }
+
     /// 撤回 while my approval is still queued.
     pub(super) fn withdraw_changes_approval_inner(
         &self,
@@ -673,11 +687,7 @@ impl CoreProvider {
         let Some(review) = self.review_card(group_id, topic_id) else {
             return reply_now(Err(AdminError::Unsupported));
         };
-        let queued = review.v2.is_some()
-            && self
-                .card_v2_pending(group_id, &review.message_id)
-                .is_some_and(|p| p.phase == crate::data::cards_v2::CardV2SendPhase::Sending);
-        if !queued {
+        if !self.review_answer_queued(group_id, &review) {
             return reply_now(Err(AdminError::Unsupported));
         }
         self.withdraw_card_v2_answer(group_id, topic_id, &review.message_id);

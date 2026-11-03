@@ -2,7 +2,8 @@
 //! open ask for me in this 话题. A review of the 话题's change shows 看改动,
 //! 要求修改 and 批准合并; another ask shows its card's buttons. Once I
 //! answer, the controls give way to a one-line record that rises in with its
-//! check drawn, and 撤回 while the change has not merged.
+//! check drawn, and 撤回 while my approval is still queued on this computer
+//! (撤回 can take back only a queued answer).
 
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, IntoElement, ParentElement, SharedString, Styled,
@@ -44,6 +45,12 @@ enum Pinned {
     },
 }
 
+/// 撤回 shows on my approval only while it is queued here and the change has
+/// not merged: once the server stored it, it cannot be taken back.
+fn can_withdraw(mine: bool, state: ChangeState, queued: bool) -> bool {
+    mine && queued && state != ChangeState::Merged
+}
+
 /// `刚刚` within a minute, else the mono clock.
 fn when(at: Millis) -> String {
     let now = crate::selftest::clock::utc_now().timestamp_millis();
@@ -83,7 +90,7 @@ impl TopicPage {
             return Some(Pinned::Record {
                 text,
                 at,
-                withdraw: mine && ch.state == ChangeState::Merging,
+                withdraw: can_withdraw(mine, ch.state, p.changes_approval_queued(g, t)),
             });
         }
         let ask = p.pinned_ask(g, t)?;
@@ -402,5 +409,18 @@ impl TopicPage {
             card,
             cx,
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_my_queued_approval_can_be_withdrawn() {
+        assert!(can_withdraw(true, ChangeState::Merging, true));
+        assert!(!can_withdraw(true, ChangeState::Merging, false));
+        assert!(!can_withdraw(false, ChangeState::Merging, true));
+        assert!(!can_withdraw(true, ChangeState::Merged, true));
     }
 }

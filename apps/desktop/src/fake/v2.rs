@@ -1727,6 +1727,11 @@ impl ChatProvider for V2Samples {
         ]);
         reply_now(Ok(()))
     }
+    /// r2-topic: the samples never send, so my approval stays queued.
+    fn changes_approval_queued(&self, group_id: &str, topic_id: &str) -> bool {
+        self.changes_approval(group_id, topic_id)
+            .is_some_and(|(by, _)| by == ME)
+    }
     fn withdraw_changes_approval(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
         self.with(|d| d.approval = None);
         self.emit(vec![

@@ -1904,6 +1904,10 @@ impl ChatProvider for CoreProvider {
         self.withdraw_changes_approval_inner(group_id, topic_id)
     }
 
+    fn changes_approval_queued(&self, group_id: &str, topic_id: &str) -> bool {
+        self.changes_approval_queued_inner(group_id, topic_id)
+    }
+
     fn run_usage(&self, run_id: &str) -> Option<crate::data::v2::RunUsage> {
         self.run_usage_inner(run_id)
     }
