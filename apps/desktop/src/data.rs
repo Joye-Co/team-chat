@@ -1624,7 +1624,8 @@ pub trait ChatProvider: Send + Sync + 'static {
             .max_by_key(|a| a.at)
     }
     /// 做完了 today, newest first. The default lists 话题 marked done since
-    /// local midnight, without proof.
+    /// local midnight, with the proof of each 话题's newest result
+    /// ([`ChatProvider::topic_result_proof`]).
     fn done_today(&self) -> Vec<v2::DoneItem> {
         let midnight = chrono::Local::now()
             .date_naive()
@@ -1643,11 +1644,15 @@ pub trait ChatProvider: Send + Sync + 'static {
                 member_id: t.owner_id.clone().unwrap_or_else(|| t.created_by.clone()),
                 title: t.title.clone(),
                 at: t.last_activity_at,
-                proof: Vec::new(),
+                proof: self.topic_result_proof(&t.group_id, &t.id),
             })
             .collect();
         out.sort_by_key(|d| std::cmp::Reverse(d.at));
         out
+    }
+    /// Proof chips of a 话题's newest result (its done card). Empty by default.
+    fn topic_result_proof(&self, _group_id: &str, _topic_id: &str) -> Vec<v2::Proof> {
+        Vec::new()
     }
     /// 正在做: active runs of every 话题 I can see, newest first.
     fn active_runs(&self) -> Vec<BotRunSummary> {

@@ -27,6 +27,8 @@ mod files_live;
 pub mod macos;
 mod panes;
 pub mod persist;
+// Proof chips from done cards (1.1.0).
+mod proof;
 // pages track: the 群, 成员 and 产出 pages.
 mod pages;
 mod process;
@@ -1777,6 +1779,14 @@ impl ChatProvider for CoreProvider {
     }
 
     // Card v2 reads and answers come from the cards v2 track above.
+
+    fn message_proof(&self, _group_id: &str, message_id: &str) -> Vec<crate::data::v2::Proof> {
+        self.message_proof_inner(message_id)
+    }
+
+    fn topic_result_proof(&self, _group_id: &str, topic_id: &str) -> Vec<crate::data::v2::Proof> {
+        self.topic_result_proof_inner(&self.resolve_topic(topic_id))
+    }
 
     // --- end of the desk track block ---
 
