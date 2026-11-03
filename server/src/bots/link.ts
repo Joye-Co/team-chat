@@ -505,8 +505,8 @@ export class MachineLink extends DurableObject<BotsEnv> {
     return { sent: ws !== null };
   }
 
-  /** run.input, run.approval or run.cancel for an open run; queued while the link is down. */
-  async toRun(frame: { t: "run.input" | "run.approval" | "run.cancel"; runId: string }): Promise<{ ok: boolean; sent: boolean }> {
+  /** run.input, run.approval, run.cancel, run.pause or run.resume for an open run; queued while the link is down. */
+  async toRun(frame: { t: "run.input" | "run.approval" | "run.cancel" | "run.pause" | "run.resume"; runId: string }): Promise<{ ok: boolean; sent: boolean }> {
     const r = this.run(frame.runId);
     if (!r || (r.state !== "assigned" && r.state !== "accepted")) return { ok: false, sent: false };
     const ws = this.socket();

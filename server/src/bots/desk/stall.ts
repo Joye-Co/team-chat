@@ -1,5 +1,5 @@
 // BotDesk stall detection: the alarm that marks silent runs blocked and fails runs whose start
-// never reached a machine.
+// never reached a machine. Paused runs (接管) have no stall deadline until they resume.
 import { STALL_MS, TEXT } from "../dispatch";
 import { ACTIVE, type RunRow, START_STUCK_MS } from "./core";
 import { DeskEvents } from "./events";
@@ -12,7 +12,7 @@ export abstract class DeskStall extends DeskEvents {
   protected async scheduleStall(): Promise<void> {
     const stall = this.sql
       .exec<{ at: number | null }>(
-        `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL`,
+        `SELECT min(last_event_at) AS at FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL AND paused_by IS NULL`,
       )
       .one().at;
     const stuck = this.sql
@@ -33,14 +33,14 @@ export abstract class DeskStall extends DeskEvents {
     const now = Date.now();
     const due = this.sql
       .exec<{ id: string }>(
-        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL AND last_event_at <= ?`,
+        `SELECT id FROM runs WHERE ${ACTIVE} AND external = 0 AND status = 'running' AND stalled = 0 AND approval_id IS NULL AND paused_by IS NULL AND last_event_at <= ?`,
         now - STALL_MS,
       )
       .toArray();
     for (const { id } of due) {
       await this.serial(id, async () => {
         const r = this.run(id);
-        if (!r || r.external || r.ended_at !== null || r.stalled || r.status !== "running" || r.last_event_at > now - STALL_MS) return;
+        if (!r || r.external || r.ended_at !== null || r.stalled || r.paused_by || r.status !== "running" || r.last_event_at > now - STALL_MS) return;
         await this.markStalled(r);
       });
     }
@@ -63,7 +63,8 @@ export abstract class DeskStall extends DeskEvents {
 
   /** No progress: one note, the run and the topic show blocked until events come again. */
   protected async markStalled(r: RunRow): Promise<void> {
-    if (r.stalled || r.ended_at !== null || r.approval_id) return;
+    // A paused run (接管) is quiet on purpose.
+    if (r.stalled || r.ended_at !== null || r.approval_id || r.paused_by) return;
     this.sql.exec("UPDATE runs SET stalled = 1 WHERE id = ?", r.id);
     r.stalled = 1;
     try {

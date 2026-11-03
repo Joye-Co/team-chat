@@ -1,5 +1,13 @@
 // HTTP routes of the bots feature (docs/protocol.md, "Bot runs").
-import { CreateMachineRequest, EndRunRequest, SetBotRunnerRequest, SetRunPlanRequest, StartRunRequest } from "@chat/protocol";
+import {
+  CreateMachineRequest,
+  EndRunRequest,
+  ResumeRunRequest,
+  SetBotRunnerRequest,
+  SetRunAcceptanceRequest,
+  SetRunPlanRequest,
+  StartRunRequest,
+} from "@chat/protocol";
 import { auditStatement } from "../core/audit";
 import type { AuthContext } from "../core/auth";
 import { sha256Hex } from "../core/crypto";
@@ -9,6 +17,7 @@ import { ulid } from "../core/ids";
 import { registerRoute } from "../core/registry";
 import { toMachine } from "./dispatch";
 import { deskStub, linkStub } from "./env";
+import type { TakeoverActor } from "./desk/takeover";
 import { MACHINE_HEADER } from "./link";
 import { authenticateMachine, loadMachineViews, loadRunner, newMachineToken, runIndex } from "./store";
 
@@ -322,6 +331,55 @@ export function registerBotRoutes(): void {
       const row = await visibleRun(env.DB, a, params.id);
       const run = unwrap(await deskStub(env, row.bot_id).cancel(row.bot_id, row.id, a.memberId));
       await auditStatement(env.DB, a, { action: "run.cancel", target: row.id, details: { botId: row.bot_id } }).run();
+      return run;
+    },
+  });
+
+  // -------------------------------------------------------------------------
+  // 1.1: take-over (pause / resume) and acceptance criteria
+  // -------------------------------------------------------------------------
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/pause",
+    auth: "member",
+    async handler({ env, params, auth }) {
+      const a = auth as AuthContext;
+      const row = await visibleRun(env.DB, a, params.id);
+      const who = { id: a.memberId, kind: a.member.kind, level: a.member.level } as TakeoverActor;
+      const run = unwrap(await deskStub(env, row.bot_id).pause(row.bot_id, row.id, who));
+      await auditStatement(env.DB, a, { action: "run.pause", target: row.id, details: { botId: row.bot_id } }).run();
+      return run;
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/runs/:id/resume",
+    auth: "member",
+    async handler({ env, params, auth, body }) {
+      const a = auth as AuthContext;
+      const req = await body(ResumeRunRequest);
+      const row = await visibleRun(env.DB, a, params.id);
+      const who = { id: a.memberId, kind: a.member.kind, level: a.member.level } as TakeoverActor;
+      const run = unwrap(await deskStub(env, row.bot_id).resume(row.bot_id, row.id, who, req.note));
+      // The note itself goes to the CLI, not into the audit log.
+      await auditStatement(env.DB, a, { action: "run.resume", target: row.id, details: { botId: row.bot_id, note: Boolean(req.note) } }).run();
+      return run;
+    },
+  });
+
+  registerRoute({
+    method: "PUT",
+    path: "/v1/runs/:id/acceptance",
+    auth: "member",
+    async handler({ env, params, auth, body }) {
+      const a = auth as AuthContext;
+      const req = await body(SetRunAcceptanceRequest);
+      const row = await visibleRun(env.DB, a, params.id);
+      if (row.bot_id !== a.memberId) throw new ApiError("forbidden", "only the run's bot sets its acceptance criteria");
+      const run = unwrap(await deskStub(env, row.bot_id).setAcceptance(row.bot_id, row.id, req.items));
+      await auditStatement(env.DB, a, { action: "run.acceptance", target: row.id, details: { items: req.items.length } }).run();
       return run;
     },
   });
