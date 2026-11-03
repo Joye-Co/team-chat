@@ -31,6 +31,24 @@ pub const SCENES: &[Scene] = &[
         open: open_main,
     },
     Scene {
+        name: "artifact-pane-v2",
+        about: "The 产出 pane beside 10 月数据月报: the page live in the pane",
+        start: Start::V2,
+        setup: |s, cx| {
+            v2_open_topic(s, d::GROWTH, d::T_REPORT, cx);
+            s.nav.update(cx, |nav, cx| {
+                nav.set_right_pane(
+                    RightPane::Artifact {
+                        id: d::ART_REPORT.into(),
+                        version: None,
+                    },
+                    cx,
+                )
+            })
+        },
+        open: open_main,
+    },
+    Scene {
         name: "artifacts-v2",
         about: "产出 destination: every 产出 with its thumbnail",
         start: Start::V2,

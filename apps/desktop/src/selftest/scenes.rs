@@ -562,7 +562,9 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
         "web-embed-covered" => Some(|cx| embed_preview::ready(EmbedMode::Covered, cx)),
         // pages track: the 产出 page shows its live page.
-        "artifact-v2" | "artifact-v2-old" => Some(crate::views::artifact_page::scenes::ready),
+        "artifact-v2" | "artifact-v2-old" | "artifact-pane-v2" => {
+            Some(crate::views::artifact_page::scenes::ready)
+        }
         _ => None,
     }
 }
