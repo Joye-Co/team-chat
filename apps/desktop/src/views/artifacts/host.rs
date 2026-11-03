@@ -116,6 +116,9 @@ struct Pending {
     /// Earlier events of this request that 重试 replaced: a reply to any of them
     /// answers the page.
     older_events: Vec<String>,
+    /// A newer emit of the same page replaced this one before its ack (latest wins): it
+    /// no longer drives the band, and its ack only settles the page's promise.
+    superseded: bool,
 }
 
 /// The last event a version's pages sent (重试): the page that owns the band and what it
@@ -451,7 +454,9 @@ fn send(
             let h = host(cx);
             h.sent
                 .push((artifact_id.to_string(), version, name.to_string(), kind));
-            // Latest wins: an older emit of the same page stops waiting.
+            // Latest wins: an older emit of the same page stops waiting. One that was
+            // acked already had its promise settled; one still on its way keeps its
+            // entry until the ack settles the promise (never left open).
             let older: Vec<String> = h
                 .pending
                 .iter()
@@ -464,8 +469,13 @@ fn send(
                 .map(|(c, _)| c.clone())
                 .collect();
             for c in older {
-                if let Some(p) = h.pending.remove(&c) {
-                    forget(h, &p);
+                let acked = h.pending.get(&c).is_some_and(|p| p.event_id.is_some());
+                if acked {
+                    if let Some(p) = h.pending.remove(&c) {
+                        forget(h, &p);
+                    }
+                } else if let Some(p) = h.pending.get_mut(&c) {
+                    p.superseded = true;
                 }
             }
             if let Some(last) = h.last.get_mut(&key) {
@@ -484,6 +494,7 @@ fn send(
                     event_id: None,
                     deadline: None,
                     older_events: Vec::new(),
+                    superseded: false,
                 },
             );
             h.bands.insert(
@@ -607,6 +618,18 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
             let Some(p) = host(cx).pending.get_mut(&client_event_id) else {
                 return;
             };
+            if p.superseded {
+                if let Some(p) = host(cx).pending.remove(&client_event_id)
+                    && let Some(id) = &p.reply_id
+                {
+                    let settled = match &result {
+                        Ok(ack) => Ok(json!({ "eventId": ack.event_id })),
+                        Err(reason) => Err(reject_for(reason)),
+                    };
+                    finish(&p.page, p.version, id, settled, cx);
+                }
+                return;
+            }
             let key = (p.artifact_id.clone(), p.version);
             match result {
                 Ok(ack) => {
@@ -732,9 +755,12 @@ pub fn on_signal(signal: PageSignal, cx: &mut App) {
                 .pending
                 .iter()
                 .filter(|(_, p)| {
+                    // Only acked emits: one still on its way settles its promise at
+                    // its ack.
                     p.artifact_id == artifact_id
                         && p.version == version
                         && p.kind == PageEventKind::Emit
+                        && p.event_id.is_some()
                         && (cause.is_none() || p.event_id == cause)
                 })
                 .map(|(c, _)| c.clone())
@@ -1396,6 +1422,60 @@ mod tests {
             reply("ev-1", cx);
             assert!(finished().is_empty());
             assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
+        });
+    }
+
+    fn emit(reply: i64, cx: &mut App) -> String {
+        let before: HashSet<String> = host(cx).pending.keys().cloned().collect();
+        send_emit(
+            PageRef::Window(ART.into()),
+            ART,
+            3,
+            "filter",
+            json!({ "channel": reply }),
+            Some(json!(reply)),
+            cx,
+        );
+        new_cid(&before, cx)
+    }
+
+    #[gpui::test]
+    fn a_replaced_emit_still_settles_its_promise(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            // Two clicks within one ack round trip: the second replaces the first.
+            let a = emit(1, cx);
+            let b = emit(2, cx);
+            assert!(host(cx).pending[&a].superseded);
+            ack(&a, "ev-a", ExpectMode::Live, cx);
+            assert_eq!(
+                finished(),
+                vec![(json!(1), Ok(json!({ "eventId": "ev-a" })))]
+            );
+            assert!(!host(cx).pending.contains_key(&a));
+            // The band still waits for the newer emit.
+            assert!(matches!(
+                host(cx).bands.get(&(ART.to_string(), 3)),
+                Some(Band::Waiting { .. })
+            ));
+            ack(&b, "ev-b", ExpectMode::Live, cx);
+            assert_eq!(
+                finished(),
+                vec![(json!(2), Ok(json!({ "eventId": "ev-b" })))]
+            );
+            // A third emit after b's ack: b stops waiting at once (its promise settled).
+            let c = emit(3, cx);
+            assert!(!host(cx).pending.contains_key(&b));
+            // A refused ack of a replaced emit rejects it with its reason.
+            let _d = emit(4, cx);
+            on_signal(
+                PageSignal::Acked {
+                    client_event_id: c.clone(),
+                    result: Err("interact.rate_limited".into()),
+                },
+                cx,
+            );
+            assert_eq!(finished(), vec![(json!(3), Err(Reject::RateLimited))]);
         });
     }
 
