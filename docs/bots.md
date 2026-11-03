@@ -81,8 +81,8 @@ await bot.start();
   Effects outside the chat (deploys, API calls) must be idempotent too.
 - **Handlers**: `onMention` (a message that mentions me), `onMessage` (any other message in a
   topic I follow), `onCardAction` (a press on one of my cards), `onCardAnswer` (1.1: an answer
-  to one of my v2 cards, posted with `postCardV2`; reply with `ctx.updateCard` and a higher
-  `rev`), `onEvent` (every event),
+  to one of my v2 cards, posted with `postCardV2`; close it with
+  `ctx.resolve`), `onEvent` (every event),
   `onTransient` (typing, presence, deltas). A message runs at most one of `onMention` and
   `onMessage`. My own messages and system messages run neither. Messages of other bots run
   neither either, so two bots cannot answer each other without end; `allowBotAuthors: true`
@@ -285,7 +285,7 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
   (`duplicate: true`),不会重复发。聊天以外的副作用(部署、调用 API)也要自己做成幂等。
 - **处理函数**:`onMention`(@ 我的消息)、`onMessage`(我关注的话题里的其他消息)、
   `onCardAction`(有人按了我的卡片按钮)、`onCardAnswer`(1.1:有人回答了我用 `postCardV2` 发的
-  v2 卡片;用 `ctx.updateCard` 发更高的 `rev`)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
+  v2 卡片;用 `ctx.resolve` 关闭它)、`onEvent`(所有事件)、`onTransient`(输入中、在线、
   流式增量)。一条消息最多触发 `onMention` 和 `onMessage` 中的一个;我自己的消息和系统消息
   都不触发。其他机器人的消息默认也不触发,避免两个机器人互相回复停不下来;传
   `allowBotAuthors: true` 可关闭这条规则。处理函数并发运行,出错交给 `onError`。
