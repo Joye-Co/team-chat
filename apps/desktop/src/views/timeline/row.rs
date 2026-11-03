@@ -106,13 +106,17 @@ impl TimelineView {
                 cx,
             );
         }
-        // The plan card of a member at work follows the last message, in
-        // the list so it scrolls with the 话题 (Live.dc.html).
-        let plan = (v2 && last).then(|| self.render_plan(cx)).flatten();
+        // The plan cards of the members at work follow the last message, in
+        // the list so they scroll with the 话题 (Live.dc.html).
+        let plans = if v2 && last {
+            self.render_plans(cx)
+        } else {
+            Vec::new()
+        };
         let item = item
             .children(gap.map(|h| div().flex_none().h(h)))
             .child(message_row)
-            .children(plan);
+            .children(plans);
         if v2 {
             // First paint: the rows of a 话题 that just opened rise in, 40 ms
             // apart from the top (CONCEPT2 §5); later rows only fade.

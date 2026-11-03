@@ -95,9 +95,26 @@ pub fn plan_progress(plan: &[PlanItem]) -> Option<(usize, usize, Option<String>)
 /// The run a member works on in this 话题 now: active and not waiting for
 /// a person (an answer or a review is said elsewhere), the latest first.
 pub fn working_run(runs: &[BotRunSummary]) -> Option<&BotRunSummary> {
-    runs.iter()
+    working_runs(runs).pop()
+}
+
+/// The runs members work on in this 话题 now, one per member (its latest),
+/// in the order they started: one plan card each on the timeline.
+pub fn working_runs(runs: &[BotRunSummary]) -> Vec<&BotRunSummary> {
+    let start = |r: &BotRunSummary| r.started_at.unwrap_or(r.created_at);
+    let mut out: Vec<&BotRunSummary> = Vec::new();
+    for r in runs
+        .iter()
         .filter(|r| r.status.is_active() && r.status != RunStatus::Waiting)
-        .max_by_key(|r| r.started_at.unwrap_or(r.created_at))
+    {
+        match out.iter_mut().find(|x| x.bot_id == r.bot_id) {
+            Some(x) if start(r) > start(x) => *x = r,
+            Some(_) => {}
+            None => out.push(r),
+        }
+    }
+    out.sort_by_key(|r| start(r));
+    out
 }
 
 /// The state line of a member's run: `Forge 在做 3/5 · 跑一万条消息的压测`,
@@ -366,6 +383,22 @@ mod tests {
         ];
         assert_eq!(working_run(&runs).map(|r| r.id.as_str()), Some("now"));
         assert!(working_run(&runs[..2]).is_none());
+    }
+
+    #[test]
+    fn each_member_at_work_has_its_run() {
+        let mut other = run("coder", RunStatus::Running, 2, plan());
+        other.bot_id = "coder".into();
+        let runs = vec![
+            run("forge-old", RunStatus::Running, 1, plan()),
+            run("forge-ask", RunStatus::Waiting, 6, plan()),
+            run("forge-new", RunStatus::Running, 4, plan()),
+            other,
+            run("forge-done", RunStatus::Done, 9, plan()),
+        ];
+        let ids: Vec<&str> = working_runs(&runs).iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["coder", "forge-new"]);
+        assert_eq!(working_run(&runs).map(|r| r.id.as_str()), Some("forge-new"));
     }
 
     #[test]

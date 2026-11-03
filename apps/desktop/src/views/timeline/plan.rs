@@ -1,5 +1,5 @@
-//! The plan card of a member at work, at the foot of a v2 timeline
-//! (Live.dc.html): the member's tile with a live ring, then a card with
+//! The plan cards of the members at work, at the foot of a v2 timeline,
+//! one per member (Live.dc.html): the member's tile with a live ring, then a card with
 //! `计划 3/5` and 收起 / 展开, the step bar, the steps (the current one on
 //! a `sunken` fill with what it does now) and a footer with the time used
 //! and when it started. While someone holds the member's computer the run
@@ -20,7 +20,7 @@ use crate::{
     data::{BotRunSummary, Millis, PlanState},
     theme::{self, Type as _, space},
     ui::{self, Lucide},
-    views::topic_page::working_run,
+    views::topic_page::working_runs,
 };
 
 /// Rows of the plan card: 34 pt; its header 40 pt and footer 36 pt.
@@ -89,13 +89,18 @@ pub fn span_text(copy: SpanCopy, ms: i64) -> String {
 }
 
 impl TimelineView {
-    /// The plan card of the member that works in the open 话题, if any.
-    pub(super) fn render_plan(&mut self, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let run = working_run(&self.runs)?.clone();
+    /// One plan card per member that works in the open 话题, in the order
+    /// they started.
+    pub(super) fn render_plans(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+        let runs: Vec<BotRunSummary> = working_runs(&self.runs).into_iter().cloned().collect();
         let p = self.services.provider.clone();
-        let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
-        let times = p.run_step_times(&run.id);
-        Some(self.plan_card(&run, paused_by.is_some(), &times, cx))
+        runs.iter()
+            .map(|run| {
+                let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
+                let times = p.run_step_times(&run.id);
+                self.plan_card(run, paused_by.is_some(), &times, cx)
+            })
+            .collect()
     }
 
     fn plan_card(
