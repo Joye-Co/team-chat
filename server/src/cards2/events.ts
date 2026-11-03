@@ -281,10 +281,13 @@ export async function cardEvent(room: RoomContext, actor: Actor, a: CardEventArg
 
 type Loaded = { row: MessageRow; ext: Record<string, unknown>; card: CardV2; state: CardState; dir: Directory; now: number };
 
-function insertEvent(room: RoomContext, r: { eventId: string; row: MessageRow; actor: Actor; a: CardEventArgs; stored: boolean; now: number; ack: CardEventAck }): void {
+function insertEvent(
+  room: RoomContext,
+  r: { eventId: string; row: MessageRow; actor: Actor; a: CardEventArgs; stored: boolean; now: number; ack: CardEventAck; cardRev?: number },
+): void {
   room.sql.exec(
-    `INSERT INTO card_events (event_id, message_id, author_id, actor_id, client_event_id, event, block_id, action_id, stored, at, ack)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO card_events (event_id, message_id, author_id, actor_id, client_event_id, event, block_id, action_id, stored, at, ack, card_rev)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     r.eventId,
     r.row.id,
     r.row.author_id,
@@ -296,6 +299,7 @@ function insertEvent(room: RoomContext, r: { eventId: string; row: MessageRow; a
     r.stored ? 1 : 0,
     r.now,
     JSON.stringify(r.ack),
+    r.cardRev ?? null,
   );
   pruneEvents(room.sql, r.now);
 }
@@ -341,7 +345,7 @@ async function storeAnswer(
   room.commit((tx) => {
     tx.append({ type: "card.answered", actorId: actor.id, topicId: row.topic_id, messageId: row.id, data });
     writeCardUpdate(room, tx, row, l.ext, actor.id, l.dir, { card, state, cardChanged: false, now });
-    insertEvent(room, { eventId, row, actor, a, stored: true, now, ack });
+    insertEvent(room, { eventId, row, actor, a, stored: true, now, ack, cardRev: card.rev });
   });
   return finishAck(room, ack, {
     groupId: room.groupId,
@@ -430,7 +434,11 @@ async function retract(room: RoomContext, actor: Actor, a: CardEventArgs, l: Loa
       .exec("SELECT 1 FROM messages WHERE topic_id = ? AND author_id = ? AND created_at > ? AND deleted_at IS NULL LIMIT 1", row.topic_id, row.author_id, answer.at)
       .toArray().length > 0;
   const consumed = room.sql.exec("SELECT 1 FROM card_consumed WHERE answer_id = ?", answerId).toArray().length > 0;
-  if (answer.retractedAt !== undefined || card.rev > answer.rev || authorActed || consumed || now - answer.at > RETRACT_WINDOW_MS) {
+  // The rev the card had when the answer was stored (an answer may name an older rev whose
+  // decision surface did not change); older rows have none and use the answer's rev.
+  const atRev =
+    room.sql.exec<{ card_rev: number | null }>("SELECT card_rev FROM card_events WHERE event_id = ?", answer.eventId).toArray()[0]?.card_rev ?? answer.rev;
+  if (answer.retractedAt !== undefined || card.rev > atRev || authorActed || consumed || now - answer.at > RETRACT_WINDOW_MS) {
     throw new ApiError("conflict", "the answer can no longer be taken back", "card.retract_closed");
   }
   rateAnswer(`${room.groupId}:${actor.id}:${a.messageId}:retract`, now);

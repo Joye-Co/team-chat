@@ -51,6 +51,9 @@ registerRoomMigration({
   `,
 });
 
+/** The card's rev when an answer was stored (the retract window closes on a newer rev). */
+registerRoomMigration({ name: "cards2-3", up: "ALTER TABLE card_events ADD COLUMN card_rev INTEGER;" });
+
 /** Idempotency keys and causes live this long. */
 export const EVENT_KEEP_MS = 24 * 3600_000;
 /** A cause must be an event of the last 30 minutes. */

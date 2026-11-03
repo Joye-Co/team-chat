@@ -65,3 +65,40 @@ describe("card event audit", () => {
     for (const c of [ca, cbot]) c.close();
   });
 });
+
+/** A blocking yes/no ask with an immediate choice and a chart outside its decision surface. */
+const quick = (from: string[], extra: Partial<CardV2> = {}): CardV2 =>
+  base({
+    intent: "ask",
+    title: "今天发版吗？",
+    fallback: "今天发版吗？",
+    ask: { from },
+    blocks: [
+      { id: "pick", type: "decision", deliver: "immediate", options: [{ id: "yes", label: "发" }, { id: "no", label: "不发" }] },
+      { id: "info", type: "text", text: "改动都测过了。" },
+    ],
+    ...extra,
+  });
+
+describe("retract window", () => {
+  it("stays open for an answer accepted at an older rev with the same decision surface", async () => {
+    const { alice, gid, ca, cbot } = await setup();
+    const m = (await send(cbot, gid, quick([alice.id]))).message;
+    await cbot.ok({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 1, ops: [{ op: "set", id: "info", props: { text: "又测了一遍。" } }] });
+    const a = await ev(ca, gid, m.id, { rev: 1, blockId: "pick", event: "choice.submit", value: { value: "yes" } });
+    expect(a, JSON.stringify(a)).toMatchObject({ ok: true, result: { stored: true } });
+    const back = await ev(ca, gid, m.id, { rev: 2, event: "answer.retract", value: { answerId: a.result.answerId } });
+    expect(back, JSON.stringify(back)).toMatchObject({ ok: true, result: { stored: true } });
+    // A new rev after the answer still closes it.
+    await sleep(1100);
+    const again = await ev(ca, gid, m.id, { rev: 2, blockId: "pick", event: "choice.submit", value: { value: "no" } });
+    expect(again).toMatchObject({ ok: true });
+    await cbot.ok({ t: "card.patch", groupId: gid, messageId: m.id, baseRev: 2, ops: [{ op: "set", id: "info", props: { text: "好的。" } }] });
+    await sleep(1100);
+    expect(await ev(ca, gid, m.id, { rev: 3, event: "answer.retract", value: { answerId: again.result.answerId } })).toMatchObject({
+      ok: false,
+      error: { reason: "card.retract_closed" },
+    });
+    for (const c of [ca, cbot]) c.close();
+  });
+});
