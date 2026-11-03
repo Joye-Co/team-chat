@@ -152,6 +152,18 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
         Start::SignedIn | Start::Empty => fake::FakeProvider::new(),
         Start::V2 => fake::v2::V2Samples::new(),
         Start::V2Quiet => fake::v2::V2Samples::quiet(),
+        // --- provider track ---
+        Start::Core => {
+            static SHOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+            let n = SHOT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "{}-selftest-core-{}-{n}",
+                env!("PRODUCT_SLUG"),
+                std::process::id()
+            ));
+            crate::provider::seeded::seeded(&root, chrono::Utc::now().timestamp_millis() as u64)
+        }
+        // --- end provider track ---
         Start::Offline => {
             let fake = fake::FakeProvider::new();
             fake.set_connection(crate::data::ConnectionState::Reconnecting {

@@ -34,6 +34,11 @@ pub enum Start {
     /// The v2 sample team on a quiet day: nothing waits on me, nothing runs
     /// (desk track, `desk-empty`).
     V2Quiet,
+    // --- provider track ---
+    /// The real chat-core provider on a seeded cache, with no server
+    /// (`provider::seeded`).
+    Core,
+    // --- end provider track ---
 }
 
 pub struct Scene {
@@ -516,7 +521,7 @@ pub const SCENES: &[Scene] = &[
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 12] = [
+    let slices: [&'static [Scene]; 13] = [
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -528,12 +533,34 @@ pub fn all() -> Vec<&'static Scene> {
         crate::views::members_page::scenes::SCENES,
         crate::views::artifact_page::scenes::SCENES,
         V2_SHARED,
+        // --- provider track ---
+        CORE_SCENES,
+        // --- end provider track ---
         // --- cards v2 track ---
         crate::views::cards::v2::scenes::SCENES,
         // --- end cards v2 track ---
     ];
     slices.into_iter().flatten().collect()
 }
+
+// --- provider track ---
+/// Scenes on the real chat-core provider (seeded cache, no server): the v2 topic parts it
+/// reads from the cache.
+const CORE_SCENES: &[Scene] = &[Scene {
+    name: "topic-core",
+    about: "话题 page on the real provider and a seeded cache: 改动 from the PR link, the pinned review, 产出 with its preview, 用到的决定 and 用时和成本",
+    start: Start::Core,
+    setup: |s, cx| {
+        v2_open_topic(
+            s,
+            crate::provider::seeded::GROUP,
+            crate::provider::seeded::TOPIC,
+            cx,
+        )
+    },
+    open: open_main,
+}];
+// --- end provider track ---
 
 /// v2 scenes whose feature lives outside its own folder.
 const V2_SHARED: &[Scene] = &[
