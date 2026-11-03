@@ -278,9 +278,86 @@ impl CoreProvider {
         let path = dir.join(v.entry.replace('/', std::path::MAIN_SEPARATOR_STR));
         let this = self.clone();
         let change = Change::Artifacts {
-            group_id: g,
-            topic_id: t,
+            group_id: g.clone(),
+            topic_id: t.clone(),
         };
-        crate::views::media::poster::poster(&path, kind, move || this.emit(vec![change]))
+        // MEDIA §3 fallback: the sender sent no preview (or it is still pending): the first
+        // receiver that can make one sends it as `artifact.previewReady`.
+        let fallback = v
+            .media
+            .as_ref()
+            .is_some_and(|m| m.preview == chat_core::proto::MediaPreview::Pending)
+            .then(|| (a.client.clone(), path.clone(), v.entry.clone(), mime.clone()));
+        let (id, version) = (artifact_id.to_string(), version);
+        crate::views::media::poster::poster(&path, kind, move || {
+            this.emit(vec![change]);
+            if let Some((client, path, name, mime)) = fallback {
+                let c = client.clone();
+                client.spawn(async move {
+                    let (info, poster) =
+                        crate::views::media::poster::describe(&path, &name, &mime);
+                    send_version_media(&c, &g, &t, &id, version, info, poster).await;
+                });
+            }
+        })
+    }
+}
+
+/// Upload keys whose preview the sender is making now (正在生成预览).
+static GENERATING: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+
+pub(super) fn set_generating(key: &str, on: bool) {
+    let mut g = GENERATING
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if on {
+        g.insert(key.to_string());
+    } else {
+        g.remove(key);
+    }
+}
+
+pub(super) fn is_generating(key: &str) -> bool {
+    GENERATING.get().is_some_and(|g| {
+        g.lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(key)
+    })
+}
+
+/// Uploads a version's poster (when there is one) and sends its media metadata
+/// (`artifact.previewReady`). Best effort: a failure only leaves the preview to the
+/// receivers' fallback.
+pub(super) async fn send_version_media(
+    client: &std::sync::Arc<chat_core::Client>,
+    group_id: &str,
+    topic_id: &str,
+    artifact_id: &str,
+    version: u32,
+    mut info: chat_core::proto::MediaInfo,
+    poster: Option<PathBuf>,
+) {
+    if let Some(path) = poster.filter(|p| p.extension().is_some_and(|e| e == "jpg")) {
+        let up = client.upload_file(
+            chat_core::UploadRequest {
+                group_id: group_id.to_string(),
+                topic_id: Some(topic_id.to_string()),
+                path,
+                name: Some("poster.jpg".into()),
+                mime: Some("image/jpeg".into()),
+            },
+            chat_core::no_progress(),
+        );
+        match up.await {
+            Ok(Ok(m)) => info.poster_file_id = Some(m.id),
+            _ => info.preview = chat_core::proto::MediaPreview::Failed,
+        }
+    }
+    if info.validate().is_err() {
+        return;
+    }
+    if let Ok(Err(e)) = client.put_artifact_media(artifact_id, version, info).await {
+        tracing::info!(error = %e, "产出 media not sent");
     }
 }

@@ -2235,6 +2235,10 @@ pub trait ChatProvider: Send + Sync + 'static {
         let path = self.cached_file(file)?;
         crate::views::media::poster::poster(&path, kind, || {})
     }
+    /// True while the sender makes the preview of an upload (`upload_key`): 正在生成预览.
+    fn upload_generating(&self, _key: &str) -> bool {
+        false
+    }
     /// The poster or snapshot of a non-page 产出 version (lists and thumbnails).
     fn artifact_poster(&self, _artifact_id: &str, _version: u32) -> Option<PathBuf> {
         None

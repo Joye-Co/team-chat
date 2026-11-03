@@ -596,7 +596,7 @@ impl CoreProvider {
             let handle = account.client.upload_file(
                 UploadRequest {
                     group_id: group_id.clone(),
-                    topic_id: topic_for_upload,
+                    topic_id: topic_for_upload.clone(),
                     path: path.clone(),
                     name: Some(file.name.clone()),
                     mime: Some(file.mime.clone()).filter(|m| !m.is_empty()),
@@ -604,6 +604,36 @@ impl CoreProvider {
                 progress,
             );
             let result = handle.await.map_err(|_| FileError::Other)?;
+            // inc-host (R9, MEDIA §3): the sender reads the file once and sends its media
+            // metadata and poster, so receivers compute nothing. 正在生成预览 meanwhile.
+            let kind = crate::views::media::file_kind(&file.name, &file.mime);
+            let described = if result.is_ok()
+                && matches!(
+                    kind,
+                    crate::views::media::MediaKind::Video
+                        | crate::views::media::MediaKind::Audio
+                        | crate::views::media::MediaKind::Pdf
+                        | crate::views::media::MediaKind::Image
+                ) {
+                super::page_host::set_generating(&key, true);
+                self.set_transfer(
+                    &key,
+                    TransferState::Running {
+                        done: file.size,
+                        total: file.size,
+                    },
+                    Some((&group_id, &view_topic)),
+                );
+                let (p, name, mime) = (path.clone(), file.name.clone(), file.mime.clone());
+                Some(
+                    super::tokio_blocking(move || {
+                        crate::views::media::poster::describe(&p, &name, &mime)
+                    })
+                    .await,
+                )
+            } else {
+                None
+            };
             if temp {
                 let _ = std::fs::remove_file(&path);
             }
@@ -612,7 +642,29 @@ impl CoreProvider {
             }
             match result {
                 Ok(meta) => {
-                    let fref = meta.to_file_ref();
+                    let mut fref = meta.to_file_ref();
+                    if let Some((mut info, poster)) = described {
+                        if let Some(poster) = poster {
+                            let up = account.client.upload_file(
+                                UploadRequest {
+                                    group_id: group_id.clone(),
+                                    topic_id: topic_for_upload.clone(),
+                                    path: poster,
+                                    name: Some("poster.jpg".into()),
+                                    mime: Some("image/jpeg".into()),
+                                },
+                                chat_core::no_progress(),
+                            );
+                            match up.await {
+                                Ok(Ok(m)) => info.poster_file_id = Some(m.id),
+                                _ => info.preview = chat_core::proto::MediaPreview::Failed,
+                            }
+                        }
+                        if info.validate().is_ok() {
+                            fref.media = Some(info);
+                        }
+                        super::page_host::set_generating(&key, false);
+                    }
                     {
                         let mut i = self.files().inner();
                         i.missing.remove(&fref.sha256);
@@ -1302,6 +1354,28 @@ impl CoreProvider {
                     }) as chat_core::files::ProgressFn
                 };
                 let is_new = request.artifact_id.is_none();
+                // inc-host (R9, MEDIA §3): the sender describes the entry file (kind, size,
+                // length, poster) and sends it with the new version; receivers compute
+                // nothing.
+                let local_entry = files
+                    .iter()
+                    .find(|f| f.path == entry)
+                    .map(|f| (f.local.clone(), f.mime.clone()));
+                let described = match local_entry {
+                    Some((local, mime)) => {
+                        let name = entry.clone();
+                        Some(
+                            super::tokio_blocking(move || {
+                                let mime = mime.unwrap_or_else(|| {
+                                    crate::views::media::mime_for(&name).to_string()
+                                });
+                                crate::views::media::poster::describe(&local, &name, &mime)
+                            })
+                            .await,
+                        )
+                    }
+                    None => None,
+                };
                 let r = a
                     .client
                     .create_artifact(
@@ -1322,6 +1396,18 @@ impl CoreProvider {
                     .map_err(|e| file_error(&e))?;
                 let title = r.artifact.title.clone();
                 let version = r.version.version;
+                if let Some((info, poster)) = described {
+                    super::page_host::send_version_media(
+                        &a.client,
+                        &r.artifact.group_id,
+                        &r.artifact.topic_id,
+                        &r.artifact.id,
+                        version,
+                        info,
+                        poster,
+                    )
+                    .await;
+                }
                 let body = if is_new {
                     fill(ca::NEW_BODY, &[("title", &title)])
                 } else {

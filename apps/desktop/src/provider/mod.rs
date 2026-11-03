@@ -2199,6 +2199,10 @@ impl ChatProvider for CoreProvider {
         self.artifact_poster_inner(artifact_id, version)
     }
 
+    fn upload_generating(&self, key: &str) -> bool {
+        page_host::is_generating(key)
+    }
+
     // --- end inc-host track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {

@@ -208,6 +208,37 @@ fn media_preview(
         },
         id: SharedString::from(format!("media-{key}-{index}")),
     };
+    // inc-host (R9): the sender's preview state. 正在生成预览 until `artifact.previewReady`;
+    // 预览失败 · 用系统应用打开 when the sender could not make one.
+    match sent.as_ref().map(|m| m.preview) {
+        Some(chat_core::proto::MediaPreview::Pending) if kind != media::MediaKind::Html => {
+            let lead = if kind == media::MediaKind::Video {
+                media::states::Lead::Blank
+            } else {
+                media::states::Lead::Icon(kind.icon())
+            };
+            return Some(
+                media::states::row(
+                    SharedString::from(format!("{}-pending", spec.id)),
+                    lead,
+                    spec.title.clone(),
+                    &media::states::Status::Generating {
+                        duration: sent
+                            .as_ref()
+                            .and_then(|m| m.duration.as_ref())
+                            .and_then(|d| d.as_f64()),
+                    },
+                    None,
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        Some(chat_core::proto::MediaPreview::Failed) => {
+            return Some(media::states::failed_row(&spec, cx).into_any_element());
+        }
+        _ => {}
+    }
     inline::render(&spec, window, cx)
 }
 // --- end v11/media ---
