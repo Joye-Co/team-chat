@@ -41,6 +41,8 @@ const OUTPUT_LINES: usize = 12;
 const SCREEN_KEEP: usize = 400;
 /// Messages of a side chat read from the cache.
 const SIDE_CHAT_LIMIT: usize = 200;
+/// Newest messages of the source topic searched for a posted suggestion.
+const POSTED_SCAN: usize = 200;
 /// The machine list is read again at most this often (for `takeoverUrl`).
 const MACHINES_REFRESH: Duration = Duration::from_secs(60);
 
@@ -60,7 +62,8 @@ struct Inner {
     machines_loading: bool,
     /// (group, topic, member) -> my first questions not in the cache yet: (clientMsgId, body, at).
     pending: HashMap<(String, String, String), Vec<(String, String, Millis)>>,
-    /// Side chat message id -> when I posted its suggestion into the topic.
+    /// Side chat message id -> when I pressed its suggestion, until the post shows in the
+    /// source topic (which keeps it across restarts).
     posted: HashMap<String, Millis>,
 }
 
@@ -265,6 +268,15 @@ fn side_message(
     }
 }
 
+/// When a suggestion went into the source topic: my first message there with the same text
+/// at or after the answer (`mine` = my messages and queued sends there: body, time).
+fn posted_at(text: &str, answer_at: Millis, mine: &[(String, Millis)]) -> Option<Millis> {
+    mine.iter()
+        .filter(|(body, at)| *at >= answer_at && body.trim() == text)
+        .map(|(_, at)| *at)
+        .min()
+}
+
 impl CoreProvider {
     fn panes_generation(&self) -> u64 {
         self.state().generation
@@ -324,10 +336,35 @@ impl CoreProvider {
             .filter(|m| m.deleted_at.flatten().is_none())
             .map(|m| side_message(m, &links, &title))
             .collect();
+        // A posted suggestion is my message in the source topic: read it from there, so a
+        // restart never offers it again.
+        if messages.iter().any(|m| m.suggestion.is_some()) {
+            let me = a.me.id.as_str();
+            let mut mine: Vec<(String, Millis)> = a
+                .client
+                .messages(&source, None, POSTED_SCAN)
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|m| m.author_id == me && !m.is_deleted())
+                .map(|m| (m.body, m.created_at as Millis))
+                .collect();
+            for item in a.client.pending_sends(&source).unwrap_or_default() {
+                if let chat_core::store::OutboxOp::Send { body, .. } = item.op {
+                    mine.push((body, item.created_at as Millis));
+                }
+            }
+            for m in &mut messages {
+                if let Some(s) = &mut m.suggestion {
+                    s.posted_at = posted_at(&s.text, m.at, &mine);
+                }
+            }
+        }
         let mut cache = lock(&self.shared.panes.inner);
         let inner = cache.for_generation(generation);
         for m in &mut messages {
-            if let Some(s) = &mut m.suggestion {
+            if let Some(s) = &mut m.suggestion
+                && s.posted_at.is_none()
+            {
                 s.posted_at = inner.posted.get(&m.id).copied();
             }
         }
@@ -667,3 +704,19 @@ impl CoreProvider {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_suggestion_counts_as_posted_once_my_message_with_its_text_follows_the_answer() {
+        let mine = vec![
+            ("让 Forge 补一个多端测试".to_string(), 50),
+            ("别的话".to_string(), 200),
+            ("  让 Forge 补一个多端测试 \n".to_string(), 300),
+        ];
+        assert_eq!(posted_at("让 Forge 补一个多端测试", 100, &mine), Some(300));
+        assert_eq!(posted_at("让 Forge 补一个多端测试", 400, &mine), None);
+        assert_eq!(posted_at("另一个建议", 0, &mine), None);
+    }
+}
