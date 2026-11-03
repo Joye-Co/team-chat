@@ -44,7 +44,7 @@ pub enum EventData {
     #[serde(rename = "topic.updated")]
     TopicUpdated(TopicUpdatedData),
     #[serde(rename = "message.created")]
-    MessageCreated(MessageCreatedData),
+    MessageCreated(Box<MessageCreatedData>),
     #[serde(rename = "message.updated")]
     MessageUpdated(MessageUpdatedData),
     #[serde(rename = "message.deleted")]

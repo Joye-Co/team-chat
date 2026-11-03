@@ -199,7 +199,7 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
             seq,
             &actor,
             at,
-            EventData::MessageCreated(MessageCreatedData { message: m }),
+            EventData::MessageCreated(Box::new(MessageCreatedData { message: m })),
         )
     };
     let events = vec![

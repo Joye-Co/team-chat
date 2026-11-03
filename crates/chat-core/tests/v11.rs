@@ -553,16 +553,16 @@ async fn recovery_refetches_the_log_once_and_restores_what_1_0_dropped() {
         s.append(
             G1,
             ME,
-            EventData::MessageCreated(MessageCreatedData {
+            EventData::MessageCreated(Box::new(MessageCreatedData {
                 message: message("M1", G1, "T1", ME, 2, "root"),
-            }),
+            })),
         );
         s.append(
             G1,
             ALICE,
-            EventData::MessageCreated(MessageCreatedData {
+            EventData::MessageCreated(Box::new(MessageCreatedData {
                 message: card_message("C1", 3, card.clone()),
-            }),
+            })),
         );
         s.append(G1, ME, answered(4, ME, "C1", 1).data);
     });
