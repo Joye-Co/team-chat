@@ -1872,13 +1872,14 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
             Some(Val::Text(t)) => t.clone(),
             _ => String::new(),
         };
-        let last = node.ui.block(id).tab.clone().unwrap_or_default();
-        if text != last {
+        let last = node.ui.block(id).tab.clone();
+        let (store, send) = text_change(last.as_deref(), &text);
+        if store {
             let ui = ctx.ui.clone();
             let block = id.clone();
             let t2 = text.clone();
             ui.update(cx, |u, _| u.block_mut(&block).tab = Some(t2));
-            if !(last.is_empty() && text.is_empty()) {
+            if send {
                 Emitter::of(ctx).send_later(
                     id,
                     "input.change",
@@ -1977,6 +1978,16 @@ pub fn diagram(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
         window,
         cx,
     )
+}
+
+/// What a draw of a text input does with its text: store it as the last seen, and send
+/// `input.change`. The first draw only stores (a default or restored text is no edit).
+fn text_change(last: Option<&str>, text: &str) -> (bool, bool) {
+    match last {
+        None => (true, false),
+        Some(l) if l == text => (false, false),
+        Some(_) => (true, true),
+    }
 }
 
 type FolderState = Option<Result<crate::data::ArtifactFolder, crate::data::FileError>>;
@@ -2506,7 +2517,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
 }
 
 #[cfg(test)]
-mod embed_tests {
+mod leaf_tests {
     use super::*;
     use crate::data::{ArtifactFolder, FileError};
 
@@ -2518,6 +2529,15 @@ mod embed_tests {
             entry: "index.html".into(),
             is_page,
         }))
+    }
+
+    #[test]
+    fn a_text_input_sends_only_after_an_edit() {
+        assert_eq!(text_change(None, "默认的话"), (true, false), "first draw");
+        assert_eq!(text_change(None, ""), (true, false));
+        assert_eq!(text_change(Some("默认的话"), "默认的话"), (false, false));
+        assert_eq!(text_change(Some("默认的话"), "默认的"), (true, true));
+        assert_eq!(text_change(Some("a"), ""), (true, true), "clearing is an edit");
     }
 
     #[test]
