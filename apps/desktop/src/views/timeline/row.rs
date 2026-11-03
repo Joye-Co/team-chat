@@ -52,9 +52,10 @@ impl TimelineView {
             !divider && !new_day && prev.is_some_and(|prev| model::continues_group(prev, &message));
         let last = ix + 1 == self.messages.len();
 
+        let v2 = self.v2;
         let mut item = div()
             .w_full()
-            .px(theme::CONTENT_GUTTER - ROW_INSET)
+            .when(!v2, |el| el.px(theme::CONTENT_GUTTER - ROW_INSET))
             .flex()
             .flex_col()
             .when(last, |el| el.pb(space::S8));
@@ -62,11 +63,18 @@ impl TimelineView {
             // The first message sits 16 pt under the header (§7.5).
             item = item.pt(if start { space::S16 } else { space::S10 });
         }
-        if start && let Some(topic) = self.topic.clone() {
-            item = item.child(self.render_start(&topic, cx));
-        }
-        if new_day {
-            item = item.child(date_divider(message.created_at, cx));
+        if v2 {
+            // The v2 page has no start block: the first row is the date.
+            if start || new_day {
+                item = item.child(super::v2::date_divider(message.created_at, start, cx));
+            }
+        } else {
+            if start && let Some(topic) = self.topic.clone() {
+                item = item.child(self.render_start(&topic, cx));
+            }
+            if new_day {
+                item = item.child(date_divider(message.created_at, cx));
+            }
         }
         if self.divider_key.as_deref() == Some(key.as_str()) {
             // The first unread row is drawn, so it is on screen (the jump
@@ -79,7 +87,7 @@ impl TimelineView {
         }
         let gap = if grouped {
             None
-        } else if start {
+        } else if start && !v2 {
             Some(space::S12)
         } else {
             Some(space::S6)
@@ -98,9 +106,42 @@ impl TimelineView {
                 cx,
             );
         }
-        item.children(gap.map(|h| div().flex_none().h(h)))
-            .child(message_row)
-            .into_any_element()
+        let item = item
+            .children(gap.map(|h| div().flex_none().h(h)))
+            .child(message_row);
+        if v2 {
+            // First paint: the rows of a 话题 that just opened rise in, 40 ms
+            // apart from the top (CONCEPT2 §5); later rows only fade.
+            let first_paint = self
+                .opened_at
+                .is_some_and(|at| at.elapsed() < super::v2::FIRST_PAINT);
+            let item: AnyElement = if first_paint {
+                let from_top = ix.saturating_sub(self.messages.len().saturating_sub(10));
+                ui::motion::rise(
+                    ElementId::Name(format!("v2-rise-{key}").into()),
+                    from_top,
+                    item.w_full(),
+                    cx,
+                )
+            } else {
+                item.into_any_element()
+            };
+            // The 720 pt column of the v2 page, centered, 32 pt from the
+            // edges; rows reach 8 pt past the text for their hover fill.
+            return div()
+                .w_full()
+                .px(super::v2::SIDE - ROW_INSET)
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .w_full()
+                        .max_w(super::v2::COLUMN + ROW_INSET * 2.)
+                        .child(item),
+                )
+                .into_any_element();
+        }
+        item.into_any_element()
     }
 
     fn render_message(
@@ -111,6 +152,13 @@ impl TimelineView {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        if self.v2
+            && self.editing.as_ref().is_none_or(|e| e.key != key)
+            && let Some(row) = self.v2_special_row(message, key, cx)
+        {
+            return row;
+        }
+        let v2 = self.v2;
         let colors = theme::colors(cx);
         let author = self
             .members
@@ -132,7 +180,21 @@ impl TimelineView {
             me: self.me.as_deref(),
         };
         let above = extras::render(extras::Placement::AboveBody, message, &ctx, window, cx);
-        let below = extras::render(extras::Placement::BelowBody, message, &ctx, window, cx);
+        let v2_files = if v2 { self.v2_files(message, cx) } else { None };
+        let below = if v2_files.is_some() {
+            let mut out = vec![];
+            out.extend(v2_files);
+            out.extend(extras::render_without_files(
+                extras::Placement::BelowBody,
+                message,
+                &ctx,
+                window,
+                cx,
+            ));
+            out
+        } else {
+            extras::render(extras::Placement::BelowBody, message, &ctx, window, cx)
+        };
         let body_hidden = extras::hides_body(message, &ctx);
         if !message.id.is_empty()
             && self
@@ -143,7 +205,7 @@ impl TimelineView {
         {
             self.card_seen = true;
         }
-        let steps = (!deleted && author.as_ref().is_some_and(Member::is_bot))
+        let steps = (!v2 && !deleted && author.as_ref().is_some_and(Member::is_bot))
             .then(|| self.render_steps(message, cx))
             .flatten();
 
@@ -281,50 +343,66 @@ impl TimelineView {
                 .into_any_element()
         });
 
-        let meta = (!grouped).then(|| {
-            let name = author.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let meta = (!grouped && v2).then(|| {
             div()
-                .h(px(22.))
-                .min_w(px(0.))
                 .flex()
-                .items_center()
-                .gap(space::S8)
-                .child(
-                    ui::truncating("sender-name", name)
-                        .flex_shrink(1.)
-                        .max_w(px(160.))
-                        .t_body()
-                        .semibold()
-                        .text_color(colors.text_1),
-                )
-                .when_some(
-                    author
-                        .as_ref()
-                        .filter(|a| a.is_bot())
-                        .and_then(|a| a.role.clone())
-                        .filter(|r| !r.trim().is_empty()),
-                    |el, role| {
-                        el.child(
-                            div()
-                                .flex_shrink(1.)
-                                .min_w(px(40.))
-                                .child(ui::RoleTag::new(role)),
-                        )
-                    },
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .t_meta()
-                        .tnum()
-                        .text_color(colors.text_3)
-                        .child(model::clock(message.created_at)),
-                )
+                .flex_col()
+                .child(self.v2_meta(author.as_ref(), message.created_at, cx))
+                .child(div().h(space::S4))
+                .into_any_element()
+        });
+        let meta = meta.or_else(|| {
+            (!grouped).then(|| {
+                let name = author.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+                div()
+                    .h(px(22.))
+                    .min_w(px(0.))
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(
+                        ui::truncating("sender-name", name)
+                            .flex_shrink(1.)
+                            .max_w(px(160.))
+                            .t_body()
+                            .semibold()
+                            .text_color(colors.text_1),
+                    )
+                    .when_some(
+                        author
+                            .as_ref()
+                            .filter(|a| a.is_bot())
+                            .and_then(|a| a.role.clone())
+                            .filter(|r| !r.trim().is_empty()),
+                        |el, role| {
+                            el.child(
+                                div()
+                                    .flex_shrink(1.)
+                                    .min_w(px(40.))
+                                    .child(ui::RoleTag::new(role)),
+                            )
+                        },
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .t_meta()
+                            .tnum()
+                            .text_color(colors.text_3)
+                            .child(model::clock(message.created_at)),
+                    )
+                    .into_any_element()
+            })
         });
 
+        let gutter_w = if v2 {
+            super::v2::GUTTER
+        } else {
+            theme::AVATAR_SIZE
+        };
         let gutter = if grouped {
             div()
-                .w(theme::AVATAR_SIZE)
+                .w(gutter_w)
                 .flex_none()
                 .flex()
                 .justify_center()
@@ -341,14 +419,17 @@ impl TimelineView {
                 .into_any_element()
         } else {
             div()
-                .w(theme::AVATAR_SIZE)
+                .w(gutter_w)
                 .flex_none()
-                .child(
+                .child(if v2 {
+                    // v2: tiles and circles only; presence lives in the rail.
+                    ui::MemberAvatar::new(author.as_ref(), gutter_w)
+                } else {
                     // People show presence; bot tiles carry no pip in the
                     // timeline (§7.5: no status dot on every bot avatar).
                     ui::MemberAvatar::new(author.as_ref(), theme::AVATAR_SIZE)
-                        .presence(author.as_ref().filter(|a| !a.is_bot())),
-                )
+                        .presence(author.as_ref().filter(|a| !a.is_bot()))
+                })
                 .into_any_element()
         };
 
@@ -372,8 +453,14 @@ impl TimelineView {
             .relative()
             .w_full()
             .px(ROW_INSET)
-            .pt(if grouped { space::S2 } else { space::S6 })
-            .pb(space::S6)
+            .pt(if grouped {
+                space::S2
+            } else if v2 {
+                space::S4
+            } else {
+                space::S6
+            })
+            .pb(if v2 { space::S4 } else { space::S6 })
             .rounded(theme::radius::MD)
             .flex()
             .gap(space::S12)
@@ -399,7 +486,7 @@ impl TimelineView {
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .max_w(theme::MEASURE)
+                    .when(!v2, |el| el.max_w(theme::MEASURE))
                     .flex()
                     .flex_col()
                     .children(meta)

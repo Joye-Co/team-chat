@@ -31,6 +31,10 @@ use crate::{
 pub struct AttachmentsExtra;
 
 impl MessageExtra for AttachmentsExtra {
+    fn draws_files(&self) -> bool {
+        true
+    }
+
     fn render(
         &self,
         message: &Message,

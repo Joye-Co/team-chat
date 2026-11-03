@@ -27,6 +27,7 @@ mod model;
 pub mod preview;
 mod row;
 pub mod selftest;
+pub mod v2;
 
 use std::{
     cell::Cell,
@@ -98,6 +99,10 @@ pub struct TimelineView {
     services: Services,
     /// Draw the v1 header band (the v2 shell draws its own title bar).
     show_header: bool,
+    /// The v2 style of the 话题 page (`timeline/v2.rs`).
+    v2: bool,
+    /// When the open 话题 opened: rows rise in during the first paint.
+    opened_at: Option<Instant>,
     open: Option<(GroupId, TopicId)>,
     topic: Option<Topic>,
     members: Vec<Member>,
@@ -191,6 +196,15 @@ impl TimelineView {
         }
     }
 
+    /// Switches to the v2 style of the 话题 page (`timeline/v2.rs`).
+    pub fn set_v2(&mut self, v2: bool, cx: &mut Context<Self>) {
+        if self.v2 != v2 {
+            self.v2 = v2;
+            self.list.reset(self.messages.len());
+            cx.notify();
+        }
+    }
+
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
@@ -229,6 +243,8 @@ impl TimelineView {
         let mut this = Self {
             services,
             show_header: true,
+            v2: false,
+            opened_at: None,
             open: None,
             topic: None,
             members: Vec::new(),
@@ -293,6 +309,7 @@ impl TimelineView {
             .as_ref()
             .and_then(|(g, t)| self.services.provider.topic(g, t))
             .map_or(0, |t| t.unread);
+        self.opened_at = open.as_ref().map(|_| Instant::now());
         self.open = open;
         self.messages.clear();
         self.list.reset(0);
