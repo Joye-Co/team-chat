@@ -6,7 +6,11 @@
 //! Controls are live only for the viewer the ask names (or who may send the block's
 //! events); everyone else sees the same options read-only (CARD21 §5).
 
-use std::{cell::RefCell, collections::HashMap};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Div, Entity, FocusHandle, FontWeight,
@@ -1977,28 +1981,88 @@ pub fn diagram(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
 
 type FolderState = Option<Result<crate::data::ArtifactFolder, crate::data::FileError>>;
 
+/// One cached ask for a version folder: the answer, and when it came.
+#[derive(Clone)]
+struct Asked {
+    state: FolderState,
+    at: Instant,
+}
+
 thread_local! {
-    /// Version folders of embedded pages, asked once per `(产出, version)`.
-    static FOLDERS: RefCell<HashMap<(String, u32), FolderState>> = RefCell::new(HashMap::new());
+    /// Version folders of embedded pages, by `(产出, version)`. A failure is kept for
+    /// [`FOLDER_RETRY`] only, so a later draw asks again (the app came back online).
+    static FOLDERS: RefCell<HashMap<(String, u32), Asked>> = RefCell::new(HashMap::new());
+}
+
+/// How long a failed folder ask stays before a draw asks again.
+const FOLDER_RETRY: Duration = Duration::from_secs(15);
+
+/// True when a cached folder state should be asked for again at `now`.
+fn stale(a: &Asked, now: Instant) -> bool {
+    matches!(a.state, Some(Err(_))) && now.duration_since(a.at) >= FOLDER_RETRY
+}
+
+/// Forgets the folder of `(artifact, version)`, so the next draw asks again (重试).
+fn forget_folder(artifact: &str, version: u32) {
+    FOLDERS.with(|f| f.borrow_mut().remove(&(artifact.to_string(), version)));
 }
 
 fn folder(ctx: &Ctx, artifact: &str, version: u32, cx: &mut App) -> FolderState {
     let key = (artifact.to_string(), version);
-    if let Some(s) = FOLDERS.with(|f| f.borrow().get(&key).cloned()) {
-        return s;
+    let now = Instant::now();
+    if let Some(a) = FOLDERS.with(|f| f.borrow().get(&key).cloned())
+        && !stale(&a, now)
+    {
+        return a.state;
     }
-    FOLDERS.with(|f| f.borrow_mut().insert(key.clone(), None));
+    FOLDERS.with(|f| {
+        f.borrow_mut().insert(
+            key.clone(),
+            Asked {
+                state: None,
+                at: now,
+            },
+        )
+    });
     let rx = ctx
         .env
         .provider
         .open_artifact_version(artifact, Some(version));
     cx.spawn(async move |cx: &mut gpui::AsyncApp| {
         let result = rx.await.unwrap_or(Err(crate::data::FileError::Other));
-        FOLDERS.with(|f| f.borrow_mut().insert(key, Some(result)));
+        FOLDERS.with(|f| {
+            f.borrow_mut().insert(
+                key,
+                Asked {
+                    state: Some(result),
+                    at: Instant::now(),
+                },
+            )
+        });
         cx.update(|cx| cx.refresh_windows());
     })
     .detach();
     None
+}
+
+/// What the body of an embed shows.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EmbedBody {
+    Page,
+    Loading,
+    /// The folder did not load: 页面没有打开 with 重试.
+    Failed,
+    /// The 产出 is not a web page: say so and offer the window.
+    NotPage,
+}
+
+fn embed_body(state: &FolderState, has_detail: bool) -> EmbedBody {
+    match state {
+        Some(Ok(f)) if !f.is_page => EmbedBody::NotPage,
+        Some(Ok(_)) if has_detail => EmbedBody::Page,
+        Some(Ok(_)) | None => EmbedBody::Loading,
+        Some(Err(_)) => EmbedBody::Failed,
+    }
 }
 
 pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -> AnyElement {
@@ -2025,8 +2089,10 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
         .or_else(|| detail.as_ref().map(|d| d.summary.title.clone()))
         .unwrap_or_default();
     let declared: Vec<String> = b.base().map(|x| x.events().to_vec()).unwrap_or_default();
-    let body: AnyElement = match (folder(ctx, artifact_id, *version, cx), detail.as_ref()) {
-        (Some(Ok(f)), Some(_)) if f.is_page => {
+    let state = folder(ctx, artifact_id, *version, cx);
+    let shown = embed_body(&state, detail.is_some());
+    let body: AnyElement = match (state, shown) {
+        (Some(Ok(f)), EmbedBody::Page) => {
             // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
             // live data, asks, refs, the pending band); the block narrows the declared
             // events to its own `events` (embed.events ⊆ the version's events).
@@ -2061,6 +2127,49 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 }
             })
             .into_any_element()
+        }
+        (_, EmbedBody::Failed) => {
+            let (art, v) = (artifact_id.clone(), *version);
+            div()
+                .h(px(h.min(200.)))
+                .bg(k.sunken)
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(space::S8)
+                .child(hint(c::EMBED_FAILED, cx))
+                .child(
+                    b20::quiet_button(eid(node, format!("embed-retry-{id}")), c::PENDING_RETRY, cx)
+                        .text_color(k.ink)
+                        .on_click(move |_, _, cx| {
+                            forget_folder(&art, v);
+                            cx.refresh_windows();
+                        }),
+                )
+                .into_any_element()
+        }
+        (_, EmbedBody::NotPage) => {
+            let a = ctx.answerer();
+            let target = crate::data::cards_v2::RefTarget::Artifact {
+                artifact_id: artifact_id.clone(),
+                version: Some(*version),
+            };
+            div()
+                .h(px(h.min(200.)))
+                .bg(k.sunken)
+                .flex()
+                .flex_col()
+                .items_center()
+                .justify_center()
+                .gap(space::S8)
+                .child(hint(c::EMBED_NOT_PAGE, cx))
+                .child(
+                    b20::quiet_button(eid(node, format!("embed-window-{id}")), c::EMBED_OPEN, cx)
+                        .text_color(k.ink)
+                        .on_click(move |_, window, cx| a.open(&target, window, cx)),
+                )
+                .into_any_element()
         }
         _ => div()
             .h(px(h.min(200.)))
@@ -2394,4 +2503,47 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
     }
     let _ = mix;
     None
+}
+
+#[cfg(test)]
+mod embed_tests {
+    use super::*;
+    use crate::data::{ArtifactFolder, FileError};
+
+    fn folder(is_page: bool) -> FolderState {
+        Some(Ok(ArtifactFolder {
+            artifact_id: "a".into(),
+            version: 1,
+            dir: "/tmp".into(),
+            entry: "index.html".into(),
+            is_page,
+        }))
+    }
+
+    #[test]
+    fn a_failed_or_odd_folder_never_says_loading() {
+        assert_eq!(embed_body(&None, true), EmbedBody::Loading);
+        assert_eq!(embed_body(&folder(true), true), EmbedBody::Page);
+        assert_eq!(embed_body(&folder(false), true), EmbedBody::NotPage);
+        assert_eq!(embed_body(&Some(Err(FileError::Other)), true), EmbedBody::Failed);
+    }
+
+    #[test]
+    fn a_failure_is_asked_again_later_but_a_page_is_kept() {
+        let t0 = Instant::now();
+        let failed = Asked {
+            state: Some(Err(FileError::Other)),
+            at: t0,
+        };
+        assert!(!stale(&failed, t0 + Duration::from_secs(1)));
+        assert!(stale(&failed, t0 + FOLDER_RETRY));
+        let ok = Asked {
+            state: folder(true),
+            at: t0,
+        };
+        assert!(!stale(&ok, t0 + FOLDER_RETRY * 10));
+        FOLDERS.with(|f| f.borrow_mut().insert(("a".into(), 1), failed));
+        forget_folder("a", 1);
+        assert!(FOLDERS.with(|f| f.borrow().get(&("a".to_string(), 1)).is_none()));
+    }
 }

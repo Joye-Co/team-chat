@@ -225,4 +225,8 @@ crate::copy! {
     I_CONFLICT_NOTE = "你答的时候卡片已经换了一版：重新画最新的，留下还能用的选择",
     I_READONLY = "别人看",
     I_READONLY_NOTE = "不是问你的地方只能看，带子写明在等谁",
+
+    // v11/pb-cards: an embed that did not open.
+    EMBED_FAILED = "页面没有打开",
+    EMBED_NOT_PAGE = "这个产出不是网页",
 }
