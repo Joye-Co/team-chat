@@ -1095,6 +1095,12 @@ pub fn capability_line(
 pub struct CapabilityLine {
     /// 页面里的操作会发给 {name} · {labels}, or 页面能做的：读这份数据.
     pub line: String,
+    /// The part of [`line`](Self::line) that is never cut (who gets the page's actions,
+    /// or the read-only line): it wraps when the footer is too narrow.
+    pub head: String,
+    /// The declared event labels after the head (` · ` joined), cut first when the footer
+    /// is narrow; the whole line shows on hover.
+    pub labels: Option<String>,
     /// A runner-made page that declares `ask`: its answers go into the run log, which the
     /// 群 can read (INTERACT §6.3). The short catalog line and the full one.
     pub run_log: Option<(String, String)>,
@@ -1105,19 +1111,27 @@ fn capability_text(bridge: Option<PageBridge>, name: &str) -> CapabilityLine {
     let Some(b) = bridge.filter(|_| caps.emit || caps.ask) else {
         return CapabilityLine {
             line: cp::PAGE_READ_ONLY.to_string(),
+            head: cp::PAGE_READ_ONLY.to_string(),
+            labels: None,
             run_log: None,
         };
     };
     let name = name.to_string();
-    let mut parts = vec![fill(cp::PAGE_SENDS_TO, &[("name", &name)])];
-    parts.extend(
-        b.events
-            .iter()
-            .filter_map(|e| e.label.as_ref())
-            .map(|l| l.chars().take(40).collect::<String>()),
-    );
+    let head = fill(cp::PAGE_SENDS_TO, &[("name", &name)]);
+    let labels: Vec<String> = b
+        .events
+        .iter()
+        .filter_map(|e| e.label.as_ref())
+        .map(|l| l.chars().take(40).collect::<String>())
+        .collect();
+    let labels = (!labels.is_empty()).then(|| labels.join(" · "));
     CapabilityLine {
-        line: parts.join(" · "),
+        line: match &labels {
+            Some(l) => format!("{head} · {l}"),
+            None => head.clone(),
+        },
+        head,
+        labels,
         run_log: (b.runner && caps.ask).then(|| {
             (
                 cp::PAGE_RUN_LOG_SHORT.to_string(),
@@ -1142,24 +1156,61 @@ pub fn page_footer(
         ui::{self, Lucide},
     };
     use gpui::{
-        InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
-        div, px,
+        InteractiveElement as _, IntoElement as _, ParentElement as _,
+        StatefulInteractiveElement as _, Styled as _, div, px,
     };
     use gpui_component::{Sizable as _, tooltip::Tooltip};
     let k = theme::colors(cx);
-    let CapabilityLine { line, run_log } = capability_line(provider, artifact_id, version);
-    let full = SharedString::from(line.clone());
-    let base = crate::views::media::parts::footer(cx)
-        .children(lead)
-        .child(
+    let CapabilityLine {
+        line,
+        head,
+        labels,
+        run_log,
+    } = capability_line(provider, artifact_id, version);
+    let full = SharedString::from(line);
+    let view = band(artifact_id, version, cx);
+    // Who gets the page's actions reads in full (it wraps before it is cut). The event
+    // labels after it give way: cut while the footer is free, left out while a band
+    // shows; then the whole line shows on hover.
+    let can = SharedString::from(format!("{id}-can"));
+    let (head, labels) = match (labels, view.is_some()) {
+        (Some(labels), false) => (
             div()
-                .id(SharedString::from(format!("{id}-can")))
+                .flex_shrink(1.)
+                .min_w(px(0.))
+                .py(space::S4)
+                .child(head),
+            div()
+                .id(can)
                 .flex_1()
                 .min_w(px(0.))
                 .one_line()
-                .child(line)
-                .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
-        )
+                .child(format!("· {labels}"))
+                .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
+                .into_any_element(),
+        ),
+        (Some(_), true) => (
+            div().flex_shrink(1.).min_w(px(0.)).py(space::S4).child(
+                div()
+                    .id(can)
+                    .child(head)
+                    .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
+            ),
+            div().flex_1().into_any_element(),
+        ),
+        (None, _) => (
+            div()
+                .flex_shrink(1.)
+                .min_w(px(0.))
+                .py(space::S4)
+                .child(head),
+            div().flex_1().into_any_element(),
+        ),
+    };
+    let base = crate::views::media::parts::footer(cx)
+        .children(lead)
+        .child(head)
+        .child(labels)
         // Never cut: the short line, with the whole notice on hover.
         .children(run_log.map(|(short, whole)| {
             let whole = SharedString::from(whole);
@@ -1190,7 +1241,7 @@ pub fn page_footer(
             .text_color(k.text_2)
             .whitespace_nowrap()
     };
-    let Some(view) = band(artifact_id, version, cx) else {
+    let Some(view) = view else {
         return base;
     };
     let busy = |text: String| {
@@ -1701,6 +1752,13 @@ mod tests {
             ))
         );
         assert!(!t.line.contains(cp::PAGE_RUN_LOG_SHORT));
+        // The head is never cut with the labels.
+        assert_eq!(t.head, fill(cp::PAGE_SENDS_TO, &[("name", "Ledger")]));
+        assert!(
+            t.labels
+                .as_deref()
+                .is_some_and(|l| l.starts_with("很长的事件名"))
+        );
         // No run log without a runner, or without ask.
         b.runner = false;
         assert_eq!(capability_text(Some(b), "Ledger").run_log, None);
