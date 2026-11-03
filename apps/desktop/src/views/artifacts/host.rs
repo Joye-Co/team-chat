@@ -823,7 +823,7 @@ fn ask_about(
     if let Some(s) = selector {
         keys.insert(
             "selector".to_string(),
-            chat_core::proto::card2::PartKey::Key(s.clone()),
+            chat_core::proto::card2::PartKey::Key(selector_key(s)),
         );
     }
     let target = refs::PartTarget {
@@ -866,6 +866,23 @@ fn ask_about(
             cx,
         );
     }
+}
+
+/// Most characters of a part key's string value (REFS §A2, `PartRef::validate`).
+const PART_KEY_MAX_CHARS: usize = 256;
+
+/// The `selector` key of a page part. The page's own selector when it fits a part key;
+/// a longer one (the bridge takes up to 512 characters) becomes `sha256:` and 32 hex
+/// digits of its digest. The same element always gets the same key, so a chip dedupes
+/// and the send with it is never refused; the label and value keep the meaning.
+fn selector_key(selector: &str) -> String {
+    if selector.chars().count() <= PART_KEY_MAX_CHARS {
+        return selector.to_string();
+    }
+    use sha2::{Digest as _, Sha256};
+    let digest = Sha256::digest(selector.as_bytes());
+    let hex: String = digest[..16].iter().map(|b| format!("{b:02x}")).collect();
+    format!("sha256:{hex}")
 }
 
 /// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
@@ -1228,6 +1245,32 @@ mod tests {
         let off = page_capabilities(Some(&b), false);
         assert!(!off.r#ref && off.emit && off.get_data);
         assert!(!page_capabilities(None, false).r#ref);
+    }
+
+    #[test]
+    fn page_selectors_fit_a_part_key_and_stay_stable() {
+        use chat_core::proto::card2::{PartKey, PartRef};
+        let part = |s: String| PartRef {
+            kind: "element".into(),
+            keys: Some([("selector".to_string(), PartKey::Key(s))].into()),
+        };
+        // A short selector stays as the page gave it.
+        assert_eq!(selector_key("#bili"), "#bili");
+        let exact = "a".repeat(PART_KEY_MAX_CHARS);
+        assert_eq!(selector_key(&exact), exact);
+        // A 6-level path of long ids (the bridge allows 512): a digest that validates.
+        let long = (0..6)
+            .map(|i| format!("#{}{i}", "频道".repeat(40)))
+            .collect::<Vec<_>>()
+            .join(" > ");
+        assert!(long.chars().count() > PART_KEY_MAX_CHARS);
+        let key = selector_key(&long);
+        assert!(key.starts_with("sha256:") && key.chars().count() == 39);
+        assert!(part(key.clone()).validate().is_ok());
+        assert!(part(long.clone()).validate().is_err());
+        // Stable: the same element gets the same key; another element another one.
+        assert_eq!(selector_key(&long), key);
+        assert_ne!(selector_key(&format!("{long}x")), key);
     }
 
     #[test]
