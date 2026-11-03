@@ -286,3 +286,43 @@ describe("chat-run outputs", () => {
     for (const x of [c, d]) x.close();
   });
 });
+
+describe("a page event whose delivery throws", () => {
+  it("remove the stored row, so a resend with the same clientEventId delivers the event", async () => {
+    const w = await pageWorld();
+    const owner: Actor = { id: w.owner.id, level: "owner", kind: "human" };
+    const args = { artifactId: w.artifactId, version: 1, name: "report.problem", clientEventId: "throw-once" };
+    const rooms = (env as unknown as { GROUP_ROOM: DurableObjectNamespace<GroupRoom> }).GROUP_ROOM;
+    let first: any;
+    let second: any;
+    let rows = -1;
+    await runInDurableObject(rooms.get(rooms.idFromName(w.gid)), async (room: GroupRoom): Promise<void> => {
+      const instance = room as any;
+      const orig = instance.broadcast;
+      let thrown = false;
+      // The delivery throws once, after the placeholder row is stored.
+      instance.broadcast = function (...xs: unknown[]) {
+        if (!thrown) {
+          thrown = true;
+          throw new Error("delivery failed");
+        }
+        return orig.apply(this, xs);
+      };
+      try {
+        first = await instance.rpc(w.gid, ARTIFACT_EVENT_RPC, owner, args).catch((err: unknown) => ({ thrown: String(err) }));
+        rows = instance.sql.exec("SELECT COUNT(*) AS n FROM page_events WHERE client_event_id = ?", args.clientEventId).toArray()[0].n;
+        second = await instance.rpc(w.gid, ARTIFACT_EVENT_RPC, owner, args);
+      } finally {
+        instance.broadcast = orig;
+      }
+    });
+    expect(first?.ok, JSON.stringify(first)).not.toBe(true);
+    expect(rows).toBe(0);
+    expect(second, JSON.stringify(second)).toMatchObject({ ok: true, value: { expect: { by: w.bot.id, mode: "live" } } });
+    expect(second.value.duplicate).toBeUndefined();
+    const got = await w.cb.next((f) => f.t === "transient" && f.event.type === "artifact.event" && f.event.eventId === second.value.eventId);
+    expect(got.event).toMatchObject({ name: "report.problem", actorId: w.owner.id });
+    w.co.close();
+    w.cb.close();
+  });
+});

@@ -244,19 +244,27 @@ registerRoomRpc(ARTIFACT_EVENT_RPC, async (room, actor, args): Promise<PageEvent
     now,
     e.name,
   );
-  const expect = await deliverPageEvent(room, v.created_by, {
-    eventId,
-    topicId,
-    artifactId: e.artifactId,
-    version: e.version,
-    name: e.name,
-    kind,
-    payload: e.payload,
-    actorId: a.id,
-    at: now,
-    title,
-    runId: v.run_id ?? null,
-  });
+  let expect: Expect;
+  try {
+    expect = await deliverPageEvent(room, v.created_by, {
+      eventId,
+      topicId,
+      artifactId: e.artifactId,
+      version: e.version,
+      name: e.name,
+      kind,
+      payload: e.payload,
+      actorId: a.id,
+      at: now,
+      title,
+      runId: v.run_id ?? null,
+    });
+  } catch (err) {
+    // The event did not go out: remove the placeholder so a resend with the same clientEventId
+    // delivers it instead of a duplicate with mode none.
+    room.sql.exec("DELETE FROM page_events WHERE event_id = ?", eventId);
+    throw err;
+  }
   const ack: PageEventAck = { eventId, expect };
   room.sql.exec("UPDATE page_events SET ack = ? WHERE event_id = ?", JSON.stringify(ack), eventId);
   const details: Record<string, unknown> = { groupId: room.groupId, artifactId: e.artifactId, version: e.version, name: e.name, kind, eventId };
