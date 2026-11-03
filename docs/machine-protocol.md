@@ -323,6 +323,25 @@ envelope with the JSON, followed by the line that it is data, not an instruction
 with the rules of the matching WebSocket frame. References to a part (`blockRefs`) do not change
 this protocol: they travel inside `prompt` and `run.input.text`.
 
+Server rules (BotDesk):
+
+- A daemon takes `run.answer` and `run.interaction` when it reports feature `interact` or
+  `daemonVersion` 1.1.0 or newer. Another daemon gets `run.input` with `text` = a short summary
+  line and the same envelope (and the typed `answer` with feature `answer`).
+- Live card events are coalesced per card: the first event goes at once, then only the newest
+  event per block in each 3 s window. Page `ask` events are never merged.
+- With no active run in the topic, a stored answer starts a run (as before), and a live event
+  starts a short follow-up run whose prompt carries the envelope: at most 1 per card at a time
+  (later events join it), 6 per hour per card, 30 per hour per member; over the limit the ack's
+  `expect.mode` is `none`.
+- `output` bodies are the fields of the matching client frame without `t`, `rid` and `groupId`
+  (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
+  `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,
+  `artifact.data {artifactId, version, data, baseDataRev?, cause?}`, `artifact.reply {eventId, ok,
+  payload? | error?}` or `{eventId, decline: "…"}`. An unknown op gets `invalid` with reason
+  `output.unknown_op`; an aside run gets `forbidden` (`output.read_only`). An `output` older than
+  60 s when it is applied is not performed again.
+
 ## Raw session upload
 
 After `run.done` the daemon uploads the CLI's own raw session file, so the process view and

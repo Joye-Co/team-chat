@@ -9,6 +9,9 @@ import { type RunProof, doneCard, doneCardV1, mergePrs, prRefs } from "../proof"
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage } from "./core";
 import { DeskRuns } from "./runs";
 
+/** Room RPC of the cards feature: a run's CLI took the answer with this seq (`{ seq, runId, inputId }`). */
+export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
+
 export abstract class DeskEvents extends DeskRuns {
   /** Stores run frames idempotently by (runId, seq) and applies their effects. */
   async ingest(runId: string, frames: SeqFrame[]): Promise<{ lastSeq: number }> {
@@ -113,9 +116,11 @@ export abstract class DeskEvents extends DeskRuns {
           // chat-run (1.1): post or patch a card, resolve an event, push or answer a 产出.
           await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f.at);
           break;
-        case "input.accepted":
+        case "input.accepted": {
           this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id);
+          await this.answerTaken(r, String(ev.inputId));
           break;
+        }
         case "plan": {
           // The link reads events loosely (newer daemons): keep what fits the plan rules.
           const plan = sanitizePlan(ev.items);
@@ -226,6 +231,22 @@ export abstract class DeskEvents extends DeskRuns {
     }
     await this.setStatus(r, "waiting");
     await this.topic(r, "waiting_answer", [r.requested_by]);
+  }
+
+  /**
+   * The CLI took a card answer: the member started acting on it, so the answerer can no longer
+   * retract it (INTERACT §3.6). Tells the room through `cards.answerTaken` (the cards feature's
+   * RPC; a room without it answers not_found, which changes nothing).
+   */
+  protected async answerTaken(r: RunRow, inputId: string): Promise<void> {
+    const row = this.sql.exec<{ message_id: string }>("SELECT message_id FROM inputs WHERE id = ? AND run_id = ?", inputId, r.id).toArray()[0];
+    const m = row ? /^answer:[^:]+:(\d+)$/.exec(row.message_id) : null;
+    if (!m) return;
+    try {
+      await this.room(r).rpc(r.group_id, CARD_ANSWER_TAKEN_RPC, this.actor(), { seq: Number(m[1]), runId: r.id, inputId });
+    } catch (err) {
+      this.log.warn("answer taken failed", { runId: r.id, err });
+    }
   }
 
   /** Keeps `run.done` usage and time with the run. Returns false when nothing changed. */

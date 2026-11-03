@@ -1198,7 +1198,12 @@ MediaInfo = { kind: "html"|"markdown"|"image"|"imageSet"|"video"|"audio"|"pdf"|"
               focus? { fromLine, toLine }, preview: "ready" | "pending" | "failed" }
 ArtifactVersion += { media? }      FileRef (message attachments) += { media? }
 artifact.previewReady (stored) data: { artifactId, version, media }
+PUT /v1/artifacts/:id/versions/:v/media  { media: MediaInfo } -> { version }   // stores artifact.previewReady
 ```
+
+The version's creator may set `media` at any time; another group member only while the stored
+`preview` is not `ready` (the receiver fallback). Every file id in `media` must be a ready file
+of the group.
 
 The sender's client computes `media`; the server checks the limits (`mediaProblem`: 2 GB, 4 h,
 images 50 MB / 100 MP, PDF 500 MB / 2000 pages, HTML 20 MB, Markdown and code 5 MB) and never
