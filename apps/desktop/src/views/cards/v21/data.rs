@@ -386,11 +386,13 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     );
                     let (uih, blockh) = (uie.clone(), block.clone());
                     let y = values.get(i).copied().flatten();
-                    let col = div()
-                        .id(eid(node, format!("pt-{block}-{i}")))
-                        .flex_1()
-                        .h_full()
-                        .cursor_pointer()
+                    // The hover tint follows a layer inside the column: the column's own
+                    // hover belongs to the 引用提问 affordance when the point is a part
+                    // (an element takes one `on_hover`).
+                    let hot = div()
+                        .id(eid(node, format!("pt-hot-{block}-{i}")))
+                        .absolute()
+                        .inset_0()
                         .on_hover(move |over, _, cx| {
                             uih.update(cx, |u, cx| {
                                 let b = u.block_mut(&blockh);
@@ -406,7 +408,14 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                                     cx.notify();
                                 }
                             })
-                        })
+                        });
+                    let col = div()
+                        .id(eid(node, format!("pt-{block}-{i}")))
+                        .relative()
+                        .flex_1()
+                        .h_full()
+                        .cursor_pointer()
+                        .child(hot)
                         .on_click(move |_, _, cx| {
                             if on {
                                 // A second click clears (chart.clear when declared).
