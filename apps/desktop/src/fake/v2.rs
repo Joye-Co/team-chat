@@ -1081,6 +1081,10 @@ impl ChatProvider for V2Samples {
                 note: None,
                 created_by: summary.created_by.clone(),
                 created_at: summary.updated_at - (summary.version - v) as i64 * 24 * 60 * MIN,
+                // --- v11/media ---
+                entry: "index.html".into(),
+                files: Vec::new(),
+                // --- end v11/media ---
             })
             .collect();
         Some(ArtifactDetail {
