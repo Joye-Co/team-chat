@@ -146,12 +146,21 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
             win.focus();
             return;
         }
+        // pages track: bridge capabilities by author (a bot's version that
+        // declares events may send them; nobody reads data).
+        let caps = provider
+            .artifact(&folder.artifact_id)
+            .map(|d| {
+                crate::views::artifact_page::capabilities(provider.as_ref(), &d, folder.version)
+            })
+            .unwrap_or(artifact_view::Capabilities::NONE);
         open_window(
             provider.clone(),
             folder.artifact_id.clone(),
             title,
             spec,
             items,
+            caps,
             cx,
         );
     }
@@ -189,7 +198,15 @@ pub fn open_html_file(file: &FileAttachment, path: &Path, cx: &mut App) {
             return;
         }
         let spec = VersionSpec::new(1, Content::Folder(dir.to_path_buf())).with_entry(entry);
-        open_window_with(None, id, file.name.clone(), spec, Vec::new(), cx);
+        open_window_with(
+            None,
+            id,
+            file.name.clone(),
+            spec,
+            Vec::new(),
+            artifact_view::Capabilities::NONE,
+            cx,
+        );
     }
     #[cfg(not(target_os = "macos"))]
     {
@@ -205,9 +222,10 @@ fn open_window(
     title: String,
     spec: artifact_view::VersionSpec,
     items: Vec<artifact_view::VersionItem>,
+    caps: artifact_view::Capabilities,
     cx: &mut App,
 ) {
-    open_window_with(Some(provider), artifact_id, title, spec, items, cx);
+    open_window_with(Some(provider), artifact_id, title, spec, items, caps, cx);
 }
 
 #[cfg(target_os = "macos")]
@@ -217,9 +235,10 @@ fn open_window_with(
     title: String,
     spec: artifact_view::VersionSpec,
     items: Vec<artifact_view::VersionItem>,
+    caps: artifact_view::Capabilities,
     cx: &mut App,
 ) {
-    use artifact_view::{ArtifactWindow, Capabilities, OpenOptions};
+    use artifact_view::{ArtifactWindow, OpenOptions};
     use futures::StreamExt as _;
     use objc2_foundation::MainThreadMarker;
 
@@ -228,8 +247,8 @@ fn open_window_with(
         return;
     };
     let mut options = OpenOptions::new(title, artifact_id.clone(), spec);
-    // Pages from teammates get no bridge capabilities.
-    options.capabilities = Capabilities::NONE;
+    // Only a bot's version that declares events may send them (pages track).
+    options.capabilities = caps;
     options.versions = items;
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let win = match ArtifactWindow::open(mtm, options, move |event| {
@@ -280,8 +299,31 @@ fn on_event(
             tracing::warn!(artifact_id, version, %reason, "产出 page failed to load");
             notify_error(ca::LOAD_FAILED.to_string(), cx);
         }
-        E::Loaded { .. } | E::Emit { .. } | E::FocusChanged { .. } => {}
+        E::Emit {
+            version,
+            name,
+            payload,
+        } => {
+            // pages track: a declared page event goes to the bot that made it.
+            if let Some(p) = provider
+                && p.artifact_page_events(artifact_id, version)
+                    .iter()
+                    .any(|n| *n == name)
+            {
+                p.send_artifact_event(artifact_id, version, &name, Some(payload));
+            }
+        }
+        E::Loaded { .. } | E::FocusChanged { .. } => {}
     }
+}
+
+/// Asks before a 产出 page opens a web link (also for pages embedded in the
+/// main window).
+pub(crate) fn ask_before_link(url: String) {
+    #[cfg(target_os = "macos")]
+    ask_to_open_link(url);
+    #[cfg(not(target_os = "macos"))]
+    let _ = url;
 }
 
 /// Only one link prompt shows at a time; links clicked meanwhile are dropped.
