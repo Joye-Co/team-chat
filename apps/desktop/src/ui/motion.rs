@@ -120,6 +120,148 @@ pub fn fade_in<E: IntoElement + Styled + 'static>(
     enter(id, duration, element, |el, _| el, cx)
 }
 
+// ---------------------------------------------------------------------------
+// v3 motion helpers (CONCEPT2 §5). GPUI cannot transform a box, so a rise or
+// a slide is a layout offset of a `relative` element, and a drawn check is a
+// clip reveal. Every helper honors Reduce motion: travel goes, a short
+// opacity fade stays, and loops stand still.
+
+/// The delay of item `index` in a first-paint stagger.
+pub fn stagger_delay(index: usize) -> Duration {
+    motion::STAGGER * index.min(motion::STAGGER_MAX) as u32
+}
+
+/// Progress 0 → 1 on the out curve of an animation that waits `delay` and
+/// then runs `run`, sampled at `t` (0 → 1 over `delay + run`).
+pub fn delayed_progress(t: f32, delay: Duration, run: Duration) -> f32 {
+    let total = (delay + run).as_secs_f32();
+    if total <= 0. {
+        return 1.;
+    }
+    let at = t * total - delay.as_secs_f32();
+    let linear = (at / run.as_secs_f32().max(f32::EPSILON)).clamp(0., 1.);
+    motion::out_fn()(linear)
+}
+
+/// First paint: item `index` of a list rises in ([`motion::RISE`] up, with
+/// opacity) after its stagger delay, once per `id`.
+pub fn rise<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    index: usize,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    use gpui::{Animation, AnimationExt as _};
+    let id = id.into();
+    let delay = stagger_delay(index);
+    if cx.reduce_motion() {
+        return Fade {
+            id,
+            duration: motion::FAST,
+            element: Some(element),
+        }
+        .into_any_element();
+    }
+    let run = motion::RISE_IN;
+    element
+        .with_animation(
+            id,
+            Animation::new(delay + run).with_easing(move |t| delayed_progress(t, delay, run)),
+            |el, p| el.opacity(p).relative().top(motion::RISE * (1. - p)),
+        )
+        .into_any_element()
+}
+
+/// A pane or the side chat enters: opacity plus [`motion::PANE_TRAVEL`] from
+/// the right over [`motion::PANE_ENTER`], once per `id`.
+pub fn pane_enter<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    enter(
+        id,
+        motion::PANE_ENTER,
+        element,
+        |el, t| el.relative().left(motion::PANE_TRAVEL * (1. - t)),
+        cx,
+    )
+}
+
+/// The opacity of a breath at `t` (0 → 1 over one [`motion::BREATHE`]):
+/// high at the ends, low in the middle, eased in and out.
+pub fn breath_opacity(t: f32) -> f32 {
+    let wave = 0.5 + 0.5 * (t * std::f32::consts::TAU).cos();
+    motion::BREATHE_LOW + (motion::BREATHE_HIGH - motion::BREATHE_LOW) * wave
+}
+
+/// A live signal breathes (rings, the current plan dot) for as long as it
+/// shows. With Reduce motion it stands still at full strength.
+pub fn breathe<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    cx: &App,
+) -> AnyElement {
+    use gpui::{Animation, AnimationExt as _};
+    if cx.reduce_motion() {
+        return element.opacity(motion::BREATHE_HIGH).into_any_element();
+    }
+    element
+        .with_animation(
+            id.into(),
+            Animation::new(motion::BREATHE).repeat(),
+            |el, t| el.opacity(breath_opacity(t)),
+        )
+        .into_any_element()
+}
+
+/// An answered card's check draws in: the glyph is revealed left to right
+/// in a box `width` wide over [`motion::CHECK_DRAW`], once per `id`. With
+/// Reduce motion it fades in instead.
+pub fn check_draw(
+    id: impl Into<ElementId>,
+    glyph: impl IntoElement + 'static,
+    width: gpui::Pixels,
+    cx: &App,
+) -> AnyElement {
+    use gpui::{Animation, AnimationExt as _, ParentElement as _};
+    let id = id.into();
+    let boxed = gpui::div().flex_none().overflow_hidden().child(glyph);
+    if cx.reduce_motion() {
+        return fade_in(id, motion::FAST, boxed.w(width), cx);
+    }
+    boxed
+        .with_animation(
+            id,
+            Animation::new(motion::CHECK_DRAW).with_easing(motion::out_fn()),
+            move |el, t| el.w(width * t),
+        )
+        .into_any_element()
+}
+
+/// A chart bar grows from zero to `height` once over [`motion::BAR_GROW`]
+/// after `delay`. With Reduce motion it is drawn at its height.
+pub fn bar_grow<E: IntoElement + Styled + 'static>(
+    id: impl Into<ElementId>,
+    element: E,
+    height: gpui::Pixels,
+    delay: Duration,
+    cx: &App,
+) -> AnyElement {
+    use gpui::{Animation, AnimationExt as _};
+    if cx.reduce_motion() {
+        return element.h(height).into_any_element();
+    }
+    let run = motion::BAR_GROW;
+    element
+        .with_animation(
+            id.into(),
+            Animation::new(delay + run).with_easing(move |t| delayed_progress(t, delay, run)),
+            move |el, p| el.h(height * p),
+        )
+        .into_any_element()
+}
+
 /// A one-shot opacity fade that runs whatever `cx.reduce_motion()` says.
 struct Fade<E> {
     id: ElementId,
@@ -448,6 +590,25 @@ mod tests {
         assert_eq!(fade_progress(Duration::from_millis(100), d), 0.5);
         assert_eq!(fade_progress(Duration::from_secs(1), d), 1.0);
         assert_eq!(fade_progress(Duration::ZERO, Duration::ZERO), 1.0);
+    }
+
+    #[test]
+    fn staggers_wait_then_run_on_the_out_curve() {
+        assert_eq!(stagger_delay(0), Duration::ZERO);
+        assert_eq!(stagger_delay(2), motion::STAGGER * 2);
+        assert_eq!(stagger_delay(100), motion::STAGGER * motion::STAGGER_MAX as u32);
+        let (d, r) = (Duration::from_millis(100), Duration::from_millis(300));
+        assert_eq!(delayed_progress(0., d, r), 0.);
+        assert_eq!(delayed_progress(0.25, d, r), 0.);
+        assert!(delayed_progress(0.5, d, r) > 0.5);
+        assert!((delayed_progress(1., d, r) - 1.).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_breath_swings_between_its_bounds() {
+        assert!((breath_opacity(0.) - motion::BREATHE_HIGH).abs() < 1e-4);
+        assert!((breath_opacity(0.5) - motion::BREATHE_LOW).abs() < 1e-4);
+        assert!((breath_opacity(1.) - motion::BREATHE_HIGH).abs() < 1e-4);
     }
 
     #[test]

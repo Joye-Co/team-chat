@@ -48,6 +48,18 @@ pub struct MemberAvatar {
     character: Option<(characters::CharacterId, Member)>,
     /// A fixed status instead of the live one (previews, the self-test).
     status_override: Option<CharacterStatus>,
+    /// v3 ring around the avatar: breathing blue while the member works,
+    /// static amber while it waits on me.
+    ring: Option<Ring>,
+}
+
+/// The ring of an avatar (v3): 1.5 pt, 3 pt out from the tile or circle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ring {
+    /// `--live`, breathing (static with reduce motion).
+    Live,
+    /// `--you`, static.
+    You,
 }
 
 impl MemberAvatar {
@@ -65,7 +77,14 @@ impl MemberAvatar {
             dimmed: member.is_some_and(|m| m.deactivated),
             character: member.and_then(|m| m.character.map(|c| (c, m.clone()))),
             status_override: None,
+            ring: None,
         }
+    }
+
+    /// Draws a v3 ring around the avatar (see [`Ring`]).
+    pub fn ring(mut self, ring: Option<Ring>) -> Self {
+        self.ring = ring;
+        self
     }
 
     /// Shows the presence dot when a person is online, and the status pip of
@@ -125,11 +144,19 @@ impl RenderOnce for MemberAvatar {
                 (Some((_, member)), None) => StatusBoard::status(cx, member),
                 (None, None) => CharacterStatus::Idle,
             };
-            let key = self
-                .character
-                .as_ref()
-                .map(|(c, _)| c.as_str().to_string())
-                .unwrap_or_else(|| self.id.clone());
+            // v3: the named member tint (`--c-<name>`), by name when it is
+            // a roster name, else by the roster character, else by id.
+            let named = theme::MEMBER_TINTS
+                .iter()
+                .any(|n| n.eq_ignore_ascii_case(self.name.trim()));
+            let key = if named {
+                self.name.clone()
+            } else {
+                self.character
+                    .as_ref()
+                    .map(|(c, _)| c.as_str().to_string())
+                    .unwrap_or_else(|| self.id.clone())
+            };
             let art = match &self.character {
                 Some((c, _)) => characters::tile::tile_image(*c, status, size).into_any_element(),
                 None => icon(Lucide::Bot, size * 0.5, k.text_2).into_any_element(),
@@ -151,6 +178,7 @@ impl RenderOnce for MemberAvatar {
                         .size(size)
                         .rounded(theme::radius::bot(size))
                         .bg(k.bot_tint(&key))
+                        .shadow(k.tile_edge())
                         .when(self.selected, |el| el.border_1().border_color(k.tile_ring))
                         .overflow_hidden()
                         .flex()
@@ -159,6 +187,9 @@ impl RenderOnce for MemberAvatar {
                         .child(art),
                 )
                 .children(pip.map(dot))
+                .children(self.ring.map(|r| {
+                    ring_element(&self.id, r, size, Some(theme::radius::bot(size)), cx)
+                }))
                 .into_any_element();
         }
 
@@ -210,7 +241,40 @@ impl RenderOnce for MemberAvatar {
             .when(self.dimmed, |el| el.opacity(0.5))
             .child(face)
             .when(self.online, |el| el.child(dot(k.online)))
+            .children(self.ring.map(|r| ring_element(&self.id, r, size, None, cx)))
             .into_any_element()
+    }
+}
+
+/// The ring element: absolute, around a box of `size` with `radius` (`None`
+/// for a circle). Live rings breathe unless reduce motion is on.
+fn ring_element(
+    id: &str,
+    ring: Ring,
+    size: Pixels,
+    radius: Option<Pixels>,
+    cx: &App,
+) -> gpui::AnyElement {
+    let k = theme::colors(cx);
+    let gap = theme::RING_GAP;
+    let color = match ring {
+        Ring::Live => k.live,
+        Ring::You => k.you,
+    };
+    let el = div()
+        .absolute()
+        .left(-gap)
+        .top(-gap)
+        .size(size + gap * 2.)
+        .border(theme::RING_WIDTH)
+        .border_color(color)
+        .map(|el| match radius {
+            Some(r) => el.rounded(r + gap),
+            None => el.rounded_full(),
+        });
+    match ring {
+        Ring::You => el.into_any_element(),
+        Ring::Live => crate::ui::motion::breathe(format!("ring-{id}"), el, cx),
     }
 }
 
