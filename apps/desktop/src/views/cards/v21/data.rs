@@ -84,6 +84,9 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         };
     }
     let keys = row_keys(rows, keys.as_deref());
+    // 引用提问 on the cells of a table I pick rows in: ⌥-click and the context menu only
+    // (REFS §A3: controls), so a plain click still picks the row.
+    let cell_refs = super::parts::control_table_refs(node, b, cx);
     let ui = node.ui.block(id);
     let order = match ui.sort {
         Some((col, asc)) => sorted(rows, col, asc),
@@ -222,7 +225,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             })
             .children((0..columns.len()).map(|ci| {
                 let text = r.get(ci).cloned().unwrap_or_default();
-                div()
+                let cell = div()
                     .flex_1()
                     .when(ci == 0, |el| el.min_w(px(96.)))
                     .min_w(px(0.))
@@ -234,7 +237,12 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                             .when(numeric[ci], |el| el.mono())
                             .when(on && ci == 0, |el| el.font_weight(theme::MEDIUM_WEIGHT))
                             .child(text),
-                    )
+                    );
+                // The source row index, so a sorted table references the same row.
+                match &cell_refs {
+                    Some(r) => r.cell(cell, *ri, ci, window, cx),
+                    None => cell.into_any_element(),
+                }
             }))
     });
     let mut col = b20::small(div()).flex().flex_col();

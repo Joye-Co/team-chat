@@ -202,6 +202,17 @@ pub fn table_refs(node: &Node, b: &CardV2Block, cx: &App) -> Option<TableRefs> {
         .table_refs()
 }
 
+/// The cell references of a table with row selection or sort (its cells are controls:
+/// ⌥-click and the context menu only, REFS §A3), or `None` where the affordances do not show.
+pub fn control_table_refs(node: &Node, b: &CardV2Block, cx: &App) -> Option<TableRefs> {
+    if !shown(node, cx) || table_parts(b) {
+        return None;
+    }
+    refs::cards::CardParts::of(node.ctx, cx)?
+        .block(b)?
+        .control_table_refs()
+}
+
 /// Adds the affordances to one block (a plain table has its own per cell).
 pub fn wrap(
     node: &Node,
@@ -217,7 +228,7 @@ pub fn wrap(
     let Some(id) = b.id() else { return el };
     // Tables and the blocks with parts (items, steps, points, metrics, proofs, images)
     // reference their parts; a whole-block 问这里 there would show a second button.
-    let el = if table_parts(b) || refs::cards::has_parts(b) {
+    let el = if matches!(b, CardV2Block::Table { .. }) || refs::cards::has_parts(b) {
         el
     } else {
         let whole = target(ctx, b, None, None, snapshot(b));

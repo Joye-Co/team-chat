@@ -291,13 +291,29 @@ impl BlockParts {
     /// The cell, row and column references of a table block (R4: `rowKeys`, else the row
     /// index); `None` for other blocks.
     pub fn table_refs(&self) -> Option<TableRefs> {
-        // Only the plain table draws its cells as parts (no selection, no sort).
+        // Only the plain table draws its cells as parts with every affordance (no
+        // selection, no sort); a table I pick rows in uses [`Self::control_table_refs`].
+        if !matches!(
+            &self.0.1,
+            CardV2Block::Table {
+                select: None,
+                sortable: None | Some(false),
+                ..
+            }
+        ) {
+            return None;
+        }
+        self.control_table_refs()
+    }
+
+    /// The cell, row and column references of any table block, also one with row
+    /// selection or sort: its cells are controls, so they take references only by ⌥-click
+    /// and the context menu (REFS §A3), never a hover 问这里.
+    pub fn control_table_refs(&self) -> Option<TableRefs> {
         let CardV2Block::Table {
             columns,
             rows,
             row_keys,
-            select: None,
-            sortable: None | Some(false),
             ..
         } = &self.0.1
         else {
@@ -646,6 +662,32 @@ mod tests {
 
     fn keys(t: &PartTarget) -> serde_json::Value {
         serde_json::to_value(t.part.as_ref().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn a_table_i_pick_rows_in_has_cell_refs_for_the_alt_click_and_the_menu_only() {
+        let c: CardV2 = serde_json::from_value(json!({
+            "v": 2, "catalog": "tc.card/2.1", "rev": 2, "intent": "info", "title": "B 站 · 按来源",
+            "fallback": "f",
+            "blocks": [
+                { "id": "by", "type": "table", "columns": ["来源", "新增群"],
+                  "rows": [["夹夹教程视频", "5"], ["UP 主合作", "3"]],
+                  "rowKeys": ["tutorial", "up"], "select": "multiple" }
+            ]
+        }))
+        .unwrap();
+        let parts = ctx_parts(&c).block(c.block("by").unwrap()).unwrap();
+        assert!(
+            parts.table_refs().is_none(),
+            "no plain-table parts: no hover 问这里 on a control"
+        );
+        let refs = parts.control_table_refs().expect("⌥-click and the menu");
+        let cell = (refs.target)(TablePick::Cell { row: 1, col: 1 }).expect("a cell");
+        assert_eq!(
+            serde_json::to_value(cell.part.as_ref().unwrap()).unwrap(),
+            json!({ "kind": "cell", "keys": { "row": "up", "col": 1 } })
+        );
+        assert!(cell.label.contains("UP 主合作"), "{}", cell.label);
     }
 
     #[test]
