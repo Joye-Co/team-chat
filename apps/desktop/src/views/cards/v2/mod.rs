@@ -1098,25 +1098,35 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
 /// in progress a 2 pt live bar along the bottom edge.
 pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let k = theme::colors(cx);
-    // --- inc-cards21: my live event waits (blue 处理中), 2.1 words, the deadline ---
+    // --- inc-cards21: my live event waits, 2.1 words, the deadline ---
     // inc-integrate: a page event of an embed in this card waits too (the page host).
-    // v11/pb-cards: the spinner only while the author works on it, a still mark after.
-    let spins =
-        super::v21::band::pending(ctx).map(|(p, _, _)| super::v21::interact::spins(p.stage));
+    // v11/pb2-cards: the band says the stage (INTERACT §4.4) in its own tone: blue with the
+    // spinner while the author has it, grey once no answer came, red 失败 when the step
+    // was not sent.
+    use super::v21::band::PendTone;
     let waiting = super::v21::band::pending(ctx)
-        .map(|(_, l, d)| (l, d))
-        .or_else(|| super::v21::band::page_pending(ctx, cx));
-    let t = match &waiting {
-        Some(_) => Tone {
+        .map(|p| (p.label, p.detail, p.tone))
+        .or_else(|| {
+            super::v21::band::page_pending(ctx, cx).map(|(l, tone)| (l, String::new(), tone))
+        });
+    let t = match waiting.as_ref().map(|w| w.2) {
+        Some(PendTone::Live) => Tone {
             mark: k.live,
             ink: k.live_ink,
             fill: mix(k.live, k.bg, m::LIVE_FILL),
             edge: mix(k.live, k.bg, m::LIVE_EDGE),
         },
+        Some(PendTone::Quiet) => Tone {
+            mark: k.ink_2,
+            ink: k.ink_2,
+            fill: k.sunken,
+            edge: k.line,
+        },
+        Some(PendTone::Bad) => tone(&CardState::Failed { answer: None }, &k)?,
         None => tone(ctx.state, &k)?,
     };
     let (label, detail) = match &waiting {
-        Some((l, d)) => (l.clone(), d.clone()),
+        Some((l, d, _)) => (l.clone(), d.clone()),
         None => super::v21::band::words(ctx, strip_words(ctx, cx)),
     };
     let right = waiting
@@ -1150,11 +1160,14 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(match &waiting {
-                Some(_) if spins == Some(false) => {
+            .child(match waiting.as_ref().map(|w| w.2) {
+                Some(PendTone::Live) => ui::motion::spinner().color(t.mark).into_any_element(),
+                Some(PendTone::Quiet) => {
                     ui::icon(Lucide::CircleAlert, px(16.), t.mark).into_any_element()
                 }
-                Some(_) => ui::motion::spinner().color(t.mark).into_any_element(),
+                Some(PendTone::Bad) => {
+                    ui::icon(Lucide::CircleX, px(16.), t.mark).into_any_element()
+                }
                 None => strip_icon(ctx.state, &t, ctx, cx),
             })
             .child(

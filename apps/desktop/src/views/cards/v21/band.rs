@@ -381,9 +381,44 @@ pub fn right(ctx: &Ctx) -> Option<String> {
     }
 }
 
-/// My live event that still waits for the author: the band says so (blue 处理中), for the
+/// The look of a band that follows my event, not the card.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendTone {
+    /// Blue, the spinner: the author has it and may still answer.
+    Live,
+    /// Grey, a still mark: no answer came, or the author will see it later.
+    Quiet,
+    /// Red 失败: the step was not sent, or the author cannot take it now.
+    Bad,
+}
+
+/// The band while my newest event on the card waits (INTERACT §4.4), for the emitter only.
+#[derive(Clone, Debug)]
+pub struct PendBand {
+    pub event_id: String,
+    pub stage: interact::Stage,
+    pub label: String,
+    pub detail: String,
+    pub tone: PendTone,
+}
+
+/// The band of a pending stage: the stage itself is the band's word (等 Ledger 回应, Ledger
+/// 还在处理, Ledger 没有回应), never a 处理中 that stays after the author stopped; a step that
+/// was not sent is the red 失败 of CARD21 §2 with the reason.
+pub fn pend_band(stage: interact::Stage, author: &str) -> Option<(String, String, PendTone)> {
+    use interact::Stage as S;
+    let words = interact::stage_words(stage, author);
+    Some(match stage {
+        S::Quiet => return None,
+        S::Wait | S::Slow => (words, String::new(), PendTone::Live),
+        S::Silent | S::OfflineAnswer => (words, String::new(), PendTone::Quiet),
+        S::OfflineLive | S::Busy => (c::BAND_FAILED.to_string(), words, PendTone::Bad),
+    })
+}
+
+/// My live event that still waits for the author: the band says its stage, for the
 /// emitter only.
-pub fn pending(ctx: &Ctx) -> Option<(interact::Pending, String, String)> {
+pub fn pending(ctx: &Ctx) -> Option<PendBand> {
     if !is_21(ctx.card) {
         return None;
     }
@@ -392,17 +427,20 @@ pub fn pending(ctx: &Ctx) -> Option<(interact::Pending, String, String)> {
         .provider
         .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
     let p = interact::pending(&events, ctx.env.now())?;
-    if p.stage == interact::Stage::Quiet {
-        return None;
-    }
-    let words = interact::stage_words(p.stage, &ctx.author);
-    Some((p, c::BAND_WORKING.to_string(), words))
+    let (label, detail, tone) = pend_band(p.stage, &ctx.author)?;
+    Some(PendBand {
+        event_id: p.event.client_event_id,
+        stage: p.stage,
+        label,
+        detail,
+        tone,
+    })
 }
 
 /// A page event from an embed in this card still waits for the author (the page host's
-/// band of that version): the card band says 处理中 with the host's words, for the
-/// emitter only (the host keeps only my own events).
-pub fn page_pending(ctx: &Ctx, cx: &gpui::App) -> Option<(String, String)> {
+/// band of that version): the card band says the host's words, for the emitter only (the
+/// host keeps only my own events).
+pub fn page_pending(ctx: &Ctx, cx: &gpui::App) -> Option<(String, PendTone)> {
     use crate::views::artifacts::host::{self, BandView};
     if !is_21(ctx.card) {
         return None;
@@ -413,9 +451,8 @@ pub fn page_pending(ctx: &Ctx, cx: &gpui::App) -> Option<(String, String)> {
             version,
             ..
         } => match host::band(artifact_id, *version, cx)? {
-            BandView::Waiting(t) | BandView::Working(t) | BandView::NoAnswer(t) => {
-                Some((c::BAND_WORKING.to_string(), t))
-            }
+            BandView::Waiting(t) | BandView::Working(t) => Some((t, PendTone::Live)),
+            BandView::NoAnswer(t) => Some((t, PendTone::Quiet)),
             _ => None,
         },
         _ => None,

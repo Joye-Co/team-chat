@@ -771,7 +771,12 @@ pub fn decorate(
     }
     col = col.child(inner);
     if let Some(p) = pend.as_ref().filter(|p| p.stage != Stage::Quiet) {
-        col = col.child(pending_line(ctx, p, cx));
+        // The band says the stage of my newest event; the block says it only for an older
+        // event the band does not show (CARD21 §2: one state is said once).
+        let in_band = super::band::pending(ctx).is_some_and(|b| b.event_id == p.event.client_event_id);
+        if let Some(line) = pending_line(ctx, p, !in_band, cx) {
+            col = col.child(line);
+        }
     }
     let drawn = cx.try_global::<DrawnRows>();
     let reply = reply_off_screen(&events, id, now, |m| drawn.is_some_and(|d| d.0.contains(m)))
@@ -872,11 +877,14 @@ fn draft_changed(ctx: &Ctx, id: &str, cx: &mut App) -> AnyElement {
         .into_any_element()
 }
 
-/// The line at a block while its event waits: a spinner and the stage, and at the end
-/// 重试 and 不等了.
-fn pending_line(ctx: &Ctx, p: &Pending, cx: &mut App) -> AnyElement {
+/// The line at a block while its event waits: a spinner and the stage when `words` (the
+/// band does not say it), and 重试 and 不等了 once no answer came. `None`: nothing to add.
+fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<AnyElement> {
+    if !words && p.stage != Stage::Silent {
+        return None;
+    }
     let k = theme::colors(cx);
-    let words = stage_words(p.stage, &ctx.author);
+    let text = stage_words(p.stage, &ctx.author);
     let mut row = meta(div())
         .mt(space::S6)
         .flex()
@@ -886,10 +894,10 @@ fn pending_line(ctx: &Ctx, p: &Pending, cx: &mut App) -> AnyElement {
             Stage::Silent | Stage::OfflineLive | Stage::Busy => k.ink_2,
             _ => k.live_ink,
         })
-        .when(matches!(p.stage, Stage::Wait | Stage::Slow), |el| {
+        .when(words && matches!(p.stage, Stage::Wait | Stage::Slow), |el| {
             el.child(crate::ui::motion::spinner().color(k.live))
         })
-        .child(div().min_w(px(0.)).one_line().child(words));
+        .when(words, |el| el.child(div().min_w(px(0.)).one_line().child(text)));
     if p.stage == Stage::Silent {
         let (provider, g, tp, m, cid) = (
             ctx.env.provider.clone(),
@@ -921,7 +929,7 @@ fn pending_line(ctx: &Ctx, p: &Pending, cx: &mut App) -> AnyElement {
                     .on_click(move |_, _, _| provider.drop_card_event(&g, &tp, &m, &cid)),
             );
     }
-    row.into_any_element()
+    Some(row.into_any_element())
 }
 
 #[cfg(test)]
