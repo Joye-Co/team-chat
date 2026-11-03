@@ -321,7 +321,7 @@ export function registerFileRoutes(): void {
       });
       if (!r.ok) {
         await env.DB.prepare("DELETE FROM artifacts WHERE id = ?").bind(id).run();
-        throw new ApiError(r.error.code, r.error.message);
+        throw new ApiError(r.error.code, r.error.message, r.error.reason);
       }
       await auditStatement(env.DB, a, {
         action: "artifact.create",

@@ -25,6 +25,7 @@ import {
   registerRoomMigration,
   registerRoomRpc,
 } from "../core/registry";
+import { schemaPatternProblem } from "./pattern";
 
 registerRoomMigration({
   name: "files-1",
@@ -327,6 +328,10 @@ function insertVersion(
  */
 async function botVersionFields(room: RoomContext, actor: Actor, topicId: string, input: VersionInput): Promise<VersionInput> {
   if (actor.kind !== "bot") return { ...input, events: undefined, runId: undefined, data: undefined };
+  for (const e of input.events ?? []) {
+    const problem = schemaPatternProblem(e.schema);
+    if (problem) throw new ApiError("invalid", `event ${e.name}: ${problem}`, "artifact.bad_schema");
+  }
   if (!input.runId) return input;
   const run = await room.env.DB.prepare("SELECT 1 AS x FROM bot_runs WHERE id = ? AND bot_id = ? AND topic_id = ?")
     .bind(input.runId, actor.id, topicId)

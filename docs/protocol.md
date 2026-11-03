@@ -1032,7 +1032,10 @@ Rules:
 - `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
   in the 产出's topic (else it is dropped). Other callers' values are dropped.
 - `TcSchema` is a subset of JSON Schema: `type properties required enum items maxItems minimum
-  maximum maxLength pattern (<= 200) description`, depth <= 4, no `$ref`.
+  maximum maxLength pattern (<= 200) description`, depth <= 4, no `$ref`. The server checks a
+  `pattern` in linear time (no backtracking), so it refuses one with a backreference (`\1`,
+  `\k<…>`) or lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`) when the version is made (`invalid`,
+  reason `artifact.bad_schema`). A string checked by a `pattern` has at most 4096 characters.
 - Paths under `__teamchat/` are reserved for the page host: create and add version refuse them
   (`invalid`).
 - `artifact.event`: a human member of the group; the version exists (`not_found`), its creator is

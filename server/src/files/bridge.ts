@@ -29,6 +29,7 @@ import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc, registerRoute } from "../core/registry";
 import { deliverPageEvent, INTERACT_FEATURE } from "../bots/interact";
 import { artifactRow, checkMedia, toVersion, type VersionRow, versionRow } from "./room";
+import { MAX_PATTERN_INPUT, patternProblem, patternTest } from "./pattern";
 import { actorOf } from "./store";
 
 export const ARTIFACT_EVENT_RPC = "artifacts.event";
@@ -143,13 +144,10 @@ export function tcSchemaViolation(schema: TcSchema, value: unknown, path = "payl
   if (typeof value === "string") {
     if (schema.maxLength !== undefined && [...value].length > schema.maxLength) return `${path} is too long`;
     if (schema.pattern !== undefined) {
-      let re: RegExp | null = null;
-      try {
-        re = new RegExp(schema.pattern, "u");
-      } catch {
-        return `${path} pattern is not valid`;
-      }
-      if (!re.test(value)) return `${path} does not match the pattern`;
+      // Linear time, never a RegExp on the viewer's string (SEC-4; files/pattern.ts).
+      if (patternProblem(schema.pattern)) return `${path} pattern is not supported`;
+      if ([...value].length > MAX_PATTERN_INPUT) return `${path} is too long for the pattern`;
+      if (!patternTest(schema.pattern, value)) return `${path} does not match the pattern`;
     }
   }
   if (typeof value === "number") {
