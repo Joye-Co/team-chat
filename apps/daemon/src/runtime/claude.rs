@@ -340,9 +340,11 @@ pub const ASIDE_DISALLOWED_TOOLS: &str =
 
 /// Permission flags and the configured extra args. A side chat run (`spec.aside`) is
 /// read-only whatever `daemon.toml` or the CLI's own settings say: permission mode `plan`, only
-/// [`ASIDE_TOOLS`], [`ASIDE_DISALLOWED_TOOLS`] denied, no MCP servers, no user, project or
-/// local settings files (their allow rules could approve a write), and neither `allowed_tools`
-/// nor the configured args (which could widen permissions).
+/// [`ASIDE_TOOLS`], [`ASIDE_DISALLOWED_TOOLS`] denied, no MCP servers, and neither
+/// `allowed_tools` nor the configured args (which could widen permissions). Only the user's own
+/// settings file loads (its env, `apiKeyHelper` and model give the run its auth and model); the
+/// project and local settings come from the repo and stay out. The tool set keeps the run
+/// read-only also when a user allow rule names a command or edit tool.
 pub fn permission_args(spec: &RunSpec) -> Vec<String> {
     let mut args = vec!["--permission-mode".to_string()];
     if spec.aside {
@@ -357,7 +359,7 @@ pub fn permission_args(spec: &RunSpec) -> Vec<String> {
                 "--mcp-config",
                 r#"{"mcpServers":{}}"#,
                 "--setting-sources",
-                "",
+                "user",
             ]
             .map(String::from),
         );

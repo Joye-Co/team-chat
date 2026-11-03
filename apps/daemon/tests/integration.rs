@@ -976,7 +976,7 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let tools = argv.iter().position(|a| a == "--tools").unwrap();
     assert_eq!(argv[tools + 1], "Read,Grep,Glob");
     let sources = argv.iter().position(|a| a == "--setting-sources").unwrap();
-    assert_eq!(argv[sources + 1], "");
+    assert_eq!(argv[sources + 1], "user");
     assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
     assert!(!argv.iter().any(|a| a == "acceptEdits"));
     for (run, runtime, kind, reason) in [

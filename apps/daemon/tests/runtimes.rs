@@ -288,7 +288,8 @@ async fn pty_cancel_kills_group() {
 /// Codex gets sandbox `read-only`, no configured args, and web search, apps, plugins, browser
 /// and computer use and every configured MCP server turned off. Claude Code gets permission
 /// mode `plan`, only the read-only tools, the command, edit, web and MCP tools denied, no MCP
-/// servers and no settings files, and neither `allowed_tools` nor the configured args.
+/// servers and only the user's settings file, and neither `allowed_tools` nor the configured
+/// args.
 #[test]
 fn aside_runs_ignore_widening_config() {
     let tmp = tempfile::tempdir().unwrap();
@@ -397,8 +398,9 @@ fn aside_runs_ignore_widening_config() {
     }
     assert!(args.iter().any(|a| a == "--strict-mcp-config"));
     assert_eq!(value("--mcp-config"), r#"{"mcpServers":{}}"#);
-    // No user, project or local settings: their allow rules cannot widen the run.
-    assert_eq!(value("--setting-sources"), "");
+    // Only the user's settings (auth env, apiKeyHelper, model); project and local settings
+    // come from the repo. The tool set above keeps a user allow rule from widening the run.
+    assert_eq!(value("--setting-sources"), "user");
     for widening in [
         "bypassPermissions",
         "--dangerously-skip-permissions",
