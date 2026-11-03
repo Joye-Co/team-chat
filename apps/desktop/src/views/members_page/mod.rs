@@ -34,6 +34,11 @@ use crate::{
     },
 };
 
+/// A member row's name never gets narrower than this (its first characters).
+const NAME_MIN: gpui::Pixels = px(40.);
+/// The 岗位 shrinks this much faster than the name: it gives way first.
+const ROLE_SHRINK: f32 = 1000.;
+
 /// The list filter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Filter {
@@ -485,10 +490,13 @@ impl MembersPage {
                             .items_baseline()
                             .gap(space::S8)
                             .min_w_0()
+                            // The 岗位 gives way first, down to nothing; then the
+                            // name ends in an ellipsis and keeps its first
+                            // characters.
                             .child(
                                 div()
-                                    .flex_shrink(0.5)
-                                    .min_w(px(40.))
+                                    .flex_shrink(1.)
+                                    .min_w(NAME_MIN)
                                     .one_line()
                                     .t_small()
                                     .medium()
@@ -497,6 +505,7 @@ impl MembersPage {
                             )
                             .children(m.role.clone().map(|r| {
                                 div()
+                                    .flex_shrink(ROLE_SHRINK)
                                     .min_w_0()
                                     .one_line()
                                     .type_role(META)
