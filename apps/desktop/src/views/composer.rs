@@ -1135,6 +1135,8 @@ impl Render for ComposerView {
                 theme::size::ICON_BUTTON,
             ))
         })
+        // v2: a round send button (Topic.dc.html).
+        .when(v2, |b| b.rounded(theme::size::ICON_BUTTON / 2.))
         .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
 
         // XSmall drops the editor's own inset; the shell pads the text 12 top
