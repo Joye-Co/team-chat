@@ -46,15 +46,18 @@ describe("cards v2", () => {
     const m = sent.message;
     expect(m.kind).toBe("card");
     expect(m.cardV2).toEqual(card);
-    expect(m.card).toEqual(cardV2ToV1(card));
+    // The derived v1 card: the protocol derivation, the fallback marked for old readers, the ask's status.
+    expect(m.card).toMatchObject({ v: 1, title: card.title, tone: cardV2ToV1(card).tone, status: { label: `等 ${alice.name} 拍板` } });
+    expect(m.card.blocks[0]).toEqual({ type: "text", text: "这部分需要新版本：请选择发布时间" });
     expect(m.card.actions).toBeUndefined(); // the card has a decision and a draft to fill
+    expect(m.cardState.ask).toMatchObject({ id: "a1", status: "open", from: [alice.id], blocking: true });
     expect(m.body).toBe("请选择发布时间");
 
     const answer = (c: Client, f: Record<string, unknown>) =>
       c.request({ t: "card.answer", groupId: gid, messageId: m.id, rev: 1, actionId: "ship", ...f });
     // Only ask.from may answer; the rev, the action and the block ids must match the card.
     expect(await answer(cb, {})).toMatchObject({ ok: false, error: { code: "forbidden" } });
-    expect(await answer(ca, { rev: 2 })).toMatchObject({ ok: false, error: { code: "conflict" } });
+    expect(await answer(ca, { rev: 2 })).toMatchObject({ ok: false, error: { code: "invalid" } });
     expect(await answer(ca, { actionId: "pr" })).toMatchObject({ ok: false, error: { code: "not_found" } });
     expect(await answer(ca, { inputs: { nope: 1 } })).toMatchObject({ ok: false, error: { code: "invalid" } });
     // inputs with editedValues over 64 KiB as JSON: too_large, as docs/protocol.md says.
@@ -70,7 +73,7 @@ describe("cards v2", () => {
       data: { messageId: m.id, rev: 1, actionId: "ship", inputs: { when: "now" }, editedValues: { notes: "改过" } },
     });
     // The first answer wins.
-    expect(await answer(ca, {})).toMatchObject({ ok: false, error: { code: "conflict" } });
+    expect(await answer(ca, {})).toMatchObject({ ok: false, error: { code: "conflict", reason: "card.already_answered" } });
 
     // An edit needs a higher rev; the derived v1 card follows the new rev.
     const rev2 = ask(2, ["owners"], { intent: "done", ask: undefined, actions: [{ id: "ok", label: "好" }] });
@@ -81,13 +84,17 @@ describe("cards v2", () => {
     const edited = await co.ok({ t: "edit", groupId: gid, messageId: m.id, body: "", cardV2: rev2 });
     expect(edited.message.cardV2.rev).toBe(2);
     expect(edited.message.card.tone).toBe("success");
-    const upd = await cb.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id);
+    // The answer refreshed the state and the v1 card; the edit carries the new rev.
+    const answered = await cb.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardState);
+    expect(answered.data.cardState.ask).toMatchObject({ status: "answered", answeredBy: alice.id });
+    expect(answered.data.card.status.label).toBe(`${alice.name} 选了 现在`);
+    const upd = await cb.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardV2);
     expect(upd.data.cardV2.rev).toBe(2);
 
-    // A v1 press on a v2 card is an answer at the current rev (old clients still answer).
+    // A v1 press on a v2 card is action.press at the current rev; without an ask it is live (not stored).
     expect(await cb.request({ t: "card.action", groupId: gid, messageId: m.id, actionId: "ok" })).toMatchObject({ ok: true });
-    const pressed = await co.waitEvent((e) => e.type === "card.answered" && e.data.rev === 2);
-    expect(pressed).toMatchObject({ actorId: bob.id, data: { messageId: m.id, actionId: "ok" } });
+    await new Promise((r) => setTimeout(r, 200));
+    expect(co.events(gid).filter((e) => e.type === "card.answered")).toHaveLength(1);
 
     // A send with an invalid cardV2 and an edit of a text message are refused.
     expect(
@@ -110,7 +117,7 @@ describe("cards v2", () => {
     expect(await decisionRows()).toEqual([]);
     const page = await cb.request({ t: "fetch", groupId: gid, afterSeq: 0 });
     const answers = page.events.filter((e: any) => e.type === "card.answered");
-    expect(answers.length).toBe(2);
+    expect(answers.length).toBe(1);
     expect(answers[0].data.inputs).toBeUndefined();
     expect(answers[0].data.editedValues).toBeUndefined();
     expect(page.events.find((e: any) => e.type === "message.created" && e.data.message.id === m.id).data.message.cardV2).toBeUndefined();
@@ -232,7 +239,7 @@ describe("产出 events", () => {
     expect(mine.body.version.events).toBeUndefined();
 
     const id = made.body.artifact.id;
-    const cb = (await Client.connect(bot.token)).c;
+    const cb = (await Client.connect(bot.token, { features: ["interact/1"] })).c;
     const ack = await co.request({ t: "artifact.event", groupId: gid, artifactId: id, version: 1, name: "pick", payload: { option: "B" } });
     expect(ack).toMatchObject({ ok: true, result: { expect: { by: bot.id } } });
     const tr = await cb.next((f) => f.t === "transient" && f.event.type === "artifact.event");
@@ -261,26 +268,30 @@ describe("产出 events", () => {
 });
 
 describe("1.1 interaction loop boundary", () => {
-  it("accept the new fields and check the new frames before a feature handles them", async () => {
+  it("check causes, refs and card events of the new frames", async () => {
     const owner = await createMember({ level: "owner" });
     const gid = await createGroup(owner, []);
     const co = (await Client.connect(owner.token)).c;
-    const sent = await co.ok({
+    const text = await co.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "表" });
+    // A cause that is not a recent event of this author's cards is refused.
+    const badCause = await co.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "为什么？", causeEventId: "01JC0EV0000000000000000001" });
+    expect(badCause).toMatchObject({ ok: false, error: { code: "invalid", reason: "interact.bad_cause" } });
+    // A ref to a message of no group of this room is refused.
+    const badRef = await co.request({
       t: "send",
       groupId: gid,
       clientMsgId: clientMsgId(),
       body: "为什么？",
-      causeEventId: "01JC0EV0000000000000000001",
       blockRefs: [{ messageId: "01JC0MSG00000000000000000A", blockId: "md:0", label: "表格 · 第 1 行" }],
     });
-    expect(sent.message.body).toContain("为什么");
+    expect(badRef).toMatchObject({ ok: false, error: { code: "invalid" } });
     // A malformed card.event is refused by the schema.
-    const bad = await co.request({ t: "card.event", groupId: gid, messageId: sent.message.id, rev: 1, clientEventId: "c1", blockId: "a", actionId: "b", event: "action.press" });
+    const bad = await co.request({ t: "card.event", groupId: gid, messageId: text.message.id, rev: 1, clientEventId: "c1", blockId: "a", actionId: "b", event: "action.press" });
     expect(bad).toMatchObject({ ok: false, error: { code: "invalid" } });
     expect(bad.error.message).toContain("blockId");
-    // A well-formed one passes the schema (a later feature answers it).
-    const good = await co.request({ t: "card.event", groupId: gid, messageId: sent.message.id, rev: 1, clientEventId: "c2", blockId: "a", event: "choice.change", value: { value: "x" } });
-    expect(good.ok === true || !String(good.error?.message ?? "").startsWith("invalid frame")).toBe(true);
+    // A well-formed one on a text message: not a card.
+    const good = await co.request({ t: "card.event", groupId: gid, messageId: text.message.id, rev: 1, clientEventId: "c2", blockId: "a", event: "choice.change", value: { value: "x" } });
+    expect(good).toMatchObject({ ok: false, error: { code: "not_found" } });
     co.close();
   });
 });

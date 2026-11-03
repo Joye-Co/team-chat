@@ -32,13 +32,14 @@ const ask = (rev: number, from: string[], extra: Partial<CardV2> = {}): CardV2 =
   ...extra,
 });
 
-/** A card with only buttons and no ask: anyone may answer it, more than once. */
-const buttons = (title: string): CardV2 => ({
+/** A done card with one button: a non-blocking ask for `from` (without an ask a press is live). */
+const buttons = (title: string, from?: string[]): CardV2 => ({
   v: 2,
   rev: 1,
   intent: "done",
   title,
   fallback: "",
+  ...(from ? { ask: { from } } : {}),
   blocks: [{ type: "text", id: "t", text: "做完了" }],
   actions: [{ id: "again", label: "再改一下" }],
 });
@@ -153,7 +154,7 @@ describe("answers to runner bots", () => {
     const { c: cb } = await Client.connect(w.bot.token);
 
     // The bot posts a done card in a new topic; nobody mentioned it, so no run is active.
-    const sent = await cb.ok({ t: "send", groupId: w.gid, title: "报告", clientMsgId: clientMsgId(), body: "", cardV2: buttons("周报") });
+    const sent = await cb.ok({ t: "send", groupId: w.gid, title: "报告", clientMsgId: clientMsgId(), body: "", cardV2: buttons("周报", [w.human.id]) });
     const topicId = sent.message.topicId as string;
     await c.ok({ t: "card.answer", groupId: w.gid, messageId: sent.message.id, rev: 1, actionId: "again" });
     const assign = await d.next((f) => f.t === "run.assign");
@@ -167,7 +168,7 @@ describe("answers to runner bots", () => {
     await c.waitEvent((e) => e.type === "run.updated" && e.data.run.status === "running");
 
     // While that run is active, the next answer is input; this daemon has no feature "answer".
-    const more = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("第二版") })).message;
+    const more = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("第二版", [w.human.id]) })).message;
     await c.ok({ t: "card.answer", groupId: w.gid, messageId: more.id, rev: 1, actionId: "again" });
     const input = await d.next((f) => f.t === "run.input");
     expect(input.runId).toBe(assign.runId);
@@ -179,8 +180,11 @@ describe("answers to runner bots", () => {
     const other = await createMember({ kind: "bot", name: "other" });
     await api(`/v1/groups/${w.gid}/members`, { token: w.owner.token, body: { memberId: other.id } });
     const { c: co } = await Client.connect(other.token);
-    const third = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("第三版") })).message;
-    await co.ok({ t: "card.answer", groupId: w.gid, messageId: third.id, rev: 1, actionId: "again" });
+    const third = (await cb.ok({ t: "send", groupId: w.gid, topicId, clientMsgId: clientMsgId(), body: "", cardV2: buttons("第三版", [other.id]) })).message;
+    expect(await co.request({ t: "card.answer", groupId: w.gid, messageId: third.id, rev: 1, actionId: "again" })).toMatchObject({
+      ok: false,
+      error: { code: "forbidden", reason: "interact.bot_emitter" },
+    });
     await new Promise((r) => setTimeout(r, 300));
     expect(d.frames.filter((f) => f.t === "run.input")).toHaveLength(1);
     for (const x of [c, cb, co, d]) x.close();
