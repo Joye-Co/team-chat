@@ -1206,6 +1206,75 @@ async fn bot_runs_from_events_and_the_process_view_from_the_run_log() {
     assert_eq!((more.len(), last2), (0, 607));
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn cancel_run_stops_an_active_run_and_takes_an_ended_one_quietly() {
+    let dir = tempfile::tempdir().unwrap();
+    let http = MockHttp::start().await;
+    let ended = BotRun {
+        ended_at: Some(4),
+        ..bot_run("R2", "T1", RunStatus::Done, 4)
+    };
+    let forbidden = BotRun {
+        bot_id: "forbidden-bot".into(),
+        ..bot_run("R3", "T1", RunStatus::Running, 1)
+    };
+    http.with(|s| {
+        s.runs.insert(
+            "R1".into(),
+            (bot_run("R1", "T1", RunStatus::Running, 3), vec![]),
+        );
+        s.runs.insert("R2".into(), (ended.clone(), vec![]));
+        s.runs.insert("R3".into(), (forbidden, vec![]));
+    });
+    let client = http_client(&http, dir.path(), |_| {});
+
+    // The HTTP call answers with the ended run.
+    let run = client.http().cancel_run("R1").await.unwrap();
+    assert_eq!(run.status, RunStatus::Cancelled);
+    assert!(run.ended_at.is_some());
+    // A second stop is a conflict on the wire.
+    let again = client.http().cancel_run("R1").await.unwrap_err();
+    assert!(again.is_conflict(), "{again:?}");
+    assert_eq!(http.with(|s| s.count("POST", "/v1/runs/R1/cancel")), 2);
+
+    // The client stores the end at once and tells the views.
+    http.with(|s| s.runs.get_mut("R1").unwrap().0 = bot_run("R1", "T1", RunStatus::Running, 5));
+    let mut rx = client.subscribe();
+    let outcome = client.cancel_run("R1").await.unwrap().unwrap();
+    assert_eq!(outcome, chat_core::CancelRun::Cancelled);
+    next_update(&mut rx, "runs changed", |u| {
+        matches!(u, ClientUpdate::RunsChanged { topic_id, .. } if topic_id == "T1")
+    })
+    .await;
+    let cached = client.runs("T1").unwrap();
+    assert_eq!(
+        cached.iter().find(|r| r.id == "R1").unwrap().status,
+        RunStatus::Cancelled
+    );
+
+    // A run that already ended is not an error: the client reads it and stores its end.
+    let outcome = client.cancel_run("R2").await.unwrap().unwrap();
+    assert_eq!(outcome, chat_core::CancelRun::AlreadyEnded);
+    assert_eq!(http.with(|s| s.count("GET", "/v1/runs/R2")), 1);
+    assert_eq!(client.store().run("R2").unwrap(), Some(ended));
+
+    // Other refusals and unknown runs are errors, and nothing is stored.
+    let forbidden = client.cancel_run("R3").await.unwrap().unwrap_err();
+    assert!(
+        matches!(
+            forbidden,
+            ClientError::Api(ApiError::Server { status: 403, .. })
+        ),
+        "{forbidden:?}"
+    );
+    assert_eq!(client.store().run("R3").unwrap(), None);
+    let missing = client.cancel_run("R9").await.unwrap().unwrap_err();
+    assert!(
+        matches!(missing, ClientError::Api(ApiError::Server { status: 404, .. })),
+        "{missing:?}"
+    );
+}
+
 fn plan_item(text: &str, state: RunPlanState) -> RunPlanItem {
     RunPlanItem {
         text: text.into(),

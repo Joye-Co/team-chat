@@ -17,6 +17,15 @@ use std::path::{Path, PathBuf};
 use tokio::task::JoinHandle;
 
 /// A 产出 version on disk, ready for the 产出 window.
+/// What [`Client::cancel_run`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancelRun {
+    /// The run was active and is now `cancelled`.
+    Cancelled,
+    /// The run had already ended (`conflict`); the cache now has its end.
+    AlreadyEnded,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ArtifactFolder {
     pub artifact_id: String,
@@ -353,6 +362,29 @@ impl Client {
                 });
             }
             Ok((entries, last))
+        })
+    }
+
+    /// Stops an active run (a person in the run's group). Stores the ended run and emits
+    /// [`ClientUpdate::RunsChanged`], so views show the end before the `run.updated` event
+    /// arrives. A run that already ended is not an error: the client reads the run again,
+    /// stores it and answers [`CancelRun::AlreadyEnded`].
+    pub fn cancel_run(&self, run_id: &str) -> JoinHandle<Result<CancelRun, ClientError>> {
+        let http = self.http();
+        let shared = self.shared().clone();
+        let id = run_id.to_string();
+        self.spawn(async move {
+            let (run, outcome) = match http.cancel_run(&id).await {
+                Ok(run) => (run, CancelRun::Cancelled),
+                Err(e) if e.is_conflict() => (http.run(&id).await?, CancelRun::AlreadyEnded),
+                Err(e) => return Err(e.into()),
+            };
+            shared.store.store_run(&run)?;
+            shared.emit(ClientUpdate::RunsChanged {
+                group_id: run.group_id.clone(),
+                topic_id: run.topic_id.clone(),
+            });
+            Ok(outcome)
         })
     }
 

@@ -432,6 +432,20 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
                 None => err(StatusCode::NOT_FOUND, "not_found"),
             }
         }
+        (&Method::POST, ["v1", "runs", id, "cancel"]) => match s.runs.get_mut(*id) {
+            Some((run, _)) if run.ended_at.is_some() => err(StatusCode::CONFLICT, "conflict"),
+            Some((run, _)) if run.bot_id == "forbidden-bot" => {
+                err(StatusCode::FORBIDDEN, "forbidden")
+            }
+            Some((run, _)) => {
+                run.status = chat_core::proto::RunStatus::Cancelled;
+                run.updated_at += 1;
+                run.ended_at = Some(run.updated_at);
+                run.summary = Some("已停止，没有完成。".into());
+                ok(&*run)
+            }
+            None => err(StatusCode::NOT_FOUND, "not_found"),
+        },
         (&Method::GET, ["v1", "runs", id, "events"]) => {
             let q: BTreeMap<String, u64> = query
                 .split('&')

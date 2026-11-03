@@ -37,7 +37,7 @@ pub use client::{
     Client, ClientConfig, ClientError, ClientUpdate, ConnectionState, DropLiveEvent, EditRequest,
     Notification, SearchRequest, SendFailure, SendRequest, TopicPatch, background,
 };
-pub use client_ext::ArtifactFolder;
+pub use client_ext::{ArtifactFolder, CancelRun};
 pub use files::{Phase, Progress, ProgressFn, UploadRequest, no_progress};
 pub use http::{ApiError, HttpClient};
 pub use runs::{ProcessItem, ProcessView};

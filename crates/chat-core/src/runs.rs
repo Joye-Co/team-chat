@@ -75,6 +75,19 @@ impl HttpClient {
         .await
     }
 
+    /// A person in the run's group: stops an active run (docs/protocol.md, "Bot runs"). The
+    /// machine gets `run.cancel` and the run ends as `cancelled` at once. Answers with the
+    /// ended run; `conflict` (409) when the run had already ended.
+    pub async fn cancel_run(&self, run_id: &str) -> ApiResult<BotRun> {
+        self.call::<(), _>(
+            Method::POST,
+            &format!("/v1/runs/{}/cancel", enc(run_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
     /// Owner: the raw CLI session of a run (gzip). 404 until the daemon uploaded it.
     pub async fn run_session(&self, run_id: &str) -> ApiResult<Vec<u8>> {
         let resp = self

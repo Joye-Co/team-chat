@@ -59,6 +59,14 @@ impl ApiError {
             _ => None,
         }
     }
+    /// The server refused the request because of the current state (409 `conflict`), for
+    /// example a run that already ended.
+    pub fn is_conflict(&self) -> bool {
+        matches!(
+            self,
+            ApiError::Server { status: 409, .. } | ApiError::Unexpected { status: 409 }
+        ) || self.code() == Some(ErrorCode::Conflict)
+    }
     pub fn is_unauthorized(&self) -> bool {
         matches!(
             self,
