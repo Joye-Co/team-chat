@@ -55,6 +55,10 @@ const ARTIFACT_ROW: Pixels = px(44.);
 const LABEL_ROW: Pixels = px(28.);
 const DIVIDER: Pixels = px(13.);
 const FOOTER: Pixels = px(40.);
+/// Corner radius of the palette surface (the Ask artboard).
+const RADIUS: Pixels = px(14.);
+/// Radius of a fill inside the surface's 1 pt edge.
+const INNER_RADIUS: Pixels = px(13.);
 /// The leading slot of every row.
 const SLOT: Pixels = px(32.);
 /// Rows per section while a query is typed.
@@ -1140,6 +1144,9 @@ impl AskPalette {
             .border_t_1()
             .border_color(k.line)
             .bg(k.raised)
+            // The dialog clips its content to a rectangle, not to its
+            // rounded edge: a fill must round its own bottom corners.
+            .rounded_b(INNER_RADIUS)
             .t_meta()
             .line_height(px(18.))
             .text_color(k.ink_3)
@@ -1259,6 +1266,7 @@ impl Render for AskPalette {
             .flex()
             .flex_col()
             .bg(k.bg)
+            .rounded(INNER_RADIUS)
             .text_color(k.ink)
             .child(
                 div()
@@ -1352,7 +1360,7 @@ pub fn open_with(
             .p_0()
             .bg(k.bg)
             .border_color(k.line)
-            .rounded(px(14.))
+            .rounded(RADIUS)
             .shadow(k.pop())
             .overflow_hidden()
             .child(view.clone())
