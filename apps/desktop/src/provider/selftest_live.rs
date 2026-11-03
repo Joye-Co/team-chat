@@ -7,6 +7,9 @@
 //! temporary folder that is removed at the end; the token is kept in memory
 //! only and never written to the report.
 //!
+//! With `--interact <dir>` it runs the 1.1 interaction and 引用提问 check of
+//! `selftest_interact` instead of the topic and message steps.
+//!
 //! With `--read-only` it only signs in with the token, connects, waits for the catch-up
 //! of every group and reports counts: no window, no topic, no message, no read
 //! position, so it is safe against production.
@@ -40,6 +43,9 @@ pub struct LiveArgs {
     pub token_file: PathBuf,
     pub report: PathBuf,
     pub read_only: bool,
+    /// `--interact <dir>`: the INTERACT 7.1 and 引用提问 live check
+    /// ([`super::selftest_interact`]), with its captures in `dir`.
+    pub interact: Option<PathBuf>,
 }
 
 /// Runs inside the app. Calls `finish(report_json, ok, cx)` at the end.
@@ -119,7 +125,26 @@ pub fn run(
         device_name: "selftest".into(),
     });
     let report = args.report.clone();
+    let interact = args.interact.clone();
     cx.spawn(async move |cx: &mut AsyncApp| {
+        if let Some(shots) = interact {
+            let result =
+                super::selftest_interact::drive(&provider, &services, &root, &shots, cx).await;
+            let (ok, json) = match result {
+                Ok(json) => (true, json),
+                Err((step, mut json)) => {
+                    json["ok"] = false.into();
+                    json["error"] = format!("timed out or failed at: {step}").into();
+                    (false, json)
+                }
+            };
+            cx.update(|cx| {
+                provider.sign_out_local_for_selftest();
+                finish(&report, json, ok, cx);
+            });
+            let _ = std::fs::remove_dir_all(&data_root);
+            return;
+        }
         let mut result = drive(&provider, &services, &root, login_at, started, cx).await;
         if let Ok(json) = result {
             provider.sign_out_local_for_selftest();

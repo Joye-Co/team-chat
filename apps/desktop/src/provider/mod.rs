@@ -43,6 +43,7 @@ mod realtime;
 mod realtime_live;
 #[cfg(test)]
 mod search_live;
+pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
