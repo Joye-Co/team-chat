@@ -58,8 +58,12 @@ const UpFrame = z.discriminatedUnion("t", [
   RunSessionFrame.extend({ source: z.string().max(32).optional() }),
 ]);
 type UpFrame = z.infer<typeof UpFrame>;
-/** A run frame with a seq, as stored by BotDesk. */
-export type SeqFrame = Extract<UpFrame, { seq: number }>;
+/**
+ * A run frame with a seq, as stored by BotDesk. `serverAt` (set here, never by the daemon) is
+ * when the daemon made a RunEvent `output`, on the server clock: the frame's machine-clock `at`
+ * moved by the offset the last heartbeat showed, and never later than its arrival.
+ */
+export type SeqFrame = Extract<UpFrame, { seq: number }> & { serverAt?: number };
 
 type RunState = "assigned" | "accepted" | "done" | "closed" | "lost";
 type RunRow = {
@@ -135,6 +139,13 @@ export class MachineLink extends DurableObject<BotsEnv> {
 
   private meta(key: string): string | null {
     return this.sql.exec<{ value: string }>("SELECT value FROM meta WHERE key = ?", key).toArray()[0]?.value ?? null;
+  }
+
+  /** A machine-clock time on the server clock, at most `now`; `now` before the first heartbeat. */
+  private serverTime(machineAt: number, now: number): number {
+    const offset = Number(this.meta("clock_offset"));
+    if (!this.meta("clock_offset") || !Number.isFinite(offset)) return now;
+    return Math.min(now, machineAt + offset);
   }
 
   private setMeta(key: string, value: string): void {
@@ -273,6 +284,8 @@ export class MachineLink extends DurableObject<BotsEnv> {
     }
     switch (f.t) {
       case "heartbeat":
+        // The machine clock against the server's (a heartbeat is sent when it is made).
+        this.setMeta("clock_offset", String(now - f.at));
         this.setMeta("health", JSON.stringify(f.health));
         this.setMeta("last_heartbeat_at", String(now));
         this.renew(
@@ -310,7 +323,7 @@ export class MachineLink extends DurableObject<BotsEnv> {
           this.send(ws, { t: "ack", runId: f.runId, seq: r.acked_seq });
           return;
         }
-        this.enqueue(r, f);
+        this.enqueue(r, f.t === "run.event" && f.event.type === "output" ? { ...f, serverAt: this.serverTime(f.at, now) } : f);
       }
     }
   }

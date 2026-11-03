@@ -114,7 +114,7 @@ export abstract class DeskEvents extends DeskRuns {
         }
         case "output":
           // chat-run (1.1): post or patch a card, resolve an event, push or answer a 产出.
-          await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f.at);
+          await this.output(r, ev as { outputId?: unknown; op?: unknown; body?: unknown }, f);
           break;
         case "input.accepted": {
           this.sql.exec("UPDATE inputs SET accepted = 1 WHERE id = ? AND run_id = ?", String(ev.inputId), r.id);

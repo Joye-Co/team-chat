@@ -255,4 +255,34 @@ describe("chat-run outputs", () => {
     for (const x of [c, cb, d]) x.close();
   });
 
+  it("measure an output's age on the server clock: a slow machine clock never drops it, and a stale output is refused (daemon F3)", async () => {
+    const w = await world();
+    const { d } = await Daemon.connect(w.machineToken, { features: ["interact", "output"] });
+    const { c } = await Client.connect(w.human.token, INTERACT);
+    const result = (outputId: string) => d.next((f) => f.t === "run.output.result" && f.outputId === outputId);
+    const r = await startRun(w, d, c);
+    // The machine clock is 5 minutes behind the server.
+    const skew = -300_000;
+    const machineNow = () => Date.now() + skew;
+    d.send({ t: "heartbeat", at: machineNow(), health: HEALTH, runs: [{ runId: r.runId, lastSeq: 0, done: false }] });
+    await d.next((f) => f.t === "heartbeat.ack");
+    const card: CardV2 = { v: 2, rev: 1, intent: "info", title: "月报", fallback: "月报", blocks: [{ type: "text", id: "t", text: "1" }] } as CardV2;
+    const send = (outputId: string, at: number) => {
+      const seq = (d.seq.get(r.runId) ?? 0) + 1;
+      d.seq.set(r.runId, seq);
+      d.send({ t: "run.event", runId: r.runId, seq, at, event: { type: "output", outputId, op: "card.post", body: { card } } });
+    };
+    send("o1", machineNow());
+    const fresh = await result("o1");
+    expect(fresh, JSON.stringify(fresh)).toMatchObject({ ok: true, result: { messageId: expect.any(String) } });
+
+    // An output that the machine made 20 s ago (chat-run gave up after 15 s), replayed now.
+    send("o2", machineNow() - 20_000);
+    const stale = await result("o2");
+    expect(stale, JSON.stringify(stale)).toMatchObject({ ok: false, error: { code: "conflict", reason: "output.expired" } });
+    await sleep(200);
+    const posts = c.frames.filter((f) => f.t === "event" && f.event?.type === "message.created" && f.event.data.message.authorId === w.bot.id);
+    expect(posts).toHaveLength(1);
+    for (const x of [c, d]) x.close();
+  });
 });

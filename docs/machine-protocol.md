@@ -367,8 +367,12 @@ Server rules (BotDesk):
   `artifact.data {artifactId, version, data, baseDataRev?, cause?}`, `artifact.reply {eventId, ok,
   payload? | error?}` or `{eventId, decline: "…"}`. Without `clientPatchId` / `clientPushId` in
   the body, the key is `o:{runId}:{outputId}`, so a later run's `o1` is never a repeat. An unknown op gets `invalid` with reason
-  `output.unknown_op`; an aside run gets `forbidden` (`output.read_only`). An `output` older than
-  60 s when it is applied is not performed again.
+  `output.unknown_op`; an aside run gets `forbidden` (`output.read_only`). The server measures an
+  `output`'s age on its own clock: the frame's `at` moved by the clock offset of the last
+  `heartbeat` (or the arrival time before the first heartbeat), never later than the arrival. An
+  `output` older than 12 s when it is applied is not performed; it gets `ok: false` with code
+  `conflict` and reason `output.expired`, so an output that `chat-run` reported as timed out (15 s)
+  is never done later, and a machine clock behind the server drops nothing.
 
 ## Raw session upload
 

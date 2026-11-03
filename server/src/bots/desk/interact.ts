@@ -24,6 +24,8 @@ export const SHORT_RUNS_PER_CARD_HOUR = 6;
 export const SHORT_RUNS_PER_BOT_HOUR = 30;
 /** How long `chat-run` waits; an output older than this is not answered any more. */
 export const OUTPUT_TIMEOUT_MS = 15_000;
+/** An output is performed only this soon after the daemon made it, on the server clock, so its result reaches `chat-run` in time. */
+export const OUTPUT_DEADLINE_MS = OUTPUT_TIMEOUT_MS - 3000;
 
 const HOUR_MS = 3600_000;
 
@@ -318,12 +320,16 @@ export abstract class DeskInteract extends DeskTakeover {
   // -------------------------------------------------------------------------
 
   /** Performs one RunEvent `output` as the bot and answers it with `run.output.result`. */
-  protected override async output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, at: number): Promise<void> {
+  protected override async output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, f: { at: number; serverAt?: number }): Promise<void> {
     const outputId = typeof ev.outputId === "string" ? ev.outputId : "";
     if (!outputId) return;
-    // An output replayed long after `chat-run` gave up is not done again.
-    if (Date.now() - at > OUTPUT_TIMEOUT_MS * 4) return;
-    const res = await this.performOutput(r, String(ev.op ?? ""), outputId, ev.body);
+    // An output that `chat-run` already reported as timed out is not performed (for example one
+    // replayed after a reconnect). The age is on the server clock (link `serverAt`); a frame
+    // stored before that field keeps the old machine-clock rule.
+    const expired = f.serverAt !== undefined ? Date.now() - f.serverAt > OUTPUT_DEADLINE_MS : Date.now() - f.at > OUTPUT_TIMEOUT_MS * 4;
+    const res: Result<unknown> = expired
+      ? { ok: false, error: { code: "conflict", reason: "output.expired", message: "chat-run stopped waiting for this output; it was not performed" } }
+      : await this.performOutput(r, String(ev.op ?? ""), outputId, ev.body);
     const frame: Record<string, unknown> = { t: "run.output.result", runId: r.id, outputId, ok: res.ok };
     if (res.ok) {
       if (res.value !== undefined) frame.result = res.value;

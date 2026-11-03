@@ -473,5 +473,5 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
   protected abstract markStalled(r: RunRow): Promise<void>;
   protected abstract start(m: TopicMessage, followUpOf?: RunRow, followUps?: { authorId: string; body: string }[]): Promise<void>;
   /** A RunEvent `output` (`chat-run`, 1.1): performed and answered by the interaction module. */
-  protected abstract output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, at: number): Promise<void>;
+  protected abstract output(r: RunRow, ev: { outputId?: unknown; op?: unknown; body?: unknown }, f: { at: number; serverAt?: number }): Promise<void>;
 }
