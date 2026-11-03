@@ -637,10 +637,21 @@ fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
         CardState::WaitingOn => glyph(Lucide::Hourglass),
         CardState::Executing { progress, .. } if progress.waiting => glyph(Lucide::Hourglass),
         CardState::Sending { .. } => ui::motion::spinner().color(t.mark).into_any_element(),
-        CardState::Answered { .. } | CardState::Done { .. } => ui::motion::check_draw(
+        CardState::Answered { answer }
+        | CardState::Done {
+            answer: Some(answer),
+        } => ui::motion::check_mark(
             ctx.id("strip-check"),
             ui::icon(Lucide::CircleCheck, px(16.), t.mark),
             px(16.),
+            ui::motion::just_answered(answer.at),
+            cx,
+        ),
+        CardState::Done { answer: None } => ui::motion::check_mark(
+            ctx.id("strip-check"),
+            ui::icon(Lucide::CircleCheck, px(16.), t.mark),
+            px(16.),
+            false,
             cx,
         ),
         CardState::Executing { .. } => div()
@@ -1207,7 +1218,14 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
                 .children(body),
         )
         .children(footer);
-    ui::motion::fade_in(ctx.id("enter"), theme::motion::FAST, card, cx)
+    // In a 话题 the timeline row handles arrival; elsewhere the card fades
+    // in once per session, not on every remount.
+    if ctx.mode == CardMode::Topic {
+        return card.into_any_element();
+    }
+    ui::motion::once(ctx.id("enter"), theme::motion::FAST, card, |el, t| {
+        el.opacity(theme::motion::out_fn()(t))
+    })
 }
 
 // ---------------------------------------------------------------------------

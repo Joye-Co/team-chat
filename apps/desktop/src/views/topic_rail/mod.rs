@@ -1052,9 +1052,11 @@ impl Render for TopicRail {
         if cards.is_empty() {
             return stub_body(Lucide::PanelRight, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
         }
+        // One id per place, not per 话题: the rail rises on its first paint
+        // only, never again on a 话题 switch (§12).
         let cards = cards.into_iter().enumerate().map(|(i, el)| {
             ui::motion::rise(
-                SharedString::from(format!("topic-rail-{t}-{i}")),
+                SharedString::from(format!("topic-rail-{i}")),
                 i + 1,
                 ui::card(cx).flex_none().p(space::S12).child(el),
                 cx,

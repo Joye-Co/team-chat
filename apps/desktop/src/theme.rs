@@ -838,6 +838,14 @@ pub mod motion {
     pub const BAR_GROW: Duration = Duration::from_millis(400);
     /// The blink half-period of a live terminal cursor (`tc-blink`).
     pub const CURSOR_BLINK: Duration = Duration::from_millis(500);
+
+    // dfix-motion (1.1.0): chart lines, and what counts as just answered.
+    /// A chart line draws in once (§12: 600–700 ms).
+    pub const LINE_DRAW: Duration = Duration::from_millis(650);
+    /// Each further chart series starts this much later.
+    pub const SERIES_STAGGER: Duration = Duration::from_millis(50);
+    /// An answer this recent draws its check; older ones show it still.
+    pub const JUST_ANSWERED: Duration = Duration::from_secs(4);
 }
 
 // ---------------------------------------------------------------------------

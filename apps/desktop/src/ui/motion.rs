@@ -144,32 +144,27 @@ pub fn delayed_progress(t: f32, delay: Duration, run: Duration) -> f32 {
 }
 
 /// First paint: item `index` of a list rises in ([`motion::RISE`] up, with
-/// opacity) after its stagger delay, once per `id`.
+/// opacity) after its stagger delay, once per `id` in this session: a page,
+/// topic or row that comes back (or scrolls back into a virtual list) shows
+/// at rest (§12: switching pages or topics is never animated).
 pub fn rise<E: IntoElement + Styled + 'static>(
     id: impl Into<ElementId>,
     index: usize,
     element: E,
     cx: &App,
 ) -> AnyElement {
-    use gpui::{Animation, AnimationExt as _};
     let id = id.into();
     let delay = stagger_delay(index);
     if cx.reduce_motion() {
-        return Fade {
-            id,
-            duration: motion::FAST,
-            element: Some(element),
-        }
-        .into_any_element();
+        return once(id, motion::FAST, element, |el, t| {
+            el.opacity(motion::out_fn()(t))
+        });
     }
     let run = motion::RISE_IN;
-    element
-        .with_animation(
-            id,
-            Animation::new(delay + run).with_easing(move |t| delayed_progress(t, delay, run)),
-            |el, p| el.opacity(p).relative().top(motion::RISE * (1. - p)),
-        )
-        .into_any_element()
+    once(id, delay + run, element, move |el, t| {
+        let p = delayed_progress(t, delay, run);
+        el.opacity(p).relative().top(motion::RISE * (1. - p))
+    })
 }
 
 /// A pane or the side chat enters: opacity plus [`motion::PANE_TRAVEL`] from
@@ -222,32 +217,64 @@ pub fn breathe<E: IntoElement + Styled + 'static>(
         .into_any_element()
 }
 
-/// An answered card's check draws in: the glyph is revealed left to right
-/// in a box `width` wide over [`motion::CHECK_DRAW`], once per `id`. With
-/// Reduce motion it fades in instead.
+/// Whether an answer made at `at` is recent enough to draw its check
+/// ([`motion::JUST_ANSWERED`]); older answers show the check at rest.
+pub fn just_answered(at: crate::data::Millis) -> bool {
+    let age = chrono::Local::now().timestamp_millis() - at;
+    let window = motion::JUST_ANSWERED.as_millis() as i64;
+    (-window..=window).contains(&age)
+}
+
+/// An answered card's check: the glyph in a fixed box `width` wide, so the
+/// text beside it never moves. With `draw` it is revealed left to right over
+/// [`motion::CHECK_DRAW`], once per `id` in this session (§12: only
+/// answering draws the check); otherwise, and for a check already drawn, it
+/// shows at rest. With Reduce motion the draw is a fade.
+pub fn check_mark(
+    id: impl Into<ElementId>,
+    glyph: impl IntoElement + 'static,
+    width: gpui::Pixels,
+    draw: bool,
+    cx: &App,
+) -> AnyElement {
+    use gpui::ParentElement as _;
+    let id = id.into();
+    let frame = |inner: AnyElement| {
+        gpui::div()
+            .flex_none()
+            .w(width)
+            .flex()
+            .items_center()
+            .child(inner)
+            .into_any_element()
+    };
+    let inner = gpui::div().flex_none().overflow_hidden().child(glyph);
+    if !draw {
+        return frame(inner.w(width).into_any_element());
+    }
+    if cx.reduce_motion() {
+        return frame(once(id, motion::FAST, inner.w(width), |el, t| {
+            el.opacity(motion::out_fn()(t))
+        }));
+    }
+    frame(once(id, motion::CHECK_DRAW, inner, move |el, t| {
+        el.w(width * motion::out_fn()(t))
+    }))
+}
+
+/// [`check_mark`] that draws once per `id` in this session.
 pub fn check_draw(
     id: impl Into<ElementId>,
     glyph: impl IntoElement + 'static,
     width: gpui::Pixels,
     cx: &App,
 ) -> AnyElement {
-    use gpui::{Animation, AnimationExt as _, ParentElement as _};
-    let id = id.into();
-    let boxed = gpui::div().flex_none().overflow_hidden().child(glyph);
-    if cx.reduce_motion() {
-        return fade_in(id, motion::FAST, boxed.w(width), cx);
-    }
-    boxed
-        .with_animation(
-            id,
-            Animation::new(motion::CHECK_DRAW).with_easing(motion::out_fn()),
-            move |el, t| el.w(width * t),
-        )
-        .into_any_element()
+    check_mark(id, glyph, width, true, cx)
 }
 
 /// A chart bar grows from zero to `height` once over [`motion::BAR_GROW`]
-/// after `delay`. With Reduce motion it is drawn at its height.
+/// after `delay`, once per `id` in this session. With Reduce motion it is
+/// drawn at its height.
 pub fn bar_grow<E: IntoElement + Styled + 'static>(
     id: impl Into<ElementId>,
     element: E,
@@ -255,18 +282,116 @@ pub fn bar_grow<E: IntoElement + Styled + 'static>(
     delay: Duration,
     cx: &App,
 ) -> AnyElement {
-    use gpui::{Animation, AnimationExt as _};
     if cx.reduce_motion() {
         return element.h(height).into_any_element();
     }
     let run = motion::BAR_GROW;
-    element
-        .with_animation(
-            id.into(),
-            Animation::new(delay + run).with_easing(move |t| delayed_progress(t, delay, run)),
-            move |el, p| el.h(height * p),
-        )
-        .into_any_element()
+    once(id, delay + run, element, move |el, t| {
+        el.h(height * delayed_progress(t, delay, run))
+    })
+}
+
+/// When each one-shot animation of this session started, by id. GPUI keeps
+/// the state of `with_animation` only while its element is drawn in every
+/// frame, so a remount (a page, topic or pane that comes back, a row that
+/// scrolls back into a virtual list) would play it again.
+#[derive(Default)]
+struct Played(std::collections::HashMap<ElementId, Instant>);
+
+impl gpui::Global for Played {}
+
+/// Runs `apply` with linear progress 0 → 1 over `duration`, once per `id`
+/// in this session: the clock starts the first time the id is drawn, and a
+/// later draw continues it or shows the end state. The id should name the
+/// thing that animates (a message, a card, a slot), not the place.
+pub fn once<E: IntoElement + 'static>(
+    id: impl Into<ElementId>,
+    duration: Duration,
+    element: E,
+    apply: impl Fn(E, f32) -> E + 'static,
+) -> AnyElement {
+    Once {
+        id: id.into(),
+        duration,
+        element: Some(element),
+        apply: Box::new(apply),
+    }
+    .into_any_element()
+}
+
+struct Once<E> {
+    id: ElementId,
+    duration: Duration,
+    element: Option<E>,
+    apply: Box<dyn Fn(E, f32) -> E>,
+}
+
+impl<E: IntoElement + 'static> IntoElement for Once<E> {
+    type Element = Self;
+
+    fn into_element(self) -> Self::Element {
+        self
+    }
+}
+
+impl<E: IntoElement + 'static> Element for Once<E> {
+    type RequestLayoutState = AnyElement;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, Self::RequestLayoutState) {
+        let now = cx.background_executor().now();
+        let start = *cx
+            .default_global::<Played>()
+            .0
+            .entry(self.id.clone())
+            .or_insert(now);
+        let t = fade_progress(now.saturating_duration_since(start), self.duration);
+        if t < 1.0 {
+            window.request_animation_frame();
+        }
+        let element = self.element.take().expect("laid out once");
+        let mut element = (self.apply)(element, t).into_any_element();
+        (element.request_layout(window, cx), element)
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: gpui::Bounds<gpui::Pixels>,
+        element: &mut Self::RequestLayoutState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        element.prepaint(window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: gpui::Bounds<gpui::Pixels>,
+        element: &mut Self::RequestLayoutState,
+        _: &mut Self::PrepaintState,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        element.paint(window, cx);
+    }
 }
 
 /// A one-shot opacity fade that runs whatever `cx.reduce_motion()` says.
@@ -628,6 +753,47 @@ mod tests {
         assert!((turn_at(quarter) - 0.25).abs() < 1e-3);
         assert!((turn_at(quarter * 2) - 0.5).abs() < 1e-3);
         assert!((turn_at(motion::SPINNER_TURN + quarter) - 0.25).abs() < 1e-3);
+    }
+
+    #[test]
+    fn only_a_recent_answer_draws_its_check() {
+        let now = chrono::Local::now().timestamp_millis();
+        assert!(just_answered(now));
+        assert!(just_answered(now - 1_000));
+        assert!(!just_answered(now - 60_000), "yesterday's answer is at rest");
+    }
+
+    struct Rises;
+
+    impl gpui::Render for Rises {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            cx: &mut gpui::Context<Self>,
+        ) -> impl IntoElement {
+            rise("a-card", 0, gpui::div().size(gpui::px(10.)), cx)
+        }
+    }
+
+    /// A one-shot animation runs once per id in the session: a second
+    /// window (a remount) with the same id, after the first ran out, asks
+    /// for no frames.
+    #[gpui::test]
+    fn a_rise_plays_once_per_id(cx: &mut gpui::TestAppContext) {
+        let size = gpui::size(gpui::px(100.), gpui::px(100.));
+        let first = cx.open_window(size, |_, _| Rises);
+        cx.run_until_parked();
+        let frames = first
+            .update(cx, |_, window, cx| window.simulate_next_frame(cx))
+            .unwrap();
+        assert!(frames > 0, "the first paint rises");
+        cx.executor().advance_clock(Duration::from_secs(2));
+        let again = cx.open_window(size, |_, _| Rises);
+        cx.run_until_parked();
+        let frames = again
+            .update(cx, |_, window, cx| window.simulate_next_frame(cx))
+            .unwrap();
+        assert_eq!(frames, 0, "a remount shows the card at rest");
     }
 
     struct Host;

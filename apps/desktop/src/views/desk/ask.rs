@@ -504,10 +504,12 @@ fn record_parts(
     cx: &mut Context<DeskPage>,
 ) -> Vec<AnyElement> {
     let k = theme::colors(cx);
-    let check = ui::motion::check_draw(
+    // Only the answer I just made draws; yesterday's shows at rest.
+    let check = ui::motion::check_mark(
         SharedString::from(format!("desk-check-{key}")),
         ui::icon(Lucide::Check, px(16.), k.ok),
         px(16.),
+        ui::motion::just_answered(done.at),
         cx,
     );
     let meta = if done.sent {
@@ -515,7 +517,6 @@ fn record_parts(
     } else {
         c::DESK_JUST_NOW.to_string()
     };
-    let _ = done.at;
     let mut parts = vec![
         check,
         div()
@@ -553,12 +554,7 @@ fn record_parts(
 fn record_band(key: &str, done: &Answered, asker: &str, cx: &mut Context<DeskPage>) -> AnyElement {
     let parts = record_parts(key, done, asker, cx);
     let band = footer_band(cx).py(space::S12).t_small().children(parts);
-    ui::motion::fade_in(
-        SharedString::from(format!("desk-record-{key}")),
-        theme::motion::FADE,
-        band,
-        cx,
-    )
+    record_fade(key, done, band)
 }
 
 /// The record in place of the options.
@@ -581,11 +577,19 @@ fn record_inline(
         .bg(k.sunken)
         .t_small()
         .children(parts);
-    ui::motion::fade_in(
+    record_fade(key, done, row)
+}
+
+/// A record fades in once, when its answer was just made.
+fn record_fade(key: &str, done: &Answered, el: gpui::Div) -> AnyElement {
+    if !ui::motion::just_answered(done.at) {
+        return el.into_any_element();
+    }
+    ui::motion::once(
         SharedString::from(format!("desk-record-{key}")),
         theme::motion::FADE,
-        row,
-        cx,
+        el,
+        |el, t| el.opacity(theme::motion::out_fn()(t)),
     )
 }
 

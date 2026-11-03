@@ -704,6 +704,7 @@ fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
         _ => return div().into_any_element(),
     };
     let mine = ctx.me.as_deref() == Some(actor.as_str());
+    let fresh = !sending && at.is_some_and(ui::motion::just_answered);
     let choice = choice_text(ctx.card, &action, inputs.as_ref());
     let text = if mine {
         fill(c::RECORD_MINE, &[("choice", &choice)])
@@ -753,10 +754,11 @@ fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
         .child(if sending {
             ui::motion::spinner().color(k.ink_3).into_any_element()
         } else {
-            ui::motion::check_draw(
+            ui::motion::check_mark(
                 ctx.id("record-check"),
                 ui::icon(Lucide::Check, px(16.), k.ok),
                 px(16.),
+                fresh,
                 cx,
             )
         })
@@ -791,17 +793,18 @@ fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
                 .children(action_el),
         );
     let details = (expanded).then(|| answered_fields(ctx, inputs.as_ref(), cx));
-    ui::motion::rise(
-        ctx.id("record-rise"),
-        0,
-        div()
-            .flex()
-            .flex_col()
-            .gap(space::S8)
-            .child(line)
-            .children(details),
-        cx,
-    )
+    let body = div()
+        .flex()
+        .flex_col()
+        .gap(space::S8)
+        .child(line)
+        .children(details);
+    // Only an answer made just now rises in; older records are at rest.
+    if fresh {
+        ui::motion::rise(ctx.id("record-rise"), 0, body, cx)
+    } else {
+        body.into_any_element()
+    }
 }
 
 /// The submitted values as key-value rows.
