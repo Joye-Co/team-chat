@@ -109,6 +109,12 @@ await bot.start();
 | `history`, `typing`, `setFollow`, `pressCard` | the other frames |
 | `setPlan(target, plan)` / `ctx.setPlan(plan)` | the plan of my current run in a topic (below) |
 | `endRun(target, status, summary?)` / `ctx.endRun(status, summary?)` | end my current run |
+| `postCardV2(target, card)` / `updateCardV2(groupId, messageId, card)` / `ctx.ask(card)` | Card v2 (1.1, below) |
+| `answerCard(groupId, { messageId, rev, actionId, inputs?, editedValues? })` | answer another member's v2 card |
+| `ack(groupId, messageId, emoji?)` / `ctx.ack()` | react (default 👀) instead of an "on it" line |
+| `done(target, card)` / `ctx.done(card)` | post the done card and end my run |
+| `setAcceptance(target, items)` / `ctx.setAcceptance(items)` | the 验收标准 of my current run |
+| `http.publishHtml({ ..., events, runId })` | an interactive 产出 whose page sends events back |
 
 Cards, files, 产出, `topic.follow`, `waitingOn` and HTTP send are V1 protocol extensions
 (docs/protocol.md). On a server build without them the call fails with the server's error.
@@ -145,6 +151,68 @@ await bot.endRun({ groupId, topicId }, "done", "已发出");
 Runner-backed bots get `conflict` from `setPlan`: their runner sets the plan from the coding
 CLI's own to-do list (Claude Code's TodoWrite, Codex plan updates).
 
+## 3a. 1.1: Card v2, answers, side chats, page events
+
+These need a 1.1 server. `examples/ask-bot.ts` uses all of them.
+
+**The output contract.** Say you saw a request with a reaction, not a text line
+(`ctx.ack()`, 👀). Keep progress in the plan (`ctx.setPlan`), not in a streaming message:
+`stream()` still works but is deprecated for work reports. End with one result card,
+`ctx.done(...)`, which posts a Card v2 with intent `done` and ends the run (`failed: true` ends
+it as failed):
+
+```ts
+await ctx.done({
+  title: "做完了",
+  summary: "登录页改好了,测试通过",            // text block, fallback and run summary
+  evidence: [{ label: "测试 128/128 通过", state: "pass" }, { label: "截图", fileId }],
+  refs: [{ label: "PR #42", target: { kind: "pr", url: "https://github.com/o/r/pull/42", number: 42 } }],
+  metrics: [{ label: "首屏", value: 1.2, unit: "s", delta: -0.4, better: "down" }],
+});
+```
+
+**Builders.** `askCard`, `decisionCard`, `approvalCard`, `draftCard`, `formCard` and `doneCard`
+make valid v2 cards and throw `ChatError` `invalid` when a card does not fit the protocol
+(docs/protocol.md, "Cards v2"). Ask builders take `from` (member ids, `"requester"`, `"owners"`:
+who may answer), `expiresAt`, `record` (the answer is a group decision, 群里的决定) and
+`irreversible` (`{ verb, target, consequence, typeToConfirm? }`). Their ids are fixed, in
+`CARD_IDS`: the decision block is `choice`, the draft block `draft`, the actions `submit`,
+`approve`, `deny` and `cancel`. Free-text options and input choices get ids `o1`, `o2`, ...
+The server derives a v1 card for 1.0.x clients; an approval (no inputs) keeps its buttons there.
+
+**Answers.** `onCardAnswer` gets every `card.answered` on my v2 cards, also after a restart
+(the SDK remembers its card messages). A press on a v2 card by an old client arrives here too,
+with no inputs. Type the inputs with a generic and read them with the helpers:
+
+```ts
+bot.onCardAnswer<{ choice: string; count: number }>(async (ctx) => {
+  if (ctx.cancelled) return;                     // a cancel action ("deny", "cancel")
+  ctx.choice();                                  // first chosen option of block "choice"
+  ctx.number("count"); ctx.text("note"); ctx.bool("notify"); ctx.draft();   // inputs by block id
+  await ctx.resolve();                           // edit the card: rev + 1, no buttons
+});
+```
+
+The values come from the client: check them. `ctx.card` is the answered card when this process
+saw it (sent or caught up); `resolve(change, base)` needs it or `base`. The server takes only
+the first answer to a rev of an ask and only from members that `ask.from` names.
+
+**Side chats (单独问).** A member can ask a bot privately about a topic: the question goes to
+their DM with the bot, in a topic whose `contextOf` names the source topic and the seq they
+read up to. `onAside` gets these messages, @ or not (without an `onAside` handler they go to
+`onMention`). `ctx.aside` is the context and `ctx.source()` reads the source topic up to
+`uptoSeq`, oldest first. Answer with `ctx.reply`: it stays in the DM. Never post into the source
+topic from a side chat; the member does that with the suggestion button.
+
+**Page events.** A bot's 产出 page may send events back when its version declares them:
+`http.publishHtml({ ..., events: [{ name: "pick", label: "选这个" }] })`. `onArtifactEvent`
+gets each `artifact.evented` on my 产出 (`ctx.name`, `ctx.payload`, `ctx.actorId`). A page event
+never approves anything: ask with a Card v2 when you need a decision.
+
+**Acceptance criteria (验收标准).** `ctx.setAcceptance([{ text, state: "pending" | "pass" |
+"fail", evidence? }])` replaces the list of the current run (at most 20) and starts a run when
+there is none. Members see it in the live view. It uses `PUT /v1/runs/:id/acceptance`.
+
 ## 4. One-shot scripts (HTTP)
 
 `examples/notify.sh` posts one message with curl:
@@ -162,7 +230,9 @@ From TypeScript: `new HttpClient({ url, token }).postMessage(groupId, { body, cl
 `cd packages/bot-sdk && bun test` starts its own `wrangler dev` of `server/` on port 8795 (with
 an empty database in a temp folder), and checks mention, reply, follow, streaming, topic status,
 reconnect after a server restart, catch-up after a bot restart, handler re-runs without
-duplicates, and run plans (set, replaced, ended). `bun test/node-smoke.ts` runs the echo example under Node.
+duplicates, run plans (set, replaced, ended), and the 1.1 features: v2 card answers with
+inputs, a v1 press on a v2 card, `resolve`, the done card, side chats and page events.
+`bun test/node-smoke.ts` runs the echo example under Node.
 
 ---
 
@@ -235,6 +305,29 @@ bun examples/echo-bot.ts          # 或者:node examples/echo-bot.ts
 机器人调用会得到 `conflict`,它们的计划由执行器从 CLI 自己的待办列表(Claude Code 的 TodoWrite、
 Codex 的计划更新)生成。
 
+**1.1:卡片 v2、回答、单独问、页面事件**(需要 1.1 服务器,示例见 `examples/ask-bot.ts`):
+
+- **交付方式**:收到请求先用表情回应(`ctx.ack()`,👀),不要发「收到」;进度放在计划里
+  (`ctx.setPlan`),不用流式消息(`stream()` 仍可用,但不再推荐用来汇报工作);最后用
+  `ctx.done({ title, summary, evidence, refs, metrics })` 发一张「做完了」卡片(Card v2,intent
+  `done`)并结束这次运行,`failed: true` 则以失败结束。
+- **卡片构造函数**:`askCard`、`decisionCard`、`approvalCard`、`draftCard`、`formCard`、`doneCard`
+  生成合法的 v2 卡片,不合协议时抛出 `ChatError`(`invalid`)。`from` 指定谁能回答(成员 id、
+  `"requester"`、`"owners"`),`record: true` 表示答案是群里的决定,`irreversible` 说明不可撤销的
+  后果。固定 id 见 `CARD_IDS`:选择块 `choice`、草稿块 `draft`、按钮 `submit`/`approve`/`deny`/
+  `cancel`;纯文字选项的 id 是 `o1`、`o2`……
+- **回答**:`onCardAnswer` 收到我的 v2 卡片的每个回答(重启后也能收到),旧客户端按 v2 卡片的
+  按钮也会到这里(没有输入)。用 `ctx.choice()`、`ctx.number(id)`、`ctx.text(id)`、`ctx.bool(id)`、
+  `ctx.draft()` 读取输入,`ctx.cancelled` 表示取消,`ctx.resolve()` 把卡片改成已回答(rev 加 1,
+  去掉按钮)。输入来自客户端,使用前要检查。
+- **单独问**:成员可以在和机器人的私聊里单独问某个话题,这个私聊话题的 `contextOf` 指向原话题和
+  读到的位置。`onAside` 收到这些消息(不用 @;没有 `onAside` 时交给 `onMention`),`ctx.source()`
+  读取原话题到 `uptoSeq` 为止的消息。用 `ctx.reply` 回答,只留在私聊里;不要往原话题发消息。
+- **页面事件**:`http.publishHtml({ ..., events: [{ name, label }] })` 声明产出页面可以发回的事件,
+  `onArtifactEvent` 收到它们。页面事件不能当作批准:需要决定时发 Card v2 提问。
+- **验收标准**:`ctx.setAcceptance([{ text, state, evidence? }])` 替换当前运行的验收标准(最多 20 条),
+  成员在实时查看里看到。
+
 卡片、文件、产出、`topic.follow`、`waitingOn` 和 HTTP 发消息是
 V1 协议扩展(docs/protocol.md);服务器没有实现时,调用会返回服务器的错误。
 
@@ -253,5 +346,5 @@ TITLE="夜间构建" examples/notify.sh <groupId> "构建 142 通过"
 ## 5. 测试
 
 `cd packages/bot-sdk && bun test` 会在 8795 端口启动自己的 `wrangler dev`(临时目录里的空数据库),
-检查 @ 提及、回复、关注、流式回复、话题状态、服务器重启后重连、机器人重启后补收,以及处理函数重跑
-不重复发消息。`bun test/node-smoke.ts` 用 Node 运行 echo 示例。
+检查 @ 提及、回复、关注、流式回复、话题状态、服务器重启后重连、机器人重启后补收、处理函数重跑
+不重复发消息,以及 1.1 的卡片回答、交付卡片、单独问和页面事件。`bun test/node-smoke.ts` 用 Node 运行 echo 示例。
