@@ -813,6 +813,14 @@ impl CoreProvider {
                 }
             }
             ClientUpdate::SearchResults { .. } | ClientUpdate::SearchFailed { .. } => {}
+            // 1.1 interaction loop: the card and 产出 host tracks handle these.
+            ClientUpdate::CardEventAcked { .. }
+            | ClientUpdate::ArtifactEventAcked { .. }
+            | ClientUpdate::CardEvent(_)
+            | ClientUpdate::InteractionResolved(_)
+            | ClientUpdate::ArtifactEvent(_)
+            | ClientUpdate::ArtifactData(_)
+            | ClientUpdate::ArtifactReply(_) => {}
         }
     }
 

@@ -76,6 +76,12 @@ mod tests {
             inputs: Some(inputs),
             edited_values: None,
             actor_id: "u1".into(),
+            answer_id: None,
+            ask_id: None,
+            event_id: None,
+            event: None,
+            block_id: None,
+            value: None,
         };
         let t = cli_text("同意", Some(&a), None);
         assert!(t.starts_with("同意\n\nCard answer"));

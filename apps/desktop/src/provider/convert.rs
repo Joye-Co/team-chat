@@ -170,6 +170,7 @@ pub fn to_file_ref(f: &crate::data::FileAttachment) -> proto::FileRef {
         width: f.width,
         height: f.height,
         sha256: f.sha256.clone(),
+        media: None,
     }
 }
 

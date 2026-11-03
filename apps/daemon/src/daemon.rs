@@ -579,6 +579,11 @@ impl Daemon {
                 }
             }
             Down::Error { error } => log!("server error {}: {}", error.code, error.message),
+            // 1.1 interaction loop: this daemon does not report "interact" or "output" yet, so
+            // the server does not send these; ignore them if it does.
+            Down::RunAnswer(_) | Down::RunInteraction(_) | Down::RunOutputResult(_) => {
+                log!("ignored interaction frame")
+            }
         }
     }
 
