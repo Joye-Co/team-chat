@@ -1,10 +1,12 @@
 //! Machine daemon: connects out to the server, runs coding CLIs for bot members and streams
 //! normalized progress back. See docs/machine-protocol.md.
 
+pub mod acceptance;
 pub mod config;
 pub mod daemon;
 pub mod doctor;
 pub mod health;
+pub mod input;
 pub mod product;
 pub mod proto;
 pub mod redact;
