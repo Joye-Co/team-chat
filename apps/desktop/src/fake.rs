@@ -16,6 +16,8 @@ use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 use crate::{data::*, drafts::DraftStore};
 
 mod settings;
+/// The v2 sample team of the 1.1.0 artboards.
+pub mod v2;
 
 pub const ME: &str = "m-joye";
 /// The topic with 10,000 messages.
