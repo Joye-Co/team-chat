@@ -1,5 +1,6 @@
 // What a bot remembers across restarts: the last handled seq per group, the topics it
-// follows, and its own card messages (so card presses reach it after a restart).
+// follows, its own card messages and 产出 (so card presses, answers and page events reach it
+// after a restart), and its side chat topics with the topic each one is about.
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -14,10 +15,24 @@ export interface BotStateData {
   cursors: Record<string, number>;
   following: Record<string, string[]>;
   cards: Record<string, CardRef>;
+  /** 1.1: my 产出 by artifact id. */
+  artifacts?: Record<string, CardRef>;
+  /** 1.1: side chat topics (单独问) by topic id: the topic each one reads, up to which seq. */
+  asides?: Record<string, AsideRef>;
+}
+
+/** A side chat topic in a DM: `groupId`/`topicId`/`uptoSeq` name the topic it is about. */
+export interface AsideRef {
+  dmGroupId: string;
+  groupId: string;
+  topicId: string;
+  uptoSeq: number;
 }
 
 /** At most this many own card messages are remembered (oldest are dropped). */
 export const MAX_REMEMBERED_CARDS = 2000;
+/** At most this many own 产出 and side chat topics are remembered (oldest are dropped). */
+export const MAX_REMEMBERED_REFS = 2000;
 
 export function emptyState(): BotStateData {
   return { v: 1, cursors: {}, following: {}, cards: {} };
@@ -57,6 +72,8 @@ export class FileStateStore implements StateStore {
       cursors: raw.cursors && typeof raw.cursors === "object" ? raw.cursors : {},
       following: raw.following && typeof raw.following === "object" ? raw.following : {},
       cards: raw.cards && typeof raw.cards === "object" ? raw.cards : {},
+      artifacts: raw.artifacts && typeof raw.artifacts === "object" ? raw.artifacts : {},
+      asides: raw.asides && typeof raw.asides === "object" ? raw.asides : {},
     };
   }
 

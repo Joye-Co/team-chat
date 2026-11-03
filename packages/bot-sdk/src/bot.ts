@@ -4,10 +4,12 @@
 // idempotent by clientMsgId, so a resend never posts twice.
 import { readFileSync, statSync } from "node:fs";
 import {
+  AcceptanceItem,
   type ArtifactRef,
   type BotRun,
   type Card,
   type CardV2,
+  type CardV2Action,
   ClientFrame,
   Event as EventSchema,
   type Event,
@@ -21,24 +23,32 @@ import {
   type RunPlanItem,
   type SendResult,
   type Topic,
+  type TopicContext,
   type TopicState,
   type TopicStatus,
   type TransientEvent,
 } from "@chat/protocol";
+import { answeredCard, checkCardV2, type DoneCardOptions, doneCard } from "./cards.ts";
 import { ChatError } from "./errors.ts";
 import { HttpClient, normalizeBaseUrl, type UploadInput } from "./http.ts";
 import { consoleLogger, type Logger, type LogLevel } from "./log.ts";
 import {
+  type AsideRef,
   type BotStateData,
+  type CardRef,
   emptyState,
   FileStateStore,
   MAX_REMEMBERED_CARDS,
+  MAX_REMEMBERED_REFS,
   MemoryStateStore,
   type StateStore,
 } from "./state.ts";
 import { type StreamOptions, StreamWriter } from "./stream.ts";
 
-export const SDK_VERSION = "0.1.0";
+export const SDK_VERSION = "1.1.0";
+
+/** The reaction `ack()` adds by default: "I saw it and work on it". */
+export const ACK_EMOJI = "👀";
 
 /** A WebSocket constructor that accepts `{ headers }` (Bun, and Node 22+ through undici). */
 export type WebSocketCtor = new (url: string, opts?: { headers?: Record<string, string> }) => WebSocket;
@@ -96,8 +106,10 @@ export interface SendInput {
   attachments?: FileRef[];
   artifactRefs?: ArtifactRef[];
   card?: Card;
-  /** 1.1: a Card v2; the server derives the v1 `card` for older clients unless `card` is set. */
+  /** Card v2 (1.1). The server derives the v1 `card` for older readers when `card` is absent. */
   cardV2?: CardV2;
+  /** Side chat (1.1): the topic this DM topic is about. Only in a DM with a bot. */
+  context?: TopicContext;
   streaming?: boolean;
   /** Idempotency key. Made when absent; pass a stable one to make retries safe across restarts. */
   clientMsgId?: string;
@@ -107,7 +119,7 @@ export interface EditInput {
   body: string;
   streaming?: boolean;
   card?: Card;
-  /** 1.1: the new Card v2; its `rev` must be higher than the stored one. */
+  /** Card v2 (1.1): replaces the card; `rev` must be higher than the stored one. */
   cardV2?: CardV2;
   attachments?: FileRef[];
   artifactRefs?: ArtifactRef[];
@@ -145,6 +157,104 @@ export interface MessageContext {
   setPlan(plan: RunPlanItem[]): Promise<BotRun>;
   /** Ends this bot's current run in this topic (see `Bot.endRun`). */
   endRun(status: "done" | "failed" | "cancelled", summary?: string): Promise<BotRun | null>;
+  /** Reacts to the message (default 👀) to say "seen, working on it", instead of a text reply. */
+  ack(emoji?: string): Promise<boolean>;
+  /** Posts a Card v2 (an ask, usually) in this topic. */
+  ask(card: CardV2, input?: Omit<SendInput, "card" | "cardV2">): Promise<SendResult>;
+  /**
+   * Posts the result card (Card v2, intent "done") in this topic and ends this bot's current run
+   * there: `failed` ends it as failed. See `Bot.done`.
+   */
+  done(card: CardV2 | DoneCardOptions): Promise<DoneResult>;
+  /** Replaces the 验收标准 of this bot's current run in this topic (see `Bot.setAcceptance`). */
+  setAcceptance(items: AcceptanceItem[]): Promise<BotRun>;
+  /** Set when the message is in a side chat (单独问): the topic the side chat is about. */
+  aside?: TopicContext;
+}
+
+/** A message in a side chat (单独问): a DM topic with this bot about another topic. */
+export interface AsideContext extends MessageContext {
+  aside: TopicContext;
+  /**
+   * The messages of the topic the side chat is about, oldest first, up to `aside.uptoSeq`:
+   * at most `limit` (default 200) of the newest ones. Deleted messages are left out.
+   */
+  source(opts?: { limit?: number }): Promise<Message[]>;
+}
+
+/** What `done` posted, and the run it ended (null when the bot had no run in the topic). */
+export interface DoneResult {
+  result: SendResult;
+  run: BotRun | null;
+}
+
+/** JSON values of an answer. */
+export type AnswerValue = string | number | boolean | null | AnswerValue[] | { [k: string]: AnswerValue };
+
+/**
+ * An answer to one of my v2 cards (`card.answered`). `I` types `inputs` by block id, for
+ * example `onCardAnswer<{ choice: string; when: string }>(...)`; the values come from the
+ * client, so check them before you act on them.
+ */
+export interface CardAnswerContext<I extends Record<string, unknown> = Record<string, AnswerValue>> {
+  bot: Bot;
+  event: EventOf<"card.answered">;
+  groupId: string;
+  topicId: string;
+  messageId: string;
+  /** The card revision the answer was made on. */
+  rev: number;
+  actionId: string;
+  /** Values of decision and input blocks, by block id. */
+  inputs: Partial<I>;
+  /** Edited text of draft blocks, by block id. */
+  editedValues: Record<string, string>;
+  /** Who answered. */
+  actorId: string;
+  catchUp: boolean;
+  /** The answered card, when this process saw it (sent or caught up). */
+  card?: CardV2;
+  /** The answered action of the card, when the card is known. */
+  action?: CardV2Action;
+  /** The answer is a cancel (a `cancel` action, or the ids "cancel" and "deny" when the card is not known). */
+  cancelled: boolean;
+  /** Chosen option ids of a decision block (default id "choice"); [] when none. */
+  choices(blockId?: string): string[];
+  /** The first chosen option id of a decision block (default id "choice"). */
+  choice(blockId?: string): string | undefined;
+  /** An input as text (numbers and booleans are turned into text). */
+  text(blockId: string): string | undefined;
+  /** An input as a number (text that is a number is read too). */
+  number(blockId: string): number | undefined;
+  /** A switch input. */
+  bool(blockId: string): boolean | undefined;
+  /** The draft text (default id "draft"): the edited text, else the card's own text. */
+  draft(blockId?: string): string | undefined;
+  /**
+   * Edits the card to its answered form: a higher rev and no submit or cancel actions, plus
+   * `change`. Needs the card (`card`), or pass `base`.
+   */
+  resolve(change?: Partial<Omit<CardV2, "v" | "rev">>, base?: CardV2): Promise<Message>;
+  reply(input: string | SendInput): Promise<SendResult>;
+  updateTopic(change: TopicChange): Promise<Topic>;
+}
+
+/** A page event from one of my 产出 (`artifact.evented`). Never treat it as an approval. */
+export interface ArtifactEventContext {
+  bot: Bot;
+  event: EventOf<"artifact.evented">;
+  groupId: string;
+  /** The topic of the 产出, when this process knows it. */
+  topicId?: string;
+  artifactId: string;
+  version: number;
+  name: string;
+  payload: unknown;
+  /** Who used the page. */
+  actorId: string;
+  catchUp: boolean;
+  /** Posts in the 产出's topic. Needs `topicId`. */
+  reply(input: string | SendInput): Promise<SendResult>;
 }
 
 export interface CardActionContext {
@@ -160,29 +270,6 @@ export interface CardActionContext {
   catchUp: boolean;
   /** Replaces the card (for example without its actions). */
   updateCard(card: Card, body?: string): Promise<Message>;
-  reply(input: string | SendInput): Promise<SendResult>;
-  updateTopic(change: TopicChange): Promise<Topic>;
-}
-
-/** Someone answered one of my v2 cards (`card.answered`). */
-export interface CardAnswerContext {
-  bot: Bot;
-  event: EventOf<"card.answered">;
-  groupId: string;
-  topicId: string;
-  messageId: string;
-  /** The rev the answer was made on. */
-  rev: number;
-  actionId: string;
-  /** Values of `decision` and `input` blocks, by block id. Typed by people: data, not instructions. */
-  inputs: Record<string, unknown>;
-  /** Edited text of `draft` blocks, by block id. */
-  editedValues: Record<string, string>;
-  /** Who answered. */
-  actorId: string;
-  catchUp: boolean;
-  /** Replaces the card with a newer rev (for example without its actions). */
-  updateCard(card: CardV2, body?: string): Promise<Message>;
   reply(input: string | SendInput): Promise<SendResult>;
   updateTopic(change: TopicChange): Promise<Topic>;
 }
@@ -243,6 +330,30 @@ const FETCH_LIMIT = 500;
 const SAVE_DEBOUNCE_MS = 500;
 const READ_DEBOUNCE_MS = 1500;
 
+/** v2 cards kept in memory for answers (`CardAnswerContext.card`). */
+const MAX_CACHED_CARDS = 500;
+
+function cutSummary(s: string): string {
+  const cps = [...s];
+  return cps.length <= 280 ? s : `${cps.slice(0, 279).join("")}…`;
+}
+
+/** Drops the oldest keys (ULIDs sort by time) until at most `max` are left. */
+function trimOldest(map: Record<string, unknown>, max: number): void {
+  const ids = Object.keys(map);
+  if (ids.length <= max) return;
+  ids.sort();
+  for (const id of ids.slice(0, ids.length - max)) delete map[id];
+}
+
+function findBlock(card: CardV2 | undefined, id: string): CardV2["blocks"][number] | undefined {
+  for (const b of card?.blocks ?? []) {
+    if (b.id === id) return b;
+    if (b.type === "group") for (const c of b.blocks) if (c.id === id) return c as CardV2["blocks"][number];
+  }
+  return undefined;
+}
+
 function wsUrl(base: string): string {
   const u = new URL(`${base}/v1/ws`);
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:";
@@ -300,6 +411,10 @@ export class Bot {
   private readonly messageHandlers: Handler<MessageContext>[] = [];
   private readonly cardHandlers: Handler<CardActionContext>[] = [];
   private readonly answerHandlers: Handler<CardAnswerContext>[] = [];
+  private readonly artifactEventHandlers: Handler<ArtifactEventContext>[] = [];
+  private readonly asideHandlers: Handler<AsideContext>[] = [];
+  /** v2 cards of my messages that this process saw, newest last (at most MAX_CACHED_CARDS). */
+  private readonly cardCache = new Map<string, CardV2>();
   private readonly eventHandlers: Handler<EventContext>[] = [];
   private readonly transientHandlers: ((e: TransientEvent) => void)[] = [];
   private readonly connectionHandlers: ((up: boolean) => void)[] = [];
@@ -339,9 +454,26 @@ export class Bot {
     this.cardHandlers.push(h);
     return this;
   }
-  /** 1.1: an answer to one of my v2 cards (a v1 press on a v2 card arrives here too). */
-  onCardAnswer(h: Handler<CardAnswerContext>): this {
-    this.answerHandlers.push(h);
+  /**
+   * An answer to one of my v2 cards (1.1). A v1 press on a v2 card arrives here too (with no
+   * inputs). Older presses on v1 cards still go to `onCardAction`.
+   */
+  onCardAnswer<I extends Record<string, unknown> = Record<string, AnswerValue>>(h: Handler<CardAnswerContext<I>>): this {
+    this.answerHandlers.push(h as unknown as Handler<CardAnswerContext>);
+    return this;
+  }
+  /** A page event from one of my 产出 (1.1): only names the version declared in `events`. */
+  onArtifactEvent(h: Handler<ArtifactEventContext>): this {
+    this.artifactEventHandlers.push(h);
+    return this;
+  }
+  /**
+   * A message (not mine) in a side chat (单独问, 1.1): a member's DM topic with me about another
+   * topic, @ or not. Answer in the DM; the member posts to the topic. Without an `onAside`
+   * handler these messages go to `onMention`.
+   */
+  onAside(h: Handler<AsideContext>): this {
+    this.asideHandlers.push(h);
     return this;
   }
   /** Every stored group event, in seq order per group. */
@@ -467,6 +599,7 @@ export class Bot {
     if (i.artifactRefs?.length) frame.artifactRefs = i.artifactRefs;
     if (i.card) frame.card = i.card;
     if (i.cardV2) frame.cardV2 = i.cardV2;
+    if (i.context) frame.context = i.context;
     if (i.streaming) frame.streaming = true;
     const result = (await this.request(frame)) as SendResult;
     this.noteOwnMessage(result.message);
@@ -497,23 +630,91 @@ export class Bot {
     return (await this.edit(groupId, messageId, { body: body ?? card.title, card })).message;
   }
 
-  /** 1.1: posts a Card v2. `body` defaults to the card's `fallback` (or its title). */
+  /**
+   * Posts a Card v2 (1.1). The server makes the v1 card for older readers; `body` defaults to
+   * the card's fallback. Build cards with `askCard`, `decisionCard`, `approvalCard`, `draftCard`,
+   * `formCard` and `doneCard`.
+   */
   postCardV2(target: Target, card: CardV2, input: Omit<SendInput, "card" | "cardV2"> = {}): Promise<SendResult> {
-    return this.send(target, { ...input, cardV2: card, body: input.body ?? "" });
+    return this.send(target, { ...input, cardV2: checkCardV2(card), body: input.body ?? "" });
   }
 
-  /** 1.1: replaces one of my v2 cards; `card.rev` must be higher than the stored rev. */
+  /** Replaces one of my v2 cards. `card.rev` must be higher than the stored rev. */
   async updateCardV2(groupId: string, messageId: string, card: CardV2, body?: string): Promise<Message> {
-    return (await this.edit(groupId, messageId, { body: body ?? "", cardV2: card })).message;
+    const checked = checkCardV2(card);
+    const r = await this.edit(groupId, messageId, { body: body ?? (checked.fallback || checked.title), cardV2: checked });
+    this.cacheCard(messageId, checked);
+    return r.message;
   }
 
-  /** 1.1: answers a v2 card (`card.answer`). */
+  /** The v2 card of one of my messages, when this process saw it. */
+  knownCard(messageId: string): CardV2 | undefined {
+    return this.cardCache.get(messageId);
+  }
+
+  /** Answers a v2 card (bots may answer other members' asks when `ask.from` names them). */
   async answerCard(
     groupId: string,
-    messageId: string,
-    answer: { rev: number; actionId: string; inputs?: Record<string, unknown>; editedValues?: Record<string, string> },
+    answer: { messageId: string; rev: number; actionId: string; inputs?: Record<string, AnswerValue>; editedValues?: Record<string, string> },
   ): Promise<void> {
-    await this.request({ t: "card.answer", groupId, messageId, ...answer });
+    const frame: Record<string, unknown> & { t: string } = {
+      t: "card.answer",
+      groupId,
+      messageId: answer.messageId,
+      rev: answer.rev,
+      actionId: answer.actionId,
+    };
+    if (answer.inputs) frame.inputs = answer.inputs;
+    if (answer.editedValues) frame.editedValues = answer.editedValues;
+    await this.request(frame);
+  }
+
+  /**
+   * Posts the result of the work in a topic as a Card v2 with intent "done" (a summary with
+   * its proof), then ends this bot's current run there (`failed` ends it as failed). Use it
+   * instead of a streaming progress message: progress belongs in the plan.
+   */
+  async done(target: Required<Target>, card: CardV2 | DoneCardOptions, input: Omit<SendInput, "card" | "cardV2"> = {}): Promise<DoneResult> {
+    const c = "v" in card ? checkCardV2(card) : doneCard(card);
+    const failed = !("v" in card) && card.failed === true;
+    const result = await this.postCardV2(target, c, input);
+    const run = await this.endRun(target, failed ? "failed" : "done", cutSummary(c.fallback || c.title));
+    return { result, run };
+  }
+
+  /**
+   * Replaces the 验收标准 (acceptance criteria) of this bot's current run in a topic, and
+   * starts a run when there is none. At most 20 items, text 1..500 characters, state
+   * `pending`, `pass` or `fail`, with optional evidence. `[]` clears them. Members see them
+   * in the live view and the topic rail. Needs a 1.1 server (`PUT /v1/runs/:id/acceptance`).
+   */
+  async setAcceptance(target: Required<Target>, items: AcceptanceItem[]): Promise<BotRun> {
+    const checked = AcceptanceItem.array().max(20).safeParse(items);
+    if (!checked.success) throw new ChatError("invalid", checked.error.issues[0]?.message ?? "invalid acceptance items");
+    let runId = this.currentRuns.get(target.topicId);
+    if (!runId) {
+      const started = await this.http.startRun({ groupId: target.groupId, topicId: target.topicId });
+      this.noteRun(started);
+      runId = started.id;
+    }
+    let run: BotRun;
+    try {
+      run = await this.http.setRunAcceptance(runId, checked.data);
+    } catch (err) {
+      if (!(err instanceof ChatError && err.code === "conflict")) throw err;
+      // The run ended meanwhile: start a new one.
+      this.currentRuns.delete(target.topicId);
+      const started = await this.http.startRun({ groupId: target.groupId, topicId: target.topicId });
+      this.noteRun(started);
+      run = await this.http.setRunAcceptance(started.id, checked.data);
+    }
+    this.noteRun(run);
+    return run;
+  }
+
+  /** Reacts to a message with `emoji` (default 👀): a short "seen, working on it". */
+  ack(groupId: string, messageId: string, emoji: string = ACK_EMOJI): Promise<boolean> {
+    return this.react(groupId, messageId, emoji);
   }
 
   /** Starts a streaming message; append text to the writer, then call `finish()`. */
@@ -1073,6 +1274,10 @@ export class Bot {
         case "topic.created": {
           const t = event.data.topic;
           this.topics.set(t.id, { waitingOn: t.waitingOn ?? [], ownerId: t.ownerId ?? null });
+          if (t.contextOf) {
+            this.noteAside(event.groupId, t.id, t.contextOf);
+            this.follow(event.groupId, t.id);
+          }
           if (t.createdBy === me || t.ownerId === me || t.waitingOn?.includes(me)) this.follow(event.groupId, t.id);
           break;
         }
@@ -1083,6 +1288,7 @@ export class Bot {
           if (d.waitingOn) info.waitingOn = d.waitingOn;
           if (d.ownerId !== undefined) info.ownerId = d.ownerId;
           this.topics.set(d.topicId, info);
+          if (d.contextOf) this.noteAside(event.groupId, d.topicId, d.contextOf);
           if ((d.waitingOn?.includes(me) && !wasWaiting) || d.ownerId === me) this.follow(event.groupId, d.topicId);
           break;
         }
@@ -1101,7 +1307,13 @@ export class Bot {
             break;
           }
           const ctx = () => this.messageContext(event, catchUp);
-          if (m.mentions.includes(me)) {
+          const aside = this.state.asides?.[m.topicId];
+          if (aside && aside.dmGroupId === event.groupId) {
+            // A side chat message is addressed to me, @ or not.
+            this.follow(event.groupId, m.topicId);
+            if (this.asideHandlers.length > 0) for (const h of this.asideHandlers) jobs.push(() => h(this.asideContext(event, aside, catchUp)));
+            else for (const h of this.mentionHandlers) jobs.push(() => h(ctx()));
+          } else if (m.mentions.includes(me)) {
             this.follow(event.groupId, m.topicId);
             for (const h of this.mentionHandlers) jobs.push(() => h(ctx()));
           } else if (this.isFollowing(event.groupId, m.topicId)) {
@@ -1113,16 +1325,33 @@ export class Bot {
         case "run.updated":
           if (event.data.run.botId === me) this.noteRun(event.data.run);
           break;
-        case "card.actioned": {
-          const ref = this.state.cards[event.data.messageId];
-          if (!ref || event.actorId === me) break;
-          for (const h of this.cardHandlers) jobs.push(() => h(this.cardContext(event, ref.topicId, catchUp)));
+        case "message.updated": {
+          const d = event.data;
+          if (event.actorId === me && d.cardV2) this.cacheCard(d.messageId, d.cardV2);
           break;
         }
         case "card.answered": {
           const ref = this.state.cards[event.data.messageId];
           if (!ref || event.actorId === me) break;
           for (const h of this.answerHandlers) jobs.push(() => h(this.answerContext(event, ref.topicId, catchUp)));
+          break;
+        }
+        case "artifact.created":
+        case "artifact.versionAdded": {
+          const { artifact, version } = event.data;
+          if (version.createdBy === me || artifact.createdBy === me) this.noteArtifact(artifact.id, { groupId: artifact.groupId, topicId: artifact.topicId });
+          break;
+        }
+        case "artifact.evented": {
+          const ref = this.state.artifacts?.[event.data.artifactId];
+          if (!ref || event.actorId === me) break;
+          for (const h of this.artifactEventHandlers) jobs.push(() => h(this.artifactEventContext(event, ref, catchUp)));
+          break;
+        }
+        case "card.actioned": {
+          const ref = this.state.cards[event.data.messageId];
+          if (!ref || event.actorId === me) break;
+          for (const h of this.cardHandlers) jobs.push(() => h(this.cardContext(event, ref.topicId, catchUp)));
           break;
         }
         default:
@@ -1189,6 +1418,124 @@ export class Bot {
       typing: () => this.typing(m.groupId, m.topicId),
       setPlan: (plan) => this.setPlan({ groupId: m.groupId, topicId: m.topicId }, plan),
       endRun: (status, summary) => this.endRun({ groupId: m.groupId, topicId: m.topicId }, status, summary),
+      ack: (emoji) => this.ack(m.groupId, m.id, emoji),
+      ask: (card, input = {}) => this.postCardV2(target, card, withId(input)),
+      done: (card) => this.done(target, card, withId({})),
+      setAcceptance: (items) => this.setAcceptance(target, items),
+      aside: this.asideOf(m.groupId, m.topicId),
+    };
+  }
+
+  private asideOf(groupId: string, topicId: string): TopicContext | undefined {
+    const a = this.state.asides?.[topicId];
+    return a && a.dmGroupId === groupId ? { groupId: a.groupId, topicId: a.topicId, uptoSeq: a.uptoSeq } : undefined;
+  }
+
+  private asideContext(event: EventOf<"message.created">, ref: AsideRef, catchUp: boolean): AsideContext {
+    const base = this.messageContext(event, catchUp);
+    const aside = { groupId: ref.groupId, topicId: ref.topicId, uptoSeq: ref.uptoSeq };
+    return {
+      ...base,
+      aside,
+      source: (opts = {}) => this.sourceMessages(aside, opts.limit ?? 200),
+    };
+  }
+
+  /** Messages of a side chat's topic up to `uptoSeq`, oldest first, at most `limit` newest. */
+  private async sourceMessages(c: TopicContext, limit: number): Promise<Message[]> {
+    const out: Message[] = [];
+    let before = c.uptoSeq + 1;
+    while (out.length < limit) {
+      const page = await this.history(c.groupId, c.topicId, { beforeSeq: before, limit: Math.min(100, limit - out.length) });
+      for (const m of page.messages) if (m.createdSeq <= c.uptoSeq && !m.deletedAt) out.push(m);
+      if (!page.hasMore || page.messages.length === 0) break;
+      before = Math.min(...page.messages.map((m) => m.createdSeq));
+    }
+    return out.slice(0, limit).reverse();
+  }
+
+  private answerContext(event: EventOf<"card.answered">, topicId: string, catchUp: boolean): CardAnswerContext {
+    const { messageId, rev, actionId } = event.data;
+    const inputs = (event.data.inputs ?? {}) as Record<string, AnswerValue>;
+    const editedValues = event.data.editedValues ?? {};
+    const card = this.cardCache.get(messageId);
+    const action = card?.actions?.find((a) => a.id === actionId);
+    const cancelled = action ? action.kind === "cancel" : actionId === "cancel" || actionId === "deny";
+    const block = (id: string) => findBlock(card, id);
+    const choices = (id = "choice"): string[] => {
+      const v = inputs[id];
+      if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string");
+      return typeof v === "string" ? [v] : [];
+    };
+    let n = 0;
+    const nextId = () => `bot:${event.groupId}:${event.seq}:${n++}`;
+    return {
+      bot: this,
+      event,
+      groupId: event.groupId,
+      topicId,
+      messageId,
+      rev,
+      actionId,
+      inputs,
+      editedValues,
+      actorId: event.actorId,
+      catchUp,
+      card,
+      action,
+      cancelled,
+      choices,
+      choice: (id) => choices(id)[0],
+      text: (id) => {
+        const v = inputs[id];
+        return typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : undefined;
+      },
+      number: (id) => {
+        const v = inputs[id];
+        if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
+        if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
+        return undefined;
+      },
+      bool: (id) => (typeof inputs[id] === "boolean" ? (inputs[id] as boolean) : undefined),
+      draft: (id = "draft") => {
+        if (typeof editedValues[id] === "string") return editedValues[id];
+        const b = block(id);
+        return b?.type === "draft" ? b.text : undefined;
+      },
+      resolve: async (change = {}, base) => {
+        const from = base ?? this.cardCache.get(messageId);
+        if (!from) throw new ChatError("invalid", "the answered card is not known; pass it as base");
+        return this.updateCardV2(event.groupId, messageId, answeredCard(from, change));
+      },
+      reply: (input) => {
+        const i = typeof input === "string" ? { body: input } : { ...input };
+        if (!i.clientMsgId) i.clientMsgId = nextId();
+        return this.send({ groupId: event.groupId, topicId }, i);
+      },
+      updateTopic: (change) => this.updateTopic(event.groupId, topicId, change),
+    };
+  }
+
+  private artifactEventContext(event: EventOf<"artifact.evented">, ref: CardRef, catchUp: boolean): ArtifactEventContext {
+    const { artifactId, version, name, payload } = event.data;
+    let n = 0;
+    const nextId = () => `bot:${event.groupId}:${event.seq}:${n++}`;
+    return {
+      bot: this,
+      event,
+      groupId: event.groupId,
+      topicId: ref.topicId,
+      artifactId,
+      version,
+      name,
+      payload,
+      actorId: event.actorId,
+      catchUp,
+      reply: (input) => {
+        const i = typeof input === "string" ? { body: input } : { ...input };
+        if (!i.clientMsgId) i.clientMsgId = nextId();
+        return this.send({ groupId: event.groupId, topicId: ref.topicId }, i);
+      },
     };
   }
 
@@ -1216,33 +1563,8 @@ export class Bot {
     };
   }
 
-  private answerContext(event: EventOf<"card.answered">, topicId: string, catchUp: boolean): CardAnswerContext {
-    const { messageId, rev, actionId, inputs, editedValues } = event.data;
-    let n = 0;
-    const nextId = () => `bot:${event.groupId}:${event.seq}:${n++}`;
-    return {
-      bot: this,
-      event,
-      groupId: event.groupId,
-      topicId,
-      messageId,
-      rev,
-      actionId,
-      inputs: inputs ?? {},
-      editedValues: editedValues ?? {},
-      actorId: event.actorId,
-      catchUp,
-      updateCard: (card, body) => this.updateCardV2(event.groupId, messageId, card, body),
-      reply: (input) => {
-        const i = typeof input === "string" ? { body: input } : { ...input };
-        if (!i.clientMsgId) i.clientMsgId = nextId();
-        return this.send({ groupId: event.groupId, topicId }, i);
-      },
-      updateTopic: (change) => this.updateTopic(event.groupId, topicId, change),
-    };
-  }
-
   private noteOwnMessage(m: Message): void {
+    if (m.cardV2) this.cacheCard(m.id, m.cardV2);
     if (m.kind !== "card" && !m.card) return;
     if (this.state.cards[m.id]) return;
     this.state.cards[m.id] = { groupId: m.groupId, topicId: m.topicId };
@@ -1252,6 +1574,34 @@ export class Bot {
       ids.sort();
       for (const id of ids.slice(0, ids.length - MAX_REMEMBERED_CARDS)) delete this.state.cards[id];
     }
+    this.scheduleSave();
+  }
+
+  private cacheCard(messageId: string, card: CardV2): void {
+    const old = this.cardCache.get(messageId);
+    if (old && old.rev > card.rev) return;
+    this.cardCache.delete(messageId);
+    this.cardCache.set(messageId, card);
+    if (this.cardCache.size > MAX_CACHED_CARDS) {
+      const first = this.cardCache.keys().next().value;
+      if (first !== undefined) this.cardCache.delete(first);
+    }
+  }
+
+  private noteArtifact(artifactId: string, ref: CardRef): void {
+    const map = (this.state.artifacts ??= {});
+    if (map[artifactId]) return;
+    map[artifactId] = ref;
+    trimOldest(map, MAX_REMEMBERED_REFS);
+    this.scheduleSave();
+  }
+
+  private noteAside(dmGroupId: string, topicId: string, c: TopicContext): void {
+    const map = (this.state.asides ??= {});
+    const cur = map[topicId];
+    if (cur && cur.dmGroupId === dmGroupId && cur.uptoSeq >= c.uptoSeq && cur.topicId === c.topicId) return;
+    map[topicId] = { dmGroupId, groupId: c.groupId, topicId: c.topicId, uptoSeq: c.uptoSeq };
+    trimOldest(map, MAX_REMEMBERED_REFS);
     this.scheduleSave();
   }
 
