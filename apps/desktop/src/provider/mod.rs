@@ -40,6 +40,9 @@ mod search_live;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+// provider track: v2 topic surfaces and the seeded cache of the `topic-core` scene.
+pub mod seeded;
+mod topic_v2;
 
 use std::{
     collections::{HashMap, HashSet},
@@ -156,6 +159,9 @@ struct Shared {
     // --- end cards v2 track ---
     /// 群里的决定 from the server (`provider/pages.rs`).
     decisions: pages::DecisionsCache,
+    // --- provider track: v2 topic surfaces (provider/topic_v2.rs) ---
+    topic_v2: topic_v2::TopicV2Cache,
+    // --- end provider track ---
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -191,6 +197,7 @@ impl CoreProvider {
                 panes: panes::PanesCache::default(),
                 cards_v2: cards_v2::CardV2Cache::default(),
                 decisions: pages::DecisionsCache::default(),
+                topic_v2: topic_v2::TopicV2Cache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -1866,6 +1873,68 @@ impl ChatProvider for CoreProvider {
     }
 
     // --- end pages track ---
+
+    // --- provider track: v2 topic surfaces (provider/topic_v2.rs) ---
+
+    fn topic_changes(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+    ) -> Option<crate::data::v2::TopicChanges> {
+        self.topic_changes_inner(group_id, topic_id)
+    }
+
+    fn pinned_ask(&self, group_id: &str, topic_id: &str) -> Option<crate::data::v2::AskItem> {
+        self.pinned_ask_inner(group_id, topic_id)
+    }
+
+    fn changes_approval(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+    ) -> Option<(crate::data::MemberId, crate::data::Millis)> {
+        self.changes_approval_inner(group_id, topic_id)
+    }
+
+    fn approve_changes(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        self.approve_changes_inner(group_id, topic_id)
+    }
+
+    fn withdraw_changes_approval(&self, group_id: &str, topic_id: &str) -> AdminReply<()> {
+        self.withdraw_changes_approval_inner(group_id, topic_id)
+    }
+
+    fn run_usage(&self, run_id: &str) -> Option<crate::data::v2::RunUsage> {
+        self.run_usage_inner(run_id)
+    }
+
+    fn topic_decisions(&self, group_id: &str, topic_id: &str) -> Vec<crate::data::v2::Decision> {
+        self.topic_decisions_inner(group_id, topic_id)
+    }
+
+    fn artifact_story(&self, artifact_id: &str) -> Option<crate::data::v2::ArtifactStory> {
+        self.artifact_story_inner(artifact_id)
+    }
+
+    fn artifact_preview(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::v2::ArtifactPreview> {
+        self.artifact_preview_inner(artifact_id, version, true)
+    }
+
+    fn artifact_thumb(&self, artifact_id: &str) -> Option<crate::data::pages::ArtifactThumb> {
+        self.artifact_thumb_inner(artifact_id)
+    }
+
+    fn media_duration(&self, file: &FileAttachment) -> Option<u64> {
+        self.media_duration_inner(file)
+    }
+
+    // desk_note and queue keep their empty defaults: 1.1 has no data source for them.
+
+    // --- end provider track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();
