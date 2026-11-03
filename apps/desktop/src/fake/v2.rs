@@ -17,7 +17,10 @@ use chrono::{Local, TimeZone as _};
 use futures::channel::mpsc::{UnboundedReceiver, UnboundedSender, unbounded};
 
 use super::FakeProvider;
-use crate::data::{v2::*, *};
+// pages track: the sample data of the 群, 成员 and 产出 pages.
+#[path = "v2_pages.rs"]
+mod pages_samples;
+use crate::data::{pages, v2::*, *};
 
 pub const ME: &str = "m-joye";
 pub const JOJO: &str = "b-jojo";
@@ -334,7 +337,7 @@ impl V2Samples {
                 OPS,
                 GroupKind::Group,
                 "运维",
-                &[ME, JOJO, WATCH, SCOUT, ALEX],
+                &[ME, JOJO, WATCH, SCOUT, FORGE, ALEX],
                 at(10, 42),
             ),
             group(
@@ -1291,7 +1294,9 @@ impl ChatProvider for V2Samples {
             by: by.into(),
             at: when,
         };
-        match group_id {
+        // pages track: decisions added with 记一条 come first.
+        let mut out = pages_samples::recorded(group_id);
+        out.extend(match group_id {
             DEV | GROWTH | OPS => vec![
                 d("d-dau", ME, "日活按去重设备算", days_ago_at(2, 11, 0)),
                 d(
@@ -1308,7 +1313,8 @@ impl ChatProvider for V2Samples {
                 ),
             ],
             _ => Vec::new(),
-        }
+        });
+        out
     }
     fn group_purpose(&self, group_id: &str) -> Option<String> {
         match group_id {
@@ -1450,6 +1456,21 @@ impl ChatProvider for V2Samples {
                 stats.active.push((r.group_id.clone(), r.topic_id.clone()));
             }
         }
+        // pages track: this week's 话题 of everyone (Members.dc.html).
+        stats.topics_this_week = match member_id {
+            WATCH => 5,
+            TARO => 3,
+            JOJO => 14,
+            TATA => 4,
+            LEDGER => 4,
+            POCKET => 7,
+            SCOUT => 9,
+            XIAOWANG => 3,
+            LIXUE => 2,
+            ALEX => 1,
+            ME => 9,
+            _ => 0,
+        };
         if member_id == FORGE {
             stats.queued = 1;
             stats.topics_this_week = 6;
@@ -1695,6 +1716,73 @@ impl ChatProvider for V2Samples {
         ]);
         reply_now(Ok(()))
     }
+
+    // --- pages track: the 群, 成员 and 产出 pages ---
+
+    fn clock_now(&self) -> Millis {
+        pages_samples::NOW()
+    }
+    fn topic_glance(&self, group_id: &str, topic_id: &str) -> pages::TopicGlance {
+        pages_samples::topic_glance(group_id, topic_id)
+    }
+    fn group_recent_done(&self, group_id: &str) -> Vec<pages::RecentDone> {
+        pages_samples::recent_done(group_id)
+    }
+    fn group_artifacts(&self, group_id: &str) -> Vec<ArtifactSummary> {
+        let mut out: Vec<ArtifactSummary> = self
+            .with(|d| d.artifacts.clone())
+            .into_iter()
+            .filter(|(g, _)| g == group_id)
+            .map(|(_, a)| a)
+            .collect();
+        out.extend(pages_samples::extra_artifacts(group_id));
+        out.sort_by_key(|a| std::cmp::Reverse(a.updated_at));
+        out
+    }
+    fn artifact_thumb(&self, artifact_id: &str) -> Option<pages::ArtifactThumb> {
+        pages_samples::thumb(artifact_id)
+    }
+    fn can_record_decision(&self, _group_id: &str) -> bool {
+        true
+    }
+    fn record_decision(&self, group_id: &str, text: String) -> AdminReply<()> {
+        pages_samples::record(group_id, text, self.clock_now());
+        self.emit(vec![Change::Topics {
+            group_id: group_id.into(),
+        }]);
+        reply_now(Ok(()))
+    }
+    fn member_extras(&self, member_id: &str) -> pages::MemberExtras {
+        pages_samples::member_extras(self, member_id)
+    }
+    fn retry_member_problem(&self, _member_id: &str, _run_id: &str) -> AdminReply<()> {
+        reply_now(Ok(()))
+    }
+    fn artifact_responses(&self, artifact_id: &str) -> Vec<pages::ArtifactResponse> {
+        pages_samples::responses(artifact_id)
+    }
+    fn artifact_page_events(&self, artifact_id: &str, _version: u32) -> Vec<String> {
+        if artifact_id == ART_REPORT {
+            vec!["choose".into()]
+        } else {
+            Vec::new()
+        }
+    }
+    fn open_artifact_version(
+        &self,
+        artifact_id: &str,
+        version: Option<u32>,
+    ) -> Reply<ArtifactFolder> {
+        let Some(detail) = self.artifact(artifact_id) else {
+            return reply_err(FileError::NotFound);
+        };
+        let version = version.unwrap_or(detail.summary.version);
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(pages_samples::write_page(artifact_id, version, &detail.summary.title));
+        rx
+    }
+
+    // --- end pages track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();
