@@ -512,12 +512,15 @@ impl Services {
         let hub = ChangeHub::start(&provider, cx);
         let nav = cx.new(|_| Navigation::new());
         let characters = crate::characters::StatusTracker::start(&provider, &hub, cx);
-        Self {
+        let services = Self {
             provider,
             hub,
             nav,
             characters,
-        }
+        };
+        // Pages area (1.1.0 fixes): the ink disc of my own avatar.
+        crate::ui::avatar::track_viewer(&services, cx);
+        services
     }
 
     /// My member id, when signed in.
