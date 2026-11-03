@@ -257,7 +257,9 @@ or a function that records them on a `CardDraft` of the newest rev:
 actions })`, `ask(ask | null)` (a new `ask.id` opens a new round; `null` closes it). On
 `card.stale_rev` the SDK rebases on the newest rev (at most 3 tries) when every op still targets an
 existing id, else it throws `ChatError` `conflict` with `reason` `card.stale_rev`. On
-`rate_limited` it queues and merges the ops of the same message (at most one patch per second).
+`rate_limited` it queues and merges the ops of the same message (at most one patch per second);
+only patches with the same cause (or none) merge, because the server resolves only the cause of
+the frame, and when a merged patch is refused each one is sent again alone.
 `ctx.reply(...)` and `ctx.postCard(card)` answer with a new message; `ctx.resolve("ignored" |
 "failed", note?)` answers without a change (the note shows under the block for 5 s). A live-event
 handler that returns without one of them makes the SDK send `ignored` (`failed` when it throws),
@@ -498,7 +500,7 @@ Codex 的计划更新)生成。
 - **交互闭环(2.1)**:块用 `events` 声明实时事件(如 `choice.change`、`chart.select`)。
   `onCardEvent` 收到实时事件,`onCardAnswer` 收到已存的回答(重启后也能收到)。用 `ctx.patch(ops)`
   原地修改卡片(SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
-  被限流时合并排队,每秒最多一次),或用 `ctx.reply`、`ctx.postCard`、`ctx.resolve("ignored")` 回应。
+  被限流时合并排队,每秒最多一次,只合并 cause 相同或没有 cause 的修改),或用 `ctx.reply`、`ctx.postCard`、`ctx.resolve("ignored")` 回应。
   实时事件的处理函数没有回应时,SDK 自动发 `ignored`(出错时发 `failed`)。服务器只接受 30 分钟内的
   cause:重启后读到的更早的回答,SDK 回应时不带 cause。
 - **Card v2.1 构造函数**:`composeCard({ intent, title, blocks, ... })` 和 `blocks.*`:容器 `stack`、

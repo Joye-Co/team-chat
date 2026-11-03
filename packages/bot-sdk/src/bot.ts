@@ -426,6 +426,8 @@ interface PatchPart {
   /** Set by `patchCard({ baseRev })`: no rebase. */
   baseRev?: number;
   tries: number;
+  /** Set after a merged patch failed: this part goes in a frame of its own. */
+  alone?: boolean;
   resolve: (m: Message) => void;
   reject: (e: unknown) => void;
 }
@@ -2300,10 +2302,14 @@ export class Bot {
       return;
     }
     // Merge: parts without their own baseRev join the first one while the ops fit in one frame.
+    // A frame names one cause and the server resolves only that event, so a part with another
+    // cause waits for the next frame.
     const batch: PatchPart[] = [];
     const ops: PatchOp[] = [];
+    let cause: string | undefined;
     for (const part of lane.parts) {
-      if (batch.length > 0 && part.baseRev !== undefined) break;
+      if (batch.length > 0 && (part.baseRev !== undefined || part.alone || first.alone)) break;
+      if (batch.length > 0 && part.cause && cause && part.cause !== cause) break;
       let partOps: PatchOp[];
       try {
         partOps = card ? opsOf(card, part.input) : Array.isArray(part.input) ? part.input : [];
@@ -2316,10 +2322,10 @@ export class Bot {
       if (batch.length > 0 && ops.length + partOps.length > MAX_PATCH_OPS) break;
       batch.push(part);
       ops.push(...partOps);
+      cause ??= part.cause;
     }
     lane.parts.splice(0, batch.length);
     const baseRev = first.baseRev ?? (card as CardV2).rev;
-    const cause = [...batch].reverse().find((p) => p.cause)?.cause;
     const frame: Record<string, unknown> & { t: string } = {
       t: "card.patch",
       groupId: lane.groupId,
@@ -2359,6 +2365,12 @@ export class Bot {
         }
         const conflict = new ChatError("conflict", "the card changed and the patch no longer fits the newest rev", undefined, "card.stale_rev");
         for (const p of batch) p.reject(conflict);
+        return;
+      }
+      if (batch.length > 1 && !stale) {
+        // One bad part must not fail the others: each one goes again on its own.
+        for (const p of batch) p.alone = true;
+        lane.parts.unshift(...batch);
         return;
       }
       for (const p of batch) p.reject(err);

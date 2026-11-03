@@ -206,7 +206,7 @@ describe("patches", () => {
     expect(opsFit(rev2, [{ op: "set", id: "check", props: { help: "x" } }])).toBe(true);
   });
 
-  test("rate_limited: later patches wait and merge into one frame", async () => {
+  test("rate_limited: later patches wait and merge into one frame per cause", async () => {
     const { server } = cardServer();
     const bot = await start(server);
     const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
@@ -226,13 +226,45 @@ describe("patches", () => {
     const p3 = bot.patchCard(GROUP_ID, r.message.id, (d) => d.set("m_dau", { value: 2341 }));
     const [m1, m2, m3] = await Promise.all([p1, p2, p3]);
     expect(Date.now() - started).toBeGreaterThanOrEqual(900);
+    // The server resolves only the frame's cause: EV1 and EV2 each get a frame; the part
+    // without a cause joins EV2.
     const frames = server.of("card.patch");
-    expect(frames).toHaveLength(2);
-    expect((frames[1]?.ops as unknown[]).length).toBe(3);
-    expect(frames[1]?.cause).toBe("EV2");
+    expect(frames).toHaveLength(3);
+    expect(frames[1]?.cause).toBe("EV1");
+    expect((frames[1]?.ops as unknown[]).length).toBe(1);
+    expect(frames[2]?.cause).toBe("EV2");
+    expect((frames[2]?.ops as unknown[]).length).toBe(2);
     expect(m1.cardV2?.rev).toBe(2);
-    expect(m2).toEqual(m1);
-    expect(m3).toEqual(m1);
+    expect(m2.cardV2?.rev).toBe(3);
+    expect(m3).toEqual(m2);
+  });
+
+  test("a merged patch the server rejects: each part goes again alone, so one bad part fails only itself", async () => {
+    const { server } = cardServer();
+    const bot = await start(server);
+    const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
+    let limited = false;
+    let rev = 1;
+    server.on("card.patch", (f) => {
+      if (!limited) {
+        limited = true;
+        return { ok: false, error: { code: "rate_limited", message: "slow down" } };
+      }
+      if ((f.ops as { props?: { value?: number } }[]).some((o) => o.props?.value === -1)) {
+        return { ok: false, error: { code: "invalid", message: "bad value", reason: "card.bad_op" } };
+      }
+      rev++;
+      return { ok: true, result: { message: message({ id: r.message.id, kind: "card", cardV2: { ...report(), rev } }), rev } };
+    });
+    const p1 = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_groups", props: { value: 39 } }]);
+    await server.next((f) => f.t === "card.patch");
+    const good = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_groups", props: { value: 40 } }]);
+    const bad = bot.patchCard(GROUP_ID, r.message.id, [{ op: "set", id: "m_dau", props: { value: -1 } }]).catch((e) => e as ChatError);
+    await p1;
+    expect((await good).cardV2?.rev).toBeGreaterThan(1);
+    const err = (await bad) as ChatError;
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.reason).toBe("card.bad_op");
   });
 });
 
