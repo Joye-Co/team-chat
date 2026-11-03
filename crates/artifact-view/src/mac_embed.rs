@@ -7,6 +7,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use block2::RcBlock;
 use dispatch2::DispatchQueue;
@@ -15,10 +16,12 @@ use objc2::runtime::{AnyClass, AnyObject};
 use objc2::{ClassType, DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::{
     NSAppearance, NSAppearanceCustomization, NSAppearanceNameAqua, NSAppearanceNameDarkAqua,
-    NSEvent, NSImage, NSResponder, NSView, NSWindowOrderingMode,
+    NSApplication, NSEvent, NSEventModifierFlags, NSEventType, NSImage, NSResponder, NSView,
+    NSWindow, NSWindowOrderingMode,
 };
 use objc2_foundation::{
-    MainThreadMarker, NSData, NSDictionary, NSError, NSObject, NSPoint, NSRect, NSSize, NSString,
+    MainThreadMarker, NSData, NSDictionary, NSError, NSObject, NSPoint, NSProcessInfo, NSRect,
+    NSSize, NSString,
 };
 use objc2_web_kit::{WKWebView, WKWebViewConfiguration};
 
@@ -96,6 +99,15 @@ define_class!(
             ok
         }
 
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, event: Option<&NSEvent>) -> bool {
+            FIRST_MOUSE_FOR_SELF_TESTS.load(Ordering::Relaxed) || {
+                // SAFETY: NSView's method with this signature.
+                let ok: bool = unsafe { msg_send![super(self), acceptsFirstMouse: event] };
+                ok
+            }
+        }
+
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
             if self.ivars().pass_scroll.get()
@@ -109,6 +121,9 @@ define_class!(
         }
     }
 );
+
+/// Set by [`EmbeddedArtifact::post_click`]: see there.
+static FIRST_MOUSE_FOR_SELF_TESTS: AtomicBool = AtomicBool::new(false);
 
 /// One 产出 page embedded in a host window. Main thread only. Dropping it removes the view
 /// and stops the page (also its media).
@@ -390,6 +405,76 @@ impl EmbeddedArtifact {
         }
     }
 
+    /// Runs JavaScript in the page and gives its value when it is a string (`None` when it
+    /// fails or is something else). `done` runs once on the main thread. For self-tests.
+    pub fn evaluate_text(&self, script: &str, done: impl FnOnce(Option<String>) + 'static) {
+        if self.is_closed() {
+            done(None);
+            return;
+        }
+        let done = RefCell::new(Some(done));
+        let block = RcBlock::new(move |value: *mut AnyObject, _err: *mut NSError| {
+            let Some(done) = done.borrow_mut().take() else {
+                return;
+            };
+            // SAFETY: WebKit passes a valid (or null) object for the call.
+            let text = unsafe { value.as_ref() }
+                .and_then(|v| v.downcast_ref::<NSString>())
+                .map(|s| s.to_string());
+            done(text);
+        });
+        unsafe {
+            self.web_view
+                .evaluateJavaScript_completionHandler(&NSString::from_str(script), Some(&block))
+        };
+    }
+
+    /// Posts a left click at `(x, y)`, in points from the page's top-left corner, to the
+    /// app's event queue: a mouse-down and a mouse-up that AppKit dispatches like the
+    /// viewer's own click (event monitors, hit testing, WebKit). False when the page is not
+    /// in a window. For self-tests.
+    ///
+    /// The self-test never activates the app (it must not take the viewer's focus), and
+    /// AppKit gives a click in an inactive app's window to a view only when the view takes
+    /// the first mouse. WebKit does not for a button, so from the first call on, every
+    /// embedded page in this process takes it, as when the app is active.
+    pub fn post_click(&self, x: f64, y: f64) -> bool {
+        if self.is_closed() {
+            return false;
+        }
+        FIRST_MOUSE_FOR_SELF_TESTS.store(true, Ordering::Relaxed);
+        let Some(window) = self.web_view.window() else {
+            return false;
+        };
+        let local = if self.web_view.isFlipped() {
+            NSPoint::new(x, y)
+        } else {
+            NSPoint::new(x, self.web_view.bounds().size.height - y)
+        };
+        let at = self.web_view.convertPoint_toView(local, None);
+        post_click_at(&window, at)
+    }
+
+    /// Posts a left click at `(x, y)`, in points from the top-left corner of the window's
+    /// content, like [`post_click`](Self::post_click). For self-tests of input outside the
+    /// page.
+    pub fn post_window_click(&self, x: f64, y: f64) -> bool {
+        let Some(window) = self.container.window() else {
+            return false;
+        };
+        let Some(content) = window.contentView() else {
+            return false;
+        };
+        let height = content.bounds().size.height;
+        let local = if content.isFlipped() {
+            NSPoint::new(x, y)
+        } else {
+            NSPoint::new(x, height - y)
+        };
+        let at = content.convertPoint_toView(local, None);
+        post_click_at(&window, at)
+    }
+
     /// Removes the view and stops the page. A `Closed` event follows once. Safe to call
     /// more than once.
     pub fn close(&self) {
@@ -407,6 +492,40 @@ impl Drop for EmbeddedArtifact {
     fn drop(&mut self) {
         self.close();
     }
+}
+
+/// Posts a left mouse-down and mouse-up at `at` (window coordinates) to the end of the
+/// app's event queue.
+fn post_click_at(window: &NSWindow, at: NSPoint) -> bool {
+    let mtm = MainThreadMarker::from(window);
+    let app = NSApplication::sharedApplication(mtm);
+    let time = NSProcessInfo::processInfo().systemUptime();
+    let number = window.windowNumber();
+    for (i, (kind, pressure)) in [
+        (NSEventType::LeftMouseDown, 1.0),
+        (NSEventType::LeftMouseUp, 0.0),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let Some(event) =
+            NSEvent::mouseEventWithType_location_modifierFlags_timestamp_windowNumber_context_eventNumber_clickCount_pressure(
+                kind,
+                at,
+                NSEventModifierFlags::empty(),
+                time + i as f64 * 0.05,
+                number,
+                None,
+                0,
+                1,
+                pressure,
+            )
+        else {
+            return false;
+        };
+        app.postEvent_atStart(&event, false);
+    }
+    true
 }
 
 fn ns_rect(r: Rect) -> NSRect {
