@@ -1924,6 +1924,9 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
         options.as_deref().unwrap_or(&[]),
         invalid,
         false,
+        // Off the ask's surface, a field takes text only when it sends live events.
+        (ctx.card.ask.is_none() || !ctx.card.surface_ids().contains(id.as_str()))
+            .then(|| live && b.base().is_some_and(|x| !x.events().is_empty())),
         window,
         cx,
     );

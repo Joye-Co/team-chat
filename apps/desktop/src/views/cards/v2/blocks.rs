@@ -1070,6 +1070,7 @@ pub(crate) fn form_grid(
             options.as_deref().unwrap_or(&[]),
             invalid,
             lead,
+            None,
             window,
             cx,
         );
@@ -1110,11 +1111,13 @@ pub(crate) fn input_control(
     options: &[InputOption],
     invalid: bool,
     lead: bool,
+    // v11/pb-cards: a 2.1 block's own say (an input outside the ask takes live events).
+    live: Option<bool>,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     let k = theme::colors(cx);
-    let live = ctx.live();
+    let live = live.unwrap_or_else(|| ctx.live());
     match kind {
         InputKind::Select => {
             let chosen = ctx.form.read(cx).choice(id).first().cloned();
