@@ -35,6 +35,9 @@ pub mod update;
 pub mod appearance;
 pub mod artifact_page;
 pub mod cards_v2;
+// --- inc-cards21 ---
+pub mod cards21;
+// --- end inc-cards21 ---
 pub mod desk;
 pub mod group_page;
 pub mod live;
@@ -67,6 +70,13 @@ pub struct Section {
 
 /// Every section of the catalog. Add a new area file here too.
 pub const SECTIONS: &[Section] = &[
+    // --- inc-cards21 ---
+    Section {
+        name: "cards21",
+        entries: cards21::ENTRIES,
+        developer: false,
+    },
+    // --- end inc-cards21 ---
     Section {
         name: "common",
         entries: common::ENTRIES,

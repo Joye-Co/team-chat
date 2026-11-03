@@ -71,6 +71,8 @@ struct Sample {
     msg: CardV2Message,
     answers: Vec<CardV2Answer>,
     pending: Option<CardV2Pending>,
+    // --- inc-cards21: my events (absolute times) ---
+    events: Vec<crate::data::cards_v2::MyCardEvent>,
 }
 
 fn card(v: serde_json::Value) -> CardV2 {
@@ -101,9 +103,12 @@ fn sample(
             created_at: created,
             edited_at: edited,
             card: std::sync::Arc::new(c),
+            card_state: None,
+            cause: None,
         },
         answers: Vec::new(),
         pending: None,
+        events: Vec::new(),
     }
 }
 
@@ -770,6 +775,23 @@ fn all() -> Vec<Sample> {
         at(10, 12),
     ));
     out.push(page);
+    // --- inc-cards21: the Card v2.1 samples ---
+    let now = crate::selftest::clock::now_ms();
+    out.extend(
+        crate::views::cards::v21::samples::all()
+            .into_iter()
+            .map(|s| Sample {
+                msg: s.msg,
+                answers: s.answers,
+                pending: s.pending,
+                events: s
+                    .events
+                    .iter()
+                    .map(|(ago, e)| crate::views::cards::v21::samples::at_ago(e, *ago, now))
+                    .collect(),
+            }),
+    );
+    // --- end inc-cards21 ---
     out
 }
 
@@ -849,6 +871,122 @@ impl SampleCards {
         Some((s.msg.group_id.clone(), s.msg.topic_id.clone()))
     }
 
+    // --- inc-cards21: card events on the sample team (acked at once, live author) ---
+
+    pub fn events(&self, message_id: &str) -> Vec<crate::data::cards_v2::MyCardEvent> {
+        self.lock()
+            .get(&Self::key(message_id))
+            .map(|s| s.events.clone())
+            .unwrap_or_default()
+    }
+
+    /// Records my event as acked by a connected author. A submit, reject or commit is
+    /// stored as my answer. Returns the topic for the change.
+    pub fn send_event(
+        &self,
+        message_id: &str,
+        me: &str,
+        request: crate::data::cards_v2::CardEventRequest,
+        now: Millis,
+    ) -> Option<(String, String, String)> {
+        use crate::data::cards_v2::{
+            CardEventAck, CardEventPhase, Expect, ExpectMode, MyCardEvent,
+        };
+        let mut map = self.lock();
+        let s = map.get_mut(&Self::key(message_id))?;
+        let card = s.msg.card.clone();
+        let answer_action = request.action_id.as_ref().and_then(|a| {
+            card.actions()
+                .iter()
+                .find(|x| &x.id == a)
+                .filter(|x| {
+                    matches!(
+                        x.kind(),
+                        crate::data::cards_v2::CardActionKind::Submit
+                            | crate::data::cards_v2::CardActionKind::Reject
+                    )
+                })
+                .map(|x| x.id.clone())
+        });
+        let commit = request
+            .block_id
+            .as_ref()
+            .is_some_and(|b| card.is_answer_event(b, &request.event));
+        let durable = answer_action.is_some() || commit;
+        if durable {
+            let inputs = match (&request.inputs, &request.block_id, &request.value) {
+                (Some(i), _, _) => Some(i.clone()),
+                (None, Some(b), Some(v)) => Some([(b.clone(), v.clone())].into_iter().collect()),
+                _ => None,
+            };
+            let action_id = answer_action
+                .or(request.block_id.clone())
+                .unwrap_or_default();
+            // A changeable vote replaces my earlier one.
+            s.answers
+                .retain(|a| !(a.actor_id == me && a.rev == request.rev && commit));
+            s.answers.push(CardV2Answer {
+                actor_id: me.into(),
+                rev: request.rev,
+                action_id,
+                inputs,
+                edited_values: None,
+                at: now,
+            });
+            s.pending = None;
+        }
+        let id = format!("sample-{}-{now}", s.events.len());
+        if let Some(b) = &request.block_id {
+            for e in s.events.iter_mut().filter(|e| {
+                !e.durable
+                    && e.request.block_id.as_deref() == Some(b)
+                    && e.request.event == request.event
+            }) {
+                e.dropped = true;
+            }
+        }
+        s.events.push(MyCardEvent {
+            client_event_id: id.clone(),
+            request,
+            durable,
+            sent_at: now,
+            phase: CardEventPhase::Acked {
+                ack: CardEventAck {
+                    event_id: format!("ev-{id}"),
+                    stored: durable,
+                    answer_id: None,
+                    duplicate: None,
+                    expect: Expect {
+                        by: s.msg.author_id.clone(),
+                        mode: ExpectMode::Live,
+                        eta_ms: Some(2000),
+                    },
+                },
+                at: now,
+            },
+            dropped: false,
+        });
+        if s.events.len() > 20 {
+            s.events.remove(0);
+        }
+        Some((s.msg.group_id.clone(), s.msg.topic_id.clone(), id))
+    }
+
+    /// 不等了.
+    pub fn drop_event(&self, message_id: &str, client_event_id: &str) -> Option<(String, String)> {
+        let mut map = self.lock();
+        let s = map.get_mut(&Self::key(message_id))?;
+        for e in s
+            .events
+            .iter_mut()
+            .filter(|e| e.client_event_id == client_event_id)
+        {
+            e.dropped = true;
+        }
+        Some((s.msg.group_id.clone(), s.msg.topic_id.clone()))
+    }
+    // --- end inc-cards21 ---
+
     /// Takes back `me`'s answer (the sample stands in for an answer that is
     /// still queued) or a refused one.
     pub fn withdraw(&self, message_id: &str, me: &str) -> Option<(String, String)> {
@@ -869,6 +1007,10 @@ mod tests {
     #[test]
     fn every_sample_card_is_valid_and_desk_asks_resolve() {
         for s in all() {
+            // inc-cards21: a block of a newer catalog never validates (it renders the box).
+            if s.msg.message_id == crate::views::cards::v21::samples::UNKNOWN {
+                continue;
+            }
             assert!(
                 s.msg.card.validate().is_ok(),
                 "{}: {:?}",

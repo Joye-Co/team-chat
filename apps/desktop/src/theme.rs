@@ -1890,3 +1890,56 @@ mod tests {
         }
     }
 }
+
+// --- inc-cards21: Card v2.1 sizes and timings (CardsCompose.dc.html, INTERACT §4.4, §6.4) ---
+pub mod card_v21 {
+    use std::time::Duration;
+
+    use gpui::{Pixels, px};
+
+    /// Rank rows, slot cells, poll rows.
+    pub const RANK_ROW: Pixels = px(40.);
+    pub const SLOT_CELL: Pixels = px(52.);
+    pub const POLL_ROW: Pixels = px(44.);
+    /// Rating stars and scale cells.
+    pub const STAR: Pixels = px(22.);
+    pub const SCALE_CELL: Pixels = px(32.);
+    /// Image choice and compare previews.
+    pub const IMAGE: Pixels = px(150.);
+    pub const PREVIEW: Pixels = px(120.);
+    /// Matrix option columns.
+    pub const MATRIX_COL: Pixels = px(72.);
+    /// Inline page height range (CARD21 §8).
+    pub const EMBED_MIN: f32 = 160.;
+    pub const EMBED_MAX: f32 = 480.;
+    pub const EMBED_DEFAULT: f32 = 320.;
+    /// The amber tint of the decision surface of a non-blocking ask, and the live tint of
+    /// a block a new rev changed.
+    pub const SURFACE_FILL: f32 = 0.07;
+    pub const CHANGE_FILL: f32 = 0.14;
+
+    /// Pending (INTERACT §4.4): nothing shows before this.
+    pub const PENDING_QUIET: Duration = Duration::from_millis(400);
+    /// Soft and hard waits by `expect.mode` (INTERACT §6.4).
+    pub const SOFT_LIVE: Duration = Duration::from_secs(8);
+    pub const HARD_LIVE: Duration = Duration::from_secs(45);
+    pub const SOFT_RUN: Duration = Duration::from_secs(20);
+    pub const HARD_RUN: Duration = Duration::from_secs(120);
+    pub const SOFT_STARTING: Duration = Duration::from_secs(45);
+    pub const HARD_STARTING: Duration = Duration::from_secs(180);
+    /// `expect.mode: offline` for a live event: the note shows this long.
+    pub const OFFLINE_NOTE: Duration = Duration::from_secs(4);
+    /// An `interaction.resolved` note shows this long under the block.
+    pub const RESOLVED_NOTE: Duration = Duration::from_secs(5);
+    /// Live debounce (INTERACT §3.2): text inputs and draft edits.
+    pub const DEBOUNCE_TEXT: Duration = Duration::from_millis(600);
+    pub const DEBOUNCE_DRAFT: Duration = Duration::from_millis(1000);
+    /// A changed block fades in and its tint fades out.
+    pub const CHANGE_IN: Duration = Duration::from_millis(200);
+    pub const CHANGE_FLASH: Duration = Duration::from_millis(1600);
+    /// 问这里 shows after the pointer rests this long (REFS §A3).
+    pub const HOVER_ASK: Duration = Duration::from_millis(300);
+    /// A part that was just added flashes `--sel`.
+    pub const PART_FLASH: Duration = Duration::from_millis(600);
+}
+// --- end inc-cards21 ---

@@ -21,6 +21,14 @@ pub enum Val {
     Text(String),
     Choice(Vec<String>),
     Switch(bool),
+    // --- inc-cards21: 2.1 inputs ---
+    /// A rank: item ids in order.
+    Order(Vec<String>),
+    /// A rating, a scale or a slider.
+    Num(f64),
+    /// A matrix: row id → column id.
+    Rows(BTreeMap<String, String>),
+    // --- end inc-cards21 ---
 }
 
 /// The viewer's values by block id.
@@ -69,6 +77,9 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
     let mut out = Vec::new();
     for block in card.all_blocks() {
         match block {
+            CardV2Block::Decision { .. } if super::super::v21::is_21(card) => {
+                out.extend(super::super::v21::form21::problem(card, block, values));
+            }
             CardV2Block::Decision { id, .. } => {
                 if choice_of(values, id).is_empty() {
                     out.push(Problem::Missing(String::new()));
@@ -116,7 +127,9 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
                     out.push(Problem::Invalid(label.clone()));
                 }
             }
-            _ => {}
+            // --- inc-cards21 ---
+            b => out.extend(super::super::v21::form21::problem(card, b, values)),
+            // --- end inc-cards21 ---
         }
     }
     out
@@ -137,6 +150,11 @@ pub fn missing_labels(problems: &[Problem]) -> Vec<String> {
 /// Decisions send one option id (an array with `multiple`); chips an array;
 /// select one id; switch a bool; number a number; the rest text.
 pub fn to_inputs(card: &CardV2, values: &Values) -> Option<AnswerInputs> {
+    // --- inc-cards21: 2.1 cards send the CARD21 §4 shapes ---
+    if super::super::v21::is_21(card) {
+        return super::super::v21::form21::to_inputs(card, values, None);
+    }
+    // --- end inc-cards21 ---
     let mut out = BTreeMap::new();
     for block in card.all_blocks() {
         match block {
@@ -265,6 +283,8 @@ pub struct Preset {
     pub editing: bool,
     /// Expand the answer record.
     pub expanded: bool,
+    /// inc-cards21: the rev the viewer saw before (screenshot scenes of a new rev).
+    pub prev: Option<std::sync::Arc<CardV2>>,
 }
 
 /// The viewer's work on one card.
@@ -279,6 +299,8 @@ pub struct CardForm {
     pub editing: Option<u32>,
     /// The answer record is expanded (展开).
     pub expanded: bool,
+    /// inc-cards21: rank orders, numbers and matrix rows.
+    other: HashMap<String, Val>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -304,10 +326,10 @@ impl CardForm {
                 Val::Switch(b) => {
                     switches.insert(k.clone(), *b);
                 }
-                Val::Text(_) => {}
+                Val::Text(_) | Val::Order(_) | Val::Num(_) | Val::Rows(_) => {}
             }
         }
-        Self {
+        let mut s = Self {
             rev: card.rev,
             choices,
             switches,
@@ -315,14 +337,69 @@ impl CardForm {
             initial,
             editing,
             expanded,
+            other: HashMap::new(),
             _subscriptions: Vec::new(),
+        };
+        for (k, v) in &s.initial {
+            if let Val::Order(_) | Val::Num(_) | Val::Rows(_) = v {
+                s.other.insert(k.clone(), v.clone());
+            }
         }
+        s
     }
 
     /// Starts over for a newer rev of the card.
     pub fn reset(&mut self, card: &CardV2) {
         *self = Self::new(card, None);
     }
+
+    // --- inc-cards21: local values survive revs (INTERACT §4.4) ---
+
+    /// Moves to a newer rev and keeps what the viewer chose or typed for every block that
+    /// still exists (choices only when their option ids still exist). A block replaced by
+    /// another type starts over.
+    pub fn rebase(&mut self, old: &CardV2, card: &CardV2, cx: &mut Context<Self>) {
+        let same_type = |id: &str| {
+            matches!((old.block(id), card.block(id)), (Some(a), Some(b))
+                if a.type_name() == b.type_name())
+        };
+        let ids = |id: &str| super::super::v21::form21::option_ids(card, id);
+        self.choices.retain(|k, v| {
+            let base = k.split('#').next().unwrap_or(k);
+            same_type(base) && ids(base).is_none_or(|known| v.iter().all(|o| known.contains(o)))
+        });
+        self.switches.retain(|k, _| same_type(k));
+        self.fields
+            .retain(|k, _| same_type(k.split('#').next().unwrap_or(k)));
+        self.other.retain(|k, _| same_type(k));
+        let fresh = defaults(card);
+        for (k, v) in fresh {
+            if !self.initial.contains_key(&k) || !same_type(&k) {
+                self.initial.insert(k, v);
+            }
+        }
+        self.initial
+            .retain(|k, _| card.block(k.split('#').next().unwrap_or(k)).is_some());
+        self.rev = card.rev;
+        cx.notify();
+    }
+
+    /// A 2.1 value (rank order, number, matrix rows).
+    pub fn value21(&self, block: &str) -> Option<&Val> {
+        self.other.get(block)
+    }
+
+    pub fn set_value21(&mut self, block: &str, v: Val, cx: &mut Context<Self>) {
+        self.other.insert(block.to_string(), v);
+        cx.notify();
+    }
+
+    /// Sets the whole choice of `block` (a matrix row, a table selection).
+    pub fn set_choice(&mut self, block: &str, ids: Vec<String>, cx: &mut Context<Self>) {
+        self.choices.insert(block.to_string(), ids);
+        cx.notify();
+    }
+    // --- end inc-cards21 ---
 
     pub fn choice(&self, block: &str) -> &[String] {
         self.choices.get(block).map(Vec::as_slice).unwrap_or(&[])
@@ -345,6 +422,12 @@ impl CardForm {
 
     pub fn switch(&self, block: &str) -> bool {
         self.switches.get(block).copied().unwrap_or(false)
+    }
+
+    /// inc-cards21: sets a switch (a confirm's yes or no).
+    pub fn toggle_switch_to(&mut self, block: &str, value: bool, cx: &mut Context<Self>) {
+        self.switches.insert(block.to_string(), value);
+        cx.notify();
     }
 
     pub fn toggle_switch(&mut self, block: &str, cx: &mut Context<Self>) {
@@ -427,6 +510,9 @@ impl CardForm {
         }
         for (k, f) in &self.fields {
             v.insert(k.clone(), Val::Text(f.text(cx)));
+        }
+        for (k, x) in &self.other {
+            v.insert(k.clone(), x.clone());
         }
         v
     }

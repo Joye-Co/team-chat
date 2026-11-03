@@ -32,7 +32,7 @@ use crate::{
 };
 
 /// 13/20.
-fn small(el: Div) -> Div {
+pub(crate) fn small(el: Div) -> Div {
     el.text_size(px(13.)).line_height(px(20.))
 }
 
@@ -167,7 +167,13 @@ fn note_input_ix(blocks: &[&CardV2Block], id: Option<&str>) -> Option<usize> {
 }
 
 /// One block on its own.
-fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn block(
+    ctx: &Ctx,
+    b: &CardV2Block,
+    ix: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let k = theme::colors(cx);
     match b {
         CardV2Block::Text { text, .. } => div()
@@ -275,7 +281,7 @@ fn fields_grid(fields: &[CardField], cx: &App) -> AnyElement {
 }
 
 /// A number-like cell: digits with an optional sign, `%`, `,` or `.`.
-fn numeric(s: &str) -> bool {
+pub(crate) fn numeric(s: &str) -> bool {
     let t = s.trim();
     !t.is_empty()
         && t.chars().any(|c| c.is_ascii_digit())
@@ -289,7 +295,7 @@ fn percent(s: &str) -> Option<f32> {
         .and_then(|n| n.trim().parse::<f32>().ok())
 }
 
-fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
+pub(crate) fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     let numeric_col: Vec<bool> = (0..columns.len())
         .map(|ci| {
@@ -375,7 +381,7 @@ fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn list(items: &[CardListItem], cx: &App) -> AnyElement {
+pub(crate) fn list(items: &[CardListItem], cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     small(div())
         .flex()
@@ -550,7 +556,7 @@ fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> Any
 // ---------------------------------------------------------------------------
 // Decisions and the answer record
 
-fn key_tile(i: usize, cx: &App) -> Div {
+pub(crate) fn key_tile(i: usize, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
@@ -566,7 +572,7 @@ fn key_tile(i: usize, cx: &App) -> Div {
         .child(letter(i).to_string())
 }
 
-fn decision(
+pub(crate) fn decision(
     ctx: &Ctx,
     id: &str,
     options: &[DecisionOption],
@@ -684,7 +690,7 @@ fn decision(
 /// row with the drawn check, `你选了 B：…` (or `Joye 选了 B：…`), where it
 /// went, the time, and `撤回` while my answer is still on its way or
 /// `展开` for others.
-fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     let _ = window;
     let k = theme::colors(cx);
     let (actor, action, inputs, at, sending) = match ctx.state {
@@ -859,7 +865,7 @@ fn answered_fields(
     fields_grid(&rows, cx)
 }
 
-fn quiet_button(id: SharedString, label: &str, cx: &App) -> gpui::Stateful<Div> {
+pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> gpui::Stateful<Div> {
     let k = theme::colors(cx);
     div()
         .id(id)
@@ -911,7 +917,7 @@ pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>
 /// A field box: 36 pt (32 in the footer), radius 8, 1 pt `line-2`; `ink-3`
 /// while focused or when it is the first empty required field; `bad` when
 /// invalid.
-fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div {
+pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .h(height)
@@ -933,7 +939,12 @@ fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div 
         .gap(space::S8)
 }
 
-fn line_input(field: &Field, disabled: bool, window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn line_input(
+    field: &Field,
+    disabled: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let k = theme::colors(cx);
     match field {
         Field::Line(s) => ui::placeholder_input(
@@ -991,7 +1002,12 @@ pub(crate) fn note_field(
         .into_any_element()
 }
 
-fn form_grid(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn form_grid(
+    ctx: &Ctx,
+    blocks: &[&CardV2Block],
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let k = theme::colors(cx);
     let problems = super::form::problems(ctx.card, &ctx.values);
     let first_missing = problems.iter().find_map(|p| match p {
@@ -1055,7 +1071,7 @@ fn form_grid(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut A
 }
 
 #[allow(clippy::too_many_arguments)]
-fn input_control(
+pub(crate) fn input_control(
     ctx: &Ctx,
     id: &str,
     kind: InputKind,
@@ -1628,7 +1644,7 @@ fn plan(
 // ---------------------------------------------------------------------------
 // Data
 
-fn fmt_number(n: f64) -> String {
+pub(crate) fn fmt_number(n: f64) -> String {
     if n.fract() == 0. && n.abs() < 1e15 {
         let s = format!("{}", n.abs() as i64);
         let mut out = String::new();
@@ -1646,7 +1662,7 @@ fn fmt_number(n: f64) -> String {
     }
 }
 
-fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
+pub(crate) fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .flex()

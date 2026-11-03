@@ -18,6 +18,9 @@ pub mod samples;
 pub mod selftest;
 // --- cards v2 track ---
 pub mod v2;
+// --- inc-cards21: Card v2.1 ---
+pub mod v21;
+// --- end inc-cards21 ---
 // --- end cards v2 track ---
 
 use std::{

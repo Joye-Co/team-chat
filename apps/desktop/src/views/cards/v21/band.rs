@@ -1,0 +1,401 @@
+//! The status band of a 2.1 card (CARD21 §2): one band per card per viewer, derived from
+//! the card, the server's card state, the answers and my events. Members cannot set it.
+//!
+//! | Band | Word | When |
+//! | --- | --- | --- |
+//! | amber | 等你 | open ask, the viewer is asked; the detail says what kind of question |
+//! | grey | 等{名字} | open ask, someone else is asked (up to 2 names, else 等 n 位成员) |
+//! | blue | 处理中 | working, or my live event waits for the author |
+//! | green | 完成 | done |
+//! | red | 失败 | my answer did not get there, or a check failed |
+//! | dimmed | 已作废 / 已过期 | superseded, expired |
+//!
+//! The 2.0 strip draws it (`v2::strip`); this file gives it the 2.1 words, the right-hand
+//! deadline and the pending override.
+
+use crate::{
+    copy::{cards21 as c, fill},
+    data::{
+        Millis,
+        cards_v2::{CardIntent, CardV2, CardV2Answer, CardV2Block, PollVoters},
+    },
+    views::cards::v2::{
+        Ctx,
+        state::{CardState, Viewer},
+    },
+};
+
+use super::{interact, is_21};
+
+/// `今天 12:00`, `明天 09:00`, `11月3日 18:00`.
+pub fn day_time(at: Millis) -> String {
+    use chrono::{Local, TimeZone as _};
+    let Some(then) = Local.timestamp_millis_opt(at).single() else {
+        return String::new();
+    };
+    let today = crate::selftest::clock::local_now().date_naive();
+    let time = then.format("%H:%M").to_string();
+    if then.date_naive() == today {
+        fill(c::BAND_TODAY, &[("time", &time)])
+    } else if today.succ_opt() == Some(then.date_naive()) {
+        fill(c::BAND_TOMORROW, &[("time", &time)])
+    } else {
+        fill(
+            c::BAND_DAY,
+            &[
+                ("m", &then.format("%-m").to_string()),
+                ("d", &then.format("%-d").to_string()),
+                ("time", &time),
+            ],
+        )
+    }
+}
+
+/// The card's poll, if it has one.
+fn poll(card: &CardV2) -> Option<&CardV2Block> {
+    card.blocks
+        .iter()
+        .find(|b| matches!(b, CardV2Block::Poll { .. }))
+}
+
+/// True when `me` may vote in `poll`.
+fn voter(b: &CardV2Block, me: Option<&str>) -> bool {
+    match (b, me) {
+        (CardV2Block::Poll { voters, .. }, Some(me)) => match voters {
+            PollVoters::Members(ids) => ids.iter().any(|x| x == me),
+            PollVoters::Keyword(_) => true,
+        },
+        _ => false,
+    }
+}
+
+/// The 2.1 rules on top of the 2.0 state: a poll stays open for every voter until
+/// `closesAt` (amber for a viewer who has not voted, grey after the vote).
+pub fn adjust(
+    card: &CardV2,
+    state: CardState,
+    answers: &[CardV2Answer],
+    viewer: &Viewer,
+    now: Millis,
+) -> CardState {
+    if !is_21(card) {
+        return state;
+    }
+    if let Some(p @ CardV2Block::Poll { closes_at, .. }) = poll(card)
+        && (*closes_at as Millis) > now
+        && matches!(
+            state,
+            CardState::Answered { .. } | CardState::Pending | CardState::WaitingOn
+        )
+    {
+        let voted = answers
+            .iter()
+            .any(|a| a.rev == card.rev && Some(a.actor_id.as_str()) == viewer.id);
+        return if voter(p, viewer.id) && !voted {
+            CardState::Pending
+        } else {
+            CardState::WaitingOn
+        };
+    }
+    state
+}
+
+/// True when the viewer can answer a non-blocking ask on a card whose band follows its
+/// intent (a question inside a done or info report, INTERACT §3.6): the decision surface
+/// is live and marked 问你, the band stays the intent's.
+pub fn surface_live(
+    ctx_card: &CardV2,
+    state: &CardState,
+    answers: &[CardV2Answer],
+    viewer: &Viewer,
+    open: Option<bool>,
+) -> bool {
+    if !is_21(ctx_card) || state.live() || ctx_card.intent == CardIntent::Ask {
+        return false;
+    }
+    let Some(ask) = &ctx_card.ask else {
+        return false;
+    };
+    let Some(me) = viewer.id else { return false };
+    let open = open.unwrap_or_else(|| !answers.iter().any(|a| a.rev == ctx_card.rev));
+    open && ask.allows(me, viewer.is_owner, viewer.requester)
+        && !matches!(
+            state,
+            CardState::Sending { .. } | CardState::Expired | CardState::Superseded
+        )
+}
+
+/// True when block `id` is on the live decision surface of a non-blocking ask.
+pub fn asks_here(ctx: &Ctx, id: &str) -> bool {
+    ctx.surface_live && !ctx.state.live() && ctx.card.surface_ids().contains(id)
+}
+
+/// What kind of question the card asks, for the amber band.
+fn ask_kind(card: &CardV2) -> Option<String> {
+    let surface = card.surface_ids();
+    let on = |b: &&CardV2Block| b.id().is_some_and(|id| surface.contains(id));
+    let mut kinds = card.blocks.iter().filter(on);
+    if let Some(CardV2Block::Questionnaire { children, .. }) = card
+        .blocks
+        .iter()
+        .find(|b| matches!(b, CardV2Block::Questionnaire { .. }))
+    {
+        let n = children
+            .iter()
+            .filter(|id| card.block(id).is_some_and(CardV2Block::takes_input))
+            .count();
+        return Some(fill(c::BAND_QUESTIONS, &[("n", &n.to_string())]));
+    }
+    let first = kinds.next()?;
+    Some(match first {
+        CardV2Block::Compare { options, .. } => {
+            fill(c::BAND_COMPARE, &[("n", &options.len().to_string())])
+        }
+        CardV2Block::Decision {
+            multiple: Some(true),
+            min_select,
+            max_select,
+            options,
+            ..
+        } => fill(
+            c::BAND_MULTIPLE,
+            &[
+                ("min", &min_select.unwrap_or(1).to_string()),
+                (
+                    "max",
+                    &max_select.unwrap_or(options.len() as u32).to_string(),
+                ),
+            ],
+        ),
+        CardV2Block::Decision {
+            allow_other: Some(_),
+            ..
+        } => c::BAND_SINGLE_OTHER.into(),
+        CardV2Block::Decision { .. } => c::BAND_SINGLE.into(),
+        CardV2Block::Rank { .. } => c::BAND_RANK.into(),
+        CardV2Block::Rating { .. } => c::BAND_RATING.into(),
+        CardV2Block::Scale { .. } => c::BAND_SCALE.into(),
+        CardV2Block::Confirm { .. } => c::BAND_CONFIRM.into(),
+        CardV2Block::ImageChoice { .. } => c::BAND_IMAGE.into(),
+        CardV2Block::Slots { .. } => c::BAND_SLOTS.into(),
+        CardV2Block::Matrix { .. } => c::BAND_MATRIX.into(),
+        CardV2Block::Table { .. } => c::BAND_TABLE.into(),
+        CardV2Block::Input { .. } => c::BAND_FILL.into(),
+        _ => return None,
+    })
+}
+
+pub(crate) fn names(ctx: &Ctx) -> (usize, String) {
+    let Some(ask) = &ctx.card.ask else {
+        return (0, String::new());
+    };
+    let resolved: Vec<String> = ctx
+        .msg
+        .card_state
+        .as_ref()
+        .and_then(|s| s.ask.as_ref())
+        .map(|a| a.from.clone())
+        .unwrap_or_else(|| {
+            ask.from
+                .iter()
+                .flat_map(|f| match f.as_str() {
+                    crate::data::cards_v2::ASK_FROM_REQUESTER => ctx
+                        .env
+                        .provider
+                        .topic(&ctx.msg.group_id, &ctx.msg.topic_id)
+                        .map(|t| vec![t.created_by])
+                        .unwrap_or_default(),
+                    crate::data::cards_v2::ASK_FROM_OWNERS => ctx
+                        .env
+                        .provider
+                        .members()
+                        .into_iter()
+                        .filter(|m| m.level == crate::data::MemberLevel::Owner && !m.deactivated)
+                        .map(|m| m.id)
+                        .collect(),
+                    id => vec![id.to_string()],
+                })
+                .collect()
+        });
+    let names: Vec<String> = resolved.iter().map(|id| ctx.name(id)).collect();
+    (
+        names.len(),
+        names.into_iter().take(2).collect::<Vec<_>>().join("、"),
+    )
+}
+
+/// The 2.1 label and detail of the band, from the 2.0 words for the same state.
+pub fn words(ctx: &Ctx, base: (String, String)) -> (String, String) {
+    if !is_21(ctx.card) {
+        return base;
+    }
+    let (_, detail) = base.clone();
+    match ctx.state {
+        CardState::Pending => {
+            if let Some(p) = poll(ctx.card) {
+                let _ = p;
+                let voted = ctx.answers.iter().filter(|a| a.rev == ctx.card.rev).count();
+                return (
+                    c::BAND_YOU.into(),
+                    fill(
+                        c::BAND_VOTED,
+                        &[
+                            ("n", &voted.to_string()),
+                            ("total", &poll_total(ctx).to_string()),
+                        ],
+                    ),
+                );
+            }
+            let kind = ask_kind(ctx.card)
+                .or_else(|| ctx.card.summary.clone().filter(|s| s.chars().count() <= 24))
+                .unwrap_or(detail);
+            (c::BAND_YOU.into(), kind)
+        }
+        CardState::WaitingOn => {
+            if poll(ctx.card).is_some() {
+                let voted = ctx.answers.iter().filter(|a| a.rev == ctx.card.rev).count();
+                let total = poll_total(ctx);
+                return (
+                    fill(
+                        c::BAND_WAITING_MANY,
+                        &[("n", &total.saturating_sub(voted).to_string())],
+                    ),
+                    fill(
+                        c::BAND_VOTED,
+                        &[("n", &voted.to_string()), ("total", &total.to_string())],
+                    ),
+                );
+            }
+            let (n, list) = names(ctx);
+            let label = if n > 2 {
+                fill(c::BAND_WAITING_MANY, &[("n", &n.to_string())])
+            } else {
+                fill(c::BAND_WAITING_ON, &[("name", &list)])
+            };
+            let questions = ctx.card.blocks.iter().find_map(|b| match b {
+                CardV2Block::Questionnaire { children, .. } => Some(children.len()),
+                _ => None,
+            });
+            let detail = match questions {
+                Some(q) => fill(
+                    c::BAND_ASKED,
+                    &[("name", &ctx.author), ("n", &q.to_string())],
+                ),
+                None => fill(c::BAND_ASKED_ONE, &[("name", &ctx.author)]),
+            };
+            (label, detail)
+        }
+        CardState::Superseded => (c::BAND_VOID.into(), detail),
+        CardState::Expired => (c::BAND_EXPIRED.into(), detail),
+        CardState::SendFailed {
+            error: crate::data::CardPressError::Other,
+            ..
+        } => (c::BAND_FAILED.into(), c::SEND_FAILED_NET.into()),
+        CardState::SendFailed { .. } | CardState::Failed { .. } => (c::BAND_FAILED.into(), detail),
+        CardState::Done { .. } => (c::BAND_DONE.into(), detail),
+        _ => base,
+    }
+}
+
+fn poll_total(ctx: &Ctx) -> usize {
+    match poll(ctx.card) {
+        Some(CardV2Block::Poll {
+            voters: PollVoters::Members(ids),
+            ..
+        }) => ids.len(),
+        Some(_) => ctx
+            .env
+            .provider
+            .members()
+            .into_iter()
+            .filter(|m| !m.is_bot() && !m.deactivated)
+            .count(),
+        None => 0,
+    }
+}
+
+/// The right-hand text of the band: the ask's deadline, the poll's close, or the time of
+/// my answer that did not get there.
+pub fn right(ctx: &Ctx) -> Option<String> {
+    if !is_21(ctx.card) {
+        return None;
+    }
+    match ctx.state {
+        CardState::Pending | CardState::WaitingOn => {
+            if let Some(CardV2Block::Poll { closes_at, .. }) = poll(ctx.card) {
+                return Some(fill(
+                    c::BAND_CLOSES,
+                    &[("time", &day_time(*closes_at as Millis))],
+                ));
+            }
+            let at = ctx.card.ask.as_ref()?.expires_at?;
+            Some(fill(c::BAND_DEADLINE, &[("time", &day_time(at as Millis))]))
+        }
+        CardState::SendFailed { .. } => ctx
+            .env
+            .provider
+            .card_v2_pending(&ctx.msg.group_id, &ctx.msg.message_id)
+            .map(|p| crate::views::shell::clock(p.at)),
+        _ => None,
+    }
+}
+
+/// My live event that still waits for the author: the band says so (blue 处理中), for the
+/// emitter only.
+pub fn pending(ctx: &Ctx) -> Option<(interact::Pending, String, String)> {
+    if !is_21(ctx.card) {
+        return None;
+    }
+    let events = ctx
+        .env
+        .provider
+        .card_v2_events(&ctx.msg.group_id, &ctx.msg.message_id);
+    let p = interact::pending(&events, ctx.env.now())?;
+    if p.stage == interact::Stage::Quiet {
+        return None;
+    }
+    let words = interact::stage_words(p.stage, &ctx.author);
+    Some((p, c::BAND_WORKING.to_string(), words))
+}
+
+/// The quiet mark above the decision surface of a non-blocking ask inside a report:
+/// 问你 for the asked viewer, 等{名字} for everyone else.
+pub enum Mark {
+    You,
+    Waiting(String),
+}
+
+pub fn surface_mark(ctx: &Ctx, tree: &super::Tree, id: &str) -> Option<Mark> {
+    if !is_21(ctx.card) || ctx.card.intent == CardIntent::Ask {
+        return None;
+    }
+    let ask = ctx.card.ask.as_ref()?;
+    if ask.blocking == Some(true) {
+        return None;
+    }
+    let open = ctx
+        .msg
+        .card_state
+        .as_ref()
+        .map(|s| s.open_ask().is_some())
+        .unwrap_or_else(|| !ctx.answers.iter().any(|a| a.rev == ctx.card.rev));
+    if !open {
+        return None;
+    }
+    let surface = ctx.card.surface_ids();
+    let ids: Vec<&str> = ctx
+        .card
+        .blocks
+        .iter()
+        .filter_map(|b| b.id())
+        .filter(|b| surface.contains(b))
+        .collect();
+    if !tree.roots(&ids).contains(&id) {
+        return None;
+    }
+    if ctx.surface_live && !ctx.state.live() {
+        return Some(Mark::You);
+    }
+    let (_, list) = names(ctx);
+    (!list.is_empty() && !ctx.surface_live).then_some(Mark::Waiting(list))
+}

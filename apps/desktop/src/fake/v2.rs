@@ -1895,6 +1895,34 @@ impl ChatProvider for V2Samples {
             self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
         }
     }
+    // --- inc-cards21: the interaction loop on the sample team ---
+    fn send_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        message_id: &str,
+        request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        let now = crate::selftest::clock::now_ms();
+        let (group_id, topic_id, id) = self.cards_v2.send_event(message_id, ME, request, now)?;
+        self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
+        Some(id)
+    }
+    fn card_v2_events(&self, _group_id: &str, message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        self.cards_v2.events(message_id)
+    }
+    fn drop_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        if let Some((group_id, topic_id)) = self.cards_v2.drop_event(message_id, client_event_id) {
+            self.emit(vec![Change::Messages { group_id, topic_id }]);
+        }
+    }
+    // --- end inc-cards21 ---
     fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
         if super::v2_desk::card_v2(message_id).is_some() {
             self.desk
