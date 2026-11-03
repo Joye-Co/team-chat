@@ -215,6 +215,32 @@ pub enum ClientUpdate {
         code: Option<ErrorCode>,
         message: String,
     },
+    /// 2.1: the server answered one of my card events (`card.event`, `card.answer`, retract).
+    /// `Err` with `reason` `client.offline` when it never left this client (live events are
+    /// not queued). `ack.error.reason` names the rule (`card.stale_rev`, ...).
+    CardEventAcked {
+        client_event_id: String,
+        message_id: String,
+        result: Result<crate::proto::CardEventAck, crate::proto::ErrorBody>,
+    },
+    /// 1.1: the server answered one of my 产出 page events (`artifact.event`).
+    ArtifactEventAcked {
+        client_event_id: String,
+        artifact_id: String,
+        version: u32,
+        result: Result<crate::proto::ArtifactEventAck, crate::proto::ErrorBody>,
+    },
+    /// 2.1 transient: a live event of a card I made (bots; a person's client rarely gets it).
+    CardEvent(Box<crate::proto::CardEventTransient>),
+    /// 2.1 transient: the author answered one of my events (pending clears).
+    InteractionResolved(crate::proto::InteractionResolvedTransient),
+    /// 1.1 transient: a page event of a 产出 version I made.
+    ArtifactEvent(Box<crate::proto::ArtifactEventTransient>),
+    /// 1.1 transient: a new data snapshot of a 产出 version; `data` is absent over 64 KiB
+    /// (read it with [`Client::artifact_data`]).
+    ArtifactData(Box<crate::proto::ArtifactDataTransient>),
+    /// 1.1 transient: the bot's answer to my page `ask` (private to me).
+    ArtifactReply(Box<crate::proto::ArtifactReplyTransient>),
 }
 
 /// The content of a notification. Texts are data from the cache (names, titles, the
@@ -256,6 +282,10 @@ pub struct SendRequest {
     pub card_v2: Option<crate::proto::CardV2>,
     /// 1.1: a side chat's context (a send in a DM with a bot); see [`Client::start_side_chat`].
     pub context: Option<crate::proto::TopicContext>,
+    /// 2.1: the event (`eventId`) this message answers.
+    pub cause_event_id: Option<String>,
+    /// 1.1: refs to parts (引用提问), at most 5; the server writes their quote lines.
+    pub block_refs: Option<Vec<crate::proto::BlockRefInput>>,
 }
 
 /// An edit of my message. `None` fields keep their value.
@@ -310,6 +340,8 @@ pub(crate) struct Shared {
     subscribers: Mutex<Vec<UnboundedSender<ClientUpdate>>>,
     state: Mutex<ConnectionState>,
     pub token: Mutex<String>,
+    /// `welcome.features` of the last welcome (1.1).
+    pub server_features: Mutex<Vec<String>>,
 }
 
 impl Shared {
@@ -329,6 +361,20 @@ impl Shared {
 
     pub fn transient(&self) -> std::sync::MutexGuard<'_, TransientState> {
         self.transient.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub fn set_server_features(&self, f: Vec<String>) {
+        *self
+            .server_features
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = f;
+    }
+
+    pub fn server_features(&self) -> Vec<String> {
+        self.server_features
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 
@@ -362,6 +408,7 @@ impl Client {
                 subscribers: Mutex::new(Vec::new()),
                 state: Mutex::new(ConnectionState::Stopped),
                 token: Mutex::new(config.token.clone()),
+                server_features: Mutex::new(Vec::new()),
             }),
             config,
             http,
@@ -551,6 +598,10 @@ impl Client {
     }
 
     /// What a background task needs to queue writes after an await.
+    pub(crate) fn command(&self, c: Command) {
+        let _ = self.cmd_tx.send(c);
+    }
+
     pub(crate) fn queue(&self) -> (Arc<Shared>, UnboundedSender<Command>) {
         (self.shared.clone(), self.cmd_tx.clone())
     }
@@ -607,7 +658,10 @@ impl Client {
     ) -> Result<String, ClientError> {
         Self::check_body(&req.body)?;
         Self::check_title(req.title.as_deref())?;
+        crate::proto::check_block_refs(req.block_refs.as_deref())
+            .map_err(|_| ClientError::Invalid("bad block refs"))?;
         if req.body.trim().is_empty()
+            && req.block_refs.is_none()
             && !req.streaming
             && req.card.is_none()
             && req.card_v2.is_none()
@@ -633,6 +687,8 @@ impl Client {
                 card: req.card,
                 card_v2: req.card_v2,
                 context: req.context,
+                cause_event_id: req.cause_event_id,
+                block_refs: req.block_refs,
                 after_root,
             },
         )

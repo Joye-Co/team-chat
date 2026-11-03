@@ -242,6 +242,8 @@ async fn duplicate_ack_is_handled() {
             op: chat_core::OutboxOp::Send {
                 card_v2: None,
                 context: None,
+                cause_event_id: None,
+                block_refs: None,
                 group_id: G1.into(),
                 topic_id: Some(tid.clone()),
                 title: None,

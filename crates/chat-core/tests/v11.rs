@@ -60,6 +60,9 @@ fn answered(seq: u64, actor: &str, message_id: &str, rev: u32) -> Event {
             action_id: "ok".into(),
             inputs: Some([("when".to_string(), json!("now"))].into()),
             edited_values: None,
+            answer_id: Some(format!("AN{seq}")),
+            ask_id: Some("a1".into()),
+            ..Default::default()
         }),
     )
 }
@@ -133,11 +136,11 @@ fn answers_decisions_links_page_events_and_runs_are_cached() {
                     9,
                     G1,
                     ALICE,
-                    EventData::ArtifactEvented(ArtifactEventedData {
-                        artifact_id: "A1".into(),
-                        version: 2,
-                        name: "pick".into(),
-                        payload: Some(json!({"option": "B"})),
+                    EventData::CardRetracted(CardRetractedData {
+                        message_id: "C2".into(),
+                        answer_id: "AN6".into(),
+                        ask_id: Some("a1".into()),
+                        event_id: None,
                     }),
                 ),
                 ev(
@@ -188,8 +191,11 @@ fn answers_decisions_links_page_events_and_runs_are_cached() {
     };
     assert_eq!(pr.state, "merged");
 
-    let events = s.artifact_events("A1").unwrap();
-    assert_eq!((events[0].name.as_str(), events[0].version), ("pick", 2));
+    // A retract marks the answer; it is no longer a decision.
+    let c2 = s.card_answers("C2").unwrap();
+    assert_eq!(c2[0].answer_id.as_deref(), Some("AN6"));
+    assert_eq!(c2[0].retracted_at, Some(1_009));
+    assert!(s.card_answers("C1").unwrap()[0].retracted_at.is_none());
 
     let active = s.active_runs().unwrap();
     assert_eq!(
@@ -641,4 +647,439 @@ async fn recovery_refetches_the_log_once_and_restores_what_1_0_dropped() {
     let row = client.store().outbox_get(&id).unwrap().unwrap();
     assert!(matches!(row.op, OutboxOp::CardAnswer { rev: 1, .. }));
     let _ = ClientUpdate::CaughtUp;
+}
+
+fn report_card() -> CardV2 {
+    serde_json::from_value(json!({
+        "v": 2, "catalog": "tc.card/2.1", "rev": 1, "intent": "done", "title": "月报", "fallback": "月报",
+        "ask": { "id": "verify", "from": [ME], "blocking": false },
+        "blocks": [
+            { "id": "check", "type": "decision", "options": [{ "id": "ok", "label": "对" }, { "id": "wrong", "label": "有问题" }], "events": ["choice.change"] },
+            { "id": "trend", "type": "chart", "kind": "line", "series": [{ "id": "oct", "name": "10 月", "values": [1, 2] }], "events": ["chart.select"] }
+        ],
+        "actions": [{ "id": "send", "label": "发送", "style": "primary", "kind": "submit", "inputs": ["check"] }]
+    }))
+    .unwrap()
+}
+
+#[test]
+fn card_state_cause_refs_retracts_and_previews_reach_the_cache() {
+    let (_d, s) = open();
+    let card = report_card();
+    let cause = Cause {
+        event_id: "EV1".into(),
+        actor_id: ME.into(),
+        at: 5,
+        event: "choice.change".into(),
+        block_id: Some("check".into()),
+        action_id: None,
+    };
+    let state = CardState {
+        ask: Some(CardStateAsk {
+            id: "verify".into(),
+            status: AskStatus::Open,
+            from: vec![ME.into()],
+            blocking: false,
+            ..Default::default()
+        }),
+        answers: vec![],
+        last_cause: Some(cause.clone()),
+        ..Default::default()
+    };
+    let refs = vec![BlockRef {
+        source: BlockRefInput {
+            message_id: Some("C1".into()),
+            block_id: "check".into(),
+            label: String::new(),
+            ..Default::default()
+        },
+        source_topic_id: "T1".into(),
+        deleted: Some(True),
+        ..Default::default()
+    }];
+    let version = ArtifactVersion {
+        artifact_id: "A1".into(),
+        version: 1,
+        entry: "index.html".into(),
+        files: vec![ArtifactFile {
+            path: "index.html".into(),
+            file_id: "F1".into(),
+            size: 3,
+            mime: "text/html".into(),
+        }],
+        note: None,
+        created_by: BOT.into(),
+        created_at: 1,
+        run_id: None,
+        events: None,
+        media: None,
+        data_rev: None,
+    };
+    let artifact = Artifact {
+        id: "A1".into(),
+        group_id: G1.into(),
+        topic_id: "T1".into(),
+        title: "看板".into(),
+        kind: ArtifactKind::Html,
+        current_version: 1,
+        created_by: BOT.into(),
+        created_at: 1,
+        updated_at: 1,
+    };
+    let media = MediaInfo {
+        kind: MediaKind::Html,
+        mime: "text/html".into(),
+        bytes: 3,
+        poster_file_id: Some("F2".into()),
+        preview: MediaPreview::Ready,
+        ..Default::default()
+    };
+    s.apply_events(
+        G1,
+        &[
+            topic_created(1, G1, topic("T1", G1, "M1", 1)),
+            msg_created(2, message("M1", G1, "T1", ME, 2, "root")),
+            msg_created(3, card_message("C1", 3, card.clone())),
+            ev(
+                4,
+                G1,
+                BOT,
+                EventData::MessageUpdated(MessageUpdatedData {
+                    message_id: "C1".into(),
+                    body: "月报".into(),
+                    edited_at: 4,
+                    streaming: false,
+                    card_v2: Some(CardV2 { rev: 2, ..card }),
+                    card_state: Some(state.clone()),
+                    cause: Some(cause.clone()),
+                    ..Default::default()
+                }),
+            ),
+            ev(
+                5,
+                G1,
+                ME,
+                EventData::MessageUpdated(MessageUpdatedData {
+                    message_id: "M1".into(),
+                    body: "> ↳ 原消息已删除\n\nroot".into(),
+                    edited_at: 5,
+                    streaming: false,
+                    block_refs: Some(refs.clone()),
+                    ..Default::default()
+                }),
+            ),
+            ev(
+                6,
+                G1,
+                BOT,
+                EventData::ArtifactCreated(ArtifactVersionResponse { artifact, version }),
+            ),
+            ev(
+                7,
+                G1,
+                BOT,
+                EventData::ArtifactPreviewReady(ArtifactPreviewReadyData {
+                    artifact_id: "A1".into(),
+                    version: 1,
+                    media: media.clone(),
+                }),
+            ),
+        ],
+    )
+    .unwrap();
+    let c1 = s.message("C1").unwrap().unwrap();
+    assert_eq!(c1.card_v2.unwrap().rev, 2);
+    assert_eq!(c1.card_state, Some(state));
+    assert_eq!(c1.cause, Some(cause));
+    assert_eq!(s.message("M1").unwrap().unwrap().block_refs, Some(refs));
+    let v = s.artifact_version("A1", 1).unwrap().unwrap();
+    assert_eq!(v.media, Some(media));
+}
+
+async fn next<T>(
+    rx: &mut tokio::sync::mpsc::UnboundedReceiver<ClientUpdate>,
+    f: impl Fn(&ClientUpdate) -> Option<T>,
+) -> T {
+    {
+        let t0 = Instant::now();
+        loop {
+            assert!(t0.elapsed() < WAIT, "timed out waiting for an update");
+            match tokio::time::timeout(Duration::from_millis(100), rx.recv()).await {
+                Ok(Some(u)) => {
+                    if let Some(x) = f(&u) {
+                        return x;
+                    }
+                }
+                Ok(None) => panic!("updates closed"),
+                Err(_) => {}
+            }
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn card_events_page_events_and_interact_transients() {
+    let server = MockServer::start(
+        member(ME, "me"),
+        vec![
+            member(ME, "me"),
+            member(ALICE, "alice"),
+            member(BOT, "ledger"),
+        ],
+    )
+    .await;
+    server.add_group(group(G1, &[ME, ALICE, BOT]));
+    server.with(|s| {
+        s.append(
+            G1,
+            ME,
+            EventData::TopicCreated(TopicCreatedData {
+                topic: topic("T1", G1, "M1", 1),
+            }),
+        );
+        s.append(
+            G1,
+            ME,
+            EventData::MessageCreated(Box::new(MessageCreatedData {
+                message: message("M1", G1, "T1", ME, 2, "root"),
+            })),
+        );
+        s.append(
+            G1,
+            BOT,
+            EventData::MessageCreated(Box::new(MessageCreatedData {
+                message: card_message("C1", 3, report_card()),
+            })),
+        );
+    });
+    let dir = tempfile::tempdir().unwrap();
+    let client = Client::new(ClientConfig::new(server.base_url(), TOKEN, dir.path())).unwrap();
+
+    // Not connected: a live event fails at once and is not queued.
+    let mut rx = client.subscribe();
+    client
+        .store()
+        .apply_welcome(
+            &member(ME, "me"),
+            &[member(ME, "me")],
+            &[summary(group(G1, &[ME, ALICE, BOT]), 0, 0, 0)],
+        )
+        .unwrap();
+    client
+        .store()
+        .apply_events(
+            G1,
+            &[
+                topic_created(1, G1, topic("T1", G1, "M1", 1)),
+                msg_created(2, message("M1", G1, "T1", ME, 2, "root")),
+                msg_created(3, card_message("C1", 3, report_card())),
+            ],
+        )
+        .unwrap();
+    client.start();
+    until("connected", || client.server_has(FEATURE_INTERACT)).await;
+    let hello = server.with(|s| s.hellos[0].clone());
+    assert_eq!(hello["features"], json!(["interact/1", "refs/1"]));
+    assert_eq!(
+        hello["supportedCatalogs"],
+        json!(["tc.card/2.0", "tc.card/2.1"])
+    );
+
+    // A live event: sent now, acked with eventId and expect.
+    let live = client
+        .send_card_event(chat_core::CardEventRequest {
+            message_id: "C1".into(),
+            rev: 1,
+            block_id: Some("trend".into()),
+            event: "chart.select".into(),
+            value: Some(json!({"series": "oct", "x": "10-06", "y": 1, "index": 0})),
+            part: Some(PartRef {
+                kind: "point".into(),
+                keys: Some(
+                    [
+                        ("series".to_string(), PartKey::Key("oct".into())),
+                        ("x".to_string(), PartKey::Key("10-06".into())),
+                    ]
+                    .into(),
+                ),
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(!live.durable);
+    let ack = next(&mut rx, |u| match u {
+        ClientUpdate::CardEventAcked {
+            client_event_id,
+            result,
+            ..
+        } if *client_event_id == live.client_event_id => Some(result.clone()),
+        _ => None,
+    })
+    .await
+    .unwrap();
+    assert!(!ack.stored);
+    assert_eq!(ack.expect.mode, ExpectMode::Live);
+    let sent = server.with(|s| s.frames_of("card.event"));
+    assert_eq!(sent[0]["part"]["kind"], "point");
+
+    // A submit is an answer: queued, sent with its clientEventId, acked as stored.
+    let answer = client
+        .send_card_event(chat_core::CardEventRequest {
+            message_id: "C1".into(),
+            rev: 1,
+            action_id: Some("send".into()),
+            event: "action.press".into(),
+            inputs: Some([("check".to_string(), json!({"value": "wrong"}))].into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(answer.durable);
+    let ack = next(&mut rx, |u| match u {
+        ClientUpdate::CardEventAcked {
+            client_event_id,
+            result,
+            ..
+        } if *client_event_id == answer.client_event_id => Some(result.clone()),
+        _ => None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(ack.answer_id.as_deref(), Some("AN-1"));
+    until("answer row gone", || {
+        client.pending_card_events("T1").unwrap().is_empty()
+    })
+    .await;
+
+    // A page event (live) and the interact transients.
+    client
+        .store()
+        .apply_events(
+            G1,
+            &[ev(
+                4,
+                G1,
+                BOT,
+                EventData::ArtifactCreated(ArtifactVersionResponse {
+                    artifact: Artifact {
+                        id: "A1".into(),
+                        group_id: G1.into(),
+                        topic_id: "T1".into(),
+                        title: "看板".into(),
+                        kind: ArtifactKind::Html,
+                        current_version: 1,
+                        created_by: BOT.into(),
+                        created_at: 1,
+                        updated_at: 1,
+                    },
+                    version: ArtifactVersion {
+                        artifact_id: "A1".into(),
+                        version: 1,
+                        entry: "index.html".into(),
+                        files: vec![],
+                        note: None,
+                        created_by: BOT.into(),
+                        created_at: 1,
+                        run_id: None,
+                        events: None,
+                        media: None,
+                        data_rev: None,
+                    },
+                }),
+            )],
+        )
+        .unwrap();
+    let page = client
+        .send_artifact_event(
+            "A1",
+            1,
+            "breakdown",
+            ArtifactEventKind::Ask,
+            Some(json!({"channel": "douyin"})),
+        )
+        .unwrap();
+    let ack = next(&mut rx, |u| match u {
+        ClientUpdate::ArtifactEventAcked {
+            client_event_id,
+            result,
+            ..
+        } if *client_event_id == page => Some(result.clone()),
+        _ => None,
+    })
+    .await
+    .unwrap();
+    assert_eq!(ack.event_id, format!("EV-{page}"));
+    server.with(|s| {
+        s.transient(json!({"type": "interaction.resolved", "groupId": G1, "eventId": "EV1", "result": "patched", "messageId": "C1"}));
+        s.transient(json!({"type": "artifact.data", "groupId": G1, "artifactId": "A1", "version": 1, "dataRev": 2, "data": {"x": 1}}));
+        s.transient(json!({"type": "artifact.reply", "groupId": G1, "eventId": ack.event_id, "ok": true, "payload": {"series": [1]}}));
+    });
+    let r = next(&mut rx, |u| match u {
+        ClientUpdate::InteractionResolved(r) => Some(r.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!(r.result, InteractionResult::Patched);
+    let d = next(&mut rx, |u| match u {
+        ClientUpdate::ArtifactData(d) => Some(d.clone()),
+        _ => None,
+    })
+    .await;
+    assert_eq!((d.data_rev, d.data.clone()), (2, Some(json!({"x": 1}))));
+    let reply = next(&mut rx, |u| match u {
+        ClientUpdate::ArtifactReply(r) => Some(r.clone()),
+        _ => None,
+    })
+    .await;
+    assert!(reply.ok);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_live_card_event_fails_at_once_when_not_connected() {
+    let dir = tempfile::tempdir().unwrap();
+    let client = Client::new(ClientConfig::new("http://127.0.0.1:9", TOKEN, dir.path())).unwrap();
+    client
+        .store()
+        .apply_welcome(
+            &member(ME, "me"),
+            &[member(ME, "me")],
+            &[summary(group(G1, &[ME, BOT]), 0, 0, 0)],
+        )
+        .unwrap();
+    client
+        .store()
+        .apply_events(
+            G1,
+            &[
+                topic_created(1, G1, topic("T1", G1, "M1", 1)),
+                msg_created(2, message("M1", G1, "T1", ME, 2, "root")),
+                msg_created(3, card_message("C1", 3, report_card())),
+            ],
+        )
+        .unwrap();
+    let mut rx = client.subscribe();
+    client.start();
+    let sent = client
+        .send_card_event(chat_core::CardEventRequest {
+            message_id: "C1".into(),
+            rev: 1,
+            block_id: Some("check".into()),
+            event: "choice.change".into(),
+            value: Some(json!({"value": "ok"})),
+            ..Default::default()
+        })
+        .unwrap();
+    assert!(!sent.durable);
+    let err = next(&mut rx, |u| match u {
+        ClientUpdate::CardEventAcked {
+            client_event_id,
+            result,
+            ..
+        } if *client_event_id == sent.client_event_id => Some(result.clone()),
+        _ => None,
+    })
+    .await
+    .unwrap_err();
+    assert_eq!(err.reason.as_deref(), Some("client.offline"));
+    assert!(client.store().outbox_all().unwrap().is_empty());
+    client.stop();
 }

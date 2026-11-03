@@ -249,6 +249,8 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             let v = ArtifactVersion {
                 events: None,
                 run_id: None,
+                media: None,
+                data_rev: None,
                 artifact_id: id.clone(),
                 version: 1,
                 entry: r.entry,
@@ -279,6 +281,8 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             let v = ArtifactVersion {
                 events: None,
                 run_id: None,
+                media: None,
+                data_rev: None,
                 artifact_id: a.id.clone(),
                 version: a.current_version,
                 entry: r.entry,

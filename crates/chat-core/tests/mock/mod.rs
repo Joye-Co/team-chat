@@ -346,7 +346,7 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 .collect();
             send(
                 tx,
-                json!({"t": "welcome", "protocol": 1, "me": s.me, "members": s.members, "groups": groups, "serverTime": 1}),
+                json!({"t": "welcome", "protocol": 1, "me": s.me, "members": s.members, "groups": groups, "serverTime": 1, "features": ["interact/1", "refs/1", "diagram/1"]}),
             );
             s.conns.push((conn, tx.clone()));
         }
@@ -523,6 +523,26 @@ fn handle(s: &mut State, conn: usize, tx: &UnboundedSender<Ctrl>, v: Value) -> b
                 return false;
             }
             send(tx, json!({"t": "ack", "rid": rid, "ok": true}));
+        }
+        "card.event" => {
+            let stored = v["event"] == "action.press";
+            let mut result = json!({"eventId": format!("EV-{}", v["clientEventId"].as_str().unwrap_or("")), "stored": stored,
+                "expect": {"by": "01BOT00000000000000000000A", "mode": "live", "etaMs": 2000}});
+            if stored {
+                result["answerId"] = json!("AN-1");
+            }
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": true, "result": result}),
+            );
+        }
+        "artifact.event" => {
+            let result = json!({"eventId": format!("EV-{}", v["clientEventId"].as_str().unwrap_or("")),
+                "expect": {"by": "01BOT00000000000000000000A", "mode": "live"}});
+            send(
+                tx,
+                json!({"t": "ack", "rid": rid, "ok": true, "result": result}),
+            );
         }
         "typing" => {
             let ev = json!({"t": "transient", "event": {"type": "typing", "groupId": gid, "topicId": v["topicId"], "memberId": me, "at": 1}});

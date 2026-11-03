@@ -591,6 +591,9 @@ fn apply_one(
             artifact_refs,
             card,
             card_v2,
+            card_state,
+            cause,
+            block_refs,
         }) => {
             out.replaced_bodies.push(message_id.clone());
             let topic: Option<String> = tx
@@ -606,6 +609,9 @@ fn apply_one(
                     || artifact_refs.is_some()
                     || card.is_some()
                     || card_v2.is_some()
+                    || card_state.is_some()
+                    || cause.is_some()
+                    || block_refs.is_some()
                 {
                     update_message_raw(tx, message_id, |m| {
                         if let Some(a) = attachments {
@@ -619,6 +625,15 @@ fn apply_one(
                         }
                         if let Some(c) = card_v2 {
                             m.card_v2 = Some(c.clone());
+                        }
+                        if let Some(c) = card_state {
+                            m.card_state = Some(c.clone());
+                        }
+                        if let Some(c) = cause {
+                            m.cause = Some(c.clone());
+                        }
+                        if let Some(r) = block_refs {
+                            m.block_refs = Some(r.clone());
                         }
                     })?;
                 }
@@ -738,14 +753,38 @@ fn apply_one(
                        AND json_extract(payload, '$.rev') = ?4",
                     params![gid, d.message_id, d.action_id, d.rev],
                 )?;
+                tx.execute(
+                    "DELETE FROM outbox WHERE kind = 'card_event' AND group_id = ?1 AND attempts > 0
+                       AND json_extract(payload, '$.message_id') = ?2
+                       AND json_extract(payload, '$.rev') = ?3
+                       AND json_extract(payload, '$.event') != 'answer.retract'",
+                    params![gid, d.message_id, d.rev],
+                )?;
             }
             if let Some(t) = super::v11::topic_of_message(tx, &d.message_id)? {
                 out.message_topics.insert(t);
             }
             out.other_events.push(ev.clone());
         }
-        EventData::ArtifactEvented(d) => {
-            super::v11::insert_artifact_event(tx, ev, d)?;
+        EventData::CardRetracted(d) => {
+            super::v11::retract_card_answer(tx, ev, d)?;
+            if ev.actor_id == me {
+                tx.execute(
+                    "DELETE FROM outbox WHERE kind = 'card_event' AND group_id = ?1 AND attempts > 0
+                       AND json_extract(payload, '$.message_id') = ?2
+                       AND json_extract(payload, '$.event') = 'answer.retract'",
+                    params![gid, d.message_id],
+                )?;
+            }
+            if let Some(t) = super::v11::topic_of_message(tx, &d.message_id)? {
+                out.message_topics.insert(t);
+            }
+            out.other_events.push(ev.clone());
+        }
+        EventData::ArtifactPreviewReady(d) => {
+            if let Some(t) = super::v11::set_version_media(tx, d)? {
+                out.artifact_topics.insert(t);
+            }
             out.other_events.push(ev.clone());
         }
         EventData::TopicLinked(d) => {

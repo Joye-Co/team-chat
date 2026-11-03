@@ -43,7 +43,10 @@ fn migrations_are_named_and_run_once() {
             st.query_map([], |r| r.get(0))?.collect()
         })
         .unwrap();
-    assert_eq!(names, vec!["characters-1", "core-1", "ext-1", "v11-1"]);
+    assert_eq!(
+        names,
+        vec!["characters-1", "core-1", "ext-1", "v11-1", "v11-2"]
+    );
     let mode: String = s
         .with_reader(|c| c.query_row("PRAGMA journal_mode", [], |r| r.get(0)))
         .unwrap();

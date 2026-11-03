@@ -182,6 +182,21 @@ impl HttpClient {
     }
 
     /// A 产出 with all versions, newest first.
+    /// `GET /v1/artifacts/:id/versions/:v/data` (1.1): the latest data snapshot of a version.
+    pub async fn artifact_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> ApiResult<crate::proto::ArtifactDataResponse> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/artifacts/{}/versions/{version}/data", enc(artifact_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
     pub async fn artifact(&self, artifact_id: &str) -> ApiResult<ArtifactResponse> {
         self.call::<(), _>(
             Method::GET,
