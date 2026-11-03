@@ -178,13 +178,21 @@ pub fn render(
         .flex()
         .items_center()
         .gap(space::S8)
+        // A long 群 name gives way first: it shrinks to an ellipsis (at
+        // most 40 % of the bar) while the 话题 title keeps its room.
         .children(spec.breadcrumb.as_ref().map(|b| {
             div()
-                .flex_none()
+                .flex_shrink(1.)
+                .min_w(px(48.))
+                .max_w(gpui::relative(0.4))
+                .flex()
+                .items_center()
+                .gap(space::S6)
                 .t_bar_title()
                 .font_weight(gpui::FontWeight::NORMAL)
                 .text_color(k.ink_3)
-                .child(format!("{b} /"))
+                .child(div().min_w_0().one_line().child(b.clone()))
+                .child(div().flex_none().child("/"))
         }))
         .child(title)
         .children(spec.subtitle.as_ref().map(|s| {
