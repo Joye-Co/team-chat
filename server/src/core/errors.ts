@@ -1,4 +1,4 @@
-import type { ErrorBody, ErrorCode } from "@chat/protocol";
+import { type ErrorBody, type ErrorCode, issueReason } from "@chat/protocol";
 
 /** An expected failure with a protocol error code. Safe to show to the client. */
 export class ApiError extends Error {
@@ -42,8 +42,8 @@ export function unwrap<T>(r: Result<T>): T {
 
 /** The `reason` of a frame that failed its schema: a named card rule, or a deferred secret input. */
 export function schemaReason(raw: Record<string, unknown>, message: string | undefined): string | undefined {
-  const m = message ? /^((?:card|interact|artifact)\.[a-z_]+):/.exec(message) : null;
-  if (m) return m[1];
+  const named = issueReason(message);
+  if (named) return named;
   const blocks: unknown[] = [];
   const cardV2 = raw.cardV2 as { blocks?: unknown } | undefined;
   if (cardV2 && Array.isArray(cardV2.blocks)) blocks.push(...cardV2.blocks);

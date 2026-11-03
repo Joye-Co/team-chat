@@ -86,6 +86,17 @@ const LIMIT = {
   error: (i: { code: string; maximum?: unknown; minimum?: unknown }) =>
     `${CARD_LIMITS}: ${i.code === "too_big" ? `at most ${String(i.maximum)}` : i.code === "too_small" ? `at least ${String(i.minimum)}` : "out of range"}`,
 };
+/**
+ * A union whose issue keeps the reason of a branch (`card.limits: …`). A plain union reports
+ * "Invalid input" and hides the limit, while Rust names `card.limits`.
+ */
+const namedUnion = <const T extends readonly [z.ZodType, z.ZodType, ...z.ZodType[]]>(options: T) =>
+  z.union(options, {
+    error: (iss) => {
+      const branches = "errors" in iss && Array.isArray(iss.errors) ? (iss.errors as { message?: string }[][]) : [];
+      return branches.flat().find((x) => issueReason(x.message) !== undefined)?.message;
+    },
+  });
 const jsonMax = (max: number, what: string) =>
   z.json().refine((v) => utf8Bytes(JSON.stringify(v)) <= max, { message: `${what} exceeds ${max} bytes` });
 
@@ -444,7 +455,7 @@ export const SlotsBlock = z.object({
     .min(1, LIMIT)
     .max(12, LIMIT),
 });
-export const PollVoters = z.union([z.literal("group"), z.array(Id).min(1, LIMIT).max(200, LIMIT)]);
+export const PollVoters = namedUnion([z.literal("group"), z.array(Id).min(1, LIMIT).max(200, LIMIT)]);
 export const PollBlock = z.object({
   type: z.literal("poll"),
   ...id,

@@ -582,6 +582,24 @@ describe("refs to parts", () => {
     for (const c of [co, ca, cbot]) c.close();
   });
 
+  it("name card.limits for a poll with more than 200 voters", async () => {
+    const { gid, co, ca, cb, cbot } = await setup();
+    const poll = (voters: unknown) => ({
+      v: 2,
+      catalog: "tc.card/2.1",
+      rev: 1,
+      intent: "info",
+      title: "投票",
+      fallback: "投票",
+      blocks: [{ id: "p", type: "poll", label: "选哪个", voters, closesAt: Date.now() + 3_600_000, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], fallbackText: "投票" }],
+    });
+    const many = await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: poll(Array.from({ length: 201 }, (_, i) => `m${i}`)) });
+    expect(many).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    const none = await cbot.request({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2: poll([]) });
+    expect(none).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    for (const c of [co, ca, cb, cbot]) c.close();
+  });
+
   it("accept a diagram block, refuse forbidden constructs, unknown types and a third diagram, and show the source to v1 readers", async () => {
     const { alice, gid, cbot } = await setup();
     const diagram = (id: string, source: string) => ({ id, type: "diagram" as const, syntax: "mermaid", source, title: "发版流程", fallbackText: "发版流程图" });
