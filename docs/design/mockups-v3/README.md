@@ -22,7 +22,7 @@ holds the HELMET2 tokens (DESIGN.md §2).
 | [Members.dc.html](Members.dc.html) | 成员 | 1440 × 900 | [PNG](Members-light@1x.png) | [PNG](Members-dark@1x.png) | 成员 page: filtered list (等你, 在做事, 空闲, 同事) and the Forge detail (现在, 这周, 最近交付, 最近的问题) with the 工作环境 rail |
 | [Artifact.dc.html](Artifact.dc.html) | 产出 | 1440 × 900 | [PNG](Artifact-light@1x.png) | [PNG](Artifact-dark@1x.png) | 产出 viewer: version picker, the page in its frame with an in-page choice, the 来龙去脉 rail (来自话题, 版本, 页面里的回应, 用到的决定, 被引用) |
 | [RailOptions.dc.html](RailOptions.dc.html) | 侧栏的三种方案 | 1440 × 900 | [PNG](RailOptions-light@1x.png) | [PNG](RailOptions-dark@1x.png) | The three rail modes side by side: A 以工作为中心, B 以「需要我」为中心, C 以成员为中心. All three ship; the user picks one in 设置 → 外观 |
-| [Cards.dc.html](Cards.dc.html) | 生成式界面组件 | 1440 × 6860 | [PNG](Cards-light@1x.png) | [PNG](Cards-dark@1x.png) | Card v2: the card anatomy, the three colors, and the 12 kinds (选择, 批准, 草稿, 表单, 计划, 数据, 对比, 证据, 链接, 轻回应, 交互产出, 通知) in every state |
+| [Cards.dc.html](Cards.dc.html) | 生成式界面组件 | 1440 × 7560 | [PNG](Cards-light@1x.png) | [PNG](Cards-dark@1x.png) | Card v2: the card anatomy, the status band on every card (等你, 等别人, 处理中, 完成, 失败, 已过期, 已作废), the three colors, and the 12 kinds (选择, 批准, 草稿, 表单, 计划, 数据, 对比, 证据, 链接, 轻回应, 交互产出, 通知) in every state |
 
 Not here: the landing page (not in 1.1.0), login and settings (unchanged layout from
 [mockups-v2](../mockups-v2/), restyled with the v3 tokens).
