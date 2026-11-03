@@ -36,9 +36,15 @@ impl PaneView for ArtifactPane {
 
 impl Render for ArtifactPane {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let RightPane::Artifact { id, .. } = self.services.nav.read(cx).visible_pane() else {
-            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx);
+        let RightPane::Artifact { id, version } = self.services.nav.read(cx).visible_pane() else {
+            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
         };
+        // topic track (v11/topic): the 产出 pane of a 话题 page.
+        if let Some(pane) =
+            crate::views::topic_page::output_pane::render(&self.services, &id, version, cx)
+        {
+            return pane;
+        }
         match self.services.provider.artifact(&id) {
             Some(a) => stub_body(
                 Lucide::FileText,
@@ -52,5 +58,6 @@ impl Render for ArtifactPane {
             ),
             None => stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx),
         }
+        .into_any_element()
     }
 }
