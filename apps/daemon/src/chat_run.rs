@@ -77,10 +77,19 @@ shows more.",
 // Daemon side
 // ---------------------------------------------------------------------------------------------
 
+/// One output that waits for `run.output.result`.
+struct Pending {
+    tx: oneshot::Sender<RunOutputResult>,
+    /// The seq of its `output` run event, once the daemon loop gave it one.
+    seq: Option<u64>,
+    /// The server acked that seq: it got the output.
+    delivered: bool,
+}
+
 /// The `chat-run` outputs of one run that wait for `run.output.result`.
 #[derive(Default)]
 pub struct Outputs {
-    pending: Mutex<HashMap<String, oneshot::Sender<RunOutputResult>>>,
+    pending: Mutex<HashMap<String, Pending>>,
     next: AtomicU64,
 }
 
@@ -88,22 +97,46 @@ impl Outputs {
     fn add(&self) -> (String, oneshot::Receiver<RunOutputResult>) {
         let id = format!("o{}", self.next.fetch_add(1, Ordering::Relaxed) + 1);
         let (tx, rx) = oneshot::channel();
-        self.lock().insert(id.clone(), tx);
+        self.lock().insert(
+            id.clone(),
+            Pending {
+                tx,
+                seq: None,
+                delivered: false,
+            },
+        );
         (id, rx)
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, oneshot::Sender<RunOutputResult>>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Pending>> {
         self.pending.lock().unwrap_or_else(|e| e.into_inner())
     }
 
-    fn forget(&self, id: &str) {
-        self.lock().remove(id);
+    /// Forgets an output; true when the server had acked it.
+    fn forget(&self, id: &str) -> bool {
+        self.lock().remove(id).is_some_and(|p| p.delivered)
+    }
+
+    /// The daemon loop gave the `output` run event of `output_id` this seq.
+    pub fn sent(&self, output_id: &str, seq: u64) {
+        if let Some(p) = self.lock().get_mut(output_id) {
+            p.seq = Some(seq);
+        }
+    }
+
+    /// The server acked the run's frames up to `seq`.
+    pub fn acked(&self, seq: u64) {
+        for p in self.lock().values_mut() {
+            if p.seq.is_some_and(|s| s <= seq) {
+                p.delivered = true;
+            }
+        }
     }
 
     /// Gives a `run.output.result` to the waiting `chat-run`. False when nothing waits.
     pub fn resolve(&self, r: RunOutputResult) -> bool {
         match self.lock().remove(&r.output_id) {
-            Some(tx) => tx.send(r).is_ok(),
+            Some(p) => p.tx.send(r).is_ok(),
             None => false,
         }
     }
@@ -396,20 +429,36 @@ pub async fn handle(
         }
         Ok(Err(_)) => error("cancelled", None, "the run ended"),
         Err(_) => {
-            outputs.forget(&output_id);
+            let delivered = outputs.forget(&output_id);
+            let secs = timeout.as_secs();
             eprintln!(
-                "{} chat-run {op} {output_id}: no answer in {} s",
+                "{} chat-run {op} {output_id}: no answer in {secs} s ({})",
                 crate::proto::now_ms(),
-                timeout.as_secs()
+                if delivered {
+                    "server got it"
+                } else {
+                    "not delivered"
+                }
             );
-            error(
-                "timeout",
-                Some("server.too_old"),
-                format!(
-                    "server too old: no answer in {} s (the server may not support chat-run)",
-                    timeout.as_secs()
-                ),
-            )
+            if delivered {
+                // The server got the output and did not answer: it does not know `output`.
+                error(
+                    "timeout",
+                    Some("server.too_old"),
+                    format!(
+                        "server too old: no answer in {secs} s (the server may not support chat-run)"
+                    ),
+                )
+            } else {
+                error(
+                    "unavailable",
+                    Some("server.not_connected"),
+                    format!(
+                        "not connected: the server did not get this in {secs} s (the daemon's \
+link to the server is down); nothing was done"
+                    ),
+                )
+            }
         }
     }
 }
@@ -686,8 +735,8 @@ Allow unix sockets (network) for its commands, or answer in the group without ch
         {
             Ok(error(
                 "timeout",
-                Some("server.too_old"),
-                "server too old: no answer in time",
+                Some("daemon.no_answer"),
+                "no answer from the daemon in time",
             ))
         }
         Err(e) => Err(format!("cannot read the answer: {e}")),
@@ -749,8 +798,8 @@ without chat-run",
             }
             return Ok(error(
                 "timeout",
-                Some("server.too_old"),
-                "server too old: no answer in time",
+                Some("daemon.no_answer"),
+                "no answer from the daemon in time",
             ));
         }
         std::thread::sleep(POLL);
@@ -920,19 +969,30 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn no_result_in_15_s_is_server_too_old() {
+    async fn no_result_in_15_s_after_the_server_got_it_is_server_too_old() {
         let outputs = Outputs::default();
         let sent = Arc::new(Mutex::new(vec![]));
         let s2 = sent.clone();
         let emit = move |e: RunEvent| s2.lock().unwrap().push(e);
         let start = tokio::time::Instant::now();
-        let v = handle(
-            br#"{"op":"interaction.resolve","body":{"eventId":"E","result":"ignored"}}"#,
-            &outputs,
-            &emit,
-            TIMEOUT,
-        )
-        .await;
+        // The daemon loop gives the event seq 4 and the server acks it.
+        let ack = async {
+            while sent.lock().unwrap().is_empty() {
+                tokio::task::yield_now().await;
+            }
+            outputs.sent("o1", 4);
+            outputs.acked(3);
+            outputs.acked(4);
+        };
+        let (v, ()) = tokio::join!(
+            handle(
+                br#"{"op":"interaction.resolve","body":{"eventId":"E","result":"ignored"}}"#,
+                &outputs,
+                &emit,
+                TIMEOUT,
+            ),
+            ack
+        );
         assert_eq!(TIMEOUT, Duration::from_secs(15));
         assert!(start.elapsed() >= Duration::from_secs(15));
         assert_eq!(v["ok"], false);
@@ -954,6 +1014,33 @@ mod tests {
             result: None,
             error: None,
         }));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_result_for_an_output_the_server_never_got_is_not_connected() {
+        let outputs = Outputs::default();
+        let emit = |_: RunEvent| {};
+        // Sent with seq 2 while the link is down: the server acks nothing, or only older frames.
+        let later = async {
+            tokio::task::yield_now().await;
+            outputs.sent("o1", 2);
+            outputs.acked(1);
+        };
+        let (v, ()) = tokio::join!(
+            handle(
+                br#"{"op":"card.patch","body":{"messageId":"M"}}"#,
+                &outputs,
+                &emit,
+                TIMEOUT,
+            ),
+            later
+        );
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"]["code"], "unavailable");
+        assert_eq!(v["error"]["reason"], "server.not_connected");
+        let msg = v["error"]["message"].as_str().unwrap();
+        assert!(msg.contains("not connected"), "{msg}");
+        assert!(!msg.contains("too old"), "{msg}");
     }
 
     #[tokio::test]
@@ -1138,6 +1225,34 @@ mod tests {
         .unwrap_err();
         assert!(e.contains("did not take"), "{e}");
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 0);
+    }
+
+    #[test]
+    fn a_daemon_that_takes_the_request_and_never_answers_is_not_the_server() {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path().to_path_buf();
+        // Takes the request like the daemon and then stays silent.
+        let taker = std::thread::spawn(move || {
+            for _ in 0..200 {
+                if let Some(Ok(e)) = std::fs::read_dir(&d).unwrap().next()
+                    && e.file_name().to_string_lossy().ends_with(".req")
+                {
+                    std::fs::remove_file(e.path()).unwrap();
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let v = call_files(
+            dir.path(),
+            "card.patch",
+            json!({}),
+            Duration::from_millis(300),
+        )
+        .unwrap();
+        taker.join().unwrap();
+        assert_eq!(v["error"]["code"], "timeout");
+        assert_eq!(v["error"]["reason"], "daemon.no_answer");
     }
 
     #[test]

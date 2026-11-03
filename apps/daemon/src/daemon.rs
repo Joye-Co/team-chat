@@ -502,6 +502,7 @@ impl Daemon {
                         Some(acked) => {
                             let r = self.runs.get_mut(&id).expect("run");
                             r.orphan = false;
+                            r.outputs.acked(*acked);
                             while r.buffer.front().is_some_and(|(s, _, _)| s <= acked) {
                                 r.buffer.pop_front();
                             }
@@ -577,6 +578,7 @@ impl Daemon {
             }
             Down::Ack { run_id, seq } => {
                 if let Some(r) = self.runs.get_mut(&run_id) {
+                    r.outputs.acked(seq);
                     while r.buffer.front().is_some_and(|(s, _, _)| *s <= seq) {
                         r.buffer.pop_front();
                     }
@@ -730,6 +732,14 @@ impl Daemon {
                     }
                 );
                 match &mut up {
+                    Up::RunEvent {
+                        seq: s,
+                        event: RunEvent::Output { output_id, .. },
+                        ..
+                    } => {
+                        *s = seq;
+                        r.outputs.sent(output_id, seq);
+                    }
                     Up::RunEvent { seq: s, .. } => *s = seq,
                     Up::RunDone(d) => {
                         d.seq = seq;

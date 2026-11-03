@@ -1396,3 +1396,60 @@ async fn codex_chat_run_uses_the_request_folder() {
         .unwrap()
         .unwrap();
 }
+
+/// `chat-run` while the daemon's link to the server is down: the output never reaches the
+/// server, so after 15 s `chat-run` says "not connected", not "server too old".
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_run_without_a_link_is_not_connected() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+
+    send(&mut ws, &assign("n1", "fake", "chatrun", None)).await;
+    // The server goes away before it acks the output event.
+    collect(&mut ws, "n1", false, |f| {
+        matches!(
+            f,
+            Up::RunEvent {
+                event: RunEvent::Output { .. },
+                ..
+            }
+        )
+    })
+    .await;
+    m.refuse.store(true, std::sync::atomic::Ordering::SeqCst);
+    drop(ws);
+    // chat-run gives up after 15 s; wait_file waits 10 s at a time.
+    let report = tmp.path().join("work/runs/n1/work/chatrun-1.json");
+    let start = std::time::Instant::now();
+    while !report.exists() && start.elapsed() < Duration::from_secs(30) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let r = chat_run_report(&tmp.path().join("work/runs/n1/work"), 1).await;
+    assert_eq!(r["code"], 1, "{r}");
+    let err: serde_json::Value = serde_json::from_str(r["out"].as_str().unwrap()).unwrap();
+    assert_eq!(err["error"]["code"], "unavailable", "{err}");
+    assert_eq!(err["error"]["reason"], "server.not_connected", "{err}");
+    assert!(
+        err["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("not connected"),
+        "{err}"
+    );
+
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}

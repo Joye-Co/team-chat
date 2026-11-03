@@ -338,8 +338,13 @@ with the rules of the matching WebSocket frame. The `output` body is that frame 
 `<run folder>/bin/chat-run` and puts that folder first on the CLI's `PATH`. Side chat runs
 (`aside`) get no `chat-run`. One request is one JSON document `{ op, body }`; the daemon sends the
 `output` run event (redacted like every frame) and answers one JSON document `{ ok, result? ,
-error? }` when `run.output.result` comes, or after 15 s `{ ok: false, error: { code: "timeout",
-reason: "server.too_old" } }`. The transport depends on the runtime:
+error? }` when `run.output.result` comes. With no result in 15 s it answers `{ ok: false, error:
+{ code: "timeout", reason: "server.too_old" } }` ("server too old") when the server acked the
+`output` event (it got it and did not understand it), else `{ ok: false, error: { code:
+"unavailable", reason: "server.not_connected" } }` ("not connected": the daemon's link to the
+server was down, and the server refuses the output as `output.expired` if it comes later). A
+daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
+"daemon.no_answer" }`. The transport depends on the runtime:
 
 - Socket (Claude Code, ACP agents, the PTY): `CHAT_RUN_SOCKET` names a unix socket of the run
   (`<run folder>/chat-run.sock`, or a short path in `$TMPDIR` when that one is too long for a
