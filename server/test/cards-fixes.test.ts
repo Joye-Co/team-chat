@@ -1,0 +1,67 @@
+// Review fixes of the 1.1 interaction loop in the group room: audit redaction, private
+// polls and anonymous questionnaires, concurrent card writes, refs, edit marks, requester
+// asks, the retract window and the topic status of blocking asks.
+import { env } from "cloudflare:test";
+import { afterAll, describe, expect, it } from "vitest";
+import type { CardV2 } from "@chat/protocol";
+import { Client, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
+
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 300));
+  expect(protocolViolations).toEqual([]);
+});
+
+const FEATURES = ["interact/1", "refs/1"];
+
+async function setup() {
+  const owner = await createMember({ level: "owner", name: "Joye" });
+  const alice = await createMember({ name: "Alice" });
+  const bob = await createMember({ name: "Bob" });
+  const bot = await createMember({ kind: "bot", name: "Ledger" });
+  const gid = await createGroup(owner, [alice.id, bob.id, bot.id]);
+  const connect = async (m: TestMember, features: string[] = FEATURES) => (await Client.connect(m.token, { features })).c;
+  const [co, ca, cb, cbot] = await Promise.all([connect(owner), connect(alice), connect(bob), connect(bot)]);
+  return { owner, alice, bob, bot, gid, co, ca, cb, cbot, connect };
+}
+
+const base = (extra: Partial<CardV2>): CardV2 => ({
+  v: 2,
+  catalog: "tc.card/2.1",
+  rev: 1,
+  intent: "info",
+  title: "卡片",
+  fallback: "卡片",
+  blocks: [],
+  ...extra,
+});
+
+const send = (c: Client, gid: string, cardV2: CardV2, extra: Record<string, unknown> = {}) =>
+  c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "", cardV2, ...extra });
+const ev = (c: Client, gid: string, messageId: string, f: Record<string, unknown>) =>
+  c.request({ t: "card.event", groupId: gid, messageId, rev: 1, clientEventId: crypto.randomUUID(), ...f });
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+describe("card event audit", () => {
+  it("redacts the value before it cuts it to 1 KiB of UTF-8", async () => {
+    const { alice, gid, ca, cbot } = await setup();
+    const card = base({ blocks: [{ id: "note", type: "input", kind: "text", label: "备注", events: ["input.change"] }] });
+    const m = (await send(cbot, gid, card)).message;
+    // A token that crosses the 1 KiB cut of the JSON text.
+    const token = "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8";
+    const r1 = await ev(ca, gid, m.id, { blockId: "note", event: "input.change", value: { value: `${"x".repeat(985)} ${token}` } });
+    expect(r1, JSON.stringify(r1)).toMatchObject({ ok: true });
+    await sleep(1100);
+    const r2 = await ev(ca, gid, m.id, { blockId: "note", event: "input.change", value: { value: "汉".repeat(1000) } });
+    expect(r2).toMatchObject({ ok: true });
+    const rows = async () =>
+      (await env.DB.prepare("SELECT details FROM audit WHERE action = 'card.event' AND target = ? ORDER BY rowid").bind(m.id).all<{ details: string }>()).results;
+    for (let i = 0; i < 50 && (await rows()).length < 2; i++) await sleep(100);
+    const values = (await rows()).map((r) => (JSON.parse(r.details) as { value: string }).value);
+    expect(values).toHaveLength(2);
+    expect(values[0]).not.toContain("ghp_");
+    expect(values[0]).toContain("<redacted>");
+    for (const v of values) expect(new TextEncoder().encode(v).length).toBeLessThanOrEqual(1024);
+    void alice;
+    for (const c of [ca, cbot]) c.close();
+  });
+});

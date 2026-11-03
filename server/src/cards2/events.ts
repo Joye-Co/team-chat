@@ -22,7 +22,7 @@ import { TokenBucket } from "../core/ratelimit";
 import type { Actor, RoomContext, RoomTx } from "../core/registry";
 import { type CardEventDelivery, expectFor } from "./delivery";
 import { eventValueProblem, eventsOf, inputProblem } from "./inputs";
-import { auditValue } from "./redact";
+import { auditValue } from "../core/auditvalue";
 import {
   type Directory,
   deriveV1,
