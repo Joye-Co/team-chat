@@ -600,7 +600,7 @@ impl MembersPage {
                     .items_center()
                     .gap(px(2.))
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "member-side-chat",
                             Lucide::MessageCircle,
                             c::MEMBERS_SIDE_CHAT,
@@ -610,7 +610,7 @@ impl MembersPage {
                         .on_click(side_chat),
                     )
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "member-outputs",
                             Lucide::Layers,
                             c::MEMBERS_OUTPUTS_BUTTON,
@@ -621,7 +621,7 @@ impl MembersPage {
                     )
                     .when(e.stats.machine.is_some(), |el| {
                         el.child(
-                            kit::icon_button(
+                            kit::bar_icon(
                                 "member-computer",
                                 Lucide::Monitor,
                                 c::MEMBERS_COMPUTER_BUTTON,
@@ -645,7 +645,7 @@ impl MembersPage {
                     })
                     .child(div().mx(space::S4).child(kit::bar_divider(cx)))
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "member-aside",
                             Lucide::PanelRight,
                             c::MEMBERS_TOGGLE_ASIDE,

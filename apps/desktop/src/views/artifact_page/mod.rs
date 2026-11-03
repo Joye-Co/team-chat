@@ -359,7 +359,7 @@ impl ArtifactPage {
                     .child(share)
                     .child(div().mx(space::S2).child(kit::bar_divider(cx)))
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "artifact-open-window",
                             Lucide::ExternalLink,
                             c::ARTIFACT_OPEN_WINDOW,
@@ -376,7 +376,7 @@ impl ArtifactPage {
                         }),
                     )
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "artifact-side-chat",
                             Lucide::MessageCircle,
                             c::ARTIFACT_SIDE_CHAT,
@@ -1079,7 +1079,7 @@ impl Render for ArtifactPage {
         let frame = self.frame(&detail, shown, window, cx);
         let aside = self.aside_open.then(|| self.story(&detail, shown, cx));
         let reopen = (!self.aside_open).then(|| {
-            kit::icon_button(
+            kit::bar_icon(
                 "artifact-aside-open",
                 Lucide::PanelRight,
                 c::ARTIFACT_EXPAND,

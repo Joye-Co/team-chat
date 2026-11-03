@@ -2,8 +2,7 @@
 //! web view as the 产出 page), with its version and 在新窗口打开.
 
 use gpui::{
-    Context, IntoElement, ParentElement, Pixels, Render, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, px,
+    Context, IntoElement, ParentElement, Pixels, Render, Styled, Subscription, Window, div, px,
 };
 
 use super::{Folders, embed};
@@ -138,7 +137,7 @@ impl Render for ArtifactPane {
                     )
                     .child(div().flex_1())
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "artifact-pane-window",
                             Lucide::ExternalLink,
                             c::ARTIFACT_OPEN_WINDOW,
@@ -155,7 +154,7 @@ impl Render for ArtifactPane {
                         }),
                     )
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "artifact-pane-page",
                             Lucide::Layers,
                             c::ARTIFACTS_TITLE,

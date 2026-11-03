@@ -201,7 +201,7 @@ impl GroupPage {
                     .items_center()
                     .gap(px(2.))
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "group-side-chat",
                             Lucide::MessageCircle,
                             c::GROUP_PAGE_SIDE_CHAT,
@@ -213,7 +213,7 @@ impl GroupPage {
                         }),
                     )
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "group-outputs",
                             Lucide::Layers,
                             c::GROUP_PAGE_OUTPUTS,
@@ -223,7 +223,7 @@ impl GroupPage {
                         .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_artifacts(cx))),
                     )
                     .child(
-                        kit::icon_button(
+                        kit::bar_icon(
                             "group-settings",
                             Lucide::Ellipsis,
                             c::GROUP_PAGE_SETTINGS,
@@ -1271,7 +1271,7 @@ impl Render for GroupPage {
         };
         let reopen = (!self.aside_open).then(|| {
             div().absolute().top(space::S12).right(space::S12).child(
-                kit::icon_button(
+                kit::bar_icon(
                     "group-aside-open",
                     Lucide::PanelRight,
                     c::GROUP_PAGE_EXPAND,

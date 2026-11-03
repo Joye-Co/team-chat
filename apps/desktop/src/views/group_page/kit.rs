@@ -64,33 +64,22 @@ pub fn page_title(text: impl Into<SharedString>, cx: &App) -> Div {
         .child(text.into())
 }
 
-/// A 28 pt icon button of a title bar; `active` has the grey `sel` fill.
-pub fn icon_button(
+/// A 28 pt icon button of a title bar (gpui-component `Button`, named for
+/// its tooltip and accessibility); `active` has the grey `sel` fill.
+pub fn bar_icon(
     id: impl Into<ElementId>,
     icon: Lucide,
     tip: &'static str,
     active: bool,
     cx: &App,
-) -> Stateful<Div> {
+) -> gpui_component::button::Button {
+    use crate::ui::NamedButton as _;
     let k = theme::colors(cx);
-    div()
-        .id(id.into())
-        .flex_none()
-        .size(theme::TITLE_BUTTON)
+    ui::icon_button_sm(id, icon)
+        .named(tip)
         .rounded(px(7.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .cursor_pointer()
         .relative()
-        .when(active, |el| el.bg(k.sel))
-        .when(!active, |el| el.hover(|s| s.bg(k.hover)))
-        .child(ui::icon(
-            icon,
-            theme::icon::ROW,
-            if active { k.ink } else { k.ink_2 },
-        ))
-        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(tip).build(window, cx))
+        .when(active, |b| b.bg(k.sel).text_color(k.ink))
 }
 
 /// The 1 × 16 divider between title bar groups.
@@ -136,7 +125,7 @@ pub fn aside(
                 )
                 .child(div().flex_1())
                 .children(on_collapse.map(|f| {
-                    icon_button(
+                    bar_icon(
                         SharedString::from(format!("{id}-collapse")),
                         Lucide::PanelRight,
                         c::GROUP_PAGE_COLLAPSE,

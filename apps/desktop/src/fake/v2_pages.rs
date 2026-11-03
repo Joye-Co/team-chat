@@ -401,3 +401,66 @@ fn plain_page(title: &str) -> String {
         "<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><style>body{{margin:0;padding:32px 40px;font-family:-apple-system,\"PingFang SC\",sans-serif;color:#111113;background:#fff}}@media (prefers-color-scheme:dark){{body{{color:#F1F1F3;background:#111113}}}}</style></head><body><h2>{title}</h2></body></html>"
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_pages_samples_point_at_known_members_and_topics() {
+        let p = V2Samples::new();
+        for t in p.topics(DEV) {
+            let g = p.topic_glance(DEV, &t.id);
+            if let Some(TopicPreview::Screen { run_id }) = g.preview {
+                assert!(p.machine_screen(&run_id).is_some());
+            }
+        }
+        for d in p.group_recent_done(DEV) {
+            assert!(p.member(&d.member_id).is_some());
+        }
+        for a in p.group_artifacts(DEV) {
+            assert!(p.member(&a.created_by).is_some());
+        }
+        let forge = p.member_extras(FORGE);
+        assert_eq!(forge.deliveries.len(), 3);
+        assert_eq!(forge.decisions.len(), 2);
+        for r in p.artifact_responses(ART_REPORT) {
+            assert!(p.member(&r.member_id).is_some());
+        }
+    }
+
+    #[test]
+    fn the_old_report_has_no_table_and_takes_no_answers() {
+        let v3 = report_html(3);
+        let v2 = report_html(2);
+        assert!(v3.contains("渠道拆分"));
+        assert!(!v2.contains("渠道拆分"));
+        assert!(v2.contains("disabled class=\"opt"));
+        assert!(!v2.contains("class=\"opt on\""));
+        assert!(!v2.contains("<svg class=\"r\""));
+    }
+
+    #[test]
+    fn only_a_bot_made_version_that_declares_events_may_send_them() {
+        let p = V2Samples::new();
+        let report = p.artifact(ART_REPORT).unwrap();
+        let caps = crate::views::artifact_page::capabilities(p.as_ref(), &report, 3);
+        assert!(caps.emit_event);
+        assert!(!caps.get_data);
+        // Same author, no declared events.
+        let other = p.artifact(ART_RECONNECT).unwrap();
+        let caps = crate::views::artifact_page::capabilities(p.as_ref(), &other, 2);
+        assert!(!caps.emit_event);
+    }
+
+    #[test]
+    fn a_recorded_decision_comes_first() {
+        let p = V2Samples::new();
+        let before = p.group_decisions(OPS).len();
+        let _ = p.record_decision(OPS, "先发 staging，再发生产".into());
+        let after = p.group_decisions(OPS);
+        assert_eq!(after.len(), before + 1);
+        assert_eq!(after[0].text, "先发 staging，再发生产");
+        assert_eq!(after[0].by, ME);
+    }
+}
