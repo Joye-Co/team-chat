@@ -58,6 +58,11 @@ const SEARCH_RADIUS: gpui::Pixels = px(9.);
 /// The list header (`话题 · 我参与的 ⌄`) and the B chips.
 const LIST_HEADER: gpui::Pixels = px(28.);
 const CHIP_HEIGHT: gpui::Pixels = px(24.);
+/// The widest a 群 chip gets; a longer name ends with an ellipsis.
+const CHIP_MAX: gpui::Pixels = px(120.);
+/// A chip name longer than this many characters may be cut: it gets a
+/// tooltip with the whole name.
+const CHIP_TOOLTIP_CHARS: usize = 6;
 
 pub struct RailView {
     services: Services,
@@ -635,7 +640,10 @@ impl RailView {
             .into_any_element()
     }
 
-    /// B: 全部 and one chip per 群, then the options menu.
+    /// B: 全部 and one chip per 群 (RailOptions.dc.html B: no button in the
+    /// row; the rail style is in 设置 → 外观). The chips wrap, so every 群
+    /// stays readable and reachable; a long name ends with an ellipsis and
+    /// shows whole in a tooltip.
     fn chips(&self, cx: &mut Context<Self>) -> AnyElement {
         let k = theme::colors(cx);
         let groups = model::groups(self.services.provider.as_ref());
@@ -645,10 +653,13 @@ impl RailView {
         for (i, (id, name)) in entries.enumerate() {
             let on = self.chip == id;
             let this = cx.entity().downgrade();
+            let long = name.chars().count() > CHIP_TOOLTIP_CHARS;
+            let full = SharedString::from(name.clone());
             chips.push(
                 div()
                     .id(("rail-chip", i))
                     .flex_none()
+                    .max_w(CHIP_MAX)
                     .h(CHIP_HEIGHT)
                     .px(space::S8)
                     .rounded(px(6.))
@@ -662,7 +673,12 @@ impl RailView {
                             .hover(|s| s.bg(k.hover))
                             .active(|s| s.bg(k.pressed))
                     })
-                    .child(name)
+                    .child(div().min_w_0().one_line().child(name))
+                    .when(long, |el| {
+                        el.tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
+                        })
+                    })
                     .on_click(move |_, _, cx| {
                         let id = id.clone();
                         let _ = this.update(cx, |this, cx| {
@@ -674,28 +690,14 @@ impl RailView {
             );
         }
         div()
+            .id("rail-chips")
             .flex_none()
             .mt(space::S16)
             .flex()
+            .flex_wrap()
             .items_center()
             .gap(space::S2)
-            .child(
-                div()
-                    .id("rail-chips")
-                    .flex_1()
-                    .min_w_0()
-                    .overflow_x_scroll()
-                    .flex()
-                    .items_center()
-                    .gap(space::S2)
-                    .children(chips),
-            )
-            .child(div().flex_none().child(self.menu_button(
-                "rail-options",
-                None,
-                RailMode::Attention,
-                cx,
-            )))
+            .children(chips)
             .into_any_element()
     }
 }
