@@ -481,9 +481,13 @@ pub fn chart_overlay(
                         .unwrap_or_default();
                     // Above the point, or under it when the plot has no room above:
                     // the tip never covers the point it describes.
-                    let at = main.values.get(xi).and_then(|v| v.as_f64()).map_or(0., |v| {
-                        crate::views::cards::v2::chart_y_from_top(*kind, series, v)
-                    });
+                    let at = main
+                        .values
+                        .get(xi)
+                        .and_then(|v| v.as_f64())
+                        .map_or(0., |v| {
+                            crate::views::cards::v2::chart_y_from_top(*kind, series, v)
+                        });
                     let y = height * at;
                     let top = if y - TIP_H - TIP_GAP >= gpui::px(0.) {
                         y - TIP_H - TIP_GAP

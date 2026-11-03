@@ -1000,7 +1000,11 @@ mod ui_tests {
         // text only stores it (text_change(None, ..) sends nothing).
         assert_eq!(ui.block("a").tab, None);
         assert_eq!(ui.block("b").tab.as_deref(), Some("补"), "untouched block");
-        assert_eq!(ui.block("t").tab.as_deref(), Some("y"), "the open tab stays");
+        assert_eq!(
+            ui.block("t").tab.as_deref(),
+            Some("y"),
+            "the open tab stays"
+        );
         // 用新的 sets the text without a keystroke too.
         ui.block_mut("b").tab = Some("我写的".into());
         ui.drafts_kept.insert("b".into());
@@ -1030,7 +1034,10 @@ mod ui_tests {
             for _ in 0..30 {
                 assert!(!schedule_fade_end(&ui, 2, cx), "later frames start none");
             }
-            assert!(schedule_fade_end(&ui, 3, cx), "the next rev's removal has its own");
+            assert!(
+                schedule_fade_end(&ui, 3, cx),
+                "the next rev's removal has its own"
+            );
         });
     }
 }

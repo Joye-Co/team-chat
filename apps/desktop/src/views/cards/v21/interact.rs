@@ -773,7 +773,8 @@ pub fn decorate(
     if let Some(p) = pend.as_ref().filter(|p| p.stage != Stage::Quiet) {
         // The band says the stage of my newest event; the block says it only for an older
         // event the band does not show (CARD21 §2: one state is said once).
-        let in_band = super::band::pending(ctx).is_some_and(|b| b.event_id == p.event.client_event_id);
+        let in_band =
+            super::band::pending(ctx).is_some_and(|b| b.event_id == p.event.client_event_id);
         if let Some(line) = pending_line(ctx, p, !in_band, cx) {
             col = col.child(line);
         }
@@ -916,10 +917,13 @@ fn pending_line(ctx: &Ctx, p: &Pending, words: bool, cx: &mut App) -> Option<Any
             Stage::Silent | Stage::OfflineLive | Stage::Busy => k.ink_2,
             _ => k.live_ink,
         })
-        .when(words && matches!(p.stage, Stage::Wait | Stage::Slow), |el| {
-            el.child(crate::ui::motion::spinner().color(k.live))
-        })
-        .when(words, |el| el.child(div().min_w(px(0.)).one_line().child(text)));
+        .when(
+            words && matches!(p.stage, Stage::Wait | Stage::Slow),
+            |el| el.child(crate::ui::motion::spinner().color(k.live)),
+        )
+        .when(words, |el| {
+            el.child(div().min_w(px(0.)).one_line().child(text))
+        });
     if p.stage == Stage::Silent {
         let (provider, g, tp, m, cid) = (
             ctx.env.provider.clone(),

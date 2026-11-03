@@ -475,7 +475,9 @@ pub fn sample_image(file_id: &str) -> Option<std::path::PathBuf> {
         "f-proto-b" => proto_by_time(),
         _ => return None,
     };
-    let dir = std::env::temp_dir().join("team-chat-v2-samples").join("images");
+    let dir = std::env::temp_dir()
+        .join("team-chat-v2-samples")
+        .join("images");
     let path = dir.join(format!("{file_id}.svg"));
     if !path.exists() {
         std::fs::create_dir_all(&dir).ok()?;

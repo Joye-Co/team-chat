@@ -362,20 +362,20 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         .left(left)
         .flex()
         .children((0..n).map(|i| {
-        let on = point.as_ref().is_some_and(|(_, p)| *p == i);
-        let fill = if on {
-            Some(mix(k.ink, k.bg, t::CHART_PICK_FILL))
-        } else if hot == Some(i) {
-            Some(mix(k.ink, k.bg, t::CHART_HOVER_FILL))
-        } else {
-            None
-        };
-        div()
-            .flex_1()
-            .h_full()
-            .rounded(theme::radius::SM)
-            .when_some(fill.filter(|_| selectable), |el, f| el.bg(f))
-    }));
+            let on = point.as_ref().is_some_and(|(_, p)| *p == i);
+            let fill = if on {
+                Some(mix(k.ink, k.bg, t::CHART_PICK_FILL))
+            } else if hot == Some(i) {
+                Some(mix(k.ink, k.bg, t::CHART_HOVER_FILL))
+            } else {
+                None
+            };
+            div()
+                .flex_1()
+                .h_full()
+                .rounded(theme::radius::SM)
+                .when_some(fill.filter(|_| selectable), |el, f| el.bg(f))
+        }));
     out = out.child(
         div()
             .relative()
@@ -392,94 +392,106 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     .unwrap_or_default();
                 let bar = *kind == ChartKind::Bar;
                 let clear = super::interact::sends(ctx.card, b, "chart.clear");
-                el.child(div().absolute().top_0().bottom_0().right_0().left(left).flex().children((0..n).map(|i| {
-                    let on = point.as_ref().is_some_and(|(_, p)| *p == i);
-                    let (emit, uie, block, skey, xv) = (
-                        emit.clone(),
-                        uie.clone(),
-                        block.clone(),
-                        skey.clone(),
-                        xs[i].clone(),
-                    );
-                    let (uih, blockh) = (uie.clone(), block.clone());
-                    let y = values.get(i).copied().flatten();
-                    // The hover tint follows a layer inside the column: the column's own
-                    // hover belongs to the 引用提问 affordance when the point is a part
-                    // (an element takes one `on_hover`).
-                    let hot = div()
-                        .id(eid(node, format!("pt-hot-{block}-{i}")))
+                el.child(
+                    div()
                         .absolute()
-                        .inset_0()
-                        .on_hover(move |over, _, cx| {
-                            uih.update(cx, |u, cx| {
-                                let b = u.block_mut(&blockh);
-                                let next = if *over {
-                                    Some(i)
-                                } else if b.hot == Some(i) {
-                                    None
-                                } else {
-                                    b.hot
-                                };
-                                if b.hot != next {
-                                    b.hot = next;
-                                    cx.notify();
-                                }
-                            })
-                        });
-                    let col = div()
-                        .id(eid(node, format!("pt-{block}-{i}")))
-                        .relative()
-                        .flex_1()
-                        .h_full()
-                        .cursor_pointer()
-                        .child(hot)
-                        .on_click(move |_, _, cx| {
-                            if on {
-                                // A second click clears (chart.clear when declared).
-                                uie.update(cx, |u, cx| {
-                                    u.block_mut(&block).point = None;
-                                    cx.notify();
-                                });
-                                if clear {
-                                    emit.send(&block, "chart.clear", json!({}), None, cx);
-                                }
-                                return;
-                            }
-                            uie.update(cx, |u, cx| {
-                                u.block_mut(&block).point = Some((skey.clone(), i));
-                                cx.notify();
-                            });
-                            let part = PartRef {
-                                kind: if bar { "bar" } else { "point" }.into(),
-                                keys: Some(
-                                    [
-                                        ("series".to_string(), PartKey::Key(skey.clone())),
-                                        ("x".to_string(), PartKey::Key(xv.clone())),
-                                    ]
-                                    .into(),
-                                ),
-                            };
-                            emit.send(
-                                &block,
-                                "chart.select",
-                                json!({ "series": skey, "x": xv, "y": y, "index": i }),
-                                Some(part),
-                                cx,
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .left(left)
+                        .flex()
+                        .children((0..n).map(|i| {
+                            let on = point.as_ref().is_some_and(|(_, p)| *p == i);
+                            let (emit, uie, block, skey, xv) = (
+                                emit.clone(),
+                                uie.clone(),
+                                block.clone(),
+                                skey.clone(),
+                                xs[i].clone(),
                             );
-                        });
-                    // A point that answers is a control: ⌥-click and the menu reference
-                    // it, a plain click still picks it.
-                    match &parts {
-                        Some(p) => crate::views::refs::affordance::part(
-                            col,
-                            p.spec(crate::views::refs::cards::Pick::Point { series: 0, x: i })
-                                .control(true),
-                            window,
-                            cx,
-                        ),
-                        None => col.into_any_element(),
-                    }
-                })))
+                            let (uih, blockh) = (uie.clone(), block.clone());
+                            let y = values.get(i).copied().flatten();
+                            // The hover tint follows a layer inside the column: the column's own
+                            // hover belongs to the 引用提问 affordance when the point is a part
+                            // (an element takes one `on_hover`).
+                            let hot = div()
+                                .id(eid(node, format!("pt-hot-{block}-{i}")))
+                                .absolute()
+                                .inset_0()
+                                .on_hover(move |over, _, cx| {
+                                    uih.update(cx, |u, cx| {
+                                        let b = u.block_mut(&blockh);
+                                        let next = if *over {
+                                            Some(i)
+                                        } else if b.hot == Some(i) {
+                                            None
+                                        } else {
+                                            b.hot
+                                        };
+                                        if b.hot != next {
+                                            b.hot = next;
+                                            cx.notify();
+                                        }
+                                    })
+                                });
+                            let col = div()
+                                .id(eid(node, format!("pt-{block}-{i}")))
+                                .relative()
+                                .flex_1()
+                                .h_full()
+                                .cursor_pointer()
+                                .child(hot)
+                                .on_click(move |_, _, cx| {
+                                    if on {
+                                        // A second click clears (chart.clear when declared).
+                                        uie.update(cx, |u, cx| {
+                                            u.block_mut(&block).point = None;
+                                            cx.notify();
+                                        });
+                                        if clear {
+                                            emit.send(&block, "chart.clear", json!({}), None, cx);
+                                        }
+                                        return;
+                                    }
+                                    uie.update(cx, |u, cx| {
+                                        u.block_mut(&block).point = Some((skey.clone(), i));
+                                        cx.notify();
+                                    });
+                                    let part = PartRef {
+                                        kind: if bar { "bar" } else { "point" }.into(),
+                                        keys: Some(
+                                            [
+                                                ("series".to_string(), PartKey::Key(skey.clone())),
+                                                ("x".to_string(), PartKey::Key(xv.clone())),
+                                            ]
+                                            .into(),
+                                        ),
+                                    };
+                                    emit.send(
+                                        &block,
+                                        "chart.select",
+                                        json!({ "series": skey, "x": xv, "y": y, "index": i }),
+                                        Some(part),
+                                        cx,
+                                    );
+                                });
+                            // A point that answers is a control: ⌥-click and the menu reference
+                            // it, a plain click still picks it.
+                            match &parts {
+                                Some(p) => crate::views::refs::affordance::part(
+                                    col,
+                                    p.spec(crate::views::refs::cards::Pick::Point {
+                                        series: 0,
+                                        x: i,
+                                    })
+                                    .control(true),
+                                    window,
+                                    cx,
+                                ),
+                                None => col.into_any_element(),
+                            }
+                        })),
+                )
             }),
     );
     if let Some(t) = tip {
@@ -615,11 +627,7 @@ mod chart_tests {
         vcx.run_until_parked();
         for y in (200..700).step_by(25) {
             for x in (40..700).step_by(60) {
-                vcx.simulate_mouse_move(
-                    point(px(x as f32), px(y as f32)),
-                    None,
-                    Modifiers::none(),
-                );
+                vcx.simulate_mouse_move(point(px(x as f32), px(y as f32)), None, Modifiers::none());
             }
         }
         vcx.run_until_parked();
