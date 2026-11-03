@@ -516,7 +516,7 @@ pub const SCENES: &[Scene] = &[
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 11] = [
+    let slices: [&'static [Scene]; 12] = [
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -528,6 +528,9 @@ pub fn all() -> Vec<&'static Scene> {
         crate::views::members_page::scenes::SCENES,
         crate::views::artifact_page::scenes::SCENES,
         V2_SHARED,
+        // --- cards v2 track ---
+        crate::views::cards::v2::scenes::SCENES,
+        // --- end cards v2 track ---
     ];
     slices.into_iter().flatten().collect()
 }
@@ -541,13 +544,7 @@ const V2_SHARED: &[Scene] = &[
         setup: |_, _| {},
         open: crate::views::settings::appearance::open_scene,
     },
-    Scene {
-        name: "cards-v2",
-        about: "Generative cards v2 (stub): the approval card of qqbot v2.14 上线 in its 话题",
-        start: Start::V2,
-        setup: |s, cx| v2_open_topic(s, crate::fake::v2::OPS, crate::fake::v2::T_RELEASE, cx),
-        open: open_main,
-    },
+    // cards-v2: moved to the cards v2 track's slice (views/cards/v2/scenes.rs).
 ];
 
 // --- web-embed: scenes that wait for native content and check their capture ---

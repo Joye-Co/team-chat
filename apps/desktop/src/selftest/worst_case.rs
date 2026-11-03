@@ -421,21 +421,6 @@ impl ChatProvider for WorstCase {
             })
             .collect()
     }
-    fn card_v2(&self, group_id: &str, message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
-        self.inner.card_v2(group_id, message_id).map(|c| {
-            let mut c = (*c).clone();
-            c.title = pick(TITLES, 0).to_string();
-            for b in c.blocks.iter_mut() {
-                if let chat_core::proto::CardV2Block::Text { text, .. } = b {
-                    *text = pick(BODIES, 4).to_string();
-                }
-            }
-            Arc::new(c)
-        })
-    }
-    fn card_v2_answers(&self, group_id: &str, message_id: &str) -> Vec<v2::CardAnswer> {
-        self.inner.card_v2_answers(group_id, message_id)
-    }
     fn done_today(&self) -> Vec<v2::DoneItem> {
         self.inner
             .done_today()
@@ -774,6 +759,47 @@ impl ChatProvider for WorstCase {
     }
 
     // --- end of the panes track ---
+
+    // --- cards v2 track: v2 cards with worst-case titles and subtitles ---
+    fn card_v2(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Message> {
+        let mut msg = self.inner.card_v2(group_id, message_id)?;
+        let i = message_id.bytes().map(usize::from).sum::<usize>();
+        let mut card = (*msg.card).clone();
+        let title = pick(TITLES, i);
+        if !title.is_empty() {
+            card.title = title.to_string();
+        }
+        card.fallback = pick(TITLES, i + 3).to_string();
+        // desk track: long bodies in the text blocks too.
+        for b in card.blocks.iter_mut() {
+            if let cards_v2::CardV2Block::Text { text, .. } = b {
+                *text = pick(BODIES, 4).to_string();
+            }
+        }
+        msg.card = Arc::new(card);
+        Some(msg)
+    }
+    fn card_v2_answers(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::CardV2Answer> {
+        self.inner.card_v2_answers(group_id, message_id)
+    }
+    fn card_v2_pending(&self, group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Pending> {
+        self.inner.card_v2_pending(group_id, message_id)
+    }
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        answer: cards_v2::CardV2AnswerRequest,
+    ) {
+        self.inner
+            .answer_card_v2(group_id, topic_id, message_id, answer)
+    }
+    fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        self.inner
+            .withdraw_card_v2_answer(group_id, topic_id, message_id)
+    }
+    // --- end cards v2 track ---
 }
 
 /// A long run of mixed text with an unbroken token (panes track).

@@ -163,6 +163,9 @@ pub struct V2Samples {
     // Desk track (1.1.0 首页): a quiet day, and the answers made on the desk.
     quiet: bool,
     desk: Mutex<super::v2_desk::DeskSamples>,
+    // --- cards v2 track ---
+    cards_v2: crate::views::cards::v2::samples::SampleCards,
+    // --- end cards v2 track ---
 }
 
 fn group(id: &str, kind: GroupKind, name: &str, members: &[&str], last: Millis) -> GroupSummary {
@@ -310,6 +313,7 @@ impl V2Samples {
             subscribers: Mutex::new(Vec::new()),
             quiet: false,
             desk: Mutex::default(),
+            cards_v2: Default::default(),
         })
     }
 
@@ -323,6 +327,9 @@ impl V2Samples {
             subscribers: Mutex::new(Vec::new()),
             quiet: true,
             desk: Mutex::default(),
+            // --- cards v2 track ---
+            cards_v2: Default::default(),
+            // --- end cards v2 track ---
         })
     }
 
@@ -1539,32 +1546,6 @@ impl ChatProvider for V2Samples {
 
     // --- desk track (1.1.0 首页): fake/v2_desk.rs ---
 
-    fn card_v2(&self, _group_id: &str, message_id: &str) -> Option<Arc<chat_core::proto::CardV2>> {
-        super::v2_desk::card_v2(message_id)
-    }
-    fn card_v2_answers(&self, _group_id: &str, message_id: &str) -> Vec<CardAnswer> {
-        let desk = self.desk.lock().unwrap_or_else(|e| e.into_inner());
-        desk.answers.get(message_id).cloned().unwrap_or_default()
-    }
-    fn answer_card_v2(
-        &self,
-        group_id: &str,
-        topic_id: &str,
-        message_id: &str,
-        _rev: u32,
-        action_id: &str,
-        inputs: std::collections::BTreeMap<String, serde_json::Value>,
-    ) {
-        let now = Local::now().timestamp_millis();
-        self.desk
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .answer(message_id, action_id, inputs, now);
-        self.emit(vec![Change::Messages {
-            group_id: group_id.into(),
-            topic_id: topic_id.into(),
-        }]);
-    }
     fn card_presses(&self, _group_id: &str, message_id: &str) -> Vec<CardPress> {
         let desk = self.desk.lock().unwrap_or_else(|e| e.into_inner());
         desk.presses.get(message_id).cloned().unwrap_or_default()
@@ -1787,6 +1768,85 @@ impl ChatProvider for V2Samples {
     }
 
     // --- end pages track ---
+
+    // --- cards v2 track ---
+    // The 首页 asks keep the desk track's cards of Main.dc.html (with the
+    // message context of the matching cards v2 sample); the choice ask stays
+    // a v1 card there. Every other card comes from the cards v2 samples.
+    fn card_v2(&self, _group_id: &str, message_id: &str) -> Option<cards_v2::CardV2Message> {
+        if message_id == super::v2_desk::choice_ask() {
+            return None;
+        }
+        if let Some(card) = super::v2_desk::card_v2(message_id) {
+            let mut msg = self.cards_v2.card(message_id)?;
+            msg.card = card;
+            return Some(msg);
+        }
+        self.cards_v2.card(message_id)
+    }
+    fn card_v2_answers(&self, _group_id: &str, message_id: &str) -> Vec<cards_v2::CardV2Answer> {
+        if super::v2_desk::card_v2(message_id).is_some() {
+            let desk = self.desk.lock().unwrap_or_else(|e| e.into_inner());
+            return desk.answers.get(message_id).cloned().unwrap_or_default();
+        }
+        self.cards_v2.answers(message_id)
+    }
+    fn card_v2_pending(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Option<cards_v2::CardV2Pending> {
+        if super::v2_desk::card_v2(message_id).is_some() {
+            return None;
+        }
+        self.cards_v2.pending(message_id)
+    }
+    fn answer_card_v2(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        answer: cards_v2::CardV2AnswerRequest,
+    ) {
+        let now = chrono::Utc::now().timestamp_millis();
+        if super::v2_desk::card_v2(message_id).is_some() {
+            self.desk
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .answer(message_id, answer, now);
+            self.emit(vec![
+                Change::Messages {
+                    group_id: group_id.into(),
+                    topic_id: topic_id.into(),
+                },
+                Change::Todo,
+            ]);
+            return;
+        }
+        if let Some((group_id, topic_id)) = self.cards_v2.answer(message_id, ME, answer, now) {
+            self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
+        }
+    }
+    fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
+        if super::v2_desk::card_v2(message_id).is_some() {
+            self.desk
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .withdraw(message_id);
+            self.emit(vec![
+                Change::Messages {
+                    group_id: group_id.into(),
+                    topic_id: topic_id.into(),
+                },
+                Change::Todo,
+            ]);
+            return;
+        }
+        if let Some((group_id, topic_id)) = self.cards_v2.withdraw(message_id, ME) {
+            self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
+        }
+    }
+    // --- end cards v2 track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

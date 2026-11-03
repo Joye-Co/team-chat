@@ -23,9 +23,11 @@ pub const SCENES: &[Scene] = &[
                 d::DEV,
                 d::T_RECONNECT,
                 &v2_desk::review_ask(),
-                1,
-                "approve",
-                Default::default(),
+                crate::data::cards_v2::CardV2AnswerRequest {
+                    rev: 1,
+                    action_id: "approve".into(),
+                    ..Default::default()
+                },
             );
             p.press_card_action(d::DEV, d::T_INVITE, &v2_desk::choice_ask(), "a");
             s.nav.update(cx, |nav, cx| nav.open_desk(cx));

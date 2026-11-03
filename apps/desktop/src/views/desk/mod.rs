@@ -152,7 +152,17 @@ impl DeskPage {
                 rev,
                 action_id,
                 inputs,
-            } => p.answer_card_v2(g, t, &message_id, *rev, action_id, inputs.clone()),
+            } => p.answer_card_v2(
+                g,
+                t,
+                &message_id,
+                crate::data::cards_v2::CardV2AnswerRequest {
+                    rev: *rev,
+                    action_id: action_id.clone(),
+                    inputs: (!inputs.is_empty()).then(|| inputs.clone()),
+                    edited_values: None,
+                },
+            ),
         }
         cx.notify();
     }

@@ -3,20 +3,20 @@
 //! draft), their answers and the presses of the v1 cards, kept in memory so
 //! a press on the desk collapses into its record.
 
-use std::{
-    collections::{BTreeMap, HashMap},
-    sync::Arc,
-};
+use std::{collections::HashMap, sync::Arc};
 
 use chat_core::proto::CardV2;
 
 use super::v2::*;
-use crate::data::{CardPress, Millis, v2::CardAnswer};
+use crate::data::{
+    CardPress, Millis,
+    cards_v2::{CardV2Answer, CardV2AnswerRequest},
+};
 
 /// Answers and presses made on the sample desk.
 #[derive(Default)]
 pub struct DeskSamples {
-    pub answers: HashMap<String, Vec<CardAnswer>>,
+    pub answers: HashMap<String, Vec<CardV2Answer>>,
     pub presses: HashMap<String, Vec<CardPress>>,
 }
 
@@ -126,23 +126,29 @@ pub fn card_v2(message_id: &str) -> Option<Arc<CardV2>> {
 }
 
 impl DeskSamples {
-    pub fn answer(
-        &mut self,
-        message_id: &str,
-        action_id: &str,
-        inputs: BTreeMap<String, serde_json::Value>,
-        at: Millis,
-    ) {
-        self.answers
-            .entry(message_id.to_string())
-            .or_default()
-            .push(CardAnswer {
-                actor_id: ME.into(),
-                action_id: action_id.into(),
-                inputs,
-                at,
-                pending: false,
-            });
+    pub fn answer(&mut self, message_id: &str, answer: CardV2AnswerRequest, at: Millis) {
+        let list = self.answers.entry(message_id.to_string()).or_default();
+        // First answer per rev wins, as on the server.
+        if list.iter().any(|a| a.rev == answer.rev) {
+            return;
+        }
+        list.push(CardV2Answer {
+            actor_id: ME.into(),
+            rev: answer.rev,
+            action_id: answer.action_id,
+            inputs: answer.inputs,
+            edited_values: answer.edited_values,
+            at,
+        });
+    }
+
+    /// 撤回: drops my last answer.
+    pub fn withdraw(&mut self, message_id: &str) {
+        if let Some(list) = self.answers.get_mut(message_id)
+            && let Some(i) = list.iter().rposition(|a| a.actor_id == ME)
+        {
+            list.remove(i);
+        }
     }
 
     pub fn press(&mut self, message_id: &str, action_id: &str, label: Option<String>, at: Millis) {

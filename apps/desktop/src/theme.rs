@@ -1618,6 +1618,89 @@ pub mod desk_screen {
     pub const SCROLL_PER_LINE: Duration = Duration::from_millis(900);
 }
 
+// --- cards v2 track: Card v2 metrics and tints (DESIGN.md §7.10) ---
+
+/// Sizes of Card v2 (Cards.dc.html). Colors stay in [`Colors`]; the state
+/// tints of a card are `color-mix` of a state color into `bg`
+/// ([`card_v2::mix`]).
+pub mod card_v2 {
+    use gpui::{Hsla, Pixels, px};
+
+    /// The status strip at the top of a card.
+    pub const STRIP: Pixels = px(34.);
+    /// The card title: 16/24 600.
+    pub const TITLE: (Pixels, Pixels) = (px(16.), px(24.));
+    /// Widest card on the 首页 and in the gallery.
+    pub const MAX_WIDTH: Pixels = px(680.);
+    /// Header tile and the key letter tile of an option.
+    pub const TILE: Pixels = px(20.);
+    /// Option rows and buttons, form fields.
+    pub const OPTION: Pixels = px(36.);
+    pub const OPTION_RADIUS: Pixels = px(9.);
+    /// Width of the label column of a form.
+    pub const FORM_LABEL: Pixels = px(84.);
+    /// Width of the key column of fields.
+    pub const FIELD_KEY: Pixels = px(68.);
+    /// Chips of a chips input.
+    pub const CHIP: Pixels = px(30.);
+    pub const CHIP_RADIUS: Pixels = px(7.);
+    /// Proof chips (`✓ 24 项通过`).
+    pub const PROOF: Pixels = px(26.);
+    /// Footer buttons.
+    pub const BUTTON: Pixels = px(32.);
+    /// Plan rows.
+    pub const PLAN_ROW: Pixels = px(28.);
+    /// Reference rows and their glyph tile.
+    pub const REF_ROW: Pixels = px(60.);
+    pub const REF_TILE: Pixels = px(28.);
+    /// Table rows.
+    pub const TABLE_ROW: Pixels = px(40.);
+    /// Diff lines and the line-number columns.
+    pub const DIFF_LINE: Pixels = px(20.);
+    pub const DIFF_NUMBER: Pixels = px(30.);
+    /// Chart plot height.
+    pub const CHART: Pixels = px(100.);
+    /// Evidence thumbnails.
+    pub const THUMB: Pixels = px(84.);
+    /// The live bar under a working strip.
+    pub const LIVE_BAR: Pixels = px(2.);
+
+    /// Strip fill and edge strengths of a state color mixed into `bg`.
+    pub const YOU_FILL: f32 = 0.10;
+    pub const YOU_EDGE: f32 = 0.24;
+    pub const YOU_BORDER: f32 = 0.30;
+    pub const OK_FILL: f32 = 0.09;
+    pub const OK_EDGE: f32 = 0.22;
+    pub const LIVE_FILL: f32 = 0.08;
+    pub const LIVE_EDGE: f32 = 0.22;
+    pub const QUIET_FILL: f32 = 0.09;
+    pub const QUIET_EDGE: f32 = 0.16;
+    /// Diff line fills.
+    pub const DIFF_FILL: f32 = 0.10;
+    /// The opacity of a muted card body (expired, superseded).
+    pub const MUTED: f32 = 0.55;
+
+    /// `color-mix(in srgb, a t, b)`.
+    pub fn mix(a: Hsla, b: Hsla, t: f32) -> Hsla {
+        let (a, b) = (a.to_rgb(), b.to_rgb());
+        let l = |x: f32, y: f32| x * t + y * (1. - t);
+        gpui::Rgba {
+            r: l(a.r, b.r),
+            g: l(a.g, b.g),
+            b: l(a.b, b.b),
+            a: l(a.a, b.a),
+        }
+        .into()
+    }
+
+    /// `a` at alpha `t` (`color-mix(in srgb, a t, transparent)`).
+    pub fn alpha(a: Hsla, t: f32) -> Hsla {
+        Hsla { a: a.a * t, ..a }
+    }
+}
+
+// --- end cards v2 track ---
+
 #[cfg(test)]
 mod tests {
     use super::*;

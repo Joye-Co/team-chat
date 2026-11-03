@@ -85,6 +85,13 @@ gpui_kit::assets::icon_assets!(
         Minimize2,
         ArrowUpRight,
         ScreenShare,
+        // --- cards v2 track ---
+        Hourglass,
+        Ban,
+        GitMerge,
+        FileX,
+        Target,
+        // --- end cards v2 track ---
     ]
 );
 

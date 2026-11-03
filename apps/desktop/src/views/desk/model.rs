@@ -108,7 +108,10 @@ impl Snapshot {
             .into_iter()
             .map(|item| {
                 let (card, card_v2) = match &item.message_id {
-                    Some(m) => (p.card(&item.group_id, m), p.card_v2(&item.group_id, m)),
+                    Some(m) => (
+                        p.card(&item.group_id, m),
+                        p.card_v2(&item.group_id, m).map(|c| c.card),
+                    ),
                     None => (None, None),
                 };
                 let answered = item.message_id.as_deref().and_then(|m| {
@@ -191,16 +194,29 @@ fn recorded(
     let me = me?;
     let p = &services.provider;
     if let Some(v2) = card_v2 {
+        // My answer on its way first, then the one the server stored.
+        if let Some(pending) = p
+            .card_v2_pending(&item.group_id, message_id)
+            .filter(|x| matches!(x.phase, crate::data::cards_v2::CardV2SendPhase::Sending))
+        {
+            let inputs = pending.inputs.unwrap_or_default();
+            return Some(Recorded {
+                record: super::ask::v2_record(v2, &pending.action_id, &inputs),
+                at: pending.at,
+                pending: true,
+            });
+        }
         let answer = p
             .card_v2_answers(&item.group_id, message_id)
             .into_iter()
             .rev()
             .find(|a| a.actor_id == me)?;
-        let record = super::ask::v2_record(v2, &answer.action_id, &answer.inputs);
+        let inputs = answer.inputs.unwrap_or_default();
+        let record = super::ask::v2_record(v2, &answer.action_id, &inputs);
         return Some(Recorded {
             record,
             at: answer.at,
-            pending: answer.pending,
+            pending: false,
         });
     }
     let press = p
