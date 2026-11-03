@@ -298,3 +298,67 @@ fn install_refuses_bad_input_and_keeps_the_running_bundle() {
     );
     assert_eq!(version_of(&f.installed), "1.0.0");
 }
+
+/// Ad-hoc signs a fake bundle. With `designated`, the signature carries that explicit
+/// designated requirement instead of the implicit cdhash one.
+fn sign(app: &Path, designated: Option<&str>) {
+    let mut cmd = Command::new("/usr/bin/codesign");
+    cmd.args(["--force", "--sign", "-", "--identifier", ID]);
+    if let Some(req) = designated {
+        cmd.arg(format!("-r=designated => {req}"));
+    }
+    let status = cmd.arg(app).status().unwrap();
+    assert!(status.success(), "codesign {app:?}");
+}
+
+#[test]
+fn stable_requirement_skips_cdhash() {
+    assert_eq!(
+        stable_requirement("designated => identifier \"a\" and certificate leaf = H\"ab\"\n"),
+        Some("identifier \"a\" and certificate leaf = H\"ab\"".into())
+    );
+    assert_eq!(
+        stable_requirement("# designated => cdhash H\"384234d7\"\n"),
+        None
+    );
+    assert_eq!(stable_requirement(""), None);
+}
+
+#[test]
+fn install_requires_the_running_designated_requirement() {
+    let _serial = DMG_TESTS.lock().unwrap_or_else(|e| e.into_inner());
+    let req = format!("identifier \"{ID}\"");
+
+    // An ad-hoc running bundle (cdhash requirement) takes an unsigned update.
+    let f = fixture(ID);
+    sign(&f.installed, None);
+    assert_eq!(designated_requirement(&f.installed), None);
+    install(&plan(&f)).unwrap();
+    assert_eq!(version_of(&f.installed), "1.1.0");
+
+    // A running bundle with a stable requirement refuses an update that does not meet it.
+    let f = fixture(ID);
+    sign(&f.installed, Some(&req));
+    assert_eq!(
+        designated_requirement(&f.installed).as_deref(),
+        Some(req.as_str())
+    );
+    let p = plan(&f);
+    assert!(matches!(install(&p), Err(InstallError::BadImage(_))));
+    assert_eq!(version_of(&f.installed), "1.0.0");
+    assert!(!staging_path(&f.installed, "1.1.0").exists());
+    assert!(!p.marker.exists());
+
+    // An update signed so that it meets the requirement installs.
+    let src = f.root.join("signed-src");
+    std::fs::create_dir_all(&src).unwrap();
+    let new = fake_bundle(&src, "1.1.0", ID);
+    sign(&new, Some(&req));
+    let dmg = f.root.join("Fake-1.1.0-signed.dmg");
+    make_dmg(&src, &dmg);
+    let mut p = plan(&f);
+    p.sha256 = version::sha256_file(&dmg).unwrap();
+    p.dmg = dmg;
+    install(&p).unwrap();
+    assert_eq!(version_of(&f.installed), "1.1.0");
+}

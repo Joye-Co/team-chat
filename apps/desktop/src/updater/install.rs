@@ -4,7 +4,9 @@
 //! Steps ([`install`]): check the DMG's SHA-256 again, check that the folder of the
 //! running bundle is writable, mount the DMG read-only and hidden from Finder
 //! (`hdiutil attach -nobrowse`), check the new bundle's id and version, copy it next to
-//! the running bundle under a hidden temporary name (`ditto`), detach, then swap the
+//! the running bundle under a hidden temporary name (`ditto`), check that the copy
+//! satisfies the running bundle's designated requirement (when that names a signing
+//! certificate, not only a cdhash), detach, then swap the
 //! two names with `rename` (same folder, so each rename is atomic). The old bundle stays
 //! under a hidden name until the new one starts: a marker file names it, and
 //! [`finish_on_launch`] in the new process removes it. [`relaunch`] starts a small shell
@@ -133,6 +135,8 @@ pub fn install(plan: &Plan) -> Result<Marker, InstallError> {
     if !plan.bundle.is_dir() || !can_replace(&plan.bundle) {
         return Err(InstallError::NotWritable);
     }
+    // Read before anything changes: the update must come from the same signer.
+    let required = designated_requirement(&plan.bundle);
     let staged = staging_path(&plan.bundle, &plan.version);
     remove_all(&staged)?;
     {
@@ -145,7 +149,12 @@ pub fn install(plan: &Plan) -> Result<Marker, InstallError> {
         }
         mount.detach();
     }
-    if let Err(e) = check_bundle(&staged, &plan.bundle_id, &plan.version) {
+    let checked =
+        check_bundle(&staged, &plan.bundle_id, &plan.version).and_then(|()| match &required {
+            Some(req) => check_signature(&staged, req),
+            None => Ok(()),
+        });
+    if let Err(e) = checked {
         let _ = remove_all(&staged);
         return Err(e);
     }
@@ -235,6 +244,52 @@ pub fn check_bundle(app: &Path, bundle_id: &str, version: &str) -> Result<(), In
         return Err(InstallError::BadImage("missing executable".into()));
     }
     Ok(())
+}
+
+/// The designated requirement of a signed bundle, when it is stable across builds: `None`
+/// for an unsigned bundle and for one whose requirement is only its cdhash (an ad-hoc
+/// signature, which every build changes).
+pub fn designated_requirement(bundle: &Path) -> Option<String> {
+    let out = Command::new("/usr/bin/codesign")
+        .args(["-d", "-r-"])
+        .arg(bundle)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    // codesign prints the requirement on stdout, the "Executable=" line on stderr.
+    let text = String::from_utf8_lossy(&out.stdout);
+    stable_requirement(&text)
+}
+
+/// Picks the `designated => <req>` line of `codesign -d -r-` output; `None` when there is
+/// none or it is a bare cdhash.
+pub fn stable_requirement(codesign_output: &str) -> Option<String> {
+    let line = codesign_output
+        .lines()
+        .map(str::trim)
+        .find_map(|l| l.trim_start_matches("# ").strip_prefix("designated => "))?
+        .trim();
+    (!line.is_empty() && !line.starts_with("cdhash ")).then(|| line.to_string())
+}
+
+/// Checks that `app` has a valid signature that satisfies `requirement`.
+pub fn check_signature(app: &Path, requirement: &str) -> Result<(), InstallError> {
+    let out = Command::new("/usr/bin/codesign")
+        .args(["--verify", "--deep", "--strict"])
+        .arg(format!("-R={requirement}"))
+        .arg(app)
+        .stdin(Stdio::null())
+        .output()?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(InstallError::BadImage(
+            "signature does not match the running app".into(),
+        ))
+    }
 }
 
 fn plist_value(plist: &Path, key: &str) -> Result<String, InstallError> {
