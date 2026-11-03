@@ -1,0 +1,48 @@
+{
+  "kind": "BotRun",
+  "valid": true,
+  "description": "usage, durationMs, resultMessageId, acceptance and pausedBy",
+  "value": {
+    "id": "01JBX0RUN000000000000000AU",
+    "botId": "01JBX0BOT000000000000000AC",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "machineId": "01JBX0MACHINE00000000000AV",
+    "status": "running",
+    "requestedBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "startedAt": 1762128001000,
+    "updatedAt": 1762128009000,
+    "usage": {
+      "inputTokens": 12000,
+      "outputTokens": 3400,
+      "costUsd": 0.42
+    },
+    "durationMs": 271000,
+    "resultMessageId": "01JBX0MSG000000000000000AE",
+    "acceptance": [
+      {
+        "text": "staging 上能登录",
+        "state": "pass",
+        "evidence": {
+          "text": "截图",
+          "fileId": "01JBX0FILE00000000000000AH",
+          "url": "https://staging.example.com",
+          "artifact": {
+            "artifactId": "01JBX0ART000000000000000AM",
+            "version": 1
+          }
+        }
+      },
+      {
+        "text": "E2E 全过",
+        "state": "pending"
+      },
+      {
+        "text": "没有新报错",
+        "state": "fail"
+      }
+    ],
+    "pausedBy": "01JBX0OWNER0000000000000AA"
+  }
+}

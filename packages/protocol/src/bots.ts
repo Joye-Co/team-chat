@@ -2,8 +2,11 @@
 // status events in the group log and the run log. See docs/protocol.md, "Bot runs".
 import { z } from "zod";
 import { eventBase, Id, Millis, Name, Seq } from "./common.ts";
-import { CliInfo, Health, Labels, RunLogEntry } from "./machine.ts";
+import { AcceptanceItem, CliInfo, Health, Labels, MAX_ACCEPTANCE_ITEMS, MachineFeature, RunLogEntry, Usage } from "./machine.ts";
 import { RunPlan } from "./plan.ts";
+
+/** `BotRun.kind` of a side chat run. */
+export const RUN_KIND_ASIDE = "aside";
 
 export const RunStatus = z.enum(["created", "running", "waiting", "blocked", "done", "failed", "cancelled"]);
 export type RunStatus = z.infer<typeof RunStatus>;
@@ -28,6 +31,19 @@ export const BotRun = z.object({
   summary: z.string().max(280).optional(),
   /** The latest plan the bot or its runner set; absent when there is none. */
   plan: RunPlan.optional(),
+  // 1.1 fields. Absent on older runs.
+  /** Tokens and cost the CLI reported in `run.done`. */
+  usage: Usage.optional(),
+  /** Run time the daemon reported in `run.done`. */
+  durationMs: z.int().nonnegative().optional(),
+  /** The message (usually a Card v2 with intent "done") the bot posted as the result. */
+  resultMessageId: Id.optional(),
+  /** 验收标准 the run reports (run event `acceptance`); replaced as a whole. */
+  acceptance: z.array(AcceptanceItem).max(MAX_ACCEPTANCE_ITEMS).optional(),
+  /** Present while a person has paused the run (接管): who. Absent = not paused. */
+  pausedBy: Id.optional(),
+  /** "aside": a read-only side chat run (单独问). Absent = a normal run. Unknown values read as normal. */
+  kind: z.string().min(1).max(32).optional(),
 });
 export type BotRun = z.infer<typeof BotRun>;
 
@@ -136,6 +152,10 @@ export const Machine = z.object({
   clis: z.array(CliInfo).optional(),
   /** Ids of the runs this machine holds now. */
   runningRuns: z.array(Id),
+  /** What the daemon supports (`hello.machine.features`, 1.1). Owners only. */
+  features: z.array(MachineFeature).optional(),
+  /** Screen sharing address for 接管 (`hello.machine.takeoverUrl`). Owners and run requesters only. */
+  takeoverUrl: z.string().min(1).max(2048).optional(),
 });
 export type Machine = z.infer<typeof Machine>;
 

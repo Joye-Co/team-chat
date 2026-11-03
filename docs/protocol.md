@@ -98,7 +98,8 @@ Event = { seq: number, groupId: string, at: number, actorId: string } & (
 ```
 
 V1 adds `card.actioned`, `artifact.created` and `artifact.versionAdded`, and new optional fields
-on several entities, frames and events: see [V1 extensions](#v1-extensions).
+on several entities, frames and events: see [V1 extensions](#v1-extensions). 1.1 adds
+`card.answered`, `artifact.evented` and `topic.linked`: see [1.1 extensions](#11-extensions).
 
 Transient events are delivered once, have no `seq` and are never stored:
 
@@ -346,6 +347,7 @@ Rules:
 - `edit` with `card` is allowed only on a card message and only for its author. `edit` cannot
   change `kind` or `replyTo`.
 - `delete` removes the message's content everywhere the server keeps it: `body`, `card`,
+  `cardV2` (1.1), the `inputs` and `editedValues` of its `card.answered` events (1.1),
   `replyTo`, `reactions`, `attachments` and `artifactRefs` of the message and of its stored
   events, and the `excerpt` of every `replyTo` that quotes it (set to `""`, the link stays). A
   file that no other message and no 产出 uses is then deleted: `GET /v1/files/:id` and its
@@ -791,3 +793,225 @@ updates to it). Any other caller gets `forbidden`, an unknown run `not_found`, a
   no stall detection; they do not change the topic status or its responsible member (the bot
   sets those itself with `topic.update`). A runner-backed bot gets `conflict` on
   `POST /v1/runs`: its runs come from mentions.
+
+# 1.1 extensions
+
+Everything here is additive, as in V1: new optional fields, new frame and event types. No value
+is added to a released closed enum (`RunStatus`, `RunPlanState`, `TopicStatus`, `CardTone`,
+`ActionStyle`, `CardListStatus`, `LinkTarget.kind`, `NotifyReason`): a 1.0.x Rust reader fails on
+an unknown value. New Rust enums of 1.1 that may grow read unknown values as `Unknown` instead.
+
+A 1.0.x client skips the new event types (`LogEntry::Unknown`) and drops the new fields when it
+caches a message or a run. The 1.1 client's cache migration `v11-1` therefore fetches every group
+log once from the start and re-applies what 1.0.x lost (see "Client cache recovery").
+
+## Cards v2
+
+Module: `card2.ts` / `card2.rs`. A v2 card travels in `Message.cardV2`. The existing `card` field
+keeps holding a v1 card, so 1.0.x clients still render and press the message. **Never put
+`v: 2` in `card`**: 1.0.x rejects the whole message (and a `history` page that holds it).
+
+```ts
+CardV2 = {
+  v: 2
+  rev: number                       // >= 1; every edit sends a higher rev
+  intent: "ask" | "done" | "working" | "info"
+  title: string                     // 1..200
+  fallback: string                  // <= 4000, plain text: old clients, notifications, search
+  ask?: {
+    from: string[]                  // 1..20: member ids, "requester" (topic creator), "owners"
+    expiresAt?: number              // no answers after this time
+    record?: boolean                // an answer is a group decision (群里的决定)
+    irreversible?: { verb /* 1..40 */, target /* 1..200 */, consequence /* 1..500 */,
+                     typeToConfirm? /* 1..100 */ }
+  }
+  blocks: CardV2Block[]             // at most 50, group children included; ids unique in the card
+  actions?: CardV2Action[]          // at most 10, ids unique
+  data?: JSON                       // bot state, <= 16 KiB
+}
+// Every block has id: 1..64 of [A-Za-z0-9_.:-].
+CardV2Block =
+  | v1 block types with an id: text, fields, table, list, progress, code, image, divider, link
+  | { type: "decision", id, options: { id, label /* 1..200 */, detail? /* <= 1000 */ }[] /* 2..10 */,
+      multiple?: boolean, default?: string[] /* option ids */ }
+  | { type: "input", id, kind: "text" | "textarea" | "number" | "select" | "date" | "switch" | "chips",
+      label /* 1..200 */, placeholder? /* <= 200 */, required?, options?: { id, label }[] /* <= 50 */,
+      min?, max?, maxLength? /* 1..32768 */, default?: JSON /* <= 4 KiB */ }
+  | { type: "draft", id, label?, text /* Markdown <= 32768 */, editable? }
+  | { type: "plan", id, runId?, items?: RunPlanItem[] }      // runId: show that run's live plan
+  | { type: "metric", id, label /* 1..100 */, value: number, unit? /* <= 16 */, delta?: number,
+      better?: "up" | "down", note? /* <= 200 */ }
+  | { type: "chart", id, kind: "line" | "bar" | "area" | "spark", label?, unit?,
+      x?: string[] /* <= 200, each <= 40 */, series: { name, values: number[] /* <= 200 */ }[] /* 1..8 */ }
+  | { type: "diff", id, path? /* <= 1024 */, text /* unified diff <= 32768 */, additions?, deletions? }
+  | { type: "evidence", id, label /* 1..200 */, state?: "pass" | "fail" | "info", detail? /* <= 1000 */,
+      fileId?, url?, artifact?: ArtifactRef }
+  | { type: "ref", id, label /* 1..200 */, target: RefTarget }
+  | { type: "group", id, label?, blocks: CardV2Block[] /* 1..20, no group inside */ }
+RefTarget =
+  | { kind: "pr", url, repo?, number?, state? }   // state: plain text, e.g. "open", "merged"
+  | { kind: "artifact", artifactId, version? }
+  | { kind: "topic", groupId, topicId }
+  | { kind: "member", memberId }
+  | { kind: "url", url }                          // http or https, <= 2048
+CardV2Action = { id, label /* 1..40 */, style?: "primary" | "default" | "danger",
+                 kind?: "submit" | "cancel" | "link" /* absent = submit */,
+                 target?: RefTarget /* exactly for link */, confirm?: { title /* 1..200 */, body? /* <= 1000 */ } }
+
+Message += { cardV2?: CardV2 }
+{ t: "send", ..., cardV2?: CardV2 }            // makes a card message
+{ t: "edit", ..., cardV2?: CardV2 }            // card messages only; rev must be higher
+message.updated data += { cardV2? }            // present = replaced
+
+{ t: "card.answer", rid, groupId, messageId, rev, actionId,
+  inputs?: Record<blockId, JSON>, editedValues?: Record<blockId, string> }   // ack, no result
+card.answered (stored event) data: { messageId, rev, actionId, inputs?, editedValues? }  // actorId = answerer
+```
+
+Rules:
+
+- A send or edit with `cardV2` and no `card` gets a `card` that the server derives with
+  `cardV2ToV1` (packages/protocol `card2.ts`). A client may send its own `card` too; the server
+  then keeps it. `kind` becomes `card`; an empty `body` becomes `fallback`, or the title when
+  `fallback` is empty.
+- Derived v1 card: `title` = title; `tone` = `warning` (ask), `success` (done), `info` (working),
+  `neutral` (info); blocks = a `text` block with `fallback` (when not empty), then each block
+  mapped: v1 types as they are (without `id`), `group` = its children, `decision` = a `list` of
+  the option labels, `draft` = a `text` block, `plan` = a `list` (done = done, current =
+  in_progress, other = todo), `metric` = `fields` (label, value and unit), `diff` = `code` with
+  `lang: "diff"`, `evidence` = a `list` item (pass = done, fail = failed), `ref` = a `link`
+  (`pr` and `url` as a url link; `member` dropped); `input` and `chart` are dropped; at most 50
+  blocks. Actions: the submit and cancel actions (id, label, style, `confirm.title`) only when
+  the card has no `input`, `draft` or `decision` block; `link` actions are dropped.
+- A v1 `card.action` press on a message that has a `cardV2` counts as a `card.answer` with
+  that action, the current rev and no inputs.
+- `card.answer`: the message must be a card message with a `cardV2` that is not deleted, `rev`
+  must be its current rev (`conflict`: the card changed), `actionId` must be one of its
+  submit or cancel actions (`not_found`), every key of `inputs` and `editedValues` must be a
+  block id of the card (`invalid`), and `inputs` with `editedValues` are at most 64 KiB as JSON
+  (`too_large`). When the card has `ask`: only a member that `ask.from` names may answer
+  (`forbidden`; `requester` is the topic's creator, so a bot that knows a run's requester lists
+  that member's id; `owners` is every owner); after `ask.expiresAt` the
+  answer gets `conflict`; the first answer to a rev wins and later ones get `conflict`. At most
+  one answer per member per message per second (`rate_limited`).
+- The card's author edits the card after an answer (for example with a higher rev and no
+  actions). Clients show a card as answered when a `card.answered` for its current rev exists,
+  as expired after `ask.expiresAt`, and as superseded when a later rev exists.
+- Answers reach a runner bot's run as `run.input.answer` (machine-protocol.md) and an SDK bot
+  as the `card.answered` event.
+- Group decisions (群里的决定) are derived on the client: every `card.answered` of a card whose
+  `ask.record` is true, with the question (title), the choice (action and inputs), who and when.
+- Readers are lenient: unknown block types, intents, kinds and styles read as unknown (Rust
+  `Unknown`, rendered as nothing or the safe default), and a `cardV2` that does not parse is
+  dropped while the v1 `card` stays. The server rejects all of these on write.
+
+## Side chats
+
+Module: `topic.ts` / `topic.rs`. A side chat (单独问) is a private conversation with a bot about
+a topic. It lives in the asker's DM with the bot, so only the two of them read it, and it
+reuses DM sync, history and storage.
+
+```ts
+TopicContext = { groupId, topicId, uptoSeq }   // the topic, read up to this seq
+Topic += { contextOf?: TopicContext }          // set on a side chat topic
+{ t: "send", ..., context?: TopicContext }     // in a DM with a bot only
+topic.updated data += { contextOf? }           // the context moved on
+```
+
+Rules:
+
+- A `send` with `context` and no `topicId` in a DM with a bot starts a side chat: the new
+  topic gets `contextOf`. The sender and the bot must both be members of `context.groupId`
+  and the topic must exist there (`forbidden` / `not_found`). A later send in that topic may
+  carry `context` with the same `groupId` and `topicId` and a higher `uptoSeq`; the server then
+  stores `topic.updated { contextOf }`. Any other use of `context` gets `invalid`.
+- The bot answers with a read-only run (`BotRun.kind = "aside"`) whose prompt holds the source
+  topic up to `uptoSeq`. Its answers stay in the DM. Nothing is posted to the source topic: a
+  "post to topic" button on the client sends a normal message by the person.
+- Clients list the side chats of a topic by `contextOf` and hide side chat topics from the DM's
+  normal topic list.
+
+## Run fields, pause and resume
+
+Modules: `bots.ts`, `machine.ts` / `bots.rs`, `machine.rs`.
+
+```ts
+BotRun += {
+  usage?: { inputTokens, outputTokens, costUsd? }   // from run.done
+  durationMs?: number                               // from run.done
+  resultMessageId?: string                          // the result message (usually a Card v2, intent done)
+  acceptance?: AcceptanceItem[]                     // at most 20; replaced as a whole
+  pausedBy?: string                                 // present while paused (接管): who
+  kind?: string                                     // "aside" = side chat run; absent = normal
+}
+AcceptanceItem = { text /* 1..500 */, state: "pending" | "pass" | "fail",
+                   evidence?: { text? /* <= 1000 */, fileId?, url?, artifact?: ArtifactRef } }
+Machine += { features?: string[], takeoverUrl?: string }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `POST /v1/runs/:id/pause` | the run's requester or an owner | | `BotRun` with `pausedBy`; `conflict` when the run ended, is paused, or its machine lacks feature `pause`; audited as `run.pause` |
+| `POST /v1/runs/:id/resume` | the run's requester or an owner | `{ note?: string }` (<= 2000) | `BotRun` without `pausedBy`; `conflict` when not paused; audited as `run.resume` |
+
+Rules:
+
+- `usage` and `durationMs` are set when the run ends, from `run.done`. `acceptance` comes from
+  the run event `acceptance` and is stored in `run.updated` like the plan. `kind` and the
+  closed `RunStatus` are separate: a paused run keeps its status (`running`) and has `pausedBy`.
+- Pause stops the CLI's process group on the machine (machine-protocol.md `run.pause`); the
+  stall detection and `maxDurationMs` stop until resume. `Machine.takeoverUrl` (owners and run
+  requesters only) is a screen sharing address the client may open while paused.
+- `Machine.features` (owners only) lists what the daemon supports; see machine-protocol.md.
+- Clients compute the desk, active runs across groups, the live terminal (from the run log's
+  `tool.call`/`tool.result`) and member stats from their cache; no extra endpoint.
+
+## 产出 events
+
+Module: `files.ts` / `files.rs`.
+
+```ts
+ArtifactVersion += { runId?: string, events?: { name /* 1..128 */, label? /* <= 200 */ }[] /* <= 20 */ }
+CreateArtifactRequest += { events?, runId? }      AddArtifactVersionRequest += { events?, runId? }
+{ t: "artifact.event", rid, groupId, artifactId, version, name, payload?: JSON /* <= 16 KiB */ }   // ack, no result
+artifact.evented (stored event) data: { artifactId, version, name, payload? }   // actorId = viewer
+```
+
+Rules:
+
+- `events` and `runId` are accepted from bot members only; `runId` must be a run of the caller
+  in the 产出's topic (else it is dropped). Other callers' values are dropped.
+- `artifact.event`: any member of the group; the version must exist (`not_found`) and declare
+  `name` in `events` (`forbidden` otherwise); at most 5 events per member per second
+  (`rate_limited`). The event goes to the author bot's run as `run.input.artifactEvent`.
+- The desktop gives a page the `emitEvent` bridge only when its version was made by a bot of
+  the group and declares events. Page events never approve anything: a bot that needs a
+  decision posts a Card v2 ask.
+
+## Topic links
+
+Module: `links.ts` / `links.rs`.
+
+```ts
+TopicLink = { kind: "pr", repo /* owner/name */, number, url, title /* <= 500 */,
+              state /* plain text: open | draft | merged | closed */,
+              checks: { name /* 1..200 */, conclusion /* 1..32, "pending" while it runs */ }[] /* <= 100 */,
+              additions?, deletions?, changedFiles? }
+topic.linked (stored event) data: { topicId, link: TopicLink }   // actorId = the integration's bot
+```
+
+Rules:
+
+- The GitHub integration stores `topic.linked` for the topic a pull request names
+  (`Topic: <id>` in its body) whenever its state, checks or size change. A link with the same
+  `kind` and `url` replaces the older one; clients keep the newest per key.
+- Readers skip a `kind` they do not know (Rust `TopicLink::Unknown`).
+
+## Client cache recovery
+
+1.0.x clients advanced past the 1.1 event types and dropped 1.1 fields from cached messages,
+topics, runs and 产出 versions. The 1.1 desktop cache step `v11-1` records, per group, the seq it
+had applied. After the next `welcome` the client fetches each such group's log from seq 0 up to
+that seq once, in pages, and re-applies only what is idempotent: `cardV2` of messages, `contextOf`
+of topics, newer runs, 产出 versions, and the 1.1 events. Read counts and message counts do not
+change. When a group is done its record is removed.

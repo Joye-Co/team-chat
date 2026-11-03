@@ -4,6 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::entities::Seq;
 use crate::limits::{Validation, ValidationError, check_id, check_ids};
 
 /// Max entries in `waitingOn`.
@@ -36,4 +37,21 @@ pub fn check_waiting_on(ids: &[String]) -> Validation {
         });
     }
     check_ids("waitingOn", ids)
+}
+
+/// A side chat (单独问) points at the topic it is about: the asker's DM topic with a bot reads
+/// `topic_id` of `group_id` up to `upto_seq` (docs/protocol.md, "Side chats").
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TopicContext {
+    pub group_id: String,
+    pub topic_id: String,
+    pub upto_seq: Seq,
+}
+
+impl TopicContext {
+    pub fn validate(&self) -> Validation {
+        check_id("context.groupId", &self.group_id)?;
+        check_id("context.topicId", &self.topic_id)
+    }
 }

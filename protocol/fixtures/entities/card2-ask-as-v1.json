@@ -1,0 +1,44 @@
+{
+  "kind": "Card",
+  "valid": true,
+  "description": "cardV2ToV1 of card2-ask: no v1 actions, the card has inputs",
+  "value": {
+    "v": 1,
+    "title": "发布 qqbot 1.4 到正式环境？",
+    "tone": "warning",
+    "blocks": [
+      {
+        "type": "text",
+        "text": "Scout 在 staging 验收通过。请选择发布时间。"
+      },
+      {
+        "type": "text",
+        "text": "**验收通过**，没有新的报错。"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "现在发"
+          },
+          {
+            "text": "今晚 22:00"
+          }
+        ]
+      },
+      {
+        "type": "text",
+        "text": "- 修好了重复消息\n- 更快的启动"
+      },
+      {
+        "type": "list",
+        "items": [
+          {
+            "text": "E2E 42/42",
+            "status": "done"
+          }
+        ]
+      }
+    ]
+  }
+}

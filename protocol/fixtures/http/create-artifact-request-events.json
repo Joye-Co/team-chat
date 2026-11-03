@@ -1,0 +1,23 @@
+{
+  "kind": "CreateArtifactRequest",
+  "valid": true,
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "方案对比",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JBX0FILE00000000000000AH"
+      }
+    ],
+    "events": [
+      {
+        "name": "pick"
+      }
+    ],
+    "runId": "01JBX0RUN000000000000000AU"
+  }
+}

@@ -1,0 +1,9 @@
+{
+  "kind": "RunEvent",
+  "valid": true,
+  "value": {
+    "type": "paused",
+    "paused": true,
+    "by": "01JA0000000000000000000H01"
+  }
+}

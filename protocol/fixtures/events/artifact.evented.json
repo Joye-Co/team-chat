@@ -1,0 +1,19 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 45,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0ALICE0000000000000AB",
+    "type": "artifact.evented",
+    "data": {
+      "artifactId": "01JBX0ART000000000000000AM",
+      "version": 2,
+      "name": "pick",
+      "payload": {
+        "option": "B"
+      }
+    }
+  }
+}

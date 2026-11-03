@@ -1,0 +1,17 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "start a side chat about a topic",
+  "value": {
+    "t": "send",
+    "rid": "r97",
+    "groupId": "01JBX0DM00000000000000000B",
+    "clientMsgId": "c97",
+    "body": "这个话题现在卡在哪？",
+    "context": {
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "uptoSeq": 41
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "info",
+    "title": "提示",
+    "fallback": "只是告诉你",
+    "blocks": [
+      {
+        "type": "text",
+        "id": "t",
+        "text": "x"
+      }
+    ],
+    "actions": [
+      {
+        "id": "ok",
+        "label": "知道了"
+      }
+    ]
+  }
+}

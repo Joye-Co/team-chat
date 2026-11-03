@@ -1,0 +1,21 @@
+{
+  "kind": "Topic",
+  "valid": true,
+  "description": "a side chat topic in a DM with a bot",
+  "value": {
+    "id": "01JBX0SIDE00000000000000AW",
+    "groupId": "01JBX0DM00000000000000000B",
+    "title": "发布 V1：检查清单 ✅",
+    "status": "in_progress",
+    "createdBy": "01JBX0OWNER0000000000000AA",
+    "createdAt": 1762128000000,
+    "rootMessageId": "01JBX0MSG000000000000000AE",
+    "lastSeq": 42,
+    "messageCount": 7,
+    "contextOf": {
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "uptoSeq": 41
+    }
+  }
+}

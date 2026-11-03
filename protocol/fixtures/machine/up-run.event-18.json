@@ -1,0 +1,15 @@
+{
+  "kind": "MachineUpFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.event",
+    "runId": "01JA0000000000000000000R04",
+    "seq": 5,
+    "at": 1793627400032,
+    "event": {
+      "type": "paused",
+      "paused": false
+    }
+  }
+}

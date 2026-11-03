@@ -1,0 +1,27 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "unknown chart kind",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "working",
+    "title": "正在做",
+    "fallback": "",
+    "blocks": [
+      {
+        "type": "chart",
+        "id": "c",
+        "kind": "pie",
+        "series": [
+          {
+            "name": "a",
+            "values": [
+              1
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -7,11 +7,14 @@ use serde::{Deserialize, Serialize};
 
 use crate::bots::RunUpdatedData;
 use crate::card::Card;
+use crate::card2::{CardAnsweredData, CardV2, lenient_card_v2};
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
-use crate::files::ArtifactEventData;
+use crate::files::{ArtifactEventData, ArtifactEventedData};
+use crate::links::TopicLinkedData;
 use crate::message::{ArtifactRef, FileRef};
 use crate::reactions::ReactionChangedData;
 use crate::serde_util::{any_value, non_null, nullable};
+use crate::topic::TopicContext;
 
 /// One stored event. The shared fields sit next to `type` and `data` on the wire.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,6 +65,13 @@ pub enum EventData {
     RunUpdated(RunUpdatedData),
     #[serde(rename = "reaction.changed")]
     ReactionChanged(ReactionChangedData),
+    // 1.1
+    #[serde(rename = "card.answered")]
+    CardAnswered(CardAnsweredData),
+    #[serde(rename = "artifact.evented")]
+    ArtifactEvented(ArtifactEventedData),
+    #[serde(rename = "topic.linked")]
+    TopicLinked(TopicLinkedData),
 }
 
 impl EventData {
@@ -80,6 +90,9 @@ impl EventData {
             Self::ArtifactVersionAdded(_) => "artifact.versionAdded",
             Self::RunUpdated(_) => "run.updated",
             Self::ReactionChanged(_) => "reaction.changed",
+            Self::CardAnswered(_) => "card.answered",
+            Self::ArtifactEvented(_) => "artifact.evented",
+            Self::TopicLinked(_) => "topic.linked",
         }
     }
 }
@@ -127,6 +140,13 @@ pub struct TopicUpdatedData {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_message_at: Option<Millis>,
+    /// Present = the side chat's new context (a later `send.context`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context_of: Option<TopicContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -161,6 +181,13 @@ pub struct MessageUpdatedData {
         skip_serializing_if = "Option::is_none"
     )]
     pub card: Option<Card>,
+    /// Read leniently, as `Message.cardV2`.
+    #[serde(
+        default,
+        deserialize_with = "lenient_card_v2",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card_v2: Option<CardV2>,
 }
 
 /// Data of `card.actioned`. The event's `actorId` is the member who pressed.

@@ -1,0 +1,13 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "unknown intent",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "question",
+    "title": "正在做",
+    "fallback": "",
+    "blocks": []
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a decision has 2..10 options",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "working",
+    "title": "正在做",
+    "fallback": "",
+    "blocks": [
+      {
+        "type": "decision",
+        "id": "d",
+        "options": [
+          {
+            "id": "a",
+            "label": "A"
+          }
+        ]
+      }
+    ]
+  }
+}

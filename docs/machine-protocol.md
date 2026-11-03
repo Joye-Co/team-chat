@@ -47,7 +47,8 @@ Before `welcome` the daemon sends nothing else, and the server sends nothing but
 ```ts
 { t: "hello", protocol: 1,
   machine: { id?: string, name: string, labels: string[], daemonVersion: string,
-             os: string, arch: string, maxParallelRuns: number },
+             os: string, arch: string, maxParallelRuns: number,
+             features?: string[] /* 1.1, see "1.1 features" */, takeoverUrl?: string /* 1.1 */ },
   clis: CliInfo[], health: Health, runs: RunCursor[] }
   // machine.id is the configured id (optional); the token is authoritative.
   // runs = every run the daemon still holds (running, or finished with frames not yet acked)
@@ -88,10 +89,17 @@ KnownRun = { runId, ackedSeq: number }
   envAllowlist: string[],          // names of daemon env vars the CLI may see (see Environment)
   leaseMs: number,                 // e.g. 600000
   maxDurationMs?: number,          // the daemon cancels the run after this; status "timeout"
-  sessionUpload?: { url: string, headers?: Record<string, string> } }
-{ t: "run.input",    runId, inputId, text, authorId? }           // a follow-up from the topic
+  sessionUpload?: { url: string, headers?: Record<string, string> },
+  kind?: "aside" }                 // 1.1, feature "aside": a read-only side chat run
+{ t: "run.input",    runId, inputId, text, authorId?,            // a follow-up from the topic
+  answer?: RunAnswer, artifactEvent?: RunArtifactEvent }         // 1.1, feature "answer"
 { t: "run.approval", runId, approvalId, decision: "approve" | "deny" }
 { t: "run.cancel",   runId, reason? }
+{ t: "run.pause",    runId, by? }                                // 1.1, feature "pause"
+{ t: "run.resume",   runId, note? /* <= 2000 */ }                // 1.1, feature "pause"
+RunAnswer = { messageId, rev, actionId, inputs?: Record<string, JSON>,
+              editedValues?: Record<string, string>, actorId }
+RunArtifactEvent = { artifactId, version, name, payload?: JSON, actorId }
 { t: "ack",          runId, seq }                                // cumulative: every frame <= seq is stored
 { t: "error",        error: { code: ErrorCode, message } }       // connection-level, as in protocol.md
 ```
@@ -121,6 +129,8 @@ RunEvent =
   | { type: "input.accepted",   inputId }                               // the CLI took this run.input
   | { type: "plan",             items: RunPlanItem[] }                  // replaces the run plan (protocol.md)
   | { type: "status",           state: "preparing" | "running" | "retrying" | "stalled" | "error", message? }
+  | { type: "acceptance",       items: AcceptanceItem[] }               // 1.1: replaces BotRun.acceptance
+  | { type: "paused",           paused: boolean, by? }                  // 1.1: after run.pause / run.resume
 ```
 
 - `status: "preparing"` comes first (worktree setup), then `running`.
@@ -215,6 +225,24 @@ RunEvent =
 - `run.cancel` interrupts the CLI (Codex `turn/interrupt`, ACP `session/cancel`), then sends
   SIGTERM to the CLI's whole process group, SIGKILL after 3 s, and ends with
   `run.done status = "cancelled"`. `maxDurationMs` does the same with `status = "timeout"`.
+
+## 1.1 features
+
+A 1.1 daemon lists what it supports in `hello.machine.features`. The server sends a 1.1 frame
+or field to a daemon only when it reports the feature; an older daemon logs and drops unknown
+server frames and ignores unknown fields, so it must never get work it cannot do safely (an
+`aside` run on an old daemon would run with full permissions).
+
+| Feature | What the daemon does |
+| --- | --- |
+| `pause` | `run.pause`: interrupts the CLI turn where the CLI supports it, else sends SIGSTOP to the run's process group, stops the stall timer and the `maxDurationMs` clock, and emits `paused { paused: true, by }`. `run.resume`: SIGCONT, restarts both clocks (the deadline moves by the paused time), emits `paused { paused: false }` and gives `note` to the CLI as its next input when set. A cancel while paused resumes first. |
+| `answer` | `run.input.answer` and `run.input.artifactEvent` reach the CLI as typed, untrusted data (a tool result of the CLI's own ask, or a user line with a fenced JSON block). `text` holds the same content as text for daemons without the feature. |
+| `aside` | `run.assign.kind = "aside"`: the run is read-only (Codex sandbox `read-only`, Claude Code permission mode `plan`, no repo write) whatever `daemon.toml` says. |
+| `acceptance` | The daemon forwards the CLI's acceptance criteria as the `acceptance` run event. |
+
+`takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://mac-mini.tailnet`).
+The owner turns on macOS Screen Sharing by hand; the daemon never changes system settings, and
+no credentials pass through chat. The server shows the address to owners and run requesters.
 
 ## Raw session upload
 

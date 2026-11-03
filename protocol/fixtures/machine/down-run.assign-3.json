@@ -1,0 +1,17 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "daemon golden frame",
+  "value": {
+    "t": "run.assign",
+    "runId": "01JA0000000000000000000R05",
+    "botMemberId": "01JA0000000000000000000B01",
+    "groupId": "01JA0000000000000000000G02",
+    "topicId": "01JA0000000000000000000T05",
+    "runtime": "claude",
+    "prompt": "Side chat about a topic",
+    "envAllowlist": [],
+    "leaseMs": 600000,
+    "kind": "aside"
+  }
+}

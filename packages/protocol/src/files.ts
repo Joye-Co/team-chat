@@ -1,7 +1,7 @@
 // V1 files and 产出 (artifacts) over HTTP, and their group events.
 // See docs/protocol.md, "Files" and "产出 (artifacts)".
 import { z } from "zod";
-import { Count, eventBase, Id, Millis, Mime, Sha256, Title } from "./common.ts";
+import { Count, eventBase, Id, Millis, Mime, Rid, Sha256, Title, utf8Bytes } from "./common.ts";
 import { MAX_FILE_NAME_CHARS } from "./message.ts";
 
 /**
@@ -98,6 +98,15 @@ export const ArtifactFile = z.object({
 });
 export type ArtifactFile = z.infer<typeof ArtifactFile>;
 
+/** Max events a 产出 version declares, and the max size of one event payload as JSON. */
+export const MAX_ARTIFACT_EVENTS = 20;
+export const MAX_ARTIFACT_EVENT_PAYLOAD_BYTES = 16_384;
+export const ArtifactEventName = z.string().min(1).max(128);
+/** An event an interactive 产出 page may send (`emitEvent`). Only declared names are accepted. */
+export const ArtifactEventDecl = z.object({ name: ArtifactEventName, label: z.string().max(200).optional() });
+export type ArtifactEventDecl = z.infer<typeof ArtifactEventDecl>;
+const ArtifactEvents = z.array(ArtifactEventDecl).max(MAX_ARTIFACT_EVENTS);
+
 export const ArtifactVersion = z.object({
   artifactId: Id,
   version: z.int().positive(),
@@ -107,6 +116,10 @@ export const ArtifactVersion = z.object({
   note: z.string().max(2000).optional(),
   createdBy: Id,
   createdAt: Millis,
+  /** 1.1: the bot run that made this version. */
+  runId: Id.optional(),
+  /** 1.1: events the page may send back (bot-made versions only). */
+  events: ArtifactEvents.optional(),
 });
 export type ArtifactVersion = z.infer<typeof ArtifactVersion>;
 
@@ -117,6 +130,10 @@ const versionInput = {
   entry: ArtifactPath,
   files: z.array(VersionFileInput).min(1).max(MAX_ARTIFACT_FILES),
   note: z.string().max(2000).optional(),
+  /** 1.1: events the page may send; accepted from bot members only. */
+  events: ArtifactEvents.optional(),
+  /** 1.1: the caller bot's active run that made it (checked by the server). */
+  runId: Id.optional(),
 };
 
 /** `POST /v1/artifacts`: makes the 产出 and its version 1. */
@@ -154,4 +171,33 @@ export const ArtifactVersionAddedEvent = z.object({
   ...eventBase,
   type: z.literal("artifact.versionAdded"),
   data: z.object({ artifact: Artifact, version: ArtifactVersion }),
+});
+
+/** `{ t: "artifact.event" }` (1.1): an interactive 产出 page sent an event. ack.result is omitted. */
+export const ArtifactEventFrame = z
+  .object({
+    t: z.literal("artifact.event"),
+    rid: Rid,
+    groupId: Id,
+    artifactId: Id,
+    version: z.int().positive(),
+    name: ArtifactEventName,
+    payload: z.json().optional(),
+  })
+  .refine((f) => f.payload === undefined || utf8Bytes(JSON.stringify(f.payload)) <= MAX_ARTIFACT_EVENT_PAYLOAD_BYTES, {
+    message: "payload exceeds 16 KiB",
+    path: ["payload"],
+  });
+export type ArtifactEventFrame = z.infer<typeof ArtifactEventFrame>;
+
+/** Stored event (1.1): a viewer's page event. `actorId` = the viewer. */
+export const ArtifactEventedEvent = z.object({
+  ...eventBase,
+  type: z.literal("artifact.evented"),
+  data: z.object({
+    artifactId: Id,
+    version: z.int().positive(),
+    name: ArtifactEventName,
+    payload: z.json().optional(),
+  }),
 });

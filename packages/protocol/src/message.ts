@@ -2,6 +2,7 @@
 // See docs/protocol.md, "Messages: quotes, attachments, cards".
 import { z } from "zod";
 import { Card } from "./card.ts";
+import { CardV2, ReadCardV2 } from "./card2.ts";
 import { Count, Id, Mime, Sha256 } from "./common.ts";
 
 export const MAX_ATTACHMENTS = 20;
@@ -56,6 +57,8 @@ export const messageFields = {
   attachments: Attachments.optional(),
   artifactRefs: ArtifactRefs.optional(),
   card: Card.optional(),
+  /** Card v2 (1.1). Next to it the server stores a derived v1 `card` for older readers. */
+  cardV2: ReadCardV2,
 };
 
 /** Fields added to the `send` client frame (and `POST /v1/groups/:id/messages`). */
@@ -64,6 +67,8 @@ export const sendFields = {
   attachments: Attachments.optional(),
   artifactRefs: ArtifactRefs.optional(),
   card: Card.optional(),
+  /** Makes a card message; without `card` the server derives the v1 card (`cardV2ToV1`). */
+  cardV2: CardV2.optional(),
 };
 
 /** Fields added to the `edit` client frame. Present = replace; absent = keep. */
@@ -71,7 +76,14 @@ export const editFields = {
   attachments: Attachments.optional(),
   artifactRefs: ArtifactRefs.optional(),
   card: Card.optional(),
+  /** A card message only; `rev` must be higher than the stored one. */
+  cardV2: CardV2.optional(),
 };
 
 /** Fields added to `message.updated` event data. Present = replaced with this value. */
-export const messageUpdatedFields = editFields;
+export const messageUpdatedFields = {
+  attachments: Attachments.optional(),
+  artifactRefs: ArtifactRefs.optional(),
+  card: Card.optional(),
+  cardV2: ReadCardV2,
+};

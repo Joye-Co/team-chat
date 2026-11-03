@@ -22,6 +22,8 @@ import {
   Title,
 } from "./common.ts";
 import { CardActionedEvent, CardActionFrame } from "./card.ts";
+import { CardAnsweredEvent, CardAnswerFrame, CardV2 } from "./card2.ts";
+import { TopicLink, TopicLinkedEvent } from "./links.ts";
 import { CharacterId } from "./characters.ts";
 import {
   AddArtifactVersionRequest,
@@ -37,6 +39,8 @@ import {
   FileResponse,
   Artifact,
   ArtifactVersion,
+  ArtifactEventedEvent,
+  ArtifactEventFrame,
 } from "./files.ts";
 import { CreateHookRequest, CreateHookResponse, Hook, HookInRequest, HooksResponse } from "./hooks.ts";
 import { editFields, messageFields, messageUpdatedFields, sendFields, FileRef } from "./message.ts";
@@ -45,7 +49,7 @@ import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, Upda
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
 import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
-import { TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
+import { sendContextFields, TopicContext, TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
 import { UpdateInfo } from "./updates.ts";
 import { DiagnosticsResponse } from "./diagnostics.ts";
 import { AuditResponse, AuditEntry } from "./audit.ts";
@@ -71,6 +75,8 @@ export * from "./characters.ts";
 export * from "./topic.ts";
 export * from "./reads.ts";
 export * from "./card.ts";
+export * from "./card2.ts";
+export * from "./links.ts";
 export * from "./message.ts";
 export * from "./files.ts";
 export * from "./members.ts";
@@ -258,6 +264,10 @@ export const Event = z.discriminatedUnion("type", [
   ArtifactVersionAddedEvent,
   RunUpdatedEvent,
   ReactionChangedEvent,
+  // 1.1
+  CardAnsweredEvent,
+  ArtifactEventedEvent,
+  TopicLinkedEvent,
 ]);
 export type Event = z.infer<typeof Event>;
 export type EventType = Event["type"];
@@ -314,6 +324,7 @@ export const SendFrame = z.object({
   mentions: z.array(Id).optional(),
   streaming: z.boolean().optional(),
   ...sendFields,
+  ...sendContextFields,
 });
 export const EditFrame = z.object({
   t: z.literal("edit"),
@@ -389,6 +400,9 @@ export const ClientFrame = z.discriminatedUnion("t", [
   CardActionFrame,
   SearchFrame,
   ReactFrame,
+  // 1.1
+  CardAnswerFrame,
+  ArtifactEventFrame,
 ]);
 export type ClientFrame = z.infer<typeof ClientFrame>;
 export type ClientFrameType = ClientFrame["t"];
@@ -640,6 +654,10 @@ export const schemas = {
   MachinesResponse,
   MachineUpFrame,
   MachineDownFrame,
+  // 1.1
+  CardV2,
+  TopicLink,
+  TopicContext,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

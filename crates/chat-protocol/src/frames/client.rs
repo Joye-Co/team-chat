@@ -6,12 +6,15 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::card::{Card, check_action_id};
+use crate::card2::{CardAnswerFrame, CardV2};
 use crate::entities::{Seq, TopicStatus};
+use crate::files::ArtifactEventFrame;
 use crate::limits::*;
 use crate::message::{ArtifactRef, FileRef, ReplyToRef, check_refs};
 use crate::reactions::ReactFrame;
 use crate::search::SearchFrame;
 use crate::serde_util::{any_value, non_null, nullable};
+use crate::topic::TopicContext;
 use crate::topic::{TopicFollowFrame, check_waiting_on};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,6 +50,11 @@ pub enum ClientFrame {
     Search(SearchFrame),
     #[serde(rename = "react")]
     React(ReactFrame),
+    // 1.1
+    #[serde(rename = "card.answer")]
+    CardAnswer(CardAnswerFrame),
+    #[serde(rename = "artifact.event")]
+    ArtifactEvent(ArtifactEventFrame),
 }
 
 impl ClientFrame {
@@ -68,6 +76,8 @@ impl ClientFrame {
             Self::CardAction(_) => "card.action",
             Self::Search(_) => "search",
             Self::React(_) => "react",
+            Self::CardAnswer(_) => "card.answer",
+            Self::ArtifactEvent(_) => "artifact.event",
         }
     }
 
@@ -84,6 +94,8 @@ impl ClientFrame {
             Self::CardAction(f) => Some(&f.rid),
             Self::Search(f) => Some(&f.rid),
             Self::React(f) => Some(&f.rid),
+            Self::CardAnswer(f) => Some(&f.rid),
+            Self::ArtifactEvent(f) => Some(&f.rid),
             Self::Hello(_) | Self::Delta(_) | Self::Typing(_) | Self::Read(_) | Self::Ping => None,
         }
     }
@@ -119,7 +131,9 @@ impl ClientFrame {
                     check_id("replyTo.messageId", &r.message_id)?;
                 }
                 check_refs(f.attachments.as_deref(), f.artifact_refs.as_deref())?;
-                f.card.as_ref().map_or(Ok(()), Card::validate)
+                f.card.as_ref().map_or(Ok(()), Card::validate)?;
+                f.card_v2.as_ref().map_or(Ok(()), CardV2::validate)?;
+                f.context.as_ref().map_or(Ok(()), TopicContext::validate)
             }
             Self::Edit(f) => {
                 check_id("rid", &f.rid)?;
@@ -127,7 +141,8 @@ impl ClientFrame {
                 check_id("messageId", &f.message_id)?;
                 check_body("body", &f.body)?;
                 check_refs(f.attachments.as_deref(), f.artifact_refs.as_deref())?;
-                f.card.as_ref().map_or(Ok(()), Card::validate)
+                f.card.as_ref().map_or(Ok(()), Card::validate)?;
+                f.card_v2.as_ref().map_or(Ok(()), CardV2::validate)
             }
             Self::Delta(f) => {
                 check_id("groupId", &f.group_id)?;
@@ -185,6 +200,8 @@ impl ClientFrame {
             }
             Self::Search(f) => f.validate(),
             Self::React(f) => f.validate(),
+            Self::CardAnswer(f) => f.validate(),
+            Self::ArtifactEvent(f) => f.validate(),
         }
     }
 }
@@ -269,6 +286,20 @@ pub struct SendFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub card: Option<Card>,
+    /// 1.1: makes a card message; without `card` the server derives the v1 card.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card_v2: Option<CardV2>,
+    /// 1.1: start (or move on) a side chat about this topic. Only in a DM with a bot.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub context: Option<TopicContext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -303,6 +334,13 @@ pub struct EditFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub card: Option<Card>,
+    /// 1.1: a card message only; `rev` must be higher than the stored one.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card_v2: Option<CardV2>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

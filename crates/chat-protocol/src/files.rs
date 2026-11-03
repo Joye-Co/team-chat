@@ -8,7 +8,7 @@ use crate::limits::{
     MAX_TITLE_CHARS, Validation, ValidationError, check_chars, check_id, check_title,
 };
 use crate::message::{MAX_FILE_NAME_CHARS, check_mime, check_positive, check_sha256};
-use crate::serde_util::{non_null, nullable};
+use crate::serde_util::{any_value, non_null, nullable};
 
 /// Max bytes of one file upload: 100 MB (decimal), the Workers request body limit.
 pub const MAX_FILE_BYTES: u64 = 100_000_000;
@@ -17,6 +17,10 @@ pub const MAX_AVATAR_BYTES: u64 = 1_048_576;
 pub const MAX_ARTIFACT_FILES: usize = 500;
 pub const MAX_ARTIFACT_PATH_CHARS: usize = 255;
 pub const MAX_VERSION_NOTE_CHARS: usize = 2000;
+/// Max events a 产出 version declares.
+pub const MAX_ARTIFACT_EVENTS: usize = 20;
+/// Max UTF-8 bytes of one `artifact.event` payload as JSON.
+pub const MAX_ARTIFACT_EVENT_PAYLOAD_BYTES: usize = 16_384;
 
 fn fail(field: &'static str, message: impl Into<String>) -> Validation {
     Err(ValidationError {
@@ -202,6 +206,47 @@ pub struct ArtifactVersion {
     pub note: Option<String>,
     pub created_by: String,
     pub created_at: Millis,
+    /// 1.1: the bot run that made this version.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub run_id: Option<String>,
+    /// 1.1: events the page may send back (bot-made versions only).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub events: Option<Vec<ArtifactEventDecl>>,
+}
+
+/// An event an interactive 产出 page may send (`emitEvent`). Only declared names are accepted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactEventDecl {
+    pub name: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub label: Option<String>,
+}
+
+fn check_events(events: Option<&[ArtifactEventDecl]>) -> Validation {
+    let Some(events) = events else { return Ok(()) };
+    if events.len() > MAX_ARTIFACT_EVENTS {
+        return fail("events", format!("at most {MAX_ARTIFACT_EVENTS}"));
+    }
+    for e in events {
+        check_chars("events.name", &e.name, 1, 128)?;
+        if let Some(l) = &e.label {
+            check_chars("events.label", l, 0, 200)?;
+        }
+    }
+    Ok(())
 }
 
 /// A file of a new version: an uploaded (`ready`) file of the same group, at a path.
@@ -242,6 +287,20 @@ pub struct CreateArtifactRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub note: Option<String>,
+    /// 1.1: events the page may send; accepted from bot members only.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub events: Option<Vec<ArtifactEventDecl>>,
+    /// 1.1: the caller bot's active run that made it.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub run_id: Option<String>,
 }
 
 impl CreateArtifactRequest {
@@ -249,7 +308,11 @@ impl CreateArtifactRequest {
         check_id("groupId", &self.group_id)?;
         check_id("topicId", &self.topic_id)?;
         check_chars("title", &self.title, 1, MAX_TITLE_CHARS)?;
-        check_version_input(&self.entry, &self.files, self.note.as_deref())
+        check_version_input(&self.entry, &self.files, self.note.as_deref())?;
+        check_events(self.events.as_deref())?;
+        self.run_id
+            .as_deref()
+            .map_or(Ok(()), |r| check_id("runId", r))
     }
 }
 
@@ -272,11 +335,28 @@ pub struct AddArtifactVersionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub title: Option<String>,
+    /// 1.1: as in [`CreateArtifactRequest`].
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub events: Option<Vec<ArtifactEventDecl>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub run_id: Option<String>,
 }
 
 impl AddArtifactVersionRequest {
     pub fn validate(&self) -> Validation {
         check_version_input(&self.entry, &self.files, self.note.as_deref())?;
+        check_events(self.events.as_deref())?;
+        if let Some(r) = &self.run_id {
+            check_id("runId", r)?;
+        }
         self.title.as_deref().map_or(Ok(()), check_title)
     }
 }
@@ -300,3 +380,52 @@ pub type ArtifactsResponse = Vec<Artifact>;
 
 /// Data of `artifact.created` and `artifact.versionAdded`.
 pub type ArtifactEventData = ArtifactVersionResponse;
+
+/// `{ t: "artifact.event" }` (1.1): an interactive 产出 page sent an event. `ack.result` is omitted.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactEventFrame {
+    pub rid: String,
+    pub group_id: String,
+    pub artifact_id: String,
+    pub version: u32,
+    pub name: String,
+    #[serde(
+        default,
+        deserialize_with = "any_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub payload: Option<serde_json::Value>,
+}
+
+impl ArtifactEventFrame {
+    pub fn validate(&self) -> Validation {
+        check_id("rid", &self.rid)?;
+        check_id("groupId", &self.group_id)?;
+        check_id("artifactId", &self.artifact_id)?;
+        check_positive("version", Some(self.version))?;
+        check_chars("name", &self.name, 1, 128)?;
+        if let Some(p) = &self.payload
+            && serde_json::to_vec(p).map(|b| b.len()).unwrap_or(usize::MAX)
+                > MAX_ARTIFACT_EVENT_PAYLOAD_BYTES
+        {
+            return fail("payload", "payload exceeds 16 KiB");
+        }
+        Ok(())
+    }
+}
+
+/// Data of `artifact.evented` (1.1). The event's `actorId` is the viewer.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactEventedData {
+    pub artifact_id: String,
+    pub version: u32,
+    pub name: String,
+    #[serde(
+        default,
+        deserialize_with = "any_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub payload: Option<serde_json::Value>,
+}

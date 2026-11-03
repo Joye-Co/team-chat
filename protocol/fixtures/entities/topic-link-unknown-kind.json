@@ -1,0 +1,26 @@
+{
+  "kind": "TopicLink",
+  "valid": false,
+  "description": "the server writes only known kinds",
+  "value": {
+    "kind": "issue",
+    "repo": "Joye-Co/team-chat",
+    "number": 42,
+    "url": "https://github.com/Joye-Co/team-chat/pull/42",
+    "title": "fix: sync test",
+    "state": "open",
+    "checks": [
+      {
+        "name": "CI",
+        "conclusion": "success"
+      },
+      {
+        "name": "e2e",
+        "conclusion": "pending"
+      }
+    ],
+    "additions": 120,
+    "deletions": 30,
+    "changedFiles": 4
+  }
+}
