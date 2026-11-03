@@ -342,6 +342,23 @@ async fn shoot(
                 }
             }
         }
+        // web-embed: native content (a web page) draws on its own schedule.
+        if let Some(ready) = scenes::ready_check(scene.name) {
+            let deadline = Instant::now() + Duration::from_secs(20);
+            while !cx.update(|cx| ready(cx)) {
+                if Instant::now() > deadline {
+                    return Err("the native content was not ready within 20 s".into());
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(100))
+                    .await;
+                let _ = next_frame(handle, cx).await;
+            }
+            for _ in 0..2 {
+                let _ = next_frame(handle, cx).await;
+            }
+            cx.background_executor().timer(options.settle).await;
+        }
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;
@@ -369,6 +386,9 @@ async fn shoot(
             }
         }
         let size = capture::png_size(png).ok_or("the PNG has no size")?;
+        if let Some(verify) = scenes::verify_check(scene.name) {
+            cx.update(|cx| verify(png, cx))?;
+        }
         Ok((number, size))
     }
     .await;

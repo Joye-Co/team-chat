@@ -2,6 +2,7 @@
 //! the native 产出 window ([`window`]), and the side panel list with uploads
 //! from the app ([`panel::TopicOutputs`]).
 
+pub mod embed_preview;
 pub mod extra;
 pub mod panel;
 pub mod window;

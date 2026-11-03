@@ -489,6 +489,29 @@ pub const SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: crate::views::timeline::preview::open_compose,
     },
+    // --- web-embed: 产出 pages live inside the window (v11/web-embed) ---
+    Scene {
+        name: "web-embed",
+        about: "An HTML 产出 live inline in a 话题 and in the 产出 pane, with local video and audio",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Topic, cx),
+    },
+    Scene {
+        name: "web-embed-scrolled",
+        about: "web-embed with the 话题 scrolled: the inline page is cut off at the clip edge",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Scrolled, cx),
+    },
+    Scene {
+        name: "web-embed-covered",
+        about: "web-embed with a menu over the inline page: the page hides and its snapshot shows",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Covered, cx),
+    },
+    // --- end web-embed ---
 ];
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
@@ -526,6 +549,33 @@ const V2_SHARED: &[Scene] = &[
         open: open_main,
     },
 ];
+
+// --- web-embed: scenes that wait for native content and check their capture ---
+
+use crate::views::artifacts::embed_preview::{self, Mode as EmbedMode};
+
+/// For a scene whose window shows native content (a web page) that GPUI's frames do not
+/// cover: true once it is ready to capture.
+pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
+    match name {
+        "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
+        "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
+        "web-embed-covered" => Some(|cx| embed_preview::ready(EmbedMode::Covered, cx)),
+        _ => None,
+    }
+}
+
+/// For a scene that checks its own capture: runs after the PNG is written.
+pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+    match name {
+        "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
+        "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
+        "web-embed-covered" => Some(|png, cx| embed_preview::verify(EmbedMode::Covered, png, cx)),
+        _ => None,
+    }
+}
+
+// --- end web-embed ---
 
 pub fn find(name: &str) -> Option<&'static Scene> {
     all().into_iter().find(|s| s.name == name)
