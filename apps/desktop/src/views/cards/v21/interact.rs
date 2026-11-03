@@ -338,9 +338,28 @@ pub fn stage_of(e: &MyCardEvent, now: Millis) -> Option<Pending> {
     }
 }
 
-/// The newest of my events on the card that still waits, if any.
+/// The newest of my events on the card that still waits, if any (the band).
 pub fn pending(events: &[MyCardEvent], now: Millis) -> Option<Pending> {
     events.iter().rev().find_map(|e| stage_of(e, now))
+}
+
+/// The newest of my events on block `block` that still waits, if any (the line at the
+/// block). Another block's newer event does not hide it (INTERACT §4.4: only a newer
+/// event from the same block ends it).
+pub fn pending_at(events: &[MyCardEvent], block: &str, now: Millis) -> Option<Pending> {
+    events
+        .iter()
+        .rev()
+        .filter(|e| e.request.block_id.as_deref() == Some(block))
+        .find_map(|e| stage_of(e, now))
+}
+
+/// The next time any waiting event of the card changes its stage.
+pub fn next_stage(events: &[MyCardEvent], now: Millis) -> Option<Millis> {
+    events
+        .iter()
+        .filter_map(|e| stage_of(e, now).and_then(|p| p.next_at))
+        .min()
 }
 
 /// The note of the newest resolved event of `block`, while it shows (5 s).
@@ -454,7 +473,7 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
         });
     }
     // A redraw at the next stage.
-    if let Some(next) = pending(&events, now).and_then(|p| p.next_at) {
+    if let Some(next) = next_stage(&events, now) {
         let wait = Duration::from_millis((next - now).max(0) as u64 + 20);
         let due = std::time::Instant::now() + wait;
         let scheduled = ui.read(cx).wake_at;
@@ -536,7 +555,7 @@ pub fn decorate(
             .tree
             .parent(id)
             .is_some_and(|p| diff.is_some_and(|d| d.changed.contains_key(p)));
-    let pend = pending(&events, now).filter(|p| p.event.request.block_id.as_deref() == Some(id));
+    let pend = pending_at(&events, id, now);
     let note = resolved_note(&events, id, now);
     let mark = super::band::surface_mark(ctx, node.tree, id);
 
@@ -737,6 +756,25 @@ mod tests {
         dropped.dropped = true;
         assert!(stage_of(&dropped, 10_000).is_none(), "不等了");
         assert!(stage_of(&ev(ExpectMode::None, 0, false), 10_000).is_none());
+    }
+
+    #[test]
+    fn each_block_keeps_its_own_pending_line() {
+        // The chart waits since 0; a table sort goes at 30 s.
+        let chart = ev(ExpectMode::Live, 0, false);
+        let mut sort = ev(ExpectMode::Live, 30_000, false);
+        sort.client_event_id = "c2".into();
+        sort.request.block_id = Some("t".into());
+        sort.request.event = "table.sort".into();
+        let events = [chart, sort];
+        let now = 46_000;
+        assert_eq!(pending(&events, now).unwrap().event.client_event_id, "c2");
+        let at_chart = pending_at(&events, "bars", now).expect("the chart still waits");
+        assert_eq!(at_chart.stage, Stage::Silent, "重试 and 不等了 show at the chart");
+        assert_eq!(pending_at(&events, "t", now).unwrap().stage, Stage::Slow);
+        assert!(pending_at(&events, "other", now).is_none());
+        // The next redraw follows the table's soft-to-hard step, not only the newest event.
+        assert!(next_stage(&events, now).is_some());
     }
 
     #[test]
