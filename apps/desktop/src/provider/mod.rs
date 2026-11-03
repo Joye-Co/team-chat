@@ -152,6 +152,8 @@ struct Shared {
     // --- cards v2 track ---
     cards_v2: cards_v2::CardV2Cache,
     // --- end cards v2 track ---
+    /// 群里的决定 from the server (`provider/pages.rs`).
+    decisions: pages::DecisionsCache,
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -186,6 +188,7 @@ impl CoreProvider {
                 cards: cards::CardCache::default(),
                 panes: panes::PanesCache::default(),
                 cards_v2: cards_v2::CardV2Cache::default(),
+                decisions: pages::DecisionsCache::default(),
             }),
         });
         if provider.shared.config.restore {
