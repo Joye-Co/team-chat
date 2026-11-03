@@ -517,6 +517,134 @@ pub const SCENES: &[Scene] = &[
         open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Covered, cx),
     },
     // --- end web-embed ---
+    // --- v11/media: 产出 media previews (v11/media) ---
+    Scene {
+        name: "media-html",
+        about: "HTML 产出: live inline in a 话题 and in the 产出 pane with versions and events",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-html").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-markdown",
+        about: "Markdown 产出: native excerpt with chips, reader with a table of contents",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-images",
+        about: "Image set: grid of 4 with +n, lightbox with filmstrip",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-images").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-video",
+        about: "Video: poster, chapter ticks and frame strip; player with chapters and frames",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-video").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-audio",
+        about: "Audio: waveform player; big waveform, speakers, speeds and transcript",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-audio").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-pdf",
+        about: "PDF: page thumbnails; reader with page sidebar and zoom",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-pdf").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-code",
+        about: "Code and table inline: the pointed lines and the first rows; the whole code file",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-code").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-table",
+        about: "Table: the sortable table with a fixed header",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-table").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-states",
+        about: "Upload and preview states: uploading, generating, ready, failed, too large",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-states").expect("sample"),
+                cx,
+            )
+        },
+    },
+    // --- end v11/media ---
 ];
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
@@ -581,6 +709,11 @@ use crate::views::artifacts::embed_preview::{self, Mode as EmbedMode};
 /// For a scene whose window shows native content (a web page) that GPUI's frames do not
 /// cover: true once it is ready to capture.
 pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
+    // --- v11/media ---
+    if let Some(check) = media_ready(name) {
+        return Some(check);
+    }
+    // --- end v11/media ---
     match name {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
@@ -600,6 +733,11 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
 
 /// For a scene that checks its own capture: runs after the PNG is written.
 pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+    // --- v11/media ---
+    if let Some(check) = media_verify(name) {
+        return Some(check);
+    }
+    // --- end v11/media ---
     match name {
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
@@ -614,6 +752,85 @@ pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Resu
 }
 
 // --- end web-embed ---
+
+// --- v11/media: media scenes wait until their samples are read and pages drew ---
+
+use crate::views::media::preview::{self as media_preview, Sample as MediaSample};
+
+fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
+    match name {
+        "media-html" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-html").expect("sample"), cx)
+        }),
+        "media-markdown" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        }),
+        "media-images" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-images").expect("sample"), cx)
+        }),
+        "media-video" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-video").expect("sample"), cx)
+        }),
+        "media-audio" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-audio").expect("sample"), cx)
+        }),
+        "media-pdf" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-pdf").expect("sample"), cx)
+        }),
+        "media-code" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-code").expect("sample"), cx)
+        }),
+        "media-table" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-table").expect("sample"), cx)
+        }),
+        "media-states" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-states").expect("sample"), cx)
+        }),
+        _ => None,
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn media_verify(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+    match name {
+        "media-html" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-html").expect("sample"), cx)
+        }),
+        "media-markdown" => Some(|_, cx| {
+            media_preview::verify(
+                MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        }),
+        "media-images" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-images").expect("sample"), cx)
+        }),
+        "media-video" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-video").expect("sample"), cx)
+        }),
+        "media-audio" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-audio").expect("sample"), cx)
+        }),
+        "media-pdf" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-pdf").expect("sample"), cx)
+        }),
+        "media-code" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-code").expect("sample"), cx)
+        }),
+        "media-table" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-table").expect("sample"), cx)
+        }),
+        "media-states" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-states").expect("sample"), cx)
+        }),
+        _ => None,
+    }
+}
+
+// --- end v11/media ---
 
 pub fn find(name: &str) -> Option<&'static Scene> {
     all().into_iter().find(|s| s.name == name)
