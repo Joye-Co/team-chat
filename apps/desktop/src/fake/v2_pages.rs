@@ -379,7 +379,7 @@ fn report_html(version: u32) -> String {
         }
         _ => out.push_str(page),
     }
-    let check_start = out.find("<svg class=\"r\"");
+    let check_start = out.find("<svg class=\"r ok\"");
     if let Some(a) = check_start
         && let Some(len) = out[a..].find("</svg>")
     {
@@ -437,7 +437,7 @@ mod tests {
         assert!(!v2.contains("渠道拆分"));
         assert!(v2.contains("disabled class=\"opt"));
         assert!(!v2.contains("class=\"opt on\""));
-        assert!(!v2.contains("<svg class=\"r\""));
+        assert!(!v2.contains("<svg class=\"r ok\""));
     }
 
     #[test]

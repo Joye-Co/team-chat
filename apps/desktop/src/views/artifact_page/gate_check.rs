@@ -147,6 +147,10 @@ var r=b.getBoundingClientRect();return JSON.stringify({x:r.left+r.width/2,y:r.to
 vw:window.innerWidth,vh:window.innerHeight});})()";
 const PICKED: &str = "(function(){var b=document.querySelector('#opts .opt.on');\
 return b?b.getAttribute('data-id'):'';})()";
+/// Where the ✓ sits, how many there are, and the footer: `c 1 你选了「抖音」· 10:21 ...`.
+const MARKED: &str = "(function(){var m=document.querySelectorAll('#opts .ok');\
+var o=m.length?m[0].closest('.opt'):null;return (o?o.getAttribute('data-id'):'-')+' '+m.length+' '+\
+document.getElementById('sent').textContent;})()";
 
 async fn check_choose(cx: &mut AsyncApp) -> Result<(), String> {
     let page = wait_for(cx, Duration::from_secs(15), |cx| page(d::ART_REPORT, cx))
@@ -201,7 +205,13 @@ async fn check_choose(cx: &mut AsyncApp) -> Result<(), String> {
                 && name == "choose"
                 && payload["option"] == "c" =>
         {
-            Ok(())
+            // One choice: the ✓ moved to 抖音, at the sample's 10:21.
+            let marked = eval(cx, &page, MARKED).await.unwrap_or_default();
+            if marked.starts_with("c 1 ") && marked.contains("「抖音」· 10:21") {
+                Ok(())
+            } else {
+                Err(format!("the page did not show the new choice: {marked:?}"))
+            }
         }
         other => Err(format!(
             "expected one choose event for option c, got {other:?}"
