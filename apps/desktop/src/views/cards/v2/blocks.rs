@@ -1554,9 +1554,9 @@ fn plan(
                 }),
                 _ => None,
             };
-            let bar = (current)
-                .then(|| progress.as_ref())
-                .flatten()
+            let bar = progress
+                .as_ref()
+                .filter(|_| current)
                 .map(|(v, l)| progress_bar(*v, None, segments(l.as_deref()), cx));
             let row = small(div())
                 .flex()

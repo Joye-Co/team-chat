@@ -147,6 +147,30 @@ pub fn has_card(provider: &Arc<dyn ChatProvider>, group_id: &str, message_id: &s
     !message_id.is_empty() && provider.card_v2(group_id, message_id).is_some()
 }
 
+/// Draws the card of `message` wherever it shows: its v2 card, or else its
+/// v1 card unchanged (1.0 bots). `None` when the message has no card.
+pub fn render_message(
+    env: &CardEnv,
+    message: &crate::data::Message,
+    mode: CardMode,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    if has_card(&env.provider, &message.group_id, &message.id) {
+        return render(env, &message.group_id, &message.id, mode, window, cx);
+    }
+    let v1 = env.provider.card(&message.group_id, &message.id)?;
+    let members = env.provider.members();
+    let me = env.me();
+    let ctx = crate::views::timeline::extras::ExtrasContext {
+        provider: &env.provider,
+        members: &members,
+        window_messages: &[],
+        me: me.as_deref(),
+    };
+    Some(super::render_card(&v1, message, &ctx, window, cx))
+}
+
 /// Draws the v2 card of a message, or `None` when it has none.
 pub fn render(
     env: &CardEnv,
@@ -1141,11 +1165,7 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
             div()
                 .pt(space::S14)
                 .px(space::S16)
-                .pb(if footer.is_some() {
-                    space::S16
-                } else {
-                    space::S16
-                })
+                .pb(space::S16)
                 .flex()
                 .flex_col()
                 .min_w(px(0.))

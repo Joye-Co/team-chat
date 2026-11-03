@@ -71,6 +71,9 @@ pub(crate) fn matches(typed: &str, expected: Option<&str>) -> bool {
     expected.is_none_or(|e| typed.trim() == e)
 }
 
+/// A sheet button handler.
+pub(crate) type Handler = Box<dyn Fn(&mut Window, &mut App)>;
+
 /// The sheet's content: the title, the body, the field (as `field`) and
 /// the footer. The gallery draws it inline with a static field.
 pub(crate) fn sheet(
@@ -78,8 +81,8 @@ pub(crate) fn sheet(
     field: Option<AnyElement>,
     ready: bool,
     id: &str,
-    on_cancel: Option<Box<dyn Fn(&mut Window, &mut App)>>,
-    on_ok: Option<Box<dyn Fn(&mut Window, &mut App)>>,
+    on_cancel: Option<Handler>,
+    on_ok: Option<Handler>,
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);

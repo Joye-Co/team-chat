@@ -164,6 +164,7 @@ fn column(items: Vec<Option<Item>>, cx: &App) -> AnyElement {
 }
 
 impl CardsGallery {
+    #[allow(clippy::too_many_arguments)]
     fn card(
         &self,
         id: &str,
