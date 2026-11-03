@@ -280,7 +280,7 @@ fn on_event(
             tracing::warn!(artifact_id, version, %reason, "产出 page failed to load");
             notify_error(ca::LOAD_FAILED.to_string(), cx);
         }
-        E::Loaded { .. } | E::Emit { .. } => {}
+        E::Loaded { .. } | E::Emit { .. } | E::FocusChanged { .. } => {}
     }
 }
 

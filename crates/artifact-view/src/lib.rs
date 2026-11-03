@@ -8,23 +8,33 @@
 //!   (`window.artifact.getData()` / `window.artifact.emitEvent(name, payload)`), checked
 //!   against the window's [`Capabilities`].
 //!
+//! The same page can also live inside a host window ([`EmbeddedArtifact`]): a child view
+//! of the host's content view that the host places from its own layout every frame
+//! ([`embed`]). It has the same isolation as the window.
+//!
 //! All window functions run on the main thread inside an app that already runs
 //! `NSApplication`.
 
 pub mod bridge;
+pub mod embed;
 pub mod resolve;
 
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod mac_embed;
 
 use std::path::PathBuf;
 
 pub use bridge::Capabilities;
+pub use embed::{EmbedOptions, Placement, Rect};
 pub use resolve::{Content, origin_host};
 use serde_json::Value;
 
 #[cfg(target_os = "macos")]
 pub use mac::{ArtifactWindow, open_external_url};
+#[cfg(target_os = "macos")]
+pub use mac_embed::{EmbeddedArtifact, view_from_ptr};
 
 /// One version of a 产出 to show.
 #[derive(Clone, Debug)]
@@ -133,7 +143,10 @@ pub enum ArtifactEvent {
     /// The user picked a version in the title-bar picker. The host loads that version and
     /// calls `show_version`.
     VersionSelected { version: u32 },
-    /// The window closed (by the user or by `close`).
+    /// An embedded page got (`true`) or lost (`false`) keyboard focus. Only
+    /// [`EmbeddedArtifact`] sends it.
+    FocusChanged { focused: bool },
+    /// The window closed (by the user or by `close`), or the embedded view was removed.
     Closed,
 }
 
@@ -147,6 +160,8 @@ pub enum Error {
     FolderMissing(PathBuf),
     /// The window was closed.
     Closed,
+    /// The host view to embed in has no superview (it is not in a window).
+    NoHostView,
 }
 
 impl std::fmt::Display for Error {
@@ -156,6 +171,7 @@ impl std::fmt::Display for Error {
             Error::InvalidEntry => write!(f, "invalid entry path"),
             Error::FolderMissing(p) => write!(f, "artifact folder missing: {}", p.display()),
             Error::Closed => write!(f, "artifact window closed"),
+            Error::NoHostView => write!(f, "host view is not in a window"),
         }
     }
 }

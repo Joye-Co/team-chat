@@ -387,7 +387,7 @@ mod demo {
                     let _ = std::fs::remove_dir_all(&dir);
                     std::process::exit(if ok { 0 } else { 1 });
                 }
-                ArtifactEvent::VersionSelected { .. } => {}
+                ArtifactEvent::VersionSelected { .. } | ArtifactEvent::FocusChanged { .. } => {}
             }
         })
         .expect("open window");

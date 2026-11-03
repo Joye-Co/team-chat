@@ -22,7 +22,8 @@ use objc2_web_kit::{
     WKContentRuleList, WKContentRuleListStore, WKNavigation, WKNavigationAction,
     WKNavigationActionPolicy, WKNavigationDelegate, WKNavigationType, WKScriptMessage,
     WKScriptMessageHandler, WKUIDelegate, WKURLSchemeHandler, WKURLSchemeTask,
-    WKUserContentController, WKUserScript, WKUserScriptInjectionTime, WKWebView,
+    WKAudiovisualMediaTypes, WKUserContentController, WKUserScript, WKUserScriptInjectionTime,
+    WKWebView,
     WKWebViewConfiguration, WKWebsiteDataStore, WKWindowFeatures,
 };
 use serde_json::Value;
@@ -51,20 +52,20 @@ macro_rules! disable_private_pref {
 
 const EXTERNAL_LINK_INTERVAL: Duration = Duration::from_millis(800);
 
-struct State {
-    artifact_id: String,
-    host: String,
-    version: u32,
-    content: Content,
-    entry: String,
-    data: Value,
-    caps: Capabilities,
-    closed: bool,
-    rules_ready: bool,
-    last_external: Option<Instant>,
+pub(crate) struct State {
+    pub(crate) artifact_id: String,
+    pub(crate) host: String,
+    pub(crate) version: u32,
+    pub(crate) content: Content,
+    pub(crate) entry: String,
+    pub(crate) data: Value,
+    pub(crate) caps: Capabilities,
+    pub(crate) closed: bool,
+    pub(crate) rules_ready: bool,
+    pub(crate) last_external: Option<Instant>,
 }
 
-pub struct Ivars {
+pub(crate) struct Ivars {
     state: Rc<RefCell<State>>,
     cb: Rc<dyn Fn(ArtifactEvent)>,
     webview: RefCell<Option<Weak<WKWebView>>>,
@@ -85,7 +86,7 @@ define_class!(
     #[thread_kind = MainThreadOnly]
     #[name = "TeamChatArtifactViewController"]
     #[ivars = Ivars]
-    pub struct Controller;
+    pub(crate) struct Controller;
 
     unsafe impl NSObjectProtocol for Controller {}
 
@@ -182,7 +183,7 @@ define_class!(
 );
 
 impl Controller {
-    fn new(
+    pub(crate) fn new(
         mtm: MainThreadMarker,
         state: Rc<RefCell<State>>,
         cb: Rc<dyn Fn(ArtifactEvent)>,
@@ -201,7 +202,7 @@ impl Controller {
 
     /// Delivers an event on a later main-queue turn so host code never runs inside a WebKit
     /// or AppKit delegate call.
-    fn emit(&self, event: ArtifactEvent) {
+    pub(crate) fn emit(&self, event: ArtifactEvent) {
         let job = MainOnly((self.ivars().cb.clone(), event));
         DispatchQueue::main().exec_async(move || {
             let job = job;
@@ -235,12 +236,22 @@ impl Controller {
             .HTTPMethod()
             .map(|s| s.to_string())
             .unwrap_or_else(|| "GET".into());
+        let range = request
+            .valueForHTTPHeaderField(&NSString::from_str("Range"))
+            .map(|s| s.to_string());
         let response = {
             let st = self.ivars().state.borrow();
             if st.closed {
                 resolve::serve(&Content::memory([]), &st.host, &st.entry, &method, "")
             } else {
-                resolve::serve(&st.content, &st.host, &st.entry, &method, &url_string)
+                resolve::serve_range(
+                    &st.content,
+                    &st.host,
+                    &st.entry,
+                    &method,
+                    &url_string,
+                    range.as_deref(),
+                )
             }
         };
         let keys: Vec<Retained<NSString>> = response
@@ -352,7 +363,7 @@ impl Controller {
         WKNavigationActionPolicy::Cancel
     }
 
-    fn load_current(&self, web_view: &WKWebView) {
+    pub(crate) fn load_current(&self, web_view: &WKWebView) {
         let url = {
             let st = self.ivars().state.borrow();
             if st.closed || !st.rules_ready {
@@ -367,7 +378,7 @@ impl Controller {
     }
 
     /// Breaks the retain cycles and stops the page. Runs once.
-    fn teardown(&self) {
+    pub(crate) fn teardown(&self) {
         {
             let mut st = self.ivars().state.borrow_mut();
             if st.closed {
@@ -398,6 +409,16 @@ impl Controller {
         }
         if let Some(window) = self.ivars().window.borrow().as_ref().and_then(|w| w.load()) {
             window.setDelegate(None);
+        }
+        if let Some(web_view) = self
+            .ivars()
+            .webview
+            .borrow()
+            .as_ref()
+            .and_then(|w| w.load())
+        {
+            // Stops <video> and <audio> that keep playing in a detached view.
+            unsafe { web_view.loadHTMLString_baseURL(&NSString::from_str(""), None) };
         }
         self.emit(ArtifactEvent::Closed);
     }
@@ -437,6 +458,152 @@ fn with_rule_list(
     }
 }
 
+/// Validates the version and builds the shared page state.
+pub(crate) fn new_state(
+    artifact_id: String,
+    version: VersionSpec,
+    caps: Capabilities,
+) -> Result<Rc<RefCell<State>>, Error> {
+    let host = resolve::origin_host(&artifact_id, version.version)?;
+    if !resolve::validate_rel(&version.entry) {
+        return Err(Error::InvalidEntry);
+    }
+    let content = version.content.prepared()?;
+    Ok(Rc::new(RefCell::new(State {
+        artifact_id,
+        host,
+        version: version.version,
+        content,
+        entry: version.entry,
+        data: version.data,
+        caps,
+        closed: false,
+        rules_ready: false,
+        last_external: None,
+    })))
+}
+
+pub(crate) struct Config {
+    pub(crate) config: Retained<WKWebViewConfiguration>,
+    pub(crate) ucc: Retained<WKUserContentController>,
+}
+
+/// The isolated configuration every 产出 web view uses (window or embedded): a
+/// non-persistent data store, the `artifact:` scheme handler, the bridge script and
+/// handler, no WebRTC, no DNS prefetch, no media devices, no element fullscreen.
+pub(crate) fn configure(mtm: MainThreadMarker, controller: &Controller, autoplay: bool) -> Config {
+    let config = unsafe { WKWebViewConfiguration::new(mtm) };
+    let ucc = unsafe { WKUserContentController::new(mtm) };
+    unsafe {
+        config.setWebsiteDataStore(&WKWebsiteDataStore::nonPersistentDataStore(mtm));
+        config.setURLSchemeHandler_forURLScheme(
+            Some(ProtocolObject::from_ref(controller)),
+            &NSString::from_str(SCHEME),
+        );
+        let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
+            WKUserScript::alloc(mtm),
+            &NSString::from_str(bridge::PAGE_SCRIPT),
+            WKUserScriptInjectionTime::AtDocumentStart,
+            true,
+        );
+        ucc.addUserScript(&script);
+        ucc.addScriptMessageHandler_name(
+            ProtocolObject::from_ref(controller),
+            &NSString::from_str("bridge"),
+        );
+        // WebRTC (STUN/TURN) and DNS prefetch go around the CSP and the
+        // content rule list, so a page could reach the network or learn the
+        // viewer's IP. Remove the APIs in every frame as well.
+        let no_rtc = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
+            WKUserScript::alloc(mtm),
+            &NSString::from_str(NO_NETWORK_SCRIPT),
+            WKUserScriptInjectionTime::AtDocumentStart,
+            false,
+        );
+        ucc.addUserScript(&no_rtc);
+        config.setUserContentController(&ucc);
+        // Local media plays inline; it starts only on a click unless the host allows
+        // autoplay. AirPlay would hand the media URL to another device.
+        config.setAllowsAirPlayForMediaPlayback(false);
+        config.setMediaTypesRequiringUserActionForPlayback(if autoplay {
+            WKAudiovisualMediaTypes::None
+        } else {
+            WKAudiovisualMediaTypes::All
+        });
+        let prefs = config.preferences();
+        prefs.setJavaScriptCanOpenWindowsAutomatically(false);
+        prefs.setElementFullscreenEnabled(false);
+        disable_private_pref!(&prefs, _setPeerConnectionEnabled);
+        disable_private_pref!(&prefs, _setDNSPrefetchingEnabled);
+        disable_private_pref!(&prefs, _setMediaDevicesEnabled);
+        config.setSuppressesIncrementalRendering(false);
+    }
+    Config { config, ucc }
+}
+
+/// Sets the delegates and the view switches shared by every 产出 web view.
+pub(crate) fn wire(web_view: &WKWebView, controller: &Controller, inspectable: bool) {
+    unsafe {
+        web_view.setNavigationDelegate(Some(ProtocolObject::from_ref(controller)));
+        web_view.setUIDelegate(Some(ProtocolObject::from_ref(controller)));
+        web_view.setAllowsLinkPreview(false);
+        web_view.setAllowsBackForwardNavigationGestures(false);
+        web_view.setAllowsMagnification(false);
+        web_view.setInspectable(inspectable);
+    }
+    *controller.ivars().webview.borrow_mut() = Some(Weak::new(web_view));
+}
+
+/// Installs the network-blocking rule list, then loads the page. If the list cannot be
+/// compiled, the page never loads and a `LoadFailed` event is sent.
+pub(crate) fn start_loading(
+    mtm: MainThreadMarker,
+    controller: &Retained<Controller>,
+    web_view: &Retained<WKWebView>,
+    ucc: &Retained<WKUserContentController>,
+) {
+    *controller.ivars().ucc.borrow_mut() = Some(Weak::from_retained(ucc));
+    let ctl = controller.clone();
+    let wv = web_view.clone();
+    let ucc_for_rules = ucc.clone();
+    with_rule_list(mtm, move |list| match list {
+        Some(list) => {
+            unsafe { ucc_for_rules.addContentRuleList(&list) };
+            ctl.ivars().state.borrow_mut().rules_ready = true;
+            ctl.load_current(&wv);
+        }
+        None => {
+            let version = ctl.ivars().state.borrow().version;
+            ctl.emit(ArtifactEvent::LoadFailed {
+                version,
+                reason: "content rule list".into(),
+            });
+        }
+    });
+}
+
+/// Loads another version (new origin, content and data) into an existing page state.
+pub(crate) fn switch_version(state: &RefCell<State>, spec: VersionSpec) -> Result<(), Error> {
+    let host = {
+        let st = state.borrow();
+        if st.closed {
+            return Err(Error::Closed);
+        }
+        resolve::origin_host(&st.artifact_id, spec.version)?
+    };
+    if !resolve::validate_rel(&spec.entry) {
+        return Err(Error::InvalidEntry);
+    }
+    let content = spec.content.prepared()?;
+    let mut st = state.borrow_mut();
+    st.host = host;
+    st.version = spec.version;
+    st.content = content;
+    st.entry = spec.entry;
+    st.data = spec.data;
+    Ok(())
+}
+
 /// A window that shows one 产出. Main thread only. Dropping it closes the window.
 pub struct ArtifactWindow {
     window: Retained<NSWindow>,
@@ -466,63 +633,9 @@ impl ArtifactWindow {
             presentation,
             inspectable,
         } = options;
-        let host = resolve::origin_host(&artifact_id, version.version)?;
-        if !resolve::validate_rel(&version.entry) {
-            return Err(Error::InvalidEntry);
-        }
-        let content = version.content.prepared()?;
-        let state = Rc::new(RefCell::new(State {
-            artifact_id,
-            host,
-            version: version.version,
-            content,
-            entry: version.entry,
-            data: version.data,
-            caps: capabilities,
-            closed: false,
-            rules_ready: false,
-            last_external: None,
-        }));
+        let state = new_state(artifact_id, version, capabilities)?;
         let controller = Controller::new(mtm, state.clone(), Rc::new(on_event));
-
-        let config = unsafe { WKWebViewConfiguration::new(mtm) };
-        let ucc = unsafe { WKUserContentController::new(mtm) };
-        unsafe {
-            config.setWebsiteDataStore(&WKWebsiteDataStore::nonPersistentDataStore(mtm));
-            config.setURLSchemeHandler_forURLScheme(
-                Some(ProtocolObject::from_ref(&*controller)),
-                &NSString::from_str(SCHEME),
-            );
-            let script = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
-                WKUserScript::alloc(mtm),
-                &NSString::from_str(bridge::PAGE_SCRIPT),
-                WKUserScriptInjectionTime::AtDocumentStart,
-                true,
-            );
-            ucc.addUserScript(&script);
-            ucc.addScriptMessageHandler_name(
-                ProtocolObject::from_ref(&*controller),
-                &NSString::from_str("bridge"),
-            );
-            // WebRTC (STUN/TURN) and DNS prefetch go around the CSP and the
-            // content rule list, so a page could reach the network or learn the
-            // viewer's IP. Remove the APIs in every frame as well.
-            let no_rtc = WKUserScript::initWithSource_injectionTime_forMainFrameOnly(
-                WKUserScript::alloc(mtm),
-                &NSString::from_str(NO_NETWORK_SCRIPT),
-                WKUserScriptInjectionTime::AtDocumentStart,
-                false,
-            );
-            ucc.addUserScript(&no_rtc);
-            config.setUserContentController(&ucc);
-            let prefs = config.preferences();
-            prefs.setJavaScriptCanOpenWindowsAutomatically(false);
-            disable_private_pref!(&prefs, _setPeerConnectionEnabled);
-            disable_private_pref!(&prefs, _setDNSPrefetchingEnabled);
-            disable_private_pref!(&prefs, _setMediaDevicesEnabled);
-            config.setSuppressesIncrementalRendering(false);
-        }
-
+        let config = configure(mtm, &controller, false);
         let frame = NSRect::new(
             NSPoint::new(0.0, 0.0),
             NSSize::new(width.max(320.0), height.max(240.0)),
@@ -546,21 +659,14 @@ impl ArtifactWindow {
         window.center();
 
         let web_view = unsafe {
-            WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config)
+            WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config.config)
         };
-        unsafe {
-            web_view.setNavigationDelegate(Some(ProtocolObject::from_ref(&*controller)));
-            web_view.setUIDelegate(Some(ProtocolObject::from_ref(&*controller)));
-            web_view.setAllowsLinkPreview(false);
-            web_view.setAllowsBackForwardNavigationGestures(false);
-            web_view.setInspectable(inspectable);
-        }
+        wire(&web_view, &controller, inspectable);
+        let ucc = config.ucc;
         window.setContentView(Some(&web_view));
         window.setDelegate(Some(ProtocolObject::from_ref(&*controller)));
 
-        *controller.ivars().webview.borrow_mut() = Some(Weak::from_retained(&web_view));
         *controller.ivars().window.borrow_mut() = Some(Weak::from_retained(&window));
-        *controller.ivars().ucc.borrow_mut() = Some(Weak::from_retained(&ucc));
 
         let this = Self {
             window,
@@ -571,23 +677,7 @@ impl ArtifactWindow {
         };
         this.set_versions(&versions);
 
-        let ctl = this.controller.clone();
-        let wv = this.web_view.clone();
-        let ucc_for_rules = ucc.clone();
-        with_rule_list(mtm, move |list| match list {
-            Some(list) => {
-                unsafe { ucc_for_rules.addContentRuleList(&list) };
-                ctl.ivars().state.borrow_mut().rules_ready = true;
-                ctl.load_current(&wv);
-            }
-            None => {
-                let version = ctl.ivars().state.borrow().version;
-                ctl.emit(ArtifactEvent::LoadFailed {
-                    version,
-                    reason: "content rule list".into(),
-                });
-            }
-        });
+        start_loading(mtm, &this.controller, &this.web_view, &ucc);
 
         if presentation == Presentation::Front {
             this.window.makeKeyAndOrderFront(None);
@@ -597,27 +687,10 @@ impl ArtifactWindow {
 
     /// Shows another version (new origin, content and data) in the same window.
     pub fn show_version(&self, spec: VersionSpec) -> Result<(), Error> {
-        if self.is_closed() {
-            return Err(Error::Closed);
-        }
-        let host = {
-            let st = self.state.borrow();
-            resolve::origin_host(&st.artifact_id, spec.version)?
-        };
-        if !resolve::validate_rel(&spec.entry) {
-            return Err(Error::InvalidEntry);
-        }
-        let content = spec.content.prepared()?;
-        {
-            let mut st = self.state.borrow_mut();
-            st.host = host;
-            st.version = spec.version;
-            st.content = content;
-            st.entry = spec.entry;
-            st.data = spec.data;
-        }
+        let version = spec.version;
+        switch_version(&self.state, spec)?;
         if let Some(popup) = self.popup.borrow().as_ref() {
-            popup.selectItemWithTag(spec.version as isize);
+            popup.selectItemWithTag(version as isize);
         }
         self.controller.load_current(&self.web_view);
         Ok(())
