@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>产出</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+.tc{--c-jojo:#F3E6BF;--c-watch:#D8ECEF;--c-taro:#EFDDEB;--c-forge:#F6E1D3;--c-tata:#DCE5F7;--c-ledger:#F4DDE3;--c-pocket:#E4E2F4;--c-scout:#DCEFE2;--tile-ink:#2D3272;--ph-1:#D9D3C7;--ph-2:#C9D5D3;--ph-3:#E2D2C4;--bg:#FFFFFF;--rail:#F7F7F8;--sunken:#F3F3F4;--raised:#FAFAFA;--ink:#111113;--ink-2:#52525B;--ink-3:#6E6E76;--line:#EBEBED;--line-2:#DCDCE0;--hover:#F0F0F2;--sel:#E9E9EC;--btn:#111113;--btn-ink:#FFFFFF;--you:#E8590C;--you-ink:#B54708;--you-bg:#FFF4EC;--live:#3B6EF5;--live-ink:#2453D1;--ok:#1F9D55;--ok-ink:#177245;--bad:#E5484D;--bad-ink:#C42B30;--person:#E6E6E9;--pop:0 18px 48px rgba(17,17,19,.16),0 2px 8px rgba(17,17,19,.06)}
+.tc.dark{--c-jojo:#CFC39E;--c-watch:#B4C6C9;--c-taro:#CAB9C6;--c-forge:#D0BDB0;--c-tata:#B8C1D2;--c-ledger:#CDB9BE;--c-pocket:#C0BED0;--c-scout:#B7C9BC;--tile-ink:#232858;--ph-1:#4A463F;--ph-2:#3D4645;--ph-3:#4E463F;--bg:#111113;--rail:#161618;--sunken:#1C1C1F;--raised:#151517;--ink:#F1F1F3;--ink-2:#A9A9B2;--ink-3:#8C8C95;--line:#252529;--line-2:#34343A;--hover:#1D1D20;--sel:#26262A;--btn:#F1F1F3;--btn-ink:#111113;--you:#F27A2E;--you-ink:#F7A26A;--you-bg:#2B1C12;--live:#6B93F7;--live-ink:#93B1FA;--ok:#3CC27A;--ok-ink:#6AD69C;--bad:#F2555A;--bad-ink:#FF8A8E;--person:#2C2C31;--pop:0 18px 48px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06)}
+.tc *{box-sizing:border-box}
+.tc button{font:inherit;color:inherit;cursor:pointer;margin:0}
+.tc a{color:inherit;text-decoration:none}
+.tc .vh{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.tc .row:hover{background:var(--hover)}
+.tc .mono{font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace;font-variant-numeric:tabular-nums;letter-spacing:0}
+@keyframes tc-breathe{0%,100%{opacity:.8}50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.tc *{animation:none!important}}
+@media (max-width:760px){.tc-shell{height:auto!important;overflow:visible!important}.tc-pane{height:auto!important;overflow:visible!important}}
+.tc{--lift:0 1px 2px rgba(17,17,19,.05);--btn-hi:inset 0 1px 0 rgba(255,255,255,.16);--sec-hi:0 1px 1px rgba(17,17,19,.05);--tile-edge:inset 0 0 0 1px rgba(17,17,19,.07);--screen:#16161A;--screen-ink:#C9C9D1;--screen-dim:#7A7A84}
+.tc.dark{--lift:none;--btn-hi:inset 0 -1px 0 rgba(0,0,0,.14);--sec-hi:none;--tile-edge:inset 0 0 0 1px rgba(0,0,0,.2);--screen:#0B0B0D;--screen-ink:#C9C9D1;--screen-dim:#6E6E78}
+@keyframes tc-rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@keyframes tc-draw{from{stroke-dashoffset:24}to{stroke-dashoffset:0}}
+@keyframes tc-scroll{from{transform:translateY(0)}to{transform:translateY(-50%)}}
+@keyframes tc-blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+.tc .rise{animation:tc-rise .36s cubic-bezier(.23,1,.32,1) both}
+.tc .btn-p:hover{opacity:.9}
+.tc .btn-s:hover{background:var(--hover)}
+.tc .opt:hover{border-color:var(--ink-3)}
+@keyframes tc-line{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+@keyframes tc-fade{from{opacity:0}to{opacity:1}}
+@keyframes tc-grow-w{from{width:0}}
+@keyframes tc-grow-h{from{height:0}}
+.tc .ib-on{background:var(--sel);color:var(--ink)}
+.tc .ver{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;column-gap:10px;width:100%;height:36px;padding:0 8px;border:0;border-radius:8px;background:transparent;font-size:13px;line-height:20px;text-align:left;color:var(--ink-2)}
+.tc .ver:hover{background:var(--hover)}
+.tc .ver.on{background:var(--sel);color:var(--ink)}
+.tc .ver.on .ver-k{color:var(--ink);font-weight:600}
+@media (max-width:760px){.art-col{padding:0 16px 24px!important}.art-head{flex-wrap:wrap;height:auto!important;padding:12px 0;row-gap:8px}.art-tools{margin-left:0!important}.art-frame{overflow:visible!important;flex:none!important}.art-page{padding:24px 20px 28px!important}.art-kpi{grid-template-columns:minmax(0,1fr)!important}.art-kpi>div{padding:12px 0!important;border-left:0!important;border-top:1px solid var(--line)}.art-kpi>div:first-child{border-top:0}.art-rail{border-left:0!important;border-top:1px solid var(--line)}.art-opts{grid-template-columns:minmax(0,1fr)!important}}
+</style>
+</helmet>
+<div class="{{themeClass}}" style="font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', sans-serif; font-size: 14px; line-height: 22px; color: var(--ink); background: var(--bg); -webkit-font-smoothing: antialiased">
+<div class="tc-shell" style="display: flex; flex-wrap: wrap; height: 100vh; overflow: hidden">
+
+<nav aria-label="导航" class="tc-pane" style="flex: 1 1 260px; min-width: 0; height: 100%; overflow: hidden; background: var(--rail); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 0 10px 10px">
+<div style="height: 52px; display: flex; align-items: center; gap: 8px; padding-left: 10px; flex: none">
+<span aria-hidden="true" style="width: 12px; height: 12px; border-radius: 6px; background: #FF5F57"></span>
+<span aria-hidden="true" style="width: 12px; height: 12px; border-radius: 6px; background: #FEBC2E"></span>
+<span aria-hidden="true" style="width: 12px; height: 12px; border-radius: 6px; background: #28C840"></span>
+<a href="Ask.dc.html" aria-label="新话题" title="新话题 ⌘N" class="row" style="margin-left: auto; width: 28px; height: 28px; border-radius: 7px; color: var(--ink-2); display: flex; align-items: center; justify-content: center">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6"></path><path d="M17.5 3.5a1.4 1.4 0 0 1 2 2L12 13l-2.7.7.7-2.7z"></path></svg>
+</a>
+</div>
+<a href="Ask.dc.html" style="flex: none; display: flex; align-items: center; gap: 8px; height: 34px; padding: 0 8px 0 10px; border-radius: 9px; background: var(--bg); border: 1px solid var(--line); box-shadow: var(--sec-hi); color: var(--ink-3); font-size: 13px">
+<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7.5"></circle><path d="m20.5 20.5-4.2-4.2"></path></svg>
+<span>搜索或交代</span>
+<span class="mono" style="margin-left: auto; font-size: 11px; line-height: 18px; color: var(--ink-3); padding: 0 5px; border-radius: 5px; background: var(--sunken)">⌘K</span>
+</a>
+
+<div style="flex: none; display: flex; flex-direction: column; gap: 1px; margin-top: 10px">
+<a href="Main.dc.html" class="row" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 8px; color: var(--ink-2); font-size: 13px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"></path></svg>
+<span>首页</span>
+<span class="mono" style="margin-left: auto; font-size: 12px; color: var(--you-ink)">4</span>
+</a>
+<a href="Artifact.dc.html" aria-current="page" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 8px; background: var(--sel); color: var(--ink); font-size: 13px; font-weight: 500">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 3 9 4.5-9 4.5-9-4.5z"></path><path d="m3 12 9 4.5 9-4.5"></path><path d="m3 16.5 9 4.5 9-4.5"></path></svg>
+<span>产出</span>
+</a>
+<a href="Members.dc.html" class="row" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 10px; border-radius: 8px; color: var(--ink-2); font-size: 13px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="8" r="3.5"></circle><path d="M2.5 20a6.5 6.5 0 0 1 13 0"></path><path d="M16 4.6a3.5 3.5 0 0 1 0 6.8"></path><path d="M18.5 14.2A6.5 6.5 0 0 1 21.5 20"></path></svg>
+<span>成员</span>
+</a>
+</div>
+
+<div style="flex: none; display: flex; align-items: center; height: 28px; padding: 0 6px 0 10px; margin-top: 16px">
+<span style="font-size: 12px; font-weight: 500; color: var(--ink-3)">话题</span>
+<button type="button" class="row" style="margin-left: auto; display: flex; align-items: center; gap: 2px; height: 22px; padding: 0 4px 0 6px; border: 0; border-radius: 6px; background: transparent; color: var(--ink-3); font-size: 12px">我参与的<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+
+<div style="flex: 1 1 auto; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; flex-direction: column; gap: 1px">
+<a href="Group.dc.html" class="row" style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 7px; color: var(--ink-3); font-size: 12px; font-weight: 500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>开发</a>
+<a href="Topic.dc.html" class="row" aria-label="断线重连后消息重复，需要你" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center"><span style="width: 7px; height: 7px; border-radius: 4px; background: var(--you)"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">断线重连后消息重复</span>
+</a>
+<a href="Live.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="position: relative; flex: none; width: 16px; height: 16px; border-radius: 5px; background: var(--c-forge); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/0d73f86febc69cb3df4e4a460f8d77dd" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--live); border-radius: 8px; animation: tc-breathe 2.4s ease-in-out infinite"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">话题列表虚拟滚动</span>
+<span class="mono" style="flex: none; font-size: 12px; color: var(--ink-3)">3/5</span>
+</a>
+<a href="Topic.dc.html" class="row" aria-label="登录页支持邀请码，需要你" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center"><span style="width: 7px; height: 7px; border-radius: 4px; background: var(--you)"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">登录页支持邀请码</span>
+</a>
+<a href="Group.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center"><span style="width: 7px; height: 7px; border-radius: 4px; border: 1.5px solid var(--ink-3)"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2)">搜索支持中文两字词</span>
+<span style="flex: none; font-size: 12px; color: var(--ink-3)">等小王</span>
+</a>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 1px">
+<a href="Group.dc.html" class="row" style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 7px; color: var(--ink-3); font-size: 12px; font-weight: 500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>运维</a>
+<a href="Topic.dc.html" class="row" aria-label="qqbot v2.14 上线，需要你" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center"><span style="width: 7px; height: 7px; border-radius: 4px; background: var(--you)"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">qqbot v2.14 上线</span>
+</a>
+<a href="Topic.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center; color: var(--ok)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2)">staging 每日巡检</span>
+<span class="mono" style="flex: none; font-size: 12px; color: var(--ink-3)">09:12</span>
+</a>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 1px">
+<a href="Group.dc.html" class="row" style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 7px; color: var(--ink-3); font-size: 12px; font-weight: 500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>夹夹增长</a>
+<a href="Topic.dc.html" class="row" aria-label="夹夹 3.0 宣传，需要你" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center"><span style="width: 7px; height: 7px; border-radius: 4px; background: var(--you)"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">夹夹 3.0 宣传</span>
+</a>
+<a href="Artifact.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center; color: var(--ok)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2)">10 月数据月报</span>
+<span class="mono" style="flex: none; font-size: 12px; color: var(--ink-3)">09:40</span>
+</a>
+<a href="Topic.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="position: relative; flex: none; width: 16px; height: 16px; border-radius: 5px; background: var(--c-tata); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/0ceac729c46e75ee0375f3e8178113ff" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--live); border-radius: 8px; animation: tc-breathe 2.4s ease-in-out infinite"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">夹夹 4.0 需求</span>
+<span class="mono" style="flex: none; font-size: 12px; color: var(--ink-3)">2/4</span>
+</a>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 1px">
+<a href="Group.dc.html" class="row" style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; border-radius: 7px; color: var(--ink-3); font-size: 12px; font-weight: 500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>全员</a>
+<a href="Topic.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="position: relative; flex: none; width: 16px; height: 16px; border-radius: 5px; background: var(--c-jojo); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/125e75bf519a96c852d0f3ec02a46bf4" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--live); border-radius: 8px; animation: tc-breathe 2.4s ease-in-out infinite"></span></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">本周周报</span>
+<span class="mono" style="flex: none; font-size: 12px; color: var(--ink-3)">1/3</span>
+</a>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 1px">
+<span style="display: flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px 0 8px; color: var(--ink-3); font-size: 12px; font-weight: 500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg>私聊</span>
+<a href="Members.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; height: 16px; border-radius: 5px; background: var(--c-jojo); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/125e75bf519a96c852d0f3ec02a46bf4" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"></span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2)">Jojo</span>
+</a>
+<a href="Members.dc.html" class="row" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px; border-radius: 8px; font-size: 13px">
+<span aria-hidden="true" style="flex: none; width: 16px; height: 16px; border-radius: 8px; background: var(--person); color: var(--ink-2); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center">王</span>
+<span style="min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-2)">小王</span>
+</a>
+</div>
+</div>
+
+<a href="Members.dc.html" class="row" aria-label="成员：5 位在忙，共 13 位" style="flex: none; margin-top: 8px; display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 10px; border-radius: 8px">
+<span aria-hidden="true" style="display: flex; align-items: center; gap: 6px">
+<span style="position: relative; width: 18px; height: 18px; border-radius: 6px; background: var(--c-watch); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/c26891b67f7fded968a18113882ab570" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--you); border-radius: 9px"></span></span>
+<span style="position: relative; width: 18px; height: 18px; border-radius: 6px; background: var(--c-taro); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/92bcaf0525464e21a05973740b91a9ab" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--you); border-radius: 9px"></span></span>
+<span style="position: relative; width: 18px; height: 18px; border-radius: 6px; background: var(--c-forge); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/0d73f86febc69cb3df4e4a460f8d77dd" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--live); border-radius: 9px; animation: tc-breathe 2.4s ease-in-out infinite"></span></span>
+<span style="position: relative; width: 18px; height: 18px; border-radius: 6px; background: var(--c-jojo); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/125e75bf519a96c852d0f3ec02a46bf4" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--live); border-radius: 9px; animation: tc-breathe 2.4s ease-in-out infinite"></span></span>
+<span style="position: relative; width: 18px; height: 18px; border-radius: 6px; background: var(--c-tata); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/0ceac729c46e75ee0375f3e8178113ff" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--live); border-radius: 9px; animation: tc-breathe 2.4s ease-in-out infinite"></span></span>
+</span>
+<span class="mono" style="margin-left: 6px; font-size: 12px; color: var(--ink-3)">+8</span>
+</a>
+<div style="flex: none; display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 6px 0 10px">
+<span style="flex: none; width: 22px; height: 22px; border-radius: 11px; background: var(--btn); color: var(--btn-ink); font-size: 11px; font-weight: 600; display: flex; align-items: center; justify-content: center">J</span>
+<span style="font-size: 13px; font-weight: 500">Joye</span>
+<button type="button" aria-label="设置" class="row" style="margin-left: auto; width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-3); display: flex; align-items: center; justify-content: center; padding: 0">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10"></path><path d="M18 7h2"></path><circle cx="16" cy="7" r="2"></circle><path d="M4 17h2"></path><path d="M10 17h10"></path><circle cx="8" cy="17" r="2"></circle></svg>
+</button>
+</div>
+</nav>
+
+<main class="tc-pane" style="flex: 999 1 560px; min-width: 0; height: 100%; overflow: auto; display: flex; flex-wrap: wrap">
+
+<div class="tc-pane art-col" style="flex: 999 1 560px; min-width: 0; height: 100%; display: flex; flex-direction: column; padding: 0 24px 24px">
+<header class="art-head" style="flex: none; height: 52px; display: flex; align-items: center; gap: 8px; min-width: 0">
+<a href="Topic.dc.html" class="row" aria-label="回到话题 夹夹增长 / 10 月数据月报" style="flex: none; display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 6px; margin-left: -6px; border-radius: 7px; font-size: 13px; line-height: 20px; color: var(--ink-3)">
+<span>夹夹增长</span>
+<span aria-hidden="true">/</span>
+</a>
+<h1 style="margin: 0 0 0 -2px; min-width: 0; font-size: 17px; line-height: 24px; font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">10 月数据月报</h1>
+<span style="flex: none; margin-left: 4px; height: 18px; padding: 0 6px; border-radius: 5px; background: var(--sunken); color: var(--ink-2); font-size: 12px; line-height: 18px">网页</span>
+
+<div class="art-tools" style="margin-left: auto; flex: none; display: flex; align-items: center; gap: 8px">
+<div style="position: relative">
+<button type="button" class="btn-s" onClick="{{toggleMenu}}" aria-haspopup="menu" aria-expanded="{{menuExp}}" aria-label="{{pickerLabel}}" style="display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 12px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px">
+<span class="mono" style="font-size: 12px; font-weight: 600">{{verKey}}</span>
+<span style="color: var(--ink-3)">{{verWhen}}</span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="color: var(--ink-3)"><path d="m6 9 6 6 6-6"></path></svg>
+</button>
+<sc-if value="{{menuOpen}}" hint-placeholder-val="{{ false }}">
+<div role="menu" aria-label="版本" style="position: absolute; z-index: 5; top: 38px; right: 0; width: 288px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--pop); animation: tc-rise .16s cubic-bezier(.23,1,.32,1) both">
+<div style="display: flex; align-items: center; height: 26px; padding: 0 8px; font-size: 12px; font-weight: 500; color: var(--ink-3)">版本</div>
+<button type="button" role="menuitemradio" aria-checked="{{v3Checked}}" class="{{v3Cls}}" onClick="{{pickV3}}">
+<span class="mono ver-k" style="font-size: 12px">v3</span>
+<span style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">加了渠道拆分</span>
+<span style="font-size: 12px; color: var(--ink-3)">今天 <span class="mono">09:40</span></span>
+</button>
+<button type="button" role="menuitemradio" aria-checked="{{v2Checked}}" class="{{v2Cls}}" onClick="{{pickV2}}">
+<span class="mono ver-k" style="font-size: 12px">v2</span>
+<span style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">修正日活口径</span>
+<span style="font-size: 12px; color: var(--ink-3)">昨天</span>
+</button>
+<a href="Artifact.dc.html" role="menuitem" class="ver">
+<span class="mono ver-k" style="font-size: 12px; color: var(--ink-3)">v1</span>
+<span>第一版</span>
+<span class="mono" style="font-size: 12px; color: var(--ink-3)">10-31</span>
+</a>
+</div>
+</sc-if>
+</div>
+<button type="button" class="btn-s" style="height: 32px; padding: 0 14px; border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px">分享</button>
+<span aria-hidden="true" style="width: 1px; height: 16px; margin: 0 2px; background: var(--line-2)"></span>
+<button type="button" aria-label="在新窗口打开" title="在新窗口打开" class="row" style="width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); display: flex; align-items: center; justify-content: center; padding: 0">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 4h6v6"></path><path d="M20 4 11 13"></path><path d="M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"></path></svg>
+</button>
+<button type="button" aria-label="单独问" title="单独问 ⌘;" class="row" style="width: 28px; height: 28px; border: 0; border-radius: 7px; background: transparent; color: var(--ink-2); display: flex; align-items: center; justify-content: center; padding: 0">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"></path><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3"></path><path d="M12 17h.01"></path></svg>
+</button>
+</div>
+</header>
+
+<div class="art-frame rise" role="document" aria-label="{{frameLabel}}" style="flex: 1 1 auto; min-height: 0; overflow: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--lift)">
+<sc-if value="{{isV2}}" hint-placeholder-val="{{ false }}">
+<div class="rise" style="position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line); background: var(--raised); font-size: 13px; line-height: 20px; color: var(--ink-2)">
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--ink-3)"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>
+<span>你在看旧版本</span>
+<span style="color: var(--ink-3)"><span class="mono" style="font-size: 12px; color: var(--ink)">v2</span> · 昨天 · 修正日活口径</span>
+<button type="button" class="row" onClick="{{pickV3}}" style="margin-left: auto; height: 28px; padding: 0 10px; border: 0; border-radius: 7px; background: transparent; color: var(--ink); font-size: 13px; font-weight: 500">回到 v3</button>
+</div>
+</sc-if>
+<article class="art-page" style="max-width: 800px; margin: 0 auto; padding: 32px 40px 40px">
+
+<p class="mono rise" style="margin: 0; font-size: 12px; line-height: 18px; color: var(--ink-3); animation-delay: 40ms">夹夹 · 2026.10.01 – 10.31</p>
+<h2 class="rise" style="margin: 8px 0 0; font-size: 22px; line-height: 30px; font-weight: 600; letter-spacing: -0.015em; animation-delay: 60ms">新增群涨了 12%，回复也更快了</h2>
+<p class="rise" style="margin: 8px 0 0; font-size: 14px; line-height: 22px; color: var(--ink-2); animation-delay: 80ms">小红书带来的新增最多，而且每周都在涨。日活按去重设备算。</p>
+
+<dl class="art-kpi rise" style="margin: 24px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); animation-delay: 120ms">
+<div style="padding: 16px 16px 16px 0; display: flex; align-items: flex-end; gap: 12px">
+<span style="min-width: 0; flex: 1 1 auto">
+<dt style="font-size: 12px; line-height: 18px; color: var(--ink-3)">新增群</dt>
+<dd style="margin: 4px 0 0; font-size: 26px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em">38</dd>
+<dd style="margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3)"><span class="mono" style="color: var(--ok-ink)">+12%</span> 比 9 月</dd>
+</span>
+<span aria-hidden="true" title="每周 8、9、10、11 个" style="flex: none; display: flex; align-items: flex-end; gap: 3px; height: 28px; margin-bottom: 4px">
+<span style="width: 6px; height: 20px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 200ms both"></span>
+<span style="width: 6px; height: 22px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 240ms both"></span>
+<span style="width: 6px; height: 25px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 280ms both"></span>
+<span style="width: 6px; height: 28px; border-radius: 1.5px; background: var(--ink-3); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 320ms both"></span>
+</span>
+</div>
+<div style="padding: 16px; border-left: 1px solid var(--line); display: flex; align-items: flex-end; gap: 12px">
+<span style="min-width: 0; flex: 1 1 auto">
+<dt style="font-size: 12px; line-height: 18px; color: var(--ink-3)">日活</dt>
+<dd style="margin: 4px 0 0; font-size: 26px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em">2,340</dd>
+<dd style="margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3)"><span class="mono" style="color: var(--ok-ink)">+4%</span> 比 9 月</dd>
+</span>
+<span aria-hidden="true" style="flex: none; display: flex; align-items: flex-end; gap: 3px; height: 28px; margin-bottom: 4px">
+<span style="width: 6px; height: 23px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 240ms both"></span>
+<span style="width: 6px; height: 24px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 280ms both"></span>
+<span style="width: 6px; height: 26px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 320ms both"></span>
+<span style="width: 6px; height: 28px; border-radius: 1.5px; background: var(--ink-3); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 360ms both"></span>
+</span>
+</div>
+<div style="padding: 16px; border-left: 1px solid var(--line); display: flex; align-items: flex-end; gap: 12px">
+<span style="min-width: 0; flex: 1 1 auto">
+<dt style="font-size: 12px; line-height: 18px; color: var(--ink-3)">平均回复</dt>
+<dd style="margin: 4px 0 0; font-size: 26px; line-height: 32px; font-weight: 600; font-variant-numeric: tabular-nums; letter-spacing: -0.01em">1.2<span style="display: inline-block; margin-left: 4px; font-size: 14px; line-height: 20px; font-weight: 500; color: var(--ink-2)">秒</span></dd>
+<dd style="margin: 4px 0 0; font-size: 12px; line-height: 18px; color: var(--ink-3)"><span class="mono" style="color: var(--ok-ink)">−0.3 秒</span> 更快了</dd>
+</span>
+<span aria-hidden="true" style="flex: none; display: flex; align-items: flex-end; gap: 3px; height: 28px; margin-bottom: 4px">
+<span style="width: 6px; height: 28px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 280ms both"></span>
+<span style="width: 6px; height: 26px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 320ms both"></span>
+<span style="width: 6px; height: 22px; border-radius: 1.5px; background: var(--line-2); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 360ms both"></span>
+<span style="width: 6px; height: 20px; border-radius: 1.5px; background: var(--ink-3); animation: tc-grow-h .4s cubic-bezier(.23,1,.32,1) 400ms both"></span>
+</span>
+</div>
+</dl>
+
+<div style="margin-top: 32px; display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 32px">
+
+<figure class="rise" style="margin: 0; min-width: 0; animation-delay: 160ms">
+<figcaption style="display: flex; align-items: baseline; gap: 8px">
+<span style="font-size: 13px; line-height: 20px; font-weight: 600">各渠道每周新增群</span>
+<span style="font-size: 12px; color: var(--ink-3)">单位：个</span>
+</figcaption>
+<sc-if value="{{isV3}}" hint-placeholder-val="{{ true }}">
+<svg viewBox="0 0 344 184" width="100%" role="img" aria-label="四周里小红书每周新增 2、3、4、5 个群，其他渠道持平在 1 到 3 个" style="display: block; max-width: 344px; margin-top: 12px; overflow: visible">
+<g style="stroke: var(--line)" stroke-width="1">
+<path d="M32 150H262"></path><path d="M32 103.3H262"></path><path d="M32 56.7H262"></path><path d="M32 10H262"></path>
+</g>
+<g class="mono" style="fill: var(--ink-3)" font-size="12" text-anchor="end">
+<text x="22" y="154">0</text><text x="22" y="107">2</text><text x="22" y="61">4</text><text x="22" y="14">6</text>
+</g>
+<g style="fill: var(--ink-3)" font-size="12" text-anchor="middle">
+<text x="40" y="176">第 1 周</text><text x="114" y="176">第 2 周</text><text x="188" y="176">第 3 周</text><text x="262" y="176">第 4 周</text>
+</g>
+<g fill="none" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" style="stroke: var(--ink-3)" opacity=".55">
+<path pathLength="1" d="M40 80L114 80L188 103.3L262 103.3" style="stroke-dasharray: 1; animation: tc-line .6s cubic-bezier(.23,1,.32,1) 240ms both"></path>
+<path pathLength="1" d="M40 103.3L114 103.3L188 103.3L262 80" style="stroke-dasharray: 1; animation: tc-line .6s cubic-bezier(.23,1,.32,1) 290ms both"></path>
+<path pathLength="1" d="M40 126.7L114 126.7L188 103.3L262 126.7" style="stroke-dasharray: 1; animation: tc-line .6s cubic-bezier(.23,1,.32,1) 340ms both"></path>
+</g>
+<path pathLength="1" d="M40 103.3L114 80L188 56.7L262 33.3" fill="none" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" style="stroke: var(--ink); stroke-dasharray: 1; animation: tc-line .7s cubic-bezier(.23,1,.32,1) 400ms both"></path>
+<g stroke-width="2" style="stroke: var(--ink); fill: var(--bg)">
+<circle cx="40" cy="103.3" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 420ms both"></circle><circle cx="114" cy="80" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 560ms both"></circle><circle cx="188" cy="56.7" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 700ms both"></circle><circle cx="262" cy="33.3" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 840ms both"></circle>
+</g>
+<g font-size="12" style="animation: tc-fade .3s cubic-bezier(.23,1,.32,1) 900ms both">
+<text x="272" y="37.5" font-weight="600" style="fill: var(--ink)">小红书</text>
+<text x="272" y="84" style="fill: var(--ink-3)">B 站</text>
+<text x="272" y="107.5" style="fill: var(--ink-3)">群内邀请</text>
+<text x="272" y="131" style="fill: var(--ink-3)">抖音</text>
+</g>
+</svg>
+</sc-if>
+<sc-if value="{{isV2}}" hint-placeholder-val="{{ false }}">
+<svg viewBox="0 0 720 184" width="100%" role="img" aria-label="四周里小红书每周新增 2、3、4、5 个群，其他渠道持平在 1 到 3 个" style="display: block; margin-top: 12px; overflow: visible">
+<g style="stroke: var(--line)" stroke-width="1">
+<path d="M32 150H620"></path><path d="M32 103.3H620"></path><path d="M32 56.7H620"></path><path d="M32 10H620"></path>
+</g>
+<g class="mono" style="fill: var(--ink-3)" font-size="12" text-anchor="end">
+<text x="22" y="154">0</text><text x="22" y="107">2</text><text x="22" y="61">4</text><text x="22" y="14">6</text>
+</g>
+<g style="fill: var(--ink-3)" font-size="12" text-anchor="middle">
+<text x="40" y="176">第 1 周</text><text x="233.3" y="176">第 2 周</text><text x="426.7" y="176">第 3 周</text><text x="620" y="176">第 4 周</text>
+</g>
+<g fill="none" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" style="stroke: var(--ink-3)" opacity=".55">
+<path pathLength="1" d="M40 80L233.3 80L426.7 103.3L620 103.3" style="stroke-dasharray: 1; animation: tc-line .6s cubic-bezier(.23,1,.32,1) 240ms both"></path>
+<path pathLength="1" d="M40 103.3L233.3 103.3L426.7 103.3L620 80" style="stroke-dasharray: 1; animation: tc-line .6s cubic-bezier(.23,1,.32,1) 290ms both"></path>
+<path pathLength="1" d="M40 126.7L233.3 126.7L426.7 103.3L620 126.7" style="stroke-dasharray: 1; animation: tc-line .6s cubic-bezier(.23,1,.32,1) 340ms both"></path>
+</g>
+<path pathLength="1" d="M40 103.3L233.3 80L426.7 56.7L620 33.3" fill="none" stroke-width="2.25" stroke-linejoin="round" stroke-linecap="round" style="stroke: var(--ink); stroke-dasharray: 1; animation: tc-line .7s cubic-bezier(.23,1,.32,1) 400ms both"></path>
+<g stroke-width="2" style="stroke: var(--ink); fill: var(--bg)">
+<circle cx="40" cy="103.3" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 420ms both"></circle><circle cx="233.3" cy="80" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 560ms both"></circle><circle cx="426.7" cy="56.7" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 700ms both"></circle><circle cx="620" cy="33.3" r="3.5" style="animation: tc-fade .2s cubic-bezier(.23,1,.32,1) 840ms both"></circle>
+</g>
+<g font-size="12" style="animation: tc-fade .3s cubic-bezier(.23,1,.32,1) 900ms both">
+<text x="630" y="37.5" font-weight="600" style="fill: var(--ink)">小红书</text>
+<text x="630" y="84" style="fill: var(--ink-3)">B 站</text>
+<text x="630" y="107.5" style="fill: var(--ink-3)">群内邀请</text>
+<text x="630" y="131" style="fill: var(--ink-3)">抖音</text>
+</g>
+</svg>
+</sc-if>
+</figure>
+
+<sc-if value="{{isV3}}" hint-placeholder-val="{{ true }}">
+<div class="rise" style="min-width: 0; animation-delay: 200ms">
+<div style="display: flex; align-items: baseline; gap: 8px">
+<span style="font-size: 13px; line-height: 20px; font-weight: 600">渠道拆分</span>
+<span style="height: 18px; padding: 0 6px; border-radius: 5px; background: var(--sunken); color: var(--ink-2); font-size: 12px; line-height: 18px">v3 新加</span>
+</div>
+<table style="margin-top: 8px; width: 100%; border-collapse: collapse; font-size: 13px; line-height: 20px">
+<thead>
+<tr style="color: var(--ink-3); font-size: 12px">
+<th scope="col" style="text-align: left; font-weight: 400; padding: 6px 0; border-bottom: 1px solid var(--line)">渠道</th>
+<th scope="col" style="text-align: right; font-weight: 400; padding: 6px 0; border-bottom: 1px solid var(--line)">新增群</th>
+<th scope="col" style="text-align: right; font-weight: 400; padding: 6px 0; border-bottom: 1px solid var(--line)">占比</th>
+<th scope="col" style="text-align: right; font-weight: 400; padding: 6px 0; border-bottom: 1px solid var(--line)">比 9 月</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<th scope="row" style="text-align: left; font-weight: 500; padding: 8px 0; border-bottom: 1px solid var(--line)">小红书</th>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line)">14</td>
+<td class="mono" style="font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-2)"><span style="display: flex; align-items: center; justify-content: flex-end; gap: 8px"><span aria-hidden="true" style="width: 48px; height: 4px; border-radius: 2px; background: var(--sunken); display: flex"><span style="width: 18px; height: 4px; border-radius: 2px; background: var(--ink); animation: tc-grow-w .4s cubic-bezier(.23,1,.32,1) 360ms both"></span></span><span style="width: 28px; text-align: right">37%</span></span></td>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ok-ink)">+6</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; font-weight: 400; padding: 8px 0; border-bottom: 1px solid var(--line)">群内邀请</th>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line)">10</td>
+<td class="mono" style="font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-2)"><span style="display: flex; align-items: center; justify-content: flex-end; gap: 8px"><span aria-hidden="true" style="width: 48px; height: 4px; border-radius: 2px; background: var(--sunken); display: flex"><span style="width: 12.5px; height: 4px; border-radius: 2px; background: var(--ink-3); animation: tc-grow-w .4s cubic-bezier(.23,1,.32,1) 400ms both"></span></span><span style="width: 28px; text-align: right">26%</span></span></td>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-2)">+1</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; font-weight: 400; padding: 8px 0; border-bottom: 1px solid var(--line)">B 站</th>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line)">9</td>
+<td class="mono" style="font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-2)"><span style="display: flex; align-items: center; justify-content: flex-end; gap: 8px"><span aria-hidden="true" style="width: 48px; height: 4px; border-radius: 2px; background: var(--sunken); display: flex"><span style="width: 11.5px; height: 4px; border-radius: 2px; background: var(--ink-3); animation: tc-grow-w .4s cubic-bezier(.23,1,.32,1) 440ms both"></span></span><span style="width: 28px; text-align: right">24%</span></span></td>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-2)">−1</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; font-weight: 400; padding: 8px 0; border-bottom: 1px solid var(--line)">抖音</th>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line)">5</td>
+<td class="mono" style="font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-2)"><span style="display: flex; align-items: center; justify-content: flex-end; gap: 8px"><span aria-hidden="true" style="width: 48px; height: 4px; border-radius: 2px; background: var(--sunken); display: flex"><span style="width: 6px; height: 4px; border-radius: 2px; background: var(--ink-3); animation: tc-grow-w .4s cubic-bezier(.23,1,.32,1) 480ms both"></span></span><span style="width: 28px; text-align: right">13%</span></span></td>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--ink-2)">−2</td>
+</tr>
+<tr>
+<th scope="row" style="text-align: left; font-weight: 400; padding: 8px 0; color: var(--ink-3)">合计</th>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; font-weight: 600">38</td>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; color: var(--ink-3)">100%</td>
+<td class="mono" style="text-align: right; font-size: 12px; padding: 8px 0; color: var(--ink-2)">+4</td>
+</tr>
+</tbody>
+</table>
+</div>
+</sc-if>
+</div>
+
+<section class="rise" aria-labelledby="h-budget" style="margin-top: 32px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--lift); overflow: hidden; animation-delay: 240ms">
+<div style="padding: 14px 16px 16px">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; line-height: 18px; color: var(--ink-3)">
+<span aria-hidden="true" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--c-ledger); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/d5b6d60b486a302c979b64cd7d573649" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"></span>
+<span style="font-size: 13px; font-weight: 500; color: var(--ink)">Ledger</span>
+<span style="height: 18px; padding: 0 6px; border-radius: 5px; background: var(--sunken); color: var(--ink-2); font-size: 12px; line-height: 18px">数据</span>
+<span>在页面里问</span>
+</div>
+<h3 id="h-budget" style="margin: 10px 0 0; font-size: 16px; line-height: 24px; font-weight: 600; letter-spacing: -0.005em">下个月加预算投哪个渠道？</h3>
+<p style="margin: 4px 0 0; font-size: 13px; line-height: 20px; color: var(--ink-2)">按 10 月算，每个新增群的花费：小红书 <span class="mono">¥41</span>，B 站 <span class="mono">¥58</span>，抖音 <span class="mono">¥96</span>。群内邀请不花钱，但涨不动。</p>
+<sc-if value="{{isV3}}" hint-placeholder-val="{{ true }}">
+<div class="art-opts" role="group" aria-labelledby="h-budget" style="margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<button type="button" aria-pressed="false" class="opt" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; text-align: left">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font-size: 11px; line-height: 20px; text-align: center">A</span>
+<span>小红书</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--ink-3)">Ledger 推荐</span>
+</button>
+<button type="button" aria-pressed="true" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--ink); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; color: var(--ink); text-align: left">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--btn); color: var(--btn-ink); font-size: 11px; line-height: 20px; text-align: center">B</span>
+<span style="font-weight: 600">B 站</span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left: auto; color: var(--ink)"><path d="M20 6 9 17l-5-5" style="stroke-dasharray: 24; animation: tc-draw .3s cubic-bezier(.23,1,.32,1) 520ms both"></path></svg>
+</button>
+<button type="button" aria-pressed="false" class="opt" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; text-align: left">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font-size: 11px; line-height: 20px; text-align: center">C</span>
+<span>抖音</span>
+</button>
+<button type="button" aria-pressed="false" class="opt" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; text-align: left">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font-size: 11px; line-height: 20px; text-align: center">D</span>
+<span>先不加，维持现状</span>
+</button>
+</div>
+</sc-if>
+<sc-if value="{{isV2}}" hint-placeholder-val="{{ false }}">
+<div class="art-opts" role="group" aria-disabled="true" aria-labelledby="h-budget" style="margin-top: 12px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px">
+<button type="button" disabled aria-pressed="false" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; text-align: left; color: var(--ink-2); cursor: default">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font-size: 11px; line-height: 20px; text-align: center">A</span>
+<span>小红书</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--ink-3)">Ledger 推荐</span>
+</button>
+<button type="button" disabled aria-pressed="false" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; text-align: left; color: var(--ink-2); cursor: default">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font-size: 11px; line-height: 20px; text-align: center">B</span>
+<span>B 站</span>
+</button>
+<button type="button" disabled aria-pressed="false" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; text-align: left; color: var(--ink-2); cursor: default">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font-size: 11px; line-height: 20px; text-align: center">C</span>
+<span>抖音</span>
+</button>
+<button type="button" disabled aria-pressed="false" style="display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px 0 8px; border: 1px solid var(--line-2); border-radius: 9px; background: var(--bg); box-shadow: var(--sec-hi); font-size: 13px; text-align: left; color: var(--ink-2); cursor: default">
+<span class="mono" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--sunken); color: var(--ink-2); font-size: 11px; line-height: 20px; text-align: center">D</span>
+<span>先不加，维持现状</span>
+</button>
+</div>
+</sc-if>
+</div>
+<sc-if value="{{isV3}}" hint-placeholder-val="{{ true }}">
+<p style="margin: 0; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--raised); font-size: 12px; line-height: 18px; color: var(--ink-3)">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14.5 21.5 22 2 2.5 9.5l8 3.5Z"></path><path d="M22 2 10.5 13"></path></svg>
+<span>你选了「B 站」· <span class="mono">10:12</span> · 已发给 Ledger</span>
+</p>
+</sc-if>
+<sc-if value="{{isV2}}" hint-placeholder-val="{{ false }}">
+<p style="margin: 0; display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-top: 1px solid var(--line); background: var(--raised); font-size: 12px; line-height: 18px; color: var(--ink-3)">
+<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>
+<span>在 v3 里回应过</span>
+</p>
+</sc-if>
+</section>
+
+</article>
+</div>
+</div>
+
+<aside aria-labelledby="h-trace" class="tc-pane art-rail" style="flex: 1 0 320px; max-width: 100%; min-width: 0; height: 100%; overflow: auto; background: var(--rail); border-left: 1px solid var(--line); padding: 0 16px 24px">
+<div style="height: 52px; display: flex; align-items: center; gap: 8px; padding: 0 4px">
+<h2 id="h-trace" style="margin: 0; font-size: 13px; line-height: 20px; font-weight: 600">来龙去脉</h2>
+<button type="button" aria-label="收起右栏" aria-pressed="true" title="收起右栏" class="ib-on" style="margin-left: auto; width: 28px; height: 28px; border: 0; border-radius: 7px; display: flex; align-items: center; justify-content: center; padding: 0">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2.5"></rect><path d="M15 4v16"></path></svg>
+</button>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 10px">
+
+<section class="rise" aria-labelledby="h-from" style="padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--lift); animation-delay: 80ms">
+<h3 id="h-from" style="margin: 0; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--ink-3)">来自话题</h3>
+<a href="Topic.dc.html" class="row" style="margin: 6px -6px 0; padding: 6px; border-radius: 8px; display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="flex: none; width: 16px; display: flex; justify-content: center; color: var(--ok)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<span style="min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column">
+<span style="font-size: 13px; line-height: 20px; font-weight: 500">10 月数据月报</span>
+<span style="font-size: 12px; line-height: 18px; color: var(--ink-3)">夹夹增长 · 做完了 <span class="mono">09:40</span></span>
+</span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--ink-3)"><path d="m9 6 6 6-6 6"></path></svg>
+</a>
+<dl style="margin: 8px 0 0; padding-top: 10px; border-top: 1px solid var(--line); display: grid; grid-template-columns: 44px minmax(0, 1fr); row-gap: 8px; column-gap: 8px; align-items: center; font-size: 13px; line-height: 20px">
+<dt style="font-size: 12px; color: var(--ink-3)">做的人</dt>
+<dd style="margin: 0; display: flex; align-items: center; gap: 8px">
+<span aria-hidden="true" style="flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--c-ledger); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/d5b6d60b486a302c979b64cd7d573649" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"></span>
+<a href="Members.dc.html" style="font-weight: 500">Ledger</a>
+<span style="height: 18px; padding: 0 6px; border-radius: 5px; background: var(--sunken); color: var(--ink-2); font-size: 12px; line-height: 18px">数据</span>
+</dd>
+<dt style="font-size: 12px; color: var(--ink-3)">要求</dt>
+<dd style="margin: 0; display: flex; align-items: center; gap: 8px">
+<span aria-hidden="true" style="position: relative; flex: none; width: 20px; height: 20px; border-radius: 6px; background: var(--c-tata); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/0ceac729c46e75ee0375f3e8178113ff" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"><span style="position: absolute; inset: -3px; border: 1.5px solid var(--live); border-radius: 9px; animation: tc-breathe 2.4s ease-in-out infinite"></span></span>
+<a href="Members.dc.html" style="font-weight: 500">Tata</a>
+<span style="height: 18px; padding: 0 6px; border-radius: 5px; background: var(--sunken); color: var(--ink-2); font-size: 12px; line-height: 18px">产品负责人</span>
+</dd>
+</dl>
+</section>
+
+<section class="rise" aria-labelledby="h-ver" style="padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--lift); animation-delay: 125ms">
+<div style="display: flex; align-items: center">
+<h3 id="h-ver" style="margin: 0; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--ink-3)">版本</h3>
+<a href="Artifact.dc.html" class="row" style="margin: -3px -6px -3px auto; height: 24px; padding: 0 6px; border-radius: 6px; display: flex; align-items: center; font-size: 12px; color: var(--ink-2)">和 v2 对比</a>
+</div>
+<div role="radiogroup" aria-labelledby="h-ver" style="margin: 6px -6px 0; display: flex; flex-direction: column; gap: 2px">
+<button type="button" role="radio" aria-checked="{{v3Checked}}" class="{{v3Cls}}" onClick="{{pickV3}}" style="padding: 0 6px">
+<span class="mono ver-k" style="font-size: 12px">v3</span>
+<span style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">加了渠道拆分</span>
+<span style="font-size: 12px; color: var(--ink-3)">今天 <span class="mono">09:40</span></span>
+</button>
+<button type="button" role="radio" aria-checked="{{v2Checked}}" class="{{v2Cls}}" onClick="{{pickV2}}" style="padding: 0 6px">
+<span class="mono ver-k" style="font-size: 12px">v2</span>
+<span style="min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap">修正日活口径</span>
+<span style="font-size: 12px; color: var(--ink-3)">昨天</span>
+</button>
+<a href="Artifact.dc.html" class="ver" style="padding: 0 6px">
+<span class="mono ver-k" style="font-size: 12px; color: var(--ink-3)">v1</span>
+<span>第一版</span>
+<span class="mono" style="font-size: 12px; color: var(--ink-3)">10-31</span>
+</a>
+</div>
+</section>
+
+<section class="rise" aria-labelledby="h-reply" style="padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--lift); animation-delay: 170ms">
+<h3 id="h-reply" style="margin: 0; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--ink-3)">页面里的回应</h3>
+<div style="margin-top: 8px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 20px">
+<span style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="flex: none; width: 18px; height: 18px; border-radius: 9px; background: var(--btn); color: var(--btn-ink); font-size: 10px; font-weight: 600; display: flex; align-items: center; justify-content: center">J</span>
+<span>Joye 选了「B 站」</span>
+<span class="mono" style="margin-left: auto; font-size: 12px; color: var(--ink-3)">10:12</span>
+</span>
+<a href="Topic.dc.html" class="row" style="margin: 0 -6px; padding: 4px 6px; border-radius: 8px; display: flex; align-items: center; gap: 10px; color: var(--ink-2)">
+<span aria-hidden="true" style="flex: none; width: 18px; height: 18px; border-radius: 6px; background: var(--c-ledger); box-shadow: var(--tile-edge); color: var(--tile-ink); font-size: 9px; font-weight: 600; display: flex; align-items: center; justify-content: center"><img src="/_blob/0fa83ceafd99af422d97d3dce461fbf3" alt="" style="width: 72%; height: 72%; display: block; pointer-events: none"></span>
+<span>Ledger 在话题里接着算预算</span>
+<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="margin-left: auto; flex: none; color: var(--ink-3)"><path d="m9 6 6 6-6 6"></path></svg>
+</a>
+</div>
+</section>
+
+<section class="rise" aria-labelledby="h-rule" style="padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--lift); animation-delay: 215ms">
+<h3 id="h-rule" style="margin: 0; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--ink-3)">用到的决定</h3>
+<a href="Group.dc.html" class="row" style="margin: 6px -6px 0; padding: 6px; border-radius: 8px; display: flex; gap: 10px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; margin-top: 2px; color: var(--ink-3)"><circle cx="12" cy="12" r="9"></circle><path d="m8.5 12 2.5 2.5 4.5-5"></path></svg>
+<span style="min-width: 0; display: flex; flex-direction: column">
+<span style="font-size: 13px; line-height: 20px">日活按去重设备算</span>
+<span style="font-size: 12px; line-height: 18px; color: var(--ink-3)">Joye · <span class="mono">11-01</span> · 夹夹增长</span>
+</span>
+</a>
+</section>
+
+<section class="rise" aria-labelledby="h-cited" style="padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--lift); animation-delay: 260ms">
+<h3 id="h-cited" style="margin: 0; font-size: 12px; line-height: 18px; font-weight: 500; color: var(--ink-3)">被引用</h3>
+<div style="margin: 6px -6px 0; display: flex; flex-direction: column; gap: 2px">
+<a href="Topic.dc.html" class="row" style="height: 32px; padding: 0 6px; border-radius: 8px; display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 20px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--ink-3)"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path></svg>
+<span>周会</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--ink-3)">全员</span>
+</a>
+<a href="Topic.dc.html" class="row" style="height: 32px; padding: 0 6px; border-radius: 8px; display: flex; align-items: center; gap: 10px; font-size: 13px; line-height: 20px">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex: none; color: var(--ink-3)"><path d="M4 6h16"></path><path d="M4 12h16"></path><path d="M4 18h10"></path></svg>
+<span>夹夹 4.0 需求</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--ink-3)">夹夹增长</span>
+</a>
+</div>
+</section>
+
+</div>
+</aside>
+</main>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { ver: 'v3', menu: false };
+  }
+  renderVals() {
+    const v3 = this.state.ver === 'v3';
+    const menu = this.state.menu;
+    return {
+      themeClass: (this.props.dark ?? false) ? 'tc dark' : 'tc',
+      isV3: v3,
+      isV2: !v3,
+      verKey: v3 ? 'v3' : 'v2',
+      verWhen: v3 ? '今天 09:40' : '昨天',
+      pickerLabel: v3 ? '切换版本，当前 v3' : '切换版本，当前 v2',
+      frameLabel: v3 ? '10 月数据月报 v3' : '10 月数据月报 v2',
+      v3Cls: v3 ? 'ver on' : 'ver',
+      v2Cls: v3 ? 'ver' : 'ver on',
+      v3Checked: v3 ? 'true' : 'false',
+      v2Checked: v3 ? 'false' : 'true',
+      menuOpen: menu,
+      menuExp: menu ? 'true' : 'false',
+      toggleMenu: () => this.setState({ menu: !this.state.menu }),
+      pickV3: () => this.setState({ ver: 'v3', menu: false }),
+      pickV2: () => this.setState({ ver: 'v2', menu: false })
+    };
+  }
+}
+</script>
+</body>
+</html>
