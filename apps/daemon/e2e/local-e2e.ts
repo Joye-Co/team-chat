@@ -257,7 +257,10 @@ async function runDaemonCheck(
   if (!chatRun.socket || existsSync(chatRun.socket)) throw new Error("chat-run socket missing in the run or left after it");
   if (chatRun.mode !== "0o600") throw new Error(`chat-run socket mode ${chatRun.mode}`);
   const chatRunAnswer = JSON.parse(chatRun.out || "null");
-  if (chatRun.code !== 0 && !chatRunAnswer?.error?.reason) throw new Error(`chat-run failed without a reason: ${chatRun.err}`);
+  // An old server answers with a reason ("server too old"); a 1.1 server runs the patch through
+  // the group room, which refuses the fake message id "M" as not_found.
+  const typed = chatRunAnswer?.error?.reason || chatRunAnswer?.error?.code === "not_found";
+  if (chatRun.code !== 0 && !typed) throw new Error(`chat-run failed without a reason: ${chatRun.err}`);
   report.chatRun = { exitCode: chatRun.code, answer: chatRunAnswer };
   step(`chat-run output in the run log, redacted; chat-run exit ${chatRun.code}`);
   const session = await until("raw session uploaded", async () => {
