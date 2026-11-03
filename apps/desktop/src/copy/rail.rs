@@ -18,4 +18,5 @@ crate::copy! {
     RAIL_MODE_WORK = "以工作为中心",
     RAIL_MODE_ATTENTION = "以「需要我」为中心",
     RAIL_MODE_MEMBER = "以成员为中心",
+    RAIL_WAITING_ON = "等{name}",
 }

@@ -8,6 +8,7 @@ crate::copy! {
     JUST_NOW = "刚刚",
     MINUTES_AGO = "{n} 分钟前",
     YESTERDAY = "昨天",
+    TOMORROW = "明天",
     MONTH_DAY = "{m}月{d}日",
     CONNECTING = "正在连接…",
     RECONNECTING = "连接已断开，正在重连…",
