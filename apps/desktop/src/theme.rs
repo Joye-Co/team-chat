@@ -828,6 +828,12 @@ pub mod motion {
     pub const BREATHE_LOW: f32 = 0.25;
     /// The check of an answered card draws in (`tc-draw`).
     pub const CHECK_DRAW: Duration = Duration::from_millis(300);
+
+    // panes track (1.1.0): 实时查看.
+    /// The terminal cursor of 实时查看 blinks once this often (`tc-blink`).
+    pub const LIVE_CURSOR_BLINK: Duration = Duration::from_millis(1100);
+    /// The 回放 track fills in once (`tc-fill`).
+    pub const LIVE_TRACK_FILL: Duration = Duration::from_millis(600);
     /// Chart bars grow from zero once.
     pub const BAR_GROW: Duration = Duration::from_millis(400);
     /// The blink half-period of a live terminal cursor (`tc-blink`).
