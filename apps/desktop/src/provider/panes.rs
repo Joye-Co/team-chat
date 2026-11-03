@@ -92,7 +92,7 @@ struct LiveEntry {
 }
 
 fn now_ms() -> Millis {
-    chrono::Utc::now().timestamp_millis()
+    crate::selftest::clock::now_ms()
 }
 
 /// The command a `tool.call` ran, as the terminal prints it.

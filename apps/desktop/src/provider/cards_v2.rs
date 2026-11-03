@@ -287,7 +287,7 @@ impl CardV2Cache {
         {
             return;
         }
-        let at = chrono::Utc::now().timestamp_millis();
+        let at = crate::selftest::clock::now_ms();
         let result = client.answer_card(
             message_id,
             request.rev,
