@@ -1,9 +1,11 @@
 //! Source checks and normalization before a diagram renders (REFS §B1, §B2 step 1, §B5).
 //!
 //! The keyword allowlist and the forbidden-construct list sit behind one function,
-//! [`check_source`]. The same lists are planned for `crates/chat-protocol/src/diagram.rs`
-//! (branch `v11/inc-protocol`, with `diagram-checks.json` fixtures); when that file lands,
-//! the integration switches this function to it.
+//! [`check_source`]. They copy `crates/chat-protocol/src/diagram.rs` of branch
+//! `v11/inc-protocol` (b4f8fcb) exactly, and the tests read a copy of its
+//! `protocol/checks/diagram-checks.json` (`diagram-checks.json` here). The integration
+//! switches [`check_source`] to `chat_protocol::diagram::check_diagram_source` and deletes the
+//! copies.
 
 /// The diagram types 1.1.0 draws (first keyword of the source).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -109,30 +111,69 @@ fn clean(source: &str) -> String {
 }
 
 /// The static checks (size, front matter, forbidden constructs, first keyword). Shared rule
-/// with the server and the SDK (REFS §B1, §B10).
+/// with the server and the SDK (REFS §B1, §B10); same order and results as
+/// `check_diagram_source` in `chat-protocol`.
 pub fn check_source(source: &str) -> Result<DiagramType, Refusal> {
     if source.len() > MAX_SOURCE_BYTES {
         return Err(Refusal::TooLong);
     }
-    let source = clean(source);
-    if source.lines().next().is_some_and(|l| l.trim() == "---") {
+    let source = source.strip_prefix('\u{feff}').unwrap_or(source);
+    let lines: Vec<&str> = source
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
+    let first = lines
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .ok_or(Refusal::Empty)?;
+    if first.trim() == "---" {
         return Err(Refusal::Forbidden("front matter"));
     }
     let lower = source.to_lowercase();
     if let Some(bad) = DIAGRAM_FORBIDDEN.iter().find(|b| lower.contains(*b)) {
         return Err(Refusal::Forbidden(bad));
     }
-    let first = source
-        .lines()
-        .map(str::trim)
-        .find(|l| !l.is_empty() && !l.starts_with("%%"))
+    let head = lines
+        .iter()
+        .find(|l| !l.trim().is_empty() && !l.trim().starts_with("%%"))
         .ok_or(Refusal::Empty)?;
-    let word = first.split_whitespace().next().unwrap_or("");
+    let word = head
+        .trim()
+        .split(|c: char| c.is_whitespace() || c == ':' || c == ';')
+        .next()
+        .unwrap_or("");
     DIAGRAM_KEYWORDS
         .iter()
         .find(|(k, _)| *k == word)
         .map(|(_, t)| *t)
         .ok_or_else(|| Refusal::Unsupported(word.chars().take(32).collect()))
+}
+
+/// The protocol's reason text for a refusal (`empty`, `too_large`, `front_matter`,
+/// `forbidden:<text>`, `unsupported:<keyword>`).
+#[cfg(test)]
+pub fn refusal_reason(r: &Refusal) -> String {
+    match r {
+        Refusal::Empty => "empty".into(),
+        Refusal::TooLong => "too_large".into(),
+        Refusal::Forbidden("front matter") => "front_matter".into(),
+        Refusal::Forbidden(f) => format!("forbidden:{}", f.trim()),
+        Refusal::Unsupported(k) => format!("unsupported:{k}"),
+    }
+}
+
+/// The protocol's type name (`flowchart`, `sequenceDiagram`, …).
+#[cfg(test)]
+pub fn protocol_type(t: DiagramType) -> &'static str {
+    match t {
+        DiagramType::Flowchart => "flowchart",
+        DiagramType::Sequence => "sequenceDiagram",
+        DiagramType::State => "stateDiagram",
+        DiagramType::Class => "classDiagram",
+        DiagramType::Er => "erDiagram",
+        DiagramType::Gantt => "gantt",
+        DiagramType::Timeline => "timeline",
+    }
 }
 
 /// True for a line that only sets colors (removed: TeamChat owns colors).
@@ -166,6 +207,28 @@ pub fn normalize(source: &str) -> Result<Normalized, Refusal> {
 mod tests {
     use super::*;
 
+    /// The shared cases of `protocol/checks/diagram-checks.json` (copy).
+    #[test]
+    fn matches_the_protocol_check_cases() {
+        let doc: serde_json::Value =
+            serde_json::from_str(include_str!("diagram-checks.json")).unwrap();
+        let cases = doc["cases"].as_array().unwrap();
+        assert!(cases.len() >= 20);
+        for case in cases {
+            let source = case["source"].as_str().unwrap();
+            match check_source(source) {
+                Ok(t) => {
+                    assert_eq!(case["ok"], true, "{source:?}");
+                    assert_eq!(case["type"].as_str(), Some(protocol_type(t)), "{source:?}");
+                }
+                Err(r) => {
+                    assert_eq!(case["ok"], false, "{source:?}");
+                    assert_eq!(case["reason"].as_str(), Some(refusal_reason(&r).as_str()), "{source:?}");
+                }
+            }
+        }
+    }
+
     #[test]
     fn detects_types() {
         let t = |s: &str| check_source(s);
@@ -181,6 +244,8 @@ mod tests {
         assert_eq!(t("pie\n\"a\" : 1"), Err(Refusal::Unsupported("pie".into())));
         assert_eq!(t("mindmap\n root"), Err(Refusal::Unsupported("mindmap".into())));
         assert_eq!(t("graphTD"), Err(Refusal::Unsupported("graphTD".into())));
+        assert_eq!(t("graph TD;\nA-->B"), Ok(DiagramType::Flowchart));
+        assert_eq!(t("flowchart;A-->B"), Ok(DiagramType::Flowchart));
         assert_eq!(t("%% only\n\n"), Err(Refusal::Empty));
     }
 

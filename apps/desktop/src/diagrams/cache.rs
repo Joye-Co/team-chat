@@ -136,9 +136,17 @@ pub struct DiskCache {
     index: HashMap<String, Entry>,
     last_write: Option<Instant>,
     dirty: bool,
+    /// The last access stamp given: stamps strictly increase, so the order is exact even
+    /// within one millisecond.
+    clock: u64,
 }
 
 impl DiskCache {
+    fn stamp(&mut self) -> u64 {
+        self.clock = now_ms().max(self.clock + 1);
+        self.clock
+    }
+
     /// `<cache_dir>/team-chat/diagrams` (`~/Library/Caches/team-chat/diagrams` on macOS).
     pub fn default_dir() -> PathBuf {
         let base = std::env::var_os("HOME")
@@ -148,16 +156,18 @@ impl DiskCache {
     }
 
     pub fn open(dir: PathBuf, limit: u64) -> Self {
-        let index = std::fs::read(dir.join("index.json"))
+        let index: HashMap<String, Entry> = std::fs::read(dir.join("index.json"))
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
+        let clock = index.values().map(|e: &Entry| e.at).max().unwrap_or(0);
         Self {
             dir,
             limit,
             index,
             last_write: None,
             dirty: false,
+            clock,
         }
     }
 
@@ -199,7 +209,8 @@ impl DiskCache {
         std::fs::write(self.svg_path(key), svg)?;
         std::fs::write(self.meta_path(key), &json)?;
         let size = (png.len() + svg.len() + json.len()) as u64;
-        self.index.insert(key.to_string(), Entry { at: now_ms(), size });
+        let at = self.stamp();
+        self.index.insert(key.to_string(), Entry { at, size });
         self.dirty = true;
         self.evict();
         self.save_index(false);
@@ -210,10 +221,11 @@ impl DiskCache {
         std::fs::create_dir_all(&self.dir)?;
         let json = serde_json::to_vec(err).unwrap_or_default();
         std::fs::write(self.err_path(key), &json)?;
+        let at = self.stamp();
         self.index.insert(
             key.to_string(),
             Entry {
-                at: now_ms(),
+                at,
                 size: json.len() as u64,
             },
         );
@@ -224,8 +236,8 @@ impl DiskCache {
     }
 
     fn touch(&mut self, key: &str) {
-        let e = self.index.entry(key.to_string()).or_default();
-        e.at = now_ms().max(e.at + 1);
+        let at = self.stamp();
+        self.index.entry(key.to_string()).or_default().at = at;
         self.dirty = true;
         self.save_index(false);
     }

@@ -1,0 +1,125 @@
+{
+  "description": "checkDiagramSource cases, read by packages/protocol and crates/chat-protocol tests",
+  "cases": [
+    {
+      "source": "flowchart LR\n  a --> b",
+      "ok": true,
+      "type": "flowchart"
+    },
+    {
+      "source": "graph TD\n  a --> b",
+      "ok": true,
+      "type": "flowchart"
+    },
+    {
+      "source": "%% a comment\nsequenceDiagram\n  A->>B: hi",
+      "ok": true,
+      "type": "sequenceDiagram"
+    },
+    {
+      "source": "\n\nstateDiagram-v2\n  [*] --> s1",
+      "ok": true,
+      "type": "stateDiagram"
+    },
+    {
+      "source": "stateDiagram\n  [*] --> s1",
+      "ok": true,
+      "type": "stateDiagram"
+    },
+    {
+      "source": "classDiagram\n  class A",
+      "ok": true,
+      "type": "classDiagram"
+    },
+    {
+      "source": "erDiagram\n  A ||--o{ B : has",
+      "ok": true,
+      "type": "erDiagram"
+    },
+    {
+      "source": "gantt\n  title 计划",
+      "ok": true,
+      "type": "gantt"
+    },
+    {
+      "source": "timeline\n  2026 : 发布",
+      "ok": true,
+      "type": "timeline"
+    },
+    {
+      "source": "",
+      "ok": false,
+      "reason": "empty"
+    },
+    {
+      "source": "\n  \n%% only a comment",
+      "ok": false,
+      "reason": "empty"
+    },
+    {
+      "source": "---\ntitle: x\n---\nflowchart LR\n  a --> b",
+      "ok": false,
+      "reason": "front_matter"
+    },
+    {
+      "source": "%%{init: {'theme': 'dark'}}%%\nflowchart LR\n  a --> b",
+      "ok": false,
+      "reason": "forbidden:%%{"
+    },
+    {
+      "source": "flowchart LR\n  a --> b\n  click a \"https://example.com\"",
+      "ok": false,
+      "reason": "forbidden:click"
+    },
+    {
+      "source": "flowchart LR\n  a[\"<a href=x>y</a>\"]",
+      "ok": false,
+      "reason": "forbidden:href"
+    },
+    {
+      "source": "flowchart LR\n  a --> b\n  CALLBACK",
+      "ok": false,
+      "reason": "forbidden:callback"
+    },
+    {
+      "source": "flowchart LR\n  a[\"javascript:alert(1)\"]",
+      "ok": false,
+      "reason": "forbidden:javascript:"
+    },
+    {
+      "source": "flowchart LR\n  a[\"<SCRIPT>x</SCRIPT>\"]",
+      "ok": false,
+      "reason": "forbidden:<script"
+    },
+    {
+      "source": "flowchart LR\n  a[\"<iframe>\"]",
+      "ok": false,
+      "reason": "forbidden:<iframe"
+    },
+    {
+      "source": "flowchart LR\n  a[\"<foreignObject>\"]",
+      "ok": false,
+      "reason": "forbidden:<foreignobject"
+    },
+    {
+      "source": "pie\n  \"a\" : 1",
+      "ok": false,
+      "reason": "unsupported:pie"
+    },
+    {
+      "source": "mindmap\n  root",
+      "ok": false,
+      "reason": "unsupported:mindmap"
+    },
+    {
+      "source": "constructor\n  x",
+      "ok": false,
+      "reason": "unsupported:constructor"
+    },
+    {
+      "source": "flowchart LR\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n  a --> b\n",
+      "ok": false,
+      "reason": "too_large"
+    }
+  ]
+}
