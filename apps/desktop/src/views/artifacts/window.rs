@@ -340,25 +340,66 @@ static PROMPTING: AtomicBool = AtomicBool::new(false);
 /// runs on a later main-queue turn, outside any GPUI update.
 #[cfg(target_os = "macos")]
 fn ask_to_open_link(url: String) {
+    let ask = Ask {
+        title: ca::LINK_TITLE.to_string(),
+        detail: fill(ca::LINK_DETAIL, &[("url", &url)]),
+        open: ca::LINK_OPEN,
+        cancel: ca::LINK_CANCEL,
+    };
+    ask_then_open(ask, url, artifact_view::open_external_url);
+}
+
+/// Asks before a machine's screen sharing address (接管) opens, and opens
+/// only a `vnc`, `http` or `https` address.
+pub(crate) fn ask_before_screen_share(name: &str, url: String) {
+    if !artifact_view::is_screen_share_url(&url) {
+        tracing::warn!("screen sharing address refused");
+        return;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        use crate::copy::live as cl;
+        let ask = Ask {
+            title: cl::LIVE_SHARE_ASK_TITLE.to_string(),
+            detail: fill(cl::LIVE_SHARE_ASK_DETAIL, &[("name", name), ("url", &url)]),
+            open: cl::LIVE_SHARE_ASK_OPEN,
+            cancel: cl::LIVE_SHARE_ASK_CANCEL,
+        };
+        ask_then_open(ask, url, artifact_view::open_screen_share_url);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = name;
+}
+
+/// The text of one open-a-link alert.
+#[cfg(target_os = "macos")]
+struct Ask {
+    title: String,
+    detail: String,
+    open: &'static str,
+    cancel: &'static str,
+}
+
+/// Shows `ask` as a native alert on a later main-queue turn (outside any
+/// GPUI update) and calls `open` with `url` only when the user agrees.
+#[cfg(target_os = "macos")]
+fn ask_then_open(ask: Ask, url: String, open: fn(&str) -> bool) {
     if PROMPTING.swap(true, Ordering::SeqCst) {
         return;
     }
     dispatch2::DispatchQueue::main().exec_async(move || {
         use objc2_app_kit::{NSAlert, NSAlertFirstButtonReturn, NSAlertStyle};
         use objc2_foundation::{MainThreadMarker, NSString};
-        let open = MainThreadMarker::new().is_some_and(|mtm| {
+        let agreed = MainThreadMarker::new().is_some_and(|mtm| {
             let alert = NSAlert::new(mtm);
             alert.setAlertStyle(NSAlertStyle::Warning);
-            alert.setMessageText(&NSString::from_str(ca::LINK_TITLE));
-            alert.setInformativeText(&NSString::from_str(&fill(
-                ca::LINK_DETAIL,
-                &[("url", &url)],
-            )));
-            alert.addButtonWithTitle(&NSString::from_str(ca::LINK_OPEN));
-            alert.addButtonWithTitle(&NSString::from_str(ca::LINK_CANCEL));
+            alert.setMessageText(&NSString::from_str(&ask.title));
+            alert.setInformativeText(&NSString::from_str(&ask.detail));
+            alert.addButtonWithTitle(&NSString::from_str(ask.open));
+            alert.addButtonWithTitle(&NSString::from_str(ask.cancel));
             alert.runModal() == NSAlertFirstButtonReturn
         });
-        if open && !artifact_view::open_external_url(&url) {
+        if agreed && !open(&url) {
             tracing::warn!("external link refused");
         }
         PROMPTING.store(false, Ordering::SeqCst);

@@ -864,6 +864,19 @@ impl Drop for ArtifactWindow {
     }
 }
 
+/// Opens a machine's screen sharing address (see [`crate::is_screen_share_url`]) with the
+/// system's handler (Screen Sharing for `vnc:`). Returns false for anything else. Call it
+/// only after the user agreed.
+pub fn open_screen_share_url(url: &str) -> bool {
+    if !crate::is_screen_share_url(url) {
+        return false;
+    }
+    let Some(nsurl) = NSURL::URLWithString(&NSString::from_str(url)) else {
+        return false;
+    };
+    NSWorkspace::sharedWorkspace().openURL(&nsurl)
+}
+
 /// Opens an `http`, `https` or `mailto` URL in the default app. Returns false for any other
 /// scheme. Call it only after the user agreed.
 pub fn open_external_url(url: &str) -> bool {

@@ -47,4 +47,9 @@ crate::copy! {
     LIVE_PLAN_FOR = "已 {n} 分钟",
     LIVE_PLAN_HELD = "你在操作电脑，{name} 停在这一步",
     LIVE_EMPTY = "现在没有成员在用电脑",
+    // trust fixes (v11/dfix-trust): ask before the screen sharing address opens.
+    LIVE_SHARE_ASK_TITLE = "打开屏幕共享？",
+    LIVE_SHARE_ASK_DETAIL = "{name} 的电脑给了这个屏幕共享地址：\n{url}",
+    LIVE_SHARE_ASK_OPEN = "打开",
+    LIVE_SHARE_ASK_CANCEL = "取消",
 }

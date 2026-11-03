@@ -298,7 +298,8 @@ impl LivePane {
         } else {
             fill(c::LIVE_HELD_OTHER, &[("who", &who), ("name", bot)])
         };
-        let share = screen.takeover_url.clone().map(|url| {
+        let share = screen_share_url(screen).map(|url| {
+            let name = bot.to_string();
             ui::button(
                 "live-screen-share",
                 c::LIVE_OPEN_SCREEN_SHARE,
@@ -307,7 +308,9 @@ impl LivePane {
                 cx,
             )
             .icon(ui::icon(Lucide::ScreenShare, theme::icon::CHIP, k.ink_2))
-            .on_click(move |_, _, cx| cx.open_url(&url))
+            .on_click(move |_, _, _| {
+                crate::views::artifacts::window::ask_before_screen_share(&name, url.clone())
+            })
         });
         let hand_back = {
             let run = run.clone();
@@ -1198,6 +1201,17 @@ impl PaneView for LivePane {
     }
 }
 
+/// The screen sharing address to offer, when it is one the app may open
+/// (`vnc`, `http` or `https`; never `file:`, `smb:` or another app's scheme).
+fn screen_share_url(screen: &MachineScreen) -> Option<String> {
+    screen
+        .takeover_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|u| artifact_view::is_screen_share_url(u))
+        .map(str::to_string)
+}
+
 fn now_ms() -> Millis {
     chrono::Utc::now().timestamp_millis()
 }
@@ -1409,5 +1423,29 @@ impl Render for LivePane {
             .child(body)
             .child(self.footer(&run, &bot, &step_text, held, held_by_me, cx))
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_screen_sharing_addresses_open() {
+        let screen = |url: &str| MachineScreen {
+            takeover_url: Some(url.into()),
+            ..MachineScreen::default()
+        };
+        assert_eq!(
+            screen_share_url(&screen(" vnc://mac-mini.tailnet ")),
+            Some("vnc://mac-mini.tailnet".into())
+        );
+        for bad in [
+            "file:///Users/me/Downloads/x.command",
+            "smb://attacker.example/share",
+            "x-apple-systempreferences:com.apple.preference.security",
+        ] {
+            assert_eq!(screen_share_url(&screen(bad)), None, "{bad}");
+        }
     }
 }
