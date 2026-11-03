@@ -16,12 +16,12 @@ mod modes;
 mod rows;
 pub mod scenes;
 
-use std::collections::HashSet;
+use std::{collections::HashSet, rc::Rc};
 
 use gpui::{
-    AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, Render,
-    SharedString, StatefulInteractiveElement as _, Styled, Subscription, WeakEntity, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, Context, InteractiveElement as _, IntoElement, ListAlignment, ListState,
+    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
+    WeakEntity, Window, div, list, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     button::{Button, ButtonVariants as _},
@@ -31,18 +31,34 @@ use gpui_component::{
 pub use model::RowState;
 
 use crate::{
-    app::{NewTopic, Page, Place, RailMode, Services},
+    app::{Changes, NewTopic, Page, Place, RailMode, Services},
     copy::{fill, rail as c},
-    data::{GroupId, MemberId, Topic},
+    data::{GroupId, Member, MemberId, Topic},
     theme::{self, Type as _, space},
     ui::{self, Lucide, MemberAvatar, NamedButton as _, Ring, RowSurface},
-    views::{
-        nav::QuickSwitch,
-        shell::{layout, panes::watch},
-    },
+    views::{nav::QuickSwitch, shell::layout},
 };
 
 use model::{Bucket, MemberSort};
+use modes::{Entry, Inputs};
+
+/// Rows drawn beyond the visible part of the rail list.
+const LIST_OVERDRAW: gpui::Pixels = px(240.);
+
+/// What the rail shows, read from the provider once per change (or when
+/// what the user chose in the rail changes). A breathing ring renders the
+/// rail on every frame it asks for, so render reads only this.
+struct Cache {
+    inputs: Inputs,
+    entries: Rc<Vec<Entry>>,
+    /// My ask count on 首页.
+    asks: usize,
+    /// The team strip: who is shown, and how many more.
+    strip: (Vec<(Member, bool)>, usize),
+    me: Option<Member>,
+    /// B: the 群 chips.
+    groups: Vec<(GroupId, String)>,
+}
 
 /// The team strip shows at most this many members.
 const STRIP_MAX: usize = 5;
@@ -79,14 +95,26 @@ pub struct RailView {
     open_members: Option<HashSet<MemberId>>,
     /// C: the order of members.
     member_sort: MemberSort,
+    cache: Option<Cache>,
+    /// The virtual list of [`Cache::entries`].
+    list: ListState,
     _subscriptions: Vec<Subscription>,
 }
 
 impl RailView {
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
+        let subscriptions = vec![
+            cx.subscribe(&services.hub, |this, _, _: &Changes, cx| {
+                this.cache = None;
+                cx.notify();
+            }),
+            cx.observe(&services.nav, |_, _, cx| cx.notify()),
+        ];
         Self {
-            _subscriptions: watch(&services, cx),
+            _subscriptions: subscriptions,
             services,
+            cache: None,
+            list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
             show_all: false,
             folded_groups: HashSet::new(),
             chip: None,
@@ -98,6 +126,84 @@ impl RailView {
 
     fn me(&self) -> Option<String> {
         self.services.me()
+    }
+
+    /// What the lists depend on now, besides the provider.
+    fn inputs(&self, cx: &App) -> Inputs {
+        let nav = self.services.nav.read(cx);
+        Inputs {
+            mode: nav.rail_mode,
+            me: self.me(),
+            open: nav.topic.clone(),
+            group_page: match (&nav.place, nav.page()) {
+                (Some(Place::Group(g)), Page::Group) => Some(g.clone()),
+                _ => None,
+            },
+            show_all: self.show_all,
+            chip: self.chip.clone(),
+            member_sort: self.member_sort,
+            folded_groups: self.folded_groups.clone(),
+            folded_buckets: self.folded_buckets.clone(),
+            open_members: self.open_members.clone(),
+        }
+    }
+
+    /// Reads the rail from the provider when a change came in or the inputs
+    /// changed; otherwise keeps what it has.
+    fn refresh(&mut self, cx: &App) {
+        let mut inputs = self.inputs(cx);
+        if self.cache.as_ref().is_some_and(|c| c.inputs == inputs) {
+            return;
+        }
+        let p = self.services.provider.clone();
+        let side = p.side_chat_topics();
+        let entries = match inputs.mode {
+            RailMode::Work => modes::work(p.as_ref(), &inputs),
+            RailMode::Attention => modes::attention(p.as_ref(), &inputs, &side),
+            RailMode::Member => modes::by_member(p.as_ref(), &mut inputs, &side),
+        };
+        // C opens its first busy member on the first read.
+        self.open_members = inputs.open_members.clone();
+        let old = self
+            .cache
+            .as_ref()
+            .map(|c| (c.inputs.mode, c.entries.len()));
+        match old {
+            Some((mode, n)) if mode == inputs.mode => {
+                // Keep the scroll position: replace only the rows past the
+                // old end, and measure the others again.
+                let keep = n.min(entries.len());
+                if n != entries.len() {
+                    self.list.splice(keep..n, entries.len() - keep);
+                }
+                self.list.remeasure_items(0..keep);
+            }
+            _ => self.list.reset(entries.len()),
+        }
+        let me = inputs.me.clone();
+        self.cache = Some(Cache {
+            asks: p.asks_for_me().len(),
+            strip: model::team_strip(p.as_ref(), me.as_deref(), STRIP_MAX, &side),
+            me: me.as_deref().and_then(|m| p.member(m)),
+            groups: model::groups(p.as_ref()),
+            entries: Rc::new(entries),
+            inputs,
+        });
+    }
+
+    /// One row of the virtual list.
+    fn entry(&self, ix: usize, cx: &mut Context<Self>) -> AnyElement {
+        let Some(entries) = self.cache.as_ref().map(|c| c.entries.clone()) else {
+            return div().into_any_element();
+        };
+        let Some(entry) = entries.get(ix) else {
+            return div().into_any_element();
+        };
+        div()
+            .w_full()
+            .pt(entry.gap)
+            .child(self.item(&entry.item, cx))
+            .into_any_element()
     }
 }
 
@@ -277,14 +383,7 @@ impl RailView {
     /// The team strip (A and B): who waits on me, who works, then `+n`.
     fn team_strip(&self, cx: &App) -> Option<AnyElement> {
         let k = theme::colors(cx);
-        let me = self.me();
-        let (shown, rest) =
-            model::team_strip(
-                self.services.provider.as_ref(),
-                me.as_deref(),
-                STRIP_MAX,
-                &self.services.provider.side_chat_topics(),
-            );
+        let (shown, rest) = self.cache.as_ref()?.strip.clone();
         if shown.is_empty() {
             return None;
         }
@@ -336,7 +435,7 @@ impl RailView {
     /// Me: the ink circle with my initial (or photo), my name, 设置.
     fn me_row(&self, cx: &App) -> AnyElement {
         let k = theme::colors(cx);
-        let me = self.me().and_then(|m| self.services.provider.member(&m));
+        let me = self.cache.as_ref().and_then(|c| c.me.clone());
         let photo = me
             .as_ref()
             .and_then(|m| m.avatar_url.as_deref())
@@ -394,20 +493,16 @@ impl RailView {
 impl Render for RailView {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        self.refresh(cx);
         let nav = self.services.nav.read(cx);
         let page = nav.page();
         let mode = nav.rail_mode;
-        let open = nav.topic.clone();
-        let group_page = match (&nav.place, page) {
-            (Some(Place::Group(g)), Page::Group) => Some(g.clone()),
-            _ => None,
-        };
-        let asks = self.services.provider.asks_for_me().len();
-        let list: Vec<AnyElement> = match mode {
-            RailMode::Work => self.work(open.as_ref(), group_page.as_deref(), cx),
-            RailMode::Attention => self.attention(open.as_ref(), cx),
-            RailMode::Member => self.by_member(open.as_ref(), cx),
-        };
+        let asks = self.cache.as_ref().map_or(0, |c| c.asks);
+        let view = cx.entity();
+        let rows = list(self.list.clone(), move |ix, _, cx| {
+            view.update(cx, |this, cx| this.entry(ix, cx))
+        })
+        .size_full();
         // C trades 成员 for 话题 among the destinations: its list is members.
         let destinations: Vec<AnyElement> = match mode {
             RailMode::Member => vec![
@@ -539,19 +634,10 @@ impl Render for RailView {
             .child(header)
             .child(
                 div()
-                    .id(SharedString::from(format!("rail-list-{}", mode.slug())))
                     .flex_1()
                     .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .flex()
-                    .flex_col()
-                    .gap(if mode == RailMode::Member {
-                        px(0.)
-                    } else {
-                        space::S6
-                    })
                     .when(mode == RailMode::Attention, |el| el.mt(space::S8))
-                    .children(list),
+                    .child(rows),
             )
             // App banners (connection, update) sit above the footer.
             .children(crate::views::banners::slot(cx))
@@ -651,7 +737,11 @@ impl RailView {
     /// shows whole in a tooltip.
     fn chips(&self, cx: &mut Context<Self>) -> AnyElement {
         let k = theme::colors(cx);
-        let groups = model::groups(self.services.provider.as_ref());
+        let groups = self
+            .cache
+            .as_ref()
+            .map(|c| c.groups.clone())
+            .unwrap_or_default();
         let mut chips: Vec<AnyElement> = Vec::new();
         let entries = std::iter::once((None, c::RAIL_FILTER_ALL_GROUPS.to_string()))
             .chain(groups.into_iter().map(|(id, name)| (Some(id), name)));
@@ -704,5 +794,54 @@ impl RailView {
             .gap(space::S2)
             .children(chips)
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        app::Changes,
+        data::{Change, ChatProvider},
+        fake::v2::V2Samples,
+    };
+
+    /// Frames (a breathing ring asks for one 24 times a second) draw the
+    /// rail from memory; only a provider change reads it again.
+    #[gpui::test]
+    fn the_rail_reads_the_provider_once_per_change(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            RailView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let entries = |view: &gpui::Entity<RailView>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, _| this.cache.as_ref().map(|c| c.entries.clone()))
+                .expect("the rail read its lists")
+        };
+        let first = entries(&view, cx);
+        assert!(!first.is_empty());
+        for _ in 0..3 {
+            view.update(cx, |_, cx| cx.notify());
+            cx.run_until_parked();
+        }
+        assert!(
+            Rc::ptr_eq(&first, &entries(&view, cx)),
+            "frames reuse the cache"
+        );
+        view.update(cx, |this, cx| {
+            this.services
+                .hub
+                .update(cx, |_, cx| cx.emit(Changes(vec![Change::Todo])))
+        });
+        cx.run_until_parked();
+        assert!(
+            !Rc::ptr_eq(&first, &entries(&view, cx)),
+            "a change reads again"
+        );
     }
 }

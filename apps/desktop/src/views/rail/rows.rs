@@ -6,12 +6,9 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
-use super::{
-    RailView,
-    model::{Meta, RowState},
-};
+use super::{RailView, model::RowState, modes::TopicItem};
 use crate::{
-    data::Topic,
+    data::Member,
     theme::{self, Type as _, space},
     ui::{self, Lucide, MemberAvatar, Ring, RowSurface},
 };
@@ -36,11 +33,13 @@ pub(super) enum SlotStyle {
 }
 
 impl RailView {
-    /// The 16 pt slot at the start of a 话题 row.
+    /// The 16 pt slot at the start of a 话题 row; `tile` is the doing
+    /// member.
     pub(super) fn slot(
         &self,
         id: &str,
         state: &RowState,
+        tile: Option<&Member>,
         style: SlotStyle,
         cx: &App,
     ) -> AnyElement {
@@ -60,14 +59,11 @@ impl RailView {
             RowState::NeedsYou => {
                 center(div().size(DOT).rounded_full().bg(k.you).into_any_element())
             }
-            RowState::Working(m) if style == SlotStyle::Tile => {
-                let member = self.services.provider.member(m);
-                center(
-                    MemberAvatar::new(member.as_ref(), theme::RAIL_SLOT)
-                        .ring(Some(Ring::Live))
-                        .into_any_element(),
-                )
-            }
+            RowState::Working(_) if style == SlotStyle::Tile => center(
+                MemberAvatar::new(tile, theme::RAIL_SLOT)
+                    .ring(Some(Ring::Live))
+                    .into_any_element(),
+            ),
             RowState::Working(_) => center(ui::motion::breathe(
                 SharedString::from(format!("rail-dot-{id}")),
                 div().size(DOT).rounded_full().bg(k.live),
@@ -86,21 +82,23 @@ impl RailView {
         }
     }
 
-    /// A 话题 row: slot, title (quiet rows in `ink-2`), meta. `indent` is the
-    /// left padding (10, or 28 under a member).
-    #[allow(clippy::too_many_arguments)]
-    pub(super) fn topic_row(
-        &self,
-        key: &str,
-        topic: &Topic,
-        state: &RowState,
-        meta: Option<Meta>,
-        meta_you: bool,
-        selected: bool,
-        style: SlotStyle,
-        indent: gpui::Pixels,
-        cx: &App,
-    ) -> AnyElement {
+    /// A 话题 row: slot, title (quiet rows in `ink-2`), meta. The indent is
+    /// the left padding (10, or 28 under a member).
+    pub(super) fn topic_row(&self, item: &TopicItem, cx: &App) -> AnyElement {
+        let TopicItem {
+            key,
+            topic,
+            state,
+            meta,
+            meta_you,
+            selected,
+            style,
+            indent,
+            tile,
+            ..
+        } = item;
+        let (meta_you, selected, style, indent) = (*meta_you, *selected, *style, *indent);
+        let meta = meta.clone();
         let k = theme::colors(cx);
         let nav = self.services.nav.clone();
         let (g, t) = (topic.group_id.clone(), topic.id.clone());
@@ -116,7 +114,13 @@ impl RailView {
         .pl(indent)
         .pr(space::S10)
         .gap(space::S8)
-        .child(self.slot(&format!("{key}-{}", topic.id), state, style, cx))
+        .child(self.slot(
+            &format!("{key}-{}", topic.id),
+            state,
+            tile.as_ref(),
+            style,
+            cx,
+        ))
         .child(
             div()
                 .flex_1()

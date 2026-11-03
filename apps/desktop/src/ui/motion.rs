@@ -760,7 +760,10 @@ mod tests {
         let now = chrono::Local::now().timestamp_millis();
         assert!(just_answered(now));
         assert!(just_answered(now - 1_000));
-        assert!(!just_answered(now - 60_000), "yesterday's answer is at rest");
+        assert!(
+            !just_answered(now - 60_000),
+            "yesterday's answer is at rest"
+        );
     }
 
     struct Rises;

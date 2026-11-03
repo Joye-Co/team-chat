@@ -472,7 +472,11 @@ mod tests {
             .expect("a working 话题");
         let side = SideChats::from([(aside.group_id.clone(), aside.id.clone())]);
         assert!(working(&side).iter().all(|t| t.id != d::T_VIRTUAL));
-        assert!(active_runs(p.as_ref(), &side).iter().all(|r| r.topic_id != d::T_VIRTUAL));
+        assert!(
+            active_runs(p.as_ref(), &side)
+                .iter()
+                .all(|r| r.topic_id != d::T_VIRTUAL)
+        );
         let forge = member_rows(p.as_ref(), Some(d::ME), MemberSort::Busy, &side)
             .into_iter()
             .find(|r| r.member.id == d::FORGE)

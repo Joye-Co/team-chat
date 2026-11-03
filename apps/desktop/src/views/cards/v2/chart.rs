@@ -8,16 +8,15 @@
 //! they are drawn whole.
 
 use gpui::{
-    AnyElement, App, Bounds, Hsla, IntoElement, ParentElement,
-    PathBuilder, Pixels, SharedString, Styled, Window, canvas, div, point,
-    prelude::FluentBuilder as _, px, quad,
+    AnyElement, App, Bounds, Hsla, IntoElement, ParentElement, PathBuilder, Pixels, SharedString,
+    Styled, Window, canvas, div, point, prelude::FluentBuilder as _, px, quad,
 };
 
 use super::meta;
 use crate::{
     data::cards_v2::{ChartKind, ChartSeries},
-    ui,
     theme::{self, Type as _, card_v2 as m, motion, space},
+    ui,
 };
 
 /// Values of a series as floats.
@@ -339,7 +338,10 @@ mod tests {
         assert_eq!(draw_time(ChartKind::Bar, 3), motion::BAR_GROW);
         // At the end every series is whole; early on the second lags.
         assert!((series_progress(ChartKind::Line, 2, 1, 1.) - 1.).abs() < 1e-4);
-        assert!(series_progress(ChartKind::Line, 2, 1, 0.05) < series_progress(ChartKind::Line, 2, 0, 0.05));
+        assert!(
+            series_progress(ChartKind::Line, 2, 1, 0.05)
+                < series_progress(ChartKind::Line, 2, 0, 0.05)
+        );
         assert_eq!(series_progress(ChartKind::Line, 2, 1, 0.), 0.);
     }
 }
