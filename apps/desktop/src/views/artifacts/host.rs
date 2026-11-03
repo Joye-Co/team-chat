@@ -918,29 +918,34 @@ fn ask_about(
         value: value.clone().map(refs::value::cap),
         card_rev: None,
     };
-    let asked = match window {
-        Some(w) => Some(refs::ask_about_outcome(
-            target,
-            refs::RefIntent::Topic,
-            w,
-            cx,
-        )),
-        None => cx
-            .active_window()
-            .or_else(|| cx.windows().into_iter().next())
-            .and_then(|handle| {
-                handle
-                    .update(cx, |_, w, cx| {
-                        refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx)
-                    })
-                    .ok()
-            }),
+    // The toast goes to the window that asked. A page in the main window asks while that
+    // window is being updated, so it cannot be found and updated again (`files::notify`).
+    use gpui_component::WindowExt as _;
+    let note = |asked: refs::Asked| {
+        ref_notice(asked)
+            .map(|text| gpui_component::notification::Notification::new().message(text.to_string()))
     };
-    if let Some(text) = asked.and_then(ref_notice) {
-        crate::views::files::notify(
-            gpui_component::notification::Notification::new().message(text.to_string()),
-            cx,
-        );
+    match window {
+        Some(w) => {
+            let asked = refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
+            if let Some(n) = note(asked) {
+                w.push_notification(n, cx);
+            }
+        }
+        None => {
+            let _ = cx
+                .active_window()
+                .or_else(|| cx.windows().into_iter().next())
+                .map(|handle| {
+                    handle.update(cx, |_, w, cx| {
+                        let asked =
+                            refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
+                        if let Some(n) = note(asked) {
+                            w.push_notification(n, cx);
+                        }
+                    })
+                });
+        }
     }
 }
 
