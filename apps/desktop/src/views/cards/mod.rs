@@ -16,6 +16,9 @@ mod actions;
 mod blocks;
 pub mod samples;
 pub mod selftest;
+// --- cards v2 track ---
+pub mod v2;
+// --- end cards v2 track ---
 
 use std::{
     cell::RefCell,
@@ -52,6 +55,14 @@ impl MessageExtra for CardExtra {
         if message.id.is_empty() {
             return false;
         }
+        // A v2 card shows instead of its body when the body is only the
+        // fallback or the title.
+        if let Some(v2) = ctx.provider.card_v2(&message.group_id, &message.id) {
+            let body = message.body.trim();
+            return body.is_empty()
+                || body == v2.card.title.trim()
+                || body == v2.card.fallback.trim();
+        }
         ctx.provider
             .card(&message.group_id, &message.id)
             .is_some_and(|card| {
@@ -69,6 +80,29 @@ impl MessageExtra for CardExtra {
     ) -> Option<AnyElement> {
         if message.id.is_empty() {
             return None;
+        }
+        // Card v2 (1.1.0): the generative card replaces the derived v1 card.
+        if v2::has_card(ctx.provider, &message.group_id, &message.id) {
+            let env = v2::CardEnv {
+                viewer: ctx.me.map(str::to_string),
+                ..v2::CardEnv::new(ctx.provider.clone())
+            };
+            let card = v2::render(
+                &env,
+                &message.group_id,
+                &message.id,
+                v2::CardMode::Topic,
+                window,
+                cx,
+            )?;
+            return Some(
+                div()
+                    .mt(space::S6)
+                    .w_full()
+                    .max_w(px(CARD_MAX_WIDTH))
+                    .child(card)
+                    .into_any_element(),
+            );
         }
         let card = ctx.provider.card(&message.group_id, &message.id)?;
         Some(render_card(&card, message, ctx, window, cx))
