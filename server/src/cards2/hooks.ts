@@ -6,6 +6,7 @@ import { MAX_CARD_V2_REVS } from "@chat/protocol";
 import { ApiError } from "../core/errors";
 import { type RoomContext, registerMessageWriteHook, registerRoomAlarm } from "../core/registry";
 import { cardLock, writeCardUpdate } from "./events";
+import { markPrivate, shownCause } from "./privacy";
 import { checkBodyLength, clearRefsTo, indexRefs, resolveRefs, withPrefix, withoutPrefix } from "./refs";
 import { checkEmbeds, deriveV1, directory, recordRev, refreshTopicWaiting, rememberRequester, stateForWrite, syncTimer } from "./state";
 import { CAUSE_MAX_AGE_MS, causeOf, eventRow, extOf, messageRow } from "./store";
@@ -36,7 +37,7 @@ registerMessageWriteHook({
     const f = frame as { cardV2?: CardV2; card?: unknown; causeEventId?: string; blockRefs?: BlockRefInput[]; topicId?: string };
     const ext: Record<string, unknown> = { ...(draft.ext ?? {}) };
     const cause = f.causeEventId ? checkCause(room, f.causeEventId, actor.id) : undefined;
-    if (cause) ext.cause = cause;
+    if (cause) ext.cause = shownCause(room.sql, cause);
     let refs: BlockRef[] | undefined;
     if (f.blockRefs && f.blockRefs.length > 0) {
       refs = resolveRefs(room, f.blockRefs);
@@ -53,7 +54,7 @@ registerMessageWriteHook({
       card = { ...f.cardV2, rev: 1 };
       checkEmbeds(room.sql, card);
       state = await stateForWrite(room, dir, card, undefined, actor.id, f.topicId ?? null, now);
-      if (cause) state.lastCause = cause;
+      if (cause) state.lastCause = shownCause(room.sql, cause);
       ext.cardV2 = card;
       ext.cardState = state;
       if (f.card === undefined) ext.card = deriveV1(card, state, dir);
@@ -65,6 +66,7 @@ registerMessageWriteHook({
         if (refs) indexRefs(room.sql, message.id, refs);
         if (card && state) {
           recordRev(room.sql, message.id, card);
+          markPrivate(room.sql, message.id, card);
           rememberRequester(room.sql, message.id, state);
           syncTimer(room, message.id, state);
           if (state.ask?.status === "open" && state.ask.blocking) refreshTopicWaiting(room, tx, message.topicId, actor.id);
@@ -99,18 +101,19 @@ registerMessageWriteHook({
       card = { ...f.cardV2, rev: (stored?.rev ?? 0) + 1 };
       checkEmbeds(room.sql, card);
       state = await stateForWrite(room, dir, card, current.cardState, current.authorId, current.topicId, Date.now(), current.id);
-      if (cause) state.lastCause = cause;
+      if (cause) state.lastCause = shownCause(room.sql, cause);
       draft.changed.cardV2 = card;
       draft.changed.cardState = state;
       if (f.card === undefined) draft.changed.card = deriveV1(card, state, dir);
       if (f.body === "") draft.body = card.fallback || card.title;
     } else if (f.baseRev !== undefined) throw new ApiError("invalid", "baseRev goes with cardV2");
-    if (cause) draft.changed.cause = cause;
+    if (cause) draft.changed.cause = shownCause(room.sql, cause);
     if (!cause && !card) return undefined;
     return {
       inTx(tx, message) {
         if (card && state) {
           recordRev(room.sql, message.id, card);
+          markPrivate(room.sql, message.id, card);
           syncTimer(room, message.id, state);
           refreshTopicWaiting(room, tx, message.topicId, actor.id);
         }

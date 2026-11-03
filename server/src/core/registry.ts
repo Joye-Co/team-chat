@@ -258,6 +258,21 @@ export function registerEventDecorator(d: EventDecorator): void {
   eventDecorators.push(d);
 }
 
+// cards2: what one member may see of a stored event or a message (non-public polls and
+// anonymous questionnaires keep voters and their choices from other members).
+/** The event as `viewerId` gets it, live and in `fetch` pages (not in exports). */
+export type EventView = (event: Event, viewerId: string, sql: SqlStorage) => Event;
+export const eventViews: EventView[] = [];
+export function registerEventView(v: EventView): void {
+  eventViews.push(v);
+}
+/** The message as `viewerId` gets it in history and in write acks. */
+export type MessageView = (message: Message, viewerId: string, sql: SqlStorage) => Message;
+export const messageViews: MessageView[] = [];
+export function registerMessageView(v: MessageView): void {
+  messageViews.push(v);
+}
+
 // ---------------------------------------------------------------------------
 // MemberGateway: RPC handlers and migrations
 // ---------------------------------------------------------------------------

@@ -289,3 +289,103 @@ describe("concurrent card writes", () => {
     for (const c of [co, ca, cbot]) c.close();
   });
 });
+
+describe("private answers", () => {
+  /** Whether a frame names this member as the actor of something (ask.from may still list them). */
+  const names = (x: unknown, id: string) => {
+    const t = JSON.stringify(x);
+    return t.includes(`"actorId":"${id}"`) || t.includes(`"answeredBy":"${id}"`);
+  };
+  const privatePoll = (voters: string[]) =>
+    base({
+      intent: "ask",
+      title: "周五团建去哪？",
+      ask: { from: ["owners"], blocking: false },
+      blocks: [
+        {
+          id: "where",
+          type: "poll",
+          label: "去哪",
+          options: [{ id: "a", label: "爬山" }, { id: "b", label: "火锅" }],
+          voters,
+          closesAt: Date.now() + 60_000,
+          public: false,
+          changeable: true,
+          fallbackText: "投票：爬山或火锅",
+        },
+      ],
+    });
+
+  it("a non-public poll gives other members and the author counts only, and the voter their own vote", async () => {
+    const { owner, alice, bob, bot, gid, co, ca, cb, cbot } = await setup();
+    const m = (await send(cbot, gid, privatePoll([alice.id, bob.id, owner.id]))).message;
+    const r = await ev(ca, gid, m.id, { blockId: "where", event: "choice.submit", value: { value: "a" } });
+    expect(r).toMatchObject({ ok: true, result: { stored: true } });
+    const upd = (c: Client) => c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id);
+    const ans = (c: Client) => c.waitEvent((e) => e.type === "card.answered" && e.data.messageId === m.id);
+    // Live.
+    for (const c of [cb, co, cbot]) {
+      const a = await ans(c);
+      expect(a.actorId).toBe("anonymous");
+      const u = await upd(c);
+      expect(u.data.cardState.answers).toEqual([]);
+      expect(u.data.cardState.tally).toEqual({ a: 1, b: 0 });
+      expect(u.data.cardState.tallyBy).toBeUndefined();
+      expect(names([a, u], alice.id)).toBe(false);
+    }
+    expect((await ans(cb)).data.value).toBeUndefined();
+    expect((await ans(cbot)).data.value).toEqual({ value: "a" });
+    const mine = await upd(ca);
+    expect(mine.data.cardState.answers).toHaveLength(1);
+    expect(mine.data.cardState.answers[0]).toMatchObject({ actorId: alice.id, value: { value: "a" } });
+    expect((await ans(ca)).actorId).toBe(alice.id);
+    // Pages and history.
+    const page = await cb.request({ t: "fetch", groupId: gid, afterSeq: m.createdSeq });
+    expect(names(page.events, alice.id)).toBe(false);
+    const hist = await cb.request({ t: "history", groupId: gid, topicId: m.topicId });
+    const seen = hist.messages.find((x: any) => x.id === m.id);
+    expect(seen.cardState.answers).toEqual([]);
+    expect(names(seen, alice.id)).toBe(false);
+    // Everyone voted: the v1 status names nobody.
+    await ev(cb, gid, m.id, { blockId: "where", event: "choice.submit", value: { value: "b" } });
+    await ev(co, gid, m.id, { blockId: "where", event: "choice.submit", value: { value: "b" } });
+    const done = await ca.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardState.ask.status === "answered");
+    expect(done.data.cardState.ask.answeredBy).toBeUndefined();
+    expect(done.data.card.status.label).toBe("已回答");
+    void bot;
+    for (const c of [co, ca, cb, cbot]) c.close();
+  });
+
+  it("an anonymous questionnaire gives the author the answers without voters and other members nothing", async () => {
+    const { alice, bob, gid, co, ca, cb, cbot } = await setup();
+    const card = base({
+      intent: "ask",
+      title: "实习反馈",
+      ask: { from: [alice.id, bob.id], blocking: false },
+      blocks: [
+        { id: "q", type: "questionnaire", children: ["mood", "next"], anonymous: true, fallbackText: "实习反馈" },
+        { id: "mood", type: "input", kind: "text", label: "感受" },
+        { id: "next", type: "input", kind: "text", label: "建议" },
+      ],
+    });
+    const m = (await send(cbot, gid, card)).message;
+    const r = await ev(ca, gid, m.id, { blockId: "q", event: "action.press", inputs: { mood: { value: "还行" } } });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true, result: { stored: true } });
+    const au = await cbot.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id);
+    expect(au.data.cardState.answers).toHaveLength(1);
+    expect(au.data.cardState.answers[0]).toMatchObject({ actorId: "anonymous", inputs: { mood: { value: "还行" } } });
+    const aa = await cbot.waitEvent((e) => e.type === "card.answered" && e.data.messageId === m.id);
+    expect(aa).toMatchObject({ actorId: "anonymous", data: { inputs: { mood: { value: "还行" } } } });
+    for (const c of [cb, co]) {
+      const u = await c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id);
+      const a = await c.waitEvent((e) => e.type === "card.answered" && e.data.messageId === m.id);
+      expect(u.data.cardState.answers).toEqual([]);
+      expect(a.data.inputs).toBeUndefined();
+      expect(names([u, a], alice.id)).toBe(false);
+      expect(JSON.stringify([u, a])).not.toContain("还行");
+    }
+    const page = await cbot.request({ t: "fetch", groupId: gid, afterSeq: m.createdSeq });
+    expect(names(page.events, alice.id)).toBe(false);
+    for (const c of [co, ca, cb, cbot]) c.close();
+  });
+});

@@ -18,6 +18,7 @@ import { type CardEventArgs, cardEvent, cardLock, loadCard, writeCardUpdate } fr
 import { closeRetractWindow } from "./delivery";
 import { checkCause, resolved } from "./hooks";
 import { applyPatch } from "./patch";
+import { shownCause, viewMessage } from "./privacy";
 import { checkEmbeds, directory, isPick, recordRev, stateForWrite } from "./state";
 import { EVENT_KEEP_MS, eventRow, pruneEvents } from "./store";
 
@@ -154,13 +155,14 @@ async function patchLocked(
   }
   if (!bucket.take()) throw new ApiError("rate_limited", "too many patches for this card");
   const nextState = await stateForWrite(room, dir, next, state, row.author_id, row.topic_id, now, row.id);
-  if (cause) nextState.lastCause = cause;
+  const shown = cause ? shownCause(room.sql, cause) : undefined;
+  if (shown) nextState.lastCause = shown;
   let ack: CardPatchAck | undefined;
   room.commit((tx) => {
-    writeCardUpdate(room, tx, row, ext, a.id, dir, { card: next, state: nextState, cardChanged: true, cause, body: next.fallback || next.title, now });
+    writeCardUpdate(room, tx, row, ext, a.id, dir, { card: next, state: nextState, cardChanged: true, cause: shown, body: next.fallback || next.title, now });
     recordRev(room.sql, row.id, next);
     const m = room.sql.exec<Record<string, SqlStorageValue>>("SELECT * FROM messages WHERE id = ?", row.id).toArray()[0];
-    ack = { message: toMessage(room, m), rev: next.rev };
+    ack = { message: viewMessage(toMessage(room, m), a.id, room.sql), rev: next.rev };
     if (f.clientPatchId) {
       room.sql.exec(
         "INSERT OR REPLACE INTO card_patches (actor_id, message_id, client_patch_id, at, ack) VALUES (?, ?, ?, ?, ?)",

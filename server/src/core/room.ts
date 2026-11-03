@@ -42,6 +42,8 @@ import {
   eventWriters,
   messageExtensions,
   type MessageWriteResult,
+  eventViews,
+  messageViews,
   messageWriteHooks,
   roomAlarmHandlers,
   roomMigrations,
@@ -376,7 +378,7 @@ export class GroupRoom extends DurableObject<Env> {
     events.forEach((event, i) => {
       const dc = { groupId: this.groupId as string, groupKind: this.groupKind, sql: this.sql, hints: hints[i] };
       for (const id of recipients) {
-        let frame: Record<string, unknown> = { t: "event", event };
+        let frame: Record<string, unknown> = { t: "event", event: this.viewEvent(event, id) };
         for (const d of eventDecorators) {
           try {
             const add = d(event, id, dc);
@@ -802,7 +804,7 @@ export class GroupRoom extends DurableObject<Env> {
         .toArray()[0] as MessageRow | undefined;
       if (existing) {
         const topic = this.topicRow(existing.topic_id);
-        const result: SendResult = { message: this.toMessage(existing), duplicate: true };
+        const result: SendResult = { message: this.viewMessage(this.toMessage(existing), actor.id), duplicate: true };
         if (topic && topic.root_message_id === existing.id) result.topic = this.toTopic(topic);
         return result;
       }
@@ -919,7 +921,7 @@ export class GroupRoom extends DurableObject<Env> {
       // Card writes of this message wait for this edit (its hooks await) and the reverse.
       const { edited, writes } = await this.serial(`message:${frame.messageId}`, () => this.editLocked(actor, frame));
       for (const w of writes) w.after?.(edited.message);
-      return edited;
+      return { message: this.viewMessage(edited.message, actor.id) };
     });
   }
 
@@ -1231,16 +1233,31 @@ export class GroupRoom extends DurableObject<Env> {
     return run(async () => {
       await this.ready(groupId);
       this.requireMember(actor.id);
-      return this.page(afterSeq, Math.min(limit ?? DEFAULT_FETCH_LIMIT, 500));
+      return this.page(afterSeq, Math.min(limit ?? DEFAULT_FETCH_LIMIT, 500), MAX_PAGE_BYTES, actor.id);
     });
   }
 
-  private page(afterSeq: number, limit: number, maxBytes = MAX_PAGE_BYTES): PageResult {
+  /** A page of the log; with `viewerId`, each event as that member may see it. */
+  private page(afterSeq: number, limit: number, maxBytes = MAX_PAGE_BYTES, viewerId?: string): PageResult {
     const rows = this.sql
       .exec<EventRow>("SELECT seq, type, at, actor_id, data FROM events WHERE seq > ? ORDER BY seq LIMIT ?", afterSeq, limit + 1)
       .toArray() as EventRow[];
     const n = fitBytes(rows, limit, maxBytes, (r) => r.data.length);
-    return { events: rows.slice(0, n).map((r) => this.toEvent(r)), hasMore: rows.length > n, lastSeq: this.lastSeq };
+    const events = rows.slice(0, n).map((r) => this.toEvent(r));
+    return { events: viewerId === undefined ? events : events.map((e) => this.viewEvent(e, viewerId)), hasMore: rows.length > n, lastSeq: this.lastSeq };
+  }
+
+  // cards2: per-viewer views of events and messages (registerEventView, registerMessageView).
+  private viewEvent(event: Event, viewerId: string): Event {
+    let out = event;
+    for (const v of eventViews) out = v(out, viewerId, this.sql);
+    return out;
+  }
+
+  private viewMessage(message: Message, viewerId: string): Message {
+    let out = message;
+    for (const v of messageViews) out = v(out, viewerId, this.sql);
+    return out;
   }
 
   async history(
@@ -1264,7 +1281,7 @@ export class GroupRoom extends DurableObject<Env> {
         )
         .toArray() as MessageRow[];
       const k = fitBytes(rows, n, MAX_PAGE_BYTES, (r) => r.body.length + (r.ext?.length ?? 0));
-      return { messages: rows.slice(0, k).map((r) => this.toMessage(r)), hasMore: rows.length > k };
+      return { messages: rows.slice(0, k).map((r) => this.viewMessage(this.toMessage(r), actor.id)), hasMore: rows.length > k };
     });
   }
 

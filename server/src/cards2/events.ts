@@ -22,6 +22,7 @@ import { TokenBucket } from "../core/ratelimit";
 import type { Actor, RoomContext, RoomTx } from "../core/registry";
 import { type CardEventDelivery, expectFor } from "./delivery";
 import { eventValueProblem, eventsOf, inputProblem } from "./inputs";
+import { markPrivate, privacyOf } from "./privacy";
 import { auditValue } from "../core/auditvalue";
 import {
   type Directory,
@@ -136,6 +137,7 @@ export function writeCardUpdate(
   // Every caller read the row before an await; a delete may have come in between.
   if (messageRow(room.sql, row.id)?.deleted_at !== null) throw new ApiError("not_found", "card message not found");
   const card = deriveV1(change.card, change.state, dir);
+  markPrivate(room.sql, row.id, change.card);
   const next: Record<string, unknown> = { ...ext, cardV2: change.card, card, cardState: change.state };
   if (change.cause) next.cause = change.cause;
   const body = change.body ?? row.body;
@@ -154,7 +156,8 @@ export function writeCardUpdate(
   tx.append({ type: "message.updated", actorId, topicId: row.topic_id, messageId: row.id, data });
   room.sql.exec("UPDATE topics SET last_seq = ? WHERE id = ?", seq, row.topic_id);
   syncTimer(room, row.id, change.state);
-  refreshTopicWaiting(room, tx, row.topic_id, actorId);
+  // A private card's topic change does not name the voter (./privacy).
+  refreshTopicWaiting(room, tx, row.topic_id, privacyOf(change.card) ? row.author_id : actorId);
 }
 
 function findBlock(card: CardV2, id: string): Block | undefined {

@@ -20,6 +20,7 @@ import { ApiError } from "../core/errors";
 import type { RoomContext, RoomTx } from "../core/registry";
 import { setFollowing } from "../core/topicstate";
 import { requesterResolvers } from "./delivery";
+import { privacyOf } from "./privacy";
 
 export type MemberInfo = { name: string; kind: "human" | "bot"; level: "owner" | "member"; deactivated: boolean };
 export type Directory = Map<string, MemberInfo>;
@@ -427,6 +428,8 @@ export function statusLabel(card: CardV2, state: CardState | undefined, dir: Dir
     case "open":
       return ask.from.length === 1 ? `等 ${name(ask.from[0])} 拍板` : `等 ${ask.from.length} 位成员拍板`;
     case "answered": {
+      // Private answers (./privacy): the shared v1 card names no voter and no choice.
+      if (privacyOf(card)) return "已回答";
       const a = [...(state?.answers ?? [])].reverse().find((x) => x.askId === ask.id && x.retractedAt === undefined);
       if (!a) return undefined;
       const label = chosenLabel(card, a);

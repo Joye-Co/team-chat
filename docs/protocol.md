@@ -1167,6 +1167,16 @@ other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
 
+Private answers: a card with a `poll` whose `public` is not true, or with a `questionnaire` with
+`anonymous: true`, is private from its first such rev on. The server keeps every answer; each
+member gets its own view, live, in `fetch` pages, in `history` and in acks. The answerer sees
+their own answers in full. Every other answer, `card.answered`, `card.retracted` and the state
+`message.updated` they cause carry `actorId: "anonymous"` (not a member id), and
+`cardState.ask.answeredBy`, `tallyBy` and the voter in `lastCause`/`cause` are left out. The
+card's author gets the values of `card.answered`, and for an anonymous questionnaire the other
+answers in `cardState.answers` (with `actorId: "anonymous"`); other members get neither (a poll's
+`tally` is for everyone). The derived v1 status of an answered private card is "已回答".
+
 ### Patches and resolves
 
 ```ts
