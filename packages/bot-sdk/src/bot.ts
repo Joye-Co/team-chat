@@ -239,13 +239,17 @@ export interface CardAnswerContext<I extends Record<string, unknown> = Record<st
   updateTopic(change: TopicChange): Promise<Topic>;
 }
 
-/** A page event from one of my 产出 (`artifact.evented`). Never treat it as an approval. */
+/** A page event from one of my 产出 (transient `artifact.event`). Never treat it as an approval. */
 export interface ArtifactEventContext {
   bot: Bot;
-  event: EventOf<"artifact.evented">;
+  event: Extract<TransientEvent, { type: "artifact.event" }>;
   groupId: string;
-  /** The topic of the 产出, when this process knows it. */
+  /** The topic of the 产出. */
   topicId?: string;
+  /** The event id (page events are not stored). */
+  eventId: string;
+  /** `emit`, or `ask` (the page waits for a reply). */
+  kind: "emit" | "ask";
   artifactId: string;
   version: number;
   name: string;
@@ -349,7 +353,7 @@ function trimOldest(map: Record<string, unknown>, max: number): void {
 function findBlock(card: CardV2 | undefined, id: string): CardV2["blocks"][number] | undefined {
   for (const b of card?.blocks ?? []) {
     if (b.id === id) return b;
-    if (b.type === "group") for (const c of b.blocks) if (c.id === id) return c as CardV2["blocks"][number];
+    if (b.type === "group") for (const c of b.blocks ?? []) if (c.id === id) return c as CardV2["blocks"][number];
   }
   return undefined;
 }
@@ -881,6 +885,9 @@ export class Bot {
           protocol: PROTOCOL_VERSION,
           client: this.opts.client ?? { name: "bot-sdk", version: SDK_VERSION },
           cursors,
+          // 1.1: page events and the other interaction transients reach this connection.
+          features: ["interact/1"],
+          supportedCatalogs: ["tc.card/2.0", "tc.card/2.1"],
         },
         true,
       );
@@ -1093,6 +1100,13 @@ export class Bot {
         return this.onEventFrame(f.event as RawEvent, false);
       case "transient": {
         const e = f.event as TransientEvent;
+        if (e.type === "artifact.event" && e.actorId !== this.meMember?.id) {
+          for (const h of this.artifactEventHandlers) {
+            Promise.resolve()
+              .then(() => h(this.artifactEventContext(e)))
+              .catch((err) => this.emitError(err, "onArtifactEvent"));
+          }
+        }
         for (const h of this.transientHandlers) {
           try {
             h(e);
@@ -1351,12 +1365,6 @@ export class Bot {
           if (version.createdBy === me || artifact.createdBy === me) this.noteArtifact(artifact.id, { groupId: artifact.groupId, topicId: artifact.topicId });
           break;
         }
-        case "artifact.evented": {
-          const ref = this.state.artifacts?.[event.data.artifactId];
-          if (!ref || event.actorId === me) break;
-          for (const h of this.artifactEventHandlers) jobs.push(() => h(this.artifactEventContext(event, ref, catchUp)));
-          break;
-        }
         case "card.actioned": {
           const ref = this.state.cards[event.data.messageId];
           if (!ref || event.actorId === me) break;
@@ -1464,7 +1472,9 @@ export class Bot {
   }
 
   private answerContext(event: EventOf<"card.answered">, topicId: string, catchUp: boolean): CardAnswerContext {
-    const { messageId, rev, actionId } = event.data;
+    const { messageId, rev } = event.data;
+    // 2.1: the commit of an immediate block has no action id (it names `blockId`).
+    const actionId = event.data.actionId ?? "";
     const inputs = (event.data.inputs ?? {}) as Record<string, AnswerValue>;
     const editedValues = event.data.editedValues ?? {};
     const card = this.cardCache.get(messageId);
@@ -1525,25 +1535,27 @@ export class Bot {
     };
   }
 
-  private artifactEventContext(event: EventOf<"artifact.evented">, ref: CardRef, catchUp: boolean): ArtifactEventContext {
-    const { artifactId, version, name, payload } = event.data;
+  private artifactEventContext(event: Extract<TransientEvent, { type: "artifact.event" }>): ArtifactEventContext {
+    const { artifactId, version, name, payload, eventId, kind, topicId } = event;
     let n = 0;
-    const nextId = () => `bot:${event.groupId}:${event.seq}:${n++}`;
+    const nextId = () => `bot:${event.groupId}:${eventId}:${n++}`;
     return {
       bot: this,
       event,
       groupId: event.groupId,
-      topicId: ref.topicId,
+      topicId,
+      eventId,
+      kind,
       artifactId,
       version,
       name,
       payload,
       actorId: event.actorId,
-      catchUp,
+      catchUp: false,
       reply: (input) => {
         const i = typeof input === "string" ? { body: input } : { ...input };
         if (!i.clientMsgId) i.clientMsgId = nextId();
-        return this.send({ groupId: event.groupId, topicId: ref.topicId }, i);
+        return this.send({ groupId: event.groupId, topicId }, i);
       },
     };
   }

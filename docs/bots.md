@@ -208,8 +208,10 @@ topic from a side chat; the member does that with the suggestion button.
 
 **Page events.** A bot's 产出 page may send events back when its version declares them:
 `http.publishHtml({ ..., events: [{ name: "pick", label: "选这个" }] })`. `onArtifactEvent`
-gets each `artifact.evented` on my 产出 (`ctx.name`, `ctx.payload`, `ctx.actorId`). A page event
-never approves anything: ask with a Card v2 when you need a decision.
+gets each page event of my 产出 while the bot is connected (the transient `artifact.event`:
+`ctx.eventId`, `ctx.kind`, `ctx.name`, `ctx.payload`, `ctx.actorId`). Page events are not stored
+in the group log, so they are not caught up after a restart. A page event never approves
+anything: ask with a Card v2 when you need a decision.
 
 **Acceptance criteria (验收标准).** `ctx.setAcceptance([{ text, state: "pending" | "pass" |
 "fail", evidence? }])` replaces the list of the current run (at most 20) and starts a run when
