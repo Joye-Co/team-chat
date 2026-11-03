@@ -7,6 +7,8 @@ import { dirname } from "node:path";
 export interface CardRef {
   groupId: string;
   topicId: string;
+  /** The card message's `createdSeq`, so its card can be loaded again after a restart. */
+  seq?: number;
 }
 
 export interface BotStateData {

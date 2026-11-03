@@ -533,6 +533,56 @@ describe("1.1 cards, side chats and page events", () => {
     expect(d.draft()).toBe("您好,问题已修复,谢谢。");
   });
 
+  test("after a restart the answered card is loaded again: resolve and draft work", async () => {
+    const asker = await post("/v1/bots", { name: "Asker" }, { authorization: `Bearer ${ownerToken}` });
+    const askerState = join(server.dir, "asker.state.json");
+    const first = new Bot({ url: server.url, token: asker.token, stateFile: askerState, logLevel: "warn" });
+    await first.start();
+    const ask = await first.postCardV2(
+      { groupId: generalId },
+      decisionCard({ title: "重启后选", options: ["甲", "乙"], from: [ownerId()] }),
+    );
+    const draft = await first.postCardV2(
+      { groupId: generalId },
+      draftCard({ title: "重启后的草稿", draft: "原文不改", from: [ownerId()] }),
+    );
+    await first.stop();
+    // State saved by an older SDK has no seq: the card is found by paging back.
+    const saved = JSON.parse(readFileSync(askerState, "utf8"));
+    expect(saved.cards[ask.message.id].seq).toBe(ask.message.createdSeq);
+    delete saved.cards[draft.message.id].seq;
+    // The cursor is past both cards, so catch-up does not show them to the new process.
+    saved.cursors[generalId] = Math.max(saved.cursors[generalId] ?? 0, draft.message.createdSeq);
+    writeFileSync(askerState, JSON.stringify(saved));
+    // Answered while the bot is down: reaches it in catch-up.
+    await human.answerCard(generalId, { messageId: draft.message.id, rev: 1, actionId: "submit" });
+
+    const second = new Bot({ url: server.url, token: asker.token, stateFile: askerState, logLevel: "warn" });
+    expect(second.knownCard(ask.message.id)).toBeUndefined();
+    const drafts: (string | undefined)[] = [];
+    const resolved: number[] = [];
+    second.onCardAnswer(async (ctx) => {
+      if (ctx.messageId === draft.message.id) drafts.push(ctx.draft());
+      if (ctx.messageId === ask.message.id) {
+        expect(ctx.card?.title).toBe("重启后选");
+        expect(ctx.action?.id).toBe("submit");
+        expect(ctx.cancelled).toBe(false);
+        const m = await ctx.resolve({ intent: "info" });
+        resolved.push(m.cardV2?.rev ?? 0);
+      }
+    });
+    await second.start();
+    try {
+      await waitFor("draft answer after restart", () => drafts.length === 1, 20_000);
+      expect(drafts[0]).toBe("原文不改");
+      await human.answerCard(generalId, { messageId: ask.message.id, rev: 1, actionId: "submit", inputs: { choice: "o1" } });
+      await waitFor("resolved after restart", () => resolved.length === 1, 20_000);
+      expect(resolved[0]).toBe(2);
+    } finally {
+      await second.stop();
+    }
+  }, 60_000);
+
   test("builders reject cards that do not fit the protocol", () => {
     expect(() => decisionCard({ title: "x", options: ["only one"], from: ["owners"] })).toThrow(ChatError);
     expect(() => formCard({ title: "x", inputs: [{ id: "bad id!", kind: "text", label: "a" }], from: ["owners"] })).toThrow(

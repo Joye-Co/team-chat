@@ -1333,7 +1333,13 @@ export class Bot {
         case "card.answered": {
           const ref = this.state.cards[event.data.messageId];
           if (!ref || event.actorId === me) break;
-          for (const h of this.answerHandlers) jobs.push(() => h(this.answerContext(event, ref.topicId, catchUp)));
+          // After a restart or a cache eviction, load the card before the handlers read it.
+          let loaded: Promise<void> | null = null;
+          for (const h of this.answerHandlers)
+            jobs.push(async () => {
+              await (loaded ??= this.loadCard(event.data.messageId, ref));
+              return h(this.answerContext(event, ref.topicId, catchUp));
+            });
           break;
         }
         case "artifact.created":
@@ -1567,7 +1573,7 @@ export class Bot {
     if (m.cardV2) this.cacheCard(m.id, m.cardV2);
     if (m.kind !== "card" && !m.card) return;
     if (this.state.cards[m.id]) return;
-    this.state.cards[m.id] = { groupId: m.groupId, topicId: m.topicId };
+    this.state.cards[m.id] = { groupId: m.groupId, topicId: m.topicId, seq: m.createdSeq };
     const ids = Object.keys(this.state.cards);
     if (ids.length > MAX_REMEMBERED_CARDS) {
       // Message ids are ULIDs: lexical order is time order.
@@ -1575,6 +1581,27 @@ export class Bot {
       for (const id of ids.slice(0, ids.length - MAX_REMEMBERED_CARDS)) delete this.state.cards[id];
     }
     this.scheduleSave();
+  }
+
+  /** Puts the v2 card of one of my card messages in the cache when it is not there. */
+  private async loadCard(messageId: string, ref: CardRef): Promise<void> {
+    if (this.cardCache.has(messageId)) return;
+    try {
+      let before = ref.seq === undefined ? undefined : ref.seq + 1;
+      // Without a saved seq (state from an older SDK), look back through at most 10 pages.
+      for (let page = 0; page < (ref.seq === undefined ? 10 : 1); page++) {
+        const r = await this.history(ref.groupId, ref.topicId, { beforeSeq: before, limit: ref.seq === undefined ? 100 : 1 });
+        const m = r.messages.find((x) => x.id === messageId);
+        if (m) {
+          if (m.cardV2) this.cacheCard(m.id, m.cardV2);
+          return;
+        }
+        if (!r.hasMore || r.messages.length === 0) return;
+        before = Math.min(...r.messages.map((x) => x.createdSeq));
+      }
+    } catch (err) {
+      this.log.warn("could not load the answered card", { messageId, err: String(err) });
+    }
   }
 
   private cacheCard(messageId: string, card: CardV2): void {
