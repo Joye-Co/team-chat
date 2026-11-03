@@ -16,6 +16,9 @@ pub mod app_glue;
 mod cards;
 // --- cards v2 track ---
 mod cards_v2;
+// --- inc-cards21 ---
+mod card_events;
+// --- end inc-cards21 ---
 // --- end cards v2 track ---
 pub mod convert;
 // Desk track (1.1.0 首页).
@@ -157,6 +160,9 @@ struct Shared {
     // --- cards v2 track ---
     cards_v2: cards_v2::CardV2Cache,
     // --- end cards v2 track ---
+    // --- inc-cards21: my card events (card.event) ---
+    card_events: card_events::CardEventLog,
+    // --- end inc-cards21 ---
     /// 群里的决定 from the server (`provider/pages.rs`).
     decisions: pages::DecisionsCache,
     /// R5: page events this window saw (they are not in the group log).
@@ -198,6 +204,7 @@ impl CoreProvider {
                 cards: cards::CardCache::default(),
                 panes: panes::PanesCache::default(),
                 cards_v2: cards_v2::CardV2Cache::default(),
+                card_events: card_events::CardEventLog::default(),
                 decisions: pages::DecisionsCache::default(),
                 page_events: pages::PageEventLog::default(),
                 topic_v2: topic_v2::TopicV2Cache::default(),
@@ -394,6 +401,7 @@ impl CoreProvider {
         self.shared.files.reset();
         self.shared.cards.clear();
         self.shared.cards_v2.clear();
+        self.shared.card_events.clear();
         self.spawn_pump(generation, updates);
         self.emit(vec![
             Change::Session,
@@ -424,6 +432,7 @@ impl CoreProvider {
         self.shared.files.reset();
         self.shared.cards.clear();
         self.shared.cards_v2.clear();
+        self.shared.card_events.clear();
         if let Some(a) = &account {
             a.client.stop();
         }
@@ -823,11 +832,42 @@ impl CoreProvider {
                     topic_id: t.topic_id.clone(),
                 });
             }
-            // 1.1 interaction loop: the card and 产出 host tracks handle these.
-            ClientUpdate::CardEventAcked { .. }
-            | ClientUpdate::ArtifactEventAcked { .. }
+            // --- inc-cards21: acks and responses of my card events ---
+            ClientUpdate::CardEventAcked {
+                client_event_id,
+                message_id,
+                result,
+            } => {
+                let now = crate::selftest::clock::now_ms();
+                if self
+                    .shared
+                    .card_events
+                    .acked(&message_id, &client_event_id, &result, now)
+                    && let Some(a) = self.account()
+                    && let Some(m) = a.client.store().message(&message_id).ok().flatten()
+                {
+                    out.push(Change::Messages {
+                        group_id: m.group_id,
+                        topic_id: m.topic_id,
+                    });
+                }
+            }
+            ClientUpdate::InteractionResolved(t) => {
+                let now = crate::selftest::clock::now_ms();
+                if let Some(message_id) = self.shared.card_events.resolved(&t, now)
+                    && let Some(a) = self.account()
+                    && let Some(m) = a.client.store().message(&message_id).ok().flatten()
+                {
+                    out.push(Change::Messages {
+                        group_id: m.group_id,
+                        topic_id: m.topic_id,
+                    });
+                }
+            }
+            // --- end inc-cards21 ---
+            // 1.1 interaction loop: the 产出 host track handles these.
+            ClientUpdate::ArtifactEventAcked { .. }
             | ClientUpdate::CardEvent(_)
-            | ClientUpdate::InteractionResolved(_)
             | ClientUpdate::ArtifactData(_)
             | ClientUpdate::ArtifactReply(_) => {}
         }
@@ -1102,6 +1142,14 @@ impl ChatProvider for CoreProvider {
             let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
             self.shared.cards.remember(&msgs);
             self.shared.cards_v2.remember(&msgs);
+            // --- inc-cards21: a new message that names my event ends its pending state ---
+            let now = crate::selftest::clock::now_ms();
+            for m in msgs.iter().filter(|m| m.cause.is_some()) {
+                if let Some(c) = &m.cause {
+                    self.shared.card_events.caused_anywhere(c, now);
+                }
+            }
+            // --- end inc-cards21 ---
             let cached_more = msgs.len() > n;
             if cached_more {
                 msgs.remove(0);
@@ -1734,7 +1782,15 @@ impl ChatProvider for CoreProvider {
         message_id: &str,
     ) -> Option<crate::data::cards_v2::CardV2Message> {
         let a = self.account()?;
-        self.shared.cards_v2.card(&a.client, message_id)
+        let card = self.shared.cards_v2.card(&a.client, message_id);
+        // --- inc-cards21: a rev that names my event ends its pending state ---
+        if let Some(c) = card.as_ref().and_then(|c| c.cause.as_ref()) {
+            self.shared
+                .card_events
+                .caused(message_id, c, crate::selftest::clock::now_ms());
+        }
+        // --- end inc-cards21 ---
+        card
     }
 
     fn card_v2_answers(
@@ -1754,7 +1810,11 @@ impl ChatProvider for CoreProvider {
         message_id: &str,
     ) -> Option<crate::data::cards_v2::CardV2Pending> {
         let a = self.account()?;
-        self.shared.cards_v2.pending(&a.client, message_id)
+        self.shared
+            .cards_v2
+            .pending(&a.client, message_id)
+            // --- inc-cards21: a 2.1 answer is a durable card event ---
+            .or_else(|| card_events::pending_answer(&self.shared.card_events.events(message_id)))
     }
 
     fn answer_card_v2(
@@ -1782,6 +1842,109 @@ impl ChatProvider for CoreProvider {
             }]);
         }
     }
+
+    // --- inc-cards21: the interaction loop ---
+    fn send_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        request: crate::data::cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        let a = self.account()?;
+        let now = crate::selftest::clock::now_ms();
+        let req = chat_core::CardEventRequest {
+            message_id: message_id.to_string(),
+            rev: request.rev,
+            block_id: request.block_id.clone(),
+            action_id: request.action_id.clone(),
+            event: request.event.clone(),
+            value: request.value.clone(),
+            inputs: request.inputs.clone(),
+            part: request.part.clone(),
+        };
+        let out = match a.client.send_card_event(req) {
+            Ok(sent) => {
+                self.shared.card_events.sent(
+                    message_id,
+                    sent.client_event_id.clone(),
+                    request,
+                    sent.durable,
+                    now,
+                );
+                Some(sent.client_event_id)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "card event refused");
+                self.shared.card_events.failed_now(
+                    message_id,
+                    request,
+                    crate::data::cards_v2::CardEventFailure::Other,
+                    now,
+                );
+                None
+            }
+        };
+        self.emit(vec![Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }]);
+        out
+    }
+
+    fn card_v2_events(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Vec<crate::data::cards_v2::MyCardEvent> {
+        self.shared.card_events.events(message_id)
+    }
+
+    fn drop_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        self.shared
+            .card_events
+            .drop_pending(message_id, client_event_id);
+        self.emit(vec![Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }]);
+    }
+
+    fn retry_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) -> bool {
+        let Some(a) = self.account() else {
+            return false;
+        };
+        let Some(e) = self.shared.card_events.get(message_id, client_event_id) else {
+            return false;
+        };
+        // Only a queued answer keeps its id; a refused live event is sent again as new.
+        if !e.durable || a.client.retry_failed(client_event_id).is_err() {
+            return false;
+        }
+        self.shared.card_events.resending(
+            message_id,
+            client_event_id,
+            crate::selftest::clock::now_ms(),
+        );
+        self.emit(vec![Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }]);
+        true
+    }
+    // --- end inc-cards21 ---
     // --- end cards v2 track ---
 
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {

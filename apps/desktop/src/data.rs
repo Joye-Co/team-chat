@@ -1879,6 +1879,47 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// refused one. Emits `Change::Messages` for the topic.
     fn withdraw_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
 
+    // --- inc-cards21: the interaction loop (INTERACT §3, §4.4) ---
+
+    /// Sends one interaction with a v2 card (`card.event`). An answer goes through the
+    /// outbox and is resent with the same id; a live event is sent now or fails at once.
+    /// Returns the `clientEventId`, or `None` when it could not be made. Emits
+    /// `Change::Messages` for the topic.
+    fn send_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        None
+    }
+    /// My events on a v2 card this session, oldest first (at most 20). Cheap.
+    fn card_v2_events(&self, _group_id: &str, _message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        Vec::new()
+    }
+    /// 不等了: stop waiting for the author's response to one of my events.
+    fn drop_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _client_event_id: &str,
+    ) {
+    }
+    /// 重试 of a refused or stuck answer with the same `clientEventId`. False when it
+    /// cannot be resent (then the view sends a new event).
+    fn retry_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _client_event_id: &str,
+    ) -> bool {
+        false
+    }
+    // --- end inc-cards21 ---
+
     // --- end cards v2 track ---
 
     // --- topic track (v11/topic): the 话题 page ---
