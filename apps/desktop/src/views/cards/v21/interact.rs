@@ -524,7 +524,11 @@ pub fn undone(e: &MyCardEvent, now: Millis) -> bool {
 }
 
 /// Blocks with a live event of mine on its way, or one whose state is still to go back.
-pub fn in_flight(events: &[MyCardEvent], reverted: &std::collections::HashSet<String>, now: Millis) -> Vec<String> {
+pub fn in_flight(
+    events: &[MyCardEvent],
+    reverted: &std::collections::HashSet<String>,
+    now: Millis,
+) -> Vec<String> {
     events
         .iter()
         .filter(|e| {
@@ -840,7 +844,12 @@ pub fn decorate(
 /// until I take the new one (INTERACT §4.4).
 fn draft_changed(ctx: &Ctx, id: &str, cx: &mut App) -> AnyElement {
     let k = theme::colors(cx);
-    let (form, ui, card, block) = (ctx.form.clone(), ctx.ui.clone(), ctx.card.clone(), id.to_string());
+    let (form, ui, card, block) = (
+        ctx.form.clone(),
+        ctx.ui.clone(),
+        ctx.card.clone(),
+        id.to_string(),
+    );
     meta(div())
         .mt(space::S6)
         .flex()
@@ -977,9 +986,16 @@ mod tests {
         dropped.dropped = true;
         assert!(stage_of(&dropped, 10_000).is_none(), "不等了");
         let none = ev(ExpectMode::None, 0, false);
-        assert_eq!(stage_of(&none, 100).unwrap().stage, Stage::Busy, "现在接不了");
+        assert_eq!(
+            stage_of(&none, 100).unwrap().stage,
+            Stage::Busy,
+            "现在接不了"
+        );
         assert!(stage_of(&none, 5_000).is_none(), "the note goes after 4 s");
-        assert!(stage_of(&ev(ExpectMode::None, 0, true), 100).is_none(), "an answer");
+        assert!(
+            stage_of(&ev(ExpectMode::None, 0, true), 100).is_none(),
+            "an answer"
+        );
     }
 
     #[test]
@@ -994,7 +1010,11 @@ mod tests {
         let now = 46_000;
         assert_eq!(pending(&events, now).unwrap().event.client_event_id, "c2");
         let at_chart = pending_at(&events, "bars", now).expect("the chart still waits");
-        assert_eq!(at_chart.stage, Stage::Silent, "重试 and 不等了 show at the chart");
+        assert_eq!(
+            at_chart.stage,
+            Stage::Silent,
+            "重试 and 不等了 show at the chart"
+        );
         assert_eq!(pending_at(&events, "t", now).unwrap().stage, Stage::Slow);
         assert!(pending_at(&events, "other", now).is_none());
         // The next redraw follows the table's soft-to-hard step, not only the newest event.
@@ -1032,7 +1052,10 @@ mod tests {
         let answer = ev(ExpectMode::Offline, 0, true);
         assert!(undone(&off, 100) && undone(&busy, 100));
         assert!(!undone(&live, 100), "a waiting event keeps its state");
-        assert!(!undone(&answer, 100), "an offline answer is stored and stays");
+        assert!(
+            !undone(&answer, 100),
+            "an offline answer is stored and stays"
+        );
         let mut failed = live.clone();
         failed.phase = CardEventPhase::Failed {
             failure: CardEventFailure::Offline,
@@ -1062,8 +1085,15 @@ mod tests {
         e.reply = Some("m-reply".into());
         let events = [e.clone()];
         let never = |_: &str| false;
-        assert_eq!(reply_off_screen(&events, "bars", 1_100, never), None, "quiet first");
-        assert_eq!(reply_off_screen(&events, "bars", 1_400, never), Some("m-reply"));
+        assert_eq!(
+            reply_off_screen(&events, "bars", 1_100, never),
+            None,
+            "quiet first"
+        );
+        assert_eq!(
+            reply_off_screen(&events, "bars", 1_400, never),
+            Some("m-reply")
+        );
         assert_eq!(
             reply_off_screen(&events, "bars", 1_400, |m| m == "m-reply"),
             None,

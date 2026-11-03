@@ -347,11 +347,12 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
     let mut out: Vec<AnyElement> = Vec::new();
     let mut prev: Option<&CardV2Block> = None;
     let fading = fading(ctx, &snapshot, cx);
-    let fade_after = |after: Option<&str>, out: &mut Vec<AnyElement>, window: &mut Window, cx: &mut App| {
-        for (_, b) in fading.iter().filter(|(a, _)| a.as_deref() == after) {
-            out.push(removed(&node, b, window, cx));
-        }
-    };
+    let fade_after =
+        |after: Option<&str>, out: &mut Vec<AnyElement>, window: &mut Window, cx: &mut App| {
+            for (_, b) in fading.iter().filter(|(a, _)| a.as_deref() == after) {
+                out.push(removed(&node, b, window, cx));
+            }
+        };
     fade_after(None, &mut out, window, cx);
     for (i, b) in tree.top.iter().enumerate() {
         if hidden.contains(&i) {

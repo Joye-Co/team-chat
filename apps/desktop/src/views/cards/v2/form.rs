@@ -428,7 +428,8 @@ impl CardForm {
 
     /// v11/pb-cards: 用新的: drops the viewer's text of `block` for the card's new one.
     pub fn use_new(&mut self, card: &CardV2, block: &str, cx: &mut Context<Self>) {
-        let mine = |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        let mine =
+            |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
         self.fields.retain(|k, _| !mine(k));
         self.initial.retain(|k, _| !mine(k));
         for (k, v) in defaults(card) {
@@ -461,11 +462,27 @@ impl CardForm {
     /// The chosen, switched and 2.1 values of `block` (its own key and `block#…`), not its
     /// typed text.
     pub fn snap(&self, block: &str) -> FormSnap {
-        let mine = |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        let mine =
+            |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
         let mut s = FormSnap {
-            choices: self.choices.iter().filter(|(k, _)| mine(k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
-            switches: self.switches.iter().filter(|(k, _)| mine(k)).map(|(k, v)| (k.clone(), *v)).collect(),
-            other: self.other.iter().filter(|(k, _)| mine(k)).map(|(k, v)| (k.clone(), v.clone())).collect(),
+            choices: self
+                .choices
+                .iter()
+                .filter(|(k, _)| mine(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            switches: self
+                .switches
+                .iter()
+                .filter(|(k, _)| mine(k))
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            other: self
+                .other
+                .iter()
+                .filter(|(k, _)| mine(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
         };
         s.choices.sort();
         s.switches.sort();
@@ -475,7 +492,8 @@ impl CardForm {
 
     /// Puts back what [`snap`](Self::snap) took for `block`.
     pub fn restore(&mut self, block: &str, snap: &FormSnap, cx: &mut Context<Self>) {
-        let mine = |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        let mine =
+            |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
         self.choices.retain(|k, _| !mine(k));
         self.switches.retain(|k, _| !mine(k));
         self.other.retain(|k, _| !mine(k));
@@ -745,7 +763,11 @@ mod tests {
             })
         };
         assert_eq!(text(vcx, "note"), "我写的");
-        assert_eq!(text(vcx, "greet"), "新欢迎", "untouched text follows the rev");
+        assert_eq!(
+            text(vcx, "greet"),
+            "新欢迎",
+            "untouched text follows the rev"
+        );
         assert_eq!(text(vcx, "same"), "一样");
         vcx.update(|_, cx| form.update(cx, |f, cx| f.use_new(&new, "note", cx)));
         assert_eq!(text(vcx, "note"), "新备注", "用新的");

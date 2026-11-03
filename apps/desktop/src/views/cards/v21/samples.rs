@@ -830,7 +830,10 @@ pub fn all() -> Vec<Sample21> {
     out.push(conflict);
     // v11/pb-cards: the notes of the loop.
     let click = json!({ "series": "groups", "x": "B 站", "y": 9, "index": 2 });
-    for (id, mode) in [(NOTE_OFFLINE, ExpectMode::Offline), (NOTE_BUSY, ExpectMode::None)] {
+    for (id, mode) in [
+        (NOTE_OFFLINE, ExpectMode::Offline),
+        (NOTE_BUSY, ExpectMode::None),
+    ] {
         let mut s = sample(id, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev1());
         s.events.push((
             1_000,
@@ -838,12 +841,26 @@ pub fn all() -> Vec<Sample21> {
         ));
         out.push(s);
     }
-    let mut draft = sample(NOTE_DRAFT, GROWTH, T_REPORT, LEDGER, at(9, 40), retro(2, "B 站停更了两周，新增群少了 1 个"));
+    let mut draft = sample(
+        NOTE_DRAFT,
+        GROWTH,
+        T_REPORT,
+        LEDGER,
+        at(9, 40),
+        retro(2, "B 站停更了两周，新增群少了 1 个"),
+    );
     draft.msg.edited_at = Some(at(10, 2));
     draft.prev = Some(Arc::new(card(retro(1, "B 站和上月差不多"))));
     out.push(draft);
     let mut reply = sample(NOTE_REPLY, GROWTH, T_REPORT, LEDGER, at(9, 40), bars_rev1());
-    let mut e = acked(NOTE_REPLY, "bars", "chart.select", click, ExpectMode::Live, LEDGER);
+    let mut e = acked(
+        NOTE_REPLY,
+        "bars",
+        "chart.select",
+        click,
+        ExpectMode::Live,
+        LEDGER,
+    );
     e.phase = CardEventPhase::Resolved {
         result: crate::data::cards_v2::InteractionResult::Patched,
         note: None,

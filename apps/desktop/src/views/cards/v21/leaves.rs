@@ -2117,7 +2117,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 spec.events = Some(
                     events
                         .into_iter()
-                        .filter(|e| declared.iter().any(|d| *d == e.name))
+                        .filter(|e| declared.contains(&e.name))
                         .collect(),
                 );
             }
@@ -2537,7 +2537,11 @@ mod leaf_tests {
         assert_eq!(text_change(None, ""), (true, false));
         assert_eq!(text_change(Some("默认的话"), "默认的话"), (false, false));
         assert_eq!(text_change(Some("默认的话"), "默认的"), (true, true));
-        assert_eq!(text_change(Some("a"), ""), (true, true), "clearing is an edit");
+        assert_eq!(
+            text_change(Some("a"), ""),
+            (true, true),
+            "clearing is an edit"
+        );
     }
 
     #[test]
@@ -2545,7 +2549,10 @@ mod leaf_tests {
         assert_eq!(embed_body(&None, true), EmbedBody::Loading);
         assert_eq!(embed_body(&folder(true), true), EmbedBody::Page);
         assert_eq!(embed_body(&folder(false), true), EmbedBody::NotPage);
-        assert_eq!(embed_body(&Some(Err(FileError::Other)), true), EmbedBody::Failed);
+        assert_eq!(
+            embed_body(&Some(Err(FileError::Other)), true),
+            EmbedBody::Failed
+        );
     }
 
     #[test]

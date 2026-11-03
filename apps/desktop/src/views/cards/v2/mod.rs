@@ -1099,7 +1099,8 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     // --- inc-cards21: my live event waits (blue 处理中), 2.1 words, the deadline ---
     // inc-integrate: a page event of an embed in this card waits too (the page host).
     // v11/pb-cards: the spinner only while the author works on it, a still mark after.
-    let spins = super::v21::band::pending(ctx).map(|(p, _, _)| super::v21::interact::spins(p.stage));
+    let spins =
+        super::v21::band::pending(ctx).map(|(p, _, _)| super::v21::interact::spins(p.stage));
     let waiting = super::v21::band::pending(ctx)
         .map(|(_, l, d)| (l, d))
         .or_else(|| super::v21::band::page_pending(ctx, cx));

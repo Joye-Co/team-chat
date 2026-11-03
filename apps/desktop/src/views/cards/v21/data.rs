@@ -333,41 +333,37 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     // bar or point stays in sight; a clear hit layer on top takes the clicks.
     let hot = node.ui.block(id).hot;
     let n = xs.len();
-    let tint = div()
-        .absolute()
-        .inset_0()
-        .flex()
-        .children((0..n).map(|i| {
-            let on = point.as_ref().is_some_and(|(_, p)| *p == i);
-            let fill = if on {
-                Some(mix(k.ink, k.bg, t::CHART_PICK_FILL))
-            } else if hot == Some(i) {
-                Some(mix(k.ink, k.bg, t::CHART_HOVER_FILL))
-            } else {
-                None
-            };
-            div()
-                .flex_1()
-                .h_full()
-                .rounded(theme::radius::SM)
-                .when_some(fill.filter(|_| selectable), |el, f| el.bg(f))
-        }));
-    out = out.child(div().relative().child(tint).child(drawn).when(selectable, |el| {
-        let emit = Emitter::of(ctx);
-        let uie = ctx.ui.clone();
-        let block = id.clone();
-        let skey = main.map(|s| s.key().to_string()).unwrap_or_default();
-        let values: Vec<Option<f64>> = main
-            .map(|s| s.values.iter().map(|v| v.as_f64()).collect())
-            .unwrap_or_default();
-        let bar = *kind == ChartKind::Bar;
-        let clear = super::interact::sends(ctx.card, b, "chart.clear");
-        el.child(
-            div()
-                .absolute()
-                .inset_0()
-                .flex()
-                .children((0..n).map(|i| {
+    let tint = div().absolute().inset_0().flex().children((0..n).map(|i| {
+        let on = point.as_ref().is_some_and(|(_, p)| *p == i);
+        let fill = if on {
+            Some(mix(k.ink, k.bg, t::CHART_PICK_FILL))
+        } else if hot == Some(i) {
+            Some(mix(k.ink, k.bg, t::CHART_HOVER_FILL))
+        } else {
+            None
+        };
+        div()
+            .flex_1()
+            .h_full()
+            .rounded(theme::radius::SM)
+            .when_some(fill.filter(|_| selectable), |el, f| el.bg(f))
+    }));
+    out = out.child(
+        div()
+            .relative()
+            .child(tint)
+            .child(drawn)
+            .when(selectable, |el| {
+                let emit = Emitter::of(ctx);
+                let uie = ctx.ui.clone();
+                let block = id.clone();
+                let skey = main.map(|s| s.key().to_string()).unwrap_or_default();
+                let values: Vec<Option<f64>> = main
+                    .map(|s| s.values.iter().map(|v| v.as_f64()).collect())
+                    .unwrap_or_default();
+                let bar = *kind == ChartKind::Bar;
+                let clear = super::interact::sends(ctx.card, b, "chart.clear");
+                el.child(div().absolute().inset_0().flex().children((0..n).map(|i| {
                     let on = point.as_ref().is_some_and(|(_, p)| *p == i);
                     let (emit, uie, block, skey, xv) = (
                         emit.clone(),
@@ -433,9 +429,9 @@ pub fn chart(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                                 cx,
                             );
                         })
-                })),
-        )
-    }));
+                })))
+            }),
+    );
     if let Some(t) = tip {
         out = out.child(
             meta(div())
