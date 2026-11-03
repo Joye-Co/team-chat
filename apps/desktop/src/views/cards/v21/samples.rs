@@ -17,8 +17,9 @@ use crate::{
         },
     },
     fake::v2::{
-        ALEX, ALL, ART_REPORT, CHENCHEN, DEV, GROWTH, JOJO, LEDGER, LIXUE, ME, OPS, POCKET, SCOUT,
-        T_PROMO, T_RELEASE, T_REPORT, T_STAGING, T_V4, T_WEEKLY, TARO, TATA, WATCH, XIAOWANG, at,
+        ALEX, ALL, ART_EMBED_BROKEN, ART_EMBED_FILE, ART_REPORT, CHENCHEN, DEV, GROWTH, JOJO,
+        LEDGER, LIXUE, ME, OPS, POCKET, SCOUT, T_PROMO, T_RELEASE, T_REPORT, T_STAGING, T_V4,
+        T_WEEKLY, TARO, TATA, WATCH, XIAOWANG, at,
     },
 };
 
@@ -39,6 +40,10 @@ pub const MATRIX: &str = "c21-matrix";
 pub const SLOTS: &str = "c21-slots";
 pub const POLL: &str = "c21-poll";
 pub const EMBED: &str = "c21-embed";
+/// The embed of a 产出 whose folder does not open.
+pub const EMBED_BROKEN: &str = "c21-embed-broken";
+/// The embed of a 产出 that is a file, not a web page.
+pub const EMBED_FILE: &str = "c21-embed-file";
 pub const UNKNOWN: &str = "c21-unknown";
 pub const BUTTONS: &str = "c21-buttons";
 pub const DIAGRAM: &str = "c21-diagram";
@@ -695,6 +700,30 @@ pub fn all() -> Vec<Sample21> {
             }),
         ),
     ));
+    for (id, artifact) in [
+        (EMBED_BROKEN, ART_EMBED_BROKEN),
+        (EMBED_FILE, ART_EMBED_FILE),
+    ] {
+        out.push(sample(
+            id,
+            GROWTH,
+            T_REPORT,
+            LEDGER,
+            at(10, 38),
+            with(
+                base("11 月的 2 万块预算怎么分？", "ask", "Ledger 做了一个预算分配页面，请在 1.1 里打开。"),
+                json!({
+                    "summary": "拖动滑块，页面会按 10 月的数估新增群。分好后按页面里的「发给 Ledger」。",
+                    "ask": { "from": [ME] },
+                    "blocks": [
+                        { "id": "page", "type": "embed", "artifactId": artifact, "version": 1, "height": 280,
+                          "title": "渠道预算分配", "events": ["budget.submit"],
+                          "fallbackText": "Ledger 做了一个预算分配页面，请在新版本里打开。" }
+                    ]
+                }),
+            ),
+        ));
+    }
     out.push(sample(
         UNKNOWN,
         ALL,

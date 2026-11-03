@@ -9,6 +9,8 @@ pub mod host;
 pub mod host_preview;
 // --- end inc-host track ---
 pub mod panel;
+// The 产出 page states no other scene reaches (embed failures, the page ref toast).
+pub mod state_scenes;
 pub mod window;
 
 use gpui::{Pixels, px};

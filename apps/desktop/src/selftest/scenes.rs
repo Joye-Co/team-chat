@@ -767,6 +767,13 @@ const HOST_SCENES: &[Scene] = &[
         setup: |_, _| {},
         open: |s, c, cx| host_preview::open(s, c, HostMode::AskPending, cx),
     },
+    Scene {
+        name: "artifact-embed-states",
+        about: "产出 embedded in a card: a page that did not open (页面没有打开 · 重试) and a 产出 that is not a web page",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: crate::views::artifacts::state_scenes::open_embed_states,
+    },
 ];
 
 fn host_check(name: &str) -> bool {

@@ -76,6 +76,10 @@ pub const RUN_WEEKLY: &str = "run-v2-weekly";
 pub const ART_RECONNECT: &str = "art-v2-reconnect-report";
 pub const ART_REPORT: &str = "art-v2-oct-report";
 pub const ART_V4: &str = "art-v2-v4-draft";
+/// Embedded in a card but its folder never opens (the 页面没有打开 · 重试 scene).
+pub const ART_EMBED_BROKEN: &str = "art-v2-embed-broken";
+/// Embedded in a card but a single file, not a web page (这个产出不是网页).
+pub const ART_EMBED_FILE: &str = "art-v2-embed-file";
 
 const MIN: i64 = 60_000;
 
@@ -1918,6 +1922,26 @@ impl ChatProvider for V2Samples {
         artifact_id: &str,
         version: Option<u32>,
     ) -> Reply<ArtifactFolder> {
+        // The embed states of a card: a folder that does not open, and a file.
+        if artifact_id == ART_EMBED_BROKEN {
+            return reply_err(FileError::Network);
+        }
+        if artifact_id == ART_EMBED_FILE {
+            let dir = std::env::temp_dir()
+                .join("team-chat-v2-samples")
+                .join(artifact_id);
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("预算.csv"), "渠道,预算\n小红书,6000\n");
+            let (tx, rx) = futures::channel::oneshot::channel();
+            let _ = tx.send(Ok(ArtifactFolder {
+                artifact_id: artifact_id.into(),
+                version: version.unwrap_or(1),
+                dir,
+                entry: "预算.csv".into(),
+                is_page: false,
+            }));
+            return rx;
+        }
         let Some(detail) = self.artifact(artifact_id) else {
             return reply_err(FileError::NotFound);
         };
