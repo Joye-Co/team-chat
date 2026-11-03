@@ -124,7 +124,7 @@ pub fn listed(topic: &Topic) -> bool {
 
 /// Local midnight in milliseconds.
 pub fn midnight() -> crate::data::Millis {
-    chrono::Local::now()
+    crate::selftest::clock::local_now()
         .date_naive()
         .and_hms_opt(0, 0, 0)
         .and_then(|t| t.and_local_timezone(chrono::Local).single())

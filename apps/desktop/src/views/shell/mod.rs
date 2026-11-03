@@ -128,7 +128,7 @@ pub fn clock(at: crate::data::Millis) -> String {
     let Some(then) = Local.timestamp_millis_opt(at).single() else {
         return String::new();
     };
-    let today = Local::now().date_naive();
+    let today = crate::selftest::clock::local_now().date_naive();
     if then.date_naive() == today {
         then.format("%H:%M").to_string()
     } else if then.date_naive().succ_opt() == Some(today) {

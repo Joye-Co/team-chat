@@ -11,7 +11,6 @@
 
 use std::time::{Duration, Instant};
 
-use chrono::Utc;
 use gpui::{
     AnyElement, Context, ElementId, InteractiveElement as _, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
@@ -524,7 +523,7 @@ impl TimelineView {
             return None;
         }
         let colors = theme::colors(cx);
-        let now = Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         let mut rows: Vec<AnyElement> = Vec::new();
         for run in runs.iter().take(MAX_LIVE) {
             let row = self.live_row(run, now, reduce, false, cx);

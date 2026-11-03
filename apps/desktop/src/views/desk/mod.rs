@@ -126,7 +126,7 @@ impl DeskPage {
             key.clone(),
             LocalAnswer {
                 record,
-                at: chrono::Local::now().timestamp_millis(),
+                at: crate::selftest::clock::local_now().timestamp_millis(),
                 undoable: true,
                 token,
             },
@@ -199,7 +199,7 @@ impl DeskPage {
 /// `11 月 3 日 周一`.
 pub fn today_line() -> String {
     use chrono::Datelike as _;
-    let now = chrono::Local::now();
+    let now = crate::selftest::clock::local_now();
     const DAYS: [&str; 7] = [
         c::WEEKDAY_1,
         c::WEEKDAY_2,

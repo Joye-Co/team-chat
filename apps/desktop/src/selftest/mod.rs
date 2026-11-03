@@ -17,6 +17,7 @@
 //! (0 = every PNG written). Scenes live in [`scenes::all`].
 
 pub mod capture;
+pub mod clock;
 pub mod scenes;
 pub mod worst_case;
 
@@ -74,6 +75,8 @@ pub fn main_if_requested() -> Option<i32> {
         return None;
     }
     crate::ui::rows::draw_as_key_window();
+    // Every scene reads the artboards' morning; the real app keeps the real clock.
+    clock::pin_to_artboards();
     match parse(&args) {
         Ok(options) => Some(run(options)),
         Err(error) => {

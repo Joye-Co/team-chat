@@ -176,7 +176,7 @@ pub fn media_time(ms: u64) -> String {
 pub fn step_minutes(run: &BotRunSummary, starts: &[Millis]) -> Vec<Option<u64>> {
     let end = run
         .ended_at
-        .unwrap_or_else(|| chrono::Utc::now().timestamp_millis());
+        .unwrap_or_else(|| crate::selftest::clock::utc_now().timestamp_millis());
     (0..run.plan.len())
         .map(|i| {
             let from = *starts.get(i)?;

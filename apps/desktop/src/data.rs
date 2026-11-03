@@ -1627,7 +1627,7 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// local midnight, with the proof of each 话题's newest result
     /// ([`ChatProvider::topic_result_proof`]).
     fn done_today(&self) -> Vec<v2::DoneItem> {
-        let midnight = chrono::Local::now()
+        let midnight = crate::selftest::clock::local_now()
             .date_naive()
             .and_hms_opt(0, 0, 0)
             .and_then(|t| t.and_local_timezone(chrono::Local).single())
@@ -1774,7 +1774,7 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// The 成员 page detail of a member. The default counts this week's
     /// runs from the cache.
     fn member_stats(&self, member_id: &str) -> Option<v2::MemberStats> {
-        let week_ago = chrono::Local::now().timestamp_millis() - 7 * 24 * 3_600_000;
+        let week_ago = crate::selftest::clock::local_now().timestamp_millis() - 7 * 24 * 3_600_000;
         let mut stats = v2::MemberStats::default();
         let mut topics = std::collections::HashSet::new();
         for g in self.groups() {
@@ -1891,7 +1891,7 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// "Now" for the pages' elapsed times (`已 3 分钟`). Sample providers
     /// fix it so screenshots do not depend on the hour they are taken.
     fn clock_now(&self) -> Millis {
-        chrono::Local::now().timestamp_millis()
+        crate::selftest::clock::local_now().timestamp_millis()
     }
     /// What a 进行中 card on the 群 page shows of a 话题. The default
     /// previews the live terminal of an active run, else the options of the

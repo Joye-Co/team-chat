@@ -93,7 +93,7 @@ pub fn render(snap: &Snapshot, services: &Services, cx: &mut Context<DeskPage>) 
 
 /// `已 3 分钟`.
 fn elapsed(since: Millis) -> Option<String> {
-    let mins = (chrono::Local::now().timestamp_millis() - since) / 60_000;
+    let mins = (crate::selftest::clock::local_now().timestamp_millis() - since) / 60_000;
     if mins < 0 {
         return None;
     }

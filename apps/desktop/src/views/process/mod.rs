@@ -398,7 +398,7 @@ impl ProcessView {
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
         let colors = theme::colors(cx);
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         let mut facts: Vec<String> = Vec::new();
         if let Some(name) = run.machine_name.clone().or_else(|| run.machine_id.clone()) {
             facts.push(fill(p::RUN_ON, &[("name", &name)]));

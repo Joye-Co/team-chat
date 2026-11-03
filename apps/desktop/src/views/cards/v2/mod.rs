@@ -138,7 +138,7 @@ impl CardEnv {
 
     fn now(&self) -> Millis {
         self.now
-            .unwrap_or_else(|| chrono::Utc::now().timestamp_millis())
+            .unwrap_or_else(|| crate::selftest::clock::utc_now().timestamp_millis())
     }
 }
 

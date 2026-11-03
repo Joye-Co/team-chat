@@ -111,7 +111,7 @@ impl MachinesPage {
     /// name with its facts and labels, and the status column (U43).
     fn row(&self, m: &MachineInfo, cx: &App) -> gpui::Div {
         let colors = theme::colors(cx);
-        let now = chrono::Local::now();
+        let now = crate::selftest::clock::local_now();
         let (dot, state_text) = if !m.connected {
             (None, s::MACHINE_OFFLINE)
         } else if !m.healthy {

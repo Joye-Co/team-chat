@@ -109,7 +109,7 @@ pub fn status_chip(
 
 /// Short local time for lists and the timeline: 刚刚, N 分钟前, HH:MM, 昨天, M月D日.
 pub fn time_text(at: Millis) -> String {
-    let now = Local::now();
+    let now = crate::selftest::clock::local_now();
     let Some(then) = Local.timestamp_millis_opt(at).single() else {
         return String::new();
     };

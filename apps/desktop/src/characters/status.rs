@@ -158,7 +158,7 @@ impl StatusTracker {
     }
 
     fn scan_all(&mut self) {
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         for group in self.provider.groups() {
             let topics = self.provider.topics(&group.id);
             for t in &topics {

@@ -460,7 +460,7 @@ impl SideChat {
     ) -> AnyElement {
         let k = theme::colors(cx);
         if let Some(at) = s.posted_at {
-            let when = if (chrono::Utc::now().timestamp_millis() - at) < 60_000 {
+            let when = if (crate::selftest::clock::utc_now().timestamp_millis() - at) < 60_000 {
                 common::JUST_NOW.to_string()
             } else {
                 clock(at)

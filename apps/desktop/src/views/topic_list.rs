@@ -768,7 +768,7 @@ impl Render for TopicListView {
             });
 
         let selected = self.services.nav.read(cx).topic.clone();
-        let now = Local::now();
+        let now = crate::selftest::clock::local_now();
         let empty_icon = match &self.place {
             Some(Place::Todo) => Lucide::CircleCheck,
             Some(Place::Group(_)) if !self.all.is_empty() => Lucide::SearchX,

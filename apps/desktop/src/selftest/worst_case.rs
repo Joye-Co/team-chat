@@ -166,10 +166,7 @@ fn topic(mut t: Topic, i: usize, now: Millis) -> Topic {
 }
 
 fn now_ms() -> Millis {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
+    crate::selftest::clock::now_ms()
 }
 
 /// The fake provider with every rendered value replaced by a worst case.

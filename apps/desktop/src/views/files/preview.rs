@@ -104,7 +104,7 @@ impl FilesPreview {
             .find(|m| m.is_bot())
             .map(|m| m.id.clone())
             .unwrap_or_default();
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         let base = |id: &str, author: &str, body: &str, at: i64| Message {
             id: id.into(),
             client_msg_id: format!("c-{id}"),
@@ -274,7 +274,7 @@ impl ChatProvider for FilesPreview {
             return None;
         }
         let bot = self.inner.members().into_iter().find(|m| m.is_bot())?.id;
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         Some(ArtifactDetail {
             summary: ArtifactSummary {
                 id: ARTIFACT.into(),

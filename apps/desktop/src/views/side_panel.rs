@@ -238,7 +238,7 @@ impl SidePanel {
 
         // Opens by itself when a bot starts work or the first 产出 arrives
         // after the topic was opened (DESIGN.md §8.1).
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         match self.opened {
             None => self.opened = Some((now, !artifacts.is_empty())),
             Some((since, had_artifacts)) => {
@@ -653,7 +653,7 @@ impl SidePanel {
     /// rows, and `查看过程`.
     fn progress(&self, topic: &Topic, bot: &Member, cx: &mut Context<Self>) -> gpui::AnyElement {
         let k = theme::colors(cx);
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         let state = self.bot_state(topic, bot);
         let waits = matches!(state, BotState::Waits { .. });
         let mut error = None;
@@ -922,7 +922,7 @@ fn elapsed(since: Millis, now: Millis) -> String {
 
 /// `14:31 更新`, or `刚刚更新`: a space only after a number.
 fn updated_text(at: Millis) -> String {
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = crate::selftest::clock::utc_now().timestamp_millis();
     let time = time_text(at.min(now));
     let spaced = time.chars().last().is_some_and(|c| c.is_ascii_digit());
     fill(

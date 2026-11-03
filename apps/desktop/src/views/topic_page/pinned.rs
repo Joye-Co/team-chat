@@ -46,7 +46,7 @@ enum Pinned {
 
 /// `刚刚` within a minute, else the mono clock.
 fn when(at: Millis) -> String {
-    let now = chrono::Utc::now().timestamp_millis();
+    let now = crate::selftest::clock::utc_now().timestamp_millis();
     if (now - at).abs() < 60_000 {
         common::JUST_NOW.to_string()
     } else {

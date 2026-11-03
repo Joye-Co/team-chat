@@ -1226,13 +1226,13 @@ fn screen_share_url(screen: &MachineScreen) -> Option<String> {
 }
 
 fn now_ms() -> Millis {
-    chrono::Utc::now().timestamp_millis()
+    crate::selftest::clock::utc_now().timestamp_millis()
 }
 
 /// `周一 10:21`, the menu bar clock.
 fn menu_clock() -> String {
     use chrono::Datelike as _;
-    let now = chrono::Local::now();
+    let now = crate::selftest::clock::local_now();
     let day = match now.weekday() {
         chrono::Weekday::Mon => n::WEEKDAY_MON,
         chrono::Weekday::Tue => n::WEEKDAY_TUE,

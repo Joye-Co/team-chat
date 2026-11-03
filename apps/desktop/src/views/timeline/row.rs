@@ -776,7 +776,7 @@ impl TimelineView {
         let when = match model::local_day(topic.created_at) {
             Some(day) => format!(
                 "{} {}",
-                model::day_label(day, chrono::Local::now().date_naive()),
+                model::day_label(day, crate::selftest::clock::local_now().date_naive()),
                 model::clock(topic.created_at)
             ),
             None => String::new(),
@@ -959,7 +959,7 @@ fn quote_markdown(body: &str) -> String {
 fn date_divider(at: crate::data::Millis, cx: &App) -> impl IntoElement {
     let colors = theme::colors(cx);
     let label = model::local_day(at)
-        .map(|day| model::day_label(day, chrono::Local::now().date_naive()))
+        .map(|day| model::day_label(day, crate::selftest::clock::local_now().date_naive()))
         .unwrap_or_default();
     div()
         .mx(ROW_INSET)

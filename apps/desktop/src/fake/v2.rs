@@ -81,7 +81,7 @@ pub fn at(hour: u32, minute: u32) -> Millis {
 }
 
 fn days_ago_at(days: i64, hour: u32, minute: u32) -> Millis {
-    let date = Local::now().date_naive() - chrono::Duration::days(days);
+    let date = crate::selftest::clock::local_now().date_naive() - chrono::Duration::days(days);
     let t = date.and_hms_opt(hour, minute, 0).unwrap_or_default();
     Local
         .from_local_datetime(&t)
@@ -1075,7 +1075,7 @@ impl ChatProvider for V2Samples {
                 &request.topic_id,
                 seq,
                 ME,
-                chrono::Utc::now().timestamp_millis(),
+                crate::selftest::clock::utc_now().timestamp_millis(),
                 &request.body,
             );
             m.client_msg_id = format!("v2-c{seq}");
@@ -1363,7 +1363,7 @@ impl ChatProvider for V2Samples {
                 id: format!("sc-{n}"),
                 author_id: ME.into(),
                 body,
-                at: chrono::Utc::now().timestamp_millis(),
+                at: crate::selftest::clock::utc_now().timestamp_millis(),
                 refs: Vec::new(),
                 sources: Vec::new(),
                 suggestion: None,
@@ -1385,7 +1385,7 @@ impl ChatProvider for V2Samples {
         let text = self.with(|d| {
             let m = d.side_chat.iter_mut().find(|m| m.id == message_id)?;
             let s = m.suggestion.as_mut().filter(|s| s.posted_at.is_none())?;
-            s.posted_at = Some(chrono::Utc::now().timestamp_millis());
+            s.posted_at = Some(crate::selftest::clock::utc_now().timestamp_millis());
             Some(s.text.clone())
         });
         if let Some(text) = text {
@@ -1573,7 +1573,7 @@ impl ChatProvider for V2Samples {
                     .map(|a| a.label.clone())
             })
         });
-        let now = Local::now().timestamp_millis();
+        let now = crate::selftest::clock::local_now().timestamp_millis();
         self.desk
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -1682,7 +1682,12 @@ impl ChatProvider for V2Samples {
         if topic_id != T_RECONNECT {
             return reply_now(Err(AdminError::NotFound));
         }
-        self.with(|d| d.approval = Some((ME.into(), chrono::Utc::now().timestamp_millis())));
+        self.with(|d| {
+            d.approval = Some((
+                ME.into(),
+                crate::selftest::clock::utc_now().timestamp_millis(),
+            ))
+        });
         self.emit(vec![
             Change::Topics {
                 group_id: group_id.into(),
@@ -1820,7 +1825,7 @@ impl ChatProvider for V2Samples {
         message_id: &str,
         answer: cards_v2::CardV2AnswerRequest,
     ) {
-        let now = chrono::Utc::now().timestamp_millis();
+        let now = crate::selftest::clock::utc_now().timestamp_millis();
         if super::v2_desk::card_v2(message_id).is_some() {
             self.desk
                 .lock()
