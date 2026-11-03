@@ -320,7 +320,8 @@ pub const USAGE: &str = "usage:
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); ops.json is a list of
 patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Each command waits up
 to 15 s and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
-(exit 1).";
+(exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
+sandbox.blocked.";
 
 /// Flags of one command; each flag at most once.
 struct Flags(HashMap<String, String>);
@@ -496,8 +497,27 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
 
 /// Sends one request to the run's socket and reads the answer line.
 pub fn call(socket: &Path, op: &str, body: Value, read_timeout: Duration) -> Result<Value, String> {
-    let mut s = std::os::unix::net::UnixStream::connect(socket)
-        .map_err(|e| format!("cannot reach the daemon at {}: {e}", socket.display()))?;
+    let mut s = match std::os::unix::net::UnixStream::connect(socket) {
+        Ok(s) => s,
+        // A CLI sandbox that counts a unix socket connect as network says EPERM or EACCES.
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+            return Ok(error(
+                "unavailable",
+                Some("sandbox.blocked"),
+                format!(
+                    "the sandbox of this CLI blocks the connection to the daemon at {}: {e}. \
+Allow unix sockets (network) for its commands, or answer in the group without chat-run",
+                    socket.display()
+                ),
+            ));
+        }
+        Err(e) => {
+            return Err(format!(
+                "cannot reach the daemon at {}: {e}",
+                socket.display()
+            ));
+        }
+    };
     s.set_read_timeout(Some(read_timeout))
         .map_err(|e| e.to_string())?;
     let mut line =
@@ -785,6 +805,36 @@ mod tests {
         assert_eq!(bad["error"]["code"], "invalid");
         drop(server);
         assert!(!path.exists());
+    }
+
+    #[tokio::test]
+    async fn a_blocked_connect_names_the_sandbox() {
+        let dir = tempfile::tempdir().unwrap();
+        let server = Server::start(
+            socket_path(dir.path()),
+            Arc::new(Outputs::default()),
+            |_| {},
+            TIMEOUT,
+        )
+        .unwrap();
+        // EACCES like a sandbox that denies the connect (Codex's Seatbelt says EPERM).
+        std::fs::set_permissions(server.path(), std::fs::Permissions::from_mode(0o000)).unwrap();
+        let p = server.path().to_path_buf();
+        let v = tokio::task::spawn_blocking(move || {
+            call(
+                &p,
+                "interaction.resolve",
+                json!({ "eventId": "E" }),
+                TIMEOUT,
+            )
+        })
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(v["ok"], false);
+        assert_eq!(v["error"]["code"], "unavailable");
+        assert_eq!(v["error"]["reason"], "sandbox.blocked");
+        assert!(v["error"]["message"].as_str().unwrap().contains("sandbox"));
     }
 
     #[test]
