@@ -19,6 +19,36 @@ pub enum RunMsg {
 
 pub type RunOut = mpsc::UnboundedSender<(String, RunMsg)>;
 
+/// What the daemon loop sends to a run. Pause and resume are handled by the supervisor (they
+/// act on the CLI's process group); everything else goes to the runtime.
+#[derive(Debug, Clone, PartialEq)]
+pub enum RunCtl {
+    Runtime(Control),
+    /// `run.pause`: SIGSTOP the CLI's process group and stop the stall and deadline clocks.
+    Pause {
+        by: Option<String>,
+    },
+    /// `run.resume`: SIGCONT, move the deadline by the paused time, give `note` to the CLI.
+    Resume {
+        note: Option<String>,
+    },
+}
+
+impl From<Control> for RunCtl {
+    fn from(c: Control) -> RunCtl {
+        RunCtl::Runtime(c)
+    }
+}
+
+/// `run.assign.kind` of a read-only side chat run.
+pub const KIND_ASIDE: &str = "aside";
+
+/// Runtime kinds that have a read-only mode the daemon can force (Codex sandbox `read-only`,
+/// Claude Code permission mode `plan`). ACP agents and the PTY have none.
+pub fn aside_capable(kind: &str) -> bool {
+    matches!(kind, "codex" | "claude")
+}
+
 const BASE_ENV: &[&str] = &[
     "PATH",
     "HOME",
@@ -46,7 +76,9 @@ pub fn build_env(cfg: &Config, rt: &RuntimeConfig, a: &RunAssign) -> Vec<(String
             put(k, v);
         }
     }
-    for k in &a.env_allowlist {
+    // A read-only side chat run needs no secrets: it gets none of the passthrough variables.
+    let aside = a.kind.as_deref() == Some(KIND_ASIDE);
+    for k in a.env_allowlist.iter().filter(|_| !aside) {
         if cfg.env_passthrough.contains(k)
             && let Ok(v) = std::env::var(k)
         {
@@ -81,8 +113,7 @@ pub struct RunCtx {
     pub token: Arc<String>,
     pub assign: RunAssign,
     pub rt: RuntimeConfig,
-    pub control_tx: mpsc::UnboundedSender<Control>,
-    pub control_rx: mpsc::UnboundedReceiver<Control>,
+    pub control_rx: mpsc::UnboundedReceiver<RunCtl>,
     pub out: RunOut,
     pub redactor: Arc<crate::redact::Redactor>,
 }
@@ -93,7 +124,6 @@ pub async fn supervise(ctx: RunCtx) {
         token,
         assign,
         rt,
-        control_tx,
         control_rx,
         out,
         redactor,
@@ -136,8 +166,9 @@ pub async fn supervise(ctx: RunCtx) {
                 cwd,
                 run_dir: dir.clone(),
                 env: build_env(&cfg, &rt, &assign),
+                aside: assign.kind.as_deref() == Some(KIND_ASIDE),
             };
-            run_runtime(&cfg, &assign, spec, control_tx, control_rx, &event).await
+            run_runtime(&cfg, &assign, spec, control_rx, &event).await
         }
     };
 
@@ -226,12 +257,30 @@ pub async fn supervise(ctx: RunCtx) {
     let _ = out.send((run_id.clone(), RunMsg::Finished));
 }
 
+/// Pause state of a run (接管).
+struct Paused {
+    since: Instant,
+    /// The process group got SIGSTOP (false while the CLI has not started yet).
+    stopped: bool,
+}
+
+/// The CLI's process group, from `run.json` (written when the runtime spawned the CLI).
+fn run_pgid(run_dir: &std::path::Path) -> Option<i32> {
+    workspace::read_meta(run_dir)?.pgid.filter(|p| *p > 1)
+}
+
+fn signal(pgid: i32, sig: i32) {
+    // SAFETY: plain syscall; a negative pid addresses the CLI's process group.
+    unsafe {
+        libc::kill(-pgid, sig);
+    }
+}
+
 async fn run_runtime(
     cfg: &Config,
     assign: &RunAssign,
     spec: RunSpec,
-    control_tx: mpsc::UnboundedSender<Control>,
-    control_rx: mpsc::UnboundedReceiver<Control>,
+    mut control_rx: mpsc::UnboundedReceiver<RunCtl>,
     event: &impl Fn(RunEvent),
 ) -> (Outcome, bool) {
     let Some(rt) = runtime::for_kind(&spec.cfg.kind) else {
@@ -240,20 +289,33 @@ async fn run_runtime(
             false,
         );
     };
+    let run_dir = spec.run_dir.clone();
     let (emit_tx, mut emit_rx) = mpsc::unbounded_channel();
-    let fut = rt.start(spec, emit_tx, control_rx);
+    let (rt_tx, rt_rx) = mpsc::unbounded_channel::<Control>();
+    let fut = rt.start(spec, emit_tx, rt_rx);
     tokio::pin!(fut);
     let stall = Duration::from_secs(cfg.stall_minutes.max(1) * 60);
     let mut last = Instant::now();
     let mut stalled = false;
     let mut timed_out = false;
-    let deadline = assign
+    let mut deadline = assign
         .max_duration_ms
         .map(|ms| tokio::time::Instant::now() + Duration::from_millis(ms));
     let mut tick = tokio::time::interval(Duration::from_secs(15));
+    let mut paused: Option<Paused> = None;
+    let mut resumes = 0u32;
+    let mut control_open = true;
+    let mut acceptance = crate::acceptance::AcceptanceTracker::default();
     // Streamed text is released per line, so redaction sees a secret whole.
     let mut gate = DeltaGate::default();
     let outcome = loop {
+        // A pause that came before the CLI started stops it as soon as its group is known.
+        if let Some(p) = paused.as_mut().filter(|p| !p.stopped)
+            && let Some(pgid) = run_pgid(&run_dir)
+        {
+            signal(pgid, libc::SIGSTOP);
+            p.stopped = true;
+        }
         let hold_until = gate
             .deadline()
             .map(tokio::time::Instant::from_std)
@@ -263,8 +325,61 @@ async fn run_runtime(
             Some(ev) = emit_rx.recv() => {
                 last = Instant::now();
                 stalled = false;
-                for ev in gate.push(ev) {
+                let extra = acceptance.on_event(&ev);
+                for ev in gate.push(ev).into_iter().chain(extra) {
                     event(ev);
+                }
+            }
+            c = control_rx.recv(), if control_open => {
+                let Some(c) = c else { control_open = false; continue };
+                match c {
+                    RunCtl::Pause { by } => {
+                        if paused.is_some() {
+                            continue;
+                        }
+                        let pgid = run_pgid(&run_dir);
+                        if let Some(pgid) = pgid {
+                            signal(pgid, libc::SIGSTOP);
+                        }
+                        paused = Some(Paused { since: Instant::now(), stopped: pgid.is_some() });
+                        for ev in gate.push(RunEvent::Paused { paused: true, by }) {
+                            event(ev);
+                        }
+                    }
+                    RunCtl::Resume { note } => {
+                        let Some(p) = paused.take() else { continue };
+                        if p.stopped && let Some(pgid) = run_pgid(&run_dir) {
+                            signal(pgid, libc::SIGCONT);
+                        }
+                        // The paused time does not count toward maxDurationMs or the stall.
+                        if let Some(d) = deadline.as_mut() {
+                            *d += p.since.elapsed();
+                        }
+                        last = Instant::now();
+                        stalled = false;
+                        for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
+                            event(ev);
+                        }
+                        if let Some(text) = note.filter(|n| !n.trim().is_empty()) {
+                            resumes += 1;
+                            let _ = rt_tx.send(Control::Input {
+                                input_id: format!("resume-{resumes}"),
+                                text,
+                            });
+                        }
+                    }
+                    RunCtl::Runtime(c) => {
+                        // A stopped CLI cannot handle SIGTERM: a cancel resumes it first.
+                        if c == Control::Cancel && let Some(p) = paused.take() {
+                            if p.stopped && let Some(pgid) = run_pgid(&run_dir) {
+                                signal(pgid, libc::SIGCONT);
+                            }
+                            for ev in gate.push(RunEvent::Paused { paused: false, by: None }) {
+                                event(ev);
+                            }
+                        }
+                        let _ = rt_tx.send(c);
+                    }
                 }
             }
             _ = tokio::time::sleep_until(hold_until), if gate.holding() => {
@@ -273,6 +388,9 @@ async fn run_runtime(
                 }
             }
             _ = tick.tick() => {
+                if paused.is_some() {
+                    continue;
+                }
                 if !stalled && last.elapsed() >= stall {
                     stalled = true;
                     event(RunEvent::Status { state: "stalled".into(),
@@ -281,13 +399,21 @@ async fn run_runtime(
                 if let Some(d) = deadline
                     && !timed_out && tokio::time::Instant::now() >= d {
                         timed_out = true;
-                        let _ = control_tx.send(Control::Cancel);
+                        let _ = rt_tx.send(Control::Cancel);
                     }
             }
         }
     };
+    // Never leave a stopped group behind (the runtime already reaped the CLI).
+    if let Some(p) = paused.take()
+        && p.stopped
+        && let Some(pgid) = run_pgid(&run_dir)
+    {
+        signal(pgid, libc::SIGCONT);
+    }
     while let Ok(ev) = emit_rx.try_recv() {
-        for ev in gate.push(ev) {
+        let extra = acceptance.on_event(&ev);
+        for ev in gate.push(ev).into_iter().chain(extra) {
             event(ev);
         }
     }

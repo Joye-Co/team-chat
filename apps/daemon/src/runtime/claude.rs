@@ -330,6 +330,34 @@ pub fn find_session_file(config_dir: &Path, cwd: &Path, session_id: &str) -> Opt
     })
 }
 
+/// Tools a side chat run may never use, on top of permission mode `plan`.
+pub const ASIDE_DISALLOWED_TOOLS: &str = "Edit Write MultiEdit NotebookEdit";
+
+/// Permission flags and the configured extra args. A side chat run (`spec.aside`) is
+/// read-only whatever `daemon.toml` says: permission mode `plan`, the edit tools disallowed,
+/// and neither `allowed_tools` nor the configured args (which could widen permissions).
+pub fn permission_args(spec: &RunSpec) -> Vec<String> {
+    let mut args = vec!["--permission-mode".to_string()];
+    if spec.aside {
+        args.push("plan".into());
+        args.push("--disallowedTools".into());
+        args.push(ASIDE_DISALLOWED_TOOLS.into());
+        return args;
+    }
+    args.push(
+        spec.cfg
+            .permission_mode
+            .clone()
+            .unwrap_or_else(|| "acceptEdits".into()),
+    );
+    if let Some(t) = &spec.cfg.allowed_tools {
+        args.push("--allowedTools".into());
+        args.push(t.clone());
+    }
+    args.extend(spec.cfg.args.iter().cloned());
+    args
+}
+
 fn user_line(text: &str) -> Value {
     json!({ "type": "user", "message": { "role": "user", "content": [{ "type": "text", "text": text }] } })
 }
@@ -361,22 +389,11 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
     .map(|s| s.to_string())
     .collect();
     args.push(session_id.clone());
-    args.push("--permission-mode".into());
-    args.push(
-        spec.cfg
-            .permission_mode
-            .clone()
-            .unwrap_or_else(|| "acceptEdits".into()),
-    );
+    args.extend(permission_args(&spec));
     if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
         args.push("--model".into());
         args.push(m);
     }
-    if let Some(t) = &spec.cfg.allowed_tools {
-        args.push("--allowedTools".into());
-        args.push(t.clone());
-    }
-    args.extend(spec.cfg.args.iter().cloned());
     let program = spec.cfg.command();
     let config_dir = spec
         .env_var("CLAUDE_CONFIG_DIR")

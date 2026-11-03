@@ -37,6 +37,9 @@ pub struct RunSpec {
     pub run_dir: PathBuf,
     /// The complete environment of the CLI process.
     pub env: Vec<(String, String)>,
+    /// A read-only side chat run (`run.assign.kind = "aside"`): the runtime forces its
+    /// read-only mode and ignores the configured args and tool grants.
+    pub aside: bool,
 }
 
 impl RunSpec {

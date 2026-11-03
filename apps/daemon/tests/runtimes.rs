@@ -36,6 +36,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
             ("PATH".into(), std::env::var("PATH").unwrap()),
             ("HOME".into(), dir.to_string_lossy().into()),
         ],
+        aside: false,
     }
 }
 
@@ -281,4 +282,52 @@ async fn pty_cancel_kills_group() {
         .unwrap();
     // SAFETY: probing a pid with signal 0.
     assert_ne!(unsafe { libc::kill(pid, 0) }, 0, "shell still alive");
+}
+
+/// A side chat run is read-only whatever the runtime config says: Codex gets sandbox
+/// `read-only` and no configured args; Claude Code gets permission mode `plan`, the edit tools
+/// disallowed, and neither `allowed_tools` nor the configured args.
+#[test]
+fn aside_runs_ignore_widening_config() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut s = spec(
+        tmp.path(),
+        "codex",
+        "codex",
+        &["--dangerously-bypass-approvals-and-sandbox"],
+        "q",
+    );
+    s.cfg.sandbox = Some("danger-full-access".into());
+    assert_eq!(
+        runtime::codex::thread_policy(&s),
+        ("on-request".to_string(), "danger-full-access".to_string())
+    );
+    s.aside = true;
+    assert_eq!(
+        runtime::codex::thread_policy(&s),
+        ("never".to_string(), "read-only".to_string())
+    );
+
+    let mut c = spec(
+        tmp.path(),
+        "claude",
+        "claude",
+        &["--dangerously-skip-permissions"],
+        "q",
+    );
+    c.cfg.permission_mode = Some("bypassPermissions".into());
+    c.cfg.allowed_tools = Some("Bash".into());
+    let normal = runtime::claude::permission_args(&c);
+    assert!(normal.contains(&"bypassPermissions".to_string()));
+    assert!(normal.contains(&"--dangerously-skip-permissions".to_string()));
+    c.aside = true;
+    assert_eq!(
+        runtime::claude::permission_args(&c),
+        vec![
+            "--permission-mode".to_string(),
+            "plan".into(),
+            "--disallowedTools".into(),
+            runtime::claude::ASIDE_DISALLOWED_TOOLS.into(),
+        ]
+    );
 }

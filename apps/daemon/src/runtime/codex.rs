@@ -289,7 +289,10 @@ fn text_input(text: &str) -> Value {
 async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Control>) -> Outcome {
     let program = spec.cfg.command();
     let mut args = vec!["app-server".to_string()];
-    args.extend(spec.cfg.args.iter().cloned());
+    // A side chat run ignores the configured args: they could widen the sandbox.
+    if !spec.aside {
+        args.extend(spec.cfg.args.iter().cloned());
+    }
     let mut p = match Proc::spawn(&spec, &program, &args) {
         Ok(p) => p,
         Err(e) => return Outcome::failed(format!("cannot start {program}: {e}")),
@@ -379,10 +382,11 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 let _ = p.write_json(&json!({ "method": "initialized" })).await;
                                 let id = ids.next_id();
                                 pending.insert(id, Pending::ThreadStart);
+                                let (approval, sandbox) = thread_policy(&spec);
                                 let mut params = json!({
                                     "cwd": spec.cwd.to_string_lossy(),
-                                    "approvalPolicy": spec.cfg.approval_policy.clone().unwrap_or_else(|| "never".into()),
-                                    "sandbox": spec.cfg.sandbox.clone().unwrap_or_else(|| "workspace-write".into()),
+                                    "approvalPolicy": approval,
+                                    "sandbox": sandbox,
                                 });
                                 if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
                                     params["model"] = json!(m);
@@ -518,6 +522,24 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
         session_file,
         usage: norm.usage,
     }
+}
+
+/// `thread/start` approval policy and sandbox. A side chat run (`spec.aside`) is read-only
+/// whatever `daemon.toml` says: sandbox `read-only`, approval policy `never` (nothing to ask).
+pub fn thread_policy(spec: &RunSpec) -> (String, String) {
+    if spec.aside {
+        return ("never".into(), "read-only".into());
+    }
+    (
+        spec.cfg
+            .approval_policy
+            .clone()
+            .unwrap_or_else(|| "never".into()),
+        spec.cfg
+            .sandbox
+            .clone()
+            .unwrap_or_else(|| "workspace-write".into()),
+    )
 }
 
 /// Input that arrived while the last turn was ending still gets a turn.

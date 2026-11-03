@@ -3,7 +3,7 @@
 use crate::config::Config;
 use crate::health;
 use crate::proto::*;
-use crate::run::{RunCtx, RunMsg};
+use crate::run::{RunCtl, RunCtx, RunMsg};
 use crate::runtime::Control;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -24,6 +24,17 @@ macro_rules! log {
 /// Frames buffered per run before message deltas are dropped (finals are always kept).
 const BUFFER_SOFT_CAP: usize = 20_000;
 
+/// `hello.machine.features`: the 1.1 work this daemon does (docs/machine-protocol.md).
+pub const FEATURES: &[&str] = &[
+    feature::PAUSE,
+    feature::ANSWER,
+    feature::ASIDE,
+    feature::ACCEPTANCE,
+];
+
+/// `run.resume.note` limit (docs/machine-protocol.md).
+const MAX_RESUME_NOTE: usize = 2000;
+
 enum LinkEvent {
     Up(u64, mpsc::UnboundedSender<String>),
     Frame(u64, String),
@@ -31,7 +42,7 @@ enum LinkEvent {
 }
 
 struct RunEntry {
-    control: mpsc::UnboundedSender<Control>,
+    control: mpsc::UnboundedSender<RunCtl>,
     next_seq: u64,
     /// Sequenced frames the server has not acked yet, in seq order.
     buffer: VecDeque<(u64, bool, String)>,
@@ -121,7 +132,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     // ack their last frames (run.done), so it shows the runs as stopped, not lost.
     log!("daemon stopping");
     for r in d.runs.values() {
-        let _ = r.control.send(Control::Cancel);
+        let _ = r.control.send(Control::Cancel.into());
     }
     let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
     while d
@@ -311,6 +322,20 @@ impl Daemon {
         }
     }
 
+    /// `takeover_url` from the config, only when redaction leaves it unchanged (a URL with a
+    /// password or a token never leaves the machine).
+    fn takeover_url(&self) -> Option<String> {
+        let url = self.cfg.takeover_url.as_deref()?.trim();
+        if url.is_empty() || crate::config::takeover_url_problem(url).is_some() {
+            return None;
+        }
+        if self.redactor.text(url) != url {
+            log!("takeover_url not reported: it looks like it holds a secret");
+            return None;
+        }
+        Some(url.to_string())
+    }
+
     fn active_count(&self) -> u32 {
         self.runs.values().filter(|r| !r.done).count() as u32
     }
@@ -428,8 +453,8 @@ impl Daemon {
                         os: std::env::consts::OS.into(),
                         arch: std::env::consts::ARCH.into(),
                         max_parallel_runs: self.cfg.max_parallel_runs,
-                        features: None,
-                        takeover_url: None,
+                        features: Some(FEATURES.iter().map(|f| f.to_string()).collect()),
+                        takeover_url: self.takeover_url(),
                     },
                     clis: self.clis.clone(),
                     health: health::health(&self.cfg, self.active_count()),
@@ -487,7 +512,7 @@ impl Daemon {
                             let r = self.runs.get_mut(&id).expect("run");
                             if !r.done {
                                 log!("run {id} unknown to server: cancelling");
-                                let _ = r.control.send(Control::Cancel);
+                                let _ = r.control.send(Control::Cancel.into());
                             }
                             r.orphan = true;
                             r.buffer.clear();
@@ -502,10 +527,14 @@ impl Daemon {
                 run_id,
                 input_id,
                 text,
+                answer,
+                artifact_event,
                 ..
             } => {
                 if let Some(r) = self.runs.get(&run_id).filter(|r| !r.done) {
-                    let _ = r.control.send(Control::Input { input_id, text });
+                    let text =
+                        crate::input::cli_text(&text, answer.as_ref(), artifact_event.as_ref());
+                    let _ = r.control.send(Control::Input { input_id, text }.into());
                 }
             }
             Down::RunApproval {
@@ -514,15 +543,31 @@ impl Daemon {
                 decision,
             } => {
                 if let Some(r) = self.runs.get(&run_id) {
-                    let _ = r.control.send(Control::Approval {
-                        approval_id,
-                        approve: decision == "approve",
-                    });
+                    let _ = r.control.send(
+                        Control::Approval {
+                            approval_id,
+                            approve: decision == "approve",
+                        }
+                        .into(),
+                    );
                 }
             }
             Down::RunCancel { run_id, .. } => {
                 if let Some(r) = self.runs.get(&run_id) {
-                    let _ = r.control.send(Control::Cancel);
+                    let _ = r.control.send(Control::Cancel.into());
+                }
+            }
+            Down::RunPause { run_id, by } => {
+                if let Some(r) = self.runs.get(&run_id).filter(|r| !r.done) {
+                    log!("run {run_id} paused");
+                    let _ = r.control.send(RunCtl::Pause { by });
+                }
+            }
+            Down::RunResume { run_id, note } => {
+                if let Some(r) = self.runs.get(&run_id).filter(|r| !r.done) {
+                    log!("run {run_id} resumed");
+                    let note = note.map(|n| n.chars().take(MAX_RESUME_NOTE).collect());
+                    let _ = r.control.send(RunCtl::Resume { note });
                 }
             }
             Down::Ack { run_id, seq } => {
@@ -534,10 +579,6 @@ impl Daemon {
                 }
             }
             Down::Error { error } => log!("server error {}: {}", error.code, error.message),
-            // This daemon does not report the "pause" feature, so the server does not send these.
-            Down::RunPause { run_id, .. } | Down::RunResume { run_id, .. } => {
-                log!("ignored pause or resume of run {run_id}: feature not supported");
-            }
         }
     }
 
@@ -589,11 +630,24 @@ impl Daemon {
         if a.prompt.is_empty() {
             return self.reject(&id, "invalid", "empty prompt");
         }
+        match a.kind.as_deref() {
+            None => {}
+            Some(crate::run::KIND_ASIDE) if crate::run::aside_capable(&rt.kind) => {}
+            Some(crate::run::KIND_ASIDE) => {
+                return self.reject(
+                    &id,
+                    "runtime_unavailable",
+                    format!("runtime {} has no read-only mode for side chats", a.runtime),
+                );
+            }
+            // A kind this daemon does not know could need a mode it cannot enforce.
+            Some(_) => return self.reject(&id, "invalid", "unknown run kind"),
+        }
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
         self.runs.insert(
             id.clone(),
             RunEntry {
-                control: ctl_tx.clone(),
+                control: ctl_tx,
                 next_seq: 1,
                 buffer: VecDeque::new(),
                 done: false,
@@ -609,7 +663,6 @@ impl Daemon {
             token: self.token.clone(),
             assign: a,
             rt,
-            control_tx: ctl_tx,
             control_rx: ctl_rx,
             out: self.run_tx.clone(),
             redactor: self.redactor.clone(),
