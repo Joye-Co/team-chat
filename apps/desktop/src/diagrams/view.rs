@@ -260,7 +260,9 @@ fn on_key(
             if let Some(i) = ui.read(cx).focused
                 && let Some(node) = ready.meta.nodes.get(i)
             {
-                super::on_node_ref(spec.origin.clone(), &node.id, &node.label);
+                let (origin, id, label) =
+                    (spec.origin.clone(), node.id.clone(), node.label.clone());
+                super::on_node_ref(origin, &id, &label, window, cx);
             }
             cx.stop_propagation();
         }
@@ -478,9 +480,9 @@ fn image_with_hits(
                         }
                     })
                 })
-                .on_click(move |e, _, _| {
+                .on_click(move |e, window, cx| {
                     if e.modifiers().alt {
-                        super::on_node_ref(origin.clone(), &nid, &label);
+                        super::on_node_ref(origin.clone(), &nid, &label, window, cx);
                     }
                 })
                 .when(hovered == Some(i), |el| {
@@ -497,9 +499,15 @@ fn image_with_hits(
                             .border_1()
                             .border_color(k.line_2)
                             .rounded(radius::SM)
-                            .on_click(move |_, _, cx| {
+                            .on_click(move |_, window, cx| {
                                 cx.stop_propagation();
-                                super::on_node_ref(ask_origin.clone(), &ask_id, &ask_label)
+                                super::on_node_ref(
+                                    ask_origin.clone(),
+                                    &ask_id,
+                                    &ask_label,
+                                    window,
+                                    cx,
+                                )
                             }),
                         ),
                     )

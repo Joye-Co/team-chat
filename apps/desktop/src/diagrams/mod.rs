@@ -56,17 +56,48 @@ pub enum DiagramBlock {
     Card { block_id: String },
 }
 
-/// A node reference (⌥-click, 问这里, the context menu, ⌥↵). For now it only logs; the
-/// 引用提问 track wires it to the composer chip (REFS §A3, §A4).
-pub fn on_node_ref(source: DiagramSource, node_id: &str, label: &str) {
-    tracing::info!(
-        target: "diagrams",
-        message = ?source.message_id,
-        block = ?source.block,
-        node = node_id,
-        label_chars = label.chars().count(),
-        "diagram node ref"
-    );
+/// A node reference (⌥-click, 问这里, the context menu, ⌥↵): a `node` part (REFS §A2.2)
+/// handed to [`refs::ask_about`]. The group id and the `md:<index>` of a Markdown fence are
+/// left empty here; the 引用提问 track fills them (REFS §A2.1).
+pub fn on_node_ref(
+    source: DiagramSource,
+    node_id: &str,
+    label: &str,
+    window: &mut gpui::Window,
+    cx: &mut gpui::App,
+) {
+    use crate::views::refs::{self, PartTarget, RefIntent, RefSource};
+    use chat_core::proto::card2::{PartKey, PartRef};
+    let topic_id = source.topic_id.clone().unwrap_or_default();
+    let target_source = match (&source.artifact, &source.message_id) {
+        (Some((artifact_id, version)), _) => RefSource::Artifact {
+            group_id: String::new(),
+            topic_id,
+            artifact_id: artifact_id.clone(),
+            version: *version,
+        },
+        (None, message_id) => RefSource::Message {
+            group_id: String::new(),
+            topic_id,
+            message_id: message_id.clone().unwrap_or_default(),
+        },
+    };
+    let block_id = match &source.block {
+        DiagramBlock::Card { block_id } => block_id.clone(),
+        DiagramBlock::MarkdownFence { .. } => String::new(),
+    };
+    let target = PartTarget {
+        source: target_source,
+        block_id,
+        part: Some(PartRef {
+            kind: "node".into(),
+            keys: Some([("node".to_string(), PartKey::Key(node_id.to_string()))].into()),
+        }),
+        label: label.chars().take(120).collect(),
+        value: Some(serde_json::json!({ "node": node_id, "label": label })),
+        card_rev: None,
+    };
+    refs::ask_about(target, RefIntent::Topic, window, cx);
 }
 
 /// The four error kinds the person sees (REFS §B4 table).

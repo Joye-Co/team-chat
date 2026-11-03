@@ -364,9 +364,9 @@ impl DiagramViewer {
                             cx.notify();
                         }
                     }))
-                    .on_click(move |e, _, _| {
+                    .on_click(move |e, window, cx| {
                         if e.modifiers().alt {
-                            super::on_node_ref(origin.clone(), &nid, &label);
+                            super::on_node_ref(origin.clone(), &nid, &label, window, cx);
                         }
                     }),
             );
