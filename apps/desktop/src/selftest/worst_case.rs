@@ -458,16 +458,6 @@ impl ChatProvider for WorstCase {
             })
             .collect()
     }
-    fn machine_screen(&self, run_id: &str) -> Option<v2::MachineScreen> {
-        self.inner.machine_screen(run_id).map(|mut s| {
-            for (i, l) in s.lines.iter_mut().enumerate() {
-                if i % 2 == 0 {
-                    l.text = pick(BODIES, i).to_string();
-                }
-            }
-            s
-        })
-    }
 
     // --- end of the desk track block ---
 
@@ -738,6 +728,12 @@ impl ChatProvider for WorstCase {
     /// A screen with very long command and output lines and many of them.
     fn machine_screen(&self, run_id: &str) -> Option<v2::MachineScreen> {
         let mut screen = self.inner.machine_screen(run_id)?;
+        // desk track: the live thumbnail rows get the long bodies too.
+        for (i, l) in screen.lines.iter_mut().enumerate() {
+            if i % 2 == 0 {
+                l.text = pick(BODIES, i).to_string();
+            }
+        }
         screen.machine_name = Some("mac-mini-office-build-runner-arm64-nightly-02.tailnet".into());
         let step = screen.lines.last().and_then(|l| l.step);
         let at = screen.lines.last().map(|l| l.at).unwrap_or(self.now);
