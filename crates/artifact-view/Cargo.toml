@@ -8,6 +8,10 @@ publish.workspace = true
 [dependencies]
 serde_json.workspace = true
 
+[dev-dependencies]
+# The pinned SHA-256 of the bundled diagram library (src/diagram.rs).
+sha2 = "0.10"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-foundation = "0.3"

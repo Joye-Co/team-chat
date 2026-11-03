@@ -62,6 +62,7 @@ pub(crate) struct State {
     pub(crate) entry: String,
     pub(crate) data: Value,
     pub(crate) caps: Capabilities,
+    pub(crate) max_message_bytes: usize,
     pub(crate) closed: bool,
     pub(crate) rules_ready: bool,
     pub(crate) last_external: Option<Instant>,
@@ -321,7 +322,7 @@ impl Controller {
                 Vec::new()
             };
             (
-                bridge::handle(&raw, st.caps, &st.data),
+                bridge::handle_limited(&raw, st.caps, &st.data, st.max_message_bytes),
                 st.version,
                 gate::recent_input(st.last_input, Instant::now()),
             )
@@ -492,6 +493,7 @@ pub(crate) fn new_state(
         entry: version.entry,
         data: version.data,
         caps,
+        max_message_bytes: bridge::MAX_MESSAGE_BYTES,
         closed: false,
         rules_ready: false,
         last_external: None,
@@ -711,8 +713,11 @@ impl ArtifactWindow {
             versions,
             presentation,
             inspectable,
+            max_message_bytes,
+            transparent,
         } = options;
         let state = new_state(artifact_id, version, capabilities)?;
+        state.borrow_mut().max_message_bytes = max_message_bytes;
         let controller = Controller::new(mtm, state.clone(), Rc::new(on_event));
         let config = configure(mtm, &controller, false);
         let frame = NSRect::new(
@@ -741,6 +746,14 @@ impl ArtifactWindow {
             WKWebView::initWithFrame_configuration(WKWebView::alloc(mtm), frame, &config.config)
         };
         wire(&web_view, &controller, inspectable);
+        if transparent {
+            // SAFETY: `drawsBackground` is a BOOL key WKWebView has answered to since macOS
+            // 10.10; with NO the page's transparent pixels stay transparent in snapshots.
+            unsafe {
+                let no = objc2_foundation::NSNumber::new_bool(false);
+                let _: () = msg_send![&*web_view, setValue: &*no, forKey: &*NSString::from_str("drawsBackground")];
+            }
+        }
         let ucc = config.ucc;
         window.setContentView(Some(&web_view));
         window.setDelegate(Some(ProtocolObject::from_ref(&*controller)));
@@ -758,8 +771,10 @@ impl ArtifactWindow {
 
         start_loading(mtm, &this.controller, &this.web_view, &ucc);
 
-        if presentation == Presentation::Front {
-            this.window.makeKeyAndOrderFront(None);
+        match presentation {
+            Presentation::Front => this.window.makeKeyAndOrderFront(None),
+            Presentation::Hidden => {}
+            Presentation::Offscreen => this.order_offscreen(),
         }
         Ok(this)
     }
@@ -847,6 +862,85 @@ impl ArtifactWindow {
         self.window.close();
     }
 
+    /// Puts the window at alpha 0 far outside every screen and orders it on screen without
+    /// making it key, so its web content paints but nobody sees or clicks it.
+    fn order_offscreen(&self) {
+        let mtm = MainThreadMarker::from(&*self.controller);
+        let mut far = NSPoint::new(-20000.0, -20000.0);
+        for screen in objc2_app_kit::NSScreen::screens(mtm).iter() {
+            let f = screen.frame();
+            far.x = far.x.min(f.origin.x - f.size.width - 20000.0);
+            far.y = far.y.min(f.origin.y - f.size.height - 20000.0);
+        }
+        self.window.setAlphaValue(0.0);
+        self.window.setIgnoresMouseEvents(true);
+        self.window.setHasShadow(false);
+        self.window.setCollectionBehavior(
+            objc2_app_kit::NSWindowCollectionBehavior::Transient
+                | objc2_app_kit::NSWindowCollectionBehavior::IgnoresCycle,
+        );
+        self.window.setFrameOrigin(far);
+        self.window.orderBack(None);
+    }
+
+    /// Resizes the page area (CSS px = points) so content up to this size lays out and can
+    /// be captured.
+    pub fn set_content_size(&self, width: f64, height: f64) {
+        if !self.is_closed() {
+            self.window
+                .setContentSize(NSSize::new(width.max(1.0), height.max(1.0)));
+        }
+    }
+
+    /// Takes a PNG of `rect` of the page (CSS px, from the top-left of the view) at `scale`
+    /// output pixels per CSS px. `done` runs on the main thread with the PNG bytes, or an
+    /// error text for the log. The view must be at least as large as `rect`.
+    pub fn snapshot(
+        &self,
+        rect: crate::Rect,
+        scale: f64,
+        done: impl FnOnce(Result<Vec<u8>, String>) + 'static,
+    ) {
+        if self.is_closed() {
+            done(Err("closed".into()));
+            return;
+        }
+        let backing = self.window.backingScaleFactor().max(1.0);
+        let config = unsafe { objc2_web_kit::WKSnapshotConfiguration::new(MainThreadMarker::from(&*self.controller)) };
+        unsafe {
+            config.setRect(objc2_foundation::NSRect::new(
+                NSPoint::new(rect.x, rect.y),
+                NSSize::new(rect.w.max(1.0), rect.h.max(1.0)),
+            ));
+            let width_pt = (rect.w * scale / backing).max(1.0);
+            config.setSnapshotWidth(Some(&objc2_foundation::NSNumber::new_f64(width_pt)));
+            config.setAfterScreenUpdates(true);
+        }
+        let done = RefCell::new(Some(done));
+        let block = RcBlock::new(move |image: *mut objc2_app_kit::NSImage, error: *mut NSError| {
+            let Some(done) = done.borrow_mut().take() else {
+                return;
+            };
+            // SAFETY: WebKit passes a valid (or null) image and error.
+            let image = unsafe { Retained::retain(image) };
+            let result = match image {
+                Some(image) => png_of(&image),
+                None => {
+                    let error = unsafe { Retained::retain(error) };
+                    Err(error.map_or_else(
+                        || "no image".to_string(),
+                        |e| format!("{} {}", e.domain(), e.code()),
+                    ))
+                }
+            };
+            done(result);
+        });
+        unsafe {
+            self.web_view
+                .takeSnapshotWithConfiguration_completionHandler(Some(&config), &block)
+        };
+    }
+
     /// Runs JavaScript in the page (for self-tests and developer tools).
     pub fn evaluate_script(&self, script: &str) {
         if !self.is_closed() {
@@ -875,6 +969,18 @@ pub fn open_screen_share_url(url: &str) -> bool {
         return false;
     };
     NSWorkspace::sharedWorkspace().openURL(&nsurl)
+}
+
+/// PNG bytes of an image at its full pixel size.
+fn png_of(image: &objc2_app_kit::NSImage) -> Result<Vec<u8>, String> {
+    use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
+    let tiff = image.TIFFRepresentation().ok_or("no tiff")?;
+    let rep = NSBitmapImageRep::imageRepWithData(&tiff).ok_or("no bitmap")?;
+    let png = unsafe {
+        rep.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new())
+    }
+    .ok_or("no png")?;
+    Ok(png.to_vec())
 }
 
 /// Opens an `http`, `https` or `mailto` URL in the default app. Returns false for any other

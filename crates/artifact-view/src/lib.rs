@@ -16,6 +16,7 @@
 //! `NSApplication`.
 
 pub mod bridge;
+pub mod diagram;
 pub mod embed;
 pub mod gate;
 pub mod resolve;
@@ -111,6 +112,9 @@ pub enum Presentation {
     /// Do not order the window on screen (self-tests and preloading). Call
     /// [`ArtifactWindow::focus`] later to show it.
     Hidden,
+    /// Order the window on screen at alpha 0, outside every screen's frame, ignoring the
+    /// mouse: for web content that must paint (snapshots) but never be seen.
+    Offscreen,
 }
 
 /// Everything needed to open an artifact window.
@@ -127,6 +131,12 @@ pub struct OpenOptions {
     pub presentation: Presentation,
     /// Allow Safari Web Inspector (developer view only).
     pub inspectable: bool,
+    /// Largest bridge message the page may send (serialized JSON). Default
+    /// [`bridge::MAX_MESSAGE_BYTES`] (256 KiB); the diagram renderer uses 4 MiB.
+    pub max_message_bytes: usize,
+    /// The web view draws no background, so snapshots keep transparent pixels
+    /// (the diagram renderer).
+    pub transparent: bool,
 }
 
 impl OpenOptions {
@@ -145,6 +155,8 @@ impl OpenOptions {
             versions: Vec::new(),
             presentation: Presentation::Front,
             inspectable: false,
+            max_message_bytes: bridge::MAX_MESSAGE_BYTES,
+            transparent: false,
         }
     }
 }

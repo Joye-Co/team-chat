@@ -44,7 +44,12 @@ fn err(id: Value, code: &str, message: &str) -> Outcome {
 
 /// Handles one raw message (`{ id, method, params }`) from the page.
 pub fn handle(raw: &[u8], caps: Capabilities, data: &Value) -> Outcome {
-    if raw.len() > MAX_MESSAGE_BYTES {
+    handle_limited(raw, caps, data, MAX_MESSAGE_BYTES)
+}
+
+/// [`handle`] with a window's own message size limit.
+pub fn handle_limited(raw: &[u8], caps: Capabilities, data: &Value, max_bytes: usize) -> Outcome {
+    if raw.len() > max_bytes {
         return err(Value::Null, "too_large", "message too large");
     }
     let Ok(Value::Object(msg)) = serde_json::from_slice::<Value>(raw) else {
@@ -168,6 +173,18 @@ mod tests {
         assert_eq!(o.reply["error"]["code"], "bad_request");
         let o = handle(b"[1]", Capabilities::ALL, &data);
         assert_eq!(o.reply["error"]["code"], "bad_request");
+    }
+
+    #[test]
+    fn message_size_limit_per_window() {
+        let big = format!(
+            r#"{{"id":1,"method":"emitEvent","params":{{"name":"n","payload":"{}"}}}}"#,
+            "x".repeat(MAX_MESSAGE_BYTES)
+        );
+        let o = handle(big.as_bytes(), Capabilities::ALL, &Value::Null);
+        assert_eq!(o.reply["error"]["code"], "too_large");
+        let o = handle_limited(big.as_bytes(), Capabilities::ALL, &Value::Null, 4 << 20);
+        assert_eq!(o.reply["result"], true);
     }
 
     #[test]
