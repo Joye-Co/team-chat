@@ -1237,21 +1237,28 @@ pub fn version_added(artifact_id: &str, version: u32, cx: &mut App) {
     h.latest.insert(artifact_id.to_string(), version);
     h.updated
         .insert(artifact_id.to_string(), (version, Instant::now()));
-    // Requests of the pages that reload end (their page is gone).
+    // The open requests of the shown version end `reloaded`. A page that reloads has a
+    // new bridge (a no-op there); one that keeps its version (a card embed, an inline
+    // page that does not follow) gets a settled promise instead of one that never ends.
     let ended: Vec<String> = h
         .pending
         .iter()
         .filter(|(_, p)| p.artifact_id == artifact_id && p.version == before)
         .map(|(c, _)| c.clone())
         .collect();
+    let mut open = Vec::new();
     for c in ended {
-        if let Some(p) = h.pending.remove(&c)
-            && let Some(e) = p.event_id
-        {
-            h.by_event.remove(&e);
+        if let Some(p) = h.pending.remove(&c) {
+            forget(h, &p);
+            open.push(p);
         }
     }
-    h.bands.remove(&(artifact_id.to_string(), before));
+    for p in open {
+        if let Some(id) = &p.reply_id {
+            finish(&p.page, p.version, id, Err(Reject::Reloaded), cx);
+        }
+    }
+    host(cx).bands.remove(&(artifact_id.to_string(), before));
     super::window::on_version_added(artifact_id, before, version, cx);
     refresh_at(UPDATED_FOR, cx);
     cx.refresh_windows();
@@ -1476,6 +1483,23 @@ mod tests {
                 cx,
             );
             assert_eq!(finished(), vec![(json!(3), Err(Reject::RateLimited))]);
+        });
+    }
+
+    #[gpui::test]
+    fn a_new_version_settles_the_open_asks_of_the_old_one(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            start_host(cx);
+            set_latest(ART, 3, cx);
+            let cid = ask(PageRef::Embed(WeakEntity::new_invalid()), 11, cx);
+            ack(&cid, "ev-1", ExpectMode::Run, cx);
+            version_added(ART, 4, cx);
+            assert_eq!(finished(), vec![(json!(11), Err(Reject::Reloaded))]);
+            assert!(host(cx).pending.is_empty() && host(cx).by_event.is_empty());
+            // Its later timeout or reply finds nothing open.
+            time_out(&cid, cx);
+            reply("ev-1", cx);
+            assert!(finished().is_empty());
         });
     }
 
