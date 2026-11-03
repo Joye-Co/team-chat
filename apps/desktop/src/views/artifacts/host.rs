@@ -152,6 +152,8 @@ pub struct PageHost {
     follow: HashMap<SharedString, bool>,
     /// Self-tests: events sent, as `(artifact, version, name, kind)`.
     sent: Vec<(String, u32, String, PageEventKind)>,
+    /// Self-tests: the 引用提问 toasts pushed to a window.
+    toasts: Vec<&'static str>,
 }
 
 impl Global for PageHost {}
@@ -170,6 +172,7 @@ impl PageHost {
             updated: HashMap::new(),
             follow: HashMap::new(),
             sent: Vec::new(),
+            toasts: Vec::new(),
         }
     }
 }
@@ -921,16 +924,17 @@ fn ask_about(
     // The toast goes to the window that asked. A page in the main window asks while that
     // window is being updated, so it cannot be found and updated again (`files::notify`).
     use gpui_component::WindowExt as _;
-    let note = |asked: refs::Asked| {
-        ref_notice(asked)
-            .map(|text| gpui_component::notification::Notification::new().message(text.to_string()))
+    let toast = |asked: refs::Asked, w: &mut Window, cx: &mut App| {
+        if let Some(text) = ref_notice(asked) {
+            host(cx).toasts.push(text);
+            let n = gpui_component::notification::Notification::new().message(text.to_string());
+            w.push_notification(n, cx);
+        }
     };
     match window {
         Some(w) => {
             let asked = refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
-            if let Some(n) = note(asked) {
-                w.push_notification(n, cx);
-            }
+            toast(asked, w, cx);
         }
         None => {
             let _ = cx
@@ -938,11 +942,8 @@ fn ask_about(
                 .or_else(|| cx.windows().into_iter().next())
                 .map(|handle| {
                     handle.update(cx, |_, w, cx| {
-                        let asked =
-                            refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
-                        if let Some(n) = note(asked) {
-                            w.push_notification(n, cx);
-                        }
+                        let asked = refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
+                        toast(asked, w, cx);
                     })
                 });
         }
@@ -1360,6 +1361,13 @@ fn on_artifacts_changed(changes: &Changes, cx: &mut App) {
 pub fn sent(cx: &App) -> Vec<(String, u32, String, PageEventKind)> {
     cx.try_global::<PageHost>()
         .map(|h| h.sent.clone())
+        .unwrap_or_default()
+}
+
+/// The 引用提问 toasts this host pushed to a window (self-tests).
+pub fn toasts(cx: &App) -> Vec<&'static str> {
+    cx.try_global::<PageHost>()
+        .map(|h| h.toasts.clone())
         .unwrap_or_default()
 }
 

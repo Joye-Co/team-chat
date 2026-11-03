@@ -196,6 +196,11 @@ async fn ask_once(
             .timer(Duration::from_millis(50))
             .await;
     }
+    // One toast, and the one of a real add.
+    let toasts = cx.update(|cx| host::toasts(cx));
+    if toasts != [crate::copy::page_host::PAGE_REF_ADDED] {
+        return Err(format!("the toasts are {toasts:?}"));
+    }
     cx.background_executor()
         .timer(Duration::from_millis(250))
         .await;
