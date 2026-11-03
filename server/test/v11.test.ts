@@ -1,6 +1,6 @@
 // 1.1 boundary: Card v2 messages with their derived v1 card, card answers, side chat context,
 // and 产出 page events. Routing answers and events to runs is tested by the bots feature.
-import { SELF } from "cloudflare:test";
+import { SELF, env, runInDurableObject } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import { type CardV2, cardV2ToV1 } from "@chat/protocol";
 import { BASE, Client, api, clientMsgId, createGroup, createMember, protocolViolations, type TestMember } from "./helpers";
@@ -98,8 +98,16 @@ describe("cards v2", () => {
       await co.request({ t: "edit", groupId: gid, messageId: text.message.id, body: "", cardV2: card }),
     ).toMatchObject({ ok: false, error: { code: "invalid" } });
 
-    // Deleting the card removes what the answerer typed from the log.
+    const genv = env as unknown as { GROUP_ROOM: DurableObjectNamespace };
+    const decisionRows = () =>
+      runInDurableObject(genv.GROUP_ROOM.get(genv.GROUP_ROOM.idFromName(gid)), (_i, state: DurableObjectState) =>
+        state.storage.sql.exec("SELECT title FROM card_decisions WHERE message_id = ?", m.id).toArray(),
+      );
+    expect((await decisionRows()).length).toBe(1);
+
+    // Deleting the card removes what the answerer typed from the log, and its decision rows.
     await co.ok({ t: "delete", groupId: gid, messageId: m.id });
+    expect(await decisionRows()).toEqual([]);
     const page = await cb.request({ t: "fetch", groupId: gid, afterSeq: 0 });
     const answers = page.events.filter((e: any) => e.type === "card.answered");
     expect(answers.length).toBe(2);

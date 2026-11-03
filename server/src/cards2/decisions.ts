@@ -80,6 +80,13 @@ registerEventWriter((event: ArchivedEvent, sql) => {
   );
 });
 
+// A deleted card message keeps no decision rows (live deletes and imports).
+registerEventWriter((event: ArchivedEvent, sql) => {
+  if (event.type !== "message.deleted") return;
+  const messageId = (event.data as { messageId?: string }).messageId ?? event.messageId;
+  if (messageId) sql.exec("DELETE FROM card_decisions WHERE message_id = ?", messageId);
+});
+
 type DecisionRow = {
   seq: number;
   message_id: string;
