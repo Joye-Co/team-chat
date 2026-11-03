@@ -8,16 +8,18 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    IndexPath, WindowExt as _,
+    IndexPath, Sizable as _, WindowExt as _,
+    button::Button,
     list::{ListDelegate, ListItem, ListState},
 };
 
 use crate::{
     app::Services,
-    copy::{dev, fill, nav as navcopy, search as s},
+    copy::{dev, fill, search as s},
     data::{GroupId, Member, SearchError, SearchHit, SearchQuery},
-    theme,
-    views::{avatar, time_text},
+    theme::{self, Type as _, space},
+    ui::{self, Lucide, MemberAvatar},
+    views::time_text,
 };
 
 /// Wait this long after the last key before asking the server.
@@ -26,7 +28,8 @@ const DEBOUNCE: Duration = Duration::from_millis(180);
 const LIMIT: u32 = 50;
 /// Longest query the protocol accepts, in characters.
 const MAX_QUERY: usize = 200;
-const ROW_HEIGHT: f32 = 56.;
+/// Row content height; the list item adds its padding (40 pt rows, §13.12).
+const ROW_HEIGHT: f32 = 28.;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -250,7 +253,6 @@ impl ListDelegate for SearchDelegate {
         let author = self.member(&hit.author_id).cloned();
         let snippet = hit.snippet.replace(['\n', '\r'], " ");
         let style = HighlightStyle {
-            background_color: Some(colors.search_highlight),
             font_weight: Some(FontWeight::SEMIBOLD),
             ..Default::default()
         };
@@ -258,74 +260,69 @@ impl ListDelegate for SearchDelegate {
             .into_iter()
             .map(|r| (r, style))
             .collect();
-        let place = div()
-            .flex()
-            .items_center()
-            .gap(px(4.))
-            .text_xs()
-            .text_color(colors.muted_foreground)
-            .child(navcopy::GROUP_MARK)
-            .child(
-                div()
-                    .flex_none()
-                    .max_w(px(180.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(group),
-            )
-            .child(navcopy::TOPIC_MARK)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(topic),
-            )
-            .when(developer, |el| {
-                el.child(div().flex_none().child(fill(
-                    dev::SEARCH_HIT,
-                    &[("id", &hit.message_id), ("seq", &hit.seq.to_string())],
-                )))
-            })
-            .child(div().flex_none().child(time_text(hit.created_at)));
+        // One 40 pt row as in the switcher's 消息 group: 24 pt avatar,
+        // "作者：片段" with the match in 600, and "群 · 话题 · 时间" trailing.
+        let selected = self.selected == Some(ix.row);
+        let name = author.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let mut place = format!("{group} · {topic} · {}", time_text(hit.created_at));
+        if developer {
+            place.push(' ');
+            place.push_str(&fill(
+                dev::SEARCH_HIT,
+                &[("id", &hit.message_id), ("seq", &hit.seq.to_string())],
+            ));
+        }
+        let trailing = div()
+            .flex_none()
+            .max_w(px(260.))
+            .t_callout()
+            .tnum()
+            .text_color(colors.text_2)
+            .one_line()
+            .child(place);
         let line = div()
+            .h(px(ROW_HEIGHT))
+            .w_full()
             .flex()
             .items_center()
-            .gap(px(6.))
-            .text_sm()
-            .child(avatar(author.as_ref(), px(18.), cx))
+            .gap(space::S10)
+            .t_ui()
             .child(
                 div()
                     .flex_none()
-                    .text_color(colors.muted_foreground)
-                    .child(author.map(|m| m.name).unwrap_or_default()),
+                    .child(MemberAvatar::new(author.as_ref(), px(24.)).on(colors.elevated)),
             )
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
+                    .flex()
+                    .items_center()
                     .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(StyledText::new(snippet).with_highlights(highlights)),
-            );
+                    .child(
+                        div()
+                            .flex_none()
+                            .max_w(px(120.))
+                            .one_line()
+                            .text_color(colors.text_1)
+                            .child(fill(s::AUTHOR_SAID, &[("name", &name)])),
+                    )
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .one_line()
+                            .text_color(colors.text_1)
+                            .child(StyledText::new(snippet).with_highlights(highlights)),
+                    ),
+            )
+            .child(trailing)
+            .when(selected, |el| el.child(ui::KbdHint::new(&["enter"])));
         Some(
             ListItem::new(ix.row)
-                .selected(self.selected == Some(ix.row))
-                .child(
-                    div()
-                        .h(px(ROW_HEIGHT))
-                        .w_full()
-                        .flex()
-                        .flex_col()
-                        .justify_center()
-                        .gap(px(4.))
-                        .child(place)
-                        .child(line),
-                ),
+                .rounded(theme::radius::SM)
+                .when(selected, |el| el.bg(colors.fill_active))
+                .child(line),
         )
     }
 
@@ -334,24 +331,49 @@ impl ListDelegate for SearchDelegate {
         _window: &mut Window,
         cx: &mut Context<ListState<Self>>,
     ) -> impl IntoElement {
-        let text = match self.phase {
-            Phase::Idle => s::HINT,
-            Phase::Searching => s::SEARCHING,
-            Phase::Done => s::EMPTY,
-            Phase::Failed(SearchError::Offline) => s::OFFLINE,
-            Phase::Failed(SearchError::Refused) => s::REFUSED,
-            Phase::Failed(SearchError::TimedOut) => s::TIMED_OUT,
-            Phase::Failed(SearchError::Unavailable) => s::UNAVAILABLE,
+        // §13.15: the search empty state says where it looked and offers all
+        // 群; the idle and failed states use the same layout.
+        let state = match self.phase {
+            Phase::Idle => ui::EmptyState::new(Lucide::Search, s::HINT),
+            Phase::Searching => ui::EmptyState::new(Lucide::Search, s::SEARCHING),
+            Phase::Done => {
+                let title = fill(s::EMPTY_TITLE, &[("q", &self.query)]);
+                let state = ui::EmptyState::new(Lucide::SearchX, title);
+                match (self.everywhere, self.group.as_ref()) {
+                    (false, Some(g)) => {
+                        let name = self
+                            .group_names
+                            .get(g)
+                            .cloned()
+                            .unwrap_or_else(|| s::UNKNOWN_GROUP.to_string());
+                        state
+                            .description(fill(s::EMPTY_IN_GROUP, &[("group", &name)]))
+                            .action(
+                                Button::new("search-all")
+                                    .small()
+                                    .label(s::SEARCH_ALL)
+                                    .shadow(theme::colors(cx).shadow(theme::Elevation::Control))
+                                    .on_click(cx.listener(|state, _, window, cx| {
+                                        state.delegate_mut().set_everywhere(true);
+                                        let query = state.delegate().query().to_string();
+                                        state.set_query(&query, window, cx);
+                                    })),
+                            )
+                    }
+                    _ => state,
+                }
+            }
+            Phase::Failed(e) => ui::EmptyState::new(
+                Lucide::CircleAlert,
+                match e {
+                    SearchError::Offline => s::OFFLINE,
+                    SearchError::Refused => s::REFUSED,
+                    SearchError::TimedOut => s::TIMED_OUT,
+                    SearchError::Unavailable => s::UNAVAILABLE,
+                },
+            ),
         };
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p(px(24.))
-            .text_sm()
-            .text_color(theme::colors(cx).muted_foreground)
-            .child(text)
+        div().size_full().child(state)
     }
 
     fn set_selected_index(

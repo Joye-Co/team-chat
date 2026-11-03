@@ -197,6 +197,7 @@ impl RenderOnce for EmptyState {
             .p(space::S20)
             .child(
                 div()
+                    .w_full()
                     .max_w(px(280.))
                     .flex()
                     .flex_col()

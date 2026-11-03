@@ -23,7 +23,8 @@ use crate::{
     app::{Place, Services},
     copy::search as s,
     data::GroupId,
-    theme,
+    theme::{self, Type as _, space},
+    ui,
 };
 
 pub use results::SearchDelegate;
@@ -110,32 +111,53 @@ impl Render for SearchDialog {
             })
             .child(Tab::new().label(s::SCOPE_GROUP).disabled(!has_group))
             .child(Tab::new().label(s::SCOPE_ALL));
+        // The switcher's frame (§13.12): scope tabs, the field, 40 pt rows
+        // and a 36 pt footer with a hairline and kbd hints.
         div()
             .flex()
             .flex_col()
             .w_full()
-            .child(div().px(px(12.)).pt(px(12.)).flex().child(tabs))
+            .child(
+                div()
+                    .px(space::S12)
+                    .pt(space::S12)
+                    .pb(space::S4)
+                    .flex()
+                    .child(tabs),
+            )
             .child(
                 List::new(&self.list)
                     .search_placeholder(s::PLACEHOLDER)
+                    .p(space::S6)
                     .h(px(440.)),
             )
+            .child(ui::hairline(cx))
             .child(
                 div()
-                    .px(px(12.))
-                    .py(px(8.))
+                    .h(px(36.))
+                    .px(space::S12)
                     .flex()
-                    .border_t_1()
-                    .border_color(colors.border)
-                    .text_xs()
-                    .text_color(colors.muted_foreground)
-                    .child(div().flex_1().child(footer))
-                    .child(s::OPEN_HINT),
+                    .items_center()
+                    .gap(space::S12)
+                    .child(ui::KbdHint::new(&["up", "down"]).label(s::KEY_SELECT))
+                    .child(ui::KbdHint::new(&["enter"]).label(s::KEY_OPEN))
+                    .child(ui::KbdHint::new(&["escape"]).label(s::KEY_CLOSE))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .flex()
+                            .justify_end()
+                            .t_caption()
+                            .tnum()
+                            .text_color(colors.text_3)
+                            .one_line()
+                            .child(footer),
+                    ),
             )
     }
 }
 
-/// Opens the search dialog in `window`.
 pub fn open(services: Services, everywhere: bool, window: &mut Window, cx: &mut App) {
     open_with_query(services, everywhere, "", window, cx);
 }
