@@ -3,6 +3,20 @@
 Each release is tagged `v<version>` and has a GitHub Release with the DMG, the machine daemon
 and their `.sha256` files. Release notes for the team are in Chinese in `docs/releases/`.
 
+## 1.0.1 (2026-11-03)
+
+Notes: [docs/releases/1.0.1.md](docs/releases/1.0.1.md). No server change.
+
+- Bot runs: 停止 on the pending row (for the person who asked) and in the 过程 header (for
+  everyone in the 群). chat-core has `Client::cancel_run` (`POST /v1/runs/:id/cancel`); a run
+  that has already ended is taken quietly. The local daemon e2e stops a run through it.
+- Updater: `--selftest-update <url> --token-file <file> --install-dir <dir>` updates the real
+  app bundle in a folder (check, download, SHA-256, designated requirement, install, read the
+  new version, remove the old bundle) without a window. `apps/desktop/src/updater/e2e-install-dir.sh`
+  uses it against `wrangler dev`: a released app installs a test build signed with the same
+  certificate and refuses an ad-hoc signed one. `build-dmg.sh` and `test-dmg.sh` take
+  `APP_VERSION` for such local test builds.
+
 ## 1.0.0 (2026-11-03)
 
 The first production release, for daily use by 5 people and 5 bots. Notes:
