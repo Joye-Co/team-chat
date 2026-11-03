@@ -1242,9 +1242,11 @@ async fn cancel_run_stops_an_active_run_and_takes_an_ended_one_quietly() {
     let mut rx = client.subscribe();
     let outcome = client.cancel_run("R1").await.unwrap().unwrap();
     assert_eq!(outcome, chat_core::CancelRun::Cancelled);
-    next_update(&mut rx, "runs changed", |u| {
-        matches!(u, ClientUpdate::RunsChanged { topic_id, .. } if topic_id == "T1")
-    })
+    next_update(
+        &mut rx,
+        "runs changed",
+        |u| matches!(u, ClientUpdate::RunsChanged { topic_id, .. } if topic_id == "T1"),
+    )
     .await;
     let cached = client.runs("T1").unwrap();
     assert_eq!(
@@ -1270,7 +1272,10 @@ async fn cancel_run_stops_an_active_run_and_takes_an_ended_one_quietly() {
     assert_eq!(client.store().run("R3").unwrap(), None);
     let missing = client.cancel_run("R9").await.unwrap().unwrap_err();
     assert!(
-        matches!(missing, ClientError::Api(ApiError::Server { status: 404, .. })),
+        matches!(
+            missing,
+            ClientError::Api(ApiError::Server { status: 404, .. })
+        ),
         "{missing:?}"
     );
 }

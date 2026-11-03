@@ -15,8 +15,9 @@ use futures::channel::oneshot;
 
 use super::{CoreProvider, lock};
 use crate::data::{
-    AdminError, AdminReply, BotRunSummary, Change, FileChangeKind, FileChangeView, ProcessStep, RawRunEntry, RunLoadError,
-    RunProcess, RunStatus, SearchError, SearchHit, SearchQuery, SearchReply, SessionDownload,
+    AdminError, AdminReply, BotRunSummary, Change, FileChangeKind, FileChangeView, ProcessStep,
+    RawRunEntry, RunLoadError, RunProcess, RunStatus, SearchError, SearchHit, SearchQuery,
+    SearchReply, SessionDownload,
 };
 
 /// Raw entries kept per run for the developer view.

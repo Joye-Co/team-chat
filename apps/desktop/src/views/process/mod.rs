@@ -22,8 +22,8 @@ use crate::{
     app::{Changes, Services},
     copy::{dev, fill, process as p},
     data::{
-        AdminError, BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess, RunStatus,
-        TopicId,
+        AdminError, BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess,
+        RunStatus, TopicId,
     },
     theme::{self, Type as _, space},
     ui,
@@ -701,6 +701,32 @@ mod tests {
         assert_eq!(run_duration(&run, 11_000), Some(4_000));
         run.started_at = None;
         assert_eq!(run_duration(&run, 11_000), None);
+    }
+
+    #[test]
+    fn only_the_person_who_asked_gets_stop_on_the_pending_row() {
+        let mut run = BotRunSummary {
+            id: "r".into(),
+            bot_id: "b".into(),
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            machine_id: None,
+            machine_name: None,
+            status: RunStatus::Running,
+            requested_by: Some("me".into()),
+            created_at: 0,
+            started_at: None,
+            ended_at: None,
+            updated_at: 0,
+            summary: None,
+            plan: Vec::new(),
+        };
+        assert!(asked_by(&run, Some("me")));
+        assert!(!asked_by(&run, Some("other")));
+        assert!(!asked_by(&run, None));
+        run.requested_by = None;
+        assert!(!asked_by(&run, None));
+        assert_eq!(stop_error_text(AdminError::Forbidden), p::STOP_FORBIDDEN);
     }
 
     #[test]
