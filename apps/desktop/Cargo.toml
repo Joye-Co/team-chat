@@ -25,6 +25,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 # The 产出 window (src/views/artifacts/window.rs) and pages inside the window
 # (src/ui/web_embed.rs). Its native parts build only on macOS.
 artifact-view = { path = "../../crates/artifact-view" }
+# Cuts a member name in the title bar at a grapheme boundary.
+unicode-segmentation = "1.13"
 
 [dev-dependencies]
 tempfile = "3"
