@@ -49,7 +49,7 @@ pub(crate) fn ticks(series: &[Vec<f32>]) -> Option<(f32, f32)> {
     if lo > hi {
         return None;
     }
-    if hi - lo < f32::EPSILON {
+    if (hi - lo).abs() < f32::EPSILON {
         let pad = (hi.abs() * 0.1).max(1.);
         lo -= pad;
         hi += pad;
@@ -476,6 +476,41 @@ mod tests {
         assert_eq!(range(&[], false), (0., 1.));
         let (lo, hi) = range(&[vec![7., 7.]], false);
         assert!(lo < 7. && hi > 7., "a flat series still has a span");
+    }
+
+    #[test]
+    fn line_charts_get_three_round_ticks_that_hold_every_value() {
+        // Interact.dc.html 01: 10 月 and 9 月 between 2,150 and 2,390 → 2,000 / 2,200 / 2,400.
+        let vals = vec![
+            vec![2210., 2268., 2301., 2390.],
+            vec![2150., 2190., 2236., 2250.],
+        ];
+        assert_eq!(ticks(&vals), Some((2000., 200.)));
+        let (lo, step) = ticks(&[vec![0.12, 0.31, 0.2]]).unwrap();
+        assert!(lo <= 0.12 && lo + 2. * step >= 0.31);
+        assert!(
+            ticks(&[vec![5., 5.]]).is_some(),
+            "a flat series still has a scale"
+        );
+        assert_eq!(ticks(&[]), None);
+        let series = vec![ChartSeries {
+            id: None,
+            name: "10 月".into(),
+            values: vals[0]
+                .iter()
+                .filter_map(|v| serde_json::Number::from_f64(f64::from(*v)))
+                .collect(),
+        }];
+        // The 10 月 series alone (2,210 to 2,390) fits a tighter scale.
+        assert_eq!(
+            y_labels(ChartKind::Line, &series),
+            ["2,400", "2,300", "2,200"]
+        );
+        assert!(
+            y_labels(ChartKind::Bar, &series).is_empty(),
+            "bars say their values"
+        );
+        assert!(plot_left(ChartKind::Line, &series) > px(0.));
     }
 
     #[test]
