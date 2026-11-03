@@ -41,6 +41,83 @@ pub(crate) fn range(series: &[Vec<f32>], bars: bool) -> (f32, f32) {
     (lo - span * 0.6, hi + span * 0.15)
 }
 
+/// Three round ticks (bottom, middle, top) that hold every value of a line or area chart
+/// (Interact.dc.html 01: 2,000 / 2,200 / 2,400): the bottom tick and the step.
+pub(crate) fn ticks(series: &[Vec<f32>]) -> Option<(f32, f32)> {
+    let all = series.iter().flatten().copied().filter(|v| v.is_finite());
+    let (mut lo, mut hi) = all.fold((f32::MAX, f32::MIN), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    if lo > hi {
+        return None;
+    }
+    if hi - lo < f32::EPSILON {
+        let pad = (hi.abs() * 0.1).max(1.);
+        lo -= pad;
+        hi += pad;
+    }
+    for e in -4..=12 {
+        for m in [1., 2., 2.5, 5.] {
+            let step = m * 10f32.powi(e);
+            let bottom = (lo / step).floor() * step;
+            if bottom + 2. * step >= hi {
+                return Some((bottom, step));
+            }
+        }
+    }
+    None
+}
+
+/// The value range a chart draws: the round ticks of a line or area chart, room for the
+/// value labels above single-series bars.
+fn scale(kind: ChartKind, series: &[Vec<f32>]) -> (f32, f32) {
+    match kind {
+        ChartKind::Bar if series.len() == 1 => {
+            let (lo, hi) = range(series, true);
+            (lo, lo + (hi - lo) / 1.1 * 1.3)
+        }
+        ChartKind::Bar => range(series, true),
+        ChartKind::Spark => range(series, false),
+        _ => ticks(series)
+            .map(|(lo, step)| (lo, lo + 2. * step))
+            .unwrap_or_else(|| range(series, false)),
+    }
+}
+
+/// The y-axis labels of a chart: three for a line or area chart, none for bars and sparks.
+pub(crate) fn y_labels(kind: ChartKind, series: &[ChartSeries]) -> Vec<String> {
+    if matches!(kind, ChartKind::Bar | ChartKind::Spark) {
+        return Vec::new();
+    }
+    let vals: Vec<Vec<f32>> = series.iter().map(values).collect();
+    let Some((lo, step)) = ticks(&vals) else {
+        return Vec::new();
+    };
+    (0..3)
+        .rev()
+        .map(|i| super::blocks::fmt_number(f64::from(lo + step * i as f32)))
+        .collect()
+}
+
+/// Where the plot starts in a chart element: after the y-axis labels.
+pub(crate) fn plot_left(kind: ChartKind, series: &[ChartSeries]) -> Pixels {
+    let longest = y_labels(kind, series)
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    if longest == 0 {
+        px(0.)
+    } else {
+        px(longest as f32 * 7.5 + 10.)
+    }
+}
+
+/// Where value `v` sits in the plot, from its top (0) to its bottom (1).
+pub(crate) fn y_from_top(kind: ChartKind, series: &[ChartSeries], v: f64) -> f32 {
+    let vals: Vec<Vec<f32>> = series.iter().map(values).collect();
+    let (lo, hi) = scale(kind, &vals);
+    1. - ((v as f32 - lo) / (hi - lo)).clamp(0., 1.)
+}
+
 /// x of point `i` of `n`: the center of its column.
 fn px_at(b: &Bounds<Pixels>, i: usize, n: usize) -> Pixels {
     b.left() + b.size.width * ((i as f32 + 0.5) / n.max(1) as f32)
@@ -94,7 +171,7 @@ fn paint(p: &Paint, b: Bounds<Pixels>, t: f32, window: &mut Window) {
         return;
     }
     let bars = p.kind == ChartKind::Bar;
-    let r = range(&p.series, bars);
+    let r = scale(p.kind, &p.series);
     if !p.spark {
         for i in 0..3 {
             let y = b.top() + b.size.height * (i as f32 / 2.);
@@ -225,27 +302,96 @@ pub(crate) fn chart(
     let height = if spark { px(28.) } else { m::CHART };
     let still = cx.reduce_motion();
     let run = draw_time(kind, series.len());
-    let plot = div().w_full().h(height);
-    let plot: AnyElement = if still {
+    let canvas_box = div().size_full();
+    let drawn: AnyElement = if still {
         let p = p.clone();
-        plot.child(
-            canvas(
-                |_, _, _| (),
-                move |b, _, window, _| paint(&p, b, 1., window),
+        canvas_box
+            .child(
+                canvas(
+                    |_, _, _| (),
+                    move |b, _, window, _| paint(&p, b, 1., window),
+                )
+                .size_full(),
             )
-            .size_full(),
-        )
-        .into_any_element()
+            .into_any_element()
     } else {
         // Drawn once per chart: a remount (scroll back, a return to the
         // page) shows it whole.
-        ui::motion::once(id.clone(), run, plot, move |el, t| {
+        ui::motion::once(id.clone(), run, canvas_box, move |el, t| {
             let p = p.clone();
             el.child(
                 canvas(|_, _, _| (), move |b, _, window, _| paint(&p, b, t, window)).size_full(),
             )
         })
     };
+    // The y-axis labels at the left of the three grid lines (line and area), and the
+    // value above each bar of a single-series bar chart.
+    let ys = if spark {
+        Vec::new()
+    } else {
+        y_labels(kind, series)
+    };
+    let left = if spark {
+        px(0.)
+    } else {
+        plot_left(kind, series)
+    };
+    let label_h = px(18.);
+    let axis = (!ys.is_empty()).then(|| {
+        div()
+            .relative()
+            .flex_none()
+            .w(left)
+            .h_full()
+            .children(ys.iter().enumerate().map(|(i, l)| {
+                meta(div())
+                    .absolute()
+                    .left_0()
+                    .top(height * (i as f32 / 2.) - label_h / 2.)
+                    .mono()
+                    .text_color(k.ink_3)
+                    .child(l.clone())
+            }))
+    });
+    let bar_values = (kind == ChartKind::Bar && series.len() == 1 && !spark).then(|| {
+        let s = &series[0];
+        div()
+            .absolute()
+            .inset_0()
+            .flex()
+            .children(s.values.iter().map(|v| {
+                let col = div().relative().flex_1().h_full();
+                let Some(n) = v.as_f64() else { return col };
+                let top = height * y_from_top(kind, series, n) - label_h - px(2.);
+                col.child(
+                    meta(div())
+                        .absolute()
+                        .left_0()
+                        .right_0()
+                        .top(top)
+                        .flex()
+                        .justify_center()
+                        .mono()
+                        .text_color(k.ink_2)
+                        .child(super::blocks::fmt_number(n)),
+                )
+            }))
+    });
+    let plot: AnyElement = div()
+        .w_full()
+        .h(height)
+        .flex()
+        .children(axis)
+        .child(
+            div()
+                .relative()
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
+                .child(drawn)
+                .children(bar_values),
+        )
+        .into_any_element();
     if spark {
         return plot;
     }
@@ -301,6 +447,7 @@ pub(crate) fn chart(
             el.child(
                 meta(div())
                     .flex()
+                    .pl(left)
                     .text_color(k.ink_3)
                     .mono()
                     .children(x.iter().map(|l| {

@@ -344,7 +344,16 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
     // bar or point stays in sight; a clear hit layer on top takes the clicks.
     let hot = node.ui.block(id).hot;
     let n = xs.len();
-    let tint = div().absolute().inset_0().flex().children((0..n).map(|i| {
+    // The columns start where the plot does (after the y-axis labels).
+    let left = super::super::v2::chart_plot_left(*kind, series);
+    let tint = div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_0()
+        .left(left)
+        .flex()
+        .children((0..n).map(|i| {
         let on = point.as_ref().is_some_and(|(_, p)| *p == i);
         let fill = if on {
             Some(mix(k.ink, k.bg, t::CHART_PICK_FILL))
@@ -375,7 +384,7 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     .unwrap_or_default();
                 let bar = *kind == ChartKind::Bar;
                 let clear = super::interact::sends(ctx.card, b, "chart.clear");
-                el.child(div().absolute().inset_0().flex().children((0..n).map(|i| {
+                el.child(div().absolute().top_0().bottom_0().right_0().left(left).flex().children((0..n).map(|i| {
                     let on = point.as_ref().is_some_and(|(_, p)| *p == i);
                     let (emit, uie, block, skey, xv) = (
                         emit.clone(),

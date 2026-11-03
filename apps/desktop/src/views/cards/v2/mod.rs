@@ -60,7 +60,9 @@ use crate::{
 #[allow(unused_imports)]
 pub use line::{notification_text, plan_row};
 // --- inc-cards21 ---
-pub(crate) use chart::chart as chart_el;
+pub(crate) use chart::{
+    chart as chart_el, plot_left as chart_plot_left, y_from_top as chart_y_from_top,
+};
 // --- end inc-cards21 ---
 
 /// Where a card is drawn.

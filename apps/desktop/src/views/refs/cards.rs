@@ -439,12 +439,13 @@ pub fn chart_overlay(
     }
     let k = crate::theme::colors(cx);
     let main = &series[0];
+    let left = crate::views::cards::v2::chart_plot_left(*kind, series);
     Some(
         div()
             .absolute()
-            .left_0()
+            .left(left)
+            .right_0()
             .top(top)
-            .w_full()
             .h(height)
             .flex()
             .children((0..n).map(|xi| {
