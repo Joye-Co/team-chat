@@ -1292,6 +1292,7 @@ dependencies = [
  "libc",
  "regex",
  "reqwest",
+ "roxmltree 0.21.2",
  "serde",
  "serde_json",
  "sha2 0.10.9",
