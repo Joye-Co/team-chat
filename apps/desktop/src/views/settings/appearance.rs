@@ -6,9 +6,9 @@
 //! header menu switches the mode too (`views::rail`).
 
 use gpui::{
-    AnyElement, AnyWindowHandle, App, Context, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Render, SharedString, Size, StatefulInteractiveElement as _, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, AnyWindowHandle, App, Context, InteractiveElement as _, IntoElement, ParentElement,
+    Pixels, Render, SharedString, Size, StatefulInteractiveElement as _, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::Page;
@@ -101,8 +101,18 @@ impl AppearancePage {
     fn theme_preview(choice: ThemeChoice) -> AnyElement {
         // Fixed swatches: the preview shows the other theme too, so it does
         // not follow the current one (HELMET2 `--bg`, `--rail`, `--line-2`).
-        let light = (gpui::rgb(0xFFFFFF), gpui::rgb(0xF7F7F8), gpui::rgb(0xDCDCE0), gpui::rgb(0x111113));
-        let dark = (gpui::rgb(0x111113), gpui::rgb(0x161618), gpui::rgb(0x34343A), gpui::rgb(0xF1F1F3));
+        let light = (
+            gpui::rgb(0xFFFFFF),
+            gpui::rgb(0xF7F7F8),
+            gpui::rgb(0xDCDCE0),
+            gpui::rgb(0x111113),
+        );
+        let dark = (
+            gpui::rgb(0x111113),
+            gpui::rgb(0x161618),
+            gpui::rgb(0x34343A),
+            gpui::rgb(0xF1F1F3),
+        );
         // Children paint over the card's rounded border, so each half rounds
         // its own outer corners (`left`, `right`).
         let r = PREVIEW_RADIUS;
@@ -167,7 +177,13 @@ impl AppearancePage {
                 .child(div().w(px(8.)).flex().justify_center().child(lead))
                 .child(line(w, k.line_2))
         };
-        let dot = |color: gpui::Hsla| div().size(px(5.)).rounded_full().bg(color).into_any_element();
+        let dot = |color: gpui::Hsla| {
+            div()
+                .size(px(5.))
+                .rounded_full()
+                .bg(color)
+                .into_any_element()
+        };
         let tile = |ring: gpui::Hsla| {
             div()
                 .size(px(8.))
@@ -177,7 +193,13 @@ impl AppearancePage {
                 .border_color(ring)
                 .into_any_element()
         };
-        let header = |w: f32| div().h(px(10.)).flex().items_center().child(line(w, k.ink_3));
+        let header = |w: f32| {
+            div()
+                .h(px(10.))
+                .flex()
+                .items_center()
+                .child(line(w, k.ink_3))
+        };
         let rows: Vec<AnyElement> = match mode {
             RailMode::Work => vec![
                 header(20.).into_any_element(),
@@ -186,7 +208,11 @@ impl AppearancePage {
                 row(dot(k.ink_3), 48.).into_any_element(),
                 header(16.).into_any_element(),
                 row(dot(k.you), 40.).into_any_element(),
-                row(ui::icon(Lucide::Check, px(8.), k.ok).into_any_element(), 50.).into_any_element(),
+                row(
+                    ui::icon(Lucide::Check, px(8.), k.ok).into_any_element(),
+                    50.,
+                )
+                .into_any_element(),
             ],
             RailMode::Attention => vec![
                 div()
@@ -207,8 +233,14 @@ impl AppearancePage {
             RailMode::Member => vec![
                 header(20.).into_any_element(),
                 row(tile(k.live), 30.).into_any_element(),
-                div().pl(px(10.)).child(row(dot(k.live), 40.)).into_any_element(),
-                div().pl(px(10.)).child(row(dot(k.you), 44.)).into_any_element(),
+                div()
+                    .pl(px(10.))
+                    .child(row(dot(k.live), 40.))
+                    .into_any_element(),
+                div()
+                    .pl(px(10.))
+                    .child(row(dot(k.you), 44.))
+                    .into_any_element(),
                 row(tile(k.you), 30.).into_any_element(),
                 row(tile(k.live), 34.).into_any_element(),
                 row(tile(k.line_2), 26.).into_any_element(),
@@ -272,9 +304,7 @@ impl Render for AppearancePage {
                         c::APPEARANCE_RAIL_ATTENTION,
                         c::APPEARANCE_RAIL_ATTENTION_HELP,
                     ),
-                    RailMode::Member => {
-                        (c::APPEARANCE_RAIL_MEMBER, c::APPEARANCE_RAIL_MEMBER_HELP)
-                    }
+                    RailMode::Member => (c::APPEARANCE_RAIL_MEMBER, c::APPEARANCE_RAIL_MEMBER_HELP),
                 };
                 let nav = self.services.nav.clone();
                 self.card(
@@ -294,7 +324,8 @@ impl Render for AppearancePage {
                 .into_any_element()
             })
             .collect();
-        let grid = |cards: Vec<AnyElement>| div().flex().items_start().gap(space::S16).children(cards);
+        let grid =
+            |cards: Vec<AnyElement>| div().flex().items_start().gap(space::S16).children(cards);
         div()
             .flex()
             .flex_col()

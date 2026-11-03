@@ -127,14 +127,16 @@ impl RailView {
             RailMode::Work => {
                 for (all, label) in [(false, c::RAIL_FILTER_MINE), (true, c::RAIL_FILTER_ALL)] {
                     let this = this.clone();
-                    menu = menu.item(PopupMenuItem::new(label).checked(self.show_all == all).on_click(
-                        move |_, _, cx| {
-                            let _ = this.update(cx, |this, cx| {
-                                this.show_all = all;
-                                cx.notify();
-                            });
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new(label)
+                            .checked(self.show_all == all)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |this, cx| {
+                                    this.show_all = all;
+                                    cx.notify();
+                                });
+                            }),
+                    );
                 }
                 menu = menu.separator();
             }
@@ -263,7 +265,7 @@ impl RailView {
                     .filter(|n| *n > 0)
                     .map(|n| div().t_mono().text_color(k.you_ink).child(n.to_string())),
             )
-            .on_click(move |_, _, cx| nav.update(cx, |nav, cx| go(nav, cx)))
+            .on_click(move |_, _, cx| nav.update(cx, go))
             .into_any_element()
     }
 
@@ -271,7 +273,8 @@ impl RailView {
     fn team_strip(&self, cx: &App) -> Option<AnyElement> {
         let k = theme::colors(cx);
         let me = self.me();
-        let (shown, rest) = model::team_strip(self.services.provider.as_ref(), me.as_deref(), STRIP_MAX);
+        let (shown, rest) =
+            model::team_strip(self.services.provider.as_ref(), me.as_deref(), STRIP_MAX);
         if shown.is_empty() {
             return None;
         }
@@ -413,7 +416,7 @@ impl Render for RailView {
                     c::RAIL_TOPICS,
                     matches!(page, Page::Topic | Page::Group),
                     None,
-                    |n, cx| choose_topics(n, cx),
+                    choose_topics,
                     cx,
                 ),
                 self.destination(
@@ -687,11 +690,12 @@ impl RailView {
                     .gap(space::S2)
                     .children(chips),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .child(self.menu_button("rail-options", None, RailMode::Attention, cx)),
-            )
+            .child(div().flex_none().child(self.menu_button(
+                "rail-options",
+                None,
+                RailMode::Attention,
+                cx,
+            )))
             .into_any_element()
     }
 }

@@ -33,7 +33,9 @@ fn open_ask_empty(
 ) -> Result<AnyWindowHandle, String> {
     let handle = open_main(services.clone(), content, cx)?;
     handle
-        .update(cx, |_, window, cx| crate::views::ask::open(services, window, cx))
+        .update(cx, |_, window, cx| {
+            crate::views::ask::open(services, window, cx)
+        })
         .map_err(|e| e.to_string())?;
     Ok(handle)
 }

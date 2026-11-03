@@ -57,7 +57,11 @@ pub fn plan_meta(plan: &[crate::data::PlanItem]) -> Option<String> {
 }
 
 /// The state of a 话题 row and its trailing meta (`3/5`, `09:12`, `等小王`).
-pub fn row_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> (RowState, Option<Meta>) {
+pub fn row_state(
+    p: &dyn ChatProvider,
+    me: Option<&str>,
+    topic: &Topic,
+) -> (RowState, Option<Meta>) {
     if me.is_some_and(|me| topic.waiting_on.iter().any(|m| m == me)) {
         return (RowState::NeedsYou, None);
     }
@@ -71,7 +75,9 @@ pub fn row_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> (RowS
     match topic.status {
         TopicStatus::Done => (
             RowState::Done,
-            Some(Meta::mono(crate::views::shell::clock(topic.last_activity_at))),
+            Some(Meta::mono(crate::views::shell::clock(
+                topic.last_activity_at,
+            ))),
         ),
         TopicStatus::WaitingAnswer | TopicStatus::WaitingReview => {
             let who = topic
@@ -95,8 +101,7 @@ pub fn involves_me(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> boo
         || topic.owner_id.as_deref() == Some(me)
         || topic.waiting_on.iter().any(|m| m == me)
         || p.topic_following(&topic.group_id, &topic.id)
-        || p
-            .runs(&topic.group_id, &topic.id)
+        || p.runs(&topic.group_id, &topic.id)
             .iter()
             .any(|r| r.requested_by.as_deref() == Some(me))
 }
@@ -324,7 +329,12 @@ pub fn team_strip(
     }
     let shown: Vec<(Member, bool)> = ids
         .into_iter()
-        .filter_map(|(id, you)| members.iter().find(|m| m.id == id).map(|m| (m.clone(), you)))
+        .filter_map(|(id, you)| {
+            members
+                .iter()
+                .find(|m| m.id == id)
+                .map(|m| (m.clone(), you))
+        })
         .filter(|(m, _)| !m.deactivated)
         .take(max)
         .collect();
@@ -397,7 +407,11 @@ mod tests {
         assert_eq!(xiaowang.topics[0].state, RowState::Waiting);
         // Busy rows stay together at the top.
         let first_idle = rows.iter().position(|r| !r.busy()).unwrap();
-        assert!(rows[first_idle..].iter().all(|r| !r.busy() || !r.member.is_bot()));
+        assert!(
+            rows[first_idle..]
+                .iter()
+                .all(|r| !r.busy() || !r.member.is_bot())
+        );
     }
 
     #[test]

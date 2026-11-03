@@ -341,27 +341,24 @@ impl RailView {
         .pl(space::S6)
         .pr(space::S10)
         .gap(space::S8)
-        .child(
-            div()
-                .flex_none()
-                .w(px(12.))
-                .flex()
-                .when(can_open, |el| {
-                    el.child(ui::icon(
-                        if expanded {
-                            Lucide::ChevronDown
-                        } else {
-                            Lucide::ChevronRight
-                        },
-                        px(12.),
-                        k.ink_3,
-                    ))
-                }),
-        )
+        .child(div().flex_none().w(px(12.)).flex().when(can_open, |el| {
+            el.child(ui::icon(
+                if expanded {
+                    Lucide::ChevronDown
+                } else {
+                    Lucide::ChevronRight
+                },
+                px(12.),
+                k.ink_3,
+            ))
+        }))
         .child(MemberAvatar::new(Some(&r.member), MEMBER_AVATAR).ring(ring))
         .child(
             div()
-                .flex_none()
+                .flex_shrink(1.)
+                .min_w_0()
+                .max_w(px(140.))
+                .one_line()
                 .t_small()
                 .medium()
                 .text_color(k.ink)
@@ -435,7 +432,10 @@ impl RailView {
         .child(MemberAvatar::new(Some(m), MEMBER_AVATAR))
         .child(
             div()
-                .flex_none()
+                .flex_shrink(1.)
+                .min_w_0()
+                .max_w(px(140.))
+                .one_line()
                 .t_small()
                 .medium()
                 .text_color(k.ink)

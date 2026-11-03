@@ -88,6 +88,7 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         KeyBinding::new("cmd-9", OpenGroup9, None),
     ]);
     switcher::bind_keys(cx);
+    crate::views::ask::bind_keys(cx);
     cx.set_global(NavGlobal {
         services: services.clone(),
         window: None,

@@ -16,8 +16,13 @@ use crate::{
     ui::{self, Lucide, MemberAvatar, Ring, RowSurface},
 };
 
+/// A row's click handler.
+pub(super) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
+
 /// The state dot: 7 pt.
 const DOT: gpui::Pixels = px(7.);
+/// The widest a row's meta gets.
+const META_MAX: gpui::Pixels = px(96.);
 /// Indent of a 话题 under a member (mode C).
 pub(super) const NESTED_PAD: gpui::Pixels = px(28.);
 
@@ -32,7 +37,13 @@ pub(super) enum SlotStyle {
 
 impl RailView {
     /// The 16 pt slot at the start of a 话题 row.
-    pub(super) fn slot(&self, id: &str, state: &RowState, style: SlotStyle, cx: &App) -> AnyElement {
+    pub(super) fn slot(
+        &self,
+        id: &str,
+        state: &RowState,
+        style: SlotStyle,
+        cx: &App,
+    ) -> AnyElement {
         let k = theme::colors(cx);
         let center = |el: AnyElement| {
             div()
@@ -46,7 +57,9 @@ impl RailView {
                 .into_any_element()
         };
         match state {
-            RowState::NeedsYou => center(div().size(DOT).rounded_full().bg(k.you).into_any_element()),
+            RowState::NeedsYou => {
+                center(div().size(DOT).rounded_full().bg(k.you).into_any_element())
+            }
             RowState::Working(m) if style == SlotStyle::Tile => {
                 let member = self.services.provider.member(m);
                 center(
@@ -115,8 +128,11 @@ impl RailView {
                 .child(title),
         )
         .children(meta.map(|m| {
+            // A long name (`等<long name>`) never takes the title's room.
             div()
                 .flex_none()
+                .max_w(META_MAX)
+                .one_line()
                 .map(|el| if m.mono { el.t_mono() } else { el.t_meta() })
                 .text_color(if meta_you { k.you_ink } else { k.ink_3 })
                 .child(m.text)
@@ -141,7 +157,7 @@ impl RailView {
         folded: bool,
         selected: bool,
         fold: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        open: Option<Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>>,
+        open: Option<ClickHandler>,
         cx: &App,
     ) -> AnyElement {
         let k = theme::colors(cx);
@@ -180,7 +196,7 @@ impl RailView {
             .when(you_dot, |el| {
                 el.child(div().flex_none().size(px(6.)).rounded_full().bg(k.you))
             })
-            .child(div().flex_none().child(label))
+            .child(div().flex_shrink(1.).min_w_0().one_line().child(label))
             .children(count.map(|n| {
                 div()
                     .ml(space::S2)

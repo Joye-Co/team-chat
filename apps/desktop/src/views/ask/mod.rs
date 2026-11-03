@@ -8,10 +8,7 @@
 
 pub mod model;
 
-use std::{
-    ops::Range,
-    sync::atomic::{AtomicBool, Ordering},
-};
+use std::ops::Range;
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable,
@@ -41,7 +38,10 @@ use crate::{
     },
 };
 
-gpui::actions!(ask, [SelectPrevious, SelectNext, GiveToHelper]);
+gpui::actions!(
+    ask,
+    [SelectPrevious, SelectNext, OpenSelected, GiveToHelper]
+);
 
 const CONTEXT: &str = "AskPalette";
 /// The query row.
@@ -61,6 +61,10 @@ const SLOT: Pixels = px(32.);
 const TOPICS_MAX: usize = 5;
 const OTHERS_MAX: usize = 3;
 const RECENT: usize = 5;
+/// The widest a member's 在做 status gets.
+const STATUS_MAX: Pixels = px(180.);
+/// The widest the 群 name of 发到 gets.
+const TARGET_NAME_MAX: Pixels = px(160.);
 
 /// One choosable row.
 #[derive(Clone, Debug)]
@@ -139,17 +143,14 @@ impl Focusable for AskPalette {
     }
 }
 
-/// The palette's keys (bound on first open).
-fn bind_keys(cx: &mut App) {
-    static BOUND: AtomicBool = AtomicBool::new(false);
-    if BOUND.swap(true, Ordering::SeqCst) {
-        return;
-    }
+/// The palette's keys (call once at start-up, beside the switcher's).
+pub fn bind_keys(cx: &mut App) {
     cx.bind_keys([
         KeyBinding::new("up", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("down", SelectNext, Some(CONTEXT)),
         KeyBinding::new("ctrl-p", SelectPrevious, Some(CONTEXT)),
         KeyBinding::new("ctrl-n", SelectNext, Some(CONTEXT)),
+        KeyBinding::new("enter", OpenSelected, Some(CONTEXT)),
         KeyBinding::new("cmd-enter", GiveToHelper, Some(CONTEXT)),
     ]);
 }
@@ -168,16 +169,11 @@ impl AskPalette {
         let subscriptions = vec![cx.subscribe_in(
             &query,
             window,
-            |this, _, event: &InputEvent, window, cx| match event {
-                InputEvent::Change => this.requery(cx),
-                InputEvent::PressEnter { secondary, .. } => {
-                    if *secondary {
-                        this.give_to_helper(window, cx)
-                    } else {
-                        this.confirm(window, cx)
-                    }
+            // Enter and ⌘Enter are key actions of the palette (`bind_keys`).
+            |this, _, event: &InputEvent, _, cx| {
+                if let InputEvent::Change = event {
+                    this.requery(cx)
                 }
-                _ => {}
             },
         )];
         let mut this = Self {
@@ -278,7 +274,9 @@ impl AskPalette {
             });
         }
         if let Some(h) = &helper
-            && !give.iter().any(|g| matches!(g, Item::Give { member, .. } if member.id == h.id))
+            && !give
+                .iter()
+                .any(|g| matches!(g, Item::Give { member, .. } if member.id == h.id))
         {
             give.push(Item::Give {
                 member: h.clone(),
@@ -301,7 +299,12 @@ impl AskPalette {
             .filter_map(|e| e.topic.clone())
             .filter_map(|t| model::weigh(&t.title, query).map(|w| (w, t)))
             .collect();
-        topics.sort_by_key(|(w, t)| (std::cmp::Reverse(w.score), std::cmp::Reverse(t.last_activity_at)));
+        topics.sort_by_key(|(w, t)| {
+            (
+                std::cmp::Reverse(w.score),
+                std::cmp::Reverse(t.last_activity_at),
+            )
+        });
         let topics: Vec<Item> = topics
             .into_iter()
             .take(TOPICS_MAX)
@@ -324,7 +327,8 @@ impl AskPalette {
             .into_iter()
             .filter_map(|(_, a)| model::weigh(&a.title, query).map(|w| (w, a)))
             .collect();
-        artifacts.sort_by_key(|(w, a)| (std::cmp::Reverse(w.score), std::cmp::Reverse(a.updated_at)));
+        artifacts
+            .sort_by_key(|(w, a)| (std::cmp::Reverse(w.score), std::cmp::Reverse(a.updated_at)));
         let artifacts: Vec<Item> = artifacts
             .into_iter()
             .take(OTHERS_MAX)
@@ -348,7 +352,7 @@ impl AskPalette {
             .filter(|m| !m.deactivated && Some(m.id.as_str()) != me.as_deref())
         {
             let ranges = if named.iter().any(|n| n.id == m.id) {
-                Some(vec![0..m.name.len()])
+                Some(std::iter::once(0..m.name.len()).collect())
             } else {
                 model::weigh(&m.name, query).map(|w| w.ranges)
             };
@@ -574,7 +578,12 @@ fn enter_glyph(cx: &App) -> AnyElement {
 }
 
 impl AskPalette {
-    fn row_shell(&self, ix: usize, item: &Item, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+    fn row_shell(
+        &self,
+        ix: usize,
+        item: &Item,
+        cx: &mut Context<Self>,
+    ) -> gpui::Stateful<gpui::Div> {
         let k = theme::colors(cx);
         let active = ix == self.active;
         div()
@@ -649,7 +658,12 @@ impl AskPalette {
                             div().size(px(6.)).rounded_full().bg(k.live),
                             cx,
                         ))
-                        .child(fill(c::ASK_WORKING_ON, &[("title", &title)]))
+                        .child(
+                            div()
+                                .max_w(STATUS_MAX)
+                                .one_line()
+                                .child(fill(c::ASK_WORKING_ON, &[("title", &title)])),
+                        )
                         .into_any_element(),
                 )
             }
@@ -698,8 +712,23 @@ impl AskPalette {
                             .flex()
                             .items_center()
                             .gap(space::S8)
-                            .child(div().t_ui().medium().text_color(k.ink).child(title))
-                            .children(member.role.clone().map(|r| tag(r, cx))),
+                            .child(
+                                div()
+                                    .flex_shrink(1.)
+                                    .min_w_0()
+                                    .one_line()
+                                    .t_ui()
+                                    .medium()
+                                    .text_color(k.ink)
+                                    .child(title),
+                            )
+                            .children(
+                                member
+                                    .role
+                                    .clone()
+                                    .filter(|r| !r.trim().is_empty())
+                                    .map(|r| tag(r, cx)),
+                            ),
                     )
                     .child(
                         div()
@@ -769,7 +798,11 @@ impl AskPalette {
         let time = (topic.status == TopicStatus::Done || ranges.is_empty())
             .then(|| crate::views::shell::clock(topic.last_activity_at));
         let slot: AnyElement = match &state {
-            RowState::NeedsYou => div().size(px(7.)).rounded_full().bg(k.you).into_any_element(),
+            RowState::NeedsYou => div()
+                .size(px(7.))
+                .rounded_full()
+                .bg(k.you)
+                .into_any_element(),
             RowState::Working(m) => {
                 let m = p.member(m);
                 MemberAvatar::new(m.as_ref(), px(18.))
@@ -881,11 +914,10 @@ impl AskPalette {
                     .items_center()
                     .t_meta()
                     .text_color(k.ink_3)
-                    .child(
-                        div()
-                            .mono()
-                            .child(fill(art_copy::VERSION_SHORT, &[("n", &artifact.version.to_string())])),
-                    )
+                    .child(div().mono().child(fill(
+                        art_copy::VERSION_SHORT,
+                        &[("n", &artifact.version.to_string())],
+                    )))
                     .child(format!(" · {kind}")),
             )
             .child(div().flex_1())
@@ -915,12 +947,20 @@ impl AskPalette {
             )
             .child(
                 div()
-                    .flex_none()
+                    .flex_shrink(1.)
+                    .min_w_0()
+                    .one_line()
                     .t_ui()
                     .text_color(k.ink_2)
                     .child(weighed(&member.name, ranges, cx)),
             )
-            .children(member.role.clone().map(|r| tag(r, cx)))
+            .children(
+                member
+                    .role
+                    .clone()
+                    .filter(|r| !r.trim().is_empty())
+                    .map(|r| tag(r, cx)),
+            )
             .child(div().flex_1())
             .children(week.map(|n| {
                 // `本周 4 个话题` with the count in mono.
@@ -956,12 +996,24 @@ impl AskPalette {
                 .groups()
                 .into_iter()
                 .find(|x| &x.id == g && x.kind == GroupKind::Group)
-                .map(|x| fill(c::ASK_GROUP_MEMBERS, &[("n", &x.member_ids.len().to_string())]))
+                .map(|x| {
+                    fill(
+                        c::ASK_GROUP_MEMBERS,
+                        &[("n", &x.member_ids.len().to_string())],
+                    )
+                })
                 .or_else(|| entry.detail.clone()),
             _ => entry.detail.clone(),
         };
         self.row_shell(ix, item, cx)
-            .child(div().flex_none().w(SLOT).flex().justify_center().child(lead))
+            .child(
+                div()
+                    .flex_none()
+                    .w(SLOT)
+                    .flex()
+                    .justify_center()
+                    .child(lead),
+            )
             .child(
                 div()
                     .flex_shrink(1.)
@@ -1020,7 +1072,14 @@ impl AskPalette {
                         .line_height(px(18.))
                         .text_color(k.ink_3)
                         .child(c::ASK_SEND_TO)
-                        .child(div().text_color(k.ink).medium().child(name))
+                        .child(
+                            div()
+                                .max_w(TARGET_NAME_MAX)
+                                .one_line()
+                                .text_color(k.ink)
+                                .medium()
+                                .child(name),
+                        )
                         .child(ui::icon(Lucide::ChevronDown, px(12.), k.ink_3)),
                 )
                 .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
@@ -1059,9 +1118,9 @@ impl AskPalette {
             } => Some(member.clone()),
             _ => None,
         });
-        let helper_hint = helper.filter(|h| {
-            !matches!(self.active_item(), Some(Item::Give { member, .. }) if member.id == h.id)
-        });
+        let helper_hint = helper.filter(
+            |h| !matches!(self.active_item(), Some(Item::Give { member, .. }) if member.id == h.id),
+        );
         let hint = |keys: AnyElement, label: String| {
             div()
                 .flex_none()
@@ -1107,7 +1166,13 @@ impl AskPalette {
             .child(div().flex_1())
             .child(hint(
                 key_box(
-                    vec![div().t_mono().text_size(px(11.)).child(nav_copy::KEY_ESC).into_any_element()],
+                    vec![
+                        div()
+                            .t_mono()
+                            .text_size(px(11.))
+                            .child(nav_copy::KEY_ESC)
+                            .into_any_element(),
+                    ],
                     cx,
                 ),
                 c::ASK_HINT_CLOSE.into(),
@@ -1186,6 +1251,7 @@ impl Render for AskPalette {
             .track_focus(&self.focus)
             .on_action(cx.listener(|this, _: &SelectPrevious, _, cx| this.select(-1, cx)))
             .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.select(1, cx)))
+            .on_action(cx.listener(|this, _: &OpenSelected, window, cx| this.confirm(window, cx)))
             .on_action(
                 cx.listener(|this, _: &GiveToHelper, window, cx| this.give_to_helper(window, cx)),
             )
@@ -1260,7 +1326,6 @@ pub fn open_with(
     window: &mut Window,
     cx: &mut App,
 ) -> Entity<AskPalette> {
-    bind_keys(cx);
     let query = query.to_string();
     let view = cx.new(|cx| {
         let mut s = AskPalette::new(services, window, cx);
