@@ -1,11 +1,10 @@
 //! Source checks and normalization before a diagram renders (REFS §B1, §B2 step 1, §B5).
 //!
-//! The keyword allowlist and the forbidden-construct list sit behind one function,
-//! [`check_source`]. They copy `crates/chat-protocol/src/diagram.rs` of branch
-//! `v11/inc-protocol` (b4f8fcb) exactly, and the tests read a copy of its
-//! `protocol/checks/diagram-checks.json` (`diagram-checks.json` here). The integration
-//! switches [`check_source`] to `chat_protocol::diagram::check_diagram_source` and deletes the
-//! copies.
+//! The keyword allowlist and the forbidden-construct list are the protocol's
+//! (`chat_core::proto::diagram`, from chat-protocol), the same rules the server and the SDK use; [`check_source`]
+//! only maps the protocol's result to the desktop's types.
+
+use chat_core::proto::diagram::{DIAGRAM_FORBIDDEN, DiagramCheck, check_diagram_source};
 
 /// The diagram types 1.1.0 draws (first keyword of the source).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -48,46 +47,16 @@ impl DiagramType {
     }
 }
 
-/// Supported first keywords, matched as a whole word.
-pub const DIAGRAM_KEYWORDS: &[(&str, DiagramType)] = &[
-    ("flowchart", DiagramType::Flowchart),
-    ("graph", DiagramType::Flowchart),
-    ("sequenceDiagram", DiagramType::Sequence),
-    ("stateDiagram-v2", DiagramType::State),
-    ("stateDiagram", DiagramType::State),
-    ("classDiagram", DiagramType::Class),
-    ("erDiagram", DiagramType::Er),
-    ("gantt", DiagramType::Gantt),
-    ("timeline", DiagramType::Timeline),
-];
-
-/// Constructs a source must not have (matched case-insensitively anywhere). A front matter
-/// block (`---` as the first line) is refused separately.
-pub const DIAGRAM_FORBIDDEN: &[&str] = &[
-    "%%{",
-    "click ",
-    "href",
-    "callback",
-    "call ",
-    "javascript:",
-    "<script",
-    "<iframe",
-    "<foreignobject",
-];
-
-/// Largest source in UTF-8 bytes.
-pub const MAX_SOURCE_BYTES: usize = 16 * 1024;
-
 /// Why a source is not drawn.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Refusal {
     /// Nothing but blank lines and comments.
     Empty,
-    /// More than [`MAX_SOURCE_BYTES`].
+    /// More than `chat_core::proto::diagram::MAX_DIAGRAM_SOURCE_BYTES`.
     TooLong,
-    /// The first keyword is not in [`DIAGRAM_KEYWORDS`] (it is kept for the log).
+    /// The first keyword is not in the protocol's keyword list (it is kept for the log).
     Unsupported(String),
-    /// A construct of [`DIAGRAM_FORBIDDEN`] (or `front matter`).
+    /// A construct of the protocol's forbidden list (or `front matter`).
     Forbidden(&'static str),
 }
 
@@ -110,43 +79,42 @@ fn clean(source: &str) -> String {
     out
 }
 
-/// The static checks (size, front matter, forbidden constructs, first keyword). Shared rule
-/// with the server and the SDK (REFS §B1, §B10); same order and results as
-/// `check_diagram_source` in `chat-protocol`.
+/// The static checks (size, front matter, forbidden constructs, first keyword): the
+/// protocol's `check_diagram_source` (REFS §B1, §B10). A leading BOM is ignored.
 pub fn check_source(source: &str) -> Result<DiagramType, Refusal> {
-    if source.len() > MAX_SOURCE_BYTES {
-        return Err(Refusal::TooLong);
-    }
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
-    let lines: Vec<&str> = source
-        .split('\n')
-        .map(|l| l.strip_suffix('\r').unwrap_or(l))
-        .collect();
-    let first = lines
-        .iter()
-        .find(|l| !l.trim().is_empty())
-        .ok_or(Refusal::Empty)?;
-    if first.trim() == "---" {
-        return Err(Refusal::Forbidden("front matter"));
+    match check_diagram_source(source) {
+        DiagramCheck::Ok { kind } => Ok(match kind {
+            "sequenceDiagram" => DiagramType::Sequence,
+            "stateDiagram" => DiagramType::State,
+            "classDiagram" => DiagramType::Class,
+            "erDiagram" => DiagramType::Er,
+            "gantt" => DiagramType::Gantt,
+            "timeline" => DiagramType::Timeline,
+            _ => DiagramType::Flowchart,
+        }),
+        DiagramCheck::Refused { reason } => Err(refusal(&reason)),
     }
-    let lower = source.to_lowercase();
-    if let Some(bad) = DIAGRAM_FORBIDDEN.iter().find(|b| lower.contains(*b)) {
-        return Err(Refusal::Forbidden(bad));
+}
+
+/// The desktop refusal of a protocol reason (`empty`, `too_large`, `front_matter`,
+/// `forbidden:<text>`, `unsupported:<keyword>`).
+fn refusal(reason: &str) -> Refusal {
+    if let Some(text) = reason.strip_prefix("forbidden:") {
+        return DIAGRAM_FORBIDDEN
+            .iter()
+            .find(|f| f.trim() == text)
+            .map(|f| Refusal::Forbidden(f))
+            .unwrap_or(Refusal::Forbidden("front matter"));
     }
-    let head = lines
-        .iter()
-        .find(|l| !l.trim().is_empty() && !l.trim().starts_with("%%"))
-        .ok_or(Refusal::Empty)?;
-    let word = head
-        .trim()
-        .split(|c: char| c.is_whitespace() || c == ':' || c == ';')
-        .next()
-        .unwrap_or("");
-    DIAGRAM_KEYWORDS
-        .iter()
-        .find(|(k, _)| *k == word)
-        .map(|(_, t)| *t)
-        .ok_or_else(|| Refusal::Unsupported(word.chars().take(32).collect()))
+    if let Some(word) = reason.strip_prefix("unsupported:") {
+        return Refusal::Unsupported(word.chars().take(32).collect());
+    }
+    match reason {
+        "too_large" => Refusal::TooLong,
+        "front_matter" => Refusal::Forbidden("front matter"),
+        _ => Refusal::Empty,
+    }
 }
 
 /// The protocol's reason text for a refusal (`empty`, `too_large`, `front_matter`,
@@ -207,11 +175,13 @@ pub fn normalize(source: &str) -> Result<Normalized, Refusal> {
 mod tests {
     use super::*;
 
-    /// The shared cases of `protocol/checks/diagram-checks.json` (copy).
+    /// The shared cases of `protocol/checks/diagram-checks.json`.
     #[test]
     fn matches_the_protocol_check_cases() {
-        let doc: serde_json::Value =
-            serde_json::from_str(include_str!("diagram-checks.json")).unwrap();
+        let doc: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../protocol/checks/diagram-checks.json"
+        ))
+        .unwrap();
         let cases = doc["cases"].as_array().unwrap();
         assert!(cases.len() >= 20);
         for case in cases {
