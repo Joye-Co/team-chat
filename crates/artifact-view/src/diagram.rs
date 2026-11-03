@@ -7,10 +7,14 @@
 
 use serde_json::{Value, json};
 
+use crate::bridge::{Bridge, Snapshot};
 use crate::resolve::Content;
+use crate::{Capabilities, OpenOptions, Presentation, VersionSpec};
 
-/// Bump when the page, the config or the sanitizer change: every cache key changes.
-pub const RENDERER_VERSION: u32 = 1;
+/// Bump when the page, the config, the sanitizer or the bridge limits change: every cache
+/// key changes, so failures cached by an older renderer (such as the timeouts of a bridge
+/// that dropped large `rendered` events) are not shown again.
+pub const RENDERER_VERSION: u32 = 2;
 /// The artifact id of the reserved origin (`teamchat-diagram-v<RENDERER_VERSION>`).
 pub const ARTIFACT_ID: &str = "teamchat-diagram";
 /// The bundled library: `mermaid` 12.2.0 from npm, `dist/mermaid.min.js`, MIT
@@ -664,6 +668,44 @@ fn clean_css(css: &str) -> String {
     out
 }
 
+// --- renderer window --------------------------------------------------------------------
+
+/// The renderer page may only emit its outcomes; it never reads 产出 data.
+pub const RENDERER_CAPS: Capabilities = Capabilities {
+    get_data: false,
+    live_data: false,
+    emit: true,
+    ask: false,
+    r#ref: false,
+};
+
+/// The options of the hidden renderer window (REFS §B2 step 3).
+pub fn open_options() -> OpenOptions {
+    let mut options = OpenOptions::new(
+        "diagram",
+        ARTIFACT_ID,
+        VersionSpec::new(RENDERER_VERSION, content()),
+    );
+    options.presentation = Presentation::Hidden;
+    options.capabilities = RENDERER_CAPS;
+    options.max_message_bytes = MAX_MESSAGE_BYTES;
+    // A `rendered` event carries the whole SVG (a small flowchart is already more than
+    // 16 KiB): the 产出 payload rule would drop every real diagram.
+    options.max_payload_bytes = MAX_MESSAGE_BYTES;
+    options.transparent = true;
+    options.width = 800.0;
+    options.height = 600.0;
+    options
+}
+
+/// A bridge with the renderer window's capabilities and limits, as the window builds it.
+pub fn bridge() -> Bridge {
+    let o = open_options();
+    Bridge::new(o.capabilities, None, Some(Snapshot::new(Value::Null, 0)))
+        .with_max_bytes(o.max_message_bytes)
+        .with_max_payload_bytes(o.max_payload_bytes)
+}
+
 // --- macOS renderer --------------------------------------------------------------------
 
 #[cfg(target_os = "macos")]
@@ -674,19 +716,7 @@ mod mac {
     use objc2_foundation::MainThreadMarker;
 
     use super::*;
-    use crate::{
-        ArtifactEvent, ArtifactWindow, Capabilities, Error, OpenOptions, Presentation, Rect,
-        VersionSpec,
-    };
-
-    /// The renderer page may only emit its outcomes; it never reads 产出 data.
-    const RENDERER_CAPS: Capabilities = Capabilities {
-        get_data: false,
-        live_data: false,
-        emit: true,
-        ask: false,
-        r#ref: false,
-    };
+    use crate::{ArtifactEvent, ArtifactWindow, Error, Rect, VersionSpec};
 
     /// What the renderer tells its host, on the main thread.
     #[derive(Clone, Debug, PartialEq)]
@@ -712,17 +742,7 @@ mod mac {
             mtm: MainThreadMarker,
             on_event: impl Fn(RendererEvent) + 'static,
         ) -> Result<Self, Error> {
-            let mut options = OpenOptions::new(
-                "diagram",
-                ARTIFACT_ID,
-                VersionSpec::new(RENDERER_VERSION, content()),
-            );
-            options.presentation = Presentation::Hidden;
-            options.capabilities = RENDERER_CAPS;
-            options.max_message_bytes = MAX_MESSAGE_BYTES;
-            options.transparent = true;
-            options.width = 800.0;
-            options.height = 600.0;
+            let options = open_options();
             let window = ArtifactWindow::open(mtm, options, move |event| match event {
                 ArtifactEvent::Emit { name, payload, .. } => {
                     if name == "ready" {
@@ -879,6 +899,50 @@ mod tests {
         );
         assert_eq!(parse_event("rendered", &json!({"reqId": 1})), None);
         assert_eq!(parse_event("other", &json!({"reqId": 1})), None);
+    }
+
+    /// A `rendered` message as the page posts it, with an SVG of `svg_bytes`.
+    fn rendered_message(req_id: u64, svg_bytes: usize) -> Vec<u8> {
+        let path = "<path d=\"M0 0L1 1\"/>";
+        let svg = format!(
+            "<svg viewBox=\"0 0 400 200\">{}</svg>",
+            path.repeat(svg_bytes / path.len() + 1)
+        );
+        serde_json::to_vec(&json!({"id": "__ab2", "method": "emitEvent", "params": {
+            "name": "rendered",
+            "payload": {"reqId": req_id, "svg": svg, "width": 400, "height": 200,
+                "type": "sequence",
+                "nodes": [{"id":"C","label":"客户端","kind":"actor","x":8,"y":8,"w":132,"h":40}]}
+        }}))
+        .unwrap()
+    }
+
+    #[test]
+    fn the_renderer_window_takes_a_whole_svg() {
+        // The scene's sequence diagram gives a 25 KiB SVG, its flowchart 17 KiB: both
+        // more than the 16 KiB 产出 payload rule that once dropped them (a 4 s timeout).
+        for bytes in [17_000, 26_000, 1 << 20] {
+            let mut b = bridge();
+            let o = b.handle(&rendered_message(9, bytes), std::time::Instant::now());
+            assert!(o.reply.unwrap().contains("\"result\":true"), "{bytes}");
+            let Some(crate::bridge::Request::Emit { name, payload, .. }) = o.request else {
+                panic!("no emit for {bytes} bytes");
+            };
+            let Some(RenderOutcome::Rendered(r)) = parse_event(&name, &payload) else {
+                panic!("not rendered");
+            };
+            assert_eq!((r.req_id, r.nodes.len()), (9, 1));
+            assert!(r.svg.len() >= bytes);
+        }
+        // Past the window's message limit the page still gets an error, never silence.
+        let o = bridge().handle(
+            &rendered_message(10, MAX_MESSAGE_BYTES),
+            std::time::Instant::now(),
+        );
+        assert!(o.request.is_none());
+        assert!(o.reply.unwrap().contains("too_large"));
+        // The window may only emit.
+        assert_eq!(open_options().capabilities, RENDERER_CAPS);
     }
 
     #[test]

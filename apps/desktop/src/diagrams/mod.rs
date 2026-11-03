@@ -468,6 +468,18 @@ fn pump(cx: &mut App) {
     .detach();
 }
 
+/// Starts the first queued job without a renderer window (unit tests run off the main
+/// thread, where no web view opens) and gives its request id.
+#[cfg(test)]
+fn start_next_for_test(cx: &mut App) -> Option<u64> {
+    let s = cx.global_mut::<Service>();
+    let job = s.queue.pop_front()?;
+    s.seq += 1;
+    let req_id = s.seq;
+    s.running = Some(Running { job, req_id });
+    Some(req_id)
+}
+
 /// When idle: render the sources seen recently in the other theme, so a theme change
 /// draws at once.
 fn queue_other_theme(cx: &mut App) {

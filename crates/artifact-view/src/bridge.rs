@@ -268,6 +268,7 @@ pub struct Bridge {
     open: HashMap<String, (Value, Open)>,
     refs: VecDeque<Instant>,
     max_bytes: usize,
+    max_payload_bytes: usize,
 }
 
 impl Bridge {
@@ -288,6 +289,7 @@ impl Bridge {
             open: HashMap::new(),
             refs: VecDeque::new(),
             max_bytes: MAX_MESSAGE_BYTES,
+            max_payload_bytes: MAX_PAYLOAD_BYTES,
         }
     }
 
@@ -298,6 +300,17 @@ impl Bridge {
 
     pub fn set_max_bytes(&mut self, max_bytes: usize) {
         self.max_bytes = max_bytes;
+    }
+
+    /// Largest `emit` / `ask` payload. Default [`MAX_PAYLOAD_BYTES`] (an 产出 page); the
+    /// diagram renderer sends whole SVGs and uses its message limit.
+    pub fn with_max_payload_bytes(mut self, max_payload_bytes: usize) -> Self {
+        self.max_payload_bytes = max_payload_bytes;
+        self
+    }
+
+    pub fn set_max_payload_bytes(&mut self, max_payload_bytes: usize) {
+        self.max_payload_bytes = max_payload_bytes;
     }
 
     pub fn caps(&self) -> Capabilities {
@@ -412,12 +425,8 @@ impl Bridge {
             return Err(Box::new(err(id, Reject::BadRequest, "params.name length")));
         }
         let payload = params.get("payload").cloned().unwrap_or(Value::Null);
-        if serde_json::to_vec(&payload).map_or(usize::MAX, |b| b.len()) > MAX_PAYLOAD_BYTES {
-            return Err(Box::new(err(
-                id,
-                Reject::TooLarge,
-                "payload exceeds 16 KiB",
-            )));
+        if serde_json::to_vec(&payload).map_or(usize::MAX, |b| b.len()) > self.max_payload_bytes {
+            return Err(Box::new(err(id, Reject::TooLarge, "payload too large")));
         }
         Ok((name.to_string(), payload))
     }
@@ -1045,6 +1054,14 @@ mod tests {
         );
         assert_eq!(
             reply_of(&b.handle(ok.as_bytes(), now()).reply.unwrap())["result"],
+            true
+        );
+        // The diagram renderer raises both limits: a whole SVG gets through.
+        let mut b = Bridge::new(Capabilities::ALL, None, None)
+            .with_max_bytes(4 << 20)
+            .with_max_payload_bytes(4 << 20);
+        assert_eq!(
+            reply_of(&b.handle(big.as_bytes(), now()).reply.unwrap())["result"],
             true
         );
     }

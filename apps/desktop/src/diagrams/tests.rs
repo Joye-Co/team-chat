@@ -241,3 +241,111 @@ fn several_untitled_diagrams_are_named_by_their_type() {
         Some("上线流程")
     );
 }
+
+/// The diagram-inline scene's sequence diagram (REFS §B2), as a member posts it.
+const SCENE_SEQUENCE: &str = "sequenceDiagram\n  participant C as 客户端\n  participant D as seq 去重\n  participant S as 服务器\n  C->>S: 重连 · 带上最后确认的 seq 1041\n  S->>D: 从 1042 推到 1050\n  D->>C: 9 条新消息放进列表";
+
+/// What the renderer page posts for a request: `rendered` with an SVG of `svg_bytes`, or
+/// `failed` with `reason`, run through a bridge with the renderer window's limits.
+fn page_outcome(req_id: u64, svg_bytes: usize, reason: Option<&str>) -> RenderOutcome {
+    let payload = match reason {
+        None => {
+            let path = "<path d=\"M0 0L1 1\"/>";
+            let svg = format!("<svg>{}</svg>", path.repeat(svg_bytes / path.len() + 1));
+            serde_json::json!({"reqId": req_id, "svg": svg, "width": 520, "height": 300,
+                "type": "sequence", "nodes": [
+                    {"id":"S","label":"服务器","kind":"actor","x":380,"y":8,"w":132,"h":40},
+                    {"id":"C","label":"客户端","kind":"actor","x":8,"y":8,"w":132,"h":40}]})
+        }
+        Some(r) => {
+            serde_json::json!({"reqId": req_id, "reason": r, "detail": "Parse error on line 2"})
+        }
+    };
+    let name = if reason.is_some() {
+        "failed"
+    } else {
+        "rendered"
+    };
+    let raw = serde_json::to_vec(&serde_json::json!({"id": "__ab2", "method": "emitEvent",
+        "params": {"name": name, "payload": payload}}))
+    .unwrap();
+    let o = renderer::bridge().handle(&raw, std::time::Instant::now());
+    let Some(artifact_view::bridge::Request::Emit { name, payload, .. }) = o.request else {
+        panic!(
+            "the renderer bridge dropped the {name} event: {:?}",
+            o.reply
+        );
+    };
+    renderer::parse_event(&name, &payload).expect("a render outcome")
+}
+
+fn service_setup(cx: &mut gpui::TestAppContext) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    if let Ok(mut d) = preview::CACHE_DIR.lock() {
+        *d = Some(dir.path().to_path_buf());
+    }
+    cx.update(gpui_component::init);
+    dir
+}
+
+#[gpui::test]
+fn a_rendered_scene_diagram_becomes_ready_with_nodes_in_source_order(
+    cx: &mut gpui::TestAppContext,
+) {
+    let _dir = service_setup(cx);
+    let n = normalize::normalize(SCENE_SEQUENCE).unwrap();
+    cx.update(|cx| {
+        assert!(request(&n, INLINE_SCALE, true, cx).is_pending());
+        let req_id = start_next_for_test(cx).expect("a queued job");
+        // A real sequence diagram gives a 25 KiB SVG.
+        let RenderOutcome::Rendered(r) = page_outcome(req_id, 26_000, None) else {
+            panic!("not rendered");
+        };
+        handle(
+            Msg::Png {
+                req_id,
+                result: Ok(b"\x89PNG\r\n\x1a\n".to_vec()),
+                rendered: Box::new(r),
+            },
+            cx,
+        );
+        let Some(State::Ready(ready)) = peek(&n, INLINE_SCALE, cx) else {
+            panic!("the scene diagram is not ready");
+        };
+        let ids: Vec<&str> = ready.meta.nodes.iter().map(|n| n.id.as_str()).collect();
+        assert_eq!(ids, ["C", "S"]);
+        assert_eq!(ready.meta.kind, "sequence");
+        assert_eq!((ready.meta.width, ready.meta.height), (520., 300.));
+    });
+}
+
+#[gpui::test]
+fn page_failures_show_their_reason(cx: &mut gpui::TestAppContext) {
+    let _dir = service_setup(cx);
+    for (i, (reason, kind)) in [
+        ("parse", ErrorKind::Failed),
+        ("too_big", ErrorKind::TooBig),
+        ("unsupported", ErrorKind::Unsupported),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let n = normalize::normalize(&format!("flowchart LR\n  A{i}-->B{i}")).unwrap();
+        cx.update(|cx| {
+            request(&n, INLINE_SCALE, true, cx);
+            let req_id = start_next_for_test(cx).expect("a queued job");
+            let RenderOutcome::Failed {
+                reason: r, detail, ..
+            } = page_outcome(req_id, 0, Some(reason))
+            else {
+                panic!("not failed");
+            };
+            let job = take_running(req_id, cx).expect("the running job");
+            fail(job, r, &detail, true, cx);
+            let Some(State::Failed(k)) = peek(&n, INLINE_SCALE, cx) else {
+                panic!("{reason}: not failed");
+            };
+            assert_eq!(k, kind, "{reason}");
+        });
+    }
+}

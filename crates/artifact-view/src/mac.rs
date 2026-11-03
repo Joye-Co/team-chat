@@ -67,6 +67,7 @@ pub(crate) struct State {
     pub(crate) viewer: Option<Viewer>,
     pub(crate) ref_menu: Option<RefMenu>,
     pub(crate) max_message_bytes: usize,
+    pub(crate) max_payload_bytes: usize,
     pub(crate) closed: bool,
     pub(crate) rules_ready: bool,
     pub(crate) last_external: Option<Instant>,
@@ -543,7 +544,12 @@ pub(crate) fn new_state(
     if !resolve::validate_rel(&version.entry) {
         return Err(Error::InvalidEntry);
     }
-    let bridge = new_bridge(&version, caps, bridge::MAX_MESSAGE_BYTES);
+    let bridge = new_bridge(
+        &version,
+        caps,
+        bridge::MAX_MESSAGE_BYTES,
+        bridge::MAX_PAYLOAD_BYTES,
+    );
     let content = version.content.prepared()?;
     Ok(Rc::new(RefCell::new(State {
         artifact_id,
@@ -555,6 +561,7 @@ pub(crate) fn new_state(
         viewer: None,
         ref_menu: None,
         max_message_bytes: bridge::MAX_MESSAGE_BYTES,
+        max_payload_bytes: bridge::MAX_PAYLOAD_BYTES,
         closed: false,
         rules_ready: false,
         last_external: None,
@@ -564,9 +571,16 @@ pub(crate) fn new_state(
 
 /// A fresh bridge for one version: its declarations, and its data now (a static `data`) or
 /// later (a live version: the host pushes the first snapshot).
-fn new_bridge(spec: &VersionSpec, caps: Capabilities, max_bytes: usize) -> Bridge {
+fn new_bridge(
+    spec: &VersionSpec,
+    caps: Capabilities,
+    max_bytes: usize,
+    max_payload_bytes: usize,
+) -> Bridge {
     let initial = (!spec.live).then(|| Snapshot::new(spec.data.clone(), 0));
-    Bridge::new(caps, spec.events.clone(), initial).with_max_bytes(max_bytes)
+    Bridge::new(caps, spec.events.clone(), initial)
+        .with_max_bytes(max_bytes)
+        .with_max_payload_bytes(max_payload_bytes)
 }
 
 fn add_script(mtm: MainThreadMarker, ucc: &WKUserContentController, source: &str, main_only: bool) {
@@ -740,7 +754,10 @@ pub(crate) fn switch_version(
     if !resolve::validate_rel(&spec.entry) {
         return Err(Error::InvalidEntry);
     }
-    let fresh = new_bridge(&spec, caps, state.borrow().max_message_bytes);
+    let fresh = {
+        let st = state.borrow();
+        new_bridge(&spec, caps, st.max_message_bytes, st.max_payload_bytes)
+    };
     let content = spec.content.prepared()?;
     let mut st = state.borrow_mut();
     // The bridge follows the version shown: another author may grant other capabilities,
@@ -836,6 +853,7 @@ impl ArtifactWindow {
             presentation,
             inspectable,
             max_message_bytes,
+            max_payload_bytes,
             transparent,
             viewer,
             ref_menu,
@@ -844,7 +862,9 @@ impl ArtifactWindow {
         {
             let mut st = state.borrow_mut();
             st.max_message_bytes = max_message_bytes;
+            st.max_payload_bytes = max_payload_bytes;
             st.bridge.set_max_bytes(max_message_bytes);
+            st.bridge.set_max_payload_bytes(max_payload_bytes);
             st.viewer = viewer;
             st.ref_menu = ref_menu;
         }

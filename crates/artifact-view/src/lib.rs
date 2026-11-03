@@ -156,6 +156,9 @@ pub struct OpenOptions {
     /// Largest bridge message the page may send (serialized JSON). Default
     /// [`bridge::MAX_MESSAGE_BYTES`] (256 KiB); the diagram renderer uses 4 MiB.
     pub max_message_bytes: usize,
+    /// Largest `emit` / `ask` payload. Default [`bridge::MAX_PAYLOAD_BYTES`] (16 KiB, an
+    /// 产出 page); the diagram renderer sends whole SVGs and uses its message limit.
+    pub max_payload_bytes: usize,
     /// The web view draws no background, so snapshots keep transparent pixels
     /// (the diagram renderer).
     pub transparent: bool,
@@ -182,6 +185,7 @@ impl OpenOptions {
             presentation: Presentation::Front,
             inspectable: false,
             max_message_bytes: bridge::MAX_MESSAGE_BYTES,
+            max_payload_bytes: bridge::MAX_PAYLOAD_BYTES,
             transparent: false,
             viewer: None,
             ref_menu: None,
