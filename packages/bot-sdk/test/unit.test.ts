@@ -11,13 +11,17 @@ import {
   CardDraft,
   type CardEventContext,
   ChatError,
+  checkArtifactEvents,
   checkDiagram,
   composeCard,
+  HttpClient,
+  MAX_PATTERN_INPUT,
   markdownBlocks,
   MemoryStateStore,
   mermaid,
   opsFit,
   parts,
+  patternProblem,
   stripRefPrefix,
 } from "../src/index.ts";
 import { BOT_ID, FakeServer, type Frame, GROUP_ID, HUMAN_ID, message, type Reply, TOPIC_ID } from "./fake.ts";
@@ -737,5 +741,66 @@ describe("Card v2.1 builders", () => {
       { op: "card", props: { ask: { id: "round2", from: ["requester"] } } },
     ]);
     expect(opsFit(report(), d.ops)).toBe(true);
+  });
+});
+
+// The server's rule, loaded at run time (its file is outside this package's typecheck).
+const serverPattern = (await import(join(import.meta.dir, "../../../server/src/files/pattern.ts"))) as {
+  patternProblem(p: string): string | undefined;
+  MAX_PATTERN_INPUT: number;
+};
+
+describe("page event declarations", () => {
+  const PATTERNS = [
+    "^[a-z]+$",
+    "^(a+)+$",
+    "^\\d{3}-\\d{4}$",
+    "(?:ab|cd)*e?",
+    "(?<year>\\d{4})",
+    "\\p{L}+",
+    "[\\]a]",
+    "\\bword\\b",
+    "(a)\\1",
+    "(?<y>a)\\k<y>",
+    "a(?=b)",
+    "a(?!b)",
+    "(?<=a)b",
+    "(?<!a)b",
+    "a{1001}",
+    "(a{0,500}){0,500}",
+    "(abc",
+    "a\\",
+  ];
+
+  test("the SDK refuses the patterns the server refuses, with the same message", () => {
+    for (const p of PATTERNS) expect([p, patternProblem(p)]).toEqual([p, serverPattern.patternProblem(p)]);
+    expect(patternProblem("(a)\\1")).toBe("pattern: backreferences are not supported");
+    expect(patternProblem("a(?=b)")).toBe("pattern: lookaround is not supported");
+    expect(patternProblem("^(a+)+$")).toBeUndefined();
+    expect(MAX_PATTERN_INPUT).toBe(serverPattern.MAX_PATTERN_INPUT);
+  });
+
+  test("a declaration with a refused pattern fails before any request", async () => {
+    const decl = [{ name: "form.submit", schema: { type: "object", properties: { code: { type: "string", pattern: "(?<!x)y" } } } }];
+    expect(() => checkArtifactEvents(decl as never)).toThrow(ChatError);
+    let calls = 0;
+    const http = new HttpClient({ url: "http://127.0.0.1:1", token: "t", fetch: (async () => {
+      calls++;
+      return new Response("{}", { status: 500 });
+    }) as never });
+    const err = (await http
+      .publishHtml({ groupId: GROUP_ID, topicId: TOPIC_ID, title: "t", html: "<p>x</p>", events: decl as never })
+      .catch((e) => e)) as ChatError;
+    expect(err).toBeInstanceOf(ChatError);
+    expect(err.code).toBe("invalid");
+    expect(err.reason).toBe("artifact.bad_schema");
+    const err2 = (await http
+      .createArtifact({ groupId: GROUP_ID, topicId: TOPIC_ID, title: "t", kind: "html", entry: "index.html", files: [], events: decl } as never)
+      .catch((e) => e)) as ChatError;
+    expect(err2.reason).toBe("artifact.bad_schema");
+    const err3 = (await http.addArtifactVersion("01JC0ART000000000000000001", { entry: "index.html", files: [], events: decl } as never).catch((e) => e)) as ChatError;
+    expect(err3.reason).toBe("artifact.bad_schema");
+    expect(calls).toBe(0);
+    expect(() => checkArtifactEvents([{ name: "form.submit", schema: { type: "string", pattern: "^[a-z]{1,8}$" } }])).not.toThrow();
   });
 });

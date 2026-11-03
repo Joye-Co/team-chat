@@ -209,7 +209,13 @@ topic from a side chat; the member does that with the suggestion button.
 
 **Page events.** A bot's 产出 page may send events back when its version declares them:
 `http.publishHtml({ ..., events: [{ name: "filter.pick", kind: "ask" }, { name: "report.flag" }] })`
-(`kind` is `emit`, the default, or `ask`: the page waits for a reply). `onArtifactEvent` gets each
+(`kind` is `emit`, the default, or `ask`: the page waits for a reply). An event may give its
+payload a `schema` (TcSchema). The server checks a `pattern` in linear time, so it refuses a
+backreference (`\1`, `\k<…>`), lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`) or a pattern of more than
+1000 states, and a string longer than 4096 characters (`MAX_PATTERN_INPUT`) does not match.
+`publishHtml`, `createArtifact` and `addArtifactVersion` check the declarations with the same rule
+(`checkArtifactEvents`, `patternProblem`) and throw `ChatError` `invalid`, reason
+`artifact.bad_schema`, before anything is uploaded. `onArtifactEvent` gets each
 page event of my 产出 while the bot is connected (the transient `artifact.event`: `ctx.eventId`,
 `ctx.kind`, `ctx.name`, `ctx.payload`, `ctx.actorId`). Answer an `ask` once with
 `ctx.reply(payload)` (private to the asker, within 120 s) or `ctx.decline(message)`. Push a new
@@ -495,7 +501,9 @@ Codex 的计划更新)生成。
   读到的位置。`onAside` 收到这些消息(不用 @;没有 `onAside` 时交给 `onMention`),`ctx.source()`
   读取原话题到 `uptoSeq` 为止的消息。用 `ctx.reply` 回答,只留在私聊里;不要往原话题发消息。
 - **页面事件**:`http.publishHtml({ ..., events: [{ name, label, kind }] })` 声明产出页面可以发回的事件
-  (`kind` 为 `emit` 或 `ask`),`onArtifactEvent` 收到它们。`ask` 用 `ctx.reply(payload)` 回答一次
+  (`kind` 为 `emit` 或 `ask`),`onArtifactEvent` 收到它们。`schema` 的 `pattern` 不能用反向引用和前后断言,
+  被检查的字符串最多 4096 个字符;SDK 在上传前按服务器的规则检查声明,不合规时抛出 `ChatError` `invalid`
+  (reason `artifact.bad_schema`)。`ask` 用 `ctx.reply(payload)` 回答一次
   (只给提问的人)或 `ctx.decline(message)`;`ctx.pushData(data)` 把新数据推给所有打开这个页面的人。
   `ctx.postMessage` 发消息时把页面事件作为 `causeEventId`。
   处理函数没有回应时 SDK 自动回应(`emit` 回 `ignored`,`ask` 回拒绝)。页面事件不能当作批准:

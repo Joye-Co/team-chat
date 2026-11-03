@@ -57,6 +57,7 @@ export {
 export { CardDraft, opsFit, type PatchInput } from "./interact.ts";
 export { DELETED_REF_LABEL, findPart, type MarkdownBlock, markdownBlocks, refPrefix, stripRefPrefix } from "./refs.ts";
 export { ChatError, type ChatErrorCode, isRetryable } from "./errors.ts";
+export { checkArtifactEvents, MAX_PATTERN_INPUT, patternProblem, schemaPatternProblem } from "./pattern.ts";
 export { HttpClient, type HttpClientOptions, type PostMessageInput, type UploadInput, sha256Hex } from "./http.ts";
 export { consoleLogger, type Logger, type LogLevel, redact } from "./log.ts";
 export { type AsideRef, type BotStateData, FileStateStore, MemoryStateStore, type StateStore } from "./state.ts";
