@@ -4,8 +4,9 @@
 use crate::http::{ApiError, ApiResult, HttpClient, enc};
 use crate::proto::machine::{FileChange, RunEvent, RunLogEntry};
 use crate::proto::{
-    BotRun, BotRunner, CreateMachineRequest, CreateMachineResponse, EndRunRequest, Machine,
-    RunEventsResponse, SetBotRunnerRequest, SetRunPlanRequest, StartRunRequest,
+    BotRun, BotRunner, CreateMachineRequest, CreateMachineResponse, DecisionsResponse,
+    EndRunRequest, MAX_DECISIONS_PAGE, Machine, RunEventsResponse, SetBotRunnerRequest,
+    SetRunPlanRequest, StartRunRequest,
 };
 use reqwest::Method;
 use std::collections::HashMap;
@@ -99,6 +100,26 @@ impl HttpClient {
             true,
         )
         .await
+    }
+
+    /// 1.1: one page of a group's decisions (群里的决定, `GET /v1/groups/:id/decisions`),
+    /// newest first: answers to v2 asks with `record`, as the card was when it was answered.
+    /// `before_seq` pages back; `limit` is 1..=200.
+    pub async fn group_decisions(
+        &self,
+        group_id: &str,
+        before_seq: Option<u64>,
+        limit: u32,
+    ) -> ApiResult<DecisionsResponse> {
+        let mut path = format!(
+            "/v1/groups/{}/decisions?limit={}",
+            enc(group_id),
+            limit.clamp(1, MAX_DECISIONS_PAGE as u32)
+        );
+        if let Some(seq) = before_seq {
+            path.push_str(&format!("&beforeSeq={seq}"));
+        }
+        self.call::<(), _>(Method::GET, &path, None, true).await
     }
 
     /// 1.1: resumes a paused run (交还). `note` becomes the CLI's next input when set.

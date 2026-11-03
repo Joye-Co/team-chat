@@ -5,7 +5,8 @@
 use crate::client::{Client, ClientError, ClientUpdate, SendRequest, Shared, enqueue_with};
 use crate::proto::machine::RunLogEntry;
 use crate::proto::{
-    AnswerEdits, AnswerInputs, BotRun, GroupKind, MemberKind, TopicContext, TopicLink,
+    AnswerEdits, AnswerInputs, BotRun, GroupDecision, GroupKind, MemberKind, TopicContext,
+    TopicLink,
 };
 use crate::runs::{TerminalLine, terminal_lines};
 use crate::store::{ArtifactEventRow, CardAnswerRow, DecisionRow, OutboxOp, OutboxState, TopicRow};
@@ -109,6 +110,19 @@ impl Client {
         limit: usize,
     ) -> Result<Vec<DecisionRow>, ClientError> {
         Ok(self.store().decisions(group_id, limit)?)
+    }
+
+    /// The newest group decisions from the server (`GET /v1/groups/:id/decisions`). The
+    /// server keeps the card as it was answered, so a decision stays listed after its author
+    /// edits the card; [`Client::decisions`] reads the cache and is the offline fallback.
+    pub fn fetch_decisions(
+        &self,
+        group_id: &str,
+        limit: u32,
+    ) -> JoinHandle<Result<Vec<GroupDecision>, ClientError>> {
+        let http = self.http();
+        let id = group_id.to_string();
+        self.spawn(async move { Ok(http.group_decisions(&id, None, limit).await?.decisions) })
     }
 
     // ------------------------------------------------------------------
