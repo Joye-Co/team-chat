@@ -22,8 +22,8 @@ pub mod files;
 mod files_live;
 #[cfg(target_os = "macos")]
 pub mod macos;
-pub mod persist;
 mod panes;
+pub mod persist;
 mod process;
 mod realtime;
 #[cfg(test)]

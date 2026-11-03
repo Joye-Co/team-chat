@@ -18,8 +18,7 @@ use std::{
 use chat_core::{
     ClientError, SideChatRequest,
     proto::{
-        AcceptanceState, Message, RunPlanState, TopicContext,
-        CardV2Block,
+        AcceptanceState, CardV2Block, Message, RunPlanState, TopicContext,
         machine::{RunEvent, RunLogEntry},
     },
 };
@@ -150,11 +149,7 @@ impl LiveEntry {
                         .position(|i| {
                             matches!(i.state, RunPlanState::Current | RunPlanState::Waiting)
                         })
-                        .or_else(|| {
-                            items
-                                .iter()
-                                .rposition(|i| i.state == RunPlanState::Done)
-                        });
+                        .or_else(|| items.iter().rposition(|i| i.state == RunPlanState::Done));
                 }
                 RunEvent::ToolCall {
                     tool, title, input, ..

@@ -56,7 +56,7 @@ const MARK: Pixels = px(24.);
 const MARK_DOT: Pixels = px(10.);
 const MARK_NOW: Pixels = px(12.);
 /// A step label under the track, centered on its mark.
-const MARK_LABEL_W: Pixels = px(180.);
+const MARK_LABEL_W: Pixels = px(150.);
 /// Rows of the 验收标准 card: at least 40 pt.
 const CRITERION_MIN: Pixels = px(40.);
 /// Rows of the plan card: 34 pt.
@@ -238,12 +238,14 @@ impl LivePane {
                     .child(fill(c::LIVE_COMPUTER, &[("name", bot)])),
             )
             .children(state)
-            .children(
-                screen
-                    .machine_name
-                    .clone()
-                    .map(|m| div().t_meta().text_color(k.ink_3).child(m)),
-            )
+            .children(screen.machine_name.clone().map(|m| {
+                div()
+                    .min_w_0()
+                    .one_line()
+                    .t_meta()
+                    .text_color(k.ink_3)
+                    .child(m)
+            }))
             .child(div().flex_1())
             .children(elapsed)
             .child(
@@ -423,18 +425,24 @@ impl LivePane {
                 .enumerate()
                 .map(|(i, l)| {
                     let row = div()
-                        .when(i > 0 && l.kind == ScreenLineKind::Command, |d| d.mt(space::S8))
+                        .when(i > 0 && l.kind == ScreenLineKind::Command, |d| {
+                            d.mt(space::S8)
+                        })
                         .one_line();
                     let row = match l.kind {
                         ScreenLineKind::Command => row
-                            .child(div().text_color(k.ink_3).child("$ "))
+                            .child(div().flex_none().text_color(k.ink_3).child("$ "))
                             .flex()
-                            .child(div().text_color(k.ink).child(l.text.clone())),
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .one_line()
+                                    .text_color(k.ink)
+                                    .child(l.text.clone()),
+                            ),
                         ScreenLineKind::Output => row.text_color(k.ink_2).child(l.text.clone()),
                         ScreenLineKind::Result => row.text_color(k.ink).child(l.text.clone()),
-                        ScreenLineKind::Error => {
-                            row.text_color(k.bad_ink).child(l.text.clone())
-                        }
+                        ScreenLineKind::Error => row.text_color(k.bad_ink).child(l.text.clone()),
                     };
                     ui::motion::rise(
                         SharedString::from(format!("live-line-{}-{i}", screen.run_id)),
@@ -499,6 +507,8 @@ impl LivePane {
                                 .line_height(px(18.))
                                 .medium()
                                 .text_color(k.btn_ink)
+                                .max_w(px(120.))
+                                .one_line()
                                 .child(name),
                         ),
                     cx,
@@ -607,7 +617,9 @@ impl LivePane {
                         } else {
                             fill(c::LIVE_REPLAY_STEP, &[("n", &(i + 1).to_string())]).into()
                         };
-                        move |window, cx| gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                        move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                        }
                     })
                     .on_click(cx.listener(move |this, _, _, cx| {
                         let rid = this.target(cx).map(|(_, _, r)| r).unwrap_or_default();
@@ -617,7 +629,11 @@ impl LivePane {
                     .into_any_element(),
             );
             if is_last {
-                let word = if active { c::LIVE_NOW_AT } else { c::LIVE_ENDED_AT };
+                let word = if active {
+                    c::LIVE_NOW_AT
+                } else {
+                    c::LIVE_ENDED_AT
+                };
                 labels.push(
                     div()
                         .absolute()
@@ -656,8 +672,14 @@ impl LivePane {
                                 .gap(space::S4)
                                 .t_meta()
                                 .text_color(if selected { k.ink } else { k.ink_2 })
-                                .child(ui::icon(Lucide::Check, theme::icon::TAG, k.ink_3))
-                                .child(div().one_line().child(step_text)),
+                                .max_w(MARK_LABEL_W)
+                                .min_w_0()
+                                .child(div().flex_none().child(ui::icon(
+                                    Lucide::Check,
+                                    theme::icon::TAG,
+                                    k.ink_3,
+                                )))
+                                .child(div().min_w_0().one_line().child(step_text)),
                         )
                         .into_any_element(),
                 );
@@ -735,10 +757,7 @@ impl LivePane {
         }
         let k = theme::colors(cx);
         let met = items.iter().filter(|i| i.met == Some(true)).count();
-        let count = [
-            ("met", met.to_string()),
-            ("total", items.len().to_string()),
-        ];
+        let count = [("met", met.to_string()), ("total", items.len().to_string())];
         let summary = match run.requested_by.as_deref() {
             Some(who) => mono_fill(
                 c::LIVE_ACCEPTANCE_FROM,
@@ -880,18 +899,17 @@ impl LivePane {
             .iter()
             .position(|p| matches!(p.state, PlanState::Current | PlanState::Waiting))
             .map_or(done, |i| i + 1);
-        let bar = div().flex().gap(space::S4).children(run.plan.iter().map(|p| {
-            div()
-                .flex_1()
-                .h(px(3.))
-                .rounded(px(2.))
-                .bg(match p.state {
+        let bar = div()
+            .flex()
+            .gap(space::S4)
+            .children(run.plan.iter().map(|p| {
+                div().flex_1().h(px(3.)).rounded(px(2.)).bg(match p.state {
                     PlanState::Done => k.ink_3,
                     PlanState::Current => k.live,
                     PlanState::Waiting => k.you,
                     PlanState::Pending => k.line_2,
                 })
-        }));
+            }));
         let now = run.ended_at.unwrap_or_else(now_ms);
         let minutes = |ms: i64| ((ms.max(0) + 30_000) / 60_000).max(1).to_string();
         let rows = run.plan.iter().enumerate().map(|(i, p)| {
@@ -902,7 +920,11 @@ impl LivePane {
                     let mark: AnyElement = if held {
                         ui::icon(Lucide::Pause, theme::icon::TAG, k.ink_3).into_any_element()
                     } else if p.state == PlanState::Waiting {
-                        div().size(px(8.)).rounded_full().bg(k.you).into_any_element()
+                        div()
+                            .size(px(8.))
+                            .rounded_full()
+                            .bg(k.you)
+                            .into_any_element()
                     } else {
                         ui::motion::breathe(
                             SharedString::from(format!("live-plan-{i}")),
@@ -1002,10 +1024,10 @@ impl LivePane {
                                 .child(p.text.clone()),
                         )
                         .children(took.map(|n| {
-                            div().t_meta().text_color(k.ink_3).child(mono_fill(
-                                c::LIVE_PLAN_TOOK,
-                                &[("n", n, true)],
-                            ))
+                            div()
+                                .t_meta()
+                                .text_color(k.ink_3)
+                                .child(mono_fill(c::LIVE_PLAN_TOOK, &[("n", n, true)]))
                         }))
                         .into_any_element()
                 }
@@ -1084,7 +1106,11 @@ impl LivePane {
                 ButtonSize::Md,
                 cx,
             )
-            .icon(ui::icon(Lucide::MousePointer2, theme::icon::CHIP, k.btn_ink))
+            .icon(ui::icon(
+                Lucide::MousePointer2,
+                theme::icon::CHIP,
+                k.btn_ink,
+            ))
             .on_click(cx.listener(move |this, _, _, cx| this.pause(&run, true, cx)))
         });
         let stop = active.then(|| {
@@ -1214,7 +1240,11 @@ fn mono_fill(template: &str, values: &[(&str, String, bool)]) -> gpui::Div {
     if !rest.is_empty() {
         parts.push(rest.to_string().into_any_element());
     }
-    div().flex().items_center().whitespace_nowrap().children(parts)
+    div()
+        .flex()
+        .items_center()
+        .whitespace_nowrap()
+        .children(parts)
 }
 
 /// 已用 19 分钟, or 已用 2 小时 5 分钟.
@@ -1246,13 +1276,11 @@ fn blinking_cursor(run_id: &str, cx: &App) -> AnyElement {
         return row.child(block).into_any_element();
     }
     use gpui::{Animation, AnimationExt as _};
-    row.child(
-        block.with_animation(
-            ElementId::Name(format!("live-cursor-{run_id}").into()),
-            Animation::new(motion::LIVE_CURSOR_BLINK).repeat(),
-            |el, t| el.opacity(if t < 0.5 { 1. } else { 0. }),
-        ),
-    )
+    row.child(block.with_animation(
+        ElementId::Name(format!("live-cursor-{run_id}").into()),
+        Animation::new(motion::LIVE_CURSOR_BLINK).repeat(),
+        |el, t| el.opacity(if t < 0.5 { 1. } else { 0. }),
+    ))
     .into_any_element()
 }
 
@@ -1302,7 +1330,10 @@ impl Render for LivePane {
             .filter(|l| !stepped || shown_step.is_none() || l.step == shown_step)
             .collect();
         let title = match (&screen.machine_name, shown_text.is_empty()) {
-            (Some(m), false) => fill(c::LIVE_TERMINAL_TITLE, &[("machine", m), ("step", &shown_text)]),
+            (Some(m), false) => fill(
+                c::LIVE_TERMINAL_TITLE,
+                &[("machine", m), ("step", &shown_text)],
+            ),
             (Some(m), true) => m.clone(),
             (None, _) => shown_text.clone(),
         };
@@ -1318,7 +1349,11 @@ impl Render for LivePane {
         let mut budget = f32::from(room) - if live_now { 20. } else { 0. };
         let mut keep = 0;
         for (i, l) in lines.iter().enumerate().rev() {
-            let gap = if i > 0 && l.kind == ScreenLineKind::Command { 8. } else { 0. };
+            let gap = if i > 0 && l.kind == ScreenLineKind::Command {
+                8.
+            } else {
+                0.
+            };
             if budget < 20. + gap {
                 break;
             }
