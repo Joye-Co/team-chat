@@ -26,6 +26,13 @@
         "info"
       ]
     },
+    "status": {
+      "type": "string",
+      "enum": [
+        "executing",
+        "failed"
+      ]
+    },
     "title": {
       "type": "string",
       "minLength": 1,
@@ -1498,6 +1505,21 @@
                         "waiting",
                         "pending"
                       ]
+                    },
+                    "startedAt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "endedAt": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    },
+                    "estimateMs": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
                     }
                   },
                   "required": [
@@ -1970,6 +1992,52 @@
                 "required": [
                   "artifactId",
                   "version"
+                ]
+              },
+              "tests": {
+                "type": "object",
+                "properties": {
+                  "passed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "failed": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "skipped": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "passed",
+                  "failed"
+                ]
+              },
+              "recording": {
+                "type": "object",
+                "properties": {
+                  "fileId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "durationMs": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "posterFileId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "fileId",
+                  "durationMs"
                 ]
               }
             },
@@ -4990,6 +5058,21 @@
                                   "waiting",
                                   "pending"
                                 ]
+                              },
+                              "startedAt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "endedAt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "estimateMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
                               }
                             },
                             "required": [
@@ -5462,6 +5545,52 @@
                           "required": [
                             "artifactId",
                             "version"
+                          ]
+                        },
+                        "tests": {
+                          "type": "object",
+                          "properties": {
+                            "passed": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "failed": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "skipped": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "passed",
+                            "failed"
+                          ]
+                        },
+                        "recording": {
+                          "type": "object",
+                          "properties": {
+                            "fileId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "durationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            "posterFileId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "fileId",
+                            "durationMs"
                           ]
                         }
                       },
@@ -7818,6 +7947,11 @@
               "maxLength": 64,
               "pattern": "^[A-Za-z0-9_.:-]+$"
             }
+          },
+          "role": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
           }
         },
         "required": [

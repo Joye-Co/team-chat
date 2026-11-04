@@ -227,6 +227,11 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
                   }
                 },
                 "required": [
@@ -9357,6 +9362,11 @@
                                       "maxLength": 64,
                                       "pattern": "^[A-Za-z0-9_.:-]+$"
                                     }
+                                  },
+                                  "role": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 32
                                   }
                                 },
                                 "required": [
@@ -9789,6 +9799,28 @@
                               "memberIds"
                             ]
                           }
+                        },
+                        "fromAside": {
+                          "type": "object",
+                          "properties": {
+                            "groupId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "topicId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "messageId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "groupId",
+                            "topicId",
+                            "messageId"
+                          ]
                         }
                       },
                       "required": [
@@ -18479,6 +18511,11 @@
                                   "maxLength": 64,
                                   "pattern": "^[A-Za-z0-9_.:-]+$"
                                 }
+                              },
+                              "role": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 32
                               }
                             },
                             "required": [
@@ -18988,6 +19025,10 @@
                   "properties": {
                     "name": {
                       "type": "string"
+                    },
+                    "purpose": {
+                      "type": "string",
+                      "maxLength": 200
                     }
                   },
                   "required": [
@@ -19543,6 +19584,49 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "preview": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "summary": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "metrics": {
+                              "maxItems": 6,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "delta": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
                         }
                       },
                       "required": [
@@ -19958,6 +20042,49 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "preview": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "summary": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "metrics": {
+                              "maxItems": 6,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "delta": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
                         }
                       },
                       "required": [
@@ -20220,6 +20347,20 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 32
+                        },
+                        "retryOf": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "queuedAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "queuePosition": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         }
                       },
                       "required": [
@@ -20520,6 +20661,24 @@
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 9007199254740991
+                            },
+                            "merge": {
+                              "type": "object",
+                              "properties": {
+                                "queuedAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "error": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "queuedAt"
+                              ]
                             }
                           },
                           "required": [
@@ -20951,6 +21110,53 @@
                 "type",
                 "data"
               ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "const": "desk.noted"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 560
+                    }
+                  },
+                  "required": [
+                    "text"
+                  ]
+                }
+              },
+              "required": [
+                "seq",
+                "groupId",
+                "at",
+                "actorId",
+                "type",
+                "data"
+              ]
             }
           ]
         },
@@ -21365,6 +21571,11 @@
                     "message": {
                       "type": "string",
                       "maxLength": 200
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
                     }
                   },
                   "required": [
@@ -21452,6 +21663,11 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 64
+                },
+                "retryAfterMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
@@ -30497,6 +30713,11 @@
                                         "maxLength": 64,
                                         "pattern": "^[A-Za-z0-9_.:-]+$"
                                       }
+                                    },
+                                    "role": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 32
                                     }
                                   },
                                   "required": [
@@ -30929,6 +31150,28 @@
                                 "memberIds"
                               ]
                             }
+                          },
+                          "fromAside": {
+                            "type": "object",
+                            "properties": {
+                              "groupId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "topicId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "messageId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "groupId",
+                              "topicId",
+                              "messageId"
+                            ]
                           }
                         },
                         "required": [
@@ -39619,6 +39862,11 @@
                                     "maxLength": 64,
                                     "pattern": "^[A-Za-z0-9_.:-]+$"
                                   }
+                                },
+                                "role": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 32
                                 }
                               },
                               "required": [
@@ -40128,6 +40376,10 @@
                     "properties": {
                       "name": {
                         "type": "string"
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "maxLength": 200
                       }
                     },
                     "required": [
@@ -40683,6 +40935,49 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "preview": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "summary": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "metrics": {
+                                "maxItems": 6,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "delta": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ]
+                                }
+                              }
+                            }
                           }
                         },
                         "required": [
@@ -41098,6 +41393,49 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "preview": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "summary": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "metrics": {
+                                "maxItems": 6,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "delta": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ]
+                                }
+                              }
+                            }
                           }
                         },
                         "required": [
@@ -41360,6 +41698,20 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 32
+                          },
+                          "retryOf": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "queuedAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "queuePosition": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "required": [
@@ -41660,6 +42012,24 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "merge": {
+                                "type": "object",
+                                "properties": {
+                                  "queuedAt": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "error": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  }
+                                },
+                                "required": [
+                                  "queuedAt"
+                                ]
                               }
                             },
                             "required": [
@@ -42080,6 +42450,53 @@
                     },
                     "required": [
                       "decision"
+                    ]
+                  }
+                },
+                "required": [
+                  "seq",
+                  "groupId",
+                  "at",
+                  "actorId",
+                  "type",
+                  "data"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "desk.noted"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "maxLength": 560
+                      }
+                    },
+                    "required": [
+                      "text"
                     ]
                   }
                 },
@@ -50853,6 +51270,11 @@
                             "maxLength": 64,
                             "pattern": "^[A-Za-z0-9_.:-]+$"
                           }
+                        },
+                        "role": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32
                         }
                       },
                       "required": [
@@ -51285,6 +51707,28 @@
                     "memberIds"
                   ]
                 }
+              },
+              "fromAside": {
+                "type": "object",
+                "properties": {
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "topicId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "messageId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "groupId",
+                  "topicId",
+                  "messageId"
+                ]
               }
             },
             "required": [
@@ -51447,6 +51891,11 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
                   }
                 },
                 "required": [
@@ -51578,6 +52027,11 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            },
+            "retryAfterMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [
