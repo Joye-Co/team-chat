@@ -145,19 +145,12 @@ impl TimelineView {
             } else {
                 item.into_any_element()
             };
-            // The 720 pt column of the v2 page, centered, 32 pt from the
-            // edges; rows reach 8 pt past the text for their hover fill.
+            // NATIVE.md §9.2: the transcript takes the full content width
+            // with 24 pt side insets; message text stops at 680 pt.
             return div()
                 .w_full()
                 .px(super::v2::SIDE - ROW_INSET)
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(super::v2::COLUMN + ROW_INSET * 2.)
-                        .child(item),
-                )
+                .child(item)
                 .into_any_element();
         }
         item.into_any_element()
@@ -385,11 +378,7 @@ impl TimelineView {
                         .gap(space::S4)
                         .t_meta()
                         .text_color(colors.danger_text)
-                        .child(ui::icon(
-                            Sym::Alert,
-                            theme::icon::CHIP,
-                            colors.danger_text,
-                        ))
+                        .child(ui::icon(Sym::Alert, theme::icon::CHIP, colors.danger_text))
                         .child(t::FAILED),
                 )
                 .child(
@@ -407,7 +396,7 @@ impl TimelineView {
                 .flex()
                 .flex_col()
                 .child(self.v2_meta(author.as_ref(), message.created_at, cx))
-                .child(div().h(space::S4))
+                .child(div().h(space::S2))
                 .into_any_element()
         });
         let meta = meta.or_else(|| {
@@ -544,7 +533,13 @@ impl TimelineView {
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .when(!v2, |el| el.max_w(theme::MEASURE))
+                    .map(|el| {
+                        if v2 {
+                            el.max_w(super::v2::TEXT_MAX)
+                        } else {
+                            el.max_w(theme::MEASURE)
+                        }
+                    })
                     .flex()
                     .flex_col()
                     .children(meta)
@@ -622,19 +617,21 @@ impl TimelineView {
                         cx.write_to_clipboard(ClipboardItem::new_string(quoted.clone()))
                     })
             })
-            .child(tool("more", Sym::More).named(t::MORE).dropdown_menu(
-                move |menu, window, cx| {
-                    super::menu::build(
-                        menu,
-                        view.clone(),
-                        &menu_message,
-                        can_edit,
-                        can_delete,
-                        window,
-                        cx,
-                    )
-                },
-            ))
+            .child(
+                tool("more", Sym::More)
+                    .named(t::MORE)
+                    .dropdown_menu(move |menu, window, cx| {
+                        super::menu::build(
+                            menu,
+                            view.clone(),
+                            &menu_message,
+                            can_edit,
+                            can_delete,
+                            window,
+                            cx,
+                        )
+                    }),
+            )
             .into_any_element()
     }
 

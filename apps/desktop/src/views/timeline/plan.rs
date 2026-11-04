@@ -1,10 +1,11 @@
 //! The plan cards of the members at work, at the foot of a v2 timeline,
-//! one per member (Live.dc.html): the member's tile with a live ring, then a card with
-//! `计划 3/5` and 收起 / 展开, the step bar, the steps (the current one on
-//! a `sunken` fill with what it does now) and a footer with the time used
+//! one per member (Live.dc.html, NATIVE.md §9.2): the member's tile with a
+//! live ring, then a card on `fill` (radius 12, no border, no shadow) with
+//! `计划 3/5` and a disclosure chevron, the 4 pt determinate bar, the steps
+//! (the current one with what it does now) and a footer with the time used
 //! and when it started. While someone holds the member's computer the run
 //! is paused: a pause mark, no breathing, and the held line. 停止 and 接管
-//! are in the 电脑 pane (the title bar's 电脑 button).
+//! are in the 电脑 pane (the inspector's 在哪干活).
 //!
 //! It replaces the v1 pending row (`live.rs`) on the 话题 page.
 
@@ -18,15 +19,18 @@ use super::{TimelineView, model, v2::GUTTER};
 use crate::{
     copy::{fill, live as l, topic_rail as c},
     data::{BotRunSummary, Millis, PlanState},
-    theme::{self, Type as _, space},
-    ui::{self, Sym},
+    theme::{Type as _, space},
+    ui::{
+        self, Sym,
+        native::{NativeType as _, determinate_bar, native_colors},
+    },
     views::topic_page::working_runs,
 };
 
-/// Rows of the plan card: 34 pt; its header 40 pt and footer 36 pt.
-const ROW: gpui::Pixels = px(34.);
+/// Rows of the plan card: 28 pt; its header 40 pt and footer 32 pt.
+const ROW: gpui::Pixels = px(28.);
 const HEADER: gpui::Pixels = px(40.);
-const FOOTER: gpui::Pixels = px(36.);
+const FOOTER: gpui::Pixels = px(32.);
 
 /// A span of time: whole minutes (rounded, at least 1), and hours and
 /// minutes from 60 minutes on (`已 9 小时 49 分钟`, never `已 589 分钟`).
@@ -110,7 +114,7 @@ impl TimelineView {
         times: &[Millis],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let k = theme::colors(cx);
+        let n = native_colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
         let name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();
         let open = !self.plan_collapsed.contains(&run.id);
@@ -126,35 +130,35 @@ impl TimelineView {
             ui::MemberAvatar::new(bot.as_ref(), GUTTER).ring((!held).then_some(ui::Ring::Live)),
         );
 
+        // A borderless disclosure chevron (NATIVE.md §9.3: no 展开 text).
         let toggle = (!run.plan.is_empty()).then(|| {
             let id = run.id.clone();
             div()
                 .id(ElementId::Name(format!("plan-toggle-{}", run.id).into()))
                 .flex_none()
                 .ml_auto()
-                .h(px(28.))
-                .pl(space::S8)
-                .pr(space::S6)
-                .rounded(px(7.))
+                .size(px(24.))
+                .rounded(px(6.))
                 .flex()
                 .items_center()
-                .gap(space::S4)
-                .t_meta()
-                .text_color(k.ink_2)
-                .hover(|s| s.bg(k.hover))
-                .child(if open {
-                    c::PLAN_COLLAPSE
-                } else {
-                    c::PLAN_EXPAND
+                .justify_center()
+                .hover(|s| s.bg(n.fill_hover))
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(if open {
+                        c::PLAN_COLLAPSE
+                    } else {
+                        c::PLAN_EXPAND
+                    })
+                    .build(window, cx)
                 })
-                .child(ui::icon(
+                .child(ui::sym(
                     if open {
                         Sym::ChevronUp
                     } else {
                         Sym::ChevronDown
                     },
-                    px(12.),
-                    k.ink_2,
+                    ui::SymSize::INLINE_SMALL,
+                    n.secondary,
                 ))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     if !this.plan_collapsed.remove(&id) {
@@ -170,46 +174,35 @@ impl TimelineView {
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(
+            .child(div().flex_none().n_headline().text_color(n.label).child(
+                if run.plan.is_empty() {
+                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
+                } else {
+                    l::LIVE_PLAN.to_string()
+                },
+            ))
+            .children(progress.as_ref().map(|(step, total, _)| {
                 div()
                     .flex_none()
-                    .t_small()
-                    .medium()
-                    .text_color(k.ink)
-                    .child(if run.plan.is_empty() {
-                        fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
-                    } else {
-                        l::LIVE_PLAN.to_string()
-                    }),
-            )
-            .children(progress.as_ref().map(|(n, total, _)| {
-                div()
-                    .flex_none()
-                    .t_mono()
-                    .text_color(k.ink_3)
-                    .child(format!("{n}/{total}"))
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .child(format!("{step}/{total}"))
             }))
             .children(toggle);
 
+        // The 4 pt determinate bar (§5.7): `blue` while the member works.
         let bar = (!run.plan.is_empty()).then(|| {
-            div()
-                .px(space::S14)
-                .flex()
-                .gap(px(3.))
-                .children(run.plan.iter().enumerate().map(|(i, s)| {
-                    let seg = div().flex_1().h(px(3.)).rounded(px(2.));
-                    match s.state {
-                        PlanState::Done => seg.bg(k.ink_3).into_any_element(),
-                        PlanState::Pending => seg.bg(k.line_2).into_any_element(),
-                        PlanState::Waiting => seg.bg(k.you).into_any_element(),
-                        PlanState::Current if held => seg.bg(k.ink_3).into_any_element(),
-                        PlanState::Current => ui::motion::breathe(
-                            SharedString::from(format!("plan-bar-{}-{i}", run.id)),
-                            seg.bg(k.live),
-                            cx,
-                        ),
-                    }
-                }))
+            let done = run
+                .plan
+                .iter()
+                .filter(|s| s.state == PlanState::Done)
+                .count();
+            div().px(space::S14).pb(space::S4).child(determinate_bar(
+                done as f32 / run.plan.len() as f32,
+                (!held).then_some(n.blue),
+                cx,
+            ))
         });
 
         // Expanded: every step. Collapsed: only the step it is on.
@@ -224,17 +217,15 @@ impl TimelineView {
                 match s.state {
                     PlanState::Current | PlanState::Waiting => {
                         let mark: AnyElement = if held {
-                            ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                            ui::sym(Sym::Pause, ui::SymSize::INLINE_SMALL, n.secondary)
+                                .into_any_element()
                         } else if s.state == PlanState::Waiting {
-                            div()
-                                .size(px(8.))
-                                .rounded_full()
-                                .bg(k.you)
+                            ui::sym(Sym::NeedsYou, ui::SymSize::INLINE_SMALL, n.amber)
                                 .into_any_element()
                         } else {
                             ui::motion::breathe(
                                 SharedString::from(format!("plan-dot-{}-{i}", run.id)),
-                                div().size(px(8.)).rounded_full().bg(k.live),
+                                div().size(px(6.)).rounded_full().bg(n.blue),
                                 cx,
                             )
                         };
@@ -247,11 +238,8 @@ impl TimelineView {
                             .flex()
                             .flex_col()
                             .gap(space::S2)
-                            .pt(px(7.))
-                            .pb(space::S8)
+                            .py(space::S4)
                             .px(space::S8)
-                            .rounded(theme::radius::MD)
-                            .bg(k.sunken)
                             .child(
                                 div()
                                     .h(px(20.))
@@ -272,16 +260,15 @@ impl TimelineView {
                                             .flex_1()
                                             .min_w_0()
                                             .one_line()
-                                            .t_small()
-                                            .medium()
-                                            .text_color(k.ink)
+                                            .n_body()
+                                            .text_color(n.label)
                                             .child(s.text.clone()),
                                     )
                                     .children(started.map(|at| {
                                         div()
                                             .flex_none()
-                                            .t_meta()
-                                            .text_color(k.ink_2)
+                                            .n_subheadline()
+                                            .text_color(n.secondary)
                                             .child(span_text(FOR, now - at))
                                     })),
                             )
@@ -290,8 +277,8 @@ impl TimelineView {
                                     .pl(px(26.))
                                     .min_w_0()
                                     .one_line()
-                                    .t_meta()
-                                    .text_color(k.ink_2)
+                                    .n_subheadline()
+                                    .text_color(n.secondary)
                                     .child(d)
                             }))
                             .into_any_element()
@@ -299,13 +286,10 @@ impl TimelineView {
                     state => {
                         let done = state == PlanState::Done;
                         let mark: AnyElement = if done {
-                            ui::icon(Sym::Check, theme::icon::CHIP, k.ink_3).into_any_element()
+                            ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, n.secondary)
+                                .into_any_element()
                         } else {
-                            div()
-                                .size(px(10.))
-                                .rounded_full()
-                                .border(px(1.5))
-                                .border_color(k.line_2)
+                            ui::sym(Sym::Todo, ui::SymSize::INLINE_SMALL, n.tertiary)
                                 .into_any_element()
                         };
                         let took = done
@@ -331,15 +315,17 @@ impl TimelineView {
                                     .flex_1()
                                     .min_w_0()
                                     .one_line()
-                                    .t_small()
-                                    .text_color(if done { k.ink_3 } else { k.ink_2 })
+                                    .n_body()
+                                    .text_color(n.secondary)
                                     .child(s.text.clone()),
                             )
-                            .children(
-                                took.map(|n| {
-                                    div().flex_none().t_meta().text_color(k.ink_3).child(n)
-                                }),
-                            )
+                            .children(took.map(|t| {
+                                div()
+                                    .flex_none()
+                                    .n_subheadline()
+                                    .text_color(n.secondary)
+                                    .child(t)
+                            }))
                             .into_any_element()
                     }
                 }
@@ -353,16 +339,14 @@ impl TimelineView {
                 .flex()
                 .items_center()
                 .gap(space::S6)
-                .border_t_1()
-                .border_color(k.line)
-                .t_meta()
-                .text_color(k.ink_3)
+                .n_subheadline()
+                .n_figures()
+                .text_color(n.secondary)
                 .child(div().flex_none().child(span_text(USED, now - at)))
                 .child(div().flex_1())
                 .child(
                     div()
                         .flex_none()
-                        .t_mono()
                         .child(fill(c::PLAN_STARTED_AT, &[("time", &model::clock(at))])),
                 )
         });
@@ -370,11 +354,9 @@ impl TimelineView {
         let card = div()
             .flex_1()
             .min_w_0()
-            .rounded(theme::radius::LG)
-            .border_1()
-            .border_color(k.line)
-            .bg(k.bg)
-            .shadow(k.lift())
+            .max_w(super::v2::TEXT_MAX)
+            .rounded(px(12.))
+            .bg(n.fill)
             .overflow_hidden()
             .child(header)
             .children(bar)
