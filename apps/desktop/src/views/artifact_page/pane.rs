@@ -28,6 +28,7 @@ pub struct ArtifactPane {
 
 impl ArtifactPane {
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
+        crate::views::artifacts::host::track_pane(services.nav.clone(), cx);
         Self {
             _subscriptions: watch(&services, cx),
             services,
@@ -161,7 +162,7 @@ impl Render for ArtifactPane {
                     .leading_inset(crate::ui::native::metrics::TOOLBAR_LEADING)
                     .group(nk::ToolbarGroup::new([open_window, page]))
             })
-            .child(div().flex_1().min_h(px(0.)).overflow_hidden().child(body))
+            .child(div().flex_1().min_h_0().overflow_hidden().child(body))
             .into_any_element()
     }
 }

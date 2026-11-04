@@ -51,7 +51,7 @@ impl Render for EmbedStates {
         // Side by side, so both cards fit the window whole.
         let mut cards = div().flex().items_start().gap(space::S24);
         for id in [EMBED_BROKEN, EMBED_FILE] {
-            cards = cards.child(div().flex_1().min_w(px(0.)).children(render(
+            cards = cards.child(div().flex_1().min_w_0().children(render(
                 &env,
                 d::GROWTH,
                 id,

@@ -7,6 +7,7 @@
 //! never above the clip edge, and never under the menu; the video must play and the audio
 //! must load from the 产出's own files.
 
+use crate::ui::native::tokens::space as tsp;
 use std::cell::RefCell;
 use std::path::Path;
 
@@ -143,7 +144,7 @@ impl EmbedPreview {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(space::S2)
@@ -185,8 +186,10 @@ impl Render for EmbedPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let version = fill(ca::CARD_VERSION, &[("n", "3")]);
+        // The inline page in its card frame (1 px line on the card fill, §1.7).
         let inline = WebEmbed::new(INLINE_ID, inline_spec())
             .height(px(300.))
+            .framed()
             .pass_scroll(true)
             .on_event(record);
         let pane = WebEmbed::new(PANE_ID, pane_spec())
@@ -212,7 +215,7 @@ impl Render for EmbedPreview {
         // The inline page is a child of the message row's column.
         let topic_column = div()
             .flex_1()
-            .min_w(px(0.))
+            .min_w_0()
             .h_full()
             .flex()
             .flex_col()
@@ -224,7 +227,7 @@ impl Render for EmbedPreview {
                 div()
                     .id("embed-topic-scroll")
                     .flex_1()
-                    .min_h(px(0.))
+                    .min_h_0()
                     .overflow_y_scroll()
                     .track_scroll(&self.scroll)
                     .child(topic),
@@ -235,7 +238,7 @@ impl Render for EmbedPreview {
             .h_full()
             .flex()
             .flex_col()
-            .bg(k.sidebar)
+            .bg(k.content)
             // The pane's toolbar row (Title 3 over a `secondary` subtitle, like every
             // toolbar), then the 产出 edge to edge under it.
             .child(crate::ui::native::ToolbarRow::new(cp::ARTIFACTS).subtitle(version))
@@ -259,7 +262,7 @@ impl Render for EmbedPreview {
         if self.cover
             && let Some(b) = embed(INLINE_ID, cx).and_then(|e| e.read(cx).bounds())
         {
-            let at = point(b.origin.x + px(48.), b.origin.y + px(40.));
+            let at = point(b.origin.x + tsp::S48, b.origin.y + px(40.));
             let menu = Bounds {
                 origin: at,
                 // Three menu rows inside the menu padding (ui::overlay::menu_surface).
@@ -440,8 +443,8 @@ pub fn verify(mode: Mode, png: &Path, cx: &mut App) -> Result<(), String> {
             let menu = PROBE.with(|p| p.borrow().menu).ok_or("no menu")?;
             // Inside the rounded corners and the shadow edge.
             let inner = Bounds {
-                origin: point(menu.origin.x + px(8.), menu.origin.y + px(8.)),
-                size: gpui::size(menu.size.width - px(16.), menu.size.height - px(16.)),
+                origin: point(menu.origin.x + tsp::S8, menu.origin.y + tsp::S8),
+                size: gpui::size(menu.size.width - tsp::S16, menu.size.height - tsp::S16),
             };
             if count(inner) > 0 {
                 return Err("the inline page draws over the menu".into());

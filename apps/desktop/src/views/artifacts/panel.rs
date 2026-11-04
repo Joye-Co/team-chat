@@ -2,6 +2,7 @@
 //! click; 上传产出 picks an HTML file or a folder and uploads it as a new
 //! 产出, and each 产出 can get a new version the same way.
 
+use crate::ui::native::tokens::space as tsp;
 use std::path::PathBuf;
 
 use gpui::{
@@ -157,7 +158,7 @@ impl Render for TopicOutputs {
             .mb(space::S4)
             .flex()
             .items_center()
-            .child(div().flex_1().min_w(px(0.)).child(ui::panel_label(
+            .child(div().flex_1().min_w_0().child(ui::panel_label(
                 p::ARTIFACTS,
                 Some(self.artifacts.len() as u32),
                 cx,
@@ -218,7 +219,7 @@ impl Render for TopicOutputs {
                     .child(
                         div()
                             .flex_none()
-                            .size(px(32.))
+                            .size(tsp::S32)
                             .rounded(theme::radius::MD)
                             .bg(k.accent_soft)
                             .flex()
@@ -229,7 +230,7 @@ impl Render for TopicOutputs {
                     .child(
                         div()
                             .flex_1()
-                            .min_w(px(0.))
+                            .min_w_0()
                             .flex()
                             .flex_col()
                             .child(

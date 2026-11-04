@@ -35,7 +35,7 @@ use gpui::{
     AnyWindowHandle, App, AppContext as _, Bounds, Context, DispatchPhase, Element, ElementId,
     Entity, GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement as _,
     IntoElement, LayoutId, MouseDownEvent, ParentElement, Pixels, Point, RenderOnce, SharedString,
-    Style, Styled, Window, WindowId, div, img, point, px, relative,
+    Style, Styled, Window, WindowId, div, img, point, prelude::FluentBuilder as _, px, relative,
 };
 
 use crate::{
@@ -99,6 +99,10 @@ pub struct WebEmbed {
     id: ElementId,
     spec: WebEmbedSpec,
     height: Pixels,
+    /// Fill the parent's height instead of [`WebEmbed::height`].
+    fill: bool,
+    /// Draw the card frame (1 px border on the card fill) around the page.
+    framed: bool,
     radius: Pixels,
     pass_scroll: bool,
     autoplay: bool,
@@ -113,6 +117,8 @@ impl WebEmbed {
             id: id.into(),
             spec,
             height: px(320.),
+            fill: false,
+            framed: false,
             radius: radius::LG,
             pass_scroll: false,
             autoplay: false,
@@ -137,6 +143,19 @@ impl WebEmbed {
 
     pub fn rounded(mut self, r: Pixels) -> Self {
         self.radius = r;
+        self
+    }
+
+    /// The page fills its parent (a page's content area) instead of a fixed height.
+    pub fn fill(mut self) -> Self {
+        self.fill = true;
+        self
+    }
+
+    /// A card frame around the page (COMPLETENESS.md §1.7, §2.4): a 1 px border on
+    /// the card fill in both themes. Leave it off inside a card that has its own frame.
+    pub fn framed(mut self) -> Self {
+        self.framed = true;
         self
     }
 
@@ -191,6 +210,8 @@ pub struct WebEmbedState {
     focused: bool,
     /// The frame color the inline page's cut edge fades into, as last given to the page.
     fade: Option<String>,
+    /// The host base stylesheet given to the page, by its token values.
+    base: Option<String>,
     #[cfg(target_os = "macos")]
     native: Option<artifact_view::EmbeddedArtifact>,
     _events: Option<gpui::Task<()>>,
@@ -227,6 +248,7 @@ impl WebEmbedState {
             check_pending: false,
             focused: false,
             fade: None,
+            base: None,
             #[cfg(target_os = "macos")]
             native: None,
             _events: None,
@@ -428,8 +450,10 @@ impl WebEmbedState {
         match &event {
             ArtifactEvent::Loaded { .. } => {
                 self.phase = Phase::Ready;
-                // A new document: it has no fade yet.
+                // A new document: it has no fade and no base stylesheet yet.
                 self.fade = None;
+                self.base = None;
+                self.apply_base(cx);
                 // Let the page draw, then keep a picture for overlays.
                 self.snapshot_later(cx, 250);
             }
@@ -497,6 +521,27 @@ impl WebEmbedState {
         }
     }
 
+    /// Gives the page the host's base stylesheet (COMPLETENESS.md §2.22, F14): the app
+    /// font at 14/22, text and lines in the app's tokens, table lines, 24 padding, and
+    /// the tokens as CSS variables (`--tc-fg`, `--tc-muted`, `--tc-border`, `--tc-fill`,
+    /// `--tc-primary`, `--tc-bg`). It sits in a cascade layer, so any rule of the page
+    /// wins over it; a page with no styles reads like the app in light and dark. It
+    /// follows the theme.
+    fn apply_base(&mut self, cx: &App) {
+        if self.phase != Phase::Ready {
+            return;
+        }
+        let css = base_css(cx);
+        if self.base.as_deref() == Some(css.as_str()) {
+            return;
+        }
+        #[cfg(target_os = "macos")]
+        if let Some(n) = &self.native {
+            n.evaluate_script(&base_script(&css));
+            self.base = Some(css);
+        }
+    }
+
     /// Takes a new snapshot after `delay_ms` (only while the page is on screen).
     fn snapshot_later(&self, cx: &mut Context<Self>, delay_ms: u64) {
         #[cfg(target_os = "macos")]
@@ -524,7 +569,7 @@ impl WebEmbedState {
             if let Ok(Some(png)) = rx.await {
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
-                    remember_preview(&s.artifact_id().to_string(), image.clone());
+                    remember_preview(&s.artifact_id().to_string(), s.version(), image.clone());
                     s.snapshot = Some(image);
                     cx.notify();
                 });
@@ -611,6 +656,7 @@ impl WebEmbedState {
             }
         }
         self.apply_fade(cx);
+        self.apply_base(cx);
         // Right after this frame shows, test whether an overlay that blocks the mouse lies
         // over the page (its hitbox is not the top one at a sample point).
         if !self.check_pending {
@@ -634,6 +680,55 @@ impl WebEmbedState {
             });
         }
     }
+}
+
+/// `#rrggbb` of a color.
+fn hex(c: gpui::Hsla) -> String {
+    let c = gpui::Rgba::from(c);
+    let b = |v: f32| (v.clamp(0., 1.) * 255.).round() as u8;
+    format!("#{:02x}{:02x}{:02x}", b(c.r), b(c.g), b(c.b))
+}
+
+/// The host base stylesheet in this theme's token values (see
+/// [`WebEmbedState::apply_base`]).
+fn base_css(cx: &App) -> String {
+    let k = crate::ui::native::native_colors(cx);
+    let scheme = if theme::is_dark(cx) { "dark" } else { "light" };
+    format!(
+        ":root{{--tc-bg:{bg};--tc-fg:{fg};--tc-muted:{muted};--tc-border:{border};\
+--tc-fill:{fill};--tc-primary:{fg};color-scheme:{scheme}}}\
+@layer tc-base{{\
+html{{font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC','Helvetica Neue',sans-serif;\
+color:var(--tc-fg);background:transparent;-webkit-font-smoothing:antialiased}}\
+body{{margin:0;padding:24px}}\
+h1{{font-size:24px;line-height:32px;font-weight:600;margin:0 0 8px}}\
+h2{{font-size:18px;line-height:28px;font-weight:600;margin:24px 0 8px}}\
+h3{{font-size:16px;line-height:24px;font-weight:600;margin:16px 0 8px}}\
+p{{margin:0 0 12px}}small{{color:var(--tc-muted)}}\
+a{{color:inherit;text-underline-offset:2px}}\
+table{{border-collapse:collapse;width:100%;margin:8px 0 16px;font-variant-numeric:tabular-nums}}\
+th,td{{border-bottom:1px solid var(--tc-border);padding:8px 12px;text-align:left}}\
+th{{font-size:12px;font-weight:500;color:var(--tc-muted)}}\
+hr{{border:0;border-top:1px solid var(--tc-border);margin:16px 0}}\
+code,pre{{font-family:ui-monospace,'SF Mono',Menlo,monospace;font-size:13px}}\
+pre{{background:var(--tc-fill);border:1px solid var(--tc-border);border-radius:8px;padding:12px;overflow:auto}}}}",
+        bg = hex(k.content),
+        fg = hex(k.label),
+        muted = hex(k.secondary),
+        border = hex(k.separator),
+        fill = hex(k.fill),
+    )
+}
+
+/// The script that puts the base stylesheet first in a page's `<head>` (or replaces it).
+fn base_script(css: &str) -> String {
+    let css = serde_json::to_string(css).unwrap_or_else(|_| "\"\"".into());
+    format!(
+        "(function(){{var s=document.getElementById('__tc_base');\
+if(!s){{s=document.createElement('style');s.id='__tc_base';\
+var h=document.head||document.documentElement;h.insertBefore(s,h.firstChild);}}\
+s.textContent={css};}})()"
+    )
 }
 
 /// The script that puts the fade into a page (or recolors it): `rgb` is `r,g,b`.
@@ -698,16 +793,21 @@ impl RenderOnce for WebEmbed {
             (Phase::Loading, _, _) => message(ca::OPENING, k.text_3).into_any_element(),
             _ => div().into_any_element(),
         };
+        let n = crate::ui::native::native_colors(cx);
         div()
             .id(self.id.clone())
             .relative()
             .w_full()
-            .h(self.height)
-            .flex_none()
+            .when(self.fill, |d| d.flex_1().h_full().min_h(px(0.)))
+            .when(!self.fill, |d| d.h(self.height).flex_none())
             .rounded(self.radius)
             .overflow_hidden()
-            // No outline: the page sits in its card's fill (NATIVE.md §9.2).
-            .bg(k.raised)
+            // A page that fills a content area sits on the app background; inline it
+            // sits on its card's fill. `framed` adds the card's 1 px line (§1.7).
+            .bg(if self.fill { n.content } else { k.raised })
+            .when(self.framed, |d| {
+                d.border_1().border_color(n.separator).bg(n.sheet)
+            })
             .child(backdrop)
             .child(
                 div()
@@ -1080,18 +1180,24 @@ pub fn clear_cache(cx: &mut App) {
 
 // --- v12/fx-cards: page previews for the 产出 list ---
 thread_local! {
-    /// The last snapshot of each 产出's page, by 产出 id: the 产出 list's thumbnail shows
-    /// the rendered page once it was on screen (NATIVE.md §9.6), else the kind symbol.
-    static PREVIEWS: RefCell<std::collections::HashMap<String, Arc<gpui::Image>>> =
+    /// The last snapshot of each 产出 version's page, by (产出 id, version): the 产出
+    /// list's thumbnail shows the rendered latest version once it was on screen
+    /// (NATIVE.md §9.6), else the kind symbol. Keyed by version, so an older version
+    /// (or a check page under the same id) never stands in for the latest one.
+    static PREVIEWS: RefCell<std::collections::HashMap<(String, u32), Arc<gpui::Image>>> =
         RefCell::new(std::collections::HashMap::new());
 }
 
-fn remember_preview(artifact_id: &str, image: Arc<gpui::Image>) {
-    PREVIEWS.with(|p| p.borrow_mut().insert(artifact_id.to_string(), image));
+fn remember_preview(artifact_id: &str, version: u32, image: Arc<gpui::Image>) {
+    PREVIEWS.with(|p| {
+        p.borrow_mut()
+            .insert((artifact_id.to_string(), version), image)
+    });
 }
 
-/// The rendered page of `artifact_id` as last seen, if it was on screen this session.
-pub fn page_preview(artifact_id: &str) -> Option<Arc<gpui::Image>> {
-    PREVIEWS.with(|p| p.borrow().get(artifact_id).cloned())
+/// The rendered page of one version of `artifact_id` as last seen, if it was on screen
+/// this session.
+pub fn page_preview(artifact_id: &str, version: u32) -> Option<Arc<gpui::Image>> {
+    PREVIEWS.with(|p| p.borrow().get(&(artifact_id.to_string(), version)).cloned())
 }
 // --- end v12/fx-cards ---

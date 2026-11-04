@@ -37,16 +37,12 @@ use crate::{
     data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
     ui::{
-        self, MemberAvatar, Ring, Sym,
+        MemberAvatar, Sym,
         native::page,
         web_embed::{WebEmbed, WebEmbedSpec},
     },
     views::{
-        group_page::{
-            kind_label,
-            kit::{self, META},
-            short_time,
-        },
+        group_page::{kind_label, kit, short_time},
         shell::{PageView, TitleBarSpec, member_name, panes::watch, stub_body},
     },
 };
@@ -246,6 +242,9 @@ pub struct ArtifactPage {
     sort: ListSort,
     search: Option<gpui::Entity<gpui_component::input::InputState>>,
     // --- end track cards ---
+    /// The width of the 产出 list's content, measured in the last frame (the icon
+    /// view's column count).
+    list_width: Rc<Cell<Pixels>>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -281,6 +280,7 @@ impl ArtifactPage {
             grid: false,
             sort: ListSort::Time,
             search: None,
+            list_width: Rc::new(Cell::new(px(0.))),
         }
     }
 
@@ -492,6 +492,7 @@ impl ArtifactPage {
             .leading_inset(leading)
             .group(crate::views::group_page::rows::toolbar_capsule(picker, cx))
             .group(nk::ToolbarGroup::new([share, open_window, side_chat]))
+            .group(crate::views::group_page::rows::toolbar_separator(cx))
             .group(nk::ToolbarGroup::new([inspector]))
             .into_any_element()
     }
@@ -508,6 +509,7 @@ impl ArtifactPage {
         let now = p.clock_now();
         let latest = detail.summary.version;
         let old = shown < latest;
+        // An older version: an Alert at the top of the content (§2.16).
         let band = old.then(|| {
             let at = detail
                 .versions
@@ -517,73 +519,41 @@ impl ArtifactPage {
                 .unwrap_or(detail.summary.updated_at);
             let nav = self.services.nav.clone();
             let id = detail.summary.id.clone();
+            let mut parts = vec![format!("v{shown}"), version_time(now, at)];
+            parts.extend(version_note(&self.services, detail, shown));
             div()
                 .flex_none()
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .h(px(40.))
-                .pl(space::S16)
-                .pr(space::S8)
-                .border_b_1()
-                .border_color(k.line)
-                .bg(k.raised)
-                .t_small()
-                .text_color(k.ink_2)
-                .child(ui::icon(Sym::Waiting, px(14.), k.ink_3))
-                .child(c::ARTIFACT_OLD_VERSION)
-                .child(div().text_color(k.ink_3).child(fill(
-                    c::ARTIFACT_OLD_VERSION_LINE,
-                    &[
-                        ("v", &shown.to_string()),
-                        ("time", &version_time(now, at)),
-                        (
-                            "note",
-                            &version_note(&self.services, detail, shown).unwrap_or_default(),
-                        ),
-                    ],
-                )))
-                .child(div().flex_1())
-                .child(
-                    crate::ui::native::push_button(
-                        "artifact-back-latest",
-                        fill(c::ARTIFACT_BACK_TO, &[("v", &latest.to_string())]),
-                        crate::ui::native::PushStyle::Outline,
-                        crate::ui::native::PushSize::Small,
-                        cx,
-                    )
-                    .on_click(move |_, _, cx| {
-                        let id = id.clone();
-                        nav.update(cx, |n, cx| n.open_artifact(id, None, cx))
-                    }),
-                )
+                .px(page::m::EDGE)
+                .pt(page::m::GUTTER)
+                .child(page::page_alert(
+                    "artifact-old-version",
+                    page::AlertKind::Info,
+                    fill(c::ARTIFACT_OLD_VERSION_TITLE, &[("v", &shown.to_string())]),
+                    Some(parts.join(" · ").into()),
+                    Some(
+                        crate::ui::native::push_button(
+                            "artifact-back-latest",
+                            fill(c::ARTIFACT_BACK_TO, &[("v", &latest.to_string())]),
+                            crate::ui::native::PushStyle::Outline,
+                            crate::ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            let id = id.clone();
+                            nav.update(cx, |n, cx| n.open_artifact(id, None, cx))
+                        })
+                        .into_any_element(),
+                    ),
+                    cx,
+                ))
         });
         let folder = self
             .folders
             .get(&self.services, &detail.summary.id, shown, cx);
-        // inc-host: a live page has the footer of what it may do and its pending band.
-        let live = matches!(&folder, Some(Ok(f)) if f.is_page);
-        // The footer is a card footer: a 1 px line above it, so the page
-        // never reads as cut by it (F37).
-        let footer = live.then(|| {
-            div()
-                .flex_none()
-                .border_t_1()
-                .border_color(k.line)
-                .child(host::page_footer(
-                    &SharedString::from("artifact-page-foot"),
-                    self.services.provider.as_ref(),
-                    &detail.summary.id,
-                    shown,
-                    None,
-                    cx,
-                ))
-        });
-        // The page fills the content area edge to edge under the toolbar row (no frame).
-        let height = window.viewport_size().height
-            - crate::ui::native::metrics::TOOLBAR_ROW
-            - if old { px(40.) } else { px(0.) }
-            - if live { px(36.) } else { px(0.) };
+        // The page fills the content area under the toolbar row and the
+        // Alert; what it may do is in the inspector's `这一页` (no footer
+        // strip that cuts the page, F37).
+        let height = window.viewport_size().height - crate::ui::native::metrics::TOOLBAR_ROW;
         let body = match folder {
             Some(Ok(folder)) if folder.is_page => embed(
                 &self.services,
@@ -594,6 +564,7 @@ impl ArtifactPage {
                 px(0.),
                 cx,
             )
+            .fill()
             .into_any_element(),
             Some(Ok(_)) | Some(Err(_)) => {
                 let provider = self.services.provider.clone();
@@ -641,23 +612,94 @@ impl ArtifactPage {
         };
         div()
             .flex_1()
-            .min_h(px(0.))
+            .min_h_0()
             .overflow_hidden()
             .flex()
             .flex_col()
             .children(band)
-            .child(div().flex_1().min_h(px(0.)).child(body))
-            .children(footer)
+            .child(div().flex_1().min_h_0().flex().flex_col().child(body))
             .into_any_element()
     }
 
-    fn story(&self, detail: &ArtifactDetail, shown: u32, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
+    /// The inspector (COMPLETENESS.md §2.5): a header band (`产出信息`, a
+    /// line, close) on the toolbar row, then fixed sections in this order:
+    /// 来自话题 (with 做的人 and 要求), 版本, 这一页 (a live page), 页面里的回应,
+    /// 用到的决定 and 被引用. A section with no data shows one muted line and
+    /// never disappears. Values truncate with a tooltip (the role first).
+    fn story(
+        &self,
+        detail: &ArtifactDetail,
+        shown: u32,
+        live: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        use crate::ui::native::{
+            self as nk, InspectorSection, NativeType as _, native_colors, page::desc_row,
+        };
+        use crate::views::group_page::rows::line;
+        let k = native_colors(cx);
         let p = self.services.provider.clone();
         let now = p.clock_now();
         let story = p.artifact_story(&detail.summary.id).unwrap_or_default();
-        let mut cards: Vec<AnyElement> = Vec::new();
-        // 来自话题, 做的人, 要求.
+        let tip = |text: String| {
+            move |window: &mut Window, cx: &mut App| {
+                gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+            }
+        };
+
+        let close = nk::borderless_button(
+            "artifact-info-close",
+            crate::ui::sf_symbols::Sf::Close,
+            c::ARTIFACT_CLOSE_INFO,
+            window,
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            this.aside_open = false;
+            cx.notify();
+        }));
+        let header = div()
+            .flex_none()
+            .h(nk::metrics::TOOLBAR_ROW)
+            .pl(nk::metrics::INSPECTOR_PAD)
+            .pr(tsp::S8)
+            .border_b_1()
+            .border_color(k.separator)
+            .flex()
+            .items_center()
+            .gap(tsp::S8)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .n_title3()
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                            .text_color(k.label)
+                            .child(c::ARTIFACT_INFO),
+                    )
+                    .child(
+                        line(c::ARTIFACT_INFO_LINE)
+                            .n_subheadline()
+                            .text_color(k.secondary),
+                    ),
+            )
+            .child(close);
+        let mut body = div()
+            .id("artifact-story")
+            .flex_1()
+            .min_h_0()
+            .overflow_y_scroll()
+            .pt(tsp::S4)
+            .pb(tsp::S24)
+            .flex()
+            .flex_col();
+
+        // 来自话题, then 做的人 and 要求 as a DescriptionList.
         let topic = story
             .topic
             .clone()
@@ -667,36 +709,35 @@ impl ArtifactPage {
             .made_by
             .clone()
             .unwrap_or_else(|| detail.summary.created_by.clone());
-        let person = |label: &'static str, id: &str| {
+        // A person: avatar 16 + the name (keeps its room) + the role, which
+        // truncates first; both in the tooltip.
+        let person = |id: &str| {
             let m = p.member(id);
-            let busy = p.active_runs().iter().any(|r| r.bot_id == id);
-            (
-                div()
-                    .type_role(META)
-                    .text_color(k.ink_3)
-                    .child(label)
-                    .into_any_element(),
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
-                    .t_small()
-                    .child(MemberAvatar::new(m.as_ref(), px(20.)).ring(busy.then_some(Ring::Live)))
-                    .child(
-                        div()
-                            .medium()
-                            .text_color(k.ink)
-                            .child(m.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
-                    )
-                    .children(m.and_then(|m| m.role).map(ui::JobTag::new))
-                    .into_any_element(),
-            )
+            let name = m.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+            let role = m.as_ref().and_then(|m| m.role.clone()).unwrap_or_default();
+            let full = if role.is_empty() {
+                name.clone()
+            } else {
+                format!("{name} · {role}")
+            };
+            div()
+                .id(SharedString::from(format!("artifact-person-{id}")))
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(tsp::S8)
+                .child(MemberAvatar::new(m.as_ref(), tsp::S16))
+                .child(
+                    line(name)
+                        .flex_none()
+                        .max_w(gpui::relative(0.7))
+                        .text_color(k.label),
+                )
+                .child(line(role).flex_1().min_w_0().text_color(k.secondary))
+                .tooltip(tip(full))
         };
-        let mut people = vec![person(c::ARTIFACT_MADE_BY, &made_by)];
-        if let Some(asked) = &story.asked_by {
-            people.push(person(c::ARTIFACT_ASKED_BY, asked));
-        }
-        let topic_row = topic.map(|t| {
+        let mut from = InspectorSection::new("artifact-ins-topic", c::ARTIFACT_FROM_TOPIC);
+        if let Some(t) = topic {
             let group = p
                 .groups()
                 .into_iter()
@@ -715,178 +756,170 @@ impl ArtifactPage {
             } else {
                 fill(c::ARTIFACT_TOPIC_ACTIVE, &[("group", &group)])
             };
+            let title = if t.title.trim().is_empty() {
+                c::ARTIFACT_NO_TITLE.to_string()
+            } else {
+                t.title.clone()
+            };
+            // The state is an icon with its word in the meta line (§2.12),
+            // never a free dot.
+            let (sym, color) = if done {
+                (Sym::Done, k.green)
+            } else {
+                (Sym::Spinner, k.blue)
+            };
             let nav = self.services.nav.clone();
             let (g, id) = (t.group_id.clone(), t.id.clone());
-            div()
-                .id("artifact-from-topic")
-                .mt(space::S6)
-                .mx(-space::S6)
-                .p(space::S6)
-                .rounded(theme::radius::MD)
-                .flex()
-                .items_center()
-                .gap(space::S10)
-                .child(
-                    div()
-                        .flex_none()
-                        .w(tsp::S16)
-                        .flex()
-                        .justify_center()
-                        .child(if done {
-                            ui::icon(Sym::Check, px(14.), k.ok).into_any_element()
-                        } else {
-                            kit::live_dot("artifact-topic-live", 6., cx)
-                        }),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .one_line()
-                                .t_small()
-                                .medium()
-                                .text_color(k.ink)
-                                .child(t.title.clone()),
-                        )
-                        .child(div().type_role(META).text_color(k.ink_3).child(meta)),
-                )
-                .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
-                .on_click(move |_, _, cx| {
-                    let (g, id) = (g.clone(), id.clone());
-                    nav.update(cx, |n, cx| n.open_topic(g, id, cx))
-                })
-        });
-        cards.push(
-            kit::side_card(cx)
-                .child(kit::card_label(c::ARTIFACT_FROM_TOPIC, None, cx).h(px(18.)))
-                .children(topic_row)
-                .child(
-                    div()
-                        .mt(space::S8)
-                        .pt(space::S10)
-                        .border_t_1()
-                        .border_color(k.line)
-                        .flex()
-                        .flex_col()
-                        .gap(space::S8)
-                        .children(people.into_iter().map(|(label, value)| {
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::S8)
-                                .child(div().flex_none().w(px(44.)).child(label))
-                                .child(value)
-                        })),
-                )
-                .into_any_element(),
-        );
+            from = from.row(
+                div()
+                    .id("artifact-from-topic")
+                    .min_h(tsp::S48)
+                    .py(tsp::S6)
+                    .flex()
+                    .items_center()
+                    .gap(tsp::S8)
+                    .child(page::row_icon(sym, color))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(line(title.clone()).n_body().text_color(k.label))
+                            .child(line(meta.clone()).n_subheadline().text_color(k.secondary)),
+                    )
+                    .child(page::row_icon(Sym::ChevronRight, k.secondary))
+                    .tooltip(tip(format!("{title} · {meta}")))
+                    .on_click(move |_, _, cx| {
+                        let (g, id) = (g.clone(), id.clone());
+                        nav.update(cx, |n, cx| n.open_topic(g, id, cx))
+                    }),
+            );
+        }
+        from = from.row(desc_row(c::ARTIFACT_MADE_BY, person(&made_by), cx));
+        from = from.row(desc_row(
+            c::ARTIFACT_ASKED_BY,
+            match &story.asked_by {
+                Some(asked) => person(asked).into_any_element(),
+                None => div()
+                    .text_color(k.secondary)
+                    .child(c::ARTIFACT_NOBODY)
+                    .into_any_element(),
+            },
+            cx,
+        ));
+        body = body.child(from);
+
         // 版本.
-        if !detail.versions.is_empty() {
-            let id = detail.summary.id.clone();
-            let compare = (shown > 1).then(|| {
-                let nav = self.services.nav.clone();
-                let id = id.clone();
-                // A small push button, not bare link text (R12).
-                crate::ui::native::push_button(
+        let id = detail.summary.id.clone();
+        let mut versions = InspectorSection::new("artifact-ins-versions", c::ARTIFACT_VERSIONS);
+        if shown > 1 {
+            let nav = self.services.nav.clone();
+            let id = id.clone();
+            versions = versions.action(
+                nk::push_button(
                     "artifact-compare",
                     fill(c::ARTIFACT_COMPARE, &[("v", &(shown - 1).to_string())]),
-                    crate::ui::native::PushStyle::Outline,
-                    crate::ui::native::PushSize::Small,
+                    nk::PushStyle::Outline,
+                    nk::PushSize::Small,
                     cx,
                 )
                 .on_click(move |_, _, cx| {
+                    cx.stop_propagation();
                     let id = id.clone();
                     nav.update(cx, |n, cx| n.open_artifact(id, Some(shown - 1), cx))
-                })
-            });
-            let rows = detail.versions.iter().map(|v| {
-                let on = v.version == shown;
-                let nav = self.services.nav.clone();
-                let (id, ver) = (id.clone(), v.version);
-                let latest = detail.summary.version;
+                }),
+            );
+        }
+        for v in &detail.versions {
+            let on = v.version == shown;
+            let nav = self.services.nav.clone();
+            let (id, ver) = (id.clone(), v.version);
+            let latest = detail.summary.version;
+            let note = version_note(&self.services, detail, v.version);
+            let note_text = note
+                .clone()
+                .unwrap_or_else(|| c::ARTIFACT_NO_NOTE.to_string());
+            let when = version_time(now, v.created_at);
+            versions = versions.row(
                 div()
                     .id(SharedString::from(format!("artifact-v{}", v.version)))
+                    .h(tsp::S32)
+                    .mx(-tsp::S8)
+                    .px(tsp::S8)
+                    .rounded(tsp::S6)
                     .flex()
                     .items_center()
-                    .gap(space::S10)
-                    .h(px(36.))
-                    .px(space::S6)
-                    .rounded(theme::radius::MD)
-                    .t_small()
-                    .text_color(if on { k.ink } else { k.ink_2 })
-                    .when(on, |el| el.bg(k.sel))
+                    .gap(tsp::S8)
+                    .n_body()
+                    .when(on, |el| el.bg(k.fill).font_weight(gpui::FontWeight::MEDIUM))
+                    .when(!on, |el| el.hover(|s| s.bg(k.fill.opacity(0.5))))
                     .child(
                         div()
                             .flex_none()
                             .w(tsp::S24)
-                            .mono()
-                            .type_role(META)
-                            .when(on, |el| el.semibold().text_color(k.ink))
-                            .when(!on, |el| el.text_color(k.ink_3))
+                            .n_subheadline()
+                            .n_figures()
+                            .text_color(if on { k.label } else { k.secondary })
                             .child(format!("v{}", v.version)),
                     )
-                    .child({
-                        // A version without a note says so (F37).
-                        let note = version_note(&self.services, detail, v.version);
-                        div()
+                    .child(
+                        line(note_text.clone())
                             .flex_1()
-                            .min_w_0()
-                            .one_line()
-                            .when(note.is_none(), |d| d.text_color(k.ink_3))
-                            .child(note.unwrap_or_else(|| c::ARTIFACT_NO_NOTE.to_string()))
-                    })
+                            .text_color(if note.is_some() { k.label } else { k.secondary }),
+                    )
                     .child(
                         div()
                             .flex_none()
-                            .type_role(META)
-                            .text_color(k.ink_3)
-                            .child(version_time(now, v.created_at)),
+                            .n_subheadline()
+                            .n_figures()
+                            .text_color(k.secondary)
+                            .child(when.clone()),
                     )
+                    .tooltip(tip(format!("v{} · {note_text} · {when}", v.version)))
                     .on_click(move |_, _, cx| {
                         let id = id.clone();
                         let ver = (ver != latest).then_some(ver);
                         nav.update(cx, |n, cx| n.open_artifact(id, ver, cx))
-                    })
-            });
-            cards.push(
-                kit::side_card(cx)
-                    .child(
-                        kit::card_label(c::ARTIFACT_VERSIONS, None, cx)
-                            .h(px(18.))
-                            .child(div().flex_1())
-                            .children(compare),
-                    )
-                    .child(
-                        div()
-                            .mt(space::S6)
-                            .mx(-space::S6)
-                            .flex()
-                            .flex_col()
-                            .gap(space::S2)
-                            .children(rows),
-                    )
-                    .into_any_element(),
+                    }),
             );
         }
-        // 页面里的回应: the server's page log (`GET /v1/artifacts/:id/events`). A page that
-        // declares no events cannot get responses, so it shows no card.
+        body = body.child(versions);
+
+        // 这一页: what the live page may do and its last request.
+        if live {
+            let mut page_sec = InspectorSection::new("artifact-ins-page", c::ARTIFACT_PAGE_CAN);
+            for row in host::page_rows(
+                "artifact-page-foot",
+                self.services.provider.as_ref(),
+                &detail.summary.id,
+                shown,
+                cx,
+            ) {
+                page_sec = page_sec.row(row);
+            }
+            body = body.child(page_sec);
+        }
+
+        // 页面里的回应: the server's page log (`GET /v1/artifacts/:id/events`).
         let responses = p.artifact_responses(&detail.summary.id);
         let responses_load = p.artifact_responses_load(&detail.summary.id);
         let has_events = detail.versions.iter().any(|v| {
             !p.artifact_page_events(&detail.summary.id, v.version)
                 .is_empty()
         });
-        if responses.is_empty() && has_events {
+        let mut resp = InspectorSection::new("artifact-ins-responses", c::ARTIFACT_RESPONSES);
+        if responses.is_empty() {
             use crate::data::pages::ResponsesLoad;
-            let body: AnyElement = match responses_load {
-                ResponsesLoad::Loading => {
+            resp = resp.row(match (has_events, responses_load) {
+                (false, _) => {
+                    page::compact_empty(Sym::AskAside, c::ARTIFACT_RESPONSES_NONE, None, cx)
+                        .into_any_element()
+                }
+                (true, ResponsesLoad::Loading) => {
                     page::skeleton_rows("artifact-responses-sk", page::SkeletonKind::Compact, 2, cx)
                 }
-                ResponsesLoad::Failed => {
+                (true, ResponsesLoad::Failed) => {
                     let services = self.services.clone();
                     let id = detail.summary.id.clone();
                     page::page_alert(
@@ -895,11 +928,11 @@ impl ArtifactPage {
                         c::ARTIFACT_RESPONSES_FAILED,
                         None,
                         Some(
-                            crate::ui::native::push_button(
+                            nk::push_button(
                                 "artifact-responses-retry",
                                 c::ARTIFACT_RESPONSES_RETRY,
-                                crate::ui::native::PushStyle::Outline,
-                                crate::ui::native::PushSize::Small,
+                                nk::PushStyle::Outline,
+                                nk::PushSize::Small,
                                 cx,
                             )
                             .on_click(move |_, _, _| {
@@ -911,198 +944,147 @@ impl ArtifactPage {
                     )
                     .into_any_element()
                 }
-                ResponsesLoad::Ready => page::compact_empty(
-                    crate::ui::sf_symbols::Sym::AskAside,
-                    c::ARTIFACT_RESPONSES_EMPTY,
-                    None,
-                    cx,
-                )
-                .into_any_element(),
-            };
-            cards.push(
-                kit::side_card(cx)
-                    .child(kit::card_label(c::ARTIFACT_RESPONSES, None, cx))
-                    .child(div().mt(space::S8).child(body))
-                    .into_any_element(),
-            );
-        }
-        if !responses.is_empty() {
-            let rows = responses.into_iter().enumerate().map(|(i, r)| {
-                let m = p.member(&r.member_id);
-                let row = div()
-                    .id(SharedString::from(format!("artifact-response-{i}")))
-                    .flex()
-                    .items_center()
-                    .gap(space::S10)
-                    .t_small()
-                    .child(MemberAvatar::new(m.as_ref(), px(18.)))
-                    .child(div().flex_1().min_w_0().one_line().child(r.text.clone()));
-                match (r.topic.clone(), r.at) {
-                    (Some((g, t)), _) => {
-                        let nav = self.services.nav.clone();
-                        row.mx(-space::S6)
-                            .px(space::S6)
-                            .py(space::S4)
-                            .rounded(theme::radius::MD)
-                            .text_color(k.ink_2)
-                            .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
-                            .on_click(move |_, _, cx| {
-                                let (g, t) = (g.clone(), t.clone());
-                                nav.update(cx, |n, cx| n.open_topic(g, t, cx))
-                            })
-                            .into_any_element()
-                    }
-                    (None, at) => row
-                        .text_color(k.ink)
-                        .children(at.map(|at| {
-                            div()
-                                .flex_none()
-                                .mono()
-                                .type_role(META)
-                                .text_color(k.ink_3)
-                                .child(short_time(now, at))
-                        }))
-                        .into_any_element(),
+                (true, ResponsesLoad::Ready) => {
+                    page::compact_empty(Sym::AskAside, c::ARTIFACT_RESPONSES_EMPTY, None, cx)
+                        .into_any_element()
                 }
             });
-            cards.push(
-                kit::side_card(cx)
-                    .child(kit::card_label(c::ARTIFACT_RESPONSES, None, cx).h(px(18.)))
-                    .child(
-                        div()
-                            .mt(space::S8)
-                            .flex()
-                            .flex_col()
-                            .gap(space::S8)
-                            .children(rows),
-                    )
-                    .into_any_element(),
-            );
         }
+        for (i, r) in responses.into_iter().enumerate() {
+            let m = p.member(&r.member_id);
+            let mut row = div()
+                .id(SharedString::from(format!("artifact-response-{i}")))
+                .h(tsp::S32)
+                .flex()
+                .items_center()
+                .gap(tsp::S8)
+                .n_body()
+                .text_color(k.label)
+                .child(MemberAvatar::new(m.as_ref(), tsp::S16))
+                .child(line(r.text.clone()).flex_1())
+                .tooltip(tip(r.text.clone()));
+            row = match (r.topic.clone(), r.at) {
+                (Some((g, t)), _) => {
+                    let nav = self.services.nav.clone();
+                    row.child(page::row_icon(Sym::ChevronRight, k.secondary))
+                        .on_click(move |_, _, cx| {
+                            let (g, t) = (g.clone(), t.clone());
+                            nav.update(cx, |n, cx| n.open_topic(g, t, cx))
+                        })
+                }
+                (None, at) => row.children(at.map(|at| {
+                    div()
+                        .flex_none()
+                        .n_subheadline()
+                        .n_figures()
+                        .text_color(k.secondary)
+                        .child(short_time(now, at))
+                })),
+            };
+            resp = resp.row(row);
+        }
+        body = body.child(resp);
+
         // 用到的决定.
-        if !story.decisions.is_empty() {
-            let rows = story.decisions.iter().enumerate().map(|(i, d)| {
-                let group = p
-                    .groups()
-                    .into_iter()
-                    .find(|g| g.id == d.group_id)
-                    .map(|g| g.name)
-                    .unwrap_or_default();
-                let nav = self.services.nav.clone();
-                let g = d.group_id.clone();
+        let mut decisions = InspectorSection::new("artifact-ins-decisions", c::ARTIFACT_DECISIONS);
+        if story.decisions.is_empty() {
+            decisions = decisions.row(page::compact_empty(
+                Sym::List,
+                c::ARTIFACT_DECISIONS_EMPTY,
+                None,
+                cx,
+            ));
+        }
+        for (i, d) in story.decisions.iter().enumerate() {
+            let group = p
+                .groups()
+                .into_iter()
+                .find(|g| g.id == d.group_id)
+                .map(|g| g.name)
+                .unwrap_or_default();
+            let meta = fill(
+                c::ARTIFACT_DECISION_META,
+                &[
+                    ("name", &member_name(&self.services, &d.by)),
+                    ("time", &kit::month_day(d.at)),
+                    ("group", &group),
+                ],
+            );
+            let nav = self.services.nav.clone();
+            let g = d.group_id.clone();
+            decisions = decisions.row(
                 div()
                     .id(SharedString::from(format!("artifact-decision-{i}")))
-                    .mx(-space::S6)
-                    .p(space::S6)
-                    .rounded(theme::radius::MD)
+                    .py(tsp::S6)
                     .flex()
-                    .gap(space::S10)
+                    .flex_col()
+                    .gap(tsp::S2)
                     .child(
                         div()
-                            .mt(tsp::S2)
-                            .child(ui::icon(Sym::Done, px(14.), k.ink_3)),
+                            .n_body()
+                            .text_color(k.label)
+                            .line_clamp(2)
+                            .child(d.text.clone()),
                     )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(div().t_small().text_color(k.ink).child(d.text.clone()))
-                            .child(div().type_role(META).text_color(k.ink_3).child(fill(
-                                c::ARTIFACT_DECISION_META,
-                                &[
-                                    ("name", &member_name(&self.services, &d.by)),
-                                    ("time", &kit::month_day(d.at)),
-                                    ("group", &group),
-                                ],
-                            ))),
-                    )
+                    .child(line(meta).n_subheadline().text_color(k.secondary))
+                    .tooltip(tip(d.text.clone()))
                     .on_click(move |_, _, cx| {
                         let g = g.clone();
                         nav.update(cx, |n, cx| n.open_group(g, cx))
-                    })
-            });
-            cards.push(
-                kit::side_card(cx)
-                    .child(kit::card_label(c::ARTIFACT_DECISIONS, None, cx).h(px(18.)))
-                    .child(div().mt(space::S6).flex().flex_col().children(rows))
-                    .into_any_element(),
+                    }),
             );
         }
+        body = body.child(decisions);
+
         // 被引用.
-        if !story.cited_by.is_empty() {
-            let rows = story.cited_by.iter().enumerate().map(|(i, (g, t, title))| {
-                let group = p
-                    .groups()
-                    .into_iter()
-                    .find(|x| &x.id == g)
-                    .map(|x| x.name)
-                    .unwrap_or_default();
-                let nav = self.services.nav.clone();
-                let (g, t) = (g.clone(), t.clone());
+        let mut cited = InspectorSection::new("artifact-ins-cited", c::ARTIFACT_CITED_BY);
+        if story.cited_by.is_empty() {
+            cited = cited.row(page::compact_empty(
+                Sym::List,
+                c::ARTIFACT_CITED_EMPTY,
+                None,
+                cx,
+            ));
+        }
+        for (i, (g, t, title)) in story.cited_by.iter().enumerate() {
+            let group = p
+                .groups()
+                .into_iter()
+                .find(|x| &x.id == g)
+                .map(|x| x.name)
+                .unwrap_or_default();
+            let nav = self.services.nav.clone();
+            let (g, t) = (g.clone(), t.clone());
+            cited = cited.row(
                 div()
                     .id(SharedString::from(format!("artifact-cited-{i}")))
+                    .h(tsp::S32)
                     .flex()
                     .items_center()
-                    .gap(space::S10)
-                    .h(tsp::S32)
-                    .px(space::S6)
-                    .rounded(theme::radius::MD)
-                    .t_small()
-                    .text_color(k.ink)
-                    .child(ui::icon(Sym::List, px(14.), k.ink_3))
-                    .child(div().flex_1().min_w_0().one_line().child(title.clone()))
+                    .gap(tsp::S8)
+                    .n_body()
+                    .text_color(k.label)
+                    .child(page::row_icon(Sym::Topic, k.secondary))
+                    .child(line(title.clone()).flex_1())
                     .child(
-                        div()
+                        line(group.clone())
                             .flex_none()
-                            .type_role(META)
-                            .text_color(k.ink_3)
-                            .child(group),
+                            .max_w(px(96.))
+                            .n_subheadline()
+                            .text_color(k.secondary),
                     )
+                    .tooltip(tip(format!("{title} · {group}")))
                     .on_click(move |_, _, cx| {
                         let (g, t) = (g.clone(), t.clone());
                         nav.update(cx, |n, cx| n.open_topic(g, t, cx))
-                    })
-            });
-            cards.push(
-                kit::side_card(cx)
-                    .child(kit::card_label(c::ARTIFACT_CITED_BY, None, cx).h(px(18.)))
-                    .child(
-                        div()
-                            .mt(space::S6)
-                            .mx(-space::S6)
-                            .flex()
-                            .flex_col()
-                            .gap(space::S2)
-                            .children(rows),
-                    )
-                    .into_any_element(),
+                    }),
             );
         }
-        // The inspector (NATIVE.md §2): 280 pt, edge to edge, its content below the 52 pt
-        // toolbar row; no heading (the toolbar's `sidebar.trailing` toggles it).
-        crate::ui::native::inspector_column(cx)
-            .child(
-                div()
-                    .id("artifact-story")
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_y_scroll()
-                    .pt(crate::ui::native::metrics::TOOLBAR_ROW)
-                    .px(space::S16)
-                    .pb(space::S24)
-                    .child(ui::rail_stack(
-                        cards.into_iter().enumerate().map(|(i, el)| {
-                            ui::motion::rise(
-                                SharedString::from(format!("artifact-side-{i}")),
-                                i + 1,
-                                div().child(el),
-                                cx,
-                            )
-                        }),
-                        cx,
-                    )),
-            )
+        body = body.child(cited);
+
+        nk::inspector_column(cx)
+            .child(header)
+            .child(body)
             .into_any_element()
     }
 
@@ -1114,6 +1096,7 @@ impl ArtifactPage {
     fn list(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         use crate::ui::native::{self as nk, NativeType as _};
         use gpui::AppContext as _;
+        use gpui_component::Disableable as _;
         let n = nk::native_colors(cx);
         let p = self.services.provider.clone();
         let now = p.clock_now();
@@ -1180,7 +1163,11 @@ impl ArtifactPage {
                 cx.notify();
             }))
         };
-        let views = nk::ToolbarGroup::new([view_item(true, cx), view_item(false, cx)]);
+        let empty = total == 0;
+        let views = nk::ToolbarGroup::new([
+            view_item(true, cx).disabled(empty),
+            view_item(false, cx).disabled(empty),
+        ]);
         // The sort pop-up as a toolbar item (`arrow.up.arrow.down`): its menu checks the
         // order; the tooltip names it.
         let sort = sym_toolbar_item(
@@ -1191,6 +1178,7 @@ impl ArtifactPage {
             active,
             cx,
         )
+        .disabled(total == 0)
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, {
             let (this, current) = (this.clone(), self.sort);
             move |mut menu, _, _| {
@@ -1211,25 +1199,28 @@ impl ArtifactPage {
             }
         });
         let leading = content_leading(&self.services, cx);
-        let mut toolbar_row = nk::ToolbarRow::new(c::ARTIFACTS_TITLE)
+        let load = page::PageLoad::of(&self.services, total > 0);
+        // The toolbar's last control ends on the content edge (x - 24), like the
+        // table under it (§2.2): an empty slot after it takes the 8 the toolbar's
+        // own inset (16) lacks.
+        let toolbar_row = nk::ToolbarRow::new(c::ARTIFACTS_TITLE)
             .leading_inset(leading)
+            // The subtitle slot stays in every state, so the title never moves.
+            .subtitle(match load {
+                page::PageLoad::Ready => fill(c::ARTIFACTS_COUNT, &[("n", &total.to_string())]),
+                page::PageLoad::Loading => crate::copy::desk::DESK_SUBTITLE_SYNCING.to_string(),
+                page::PageLoad::Failed => crate::copy::desk::DESK_SUBTITLE_OFFLINE.to_string(),
+            })
             .group(views)
             .group(nk::toolbar_slot(sort))
             .group(
                 nk::SearchField::new("artifacts-search", &search)
                     .sidebar()
                     .width(px(200.)),
-            );
-        let load = page::PageLoad::of(&self.services, total > 0);
-        if load == page::PageLoad::Ready {
-            toolbar_row =
-                toolbar_row.subtitle(fill(c::ARTIFACTS_COUNT, &[("n", &total.to_string())]));
-        }
-        let toolbar = div()
-            .flex_none()
-            .border_b_1()
-            .border_color(n.separator)
-            .child(toolbar_row);
+            )
+            .group(div().flex_none().w(px(0.)));
+        // ToolbarRow draws the one 1 px line at y 52 itself (§2.2).
+        let toolbar = div().flex_none().child(toolbar_row);
         let shell = |body: AnyElement| {
             div()
                 .size_full()
@@ -1240,37 +1231,53 @@ impl ArtifactPage {
                     div()
                         .id("artifacts-list")
                         .flex_1()
-                        .min_h(px(0.))
+                        .min_h_0()
                         .overflow_y_scroll()
-                        .px(page::m::EDGE)
-                        .pt(page::m::GUTTER)
-                        .pb(page::m::GUTTER)
-                        .flex()
-                        .flex_col()
-                        .gap(page::m::GUTTER)
-                        .child(body),
+                        .child(
+                            // The content fills the pane: a short table or grid
+                            // ends in its footer at the bottom (§2.21).
+                            div()
+                                .min_h_full()
+                                .px(page::m::EDGE)
+                                .pt(page::m::GUTTER)
+                                .pb(page::m::GUTTER)
+                                .flex()
+                                .flex_col()
+                                .gap(page::m::GUTTER)
+                                .child(body),
+                        ),
                 )
                 .into_any_element()
         };
         match load {
-            page::PageLoad::Loading | page::PageLoad::Failed => {
-                let mut body = div().flex().flex_col().gap(page::m::GUTTER);
-                if load == page::PageLoad::Failed {
-                    body = body.child(page::load_failed("artifacts", &self.services, cx));
-                }
-                body = body.child(page::skeleton_rows(
+            page::PageLoad::Failed => {
+                // The failure takes the content's place (§2.15).
+                return shell(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .child(crate::views::group_page::rows::failed_region(
+                            "artifacts",
+                            &self.services,
+                            cx,
+                        ))
+                        .into_any_element(),
+                );
+            }
+            page::PageLoad::Loading => {
+                return shell(page::skeleton_rows(
                     "artifacts-sk",
                     page::SkeletonKind::Row,
                     5,
                     cx,
                 ));
-                return shell(body.into_any_element());
             }
             page::PageLoad::Ready if total == 0 => {
-                let nav = self.services.nav.clone();
                 return shell(
                     div()
-                        .min_h(px(360.))
+                        .flex_1()
+                        .min_h(px(240.))
                         .flex()
                         .rounded(page::m::FRAME_RADIUS)
                         .border_1()
@@ -1279,15 +1286,18 @@ impl ArtifactPage {
                             Sym::Outputs,
                             c::ARTIFACTS_EMPTY,
                             c::ARTIFACTS_EMPTY_BODY,
+                            // A verb (§2.13): 产出 come out of 话题.
                             vec![
                                 nk::push_button(
-                                    "artifacts-empty-desk",
-                                    crate::copy::desk::DESK_TITLE,
-                                    nk::PushStyle::Outline,
+                                    "artifacts-empty-new",
+                                    crate::copy::desk::DESK_NEW_TOPIC,
+                                    nk::PushStyle::Default,
                                     nk::PushSize::Small,
                                     cx,
                                 )
-                                .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_desk(cx)))
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(crate::app::NewTopic), cx)
+                                })
                                 .into_any_element(),
                             ],
                             cx,
@@ -1326,37 +1336,33 @@ impl ArtifactPage {
                 &[("n", &all.len().to_string()), ("total", &total.to_string())],
             )
         };
-        let body: AnyElement = if all.is_empty() {
-            let clear = {
-                let search = search.clone();
-                nk::push_button(
-                    "artifacts-clear",
-                    c::ARTIFACTS_CLEAR_SEARCH,
-                    nk::PushStyle::Outline,
-                    nk::PushSize::Small,
-                    cx,
-                )
-                .on_click(move |_, window, cx| {
-                    search.update(cx, |s, cx| s.set_value("", window, cx));
-                })
-            };
+        let cell_tip = |id: String, text: String, muted: bool, cx: &App| {
+            let tip = text.clone();
             div()
-                .min_h(px(360.))
-                .flex()
-                .rounded(page::m::FRAME_RADIUS)
-                .border_1()
-                .border_color(n.separator)
-                .child(page::page_empty(
-                    Sym::Search,
-                    fill(c::ARTIFACTS_NO_MATCH_TITLE, &[("q", &query)]),
-                    c::ARTIFACTS_NO_MATCH_BODY,
-                    vec![clear.into_any_element()],
-                    cx,
-                ))
+                .id(SharedString::from(id))
+                .min_w_0()
+                .child(page::cell_text(text, muted, cx))
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                })
                 .into_any_element()
-        } else if self.grid {
-            // Icon view: one group per day (今天, 昨天, 11 月 1 日), equal
-            // tiles in a grid, gap 16.
+        };
+        let footer = page::list_footer("artifacts-footer", footer_text, None, cx);
+        let body: AnyElement = if self.grid && !all.is_empty() {
+            // Icon view (§2.18): one group per day (今天, 昨天, 11 月 1 日),
+            // equal cards in a grid, gap 16. The column count follows the
+            // measured width (tiles at least 220 wide), so the tiles use the
+            // whole width.
+            let width = match self.list_width.get() {
+                w if w > px(0.) => w,
+                // Before the first measure: the window less the sidebar.
+                _ => window.viewport_size().width - px(248. + 16. + 48.),
+            };
+            // Never more columns than tiles, so a short list still fills the width.
+            let cols = (((f32::from(width) + 16.) / (TILE_MIN + 16.))
+                .floor()
+                .max(1.) as u16)
+                .min(all.len().max(1) as u16);
             let mut days: Vec<(String, Vec<&(String, crate::data::ArtifactSummary)>)> = Vec::new();
             for item in &all {
                 let day = day_label(now, item.1.updated_at);
@@ -1365,10 +1371,27 @@ impl ArtifactPage {
                     None => days.push((day, vec![item])),
                 }
             }
+            let measured = self.list_width.clone();
+            let probe = gpui::canvas(
+                move |bounds, window, _| {
+                    if (bounds.size.width - measured.get()).abs() > px(0.5) {
+                        measured.set(bounds.size.width);
+                        window.refresh();
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full();
             div()
+                .relative()
+                .flex_1()
                 .flex()
                 .flex_col()
                 .gap(page::m::GUTTER)
+                .child(probe)
                 .children(days.into_iter().map(|(day, items)| {
                     let tiles = items.into_iter().map(|(g, a)| {
                         let opener = open(a.id.clone(), self.services.nav.clone());
@@ -1379,11 +1402,10 @@ impl ArtifactPage {
                                 ("topic", &topic_name(g, &a.topic_id)),
                             ],
                         );
-                        let full = a.title.clone();
+                        let full = format!("{} · {meta}", a.title);
                         page::card(cx)
                             .id(SharedString::from(format!("artifact-{}", a.id)))
-                            .w(TILE_WIDTH)
-                            .rounded(page::m::FRAME_RADIUS)
+                            .min_w_0()
                             .overflow_hidden()
                             .cursor_pointer()
                             .hover(|s| s.border_color(n.secondary))
@@ -1397,11 +1419,14 @@ impl ArtifactPage {
                                     .flex_col()
                                     .gap(tsp::S2)
                                     .child(
+                                        // Two lines, so titles that share a
+                                        // long start still differ (F07).
                                         div()
+                                            .h(px(40.))
                                             .n_body()
                                             .font_weight(gpui::FontWeight::MEDIUM)
                                             .text_color(n.label)
-                                            .one_line()
+                                            .line_clamp(2)
                                             .child(a.title.clone()),
                                     )
                                     .child(
@@ -1430,16 +1455,19 @@ impl ArtifactPage {
                         .child(page::section_header(day, Some(count), None, None, cx))
                         .child(
                             div()
-                                .flex()
-                                .flex_wrap()
+                                .grid()
+                                .grid_cols(cols)
                                 .gap(page::m::GRID_GAP)
                                 .children(tiles),
                         )
                 }))
-                .child(div().n_body().text_color(n.secondary).child(footer_text))
+                // The count in a footer row at the bottom (§2.6).
+                .child(div().flex_1())
+                .child(page::frame(cx).child(footer.border_t_0()))
                 .into_any_element()
         } else {
-            // Table view (default): 名称, 类型, 话题, 做的人, 版本, 更新, ⋯.
+            // Table view (default): 名称, 类型, 话题, 做的人, 版本, 更新, ⋯. 名称 and
+            // 话题 share the free width; numbers keep their room (§2.7).
             let cols = [
                 page::Col {
                     header: c::ARTIFACTS_COL_NAME.into(),
@@ -1453,12 +1481,12 @@ impl ArtifactPage {
                 },
                 page::Col {
                     header: c::ARTIFACTS_COL_TOPIC.into(),
-                    width: Some(px(160.)),
+                    width: None,
                     right: false,
                 },
                 page::Col {
                     header: c::ARTIFACTS_COL_BY.into(),
-                    width: Some(px(112.)),
+                    width: Some(px(136.)),
                     right: false,
                 },
                 page::Col {
@@ -1485,7 +1513,7 @@ impl ArtifactPage {
                     let full = a.title.clone();
                     let name = div()
                         .id(SharedString::from(format!("artifact-name-{}", a.id)))
-                        .min_w(px(0.))
+                        .min_w_0()
                         .flex()
                         .items_center()
                         .gap(tsp::S8)
@@ -1496,7 +1524,7 @@ impl ArtifactPage {
                         )
                         .child(
                             div()
-                                .min_w(px(0.))
+                                .min_w_0()
                                 .font_weight(gpui::FontWeight::MEDIUM)
                                 .one_line()
                                 .child(a.title.clone()),
@@ -1505,8 +1533,11 @@ impl ArtifactPage {
                             gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
                         })
                         .into_any_element();
+                    let who = member_name(&self.services, &a.created_by);
+                    let who_tip = who.clone();
                     let person = div()
-                        .min_w(px(0.))
+                        .id(SharedString::from(format!("artifact-by-{}", a.id)))
+                        .min_w_0()
                         .flex()
                         .items_center()
                         .gap(tsp::S8)
@@ -1519,11 +1550,10 @@ impl ArtifactPage {
                                     cx,
                                 )),
                         )
-                        .child(page::cell_text(
-                            member_name(&self.services, &a.created_by),
-                            false,
-                            cx,
-                        ))
+                        .child(page::cell_text(who, false, cx))
+                        .tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(who_tip.clone()).build(window, cx)
+                        })
                         .into_any_element();
                     let menu = {
                         let (services, art) = (self.services.clone(), a.clone());
@@ -1545,7 +1575,12 @@ impl ArtifactPage {
                         vec![
                             name,
                             page::outline_badge(kind_label(a.kind), cx),
-                            page::cell_text(topic_name(g, &a.topic_id), true, cx),
+                            cell_tip(
+                                format!("artifact-topic-{}", a.id),
+                                topic_name(g, &a.topic_id),
+                                true,
+                                cx,
+                            ),
                             person,
                             div()
                                 .n_figures()
@@ -1563,17 +1598,50 @@ impl ArtifactPage {
                     )
                 })
                 .collect();
+            // No match: the header and footer stay; one cell says so
+            // (§2.7 empty).
+            let no_match = all.is_empty().then(|| {
+                let search = search.clone();
+                let clear = nk::push_button(
+                    "artifacts-clear",
+                    c::ARTIFACTS_CLEAR_SEARCH,
+                    nk::PushStyle::Outline,
+                    nk::PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, window, cx| {
+                    search.update(cx, |s, cx| s.set_value("", window, cx));
+                });
+                div()
+                    .h(px(96.))
+                    .flex()
+                    .flex_col()
+                    .items_center()
+                    .justify_center()
+                    .gap(tsp::S8)
+                    .child(
+                        div()
+                            .n_body()
+                            .text_color(n.secondary)
+                            .child(fill(c::ARTIFACTS_NO_MATCH_TITLE, &[("q", &query)])),
+                    )
+                    .child(clear)
+            });
+            // The frame takes the rest of the pane and ends in its footer.
             page::frame(cx)
+                .flex_1()
                 .child(page::table("artifacts", &cols, rows, cx))
-                .child(page::list_footer("artifacts-footer", footer_text, None, cx))
+                .children(no_match)
+                .child(div().flex_1())
+                .child(footer)
                 .into_any_element()
         };
         shell(body)
     }
 }
 
-/// The width of a tile in the icon view.
-const TILE_WIDTH: Pixels = px(208.);
+/// The narrowest tile of the icon view.
+const TILE_MIN: f32 = 220.;
 
 /// The day group of the icon view: `今天`, `昨天` or `11 月 1 日`.
 fn day_label(now: Millis, at: Millis) -> String {
@@ -1614,7 +1682,13 @@ impl Render for ArtifactPage {
         );
         let header = self.header(&detail, shown, window, cx);
         let frame = self.frame(&detail, shown, window, cx);
-        let aside = self.aside_open.then(|| self.story(&detail, shown, cx));
+        let live = matches!(
+            self.folders.get(&self.services, &detail.summary.id, shown, cx),
+            Some(Ok(f)) if f.is_page
+        );
+        let aside = self
+            .aside_open
+            .then(|| self.story(&detail, shown, live, window, cx));
         div()
             .size_full()
             .flex()
@@ -1622,7 +1696,7 @@ impl Render for ArtifactPage {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
@@ -1673,7 +1747,7 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
     use crate::ui::native as nk;
     use gpui::StyledImage as _;
     let n = nk::native_colors(cx);
-    let picture: Option<gpui::ImageSource> = crate::ui::web_embed::page_preview(&a.id)
+    let picture: Option<gpui::ImageSource> = crate::ui::web_embed::page_preview(&a.id, a.version)
         .map(gpui::ImageSource::from)
         .or_else(|| {
             services

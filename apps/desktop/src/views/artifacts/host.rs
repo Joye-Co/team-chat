@@ -17,6 +17,7 @@
 //! - **引用提问**: the bridge `ref` method and ⌥-click on `data-ref-label` call
 //!   [`refs::ask_about`] with the page part.
 
+use crate::ui::native::tokens::space as tsp;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
@@ -1192,7 +1193,7 @@ pub fn page_footer(
         None => div().child(head),
     }
     .flex_shrink(1.)
-    .min_w(px(0.))
+    .min_w_0()
     .py(space::S4);
     let can = SharedString::from(format!("{id}-can"));
     let head = match (labels, view.is_some()) {
@@ -1200,7 +1201,7 @@ pub fn page_footer(
             div()
                 .id(can)
                 .flex_1()
-                .min_w(px(0.))
+                .min_w_0()
                 .one_line()
                 .child(format!(" · {labels}"))
                 .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
@@ -1209,7 +1210,7 @@ pub fn page_footer(
             div()
                 .id(can)
                 .flex_shrink(1.)
-                .min_w(px(0.))
+                .min_w_0()
                 .child(head)
                 .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
         ),
@@ -1217,7 +1218,7 @@ pub fn page_footer(
     }
     // The text takes the free width; what follows sits at the footer's end.
     .flex_1()
-    .min_w(px(0.));
+    .min_w_0();
     let base = crate::views::media::parts::footer(cx)
         .children(lead)
         .child(head)
@@ -1231,7 +1232,7 @@ pub fn page_footer(
                 .items_center()
                 .gap(space::S4)
                 .whitespace_nowrap()
-                .child(ui::icon(Sym::Info, px(12.), k.ink_3))
+                .child(ui::icon(Sym::Info, tsp::S12, k.ink_3))
                 .child(short)
                 .tooltip(move |window, cx| Tooltip::new(whole.clone()).build(window, cx))
         }));
@@ -1239,7 +1240,7 @@ pub fn page_footer(
         div()
             .flex_none()
             // Symbol + text, no box (NATIVE.md rule 4).
-            .h(px(24.))
+            .h(tsp::S24)
             .flex()
             .items_center()
             .gap(space::S6)
@@ -1297,6 +1298,179 @@ pub fn page_footer(
                 .child(t),
         ),
     }
+}
+
+/// What a live page may do and the state of its last request, as the rows
+/// of the 产出 inspector's `这一页` section (COMPLETENESS.md §2.5): the
+/// capability line (14 muted, wraps), the run-log notice, and the request
+/// band as a StatusBadge with its actions.
+pub fn page_rows(
+    id: &str,
+    provider: &dyn ChatProvider,
+    artifact_id: &str,
+    version: u32,
+    cx: &App,
+) -> Vec<gpui::AnyElement> {
+    use crate::ui::{
+        native::{
+            NativeType as _, PushSize, PushStyle, native_colors,
+            page::{self, Status},
+            push_button,
+        },
+        sf_symbols::Sym,
+    };
+    use gpui::{IntoElement as _, ParentElement as _, Styled as _, div, px};
+    let k = native_colors(cx);
+    let line = capability_line(provider, artifact_id, version);
+    let text_row = |sym: Sym, text: String| {
+        div()
+            .py(tsp::S6)
+            .flex()
+            .items_start()
+            .gap(tsp::S8)
+            .child(
+                div()
+                    .flex_none()
+                    .pt(px(3.))
+                    .child(page::row_icon(sym, k.secondary)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .n_body()
+                    .text_color(k.secondary)
+                    .child(text),
+            )
+            .into_any_element()
+    };
+    let mut rows = vec![text_row(Sym::Shield, line.line)];
+    if let Some((_, whole)) = line.run_log {
+        rows.push(text_row(Sym::Info, whole));
+    }
+    let Some(view) = band(artifact_id, version, cx) else {
+        return rows;
+    };
+    let badge_row = |status: Status, text: String, actions: Vec<gpui::AnyElement>| {
+        div()
+            .min_h(px(36.))
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .gap(tsp::S8)
+            .child(page::status_badge(status, text, cx))
+            .children(actions)
+            .into_any_element()
+    };
+    rows.push(match view {
+        BandView::Waiting(t) | BandView::Working(t) => badge_row(Status::Working, t, Vec::new()),
+        BandView::NoAnswer(t) => {
+            let (a, b) = (artifact_id.to_string(), artifact_id.to_string());
+            badge_row(
+                Status::Failed,
+                t,
+                vec![
+                    push_button(
+                        SharedString::from(format!("{id}-retry")),
+                        cp::PAGE_RETRY,
+                        PushStyle::Outline,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| retry(&a, version, cx))
+                    .into_any_element(),
+                    push_button(
+                        SharedString::from(format!("{id}-stop")),
+                        cp::PAGE_STOP_WAITING,
+                        PushStyle::Ghost,
+                        PushSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| stop_waiting(&b, version, cx))
+                    .into_any_element(),
+                ],
+            )
+        }
+        BandView::Failed(t) => badge_row(Status::Failed, t, Vec::new()),
+        BandView::Done(t) => badge_row(Status::Done, t, Vec::new()),
+    });
+    rows
+}
+
+/// The app's navigation, for [`shown_in_pane`] (set by the 产出 pane).
+struct PaneNav(gpui::Entity<crate::app::Navigation>);
+
+impl Global for PaneNav {}
+
+/// Lets [`shown_in_pane`] see the right pane (the 产出 pane calls it once).
+pub fn track_pane(nav: gpui::Entity<crate::app::Navigation>, cx: &mut App) {
+    if !cx.has_global::<PaneNav>() {
+        cx.set_global(PaneNav(nav));
+    }
+}
+
+/// True while the 产出 pane shows `artifact_id` (COMPLETENESS.md §2.17: the
+/// in-thread embed of that 产出 then collapses to [`reference_row`]).
+pub fn shown_in_pane(artifact_id: &str, cx: &App) -> bool {
+    let Some(PaneNav(nav)) = cx.try_global::<PaneNav>() else {
+        return false;
+    };
+    matches!(
+        nav.read(cx).visible_pane(),
+        crate::app::RightPane::Artifact { id, .. } if id == artifact_id
+    )
+}
+
+/// The one-line reference an in-thread embed collapses to while the 产出 pane
+/// shows the same 产出 (COMPLETENESS.md §2.17, F36): icon 16, the title, the
+/// `v3` badge and `在右侧打开`, in a frame (radius 10, 1 px line), h40, as wide
+/// as the in-thread width. No page shows twice on one screen (§2.21).
+pub fn reference_row(
+    id: impl Into<gpui::ElementId>,
+    title: impl Into<SharedString>,
+    version: u32,
+    cx: &App,
+) -> gpui::AnyElement {
+    use crate::ui::{
+        native::{NativeType as _, native_colors, page},
+        sf_symbols::Sym,
+    };
+    use gpui::{InteractiveElement as _, IntoElement as _, ParentElement as _, Styled as _, div};
+    let k = native_colors(cx);
+    div()
+        .id(id.into())
+        .w_full()
+        .h(crate::ui::native::tokens::height::FOOTER_ROW)
+        .px(tsp::S12)
+        .rounded(page::m::FRAME_RADIUS)
+        .border_1()
+        .border_color(k.separator)
+        .bg(k.sheet)
+        .flex()
+        .items_center()
+        .gap(tsp::S8)
+        .child(page::row_icon(Sym::Document, k.secondary))
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .n_body()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(k.label)
+                .child(title.into()),
+        )
+        .child(page::outline_badge(format!("v{version}"), cx))
+        .child(
+            div()
+                .flex_none()
+                .n_callout()
+                .text_color(k.secondary)
+                .child(crate::copy::artifact_page::ARTIFACT_IN_PANE),
+        )
+        .into_any_element()
 }
 
 /// A chip for the header of a page frame: 已更新到 v{n} or 有 v{n}.
