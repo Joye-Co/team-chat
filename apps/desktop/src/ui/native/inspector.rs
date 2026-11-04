@@ -8,7 +8,7 @@ use std::rc::Rc;
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, Hsla, InteractiveElement as _, IntoElement,
     ParentElement, RenderOnce, SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    prelude::FluentBuilder as _, px, relative,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::tokens::{NativeType as _, emphasized, metrics, native_colors};
@@ -290,33 +290,19 @@ impl RenderOnce for ListRow {
     }
 }
 
-/// A determinate bar (§5.7): 4 pt, radius 2, `quaternary` track, `label`
-/// fill (or the state color when it shows a state). `value` is 0–1. This is
-/// the one progress drawing of the app: plan steps, budgets, downloads and
-/// uploads all use it (no segmented or dashed bars).
-pub fn determinate_bar(value: f32, color: Option<Hsla>, cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
-    div()
-        .w_full()
-        .h(metrics::BAR)
-        .rounded(metrics::BAR_RADIUS)
-        .bg(k.quaternary)
-        .child(
-            div()
-                .h_full()
-                .w(relative(value.clamp(0., 1.)))
-                .rounded(metrics::BAR_RADIUS)
-                .bg(color.unwrap_or(k.label)),
-        )
+/// The one Progress (COMPLETENESS.md D12): h4, radius full, track primary at
+/// 20 %, value primary. `value` is 0–1. A state color never fills a bar
+/// (§1.3): `_color` is kept for its callers and ignored.
+pub fn determinate_bar(value: f32, _color: Option<Hsla>, cx: &App) -> gpui::Div {
+    super::feedback::progress(value, cx)
 }
 
-/// A plan of `done` out of `total` steps as a determinate bar (never a
-/// row of segments).
-pub fn steps_bar(done: usize, total: usize, color: Option<Hsla>, cx: &App) -> gpui::Div {
+/// A plan of `done` out of `total` steps: the Progress bar (D12).
+pub fn steps_bar(done: usize, total: usize, _color: Option<Hsla>, cx: &App) -> gpui::Div {
     let value = if total == 0 {
         0.
     } else {
         done as f32 / total as f32
     };
-    determinate_bar(value, color, cx)
+    super::feedback::progress(value, cx)
 }

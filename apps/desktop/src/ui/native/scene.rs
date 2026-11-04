@@ -290,18 +290,18 @@ impl NativeKit {
                 hstack()
                     .child(sample(
                         t::STATE_REST,
-                        push_button("kb-1", t::EDIT, PushStyle::Standard, reg, cx),
+                        push_button("kb-1", t::EDIT, PushStyle::Outline, reg, cx),
                         &k,
                     ))
                     .child(sample(
                         t::STATE_PRESSED,
-                        push_button("kb-2", t::EDIT, PushStyle::Standard, reg, cx).bg(k.fill_hover),
+                        push_button("kb-2", t::EDIT, PushStyle::Outline, reg, cx).bg(k.fill_hover),
                         &k,
                     ))
                     .child(sample(
                         t::STATE_DISABLED,
                         disabled_push(
-                            push_button("kb-3", t::EDIT, PushStyle::Standard, reg, cx),
+                            push_button("kb-3", t::EDIT, PushStyle::Outline, reg, cx),
                             true,
                             cx,
                         ),
@@ -329,7 +329,7 @@ impl NativeKit {
                     .child(push_button(
                         "kb-s1",
                         t::SEE_CHANGES,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     ))
@@ -343,7 +343,7 @@ impl NativeKit {
                     .child(push_button(
                         "kb-l1",
                         t::CANCEL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Large,
                         cx,
                     ))
@@ -823,7 +823,7 @@ impl NativeKit {
                     .message(t::ALERT_MESSAGE)
                     .checkbox(NativeCheckbox::new("ka-check", false).label(t::DELETE_LOCAL))
                     .buttons([
-                        alert_button("ka-ok", t::ALERT_CONFIRM, PushStyle::Standard, true, cx),
+                        alert_button("ka-ok", t::ALERT_CONFIRM, PushStyle::Outline, true, cx),
                         alert_button("ka-cancel", t::CANCEL, PushStyle::Default, false, cx),
                     ]),
             ),

@@ -10,7 +10,7 @@ use gpui::{
 use crate::{
     fake::v2,
     theme::{self, StateTone, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, JobTag, MemberAvatar, Ring, RowSurface, Sym},
+    ui::{self, PushStyle, PushSize, JobTag, MemberAvatar, Ring, RowSurface, Sym},
 };
 
 fn section(title: &'static str, cx: &App) -> gpui::Div {
@@ -107,21 +107,21 @@ fn states(cx: &App) -> gpui::Div {
 
 fn buttons(cx: &App) -> gpui::Div {
     let b = |id: &'static str, label: &'static str, kind, size| {
-        ui::button(id, label, kind, size, cx).into_any_element()
+        ui::native::push_button(id, label, kind, size, cx).into_any_element()
     };
     div()
         .flex()
         .flex_col()
         .gap(space::S10)
         .child(div().flex().gap(space::S8).children([
-            b("v3-p", "批准合并", ButtonKind::Primary, ButtonSize::Md),
-            b("v3-s", "要求修改", ButtonKind::Secondary, ButtonSize::Md),
-            b("v3-g", "看改动", ButtonKind::Ghost, ButtonSize::Md),
+            b("v3-p", "批准合并", PushStyle::Default, PushSize::Regular),
+            b("v3-s", "要求修改", PushStyle::Outline, PushSize::Regular),
+            b("v3-g", "看改动", PushStyle::Ghost, PushSize::Regular),
         ]))
         .child(div().flex().gap(space::S8).children([
-            b("v3-p-sm", "发布到生产", ButtonKind::Primary, ButtonSize::Sm),
-            b("v3-s-sm", "先不发", ButtonKind::Secondary, ButtonSize::Sm),
-            b("v3-d-sm", "停止", ButtonKind::Danger, ButtonSize::Sm),
+            b("v3-p-sm", "发布到生产", PushStyle::Default, PushSize::Small),
+            b("v3-s-sm", "先不发", PushStyle::Outline, PushSize::Small),
+            b("v3-d-sm", "停止", PushStyle::Destructive, PushSize::Small),
         ]))
 }
 

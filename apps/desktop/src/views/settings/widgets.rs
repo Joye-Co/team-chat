@@ -347,7 +347,7 @@ pub fn form_input(
 ) -> Div {
     field(
         label,
-        crate::ui::TextField::new(id, state, crate::ui::FieldKind::Form),
+        crate::ui::native::NativeTextField::new(id, state).full_width(),
         cx,
     )
 }
@@ -817,7 +817,7 @@ pub fn popup_fixed(
         sf_symbols::{Sf, Weight, symbol},
     };
     let k = native_colors(cx);
-    push_button(id, "", PushStyle::Standard, PushSize::Regular, cx)
+    push_button(id, "", PushStyle::Outline, PushSize::Regular, cx)
         .w(width)
         .pl(metrics::BUTTON_REGULAR_PAD)
         .pr(metrics::FIELD_PAD)

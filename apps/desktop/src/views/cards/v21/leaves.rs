@@ -35,7 +35,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, card_v21 as t, space},
-    ui::{self, ButtonKind, Sym, native::NativeType as _},
+    ui::{self, PushStyle, Sym, native::NativeType as _},
     views::cards::v2::{
         Ctx, blocks as b20, button, disabled_button, form::Val, meta, state::CardState,
     },
@@ -938,9 +938,9 @@ pub fn confirm(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             eid(node, format!("confirm-{id}-{value}")),
             label.to_string(),
             if on {
-                ButtonKind::Primary
+                PushStyle::Default
             } else {
-                ButtonKind::Secondary
+                PushStyle::Outline
             },
             cx,
         )
@@ -1699,9 +1699,9 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
                 eid(node, format!("btn-{id}-{}", x.id)),
                 label,
                 if danger || is_armed {
-                    ButtonKind::Danger
+                    PushStyle::Destructive
                 } else {
-                    ButtonKind::Secondary
+                    PushStyle::Outline
                 },
                 cx,
             )
@@ -2398,7 +2398,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
             button(
                 ctx.id("update"),
                 fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
-                ButtonKind::Secondary,
+                PushStyle::Outline,
                 cx,
             )
             .on_click(|_, _, cx| {
@@ -2417,7 +2417,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
             button(
                 ctx.id("retry21"),
                 c::PENDING_RETRY.to_string(),
-                ButtonKind::Secondary,
+                PushStyle::Outline,
                 cx,
             )
             .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
@@ -2490,9 +2490,9 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                     ctx.id(format!("act-{}", x.id)),
                     x.label.clone(),
                     if primary {
-                        ButtonKind::Primary
+                        PushStyle::Default
                     } else {
-                        ButtonKind::Secondary
+                        PushStyle::Outline
                     },
                     cx,
                 )

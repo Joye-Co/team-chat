@@ -521,7 +521,7 @@ impl SideChat {
                 push_button(
                     SharedString::from(format!("side-chat-suggest-{}", msg.id)),
                     label,
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Regular,
                     cx,
                 )

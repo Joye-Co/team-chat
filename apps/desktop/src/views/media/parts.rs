@@ -123,7 +123,7 @@ pub fn footer(cx: &App) -> Div {
 
 /// A named 28 pt tool button.
 pub fn tool(id: impl Into<ElementId>, icon: Sym, name: &'static str) -> Button {
-    ui::icon_button_sm(id, icon).named(name)
+    ui::native::icon_button_bare(id, icon, ui::native::IconSize::Small).named(name)
 }
 
 /// A tool button on the dark screen (lightbox, video): `screen-ink` glyph.

@@ -20,7 +20,7 @@ use super::{
 use crate::{
     copy::{fill, media as cm},
     theme::{self, Type as _, radius, space},
-    ui::{self, ButtonKind, ButtonSize, Sym},
+    ui::{self, PushStyle, PushSize, Sym},
 };
 
 /// What the row shows on its left.
@@ -204,7 +204,7 @@ fn small_button(
     icon: Option<Sym>,
     cx: &App,
 ) -> gpui_component::button::Button {
-    let b = ui::button(id, label, ButtonKind::Secondary, ButtonSize::Sm, cx);
+    let b = ui::native::push_button(id, label, PushStyle::Outline, PushSize::Small, cx);
     match icon {
         Some(i) => b.icon(ui::icon(i, px(13.), theme::colors(cx).text_2)),
         None => b,

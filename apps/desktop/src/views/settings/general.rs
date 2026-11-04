@@ -194,7 +194,7 @@ impl GeneralPage {
                                 push_button(
                                     "diagnostics-cancel",
                                     common::CANCEL,
-                                    PushStyle::Standard,
+                                    PushStyle::Outline,
                                     PushSize::Large,
                                     cx,
                                 )
@@ -272,7 +272,7 @@ impl GeneralPage {
                 push_button(
                     "about-dismiss",
                     u::DISMISS,
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Regular,
                     cx,
                 )
@@ -283,7 +283,7 @@ impl GeneralPage {
                     push_button(
                         "about-check",
                         u::CHECK,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     )
@@ -422,7 +422,7 @@ impl Render for GeneralPage {
                                 push_button(
                                     "diagnostics-open",
                                     s::DIAGNOSTICS_OPEN,
-                                    PushStyle::Standard,
+                                    PushStyle::Outline,
                                     PushSize::Regular,
                                     cx,
                                 ),

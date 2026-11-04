@@ -762,7 +762,7 @@ impl Render for TopicListView {
             )
             .when(is_group, |el| {
                 el.child(
-                    ui::icon_button("new-topic", Sym::Compose)
+                    ui::native::icon_button_bare("new-topic", Sym::Compose, ui::native::IconSize::Regular)
                         .named(nav::NEW_TOPIC_TIP)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))

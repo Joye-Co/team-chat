@@ -470,7 +470,7 @@ impl Render for LoginView {
             push_button(
                 "login-server-cancel",
                 common::CANCEL,
-                PushStyle::Standard,
+                PushStyle::Outline,
                 PushSize::Large,
                 cx,
             )

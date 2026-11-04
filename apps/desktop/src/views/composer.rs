@@ -1100,7 +1100,7 @@ impl ComposerView {
             .child(ui::sym(glyph, ui::SymSize::INLINE_SMALL, k.secondary))
             .child(div().min_w(px(0.)).one_line().child(text))
             .child(
-                ui::icon_button(id, Sym::Close)
+                ui::native::icon_button_bare(id, Sym::Close, ui::native::IconSize::Regular)
                     .with_size(px(20.))
                     .rounded(px(5.))
                     .icon(ui::button_glyph(Sym::Close, px(11.), px(20.)))
@@ -1528,7 +1528,7 @@ impl Render for ComposerView {
                     .t_small()
                     .child(div().semibold().text_color(colors.text_1).child(c::EDITING))
                     .child(
-                        ui::text_button("cancel-edit", crate::copy::common::CANCEL, cx).on_click(
+                        ui::native::push_button("cancel-edit", crate::copy::common::CANCEL, ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx).on_click(
                             cx.listener(|this, _, window, cx| this.cancel_edit(window, cx)),
                         ),
                     ),

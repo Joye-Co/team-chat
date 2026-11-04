@@ -18,7 +18,9 @@
 //! | [`inspector`] | §9.3, §5.7 | inspector sections, label/value rows, list rows, determinate bar |
 //! | [`scene`] | §11 | the `native-kit` self-test scenes |
 
+pub mod badge;
 pub mod buttons;
+pub mod feedback;
 pub mod fields;
 pub mod form;
 pub mod inspector;
@@ -33,8 +35,16 @@ pub mod toolbar;
 
 #[allow(unused_imports)]
 pub use buttons::{
-    PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text, borderless_variant,
-    disabled_push, popup_button, pull_down, push_button, square_button, square_pair, toolbar_item,
+    Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
+    borderless_variant, disabled_push, ghost_button, icon_button, icon_button_bare, icon_button_styled,
+    popup_button, pull_down, push_button, square_button, square_pair, toolbar_item,
+};
+#[allow(unused_imports)]
+pub use badge::{Badge, BadgeState, BadgeVariant, CountPill, KeyCap, StatusBadge};
+#[allow(unused_imports)]
+pub use feedback::{
+    Alert, AlertTone, Empty, EmptyLine, SkeletonKind, icon_box, progress, progress_steps,
+    skeleton, skeleton_rows, toast_surface,
 };
 #[allow(unused_imports)]
 pub use fields::{FieldSize, NativeTextField, SearchField};

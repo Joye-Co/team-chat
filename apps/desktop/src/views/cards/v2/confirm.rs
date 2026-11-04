@@ -108,7 +108,7 @@ pub(crate) fn sheet(
     let cancel = nk::push_button(
         SharedString::from(format!("{id}-cancel")),
         common::CANCEL,
-        nk::PushStyle::Standard,
+        nk::PushStyle::Outline,
         nk::PushSize::Large,
         cx,
     );

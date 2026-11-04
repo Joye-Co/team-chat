@@ -401,7 +401,7 @@ pub fn render(services: &Services, id: &str, version: Option<u32>, cx: &App) -> 
                 push_button(
                     "out-open-window-empty",
                     c::OPEN_WINDOW,
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Regular,
                     cx,
                 )

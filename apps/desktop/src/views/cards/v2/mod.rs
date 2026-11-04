@@ -54,7 +54,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, space},
-    ui::{self, ButtonKind, Sym, native::NativeType as _},
+    ui::{self, PushStyle, Sym, native::NativeType as _},
 };
 
 #[allow(unused_imports)]
@@ -993,7 +993,7 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         ui::native::push_button(
             id,
             label.to_string(),
-            ui::native::PushStyle::Standard,
+            ui::native::PushStyle::Outline,
             ui::native::PushSize::Small,
             cx,
         )
@@ -1452,14 +1452,14 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
 pub(crate) fn button(
     id: SharedString,
     label: impl Into<SharedString>,
-    kind: ButtonKind,
+    kind: PushStyle,
     cx: &App,
 ) -> Button {
     use ui::native::{PushSize, PushStyle};
     let style = match kind {
-        ButtonKind::Primary => PushStyle::Default,
-        ButtonKind::Danger => PushStyle::Destructive,
-        _ => PushStyle::Standard,
+        PushStyle::Default => PushStyle::Default,
+        PushStyle::Destructive => PushStyle::Destructive,
+        _ => PushStyle::Outline,
     };
     ui::native::push_button(id, label, style, PushSize::Regular, cx).flex_none()
 }
@@ -1471,17 +1471,17 @@ pub(crate) fn disabled_button(
     label: impl Into<SharedString>,
     cx: &App,
 ) -> Button {
-    ui::native::disabled_push(button(id, label, ButtonKind::Secondary, cx), true, cx)
+    ui::native::disabled_push(button(id, label, PushStyle::Outline, cx), true, cx)
 }
 
-fn style_kind(action: &CardV2Action, first_default_used: &mut bool) -> ButtonKind {
+fn style_kind(action: &CardV2Action, first_default_used: &mut bool) -> PushStyle {
     match action.style.unwrap_or_default() {
-        CardV2ActionStyle::Primary => ButtonKind::Primary,
-        CardV2ActionStyle::Danger => ButtonKind::Danger,
-        _ if action.kind() == CardActionKind::Link || *first_default_used => ButtonKind::Ghost,
+        CardV2ActionStyle::Primary => PushStyle::Default,
+        CardV2ActionStyle::Danger => PushStyle::Destructive,
+        _ if action.kind() == CardActionKind::Link || *first_default_used => PushStyle::Ghost,
         _ => {
             *first_default_used = true;
-            ButtonKind::Secondary
+            PushStyle::Outline
         }
     }
 }
@@ -1557,7 +1557,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 button(
                     ctx.id(format!("link-{i}")),
                     l.label.clone(),
-                    ButtonKind::Ghost,
+                    PushStyle::Ghost,
                     cx,
                 )
                 .on_click(move |_, window, cx| a.press(&action, window, cx))
@@ -1582,7 +1582,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     button(
                         ctx.id("submit"),
                         submit.label.clone(),
-                        ButtonKind::Primary,
+                        PushStyle::Default,
                         cx,
                     )
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
@@ -1599,7 +1599,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         button(
                             ctx.id(format!("act-{}", x.id)),
                             x.label.clone(),
-                            ButtonKind::Ghost,
+                            PushStyle::Ghost,
                             cx,
                         )
                         .disabled(!live)
@@ -1637,7 +1637,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         button(
                             ctx.id("draft-done"),
                             fill(c::DRAFT_DONE, &[("label", &submit.label)]),
-                            ButtonKind::Primary,
+                            PushStyle::Default,
                             cx,
                         )
                         .disabled(!live)
@@ -1649,7 +1649,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         button(
                             ctx.id("draft-cancel"),
                             crate::copy::common::CANCEL,
-                            ButtonKind::Ghost,
+                            PushStyle::Ghost,
                             cx,
                         )
                         .on_click(move |_, _, cx| form.update(cx, |f, cx| f.set_editing(false, cx)))
@@ -1664,7 +1664,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     button(
                         ctx.id("draft-ok"),
                         submit.label.clone(),
-                        ButtonKind::Primary,
+                        PushStyle::Default,
                         cx,
                     )
                     .disabled(!live)
@@ -1676,7 +1676,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     button(
                         ctx.id("draft-edit"),
                         c::DRAFT_EDIT,
-                        ButtonKind::Secondary,
+                        PushStyle::Outline,
                         cx,
                     )
                     .disabled(!live)
@@ -1689,7 +1689,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         button(
                             ctx.id(format!("act-{}", x.id)),
                             x.label.clone(),
-                            ButtonKind::Ghost,
+                            PushStyle::Ghost,
                             cx,
                         )
                         .disabled(!live)
@@ -1721,7 +1721,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     button(
                         ctx.id("submit"),
                         submit.label.clone(),
-                        ButtonKind::Primary,
+                        PushStyle::Default,
                         cx,
                     )
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
@@ -1800,7 +1800,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     button(
                         ctx.id("watch"),
                         fill(c::PLAN_WATCH_COMPUTER, &[("name", &ctx.author)]),
-                        ButtonKind::Secondary,
+                        PushStyle::Outline,
                         cx,
                     )
                     .icon(Sym::Computer)

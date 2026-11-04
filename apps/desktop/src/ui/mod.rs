@@ -7,7 +7,7 @@
 //!
 //! | Module | Spec | What |
 //! | --- | --- | --- |
-//! | [`controls`] | §4.2, §7.3, §7.4 | buttons, icon buttons, text buttons, fields, selects |
+//! | [`controls`] | §1.9 | icon button names, input placeholders, field label and help |
 //! | [`rows`] | §7.1, §7.6, §7.7 | the row helper, section headers, tabs, unread dot |
 //! | [`chip`] | §7.8, §7.9 | status chips and labels, badges, role tag, kbd |
 //! | [`avatar`] | §7.9 | people circles, bot tiles, the 群 glyph |
@@ -49,11 +49,10 @@ pub use chip::{BadgeKind, ChipStyle, CountBadge, JobTag, Kbd, RoleTag, StatusChi
 #[allow(unused_imports)]
 pub use composer::{ComposerShell, composer_tool, send_button};
 #[allow(unused_imports)]
-pub use controls::{
-    ButtonKind, ButtonSize, ButtonSpec, FieldKind, NamedButton, TextField, button, field_help,
-    field_label, icon_button, icon_button_sm, placeholder_input, primary_button, secondary_button,
-    select_trigger, text_button,
-};
+pub use controls::{NamedButton, field_help, field_label, placeholder_input};
+/// The one Button's variant and size (`ui::native::buttons`).
+#[allow(unused_imports)]
+pub use native::{PushSize, PushStyle};
 pub use icons::{AppAssets, Sym, button_glyph, icon};
 // --- v12/symbols: the SF Symbols API (NATIVE.md §6) ---
 #[allow(unused_imports)]

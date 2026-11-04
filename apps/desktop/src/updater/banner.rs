@@ -99,7 +99,7 @@ impl Render for UpdateSheet {
             push_button(id, label, style, PushSize::Large, cx)
         };
         let hide = |cx: &App| {
-            button("update-hide", o::UPDATE_HIDE, PushStyle::Standard, cx)
+            button("update-hide", o::UPDATE_HIDE, PushStyle::Outline, cx)
                 .on_click(|_, window, cx| window.close_dialog(cx))
         };
         let u1 = updater.clone();
@@ -108,7 +108,7 @@ impl Render for UpdateSheet {
             Phase::Ready { .. } => SheetLayout::new(fill(o::UPDATE_READY_TITLE, &[("version", v)]))
                 .explanation(o::UPDATE_READY_EXPLANATION)
                 .buttons([
-                    button("update-later", u::LATER, PushStyle::Standard, cx).on_click(
+                    button("update-later", u::LATER, PushStyle::Outline, cx).on_click(
                         move |_, window, cx| {
                             u1.update(cx, |up, cx| up.postpone(cx));
                             window.close_dialog(cx);
@@ -142,7 +142,7 @@ impl Render for UpdateSheet {
                 SheetLayout::new(fill(o::UPDATE_FAILED_TITLE, &[("version", v)]))
                     .explanation(banner_text(&phase).unwrap_or_default())
                     .buttons([
-                        button("update-later", u::LATER, PushStyle::Standard, cx).on_click(
+                        button("update-later", u::LATER, PushStyle::Outline, cx).on_click(
                             move |_, window, cx| {
                                 u1.update(cx, |up, cx| up.postpone(cx));
                                 window.close_dialog(cx);

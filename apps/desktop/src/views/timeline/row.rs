@@ -384,7 +384,7 @@ impl TimelineView {
                         .child(t::FAILED),
                 )
                 .child(
-                    ui::text_button(ElementId::Name(format!("retry-{key}").into()), t::RETRY, cx)
+                    ui::native::push_button(ElementId::Name(format!("retry-{key}").into()), t::RETRY, ui::native::PushStyle::Ghost, ui::native::PushSize::Small, cx)
                         .on_click(cx.listener({
                             let message = message.clone();
                             move |this, _, _, _| this.retry(&message)
@@ -584,7 +584,7 @@ impl TimelineView {
         let can_edit = self.can_edit(message);
         let can_delete = self.can_delete(message);
         let tool = |id: &str, glyph: Sym| {
-            ui::icon_button(ElementId::Name(format!("{id}-{key}").into()), glyph)
+            ui::native::icon_button_bare(ElementId::Name(format!("{id}-{key}").into()), glyph, ui::native::IconSize::Regular)
                 .rounded(theme::radius::SM)
         };
         ui::capsule(cx)
@@ -948,7 +948,7 @@ impl TimelineView {
                             .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
                     )
                     .child(
-                        ui::secondary_button("edit-cancel", common::CANCEL, cx)
+                        ui::native::push_button("edit-cancel", common::CANCEL, ui::native::PushStyle::Outline, ui::native::PushSize::Regular, cx)
                             .h(theme::size::BUTTON_SM)
                             .on_click(cx.listener(|this, _, _, cx| this.cancel_edit(cx))),
                     ),

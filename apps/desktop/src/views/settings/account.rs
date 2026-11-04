@@ -414,7 +414,7 @@ impl AccountPage {
                     alert_button(
                         "device-remove-ok",
                         s::DEVICE_REMOVE_CONFIRM,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         true,
                         cx,
                     )
@@ -426,7 +426,7 @@ impl AccountPage {
                     alert_button(
                         "device-remove-cancel",
                         common::CANCEL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         false,
                         cx,
                     )
@@ -457,7 +457,7 @@ impl AccountPage {
                     alert_button(
                         "sign-out-ok",
                         s::DEVICE_REMOVE_CONFIRM,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         true,
                         cx,
                     )
@@ -469,7 +469,7 @@ impl AccountPage {
                     alert_button(
                         "sign-out-cancel",
                         common::CANCEL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         false,
                         cx,
                     )
@@ -523,7 +523,7 @@ impl AccountPage {
                         push_button(
                             "profile-photo",
                             s::CHANGE_PHOTO,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Small,
                             cx,
                         )
@@ -564,7 +564,7 @@ impl AccountPage {
                                 push_button(
                                     "profile-cancel",
                                     common::CANCEL,
-                                    PushStyle::Standard,
+                                    PushStyle::Outline,
                                     PushSize::Large,
                                     cx,
                                 )
@@ -652,7 +652,7 @@ impl AccountPage {
                     push_button(
                         "profile-edit",
                         s::EDIT,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     ),

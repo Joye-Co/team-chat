@@ -172,7 +172,7 @@ impl Render for MachinesPage {
                         push_button(
                             "machines-retry",
                             s::RETRY,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Small,
                             cx,
                         )
@@ -426,7 +426,7 @@ impl Render for MachineForm {
                 push_button(
                     "machine-cancel",
                     common::CANCEL,
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Large,
                     cx,
                 )

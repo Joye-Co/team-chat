@@ -172,7 +172,7 @@ pub fn composer_chip(
             d.child(div().flex_none().text_color(k.ink_3).child(c::UPDATED))
         })
         .child(
-            ui::icon_button(ElementId::Name(format!("{id:?}-x").into()), Sym::Close)
+            ui::native::icon_button_bare(ElementId::Name(format!("{id:?}-x").into()), Sym::Close, ui::native::IconSize::Regular)
                 .with_size(px(18.))
                 .rounded(px(9.))
                 .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))

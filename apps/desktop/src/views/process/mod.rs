@@ -586,7 +586,7 @@ impl ProcessView {
                     push_button(
                         "download-session",
                         dev::RUN_DOWNLOAD_SESSION,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     ),
@@ -724,7 +724,7 @@ impl Render for ProcessView {
                                         push_button(
                                             "process-retry",
                                             p::RETRY,
-                                            PushStyle::Standard,
+                                            PushStyle::Outline,
                                             PushSize::Small,
                                             cx,
                                         )

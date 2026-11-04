@@ -8,6 +8,7 @@ use gpui::{
 
 use crate::{
     theme::{self, Elevation, Type as _, size, space},
+    ui::native::NativeType as _,
     ui::{
         icons::{Sym, icon},
         rows::{RowSurface, list_row},
@@ -157,27 +158,25 @@ impl Toast {
 
 impl RenderOnce for Toast {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
+        // COMPLETENESS.md §2.16: the toast surface, a 16 icon, 14 medium
+        // text, an outline sm action.
+        let n = crate::ui::native::native_colors(cx);
         let glyph_color = match self.tone {
-            Tone::Neutral => k.text_2,
-            Tone::Success => k.success,
-            Tone::Danger => k.danger,
+            Tone::Neutral => n.label,
+            Tone::Success => n.green,
+            Tone::Danger => n.red,
         };
-        overlay_surface(cx)
-            .h(size::TOAST)
-            .max_w(px(420.))
-            .pl(space::S14)
-            .pr(space::S12)
+        crate::ui::native::feedback::toast_surface(cx)
             .flex()
             .items_center()
-            .gap(space::S10)
-            .child(icon(self.glyph, theme::icon::ROW, glyph_color))
+            .gap(space::S12)
+            .child(icon(self.glyph, crate::ui::native::tokens::icon::MD, glyph_color))
             .child(
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .t_ui()
-                    .text_color(k.text_1)
+                    .n_headline()
+                    .text_color(n.label)
                     .one_line()
                     .child(self.text),
             )
@@ -226,42 +225,18 @@ impl Banner {
 }
 
 impl RenderOnce for Banner {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
-        div()
-            .flex_none()
-            .w_full()
-            .min_h(size::BANNER)
-            .px(space::S12)
-            .py(space::S6)
-            // v12/kit: a quiet `fill` row, no border, no card.
-            .rounded(theme::radius::MD)
-            .bg(k.field)
-            .flex()
-            .items_center()
-            .gap(space::S10)
-            .child(icon(
-                self.glyph,
-                theme::icon::ROW,
-                self.glyph_color.unwrap_or(k.text_2),
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .t_small()
-                            .text_color(k.text_1)
-                            .one_line()
-                            .child(self.text),
-                    )
-                    .when_some(self.detail, |el, d| {
-                        el.child(div().t_meta().text_color(k.text_3).one_line().child(d))
-                    }),
-            )
-            .children(self.action)
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        // COMPLETENESS.md §2.15, §2.16: an in-page banner is the Alert.
+        let mut alert = crate::ui::native::feedback::Alert::new(self.glyph, self.text);
+        if let Some(c) = self.glyph_color {
+            alert = alert.icon_color(c);
+        }
+        if let Some(d) = self.detail {
+            alert = alert.description(d);
+        }
+        if let Some(a) = self.action {
+            alert = alert.action(a);
+        }
+        alert
     }
 }

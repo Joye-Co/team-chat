@@ -9,7 +9,7 @@ use gpui::{
 };
 use gpui_component::{
     Disableable as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
 };
 
 use super::{is_expanded, part_id, toggle_expanded};
@@ -21,7 +21,7 @@ use crate::{
     },
     markdown,
     theme::{self, Type as _, space},
-    ui::{self, ButtonSpec as _, Sym},
+    ui::{self, Sym},
     views::timeline::extras::ExtrasContext,
 };
 
@@ -257,10 +257,11 @@ fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
         fill(c::TABLE_MORE, &[("n", &hidden.to_string())])
     };
     let toggle_key = key.to_string();
-    Button::new(ElementId::Name(format!("{key}-more").into()))
-        .ghost()
-        .label(label)
-        .spec(ui::ButtonSize::Sm)
+    ui::native::ghost_button(
+        ElementId::Name(format!("{key}-more").into()),
+        label,
+        ui::native::PushSize::Small,
+    )
         .on_click(move |_, window, cx| toggle_expanded(toggle_key.clone(), window, cx))
 }
 
@@ -661,11 +662,8 @@ fn link_button(
     target: &LinkTarget,
 ) -> AnyElement {
     let id = ElementId::Name(format!("{key}-link").into());
-    let button = Button::new(id)
-        .ghost()
-        .label(label.to_string())
-        .spec(ui::ButtonSize::Sm)
-        .ml(px(-10.));
+    let button = ui::native::ghost_button(id, label.to_string(), ui::native::PushSize::Small)
+        .ml(-ui::native::metrics::BUTTON_SMALL_PAD);
     match target {
         LinkTarget::Url { url } => match markdown::safe_link(url) {
             Some(safe) if safe.starts_with("http") || safe.starts_with("HTTP") => {

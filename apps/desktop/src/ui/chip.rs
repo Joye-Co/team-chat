@@ -13,15 +13,14 @@
 //! | [`CountBadge`] | 20 pt pill | red for @ only; neutral `count-solid` for unread; grey for tabs |
 
 use gpui::{
-    App, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled, Window, div,
-    prelude::FluentBuilder as _, px,
+    App, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled, Window, div, px,
 };
 
 use crate::{
     copy::{common, nav},
     data::{Member, Topic, TopicStatus},
-    theme::{self, ChipKind, Type as _, size, space},
-    ui::icons::{Sym, icon},
+    theme::{self, ChipKind, Type as _, size},
+    ui::icons::Sym,
 };
 
 /// How a status mark is drawn.
@@ -192,51 +191,31 @@ pub fn status_glyph(status: TopicStatus) -> Option<Sym> {
     })
 }
 
+impl StatusChip {
+    /// The §2.12 state of this chip.
+    pub fn badge_state(&self) -> crate::ui::native::badge::BadgeState {
+        use crate::ui::native::badge::BadgeState as B;
+        match (self.kind, self.status) {
+            (ChipKind::You, _) => B::NeedsYou,
+            (ChipKind::Blocked, _) => B::Failed,
+            (ChipKind::Info, _) | (_, TopicStatus::InProgress) => B::Working,
+            (_, TopicStatus::Done) => B::Done,
+            (_, TopicStatus::Blocked) => B::Failed,
+            (_, TopicStatus::WaitingAnswer | TopicStatus::WaitingReview) => B::Queued,
+            (_, TopicStatus::Open) => B::Quiet,
+        }
+    }
+}
+
 impl RenderOnce for StatusChip {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
-        let colors = theme::chip_colors(self.kind, self.status, cx);
-        let glyph = status_glyph(self.status);
-        let (height, max_w) = match self.style {
-            ChipStyle::Compact => (size::CHIP_COMPACT, size::CHIP_COMPACT_MAX),
-            _ => (size::CHIP, size::CHIP_MAX),
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        // COMPLETENESS.md §2.12: every status is the one StatusBadge, an
+        // outline badge with the state's colored icon and foreground words.
+        let max_w = match self.style {
+            ChipStyle::Compact => size::CHIP_COMPACT_MAX,
+            _ => size::CHIP_MAX,
         };
-        // v12/kit: no pills (NATIVE.md §1 rule 4). Every style draws the
-        // state symbol plus text in the state color, never a filled capsule;
-        // `ChipStyle` is kept for its callers.
-        let filled = false;
-        let text = if self.kind == ChipKind::You {
-            k.you_glyph
-        } else {
-            colors.text
-        };
-        div()
-            .flex_none()
-            .h(height)
-            .max_w(max_w)
-            .flex()
-            .items_center()
-            .gap(space::S4)
-            .rounded(theme::radius::SM)
-            .when(filled, |el| {
-                el.bg(colors.bg).map(|el| match (self.style, glyph) {
-                    (ChipStyle::Compact, _) => el.px(space::S6),
-                    (_, Some(_)) => el.pl(space::S6).pr(space::S8),
-                    (_, None) => el.px(space::S8),
-                })
-            })
-            .t_meta_medium()
-            .font_weight(gpui::FontWeight::NORMAL)
-            .text_color(text)
-            .when_some(glyph, |el, g| {
-                let glyph_color = if !filled && self.kind == ChipKind::You {
-                    k.you_glyph
-                } else {
-                    colors.glyph
-                };
-                el.child(icon(g, theme::icon::CHIP, glyph_color))
-            })
-            .child(div().min_w(px(0.)).one_line().child(self.label))
+        crate::ui::native::badge::StatusBadge::new(self.badge_state(), self.label).max_w(max_w)
     }
 }
 
@@ -285,35 +264,12 @@ impl CountBadge {
 }
 
 impl RenderOnce for CountBadge {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        // §1.8: the one count pill (20, `muted` fill, 12 medium tabular).
         if self.count == 0 {
             return div().into_any_element();
         }
-        let k = theme::colors(cx);
-        // v12/kit: the only count capsule is the gray sidebar count
-        // (NATIVE.md §1 rule 4): `quaternary` fill, `secondary` 11 pt
-        // figures; a mention count keeps its `@` in red text.
-        let n = crate::ui::native::native_colors(cx);
-        let (bg, fg) = match self.kind {
-            BadgeKind::Mention | BadgeKind::MentionCount => (n.quaternary, n.red),
-            _ => (n.quaternary, n.secondary),
-        };
-        let _ = k;
-        div()
-            .flex_none()
-            .h(px(16.))
-            .min_w(px(16.))
-            .px(px(5.))
-            .rounded_full()
-            .bg(bg)
-            .text_color(fg)
-            .flex()
-            .items_center()
-            .justify_center()
-            .t_meta()
-            .tnum()
-            .child(Self::text(self.count, self.kind))
-            .into_any_element()
+        crate::ui::native::badge::CountPill::text(Self::text(self.count, self.kind)).into_any_element()
     }
 }
 
@@ -441,17 +397,9 @@ impl Kbd {
 }
 
 impl RenderOnce for Kbd {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
-        div()
-            .flex_none()
-            // v12/kit: a shortcut reads as menu text, `secondary`, no keycap.
-            .flex()
-            .items_center()
-            .justify_center()
-            .t_ui()
-            .text_color(k.text_2)
-            .child(self.label)
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        // §1.8: one key cap per key.
+        crate::ui::native::badge::KeyCap::new(self.label)
     }
 }
 

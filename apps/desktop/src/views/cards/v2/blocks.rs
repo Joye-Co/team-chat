@@ -838,7 +838,7 @@ pub(crate) fn option_button(
     let style = if recommended {
         nk::PushStyle::Default
     } else {
-        nk::PushStyle::Standard
+        nk::PushStyle::Outline
     };
     let ink = if recommended { n.on_accent } else { n.label };
     nk::disabled_push(
@@ -1038,7 +1038,7 @@ pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> Button {
     ui::native::push_button(
         id,
         label.to_string(),
-        ui::native::PushStyle::Standard,
+        ui::native::PushStyle::Outline,
         ui::native::PushSize::Small,
         cx,
     )
@@ -2423,7 +2423,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                 super::button(
                     ctx.id("ask-evidence"),
                     fill(c::EVIDENCE_ASK, &[("name", &ctx.author)]),
-                    ui::ButtonKind::Secondary,
+                    ui::native::PushStyle::Outline,
                     cx,
                 )
                 .h(px(30.))

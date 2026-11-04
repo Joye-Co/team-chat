@@ -243,7 +243,7 @@ impl DiagramViewer {
                     .items_center()
                     .h(px(28.))
                     .child(
-                        ui::icon_button_sm("dv-out", Sym::Minus)
+                        ui::native::icon_button_bare("dv-out", Sym::Minus, ui::native::IconSize::Small)
                             .named(c::ZOOM_OUT)
                             .on_click(
                                 cx.listener(|this, _, _, cx| {
@@ -264,7 +264,7 @@ impl DiagramViewer {
                             )),
                     )
                     .child(
-                        ui::icon_button_sm("dv-in", Sym::Plus)
+                        ui::native::icon_button_bare("dv-in", Sym::Plus, ui::native::IconSize::Small)
                             .named(c::ZOOM_IN)
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.set_zoom(zoom_in(this.zoom), cx)),
@@ -272,12 +272,12 @@ impl DiagramViewer {
                     ),
             )
             .child(
-                ui::icon_button_sm("dv-fit", Sym::Scan)
+                ui::native::icon_button_bare("dv-fit", Sym::Scan, ui::native::IconSize::Small)
                     .named(c::FIT)
                     .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
             )
             .child(
-                ui::icon_button_sm("dv-src", Sym::Code)
+                ui::native::icon_button_bare("dv-src", Sym::Code, ui::native::IconSize::Small)
                     .named(c::VIEW_SOURCE)
                     .selected(self.show_source)
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -286,14 +286,14 @@ impl DiagramViewer {
                     })),
             )
             .child(
-                ui::icon_button_sm("dv-copy", Sym::Copy)
+                ui::native::icon_button_bare("dv-copy", Sym::Copy, ui::native::IconSize::Small)
                     .named(c::COPY_SOURCE)
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
                     }),
             )
             .child(
-                ui::icon_button_sm("dv-img", Sym::Image)
+                ui::native::icon_button_bare("dv-img", Sym::Image, ui::native::IconSize::Small)
                     .named(c::COPY_IMAGE)
                     .disabled(image.is_none())
                     .on_click(move |_, _, cx| {
@@ -303,7 +303,7 @@ impl DiagramViewer {
                     }),
             )
             .child(
-                ui::icon_button_sm("dv-close", Sym::Close)
+                ui::native::icon_button_bare("dv-close", Sym::Close, ui::native::IconSize::Small)
                     .named(c::CLOSE)
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )

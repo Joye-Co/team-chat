@@ -345,7 +345,7 @@ impl TimelineView {
                 push_button(
                     ElementId::Name(format!("plan-stop-{}", run.id).into()),
                     if stopping { pr::STOPPING } else { t::PLAN_STOP },
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Small,
                     cx,
                 ),

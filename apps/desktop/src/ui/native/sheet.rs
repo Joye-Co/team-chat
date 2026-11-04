@@ -184,7 +184,7 @@ pub fn sheet_buttons(
         push_button(
             format!("{id}-cancel"),
             cancel,
-            PushStyle::Standard,
+            PushStyle::Outline,
             PushSize::Large,
             cx,
         ),
@@ -312,7 +312,7 @@ pub fn alert_button(
 /// The style an alert button gets: `取消` is Standard.
 fn alert_style(label: &str, style: PushStyle) -> PushStyle {
     if label == crate::copy::common::CANCEL {
-        PushStyle::Standard
+        PushStyle::Outline
     } else {
         style
     }
@@ -336,7 +336,7 @@ mod tests {
     fn cancel_in_an_alert_is_never_the_default() {
         assert_eq!(
             alert_style(crate::copy::common::CANCEL, PushStyle::Default),
-            PushStyle::Standard
+            PushStyle::Outline
         );
         assert_eq!(alert_style("离开", PushStyle::Default), PushStyle::Default);
     }

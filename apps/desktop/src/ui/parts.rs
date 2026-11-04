@@ -141,39 +141,16 @@ impl EmptyState {
 }
 
 impl RenderOnce for EmptyState {
-    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = theme::colors(cx);
-        div()
-            .size_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .p(space::S20)
-            .child(
-                // Full width up to 280 pt, so the description wraps in a
-                // narrow column such as the sidebar.
-                div()
-                    .w_full()
-                    .max_w(px(320.))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(space::S4)
-                    .text_center()
-                    .child(icon(self.icon, theme::icon::EMPTY, k.text_3))
-                    .child(
-                        div()
-                            .pt(space::S8)
-                            .t_ui()
-                            .semibold()
-                            .text_color(k.text_1)
-                            .child(self.title),
-                    )
-                    .when_some(self.description, |el, d| {
-                        el.child(div().t_small().text_color(k.text_2).child(d))
-                    })
-                    .when_some(self.action, |el, a| el.child(div().pt(space::S12).child(a))),
-            )
+    fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
+        // COMPLETENESS.md §2.13: the one Empty state.
+        let mut e = crate::ui::native::feedback::Empty::new(self.icon, self.title);
+        if let Some(d) = self.description {
+            e = e.description(d);
+        }
+        if let Some(a) = self.action {
+            e = e.action(a);
+        }
+        e
     }
 }
 

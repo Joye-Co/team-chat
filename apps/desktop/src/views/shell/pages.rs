@@ -167,7 +167,7 @@ pub fn empty_page(leading: Pixels, active: bool, _window: &mut Window, cx: &App)
                             push_button(
                                 "empty-start-dm",
                                 nav::MENU_START_DM,
-                                PushStyle::Standard,
+                                PushStyle::Outline,
                                 PushSize::Regular,
                                 cx,
                             )

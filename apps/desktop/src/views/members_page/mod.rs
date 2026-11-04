@@ -568,7 +568,7 @@ impl MembersPage {
                     push_button(
                         "member-side-chat",
                         c::MEMBERS_SIDE_CHAT,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     )
@@ -580,7 +580,7 @@ impl MembersPage {
                     push_button(
                         "member-pause",
                         c::MEMBERS_PAUSE,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     )
@@ -889,7 +889,7 @@ impl MembersPage {
                     push_button(
                         SharedString::from(format!("member-retry-{i}")),
                         c::MEMBERS_RETRY,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )
@@ -995,7 +995,7 @@ impl MembersPage {
                     push_button(
                         "member-approvals-edit",
                         c::MEMBERS_EDIT_MORE,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Regular,
                         cx,
                     )

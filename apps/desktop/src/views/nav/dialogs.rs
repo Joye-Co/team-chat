@@ -784,12 +784,12 @@ pub fn destructive_alert(
                     .icon(app_icon(metrics::ALERT_ICON))
                     .message(message.clone())
                     .buttons([
-                        alert_button((id, 0usize), destructive, PushStyle::Standard, true, cx)
+                        alert_button((id, 0usize), destructive, PushStyle::Outline, true, cx)
                             .on_click(move |_, window, cx| {
                                 window.close_dialog(cx);
                                 on_confirm(window, cx);
                             }),
-                        alert_button((id, 1usize), common::CANCEL, PushStyle::Standard, false, cx)
+                        alert_button((id, 1usize), common::CANCEL, PushStyle::Outline, false, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ]),
             )

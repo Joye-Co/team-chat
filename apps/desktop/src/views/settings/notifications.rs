@@ -430,7 +430,7 @@ impl Render for NotificationsPage {
                         push_button(
                             "notify-groups-open",
                             s::PER_GROUP_OPEN,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         )

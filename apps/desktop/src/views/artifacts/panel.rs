@@ -163,7 +163,7 @@ impl Render for TopicOutputs {
                 cx,
             )))
             .child(
-                ui::icon_button_sm("artifact-new", Sym::Plus)
+                ui::native::icon_button_bare("artifact-new", Sym::Plus, ui::native::IconSize::Small)
                     .named(ca::NEW)
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.pick_and_upload(None, cx))),
@@ -251,12 +251,12 @@ impl Render for TopicOutputs {
                             .invisible()
                             .group_hover(group, |s| s.visible())
                             .child(
-                                ui::icon_button_sm(
+                                ui::native::icon_button_bare(
                                     ElementId::Name(SharedString::from(format!(
-                                        "panel-artifact-version-{}",
-                                        a.id
+                                        "panel-artifact-version-{}", a.id
                                     ))),
                                     Sym::Plus,
+                                    ui::native::IconSize::Small,
                                 )
                                 .named(ca::NEW_VERSION)
                                 .disabled(busy)

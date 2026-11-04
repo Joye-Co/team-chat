@@ -540,7 +540,7 @@ impl ArtifactPage {
                     crate::ui::native::push_button(
                         "artifact-back-latest",
                         fill(c::ARTIFACT_BACK_TO, &[("v", &latest.to_string())]),
-                        crate::ui::native::PushStyle::Standard,
+                        crate::ui::native::PushStyle::Outline,
                         crate::ui::native::PushSize::Small,
                         cx,
                     )

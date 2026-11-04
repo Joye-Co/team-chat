@@ -145,7 +145,13 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                 .child(ui::icon(Sym::Alert, px(20.), k.text_3))
                 .child(cm::STATE_FAILED_DETAIL)
                 .child(
-                    ui::secondary_button(id(spec, "sysbig"), cm::OPEN_WITH_SYSTEM, cx)
+                    ui::native::push_button(
+                        id(spec, "sysbig"),
+                        cm::OPEN_WITH_SYSTEM,
+                        ui::PushStyle::Outline,
+                        ui::PushSize::Regular,
+                        cx,
+                    )
                         .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
                 ),
         )
@@ -920,11 +926,11 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                         )))
                         .child(div().flex_1())
                         .child(
-                            ui::button(
+                            ui::native::push_button(
                                 id(spec, "copyf"),
                                 cm::VIDEO_COPY_FRAME,
-                                ui::ButtonKind::Secondary,
-                                ui::ButtonSize::Sm,
+                                ui::native::PushStyle::Outline,
+                                ui::native::PushSize::Small,
                                 cx,
                             )
                             .icon(ui::icon(Sym::Copy, px(13.), k.text_2))
@@ -935,11 +941,11 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                             }),
                         )
                         .child(
-                            ui::button(
+                            ui::native::push_button(
                                 id(spec, "sendf"),
                                 cm::VIDEO_SEND_FRAME,
-                                ui::ButtonKind::Secondary,
-                                ui::ButtonSize::Sm,
+                                ui::native::PushStyle::Outline,
+                                ui::native::PushSize::Small,
                                 cx,
                             )
                             .icon(ui::icon(Sym::Send, px(13.), k.text_2))
@@ -1462,11 +1468,11 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         )
         .child(
             footer(cx).child(cm::PDF_NOTE).child(div().flex_1()).child(
-                ui::button(
+                ui::native::push_button(
                     id(spec, "preview"),
                     cm::PDF_OPEN_PREVIEW,
-                    ui::ButtonKind::Secondary,
-                    ui::ButtonSize::Sm,
+                    ui::native::PushStyle::Outline,
+                    ui::native::PushSize::Small,
                     cx,
                 )
                 .icon(ui::icon(Sym::OpenExternal, px(13.), k.text_2))

@@ -252,7 +252,7 @@ impl MembersPage {
                     alert_button(
                         "deactivate-ok",
                         s::DEACTIVATE,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         true,
                         cx,
                     )
@@ -264,7 +264,7 @@ impl MembersPage {
                     alert_button(
                         "deactivate-cancel",
                         common::CANCEL,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         false,
                         cx,
                     )
@@ -563,7 +563,7 @@ impl Render for MembersPage {
                         push_button(
                             "member-invite",
                             s::INVITE_OPEN,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         )
@@ -575,7 +575,7 @@ impl Render for MembersPage {
                         push_button(
                             "member-add-ai",
                             s::ADD_AI_OPEN,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Regular,
                             cx,
                         )
@@ -734,7 +734,7 @@ fn sheet_actions(
         push_button(
             SharedString::from(format!("{id}-cancel")),
             common::CANCEL,
-            PushStyle::Standard,
+            PushStyle::Outline,
             PushSize::Large,
             cx,
         )
@@ -1411,7 +1411,7 @@ impl Render for CharacterForm {
             .buttons([push_button(
                 "member-character-cancel",
                 common::CANCEL,
-                PushStyle::Standard,
+                PushStyle::Outline,
                 PushSize::Large,
                 cx,
             )

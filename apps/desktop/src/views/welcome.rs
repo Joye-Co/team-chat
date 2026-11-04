@@ -72,7 +72,7 @@ impl RenderOnce for Welcome {
                                 push_button(
                                     "welcome-start-dm",
                                     nav::START_DM,
-                                    PushStyle::Standard,
+                                    PushStyle::Outline,
                                     PushSize::Regular,
                                     cx,
                                 )
