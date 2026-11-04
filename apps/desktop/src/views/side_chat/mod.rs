@@ -2,7 +2,7 @@
 //! open 话题. It reads the 话题 up to now; answers stay private; a suggestion
 //! posts into the 话题 only when pressed.
 //!
-//! Layout (380 pt, `sidebar` fill, NATIVE.md §9.2–§9.3): a 52 pt header
+//! Layout (400 pt, `sidebar` fill, NATIVE.md §9.2–§9.3): a 52 pt header
 //! (单独问, the member pop-up button, a borderless close), the privacy line,
 //! the aside anchored to the bottom (a centered context line, my questions
 //! as bubbles at the right, answers under the transcript's sender line,
@@ -32,7 +32,7 @@ use crate::{
         Member, MemberId, Millis,
         v2::{SideChatMessage, SideChatSource, SideChatThread},
     },
-    theme::{self, Type as _, space},
+    theme::{Type as _, space},
     ui::{
         self, Sym,
         native::{
@@ -207,7 +207,8 @@ impl SideChat {
         let services = self.services.clone();
         div()
             .flex_none()
-            .h(theme::TITLE_BAR)
+            // The 52 pt toolbar row: Title 3 like the window's toolbar title.
+            .h(crate::ui::native::metrics::TOOLBAR_ROW)
             .pl(space::S16)
             .pr(space::S10)
             .flex()
@@ -215,7 +216,7 @@ impl SideChat {
             .gap(space::S8)
             .child(
                 div()
-                    .n_headline()
+                    .n_title3()
                     .text_color(k.label)
                     .child(c::SIDE_CHAT_TITLE),
             )
@@ -663,7 +664,7 @@ impl SideChat {
 
 impl PaneView for SideChat {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        theme::SIDE_CHAT_WIDTH
+        crate::views::topic_rail::PANE_WIDE
     }
 }
 

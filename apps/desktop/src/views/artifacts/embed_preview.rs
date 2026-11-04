@@ -17,6 +17,7 @@ use gpui::{
     Styled, Window, WindowBounds, div, point, px,
 };
 
+use crate::ui::native::NativeType as _;
 use crate::{
     app::{Services, main_window_options},
     copy::{artifacts as ca, fill, nav as cn, panel as cp},
@@ -36,7 +37,8 @@ const INLINE_ID: &str = "selftest-weekly";
 const PANE_ID: &str = "selftest-media";
 /// The page's bar colour (#E8590C). The app's theme has no such orange.
 const BAR: (u8, u8, u8) = (0xE8, 0x59, 0x0C);
-const PANE_WIDTH: Pixels = px(440.);
+// v12/fx-topic: the one wide trailing pane width.
+const PANE_WIDTH: Pixels = crate::views::topic_rail::PANE_WIDE;
 /// How far the scrolled scene moves the inline page above the clip edge.
 const CUT: Pixels = px(96.);
 
@@ -165,6 +167,7 @@ impl EmbedPreview {
 impl Render for EmbedPreview {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
+        let n = crate::ui::native::native_colors(cx);
         let version = fill(ca::CARD_VERSION, &[("n", "3")]);
         let inline = WebEmbed::new(INLINE_ID, inline_spec())
             .height(px(300.))
@@ -220,14 +223,19 @@ impl Render for EmbedPreview {
             .flex_col()
             .bg(k.sidebar)
             .child(
+                // --- v12/fx-topic: the pane header in the Title 3 toolbar
+                // style (title over a `secondary` subtitle), the 产出 edge to
+                // edge below the 52 pt row, no hairline under the toolbar.
                 toolbar_band("embed-pane-bar")
                     .px(space::S16)
-                    .gap(space::S8)
-                    .child(div().t_title().text_color(k.text_1).child(cp::ARTIFACTS))
-                    .child(div().t_ui().text_color(k.text_3).child(version)),
+                    .flex_col()
+                    .items_start()
+                    .justify_center()
+                    .child(div().n_title3().text_color(n.label).child(cp::ARTIFACTS))
+                    .child(div().n_subheadline().text_color(n.secondary).child(version)),
             )
-            .child(hairline(cx))
-            .child(div().p(space::S16).child(pane));
+            .child(pane);
+        // --- end v12/fx-topic ---
 
         let mut root = div()
             .size_full()
