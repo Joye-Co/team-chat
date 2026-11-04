@@ -28,7 +28,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::refs::{
         affordance::Anchor,
         cards::{self as ref_parts, BlockParts, CardParts, Pick},
@@ -546,10 +546,10 @@ pub(crate) fn list_with(
         .children(items.iter().enumerate().map(|(i, it)| {
             let pick = Pick::Item(i);
             let (glyph, color, text) = match it.status {
-                Some(CardListStatus::Done) => (Some(Lucide::Check), k.ink_3, k.ink_2),
+                Some(CardListStatus::Done) => (Some(Sym::Check), k.ink_3, k.ink_2),
                 Some(CardListStatus::InProgress) => (None, k.live, k.ink),
-                Some(CardListStatus::Failed) => (Some(Lucide::X), k.bad, k.ink),
-                Some(CardListStatus::Skipped) => (Some(Lucide::Minus), k.ink_3, k.ink_3),
+                Some(CardListStatus::Failed) => (Some(Sym::Close), k.bad, k.ink),
+                Some(CardListStatus::Skipped) => (Some(Sym::Minus), k.ink_3, k.ink_3),
                 Some(CardListStatus::Todo) | None => (None, k.ink_3, k.ink_2),
             };
             let row = div()
@@ -714,7 +714,7 @@ fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> Any
         .font_weight(theme::MEDIUM_WEIGHT)
         .hover(|s| s.text_color(k.ink_2))
         .child(label.to_string())
-        .child(ui::icon(Lucide::ChevronRight, px(14.), k.ink_3))
+        .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
         .on_click(move |_, window, cx| a.open(&t, window, cx))
         .into_any_element()
 }
@@ -808,7 +808,7 @@ pub(crate) fn decision(
                                 el.child(meta(div()).text_color(k.ink_3).child(c::RECOMMENDED))
                             })
                             .when(picked, |el| {
-                                el.child(ui::icon(Lucide::Check, px(14.), k.ink))
+                                el.child(ui::icon(Sym::Check, px(14.), k.ink))
                             })
                         }),
                 )
@@ -935,7 +935,7 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
         } else {
             ui::motion::check_mark(
                 ctx.id("record-check"),
-                ui::icon(Lucide::Check, px(16.), k.ok),
+                ui::icon(Sym::Check, px(16.), k.ok),
                 px(16.),
                 fresh,
                 cx,
@@ -1291,7 +1291,7 @@ pub(crate) fn input_control(
                         .text_color(if empty { k.ink_3 } else { k.ink })
                         .child(shown),
                 )
-                .child(ui::icon(Lucide::ChevronDown, px(14.), k.ink_3));
+                .child(ui::icon(Sym::ChevronDown, px(14.), k.ink_3));
             if !live {
                 return trigger.into_any_element();
             }
@@ -1352,7 +1352,7 @@ pub(crate) fn input_control(
                         .map(|el| {
                             if lock {
                                 el.bg(k.sunken).text_color(k.ink_2).child(ui::icon(
-                                    Lucide::Lock,
+                                    Sym::Lock,
                                     px(12.),
                                     k.ink_2,
                                 ))
@@ -1364,7 +1364,7 @@ pub(crate) fn input_control(
                                     .text_color(k.ink)
                                     .when(on, |el| {
                                         el.font_weight(theme::MEDIUM_WEIGHT).child(ui::icon(
-                                            Lucide::Check,
+                                            Sym::Check,
                                             px(13.),
                                             k.ink,
                                         ))
@@ -1436,7 +1436,7 @@ pub(crate) fn input_control(
                         .child(line_input(&field, !live, window, cx)),
                 )
                 .when(kind == InputKind::Date, |el| {
-                    el.child(ui::icon(Lucide::Calendar, px(14.), k.ink_3))
+                    el.child(ui::icon(Sym::Calendar, px(14.), k.ink_3))
                 })
                 .into_any_element()
         }
@@ -1541,7 +1541,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                     .items_center()
                     .gap(space::S8)
                     .text_color(k.ink_3)
-                    .child(ui::icon(Lucide::Image, px(14.), k.ink_3))
+                    .child(ui::icon(Sym::Image, px(14.), k.ink_3))
                     .child(fill(c::DRAFT_IMAGES, &[("n", &images.len().to_string())]))
                     .into_any_element(),
             );
@@ -1717,7 +1717,7 @@ fn plan(
                 current_seen = true;
             }
             let glyph: AnyElement = match it.state {
-                RunPlanState::Done => ui::icon(Lucide::Check, px(14.), k.ink_3).into_any_element(),
+                RunPlanState::Done => ui::icon(Sym::Check, px(14.), k.ink_3).into_any_element(),
                 RunPlanState::Current => ui::motion::breathe(
                     ctx.id(format!("plan-dot-{i}")),
                     div().size(px(8.)).rounded_full().bg(k.live),
@@ -2144,7 +2144,7 @@ fn diff(
 /// A proof chip: 26 pt, radius 7, 1 pt `line`, a state glyph and the label.
 pub(crate) fn proof_chip(
     id: SharedString,
-    glyph: Option<(Lucide, Hsla)>,
+    glyph: Option<(Sym, Hsla)>,
     label: String,
     url: Option<String>,
     cx: &App,
@@ -2199,8 +2199,8 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         }
         let bp = part(b);
         let glyph = match state {
-            Some(EvidenceState::Pass) => Some((Lucide::Check, k.ok)),
-            Some(EvidenceState::Fail) => Some((Lucide::X, k.bad)),
+            Some(EvidenceState::Pass) => Some((Sym::Check, k.ok)),
+            Some(EvidenceState::Fail) => Some((Sym::Close, k.bad)),
             _ => None,
         };
         // A result with a sentence of detail reads as a line; a bare count
@@ -2414,7 +2414,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .rounded(theme::radius::MD)
             .bg(k.sunken)
             .text_color(k.ink_2)
-            .child(ui::icon(Lucide::Info, px(14.), k.ink_3))
+            .child(ui::icon(Sym::Info, px(14.), k.ink_3))
             .child(
                 div()
                     .flex_1()
@@ -2439,7 +2439,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
 // ---------------------------------------------------------------------------
 // Refs
 
-fn ref_tile(glyph: Lucide, dashed: bool, cx: &App) -> AnyElement {
+fn ref_tile(glyph: Sym, dashed: bool, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .flex_none()
@@ -2559,7 +2559,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                     let tone = state.as_ref().map_or(PrTone::Plain, |s| s.tone);
                     (
                         ref_tile(
-                            if tone == PrTone::Merged { Lucide::GitMerge } else { Lucide::GitPullRequest },
+                            if tone == PrTone::Merged { Sym::Merge } else { Sym::PullRequest },
                             false,
                             cx,
                         ),
@@ -2583,7 +2583,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         let shown = version.unwrap_or(a.summary.version);
                         let newer = a.summary.version > shown;
                         (
-                            ref_tile(Lucide::FileText, false, cx),
+                            ref_tile(Sym::Document, false, cx),
                             a.summary.title.clone(),
                             fill(
                                 c::REF_ARTIFACT_LINE,
@@ -2596,7 +2596,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         )
                     }
                     None => (
-                        ref_tile(Lucide::FileX, true, cx),
+                        ref_tile(Sym::MissingFile, true, cx),
                         c::REF_ARTIFACT_GONE.to_string(),
                         fill(c::REF_ARTIFACT_GONE_DETAIL, &[("title", label)]),
                         None,
@@ -2625,7 +2625,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                             format!("{}/{}", (done + 1).min(r.plan.len()), r.plan.len())
                         });
                     (
-                        ref_tile(Lucide::List, false, cx),
+                        ref_tile(Sym::List, false, cx),
                         topic.map(|t| t.title).unwrap_or_else(|| label.clone()),
                         fill(c::REF_TOPIC_LINE, &[("group", &group), ("status", &status)]),
                         run,
@@ -2643,14 +2643,14 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                     )
                 }
                 RefTarget::Url { url } => (
-                    ref_tile(Lucide::Link, false, cx),
+                    ref_tile(Sym::Link, false, cx),
                     label.clone(),
                     url.clone(),
                     None,
                     k.ink_2,
                 ),
                 RefTarget::Unknown => (
-                    ref_tile(Lucide::Link, false, cx),
+                    ref_tile(Sym::Link, false, cx),
                     label.clone(),
                     String::new(),
                     None,

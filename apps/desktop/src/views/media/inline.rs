@@ -28,7 +28,7 @@ use crate::{
     markdown,
     theme::{self, Type as _, radius, space},
     ui::{
-        self, Lucide,
+        self, Sym,
         web_embed::{WebEmbed, WebEmbedSpec},
     },
 };
@@ -188,7 +188,7 @@ fn open_tool(spec: &InlineSpec, suffix: &str, opening: Opening) -> gpui_componen
     let s = spec.clone();
     tool(
         ElementId::Name(format!("{}-{suffix}", spec.id).into()),
-        Lucide::ExternalLink,
+        Sym::OpenExternal,
         cm::OPEN_IN_WINDOW,
     )
     .on_click(move |_, _, cx| open(&s, opening.clone(), cx))
@@ -243,7 +243,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         .gap(space::S4)
         .cursor_pointer()
         .hover(|st| st.text_color(k.text_1))
-        .child(ui::icon(Lucide::ChevronDown, px(14.), k.text_3))
+        .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
         .child(cm::EXPAND)
         .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
     let foot = match spec.target.provider.as_deref() {
@@ -264,7 +264,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Lucide::AppWindow, spec.title.clone(), cx)
+            card_header(Sym::OpenWindow, spec.title.clone(), cx)
                 .child(version_chip(spec.key.version, cx))
                 .children(notice)
                 .child(
@@ -272,7 +272,7 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
                         .flex()
                         .items_center()
                         .gap(space::S4)
-                        .child(ui::icon(Lucide::Shield, px(12.), k.text_3))
+                        .child(ui::icon(Sym::Shield, px(12.), k.text_3))
                         .child(div().t_meta().text_color(k.text_3).child(cm::SANDBOX)),
                 )
                 .child(div().flex_1())
@@ -324,7 +324,7 @@ fn markdown_card(
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Lucide::FileText, media.file_name().to_string(), cx)
+            card_header(Sym::Document, media.file_name().to_string(), cx)
                 .child(mono(
                     fill(cm::MD_WORDS, &[("n", &group_digits(md.stats.chars as u64))]),
                     k.text_3,
@@ -349,7 +349,7 @@ fn markdown_card(
                 .id(ElementId::Name(format!("{}-more", spec.id).into()))
                 .cursor_pointer()
                 .hover(|st| st.text_color(k.text_1))
-                .child(ui::icon(Lucide::ChevronDown, px(14.), k.text_3))
+                .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
                 .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
                 .child(div().flex_1())
                 .child(chips)
@@ -499,7 +499,7 @@ pub fn play_badge(size: f32) -> gpui::Div {
         .items_center()
         .justify_center()
         .child(ui::icon(
-            Lucide::Play,
+            Sym::Play,
             px(size * 0.4),
             gpui::hsla(0., 0., 0.08, 1.),
         ))
@@ -626,7 +626,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                         .gap(space::S4)
                         .whitespace_nowrap()
                         .cursor_pointer()
-                        .child(ui::icon(Lucide::Send, px(12.), k.content))
+                        .child(ui::icon(Sym::Send, px(12.), k.content))
                         .child(
                             div()
                                 .t_meta()
@@ -792,7 +792,7 @@ fn audio(
         )
         .child(
             footer(cx)
-                .child(ui::icon(Lucide::FileText, px(13.), k.text_3))
+                .child(ui::icon(Sym::Document, px(13.), k.text_3))
                 .child(footer_text)
                 .child(div().flex_1())
                 .child(open_tool(spec, "open", Opening::default())),
@@ -849,7 +849,7 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                 .gap(space::S8)
                 .border_t_1()
                 .border_color(k.sep)
-                .child(ui::icon(Lucide::FileText, theme::icon::ROW, k.text_2))
+                .child(ui::icon(Sym::Document, theme::icon::ROW, k.text_2))
                 .child(
                     div()
                         .t_small()
@@ -868,7 +868,7 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
                 ))
                 .child(div().flex_1())
                 .child(div().t_meta().text_color(k.text_2).child(cm::PDF_OPEN))
-                .child(ui::icon(Lucide::ChevronRight, px(14.), k.text_2)),
+                .child(ui::icon(Sym::ChevronRight, px(14.), k.text_2)),
         )
         .on_click(move |_, _, cx| open(&s, Opening::default(), cx))
         .into_any_element()
@@ -937,7 +937,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Lucide::FileCode, String::new(), cx)
+            card_header(Sym::CodeFile, String::new(), cx)
                 .child(mono(media.entry.clone(), k.text_1))
                 .child(div().t_meta().text_color(k.text_3).child(fill(
                     cm::CODE_RANGE,
@@ -949,7 +949,7 @@ fn code(spec: &InlineSpec, media: &Arc<Media>, c: &store::Code, cx: &App) -> Any
                 )))
                 .child(div().flex_1())
                 .child(
-                    tool(copy_id, Lucide::Copy, cm::COPY).on_click(move |_, _, cx| {
+                    tool(copy_id, Sym::Copy, cm::COPY).on_click(move |_, _, cx| {
                         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text_all.clone()));
                     }),
                 )
@@ -1015,7 +1015,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         .w(INLINE_W)
         .max_w_full()
         .child(
-            card_header(Lucide::Table, media.file_name().to_string(), cx)
+            card_header(Sym::Table, media.file_name().to_string(), cx)
                 .child(mono(
                     fill(
                         cm::TABLE_META,
@@ -1047,7 +1047,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                     cm::TABLE_SHOW_ALL,
                     &[("n", &t.total_rows.to_string())],
                 ))
-                .child(ui::icon(Lucide::ChevronRight, px(13.), k.text_2))
+                .child(ui::icon(Sym::ChevronRight, px(13.), k.text_2))
                 .on_click(move |_, _, cx| open(&s, Opening::default(), cx)),
         )
         .into_any_element()

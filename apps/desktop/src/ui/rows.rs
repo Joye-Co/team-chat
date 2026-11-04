@@ -12,7 +12,7 @@ use crate::{
     theme::{self, Type as _, size, space},
     ui::{
         chip::{BadgeKind, CountBadge},
-        icons::{Lucide, icon},
+        icons::{Sym, icon},
     },
 };
 
@@ -158,9 +158,9 @@ impl RenderOnce for SectionHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
         let chevron = if self.collapsed {
-            Lucide::ChevronRight
+            Sym::ChevronRight
         } else {
-            Lucide::ChevronDown
+            Sym::ChevronDown
         };
         div()
             .id(self

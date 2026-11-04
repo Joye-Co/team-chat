@@ -34,7 +34,7 @@ use crate::{
         v2::AskKind,
     },
     theme::{self, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide},
+    ui::{self, ButtonKind, ButtonSize, Sym},
     views::shell::clock,
 };
 
@@ -502,7 +502,7 @@ fn footer_band(cx: &App) -> gpui::Div {
 }
 
 /// The note at the end of a footer, with an optional glyph.
-fn footer_note(text: String, glyph: Option<Lucide>, mono: bool, cx: &App) -> AnyElement {
+fn footer_note(text: String, glyph: Option<Sym>, mono: bool, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .ml_auto()
@@ -529,7 +529,7 @@ fn record_parts(
     // Only the answer I just made draws; yesterday's shows at rest.
     let check = ui::motion::check_mark(
         SharedString::from(format!("desk-check-{key}")),
-        ui::icon(Lucide::Check, px(16.), k.ok),
+        ui::icon(Sym::Check, px(16.), k.ok),
         px(16.),
         ui::motion::just_answered(done.at),
         cx,
@@ -807,7 +807,7 @@ fn v2_parts(
         }
         chips.push(chip(
             format!("desk-chip-pr-{key}"),
-            Some((Lucide::GitPullRequest, k.ink_3)),
+            Some((Sym::PullRequest, k.ink_3)),
             parts,
             cx,
         ));
@@ -831,10 +831,10 @@ fn v2_parts(
                 ..
             } => {
                 let glyph = match state {
-                    Some(EvidenceState::Pass) => Some((Lucide::Check, k.ok)),
-                    Some(EvidenceState::Fail) => Some((Lucide::X, k.bad)),
+                    Some(EvidenceState::Pass) => Some((Sym::Check, k.ok)),
+                    Some(EvidenceState::Fail) => Some((Sym::Close, k.bad)),
                     _ if detail.as_deref().is_some_and(is_duration) => {
-                        Some((Lucide::Play, k.ink_3))
+                        Some((Sym::Play, k.ink_3))
                     }
                     _ => None,
                 };
@@ -954,7 +954,7 @@ fn v2_parts(
         )),
         (Some(i), false, _) => Some(footer_note(
             fill(c::DESK_NO_UNDO, &[("verb", &i.verb)]),
-            Some(Lucide::Lock),
+            Some(Sym::Lock),
             false,
             cx,
         )),

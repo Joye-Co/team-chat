@@ -20,7 +20,7 @@ use super::{
 use crate::{
     copy::diagrams as c,
     theme::{self, Type as _, radius, space},
-    ui::{self, Lucide, NamedButton as _},
+    ui::{self, Sym, NamedButton as _},
 };
 
 pub const MIN_ZOOM: f32 = 0.25;
@@ -221,7 +221,7 @@ impl DiagramViewer {
             .gap(space::S8)
             .border_b_1()
             .border_color(k.line)
-            .child(ui::icon(Lucide::Workflow, px(16.), k.ink_3))
+            .child(ui::icon(Sym::Diagram, px(16.), k.ink_3))
             .child(
                 div().t_bar_title().text_color(k.ink).child(
                     self.spec
@@ -248,7 +248,7 @@ impl DiagramViewer {
                     .border_1()
                     .border_color(k.line_2)
                     .child(
-                        ui::icon_button_sm("dv-out", Lucide::Minus)
+                        ui::icon_button_sm("dv-out", Sym::Minus)
                             .named(c::ZOOM_OUT)
                             .on_click(
                                 cx.listener(|this, _, _, cx| {
@@ -269,7 +269,7 @@ impl DiagramViewer {
                             )),
                     )
                     .child(
-                        ui::icon_button_sm("dv-in", Lucide::Plus)
+                        ui::icon_button_sm("dv-in", Sym::Plus)
                             .named(c::ZOOM_IN)
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.set_zoom(zoom_in(this.zoom), cx)),
@@ -284,7 +284,7 @@ impl DiagramViewer {
                     ui::ButtonSize::Sm,
                     cx,
                 )
-                .icon(ui::icon(Lucide::Scan, px(14.), k.ink_2))
+                .icon(ui::icon(Sym::Scan, px(14.), k.ink_2))
                 .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
             )
             .child(
@@ -295,7 +295,7 @@ impl DiagramViewer {
                     ui::ButtonSize::Sm,
                     cx,
                 )
-                .icon(ui::icon(Lucide::Code, px(14.), k.ink_2))
+                .icon(ui::icon(Sym::Code, px(14.), k.ink_2))
                 .selected(self.show_source)
                 .on_click(cx.listener(|this, _, _, cx| {
                     this.show_source = !this.show_source;
@@ -310,7 +310,7 @@ impl DiagramViewer {
                     ui::ButtonSize::Sm,
                     cx,
                 )
-                .icon(ui::icon(Lucide::Copy, px(14.), k.ink_2))
+                .icon(ui::icon(Sym::Copy, px(14.), k.ink_2))
                 .on_click(move |_, _, cx| {
                     cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
                 }),
@@ -323,7 +323,7 @@ impl DiagramViewer {
                     ui::ButtonSize::Sm,
                     cx,
                 )
-                .icon(ui::icon(Lucide::Image, px(14.), k.ink_2))
+                .icon(ui::icon(Sym::Image, px(14.), k.ink_2))
                 .disabled(image.is_none())
                 .on_click(move |_, _, cx| {
                     if let Some(i) = &image {
@@ -332,7 +332,7 @@ impl DiagramViewer {
                 }),
             )
             .child(
-                ui::icon_button_sm("dv-close", Lucide::X)
+                ui::icon_button_sm("dv-close", Sym::Close)
                     .named(c::CLOSE)
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )

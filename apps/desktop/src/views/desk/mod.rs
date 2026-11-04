@@ -29,7 +29,7 @@ use crate::{
     copy::desk as c,
     data::Millis,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::shell::{PageView, TitleBarSpec},
 };
 
@@ -388,7 +388,7 @@ impl Render for DeskPage {
 
         let empty = quiet.then(|| {
             div().mt(px(96.)).child(
-                ui::EmptyState::new(Lucide::CircleCheck, c::DESK_EMPTY)
+                ui::EmptyState::new(Sym::Done, c::DESK_EMPTY)
                     .description(c::DESK_EMPTY_LINE),
             )
         });
@@ -444,7 +444,7 @@ pub fn side_toggle(id: &'static str, hide: bool, cx: &mut Context<DeskPage>) -> 
         .justify_center()
         .cursor_pointer()
         .hover(|s| s.bg(k.hover))
-        .child(ui::icon(Lucide::PanelRight, theme::icon::ROW, k.ink_3))
+        .child(ui::icon(Sym::Inspector, theme::icon::ROW, k.ink_3))
         .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(name).build(window, cx))
         .on_click(cx.listener(move |this, _, _, cx| {
             this.side_hidden = hide;

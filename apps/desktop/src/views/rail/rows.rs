@@ -10,7 +10,7 @@ use super::{RailView, model::RowState, modes::TopicItem};
 use crate::{
     data::Member,
     theme::{self, Type as _, space},
-    ui::{self, Lucide, MemberAvatar, Ring, RowSurface},
+    ui::{self, Sym, MemberAvatar, Ring, RowSurface},
 };
 
 /// A row's click handler.
@@ -57,8 +57,9 @@ impl RailView {
                 .into_any_element()
         };
         match state {
+            // NATIVE.md §6: needs you is `exclamationmark.circle.fill` in amber.
             RowState::NeedsYou => {
-                center(div().size(DOT).rounded_full().bg(k.you).into_any_element())
+                center(ui::sym(Sym::NeedsYou, ui::SymSize::INLINE, k.you).into_any_element())
             }
             RowState::Working(_) if style == SlotStyle::Tile => center(
                 MemberAvatar::new(tile, theme::RAIL_SLOT)
@@ -71,16 +72,12 @@ impl RailView {
             }
             // Done is quiet: an `ink-3` check, not a green one (§7.3).
             RowState::Done => {
-                center(ui::icon(Lucide::Check, theme::RAIL_STATE_CHECK, k.ink_3).into_any_element())
+                center(ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, k.ink_3).into_any_element())
             }
-            RowState::Waiting => center(
-                div()
-                    .size(DOT)
-                    .rounded_full()
-                    .border(theme::RAIL_STATE_STROKE)
-                    .border_color(k.ink_3)
-                    .into_any_element(),
-            ),
+            // Waiting on someone: `clock` in `secondary` (§6).
+            RowState::Waiting => {
+                center(ui::sym(Sym::Waiting, ui::SymSize::INLINE, k.ink_3).into_any_element())
+            }
             RowState::Idle => center(div().into_any_element()),
         }
     }
@@ -174,9 +171,9 @@ impl RailView {
             .justify_center()
             .child(ui::icon(
                 if folded {
-                    Lucide::ChevronRight
+                    Sym::ChevronRight
                 } else {
-                    Lucide::ChevronDown
+                    Sym::ChevronDown
                 },
                 px(12.),
                 k.ink_3,

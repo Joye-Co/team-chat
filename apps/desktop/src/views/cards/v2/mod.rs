@@ -54,7 +54,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide},
+    ui::{self, ButtonKind, ButtonSize, Sym},
 };
 
 #[allow(unused_imports)]
@@ -729,25 +729,25 @@ pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
 }
 
 fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
-    let glyph = |name: Lucide| ui::icon(name, px(16.), t.mark).into_any_element();
+    let glyph = |name: Sym| ui::icon(name, px(16.), t.mark).into_any_element();
     match state {
-        CardState::Pending => glyph(Lucide::CircleDot),
-        CardState::WaitingOn => glyph(Lucide::Hourglass),
-        CardState::Executing { progress, .. } if progress.waiting => glyph(Lucide::Hourglass),
+        CardState::Pending => glyph(Sym::Live),
+        CardState::WaitingOn => glyph(Sym::Hourglass),
+        CardState::Executing { progress, .. } if progress.waiting => glyph(Sym::Hourglass),
         CardState::Sending { .. } => ui::motion::spinner().color(t.mark).into_any_element(),
         CardState::Answered { answer }
         | CardState::Done {
             answer: Some(answer),
         } => ui::motion::check_mark(
             ctx.id("strip-check"),
-            ui::icon(Lucide::CircleCheck, px(16.), t.mark),
+            ui::icon(Sym::Done, px(16.), t.mark),
             px(16.),
             ui::motion::just_answered(answer.at),
             cx,
         ),
         CardState::Done { answer: None } => ui::motion::check_mark(
             ctx.id("strip-check"),
-            ui::icon(Lucide::CircleCheck, px(16.), t.mark),
+            ui::icon(Sym::Done, px(16.), t.mark),
             px(16.),
             false,
             cx,
@@ -764,9 +764,9 @@ fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
                 cx,
             ))
             .into_any_element(),
-        CardState::Failed { .. } | CardState::SendFailed { .. } => glyph(Lucide::CircleX),
-        CardState::Expired => glyph(Lucide::Clock),
-        CardState::Superseded => glyph(Lucide::Ban),
+        CardState::Failed { .. } | CardState::SendFailed { .. } => glyph(Sym::Failed),
+        CardState::Expired => glyph(Sym::Waiting),
+        CardState::Superseded => glyph(Sym::Stopped),
         CardState::Info => div().into_any_element(),
     }
 }
@@ -1183,14 +1183,14 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .gap(space::S8)
             .child(match waiting.as_ref().map(|w| w.2) {
                 _ if updated.is_some() => {
-                    ui::icon(Lucide::RotateCw, px(16.), t.mark).into_any_element()
+                    ui::icon(Sym::Refresh, px(16.), t.mark).into_any_element()
                 }
                 Some(PendTone::Live) => ui::motion::spinner().color(t.mark).into_any_element(),
                 Some(PendTone::Quiet) => {
-                    ui::icon(Lucide::CircleAlert, px(16.), t.mark).into_any_element()
+                    ui::icon(Sym::Alert, px(16.), t.mark).into_any_element()
                 }
                 Some(PendTone::Bad) => {
-                    ui::icon(Lucide::CircleX, px(16.), t.mark).into_any_element()
+                    ui::icon(Sym::Failed, px(16.), t.mark).into_any_element()
                 }
                 None => strip_icon(ctx.state, &t, ctx, cx),
             })
@@ -1500,7 +1500,7 @@ fn note(text: String, lock: bool, cx: &App) -> AnyElement {
         .gap(space::S6)
         .text_color(k.ink_3)
         .when(lock, |el| {
-            el.child(ui::icon(Lucide::Lock, px(13.), k.ink_3))
+            el.child(ui::icon(Sym::Lock, px(13.), k.ink_3))
         })
         .child(div().min_w(px(0.)).one_line().child(text))
         .into_any_element()
@@ -1795,7 +1795,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         .hover(|s| s.bg(k.hover))
                         .text_size(px(13.))
                         .text_color(k.ink_2)
-                        .child(ui::icon(Lucide::Monitor, px(14.), k.ink_2))
+                        .child(ui::icon(Sym::Computer, px(14.), k.ink_2))
                         .child(fill(c::PLAN_WATCH_COMPUTER, &[("name", &ctx.author)]))
                         .on_click(move |_, window, cx| a2.open_live(run.as_deref(), window, cx))
                         .into_any_element(),
@@ -1826,7 +1826,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     let mut b = button(ctx.id(format!("act-{}", x.id)), x.label.clone(), kind, cx)
                         .on_click(move |_, window, cx| a.press(&action, window, cx));
                     if reverse {
-                        b = b.icon(ui::icon(Lucide::RotateCcw, px(14.), theme::colors(cx).ink));
+                        b = b.icon(ui::icon(Sym::Retry, px(14.), theme::colors(cx).ink));
                     }
                     items.push(b.into_any_element());
                 }

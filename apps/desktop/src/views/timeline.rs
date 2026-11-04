@@ -50,7 +50,7 @@ use crate::{
         Change, GroupId, Member, MemberLevel, Message, MessageId, SessionState, Topic, TopicId,
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 use model::ListOp;
@@ -718,7 +718,7 @@ impl Render for TimelineView {
                 .flex()
                 .justify_center()
                 .child(
-                    jump_pill("jump-latest", label, Lucide::ArrowDown, cx).on_click(cx.listener(
+                    jump_pill("jump-latest", label, Sym::ArrowDown, cx).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.jump_to_latest();
                             cx.notify();
@@ -738,7 +738,7 @@ impl Render for TimelineView {
                     jump_pill(
                         "jump-unread",
                         fill(t::JUMP_UNREAD, &[("n", &self.unread_at_open.to_string())]),
-                        Lucide::ArrowUp,
+                        Sym::ArrowUp,
                         cx,
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -822,7 +822,7 @@ impl Render for TimelineView {
 fn jump_pill(
     id: &'static str,
     label: String,
-    glyph: Lucide,
+    glyph: Sym,
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
     let colors = theme::colors(cx);

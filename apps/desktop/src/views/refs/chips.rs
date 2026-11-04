@@ -15,12 +15,12 @@ use crate::{
     copy::refs as c,
     data::{ChatProvider, DraftRef, Message},
     theme::{self, Type as _, radius, space},
-    ui::{self, Lucide, NamedButton as _},
+    ui::{self, Sym, NamedButton as _},
     views::timeline::extras::{ExtrasContext, MessageExtra, Placement},
 };
 
 /// The chip glyph of a reference, from its part kind (or the block for a whole block).
-pub fn glyph(r: &chat_core::proto::BlockRefInput) -> Lucide {
+pub fn glyph(r: &chat_core::proto::BlockRefInput) -> Sym {
     let kind = r.part.as_ref().map(|p| p.kind.as_str());
     let has = |k: &str| {
         r.part
@@ -29,20 +29,20 @@ pub fn glyph(r: &chat_core::proto::BlockRefInput) -> Lucide {
             .is_some_and(|keys| keys.contains_key(k))
     };
     match kind {
-        Some("cell" | "row" | "column") => Lucide::Table,
-        Some("point" | "series") => Lucide::ChartLine,
-        Some("bar") => Lucide::ChartColumn,
-        Some("metric") => Lucide::Hash,
-        Some("step") => Lucide::ListChecks,
-        Some("hunk") => Lucide::FileDiff,
-        Some("line") if has("side") => Lucide::FileDiff,
-        Some("line") => Lucide::Code,
-        Some("image") => Lucide::Image,
-        Some("node") => Lucide::Workflow,
-        Some("element") => Lucide::FileText,
-        Some("item") => Lucide::List,
-        _ if r.artifact.is_some() => Lucide::FileText,
-        _ => Lucide::TextQuote,
+        Some("cell" | "row" | "column") => Sym::Table,
+        Some("point" | "series") => Sym::Chart,
+        Some("bar") => Sym::BarChart,
+        Some("metric") => Sym::Topic,
+        Some("step") => Sym::Checklist,
+        Some("hunk") => Sym::Diff,
+        Some("line") if has("side") => Sym::Diff,
+        Some("line") => Sym::Code,
+        Some("image") => Sym::Image,
+        Some("node") => Sym::Diagram,
+        Some("element") => Sym::Document,
+        Some("item") => Sym::List,
+        _ if r.artifact.is_some() => Sym::Document,
+        _ => Sym::Quote,
     }
 }
 
@@ -180,10 +180,10 @@ pub fn composer_chip(
             d.child(div().flex_none().text_color(k.ink_3).child(c::UPDATED))
         })
         .child(
-            ui::icon_button(ElementId::Name(format!("{id:?}-x").into()), Lucide::X)
+            ui::icon_button(ElementId::Name(format!("{id:?}-x").into()), Sym::Close)
                 .with_size(px(22.))
                 .rounded(radius::SM)
-                .icon(ui::button_glyph(Lucide::X, theme::icon::TAG, px(22.)))
+                .icon(ui::button_glyph(Sym::Close, theme::icon::TAG, px(22.)))
                 .named(c::REMOVE)
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
@@ -333,7 +333,7 @@ pub fn side_lines(labels: &[String], cx: &App) -> AnyElement {
                 .min_w_0()
                 .t_meta()
                 .text_color(k.ink_3)
-                .child(ui::icon(Lucide::TextQuote, theme::icon::TAG, k.ink_3))
+                .child(ui::icon(Sym::Quote, theme::icon::TAG, k.ink_3))
                 .when(!a.trim().is_empty(), |d| {
                     d.child(div().flex_none().one_line().child(a.trim_end().to_string()))
                 })
@@ -381,9 +381,9 @@ pub fn sent_refs(message: &Message, refs: &[BlockRef], cx: &App) -> AnyElement {
                     .h(px(22.))
                     .t_meta()
                     .text_color(k.ink_3)
-                    .child(ui::icon(Lucide::TextQuote, theme::icon::TAG, k.ink_3))
+                    .child(ui::icon(Sym::Quote, theme::icon::TAG, k.ink_3))
                     .child(super::cited(refs.len()))
-                    .child(ui::icon(Lucide::ChevronDown, theme::icon::TAG, k.ink_3)),
+                    .child(ui::icon(Sym::ChevronDown, theme::icon::TAG, k.ink_3)),
             )
         })
         .children(lines)

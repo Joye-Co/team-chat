@@ -23,7 +23,7 @@ use crate::{
     copy::{common, fill, nav},
     data::{Change, GroupId, GroupKind, GroupSummary, Member, TodoItem, TodoReason, TopicStatus},
     theme::{self, Type as _, size, space},
-    ui::{self, BadgeKind, CountBadge, GroupGlyph, Kbd, Lucide, MemberAvatar, RowSurface},
+    ui::{self, BadgeKind, CountBadge, GroupGlyph, Kbd, Sym, MemberAvatar, RowSurface},
     views::nav::{NewGroup, QuickSwitch, StartDm},
 };
 
@@ -43,7 +43,7 @@ enum Section {
 
 /// A menu row (§7.12): 32 pt, a 16 pt glyph in `text-2` (or `danger-text`
 /// for a destructive item), 8 pt gap, `ui` 14.
-pub fn menu_item(glyph: Lucide, label: &'static str, danger: bool) -> PopupMenuItem {
+pub fn menu_item(glyph: Sym, label: &'static str, danger: bool) -> PopupMenuItem {
     PopupMenuItem::element(move |_, cx| {
         let k = theme::colors(cx);
         let (glyph_color, text) = if danger {
@@ -208,9 +208,9 @@ impl Sidebar {
         let k = theme::colors(cx);
         let collapsed = self.collapsed.contains(&section);
         let chevron = if collapsed {
-            Lucide::ChevronRight
+            Sym::ChevronRight
         } else {
-            Lucide::ChevronDown
+            Sym::ChevronDown
         };
         let open_todo = section == Section::Todo;
         // While the 待办 list fills the middle column, its header is the
@@ -345,7 +345,7 @@ impl Sidebar {
             };
             Some(CountBadge::new(group.mentions, kind).into_any_element())
         } else if muted {
-            Some(ui::icon(Lucide::BellOff, theme::icon::CHIP, k.text_3).into_any_element())
+            Some(ui::icon(Sym::Muted, theme::icon::CHIP, k.text_3).into_any_element())
         } else if group.kind == GroupKind::Dm && group.unread > 0 {
             Some(CountBadge::new(group.unread, BadgeKind::Unread).into_any_element())
         } else {
@@ -394,9 +394,9 @@ impl Sidebar {
             let services = menu_services.clone();
             let g = menu_group.clone();
             let (mute_label, mute_icon) = if muted {
-                (nav::UNMUTE, Lucide::Bell)
+                (nav::UNMUTE, Sym::Bell)
             } else {
-                (nav::MUTE, Lucide::BellOff)
+                (nav::MUTE, Sym::Muted)
             };
             let mute_services = services.clone();
             let mute_id = g.id.clone();
@@ -414,7 +414,7 @@ impl Sidebar {
                 let (rename_id, rename_name) = (g.id.clone(), g.name.clone());
                 // The destructive item in its own group, in `danger-text`.
                 menu.item(
-                    menu_item(Lucide::Pencil, nav::RENAME_GROUP, false).on_click(
+                    menu_item(Sym::Edit, nav::RENAME_GROUP, false).on_click(
                         move |_, window, cx| {
                             super::nav::rename::open_rename_group(
                                 rename_services.clone(),
@@ -427,7 +427,7 @@ impl Sidebar {
                     ),
                 )
                 .item(
-                    menu_item(Lucide::UserPlus, nav::ADD_MEMBERS, false).on_click(
+                    menu_item(Sym::Invite, nav::ADD_MEMBERS, false).on_click(
                         move |_, window, cx| {
                             super::nav::dialogs::open_add_members(
                                 add_services.clone(),
@@ -440,7 +440,7 @@ impl Sidebar {
                     ),
                 )
                 .separator()
-                .item(menu_item(Lucide::LogOut, nav::LEAVE_GROUP, true).on_click(
+                .item(menu_item(Sym::SignOut, nav::LEAVE_GROUP, true).on_click(
                     move |_, window, cx| {
                         super::nav::dialogs::confirm_leave(
                             services.clone(),
@@ -463,9 +463,9 @@ impl Sidebar {
     fn todo_row(&self, ix: usize, item: &TodoItem, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let glyph = match (item.reason, item.topic.status) {
-            (TodoReason::Mentioned, _) => Lucide::AtSign,
-            (_, TopicStatus::WaitingReview) => Lucide::Eye,
-            _ => Lucide::CircleQuestionMark,
+            (TodoReason::Mentioned, _) => Sym::Mention,
+            (_, TopicStatus::WaitingReview) => Sym::Watch,
+            _ => Sym::Help,
         };
         let context = format!("{} · {}", item.group_name, todo_reason(item, &self.members));
         let (g, t) = (item.group_id.clone(), item.topic.id.clone());
@@ -651,7 +651,7 @@ impl Render for Sidebar {
             nav::GROUPS,
             None,
             Some(
-                ui::icon_button_sm("sidebar-new-group", Lucide::Plus)
+                ui::icon_button_sm("sidebar-new-group", Sym::Plus)
                     .named(nav::NEW_GROUP)
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(NewGroup), cx))
                     .into_any_element(),
@@ -664,7 +664,7 @@ impl Render for Sidebar {
             nav::DMS,
             None,
             Some(
-                ui::icon_button_sm("sidebar-start-dm", Lucide::Plus)
+                ui::icon_button_sm("sidebar-start-dm", Sym::Plus)
                     .named(nav::START_DM)
                     .on_click(|_, window, cx| window.dispatch_action(Box::new(StartDm), cx))
                     .into_any_element(),
@@ -718,7 +718,7 @@ impl Render for Sidebar {
                         ),
                 )
                 .child(
-                    ui::icon_button("sidebar-settings", Lucide::Settings)
+                    ui::icon_button("sidebar-settings", Sym::General)
                         .named(crate::copy::settings::TITLE)
                         .on_click(|_, window, cx| {
                             window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
@@ -746,7 +746,7 @@ impl Render for Sidebar {
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(ui::icon(Lucide::Search, theme::icon::ROW, k.text_3))
+            .child(ui::icon(Sym::Search, theme::icon::ROW, k.text_3))
             .child(
                 div()
                     .flex_1()

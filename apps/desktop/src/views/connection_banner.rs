@@ -10,7 +10,7 @@ use crate::{
     copy::{connection as c, fill},
     data::{Change, ConnectionState, SessionState},
     theme,
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 pub struct ConnectionBanner {
@@ -110,7 +110,7 @@ impl Render for ConnectionBanner {
         };
         crate::views::banners::Card {
             id: "connection-banner",
-            glyph: ui::icon(Lucide::WifiOff, theme::icon::ROW, colors.text_2).into_any_element(),
+            glyph: ui::icon(Sym::Offline, theme::icon::ROW, colors.text_2).into_any_element(),
             title: title.into(),
             detail: Some(crate::views::banners::detail_text(detail)),
             actions,

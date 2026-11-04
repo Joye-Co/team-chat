@@ -162,10 +162,11 @@ fn main() {
             std::process::exit(2)
         });
         gpui_kit::application()
-            .with_assets(gpui_kit::assets::Assets)
+            .with_assets(ui::AppAssets)
             .run(move |cx: &mut App| {
                 gpui_kit::init(cx);
                 render_text_like_the_mockups(cx);
+                ui::icons::prewarm();
                 views::settings::selftest::run(settings, finish, cx);
             });
         std::process::exit(EXIT_CODE.load(Ordering::SeqCst));
@@ -189,6 +190,7 @@ fn main() {
     application.run(move |cx: &mut App| {
         gpui_kit::init(cx);
         render_text_like_the_mockups(cx);
+        ui::icons::prewarm();
         if let Some(url) = args.live_url.clone() {
             let live = provider::selftest_live::LiveArgs {
                 url,

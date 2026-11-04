@@ -83,26 +83,30 @@ struct Compare {
 enum Set {
     Lucide,
     Sf(Weight),
+    /// What the app draws: the concept through `icons::icon` (GPUI `svg()`).
+    App,
 }
 
 impl Set {
     fn glyph(self, sf: Sf, slot: f32, color: Hsla, window: &Window) -> AnyElement {
         match self {
-            Set::Lucide => icons::icon(sf.lucide(), px(slot), color).into_any_element(),
+            Set::Lucide => icons::lucide_raw(sf.lucide(), px(slot), color).into_any_element(),
             Set::Sf(w) => symbol(sf, px(slot), w, color, window),
+            Set::App => icons::icon(sf.sym(), px(slot), color).into_any_element(),
         }
     }
 
     fn name(self) -> &'static str {
         match self {
-            Set::Lucide => dev::SF_SET_LUCIDE,
+            Set::Lucide => dev::SF_SET_BEFORE,
+            Set::App => dev::SF_SET_APP,
             Set::Sf(Weight::Medium) => dev::SF_SET_MEDIUM,
             Set::Sf(_) => dev::SF_SET_REGULAR,
         }
     }
 }
 
-const SETS: [Set; 3] = [Set::Lucide, Set::Sf(Weight::Regular), Set::Sf(Weight::Medium)];
+const SETS: [Set; 3] = [Set::Lucide, Set::Sf(Weight::Regular), Set::App];
 const COLUMN: Pixels = px(440.);
 
 impl Compare {

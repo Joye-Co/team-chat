@@ -23,7 +23,7 @@ use crate::{
     copy::{common, fill, nav},
     data::{AdminError, CreateGroupRequest, GroupId, Member, MemberId},
     theme::{self, Type as _, size, space},
-    ui::{self, ButtonSpec as _, FieldKind, Lucide},
+    ui::{self, ButtonSpec as _, FieldKind, Sym},
     views::sidebar::{edge_fade, scroll_edges, watch_scroll_edges},
 };
 
@@ -620,7 +620,7 @@ impl Render for DmPicker {
                             .children(rows)
                             .when(empty, |el| {
                                 el.child(div().h(px(160.)).child(ui::EmptyState::new(
-                                    Lucide::SearchX,
+                                    Sym::Search,
                                     nav::NO_MEMBERS_MATCH,
                                 )))
                             }),

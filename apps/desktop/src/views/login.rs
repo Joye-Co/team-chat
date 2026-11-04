@@ -20,7 +20,7 @@ use crate::{
     copy::login as l,
     data::{Change, Credential, LoginError, LoginRequest, SessionState},
     theme::{self, Type as _, space},
-    ui::{self, ButtonSpec as _, Lucide},
+    ui::{self, ButtonSpec as _, Sym},
 };
 
 pub fn default_server_url() -> &'static str {
@@ -354,7 +354,7 @@ impl LoginView {
                 .flex()
                 .items_center()
                 .gap(space::S8)
-                .child(ui::icon(Lucide::Lock, theme::icon::ROW, k.text_3))
+                .child(ui::icon(Sym::Lock, theme::icon::ROW, k.text_3))
                 .child(div().t_ui().text_color(k.text_2).child(locked)),
             (CodeInput::Code(chars), None) => {
                 let chars: Vec<char> = chars.chars().collect();
@@ -502,7 +502,7 @@ impl Render for LoginView {
                 .gap(space::S6)
                 .t_small()
                 .text_color(k.text_3)
-                .child(ui::icon(Lucide::Server, theme::icon::CHIP, k.text_3))
+                .child(ui::icon(Sym::MacMini, theme::icon::CHIP, k.text_3))
                 .child(div().min_w_0().one_line().child(host))
                 .child("·")
                 .child(

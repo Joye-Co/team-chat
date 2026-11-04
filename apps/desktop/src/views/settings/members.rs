@@ -29,7 +29,7 @@ use crate::{
     },
     theme,
     theme::{Type as _, space},
-    ui::{self, ButtonSpec as _, Lucide},
+    ui::{self, ButtonSpec as _, Sym},
 };
 
 /// Members in list order: me, the other owners, the other people, then bot
@@ -174,7 +174,7 @@ impl MembersPage {
             ui::ButtonSize::Page,
             cx,
         )
-        .icon(Icon::new(Lucide::UserPlus))
+        .icon(Icon::new(Sym::Invite))
         .dropdown_caret(true)
         .disabled_fill(!owner, cx)
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
@@ -182,14 +182,14 @@ impl MembersPage {
             let bot = services.clone();
             menu.item(
                 PopupMenuItem::new(s::INVITE)
-                    .icon(Icon::new(Lucide::UserPlus))
+                    .icon(Icon::new(Sym::Invite))
                     .on_click(move |_, window, cx| {
                         open_invite(invite.clone(), window, cx);
                     }),
             )
             .item(
                 PopupMenuItem::new(s::ADD_BOT_MEMBER)
-                    .icon(Icon::new(Lucide::Bot))
+                    .icon(Icon::new(Sym::AiMember))
                     .on_click(move |_, window, cx| {
                         open_add_bot(bot.clone(), window, cx);
                     }),
@@ -273,7 +273,7 @@ impl MembersPage {
             let deactivated = m.deactivated;
             ui::icon_button(
                 ElementId::Name(format!("more-{id}").into()),
-                Lucide::Ellipsis,
+                Sym::More,
             )
             .named(s::MEMBER_MORE)
             .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
@@ -380,7 +380,7 @@ impl MembersPage {
                                         .text_color(colors.text_2)
                                         .when(m.is_bot(), |el| {
                                             el.child(ui::icon(
-                                                Lucide::Bot,
+                                                Sym::AiMember,
                                                 theme::icon::TAG,
                                                 colors.text_2,
                                             ))

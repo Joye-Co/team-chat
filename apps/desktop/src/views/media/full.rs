@@ -28,7 +28,7 @@ use crate::{
     markdown,
     theme::{self, Type as _, radius, space},
     ui::{
-        self, Lucide,
+        self, Sym,
         web_embed::{WebEmbed, WebEmbedSpec, WebEmbedState, live},
     },
 };
@@ -89,17 +89,17 @@ fn header_tools(spec: &FullSpec, header: gpui::Div, with_save: bool) -> gpui::Di
     if with_save {
         header =
             header
-                .child(tool(id(spec, "save"), Lucide::Download, cm::SAVE).on_click(
+                .child(tool(id(spec, "save"), Sym::Download, cm::SAVE).on_click(
                     move |_, _, cx| parts::save_to_downloads(&[save_path.as_path()], cx),
                 ));
     }
     header = header.child(
-        tool(id(spec, "sys"), Lucide::ExternalLink, cm::OPEN_WITH_SYSTEM)
+        tool(id(spec, "sys"), Sym::OpenExternal, cm::OPEN_WITH_SYSTEM)
             .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
     );
     if let Some(close) = spec.close.clone() {
         header = header.child(
-            tool(id(spec, "close"), Lucide::X, cm::CLOSE)
+            tool(id(spec, "close"), Sym::Close, cm::CLOSE)
                 .on_click(move |_, window, cx| close(window, cx)),
         );
     }
@@ -139,7 +139,7 @@ fn file(spec: &FullSpec, cx: &App) -> AnyElement {
                 .gap(space::S12)
                 .t_small()
                 .text_color(k.text_3)
-                .child(ui::icon(Lucide::CircleAlert, px(20.), k.text_3))
+                .child(ui::icon(Sym::Alert, px(20.), k.text_3))
                 .child(cm::STATE_FAILED_DETAIL)
                 .child(
                     ui::secondary_button(id(spec, "sysbig"), cm::OPEN_WITH_SYSTEM, cx)
@@ -291,7 +291,7 @@ fn html(
     for e in events.iter().rev().take(8) {
         log = log.child(mono(e.clone(), k.text_2));
     }
-    let header = pane_header(Lucide::AppWindow, spec.media.title.clone(), cx)
+    let header = pane_header(Sym::OpenWindow, spec.media.title.clone(), cx)
         .child(div().t_meta().text_color(k.text_3).child(cm::KIND_HTML))
         .child(chip(
             fill(cm::VERSION_CHIP, &[("n", &shown.to_string())]),
@@ -318,7 +318,7 @@ fn html(
         )
         .child(
             footer(cx)
-                .child(ui::icon(Lucide::Lock, px(13.), k.text_3))
+                .child(ui::icon(Sym::Lock, px(13.), k.text_3))
                 .child(cm::SANDBOX_NOTE),
         )
         .into_any_element()
@@ -445,11 +445,11 @@ fn markdown_view(
         )));
     }
     let toggle = state.clone();
-    let header = pane_header(Lucide::FileText, spec.media.title.clone(), cx)
+    let header = pane_header(Sym::Document, spec.media.title.clone(), cx)
         .child(div().t_meta().text_color(k.text_3).child(cm::KIND_MARKDOWN))
         .child(div().flex_1())
         .child(
-            tool(id(spec, "toc"), Lucide::ListTree, cm::MD_TOC)
+            tool(id(spec, "toc"), Sym::Outline, cm::MD_TOC)
                 .selected(toc_on)
                 .on_click(move |_, _, cx| {
                     toggle.update(cx, |s, cx| {
@@ -533,15 +533,15 @@ fn lightbox(
         ))
         .child(div().flex_1())
         .child(
-            screen_tool(id(spec, "copy"), Lucide::Copy, cm::COPY, &s, cx)
+            screen_tool(id(spec, "copy"), Sym::Copy, cm::COPY, &s, cx)
                 .on_click(move |_, _, cx| parts::copy_image_file(&copy_path, cx)),
         )
         .child(
-            screen_tool(id(spec, "save"), Lucide::Download, cm::SAVE, &s, cx)
+            screen_tool(id(spec, "save"), Sym::Download, cm::SAVE, &s, cx)
                 .on_click(move |_, _, cx| parts::save_to_downloads(&[save_path.as_path()], cx)),
         )
         .child(
-            screen_tool(id(spec, "send"), Lucide::Send, cm::SEND_TO_TOPIC, &s, cx).on_click(
+            screen_tool(id(spec, "send"), Sym::Send, cm::SEND_TO_TOPIC, &s, cx).on_click(
                 move |_, _, cx| {
                     if let Ok(bytes) = std::fs::read(&send_path) {
                         parts::send_image(&target, bytes, cx);
@@ -551,11 +551,11 @@ fn lightbox(
         );
     if let Some(close) = spec.close.clone() {
         header = header.child(
-            screen_tool(id(spec, "close"), Lucide::X, cm::CLOSE, &s, cx)
+            screen_tool(id(spec, "close"), Sym::Close, cm::CLOSE, &s, cx)
                 .on_click(move |_, w, cx| close(w, cx)),
         );
     }
-    let nav = |idn: &str, icon: Lucide, label: &'static str| {
+    let nav = |idn: &str, icon: Sym, label: &'static str| {
         gpui_component::button::Button::new(id(spec, idn))
             .custom(
                 gpui_component::button::ButtonCustomVariant::new(cx)
@@ -612,7 +612,7 @@ fn lightbox(
                 .items_center()
                 .gap(space::S16)
                 .px(space::S16)
-                .child(nav("prev", Lucide::ChevronLeft, cm::IMG_PREV).on_click(step(-1)))
+                .child(nav("prev", Sym::ChevronLeft, cm::IMG_PREV).on_click(step(-1)))
                 .child(
                     div()
                         .flex_1()
@@ -627,7 +627,7 @@ fn lightbox(
                                 .object_fit(ObjectFit::Contain),
                         ),
                 )
-                .child(nav("next", Lucide::ChevronRight, cm::IMG_NEXT).on_click(step(1))),
+                .child(nav("next", Sym::ChevronRight, cm::IMG_NEXT).on_click(step(1))),
         )
         .child(div().pt(space::S12).child(strip))
         .child(
@@ -879,7 +879,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
     let at = sel.and_then(|i| v.frames.get(i)).map_or(position, |f| f.t);
     let (copy_v, send_v, target) = (v.path.clone(), v.path.clone(), spec.target.clone());
     let size_line = info.map_or(String::new(), |i| format!("{} × {}", i.width, i.height));
-    let header = pane_header(Lucide::Video, spec.media.file_name().to_string(), cx)
+    let header = pane_header(Sym::Video, spec.media.file_name().to_string(), cx)
         .child(mono(super::time_text(duration), k.text_3));
     frame(cx)
         .child(header_tools(spec, header, true))
@@ -919,7 +919,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                                 ui::ButtonSize::Sm,
                                 cx,
                             )
-                            .icon(ui::icon(Lucide::Copy, px(13.), k.text_2))
+                            .icon(ui::icon(Sym::Copy, px(13.), k.text_2))
                             .on_click(move |_, _, cx| {
                                 if let Some(png) = store::frame_png(&copy_v, at) {
                                     parts::copy_image(ImageFormat::Png, png, cx);
@@ -934,7 +934,7 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                                 ui::ButtonSize::Sm,
                                 cx,
                             )
-                            .icon(ui::icon(Lucide::Send, px(13.), k.text_2))
+                            .icon(ui::icon(Sym::Send, px(13.), k.text_2))
                             .on_click(move |_, _, cx| {
                                 if let Some(png) = store::frame_png(&send_v, at) {
                                     parts::send_image(&target, png, cx);
@@ -1176,8 +1176,8 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .on_click(move |_, _, cx| seek.update(cx, |s, cx| s.seek_audio(&p, t, cx))),
         );
     }
-    let round = |idn: &str, icon: Lucide, label: &'static str| tool(id(spec, idn), icon, label);
-    let header = pane_header(Lucide::AudioLines, spec.media.file_name().to_string(), cx)
+    let round = |idn: &str, icon: Sym, label: &'static str| tool(id(spec, idn), icon, label);
+    let header = pane_header(Sym::Audio, spec.media.file_name().to_string(), cx)
         .child(mono(super::time_text(a.duration), k.text_3));
     frame(cx)
         .child(header_tools(spec, header, true))
@@ -1210,7 +1210,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                         .flex()
                         .items_center()
                         .gap(space::S12)
-                        .child(round("back", Lucide::RotateCcw, cm::AUDIO_BACK).on_click(
+                        .child(round("back", Sym::Retry, cm::AUDIO_BACK).on_click(
                             move |_, _, cx| {
                                 back.update(cx, |s, cx| {
                                     let t = s.position - 15.;
@@ -1225,7 +1225,7 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                             cx,
                             move |_, _, cx| toggle.update(cx, |s, cx| s.toggle_audio(&path, cx)),
                         ))
-                        .child(round("fwd", Lucide::RotateCw, cm::AUDIO_FORWARD).on_click(
+                        .child(round("fwd", Sym::Refresh, cm::AUDIO_FORWARD).on_click(
                             move |_, _, cx| {
                                 fwd.update(cx, |s, cx| {
                                     let t = s.position + 15.;
@@ -1324,7 +1324,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         .border_b_1()
         .border_color(k.sep)
         .child(
-            tool(id(spec, "side"), Lucide::PanelLeft, cm::PDF_SIDEBAR)
+            tool(id(spec, "side"), Sym::SidebarToggle, cm::PDF_SIDEBAR)
                 .selected(sidebar)
                 .on_click(move |_, _, cx| {
                     side.update(cx, |s, cx| {
@@ -1334,7 +1334,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 }),
         )
         .child(div().w(px(1.)).h(px(16.)).bg(k.sep))
-        .child(tool(id(spec, "prev"), Lucide::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
+        .child(tool(id(spec, "prev"), Sym::ChevronLeft, cm::PDF_PREV).on_click(go(-1)))
         .child(
             mono(
                 fill(
@@ -1345,9 +1345,9 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
             )
             .text_size(px(13.)),
         )
-        .child(tool(id(spec, "next"), Lucide::ChevronRight, cm::PDF_NEXT).on_click(go(1)))
+        .child(tool(id(spec, "next"), Sym::ChevronRight, cm::PDF_NEXT).on_click(go(1)))
         .child(div().flex_1())
-        .child(tool(id(spec, "zout"), Lucide::Minus, cm::PDF_ZOOM_OUT).on_click(zoom_by(1. / 1.25)))
+        .child(tool(id(spec, "zout"), Sym::Minus, cm::PDF_ZOOM_OUT).on_click(zoom_by(1. / 1.25)))
         .child(
             mono(format!("{}%", (zoom * 100.).round()), k.text_1)
                 .text_size(px(13.))
@@ -1355,7 +1355,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 .flex()
                 .justify_center(),
         )
-        .child(tool(id(spec, "zin"), Lucide::Plus, cm::PDF_ZOOM_IN).on_click(zoom_by(1.25)));
+        .child(tool(id(spec, "zin"), Sym::Plus, cm::PDF_ZOOM_IN).on_click(zoom_by(1.25)));
     let mut thumbs = div()
         .id(id(spec, "thumbs"))
         .w(px(104.))
@@ -1451,7 +1451,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
         );
     }
     let path = spec.media.entry_path();
-    let header = pane_header(Lucide::FileText, spec.media.file_name().to_string(), cx).child(mono(
+    let header = pane_header(Sym::Document, spec.media.file_name().to_string(), cx).child(mono(
         fill(cm::PDF_PAGES, &[("n", &p.pages.to_string())]),
         k.text_3,
     ));
@@ -1475,7 +1475,7 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                     ui::ButtonSize::Sm,
                     cx,
                 )
-                .icon(ui::icon(Lucide::ExternalLink, px(13.), k.text_2))
+                .icon(ui::icon(Sym::OpenExternal, px(13.), k.text_2))
                 .on_click(move |_, _, cx| parts::open_with_system(&path, cx)),
             ),
         )
@@ -1522,7 +1522,7 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
     .tnum();
     let all = lines.join("\n");
     let toggle = state.clone();
-    let header = pane_header(Lucide::FileCode, spec.media.file_name().to_string(), cx)
+    let header = pane_header(Sym::CodeFile, spec.media.file_name().to_string(), cx)
         .child(mono(
             fill(
                 cm::VERSION_CHIP,
@@ -1532,12 +1532,12 @@ fn code(spec: &FullSpec, c: &store::Code, state: &Entity<MediaState>, cx: &App) 
         ))
         .child(div().flex_1())
         .child(
-            tool(id(spec, "copy"), Lucide::Copy, cm::COPY).on_click(move |_, _, cx| {
+            tool(id(spec, "copy"), Sym::Copy, cm::COPY).on_click(move |_, _, cx| {
                 cx.write_to_clipboard(gpui::ClipboardItem::new_string(all.clone()));
             }),
         )
         .child(
-            tool(id(spec, "wrap"), Lucide::List, cm::CODE_WRAP)
+            tool(id(spec, "wrap"), Sym::List, cm::CODE_WRAP)
                 .selected(wrap)
                 .on_click(move |_, _, cx| {
                     toggle.update(cx, |s, cx| {
@@ -1637,9 +1637,9 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
         let set = state.clone();
         let mark = match sort {
             Some((c, asc)) if c == i => Some(if asc {
-                Lucide::ChevronUp
+                Sym::ChevronUp
             } else {
-                Lucide::ChevronDown
+                Sym::ChevronDown
             }),
             _ => None,
         };
@@ -1712,7 +1712,7 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
     let sorted = sort
         .and_then(|(c, _)| t.header.get(c))
         .map(|h| fill(cm::TABLE_SORTED, &[("col", h)]));
-    let header = pane_header(Lucide::Table, spec.media.file_name().to_string(), cx).child(mono(
+    let header = pane_header(Sym::Table, spec.media.file_name().to_string(), cx).child(mono(
         fill(cm::TABLE_ROWS, &[("n", &t.total_rows.to_string())]),
         k.text_3,
     ));

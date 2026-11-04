@@ -22,7 +22,7 @@ use super::{PartTarget, RefIntent, RefsHub, ask_about, label};
 use crate::{
     copy::refs as c,
     theme::{self, radius},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// Where the 问这里 button sits.
@@ -107,7 +107,7 @@ pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
         .compact()
         .with_size(gpui_component::Size::XSmall)
         .icon(ui::icon(
-            Lucide::TextQuote,
+            Sym::Quote,
             theme::icon::TAG,
             theme::colors(cx).bg,
         ))

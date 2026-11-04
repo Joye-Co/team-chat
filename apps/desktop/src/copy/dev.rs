@@ -49,4 +49,8 @@ crate::copy! {
     SF_PAGE_SHORTCUTS = "快捷键",
     SF_PAGE_PRIVACY = "隐私与数据",
     // --- end v11/pl-sf-symbols ---
+    // --- v12/symbols: the app's own SF Symbols path in the comparison scene ---
+    SF_SET_APP = "App icons (Sym via svg(), §6 sizes)",
+    SF_SET_BEFORE = "Lucide (before, stroke 1.75)",
+    // --- end v12/symbols ---
 }

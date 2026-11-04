@@ -639,7 +639,7 @@ impl Render for ProcessView {
                                 })
                                 .when(retry, |el| {
                                     el.child(ui::icon(
-                                        ui::Lucide::CircleAlert,
+                                        ui::Sym::Alert,
                                         theme::icon::CHIP,
                                         colors.danger,
                                     ))

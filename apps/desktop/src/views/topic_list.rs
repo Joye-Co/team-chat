@@ -21,7 +21,7 @@ use crate::{
     copy::{common, fill, nav, realtime as r},
     data::{Change, GroupId, Member, MemberId, Millis, Topic, TopicId, TopicStatus},
     theme::{self, Type as _, size, space},
-    ui::{self, BadgeKind, CountBadge, Lucide, RowSurface, StatusChip},
+    ui::{self, BadgeKind, CountBadge, Sym, RowSurface, StatusChip},
     views::{
         sidebar::{edge_fade, scroll_edges, topic_line, watch_scroll_edges},
         topic_menu,
@@ -759,7 +759,7 @@ impl Render for TopicListView {
             )
             .when(is_group, |el| {
                 el.child(
-                    ui::icon_button("new-topic", Lucide::SquarePen)
+                    ui::icon_button("new-topic", Sym::Compose)
                         .named(nav::NEW_TOPIC_TIP)
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.services.nav.update(cx, |nav, cx| nav.new_topic(cx))
@@ -770,10 +770,10 @@ impl Render for TopicListView {
         let selected = self.services.nav.read(cx).topic.clone();
         let now = crate::selftest::clock::local_now();
         let empty_icon = match &self.place {
-            Some(Place::Todo) => Lucide::CircleCheck,
-            Some(Place::Group(_)) if !self.all.is_empty() => Lucide::SearchX,
-            Some(Place::Group(_)) => Lucide::MessageSquarePlus,
-            _ => Lucide::UsersRound,
+            Some(Place::Todo) => Sym::Done,
+            Some(Place::Group(_)) if !self.all.is_empty() => Sym::Search,
+            Some(Place::Group(_)) => Sym::NewChat,
+            _ => Sym::Members,
         };
         let body = match empty_text {
             Some((text, hint)) => div()

@@ -36,7 +36,7 @@ use crate::{
     data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
     ui::{
-        self, Lucide, MemberAvatar, Ring,
+        self, Sym, MemberAvatar, Ring,
         web_embed::{WebEmbed, WebEmbedSpec},
     },
     views::{
@@ -367,7 +367,7 @@ impl ArtifactPage {
                         .text_color(k.ink_3)
                         .child(version_time(now, at)),
                 )
-                .child(ui::icon(Lucide::ChevronDown, px(14.), k.ink_3)),
+                .child(ui::icon(Sym::ChevronDown, px(14.), k.ink_3)),
         )
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let mut menu = menu.label(c::ARTIFACT_VERSIONS);
@@ -455,7 +455,7 @@ impl ArtifactPage {
                     .child(
                         kit::bar_icon(
                             "artifact-open-window",
-                            Lucide::ExternalLink,
+                            Sym::OpenExternal,
                             c::ARTIFACT_OPEN_WINDOW,
                             false,
                             cx,
@@ -472,7 +472,7 @@ impl ArtifactPage {
                     .child(
                         kit::bar_icon(
                             "artifact-side-chat",
-                            Lucide::MessageCircle,
+                            Sym::AskAside,
                             c::ARTIFACT_SIDE_CHAT,
                             false,
                             cx,
@@ -523,7 +523,7 @@ impl ArtifactPage {
                 .bg(k.raised)
                 .t_small()
                 .text_color(k.ink_2)
-                .child(ui::icon(Lucide::Clock, px(14.), k.ink_3))
+                .child(ui::icon(Sym::Waiting, px(14.), k.ink_3))
                 .child(c::ARTIFACT_OLD_VERSION)
                 .child(div().text_color(k.ink_3).child(fill(
                     c::ARTIFACT_OLD_VERSION_LINE,
@@ -727,7 +727,7 @@ impl ArtifactPage {
                         .flex()
                         .justify_center()
                         .child(if done {
-                            ui::icon(Lucide::Check, px(14.), k.ok).into_any_element()
+                            ui::icon(Sym::Check, px(14.), k.ok).into_any_element()
                         } else {
                             kit::live_dot("artifact-topic-live", 6., cx)
                         }),
@@ -748,7 +748,7 @@ impl ArtifactPage {
                         )
                         .child(div().type_role(META).text_color(k.ink_3).child(meta)),
                 )
-                .child(ui::icon(Lucide::ChevronRight, px(14.), k.ink_3))
+                .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
                 .on_click(move |_, _, cx| {
                     let (g, id) = (g.clone(), id.clone());
                     nav.update(cx, |n, cx| n.open_topic(g, id, cx))
@@ -882,7 +882,7 @@ impl ArtifactPage {
                             .cursor_pointer()
                             .text_color(k.ink_2)
                             .hover(|s| s.bg(k.hover))
-                            .child(ui::icon(Lucide::ChevronRight, px(14.), k.ink_3))
+                            .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
                             .on_click(move |_, _, cx| {
                                 let (g, t) = (g.clone(), t.clone());
                                 nav.update(cx, |n, cx| n.open_topic(g, t, cx))
@@ -939,7 +939,7 @@ impl ArtifactPage {
                     .child(
                         div()
                             .mt(px(2.))
-                            .child(ui::icon(Lucide::CircleCheck, px(14.), k.ink_3)),
+                            .child(ui::icon(Sym::Done, px(14.), k.ink_3)),
                     )
                     .child(
                         div()
@@ -991,7 +991,7 @@ impl ArtifactPage {
                     .hover(|s| s.bg(k.hover))
                     .t_small()
                     .text_color(k.ink)
-                    .child(ui::icon(Lucide::List, px(14.), k.ink_3))
+                    .child(ui::icon(Sym::List, px(14.), k.ink_3))
                     .child(div().flex_1().min_w_0().one_line().child(title.clone()))
                     .child(
                         div()
@@ -1070,7 +1070,7 @@ impl ArtifactPage {
                 .flex_col()
                 .px(space::S32.max(kit::leading(&self.services, cx)))
                 .child(header)
-                .child(stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx))
+                .child(stub_body(Sym::Outputs, c::ARTIFACTS_EMPTY, None, cx))
                 .into_any_element();
         }
         let rows = all.into_iter().enumerate().map(|(i, (g, a))| {
@@ -1176,7 +1176,7 @@ impl Render for ArtifactPage {
             return self.list(cx);
         };
         let Some(detail) = self.services.provider.artifact(&id) else {
-            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Outputs, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
         };
         let shown = version
             .filter(|v| detail.versions.iter().any(|x| x.version == *v))
@@ -1187,7 +1187,7 @@ impl Render for ArtifactPage {
         let reopen = (!self.aside_open).then(|| {
             kit::bar_icon(
                 "artifact-aside-open",
-                Lucide::PanelRight,
+                Sym::Inspector,
                 c::ARTIFACT_EXPAND,
                 false,
                 cx,

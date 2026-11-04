@@ -19,7 +19,7 @@ use crate::{
     copy::{fill, live as l, topic_rail as c},
     data::{BotRunSummary, Millis, PlanState},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::topic_page::working_runs,
 };
 
@@ -150,9 +150,9 @@ impl TimelineView {
                 })
                 .child(ui::icon(
                     if open {
-                        Lucide::ChevronUp
+                        Sym::ChevronUp
                     } else {
-                        Lucide::ChevronDown
+                        Sym::ChevronDown
                     },
                     px(12.),
                     k.ink_2,
@@ -225,7 +225,7 @@ impl TimelineView {
                 match s.state {
                     PlanState::Current | PlanState::Waiting => {
                         let mark: AnyElement = if held {
-                            ui::icon(Lucide::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                            ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
                         } else if s.state == PlanState::Waiting {
                             div()
                                 .size(px(8.))
@@ -300,7 +300,7 @@ impl TimelineView {
                     state => {
                         let done = state == PlanState::Done;
                         let mark: AnyElement = if done {
-                            ui::icon(Lucide::Check, theme::icon::CHIP, k.ink_3).into_any_element()
+                            ui::icon(Sym::Check, theme::icon::CHIP, k.ink_3).into_any_element()
                         } else {
                             div()
                                 .size(px(10.))

@@ -27,7 +27,7 @@ use crate::{
         v2::MemberStats,
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide, MemberAvatar, Ring},
+    ui::{self, Sym, MemberAvatar, Ring},
     views::{
         group_page::kit::{self, META, SMALL, TINY},
         shell::{PageView, TitleBarSpec, clock, member_name, panes::watch, stub_body},
@@ -212,21 +212,21 @@ impl MembersPage {
             ui::ButtonSize::Sm,
             cx,
         )
-        .icon(gpui_component::Icon::new(Lucide::Plus))
+        .icon(gpui_component::Icon::new(Sym::Plus))
         .disabled(!owner)
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let invite = services.clone();
             let bot = services.clone();
             menu.item(
                 PopupMenuItem::new(c::MEMBERS_INVITE)
-                    .icon(gpui_component::Icon::new(Lucide::UserPlus))
+                    .icon(gpui_component::Icon::new(Sym::Invite))
                     .on_click(move |_, window, cx| {
                         crate::views::settings::open_invite(invite.clone(), window, cx);
                     }),
             )
             .item(
                 PopupMenuItem::new(c::MEMBERS_ADD_BOT)
-                    .icon(gpui_component::Icon::new(Lucide::Bot))
+                    .icon(gpui_component::Icon::new(Sym::AiMember))
                     .on_click(move |_, window, cx| {
                         crate::views::settings::open_add_bot(bot.clone(), window, cx);
                     }),
@@ -615,7 +615,7 @@ impl MembersPage {
                     .child(
                         kit::bar_icon(
                             "member-side-chat",
-                            Lucide::MessageCircle,
+                            Sym::AskAside,
                             c::MEMBERS_SIDE_CHAT,
                             false,
                             cx,
@@ -625,7 +625,7 @@ impl MembersPage {
                     .child(
                         kit::bar_icon(
                             "member-outputs",
-                            Lucide::Layers,
+                            Sym::Outputs,
                             c::MEMBERS_OUTPUTS_BUTTON,
                             false,
                             cx,
@@ -636,7 +636,7 @@ impl MembersPage {
                         el.child(
                             kit::bar_icon(
                                 "member-computer",
-                                Lucide::Monitor,
+                                Sym::Computer,
                                 c::MEMBERS_COMPUTER_BUTTON,
                                 false,
                                 cx,
@@ -660,7 +660,7 @@ impl MembersPage {
                     .child(
                         kit::bar_icon(
                             "member-aside",
-                            Lucide::PanelRight,
+                            Sym::Inspector,
                             c::MEMBERS_TOGGLE_ASIDE,
                             self.aside_open,
                             cx,
@@ -1132,9 +1132,9 @@ impl MembersPage {
                         .justify_center()
                         .child(ui::icon(
                             if d.state == Some(DeliveryState::Merged) {
-                                Lucide::GitBranch
+                                Sym::Branch
                             } else {
-                                Lucide::GitPullRequest
+                                Sym::PullRequest
                             },
                             px(14.),
                             k.ink_2,
@@ -1228,7 +1228,7 @@ impl MembersPage {
                         .child(meta.type_role(META).text_color(k.ink_3)),
                 )
                 .children(tag)
-                .child(ui::icon(Lucide::ChevronRight, px(14.), k.ink_3))
+                .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
                 .on_click(move |_, _, cx| match (&kind, &topic) {
                     (DeliveryKind::Artifact { artifact_id, .. }, _) => {
                         let id = artifact_id.clone();
@@ -1292,7 +1292,7 @@ impl MembersPage {
                     .when(i > 0, |el| el.border_t_1().border_color(k.line));
                 if retried {
                     return row
-                        .child(ui::icon(Lucide::CircleCheck, px(16.), k.ok))
+                        .child(ui::icon(Sym::Done, px(16.), k.ok))
                         .child(
                             div()
                                 .min_w_0()
@@ -1314,7 +1314,7 @@ impl MembersPage {
                 }
                 let member = e.member.id.clone();
                 let run = pr.run_id.clone();
-                row.child(ui::icon(Lucide::CircleAlert, px(16.), k.bad))
+                row.child(ui::icon(Sym::Alert, px(16.), k.bad))
                     .child(
                         div()
                             .min_w_0()
@@ -1430,7 +1430,7 @@ impl MembersPage {
                             .items_center()
                             .gap(space::S8)
                             .t_small()
-                            .child(ui::icon(Lucide::Monitor, px(14.), k.live))
+                            .child(ui::icon(Sym::Computer, px(14.), k.live))
                             .child(div().medium().text_color(k.ink).child(mc.name.clone()))
                             .child(div().text_color(k.ink_2).child(state))
                             .child(div().flex_1())
@@ -1489,7 +1489,7 @@ impl MembersPage {
                                 .h(px(28.))
                                 .t_small()
                                 .text_color(k.ink)
-                                .child(ui::icon(Lucide::Lock, px(13.), k.ink_3))
+                                .child(ui::icon(Sym::Lock, px(13.), k.ink_3))
                                 .child(a.clone())
                         }),
                     ))
@@ -1627,7 +1627,7 @@ impl MembersPage {
         .when(cards.is_empty(), |el| {
             el.child(
                 div().flex_1().min_h(px(160.)).child(
-                    ui::EmptyState::new(Lucide::Monitor, c::MEMBERS_WORKPLACE_EMPTY)
+                    ui::EmptyState::new(Sym::Computer, c::MEMBERS_WORKPLACE_EMPTY)
                         .description(c::MEMBERS_WORKPLACE_EMPTY_LINE),
                 ),
             )
@@ -1672,7 +1672,7 @@ impl Render for MembersPage {
             .and_then(|id| entries.iter().find(|e| e.member.id == id));
         let (detail, aside) = match entry {
             None => (
-                stub_body(Lucide::Users, c::MEMBERS_PICK, None, cx).into_any_element(),
+                stub_body(Sym::Members, c::MEMBERS_PICK, None, cx).into_any_element(),
                 None,
             ),
             Some(e) => {

@@ -26,7 +26,7 @@ use crate::{
     data::{Member, Message, SendState, Topic},
     markdown,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// The row's inset inside the content box: hover fills reach 8 pt past the
@@ -368,7 +368,7 @@ impl TimelineView {
                         .t_meta()
                         .text_color(colors.danger_text)
                         .child(ui::icon(
-                            Lucide::CircleAlert,
+                            Sym::Alert,
                             theme::icon::CHIP,
                             colors.danger_text,
                         ))
@@ -569,7 +569,7 @@ impl TimelineView {
         let view = cx.entity().downgrade();
         let can_edit = self.can_edit(message);
         let can_delete = self.can_delete(message);
-        let tool = |id: &str, glyph: Lucide| {
+        let tool = |id: &str, glyph: Sym| {
             ui::icon_button(ElementId::Name(format!("{id}-{key}").into()), glyph)
                 .rounded(theme::radius::SM)
         };
@@ -585,11 +585,11 @@ impl TimelineView {
                     message,
                     key,
                     false,
-                    tool("react", Lucide::FaceSlightlySmilingPlus).named(t::ADD_REACTION),
+                    tool("react", Sym::Emoji).named(t::ADD_REACTION),
                     cx,
                 ))
                 .child(
-                    tool("reply", Lucide::Reply)
+                    tool("reply", Sym::Reply)
                         .named(t::REPLY)
                         .on_click(cx.listener({
                             let m = message.clone();
@@ -599,13 +599,13 @@ impl TimelineView {
             })
             .child({
                 let quoted = quote_markdown(&message.body);
-                tool("copy-quote", Lucide::TextQuote)
+                tool("copy-quote", Sym::Quote)
                     .named(t::COPY_QUOTE)
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(quoted.clone()))
                     })
             })
-            .child(tool("more", Lucide::Ellipsis).named(t::MORE).dropdown_menu(
+            .child(tool("more", Sym::More).named(t::MORE).dropdown_menu(
                 move |menu, window, cx| {
                     super::menu::build(
                         menu,

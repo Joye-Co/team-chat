@@ -24,7 +24,7 @@ use crate::{
     copy::{fill, process as pr, timeline as t},
     data::{BotRunSummary, Message, Millis, ProcessStep, RunStatus},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// Most pending rows; more working bots fold into one line.
@@ -140,13 +140,13 @@ pub fn steps_summary(steps: &[ProcessStep]) -> (String, usize) {
 }
 
 /// One line per step for the opened steps row.
-fn step_line(step: &ProcessStep) -> Option<(Lucide, String, bool)> {
+fn step_line(step: &ProcessStep) -> Option<(Sym, String, bool)> {
     Some(match step {
         ProcessStep::Tool { title, ok, .. } => {
-            (Lucide::SquareTerminal, title.clone(), *ok == Some(false))
+            (Sym::Terminal, title.clone(), *ok == Some(false))
         }
         ProcessStep::Files { changes } => (
-            Lucide::FileText,
+            Sym::Document,
             changes
                 .iter()
                 .map(|c| c.path.rsplit('/').next().unwrap_or(&c.path))
@@ -154,8 +154,8 @@ fn step_line(step: &ProcessStep) -> Option<(Lucide, String, bool)> {
                 .join("、"),
             false,
         ),
-        ProcessStep::Approval { title, .. } => (Lucide::CircleCheck, title.clone(), false),
-        ProcessStep::Status { message } => (Lucide::CircleDot, message.clone(), false),
+        ProcessStep::Approval { title, .. } => (Sym::Done, title.clone(), false),
+        ProcessStep::Status { message } => (Sym::Live, message.clone(), false),
         _ => return None,
     })
 }
@@ -221,9 +221,9 @@ impl TimelineView {
             .text_color(colors.text_2)
             .child(ui::icon(
                 if open {
-                    Lucide::ChevronDown
+                    Sym::ChevronDown
                 } else {
-                    Lucide::ChevronRight
+                    Sym::ChevronRight
                 },
                 theme::icon::TAG,
                 colors.text_3,

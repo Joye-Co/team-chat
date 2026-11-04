@@ -11,7 +11,7 @@ use gpui_component::kbd::Kbd;
 
 use crate::{
     theme::{self, Type as _, space},
-    ui::icons::{Lucide, icon},
+    ui::icons::{Sym, icon},
 };
 
 /// The 52 pt band at the top of a column. Dragging it moves the window and a
@@ -113,14 +113,14 @@ impl RenderOnce for KbdHint {
 /// most 320 pt. Never more than one on a screen.
 #[derive(IntoElement)]
 pub struct EmptyState {
-    icon: Lucide,
+    icon: Sym,
     title: SharedString,
     description: Option<SharedString>,
     action: Option<AnyElement>,
 }
 
 impl EmptyState {
-    pub fn new(icon: Lucide, title: impl Into<SharedString>) -> Self {
+    pub fn new(icon: Sym, title: impl Into<SharedString>) -> Self {
         Self {
             icon,
             title: title.into(),
@@ -182,7 +182,7 @@ impl RenderOnce for EmptyState {
 /// App-level banners with a detail line use `ui::Banner`.
 #[derive(IntoElement)]
 pub struct Band {
-    icon: Lucide,
+    icon: Sym,
     icon_color: Option<Hsla>,
     text: SharedString,
     height: Pixels,
@@ -190,7 +190,7 @@ pub struct Band {
 }
 
 impl Band {
-    pub fn new(icon: Lucide, text: impl Into<SharedString>) -> Self {
+    pub fn new(icon: Sym, text: impl Into<SharedString>) -> Self {
         Self {
             icon,
             icon_color: None,

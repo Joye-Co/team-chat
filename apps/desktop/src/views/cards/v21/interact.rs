@@ -661,7 +661,7 @@ fn reply_link(ctx: &Ctx, block: &str, reply: &str, cx: &mut App) -> AnyElement {
             .text_color(k.live_ink)
             .on_click(move |_, window, cx| a.open_message(&reply, window, cx)),
         )
-        .child(ui::icon(ui::Lucide::ArrowDown, px(12.), k.live_ink))
+        .child(ui::icon(ui::Sym::ArrowDown, px(12.), k.live_ink))
         .into_any_element()
 }
 

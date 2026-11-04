@@ -17,7 +17,7 @@ use crate::{
     app::{RightPane, Services},
     copy::topic_rail as c,
     theme::{self, StateTone, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// The title size: pages or a 话题.
@@ -42,13 +42,13 @@ pub enum TitleButtonKind {
 }
 
 impl TitleButtonKind {
-    fn icon(self) -> Lucide {
+    fn icon(self) -> Sym {
         match self {
-            TitleButtonKind::SideChat => Lucide::MessageCircle,
-            TitleButtonKind::Outputs => Lucide::Layers,
-            TitleButtonKind::Machine => Lucide::Monitor,
-            TitleButtonKind::Changes => Lucide::GitPullRequest,
-            TitleButtonKind::Rail => Lucide::PanelRight,
+            TitleButtonKind::SideChat => Sym::AskAside,
+            TitleButtonKind::Outputs => Sym::Outputs,
+            TitleButtonKind::Machine => Sym::Computer,
+            TitleButtonKind::Changes => Sym::PullRequest,
+            TitleButtonKind::Rail => Sym::Inspector,
         }
     }
 
@@ -259,7 +259,7 @@ fn state(
     let glyph = if spec.state_paused {
         div()
             .flex_none()
-            .child(ui::icon(Lucide::Pause, theme::icon::TAG, k.ink_3))
+            .child(ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3))
             .into_any_element()
     } else {
         div()
@@ -573,9 +573,9 @@ pub fn render(
             .cursor_pointer()
             .when(active, |el| el.bg(k.sel))
             .when(!active, |el| el.hover(|s| s.bg(k.hover)))
-            .child(ui::icon(
+            .child(ui::sym(
                 b.kind.icon(),
-                theme::icon::ROW,
+                ui::SymSize::TOOLBAR,
                 if active { k.ink } else { k.ink_2 },
             ))
             .tooltip({

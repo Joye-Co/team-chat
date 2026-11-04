@@ -1162,7 +1162,7 @@ pub fn page_footer(
 ) -> gpui::Div {
     use crate::{
         theme::{Type as _, radius, space},
-        ui::{self, Lucide},
+        ui::{self, Sym},
     };
     use gpui::{
         InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
@@ -1231,7 +1231,7 @@ pub fn page_footer(
                 .items_center()
                 .gap(space::S4)
                 .whitespace_nowrap()
-                .child(ui::icon(Lucide::Info, px(12.), k.ink_3))
+                .child(ui::icon(Sym::Info, px(12.), k.ink_3))
                 .child(short)
                 .tooltip(move |window, cx| Tooltip::new(whole.clone()).build(window, cx))
         }));
@@ -1291,13 +1291,13 @@ pub fn page_footer(
         }
         BandView::Failed(t) => base.child(
             pill()
-                .child(ui::icon(Lucide::CircleAlert, px(13.), k.ink_3))
+                .child(ui::icon(Sym::Alert, px(13.), k.ink_3))
                 .child(t),
         ),
         BandView::Done(t) => base.child(
             pill()
                 .id(SharedString::from(format!("{id}-band")))
-                .child(ui::icon(Lucide::Check, px(13.), k.ok))
+                .child(ui::icon(Sym::Check, px(13.), k.ok))
                 .child(t),
         ),
     }

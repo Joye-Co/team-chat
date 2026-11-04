@@ -21,7 +21,7 @@ use crate::{
         TopicFile, TopicId, TransferState, create_key,
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::{
         files::{PANEL_ROW_H, error_text, extra::file_row_in, notify, notify_error, size_text},
         time_text,
@@ -163,7 +163,7 @@ impl Render for TopicOutputs {
                 cx,
             )))
             .child(
-                ui::icon_button_sm("artifact-new", Lucide::Plus)
+                ui::icon_button_sm("artifact-new", Sym::Plus)
                     .named(ca::NEW)
                     .disabled(busy)
                     .on_click(cx.listener(|this, _, _, cx| this.pick_and_upload(None, cx))),
@@ -176,9 +176,9 @@ impl Render for TopicOutputs {
             .iter()
             .map(|a| {
                 let (kind, glyph) = match a.kind {
-                    ArtifactKind::Page => (ca::PANEL_KIND_PAGE, Lucide::FileCode),
-                    ArtifactKind::Image => (f::KIND_IMAGE, Lucide::FileImage),
-                    _ => (ca::KIND_FILE, Lucide::FileText),
+                    ArtifactKind::Page => (ca::PANEL_KIND_PAGE, Sym::CodeFile),
+                    ArtifactKind::Image => (f::KIND_IMAGE, Sym::Image),
+                    _ => (ca::KIND_FILE, Sym::Document),
                 };
                 // A page shows its version and time (`网页 · v3 · 今天 14:31`);
                 // a first-version image its size (`图片 · 2.4 MB`).
@@ -259,7 +259,7 @@ impl Render for TopicOutputs {
                                         "panel-artifact-version-{}",
                                         a.id
                                     ))),
-                                    Lucide::Plus,
+                                    Sym::Plus,
                                 )
                                 .named(ca::NEW_VERSION)
                                 .disabled(busy)

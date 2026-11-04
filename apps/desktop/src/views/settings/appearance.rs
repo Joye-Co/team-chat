@@ -16,7 +16,7 @@ use crate::{
     app::{RailMode, Services},
     copy::appearance as c,
     theme::{self, ThemeChoice, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::shell::{layout, section_label},
 };
 
@@ -77,7 +77,7 @@ impl AppearancePage {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .child(ui::icon(Lucide::Check, px(12.), k.btn_ink)),
+                                .child(ui::icon(Sym::Check, px(12.), k.btn_ink)),
                         )
                     }),
             )
@@ -209,7 +209,7 @@ impl AppearancePage {
                 header(16.).into_any_element(),
                 row(dot(k.you), 40.).into_any_element(),
                 row(
-                    ui::icon(Lucide::Check, px(8.), k.ok).into_any_element(),
+                    ui::icon(Sym::Check, px(8.), k.ok).into_any_element(),
                     50.,
                 )
                 .into_any_element(),

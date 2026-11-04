@@ -15,7 +15,7 @@ use crate::{
     copy::{fill, settings as s},
     data::{AdminError, AdminReply, MemberLevel, Millis},
     theme::{self, Elevation, Type as _, space},
-    ui::Lucide,
+    ui::Sym,
 };
 
 /// Waits for a reply off the UI thread. A dropped sender is [`AdminError::Other`].
@@ -398,7 +398,7 @@ pub fn status_line(id: impl Into<ElementId>, status: &Status, cx: &App) -> Optio
         } else if failed {
             line(text, color)
                 .child(crate::ui::icon(
-                    Lucide::CircleAlert,
+                    Sym::Alert,
                     theme::icon::CHIP,
                     k.danger,
                 ))
@@ -417,7 +417,7 @@ pub fn error_row(text: impl Into<SharedString>, retry: Button, cx: &App) -> Div 
     table(cx).child(
         table_row()
             .child(crate::ui::icon(
-                Lucide::CircleAlert,
+                Sym::Alert,
                 theme::icon::ROW,
                 k.danger,
             ))
@@ -496,7 +496,7 @@ pub fn select_button(id: impl Into<ElementId>, label: impl Into<SharedString>, c
                 .child(label.into()),
         )
         .child(crate::ui::icon(
-            Lucide::ChevronsUpDown,
+            Sym::PopUp,
             theme::icon::CHIP,
             k.text_3,
         ))

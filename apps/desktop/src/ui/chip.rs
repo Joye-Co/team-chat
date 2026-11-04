@@ -21,7 +21,7 @@ use crate::{
     copy::{common, nav},
     data::{Member, Topic, TopicStatus},
     theme::{self, ChipKind, Type as _, size, space},
-    ui::icons::{Lucide, icon},
+    ui::icons::{Sym, icon},
 };
 
 /// How a status mark is drawn.
@@ -181,14 +181,14 @@ impl StatusChip {
 }
 
 /// The glyph of a status (§7.8).
-pub fn status_glyph(status: TopicStatus) -> Option<Lucide> {
+pub fn status_glyph(status: TopicStatus) -> Option<Sym> {
     Some(match status {
         TopicStatus::Open => return None,
-        TopicStatus::InProgress => Lucide::CircleDot,
-        TopicStatus::WaitingAnswer => Lucide::CircleQuestionMark,
-        TopicStatus::WaitingReview => Lucide::Eye,
-        TopicStatus::Blocked => Lucide::CircleAlert,
-        TopicStatus::Done => Lucide::CircleCheck,
+        TopicStatus::InProgress => Sym::Live,
+        TopicStatus::WaitingAnswer => Sym::Help,
+        TopicStatus::WaitingReview => Sym::Watch,
+        TopicStatus::Blocked => Sym::Alert,
+        TopicStatus::Done => Sym::Done,
     })
 }
 

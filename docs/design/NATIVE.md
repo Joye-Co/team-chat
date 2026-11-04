@@ -190,8 +190,12 @@ shape. The text inside every control is Body 13 pt unless noted.
 ## 6. Icons (SF Symbols)
 
 - Drawn by `ui::sf_symbols` (system raster, never bundled). Weight Regular next to 13 pt text,
-  Medium in the toolbar. Sizes: sidebar 15 pt in an 18 pt slot; toolbar 15 pt; inline with 13 pt
-  text 13 pt; inline with 11 pt text 11 pt; settings toolbar tabs 18 pt.
+  Medium in the toolbar. Sizes: sidebar 15 pt in an 18 pt slot; toolbar 16 pt in 20; inline with
+  13 pt text 13 pt in 16; inline with 11 pt text 11 pt in 14; settings toolbar tabs 18 pt in 24;
+  pop-up mark 9 pt Semibold. In code: `Sym::<Concept>` with `SymSize::{SIDEBAR, TOOLBAR, INLINE,
+  INLINE_SMALL, TAB, POPUP}` (`ui::sym`, `Sym::Home.sidebar()`); never a symbol name or Lucide.
+- gpui-component's own glyphs (select and menu chevrons, checkbox check, dialog close, input
+  clear, spinner) are answered with the concept's SF Symbol by the asset source.
 - Color: `secondary` in sidebars and rows; `label` in the toolbar; state color only when the symbol
   *is* the state.
 - One symbol per concept. Use this table; add a row here before you use a new concept.
@@ -223,6 +227,54 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Lock / needs approval | `lock` |
 | Open in new window | `macwindow` |
 | More | `ellipsis` (in a circle only as a toolbar item) |
+| Settings (generic gear) | `gearshape` |
+| AI member without a face | `sparkles` |
+| Check / close | `checkmark` / `xmark` |
+| Chevrons | `chevron.down`, `chevron.up`, `chevron.left`, `chevron.right`; pop-up `chevron.up.chevron.down` |
+| Open elsewhere | `arrow.up.forward` |
+| Alert in a row (quiet) | `exclamationmark.circle` in `secondary`; outlined warning `exclamationmark.triangle` |
+| Failed | `xmark.circle.fill` in `red` |
+| Not started | `circle.dashed`; stopped `nosign`; hourglass `hourglass` |
+| Offline | `wifi.slash` |
+| Muted / notify badge | `bell.slash` / `bell.badge` |
+| Branch / merge | `arrow.triangle.branch` / `arrow.triangle.merge` |
+| Document, file, code file, missing file | `doc.text`, `doc`, `doc.plaintext`, `doc.questionmark` |
+| Diff | `plus.forwardslash.minus` |
+| Image, images | `photo`, `photo.on.rectangle` |
+| Copy | `doc.on.doc` |
+| Person, invite | `person`, `person.badge.plus` |
+| Quote | `text.quote` |
+| Lists | `list.bullet`, `list.number`, `checklist`, outline `list.bullet.indent`; grid `square.grid.2x2`; table `tablecells` |
+| Download / upload | `square.and.arrow.down` / `square.and.arrow.up` |
+| Diagram | `point.3.connected.trianglepath.dotted` |
+| Media | video `video`, audio `waveform`, `play`, `pause`, volume `speaker.wave.2`, `pip`, zoom `plus.magnifyingglass` / `minus.magnifyingglass` |
+| Pointer (实时查看 cursor) | `cursorarrow` |
+| Watch (实时查看) / hidden | `eye` / `eye.slash` |
+| New chat | `plus.bubble` |
+| Info / help | `info.circle` / `questionmark.circle` |
+| Return key | `return` |
+| Reply | `arrowshape.turn.up.left`; indented reply `arrow.turn.down.right` |
+| Arrows | `arrow.up`, `arrow.down`, `arrow.right`; sort `arrow.up.arrow.down` |
+| Terminal | `terminal` |
+| Retry / refresh / undo | `arrow.counterclockwise` / `arrow.clockwise` / `arrow.uturn.backward` |
+| Link / code | `link` / `chevron.left.forwardslash.chevron.right` |
+| Mention | `at` |
+| Text format | `textformat`, `bold`, `italic`, `strikethrough`, `text.alignleft` |
+| Options | `slider.horizontal.3` |
+| Edit | `pencil` |
+| Expand / collapse | `arrow.up.left.and.arrow.down.right` / `arrow.down.right.and.arrow.up.left` |
+| Sign out, leave | `rectangle.portrait.and.arrow.right` |
+| Emoji, reaction | `face.smiling` |
+| Charts | `chart.xyaxis.line`, `chart.bar`; activity `waveform.path.ecg` |
+| Delete | `trash` |
+| Star | `star`, `star.fill` |
+| Screen share | `rectangle.inset.filled.and.person.filled` |
+| Scan | `viewfinder` |
+| Folder, calendar, target | `folder`, `calendar`, `scope` |
+| Keyboard, privacy | `keyboard`, `hand.raised`; shield `checkmark.shield` |
+| Mic, book, square, asterisk | `mic`, `book`, `square`, `asterisk` |
+| Busy spinner | `progress.indicator` (turned by the spinner) |
+| Find and replace, bottom panel (gpui-component) | `arrow.left.arrow.right`, `rectangle.bottomthird.inset.filled` |
 
 ## 7. Overlays
 

@@ -20,12 +20,12 @@ use super::{
 use crate::{
     copy::{fill, media as cm},
     theme::{self, Type as _, radius, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide},
+    ui::{self, ButtonKind, ButtonSize, Sym},
 };
 
 /// What the row shows on its left.
 pub enum Lead {
-    Icon(Lucide),
+    Icon(Sym),
     Thumb(PathBuf),
     /// A dark thumbnail with nothing in it yet (the poster is being made).
     Blank,
@@ -106,7 +106,7 @@ pub fn row(
             .gap(space::S4)
             .t_meta()
             .text_color(k.text_3)
-            .child(ui::icon(Lucide::CircleAlert, px(12.), k.text_3))
+            .child(ui::icon(Sym::Alert, px(12.), k.text_3))
             .child(format!(
                 "{} · {}",
                 cm::STATE_FAILED_DETAIL,
@@ -200,7 +200,7 @@ pub fn ready_mark(cx: &App) -> AnyElement {
         .gap(space::S4)
         .t_meta()
         .text_color(k.text_2)
-        .child(ui::icon(Lucide::Check, px(13.), k.success_text))
+        .child(ui::icon(Sym::Check, px(13.), k.success_text))
         .child(cm::STATE_READY)
         .into_any_element()
 }
@@ -208,7 +208,7 @@ pub fn ready_mark(cx: &App) -> AnyElement {
 fn small_button(
     id: impl Into<ElementId>,
     label: &'static str,
-    icon: Option<Lucide>,
+    icon: Option<Sym>,
     cx: &App,
 ) -> gpui_component::button::Button {
     let b = ui::button(id, label, ButtonKind::Secondary, ButtonSize::Sm, cx);
@@ -230,7 +230,7 @@ pub fn failed_row(spec: &InlineSpec, cx: &App) -> gpui::Stateful<Div> {
             small_button(
                 format!("{}-sys", spec.id),
                 cm::OPEN,
-                Some(Lucide::ExternalLink),
+                Some(Sym::OpenExternal),
                 cx,
             )
             .on_click(move |_, _, cx| {
@@ -266,7 +266,7 @@ pub fn failed_media_row(spec: &InlineSpec, media: &Media, cx: &App) -> gpui::Sta
             small_button(
                 format!("{}-sys", spec.id),
                 cm::OPEN_WITH_SYSTEM,
-                Some(Lucide::ExternalLink),
+                Some(Sym::OpenExternal),
                 cx,
             )
             .on_click(move |_, _, cx| parts::open_with_system(&path, cx))
@@ -309,7 +309,7 @@ pub fn big_row(spec: &InlineSpec, cx: &App) -> gpui::Stateful<Div> {
 pub fn action(
     id: impl Into<ElementId>,
     label: &'static str,
-    icon: Option<Lucide>,
+    icon: Option<Sym>,
     cx: &App,
 ) -> AnyElement {
     small_button(id, label, icon, cx).into_any_element()

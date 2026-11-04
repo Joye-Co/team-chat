@@ -45,7 +45,7 @@ use crate::{
     copy::{cards21 as c, fill},
     data::cards_v2::{CardV2, CardV2Block, Cause},
     theme::{self, Type as _, card_v21 as interact_t, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// A card narrower than this lays a `row` out as a stack (INTERACT §2.2).
@@ -732,9 +732,9 @@ fn group(
         .when(can_collapse, |el| {
             el.child(ui::icon(
                 if closed {
-                    Lucide::ChevronRight
+                    Sym::ChevronRight
                 } else {
-                    Lucide::ChevronDown
+                    Sym::ChevronDown
                 },
                 px(14.),
                 k.ink_3,

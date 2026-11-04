@@ -23,7 +23,7 @@ use crate::{
     data::{ChatProvider, FileAttachment, Message, TransferState, download_key, upload_key},
     provider::files::THUMB_SOURCE_MAX_BYTES,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -130,7 +130,7 @@ fn image_preview(
             .gap(space::S6)
             .px(space::S12)
             .max_w_full()
-            .child(ui::icon(Lucide::FileImage, theme::icon::EMPTY, k.text_3))
+            .child(ui::icon(Sym::Image, theme::icon::EMPTY, k.text_3))
             .child(line)
             .into_any_element()
     };
@@ -187,13 +187,13 @@ fn image_preview(
 }
 
 /// The type glyph of a file tile.
-fn file_icon(file: &FileAttachment) -> Lucide {
+fn file_icon(file: &FileAttachment) -> Sym {
     if file.is_image() {
-        Lucide::FileImage
+        Sym::Image
     } else if super::is_html(&file.name) {
-        Lucide::FileCode
+        Sym::CodeFile
     } else {
-        Lucide::FileText
+        Sym::Document
     }
 }
 
@@ -423,7 +423,7 @@ pub fn file_row_in(
     };
     let running = progress.is_some();
     let failed = matches!(state, Some(TransferState::Failed(_)));
-    let action = |part: &str, label: &'static str, what: OpenAction, glyph: Lucide| {
+    let action = |part: &str, label: &'static str, what: OpenAction, glyph: Sym| {
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
         ui::icon_button(id(part), glyph)
@@ -440,14 +440,14 @@ pub fn file_row_in(
             "retry",
             f::RETRY,
             OpenAction::Open,
-            Lucide::RefreshCw,
+            Sym::Refresh,
         )]
     } else if running {
         // Downloading: cancel `x` (§7.11).
         let provider = provider.clone();
         let file = file.clone();
         vec![
-            ui::icon_button(id("cancel"), Lucide::X)
+            ui::icon_button(id("cancel"), Sym::Close)
                 .named(f::CANCEL_DOWNLOAD)
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
@@ -457,12 +457,12 @@ pub fn file_row_in(
         ]
     } else {
         vec![
-            action("open", f::OPEN, OpenAction::Open, Lucide::ExternalLink),
+            action("open", f::OPEN, OpenAction::Open, Sym::OpenExternal),
             action(
                 "reveal",
                 f::REVEAL,
                 OpenAction::RevealInFinder,
-                Lucide::FolderOpen,
+                Sym::Folder,
             ),
         ]
     };

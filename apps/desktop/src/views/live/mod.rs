@@ -29,7 +29,7 @@ use crate::{
         v2::{AcceptanceItem, MachineScreen, ScreenLine, ScreenLineKind},
     },
     theme::{self, Type as _, motion, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide},
+    ui::{self, ButtonKind, ButtonSize, Sym},
     views::{
         process::{ProcessView, stop_run},
         shell::{PaneView, clock, member_name, panes::watch, stub_body},
@@ -187,7 +187,7 @@ impl LivePane {
                     .flex()
                     .items_center()
                     .gap(space::S6)
-                    .child(ui::icon(Lucide::MousePointer2, px(11.), k.ink))
+                    .child(ui::icon(Sym::Pointer, px(11.), k.ink))
                     .child(c::LIVE_YOU_HOLD)
                     .into_any_element(),
                 k.ink,
@@ -253,9 +253,9 @@ impl LivePane {
                 ui::icon_button_sm(
                     "live-expand",
                     if self.expanded {
-                        Lucide::Minimize2
+                        Sym::Collapse
                     } else {
-                        Lucide::Maximize2
+                        Sym::Expand
                     },
                 )
                 .named(if self.expanded {
@@ -269,7 +269,7 @@ impl LivePane {
                 })),
             )
             .child(
-                ui::icon_button_sm("live-close", Lucide::X)
+                ui::icon_button_sm("live-close", Sym::Close)
                     .named(c::LIVE_CLOSE)
                     .on_click(move |_, _, cx| {
                         close
@@ -309,7 +309,7 @@ impl LivePane {
                 ButtonSize::Md,
                 cx,
             )
-            .icon(ui::icon(Lucide::ScreenShare, theme::icon::CHIP, k.ink_2))
+            .icon(ui::icon(Sym::ScreenShare, theme::icon::CHIP, k.ink_2))
             .on_click(move |_, _, _| {
                 crate::views::artifacts::window::ask_before_screen_share(&name, url.clone())
             })
@@ -342,7 +342,7 @@ impl LivePane {
                 .flex()
                 .items_center()
                 .gap(space::S10)
-                .child(ui::icon(Lucide::MousePointer2, theme::icon::ROW, k.ink))
+                .child(ui::icon(Sym::Pointer, theme::icon::ROW, k.ink))
                 .child(div().t_small().medium().text_color(k.ink).child(title))
                 .child(
                     div()
@@ -500,7 +500,7 @@ impl LivePane {
                         .flex()
                         .items_start()
                         .gap(space::S2)
-                        .child(ui::icon(Lucide::MousePointer2, theme::icon::HEADER, k.ink))
+                        .child(ui::icon(Sym::Pointer, theme::icon::HEADER, k.ink))
                         .child(
                             div()
                                 .mt(px(14.))
@@ -680,7 +680,7 @@ impl LivePane {
                                 .max_w(MARK_LABEL_W)
                                 .min_w_0()
                                 .child(div().flex_none().child(ui::icon(
-                                    Lucide::Check,
+                                    Sym::Check,
                                     theme::icon::TAG,
                                     k.ink_3,
                                 )))
@@ -783,13 +783,13 @@ impl LivePane {
         let active = run.status.is_active();
         let rows = items.iter().enumerate().map(|(i, item)| {
             let status: AnyElement = match item.met {
-                Some(true) => ui::icon(Lucide::Check, theme::icon::CHIP, k.ok).into_any_element(),
+                Some(true) => ui::icon(Sym::Check, theme::icon::CHIP, k.ok).into_any_element(),
                 Some(false) => div()
                     .flex()
                     .items_center()
                     .gap(space::S8)
                     .child(div().text_color(k.bad_ink).child(c::LIVE_NOT_MET))
-                    .child(ui::icon(Lucide::X, theme::icon::CHIP, k.bad))
+                    .child(ui::icon(Sym::Close, theme::icon::CHIP, k.bad))
                     .into_any_element(),
                 None if active => div()
                     .flex()
@@ -922,7 +922,7 @@ impl LivePane {
             match p.state {
                 PlanState::Current | PlanState::Waiting => {
                     let mark: AnyElement = if held {
-                        ui::icon(Lucide::Pause, theme::icon::TAG, k.ink_3).into_any_element()
+                        ui::icon(Sym::Pause, theme::icon::TAG, k.ink_3).into_any_element()
                     } else if p.state == PlanState::Waiting {
                         div()
                             .size(px(8.))
@@ -991,7 +991,7 @@ impl LivePane {
                 state => {
                     let done = state == PlanState::Done;
                     let mark: AnyElement = if done {
-                        ui::icon(Lucide::Check, theme::icon::CHIP, k.ink_3).into_any_element()
+                        ui::icon(Sym::Check, theme::icon::CHIP, k.ink_3).into_any_element()
                     } else {
                         div()
                             .size(px(10.))
@@ -1112,7 +1112,7 @@ impl LivePane {
                 cx,
             )
             .icon(ui::icon(
-                Lucide::MousePointer2,
+                Sym::Pointer,
                 theme::icon::CHIP,
                 k.btn_ink,
             ))
@@ -1176,7 +1176,7 @@ impl LivePane {
                     cx,
                 )
                 .when(!developer_on, |b| {
-                    b.icon(ui::icon(Lucide::ArrowUpRight, theme::icon::TAG, k.ink_2))
+                    b.icon(ui::icon(Sym::OpenExternal, theme::icon::TAG, k.ink_2))
                 })
                 .text_color(k.ink_2)
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -1316,12 +1316,12 @@ impl Render for LivePane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = theme::colors(cx);
         let Some((g, t, run_id)) = self.target(cx) else {
-            return stub_body(Lucide::Monitor, c::LIVE_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Computer, c::LIVE_EMPTY, None, cx).into_any_element();
         };
         let p = self.services.provider.clone();
         let run = p.runs(&g, &t).into_iter().find(|r| r.id == run_id);
         let (Some(run), Some(screen)) = (run, p.machine_screen(&run_id)) else {
-            return stub_body(Lucide::Monitor, c::LIVE_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Computer, c::LIVE_EMPTY, None, cx).into_any_element();
         };
         if run.status.is_active() {
             self.ensure_polling(&run_id, cx);
