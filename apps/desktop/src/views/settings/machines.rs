@@ -230,25 +230,13 @@ impl Render for MachinesPage {
             )),
             _ => None,
         };
-        let open_cloud = div()
-            .id("cloud-open")
-            .tooltip(|window, cx| Tooltip::new(s::CLOUD_OPEN_TIP).build(window, cx))
-            .child(disabled_push(
-                push_button(
-                    "cloud-open-button",
-                    s::CLOUD_OPEN,
-                    PushStyle::Outline,
-                    PushSize::Small,
-                    cx,
-                ),
-                true,
-                cx,
-            ));
+        // 云端 is not open to anyone yet: the row says so and an outline
+        // badge marks it; no dead button (F5, C1-03).
         let cloud = GroupedForm::new().row(
             widgets::ItemRow::new("cloud", s::CLOUD)
                 .media(widgets::icon_box_28(Sym::Cloud, cx))
                 .description(s::CLOUD_NOT_YET)
-                .value(open_cloud),
+                .value(crate::ui::native::Badge::new(s::CLOUD_COMING_SOON)),
         );
         widgets::pane()
             .child(widgets::section(

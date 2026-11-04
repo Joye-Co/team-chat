@@ -92,7 +92,9 @@ impl Page {
             Page::Account => Sym::Account,
             Page::Notifications => Sym::Bell,
             Page::Members => Sym::Members,
-            Page::Machines => Sym::MacMini,
+            // desktopcomputer: its ink fills the 18 box; macmini is 22 × 10
+            // (2.19, C1-09).
+            Page::Machines => Sym::Computer,
             Page::Appearance => Sym::Appearance,
             Page::Shortcuts => Sym::Shortcuts,
         }

@@ -21,9 +21,9 @@ use crate::{
     data::{Change, ConnectionState, SessionState},
     theme::Type as _,
     ui::native::{
-        FormRow, GroupedForm, IconSize, NativeSwitch, NativeType as _, PushSize, PushStyle,
-        SectionTitle, SheetLayout, SheetWidth, disabled_push, icon_button, metrics, native_colors,
-        progress, push_button, spinner,
+        BadgeState, FormRow, GroupedForm, IconSize, NativeSwitch, NativeType as _, PushSize,
+        PushStyle, SectionTitle, SheetLayout, SheetWidth, StatusBadge, disabled_push, icon_button,
+        metrics, native_colors, progress, push_button, spinner,
         tokens::{height, space},
     },
     updater::{self, Phase, banner::banner_text, version},
@@ -232,10 +232,7 @@ impl GeneralPage {
             None | Some(Phase::Idle) => s::UPDATE_STATE_IDLE.to_string(),
             Some(Phase::Checking) => u::CHECKING.to_string(),
             Some(Phase::UpToDate) => u::UP_TO_DATE.to_string(),
-            Some(Phase::Available(i)) => fill(
-                u::FROM_TO,
-                &[("current", version::CURRENT), ("version", &i.version)],
-            ),
+            Some(Phase::Available(i)) => fill(u::NEW_VERSION, &[("version", &i.version)]),
             Some(Phase::Downloading { info, done, total }) => {
                 let total = if *total == 0 { info.size } else { *total };
                 fill(
@@ -345,11 +342,12 @@ impl GeneralPage {
         };
         rows.push(version_row(Some(control)));
         if let Some(Phase::Manual(_)) = &phase {
+            // Each step wraps in the row, never runs past the group (2.21).
             let line = |t: String| {
                 div()
+                    .w_full()
                     .n_subheadline()
                     .text_color(k.secondary)
-                    .whitespace_nowrap()
                     .child(t)
             };
             rows.push(
@@ -411,35 +409,37 @@ pub fn nav_row(
     cx: &App,
     open: impl Fn(&mut Window, &mut App) + 'static,
 ) -> gpui::AnyElement {
-    use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
     let k = native_colors(cx);
-    div()
-        .id(id)
-        .w_full()
+    // A ghost button across the row: a Tab stop with the focus ring, Space
+    // and Return open it, muted on hover (E3, C1-05).
+    crate::ui::native::row_button(id, cx)
         .h(metrics::FORM_ROW)
         .px(metrics::FORM_ROW_INSET)
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .cursor_pointer()
-        .hover(|d| d.bg(k.fill.opacity(0.5)))
+        .accessibility_label(label)
         .on_click(move |_, window, cx| open(window, cx))
-        .child(div().flex_1().n_body().text_color(k.label).child(label))
-        .children(value.map(|v| {
+        .child(
             div()
-                .flex_none()
-                .n_body()
-                .n_figures()
-                .text_color(k.secondary)
-                .child(v)
-        }))
-        .child(crate::ui::sf_symbols::symbol(
-            crate::ui::sf_symbols::Sf::ChevronRight,
-            crate::ui::native::tokens::icon::MD,
-            crate::ui::sf_symbols::Weight::Regular,
-            k.secondary,
-            window,
-        ))
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(div().flex_1().n_body().text_color(k.label).child(label))
+                .children(value.map(|v| {
+                    div()
+                        .flex_none()
+                        .n_body()
+                        .n_figures()
+                        .text_color(k.secondary)
+                        .child(v)
+                }))
+                .child(crate::ui::sf_symbols::symbol(
+                    crate::ui::sf_symbols::Sf::ChevronRight,
+                    crate::ui::native::tokens::icon::MD,
+                    crate::ui::sf_symbols::Weight::Regular,
+                    k.secondary,
+                    window,
+                )),
+        )
         .into_any_element()
 }
 
@@ -581,32 +581,37 @@ impl Render for GeneralPage {
         );
         if developer {
             let provider = self.services.provider.clone();
-            let connection = match provider.connection() {
-                ConnectionState::Offline => dev::STATE_OFFLINE.to_string(),
-                ConnectionState::TokenUnreadable => dev::STATE_TOKEN_UNREADABLE.to_string(),
-                ConnectionState::Connecting => dev::STATE_CONNECTING.to_string(),
-                ConnectionState::Online => dev::STATE_ONLINE.to_string(),
-                ConnectionState::Reconnecting {
-                    attempt,
-                    retry_in_ms,
-                } => fill(
-                    dev::STATE_RECONNECTING,
-                    &[
-                        ("attempt", &attempt.to_string()),
-                        ("ms", &retry_in_ms.to_string()),
-                    ],
-                ),
+            // 连接 is a state, not a value to copy: a StatusBadge in
+            // interface words (2.19, F5).
+            let (state, word) = match provider.connection() {
+                ConnectionState::Offline => (BadgeState::Offline, common::OFFLINE),
+                ConnectionState::TokenUnreadable => {
+                    (BadgeState::Failed, s::DEV_CONNECTION_TOKEN_UNREADABLE)
+                }
+                ConnectionState::Connecting => (BadgeState::Working, s::DEV_CONNECTION_CONNECTING),
+                ConnectionState::Online => (BadgeState::Online, common::ONLINE),
+                ConnectionState::Reconnecting { .. } => {
+                    (BadgeState::Working, s::DEV_CONNECTION_RECONNECTING)
+                }
             };
+            dev_group = dev_group.row(dev_row(
+                dev::LABEL_CONNECTION,
+                StatusBadge::new(state, word).into_any_element(),
+                cx,
+            ));
             let me = match provider.session() {
                 SessionState::SignedIn { me, .. } => me.id,
                 _ => String::new(),
             };
             for (id, label, value) in [
-                ("dev-connection", dev::LABEL_CONNECTION, connection),
                 ("dev-server", dev::LABEL_SERVER, server.clone()),
                 ("dev-member", dev::LABEL_MEMBER_ID, me),
             ] {
-                dev_group = dev_group.row(dev_row(id, label, value, window, cx));
+                dev_group = dev_group.row(dev_row(
+                    label,
+                    dev_value_with_copy(id, value, window, cx),
+                    cx,
+                ));
             }
         }
         let page = cx.entity();
@@ -710,14 +715,8 @@ fn value_with_copy(
 }
 
 /// A developer row (2.19 DescriptionList): the label 14 muted in the 112
-/// column, the value 13 mono, the copy button at the trailing edge.
-fn dev_row(
-    id: &'static str,
-    label: &'static str,
-    value: String,
-    window: &Window,
-    cx: &App,
-) -> gpui::Div {
+/// column, then the value across the rest of the row.
+fn dev_row(label: &'static str, value: gpui::AnyElement, cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .w_full()
@@ -739,7 +738,47 @@ fn dev_row(
                 .flex_1()
                 .min_w(gpui::Pixels::ZERO)
                 .flex()
-                .justify_start()
-                .child(value_with_copy(id, value, s::COPY_VALUE, true, window, cx)),
+                .items_center()
+                .child(value),
         )
+}
+
+/// A developer value: 13 mono from the value column, truncating with a
+/// tooltip, and the ghost 28 copy pinned at the row's trailing edge, so
+/// every copy button sits at one x.
+fn dev_value_with_copy(
+    id: &'static str,
+    value: String,
+    window: &Window,
+    cx: &App,
+) -> gpui::AnyElement {
+    use gpui::ClipboardItem;
+    let copy = value.clone();
+    div()
+        .w_full()
+        .min_w(gpui::Pixels::ZERO)
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .child(
+            crate::ui::truncate::TruncText::new(value)
+                .id(SharedString::from(format!("{id}-value")))
+                .flex_1()
+                .t_code()
+                .text_color(native_colors(cx).label),
+        )
+        .child(
+            icon_button(
+                SharedString::from(format!("{id}-copy")),
+                crate::ui::Sym::Copy,
+                s::COPY_VALUE,
+                IconSize::Small,
+                window,
+                cx,
+            )
+            .on_click(move |_, _, cx| {
+                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+            }),
+        )
+        .into_any_element()
 }

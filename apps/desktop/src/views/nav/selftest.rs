@@ -384,6 +384,21 @@ pub mod scenes {
         over_main(services, content, cx, super::super::dialogs::open_new_group)
     }
 
+    /// The new-group sheet driven from the keyboard: the list focused (its
+    /// ring), the second row highlighted and checked with Space.
+    pub fn new_group_keyboard(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(
+            services,
+            content,
+            cx,
+            super::super::dialogs::open_new_group_keyboard,
+        )
+    }
+
     /// The new-group sheet with a name that is too long: the field error.
     pub fn new_group_error(
         services: Services,
