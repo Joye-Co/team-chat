@@ -148,6 +148,9 @@ pub struct TimelineView {
     focus: focus::FocusState,
     /// The message row under the pointer (its hover toolbar shows).
     hovered: Option<String>,
+    /// R2-12, E3: the thread is a Tab stop; ↑↓ move the row whose toolbar
+    /// shows (the same toolbar as under the pointer).
+    key_focus: gpui::FocusHandle,
     /// The emoji picker is open for this message row: from the hover
     /// toolbar (`false`) or from the add pill under the reactions (`true`).
     reacting: Option<(String, bool)>,
@@ -291,6 +294,7 @@ impl TimelineView {
             activation: None,
             focus: focus::FocusState::default(),
             hovered: None,
+            key_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             reacting: None,
             runs: Vec::new(),
             live_shown: Vec::new(),
@@ -672,7 +676,38 @@ impl TimelineView {
     }
 }
 
+/// The key context of the thread.
+const KEY_CONTEXT: &str = "Timeline";
+
+/// ↑↓ in a focused thread (call once at start-up).
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("up", crate::views::rail::SelectPrevious, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("down", crate::views::rail::SelectNext, Some(KEY_CONTEXT)),
+    ]);
+}
+
 impl TimelineView {
+    /// Moves the keyboard row `step` rows (from the newest when none is
+    /// set): it gets the hover band and the message toolbar, whose buttons
+    /// Tab then reaches.
+    fn move_keyboard_row(&mut self, step: isize, cx: &mut Context<Self>) {
+        let Some(last) = self.messages.len().checked_sub(1) else {
+            return;
+        };
+        let current = self
+            .hovered
+            .as_deref()
+            .and_then(|k| self.messages.iter().position(|m| model::key(m) == k));
+        let ix = match current {
+            Some(i) => i.saturating_add_signed(step).min(last),
+            None => last,
+        };
+        self.hovered = Some(model::key(&self.messages[ix]).to_string());
+        self.list.scroll_to_reveal_item(ix);
+        cx.notify();
+    }
+
     /// The card of message `id` was on screen in the last frame.
     pub fn shows_card(&self, id: &str) -> bool {
         self.cards_shown.contains(id)
@@ -844,6 +879,18 @@ impl Render for TimelineView {
 
         div()
             .id("timeline")
+            .track_focus(&self.key_focus)
+            .key_context(KEY_CONTEXT)
+            .on_action(
+                cx.listener(|this, _: &crate::views::rail::SelectPrevious, _, cx| {
+                    this.move_keyboard_row(-1, cx)
+                }),
+            )
+            .on_action(
+                cx.listener(|this, _: &crate::views::rail::SelectNext, _, cx| {
+                    this.move_keyboard_row(1, cx)
+                }),
+            )
             .size_full()
             .flex()
             .flex_col()
@@ -987,4 +1034,65 @@ fn jump_pill(id: &'static str, label: String, glyph: Sym, cx: &App) -> gpui::Sta
         .active(|el| el.bg(colors.pressed))
         .child(label)
         .child(ui::icon(glyph, theme::icon::CHIP, colors.text_2))
+}
+
+#[cfg(test)]
+mod keyboard_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        data::ChatProvider,
+        fake::v2::{DEV, T_RECONNECT, V2Samples},
+    };
+
+    /// R2-12: with the thread focused, ↑ picks the newest message (its
+    /// toolbar shows, as under the pointer) and walks back; ↓ comes forward.
+    #[gpui::test]
+    fn arrow_keys_move_the_keyboard_row(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            services.nav.update(cx, |nav, cx| {
+                nav.open_topic(DEV.into(), T_RECONNECT.into(), cx)
+            });
+            TimelineView::new(services, cx)
+        });
+        cx.run_until_parked();
+        let keys = |view: &Entity<TimelineView>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, _| {
+                let all: Vec<String> = this
+                    .messages
+                    .iter()
+                    .map(|m| model::key(m).to_string())
+                    .collect();
+                (all, this.hovered.clone())
+            })
+        };
+        let (all, none) = keys(&view, cx);
+        assert!(all.len() >= 2, "the sample 话题 has messages");
+        assert!(none.is_none());
+        view.update_in(cx, |this, window, cx| window.focus(&this.key_focus, cx));
+        cx.simulate_keystrokes("up");
+        cx.run_until_parked();
+        assert_eq!(
+            keys(&view, cx).1.as_ref(),
+            all.last(),
+            "↑ starts at the newest"
+        );
+        cx.simulate_keystrokes("up");
+        cx.run_until_parked();
+        assert_eq!(
+            keys(&view, cx).1.as_ref(),
+            all.get(all.len() - 2),
+            "↑ walks back"
+        );
+        cx.simulate_keystrokes("down");
+        cx.run_until_parked();
+        assert_eq!(keys(&view, cx).1.as_ref(), all.last(), "↓ comes forward");
+    }
 }

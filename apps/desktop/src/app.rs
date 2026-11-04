@@ -929,6 +929,7 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     crate::views::topic_list::bind_keys(cx);
     // --- v12/behavior ---
     crate::views::rail::bind_keys(cx);
+    crate::views::timeline::bind_keys(cx);
     crate::views::members_page::bind_keys(cx);
     // --- end v12/behavior ---
     // --- v12/shell: the accent of System Settings (NATIVE.md §4) ---
