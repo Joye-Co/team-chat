@@ -2,7 +2,7 @@
 
 use gpui::{
     App, AppContext as _, Context, Entity, IntoElement, ParentElement, PathPromptOptions, Render,
-    Styled, Subscription, Window, div, px,
+    Styled, Subscription, Window, div,
 };
 use gpui_component::{
     Disableable as _, Icon, WindowExt as _,
@@ -15,7 +15,7 @@ use crate::{
     app::{Changes, Services},
     copy::{common, settings as s},
     data::{Change, Member, SessionState},
-    theme::{self, Type as _, space},
+    theme::{self, space},
     ui::{self, Lucide},
     views::avatar,
 };
@@ -283,130 +283,99 @@ impl Render for ProfilePage {
         };
         let name_error = error_of(Field::Name);
         let role_error = error_of(Field::Role);
+        // A form field in a list row: fixed width at the right, its error
+        // 6 pt under it (§7.1).
+        let field = |id: &'static str, state: &Entity<InputState>, error: Option<String>| {
+            div()
+                .w(theme::size::SETTINGS_FIELD_WIDTH)
+                .flex()
+                .flex_col()
+                .child(
+                    ui::TextField::new(id, state, ui::FieldKind::Form)
+                        .width(theme::size::SETTINGS_FIELD_WIDTH)
+                        .error(error.is_some())
+                        .disabled(!signed_in),
+                )
+                .children(error.map(|e| ui::field_help(e, true, cx)))
+                .into_any_element()
+        };
+        let avatar_detail = match widgets::status_line("avatar-status", &self.avatar, cx) {
+            Some(line) => line.into_any_element(),
+            None => widgets::row_detail(s::AVATAR_HINT, cx),
+        };
         div()
             .flex()
             .flex_col()
-            // Avatar: the picture, 更换头像… and its help (§8.4).
-            .child(widgets::section_label(s::AVATAR, true, cx))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S16)
-                    .child(div().flex_none().child(avatar(me.as_ref(), px(64.), cx)))
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .items_start()
-                            .gap(space::S6)
-                            .child(
-                                ui::secondary_button("avatar-choose", s::AVATAR_CHOOSE, cx)
-                                    .loading(self.avatar.busy())
-                                    .disabled(!signed_in || self.avatar.busy())
-                                    .on_click(cx.listener(|this, _, _, cx| this.choose_avatar(cx))),
-                            )
-                            .child(
-                                match widgets::status_line("avatar-status", &self.avatar, cx) {
-                                    Some(line) => line,
-                                    None => widgets::hint(s::AVATAR_HINT, cx),
-                                },
-                            ),
+            // One group: 头像, 名字 and 岗位, labels left and controls right
+            // (§8.10). Name and 岗位 save on blur and on Return.
+            .child(widgets::table_of(
+                None,
+                vec![
+                    widgets::list_row(
+                        s::AVATAR,
+                        Some(avatar_detail),
+                        Some(
+                            div()
+                                .flex()
+                                .items_center()
+                                .gap(space::S12)
+                                .child(avatar(me.as_ref(), theme::size::SETTINGS_AVATAR, cx))
+                                .child(
+                                    ui::secondary_button("avatar-choose", s::AVATAR_CHOOSE, cx)
+                                        .loading(self.avatar.busy())
+                                        .disabled(!signed_in || self.avatar.busy())
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| this.choose_avatar(cx)),
+                                        ),
+                                )
+                                .into_any_element(),
+                        ),
+                        cx,
                     ),
-            )
-            // Name and 岗位 save on blur and on Return (§8.4).
-            .child(
-                div()
-                    .pt(space::S24)
-                    .flex()
-                    .flex_col()
-                    .gap(space::S16)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(widgets::field(
-                                s::NAME,
-                                ui::TextField::new("profile-name", &self.name, ui::FieldKind::Form)
-                                    .error(name_error.is_some())
-                                    .disabled(!signed_in),
-                                cx,
-                            ))
-                            // The error of a field sits 6 pt under it (§7.1).
-                            .children(name_error.map(|e| ui::field_help(e, true, cx))),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .child(widgets::field(
-                                s::ROLE,
-                                ui::TextField::new("profile-role", &self.role, ui::FieldKind::Form)
-                                    .error(role_error.is_some())
-                                    .disabled(!signed_in),
-                                cx,
-                            ))
-                            .child(match role_error {
-                                Some(e) => ui::field_help(e, true, cx),
-                                None => div().pt(space::S6).child(
-                                    match widgets::status_line("save-status", &self.save, cx) {
-                                        Some(line) => line,
-                                        None => widgets::hint(s::PROFILE_SAVE_HINT, cx),
-                                    },
-                                ),
-                            }),
+                    widgets::list_row(
+                        s::NAME,
+                        None,
+                        Some(field("profile-name", &self.name, name_error)),
+                        cx,
                     ),
-            )
-            // Sign out, then the danger row on its own (U40).
+                    widgets::list_row(
+                        s::ROLE,
+                        None,
+                        Some(field("profile-role", &self.role, role_error)),
+                        cx,
+                    ),
+                ],
+                cx,
+            ))
+            .child(match widgets::status_line("save-status", &self.save, cx) {
+                Some(line) => div().pt(space::S8).child(line),
+                None => widgets::footnote(s::PROFILE_SAVE_HINT, cx).pt(space::S8),
+            })
+            // 账号: each row says what happens and its button names the
+            // action, so the action is not said twice; the danger row comes
+            // last, its button label in `danger-text`.
             .child(widgets::section_label(s::ACCOUNT, false, cx))
             .child(widgets::table_of(
                 None,
                 vec![
-                    widgets::table_row()
-                        .child(widgets::title_cell(
-                            s::SIGN_OUT,
-                            Some(s::SIGN_OUT_HINT.into()),
-                            cx,
-                        ))
-                        .child(
+                    widgets::list_row(
+                        s::SIGN_OUT_HINT,
+                        None,
+                        Some(
                             ui::secondary_button("sign-out", s::SIGN_OUT, cx)
                                 .icon(Icon::new(Lucide::LogOut))
                                 .disabled(!signed_in)
                                 .on_click(cx.listener(|this, _, _, _| {
                                     this.services.provider.sign_out(false)
-                                })),
+                                }))
+                                .into_any_element(),
                         ),
-                ],
-                cx,
-            ))
-            .child(div().h(space::S16))
-            .child(widgets::table_of(
-                None,
-                vec![
-                    widgets::table_row()
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .t_ui()
-                                        .medium()
-                                        .text_color(colors.text_1)
-                                        .child(s::SIGN_OUT_WIPE),
-                                )
-                                .child(
-                                    div()
-                                        .t_small()
-                                        .text_color(colors.text_2)
-                                        .child(s::SIGN_OUT_WIPE_HINT),
-                                ),
-                        )
-                        .child(
+                        cx,
+                    ),
+                    widgets::list_row(
+                        s::SIGN_OUT_WIPE_HINT,
+                        None,
+                        Some(
                             // Secondary with a danger label: the alert that
                             // follows carries the filled danger button.
                             ui::secondary_button("sign-out-wipe", s::SIGN_OUT_WIPE_BUTTON, cx)
@@ -416,8 +385,11 @@ impl Render for ProfilePage {
                                     cx.listener(|this, _, window, cx| {
                                         this.confirm_wipe(window, cx)
                                     }),
-                                ),
+                                )
+                                .into_any_element(),
                         ),
+                        cx,
+                    ),
                 ],
                 cx,
             ))

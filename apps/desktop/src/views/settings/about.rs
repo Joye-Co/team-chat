@@ -139,11 +139,12 @@ impl Render for AboutPage {
                 None,
                 vec![
                     div().w_full().child(self.update.clone()),
-                    widgets::table_row().child(widgets::title_cell(
+                    widgets::list_row(
                         s::SERVER,
-                        Some(server.clone().into()),
+                        None,
+                        Some(widgets::row_value(server.clone(), cx)),
                         cx,
-                    )),
+                    ),
                 ],
                 cx,
             ))
@@ -197,22 +198,22 @@ impl Render for AboutPage {
             .child(
                 widgets::table(cx)
                     .mt(space::S24)
-                    .child(
-                        widgets::table_row()
-                            .child(widgets::title_cell(
-                                s::DEVELOPER_VIEW,
-                                Some(s::DEVELOPER_VIEW_HINT.into()),
-                                cx,
-                            ))
-                            .child(Switch::new("developer-view").checked(developer).on_click(
-                                cx.listener(|this, checked: &bool, _, cx| {
+                    .child(widgets::list_row(
+                        s::DEVELOPER_VIEW,
+                        Some(widgets::row_detail(s::DEVELOPER_VIEW_HINT, cx)),
+                        Some(
+                            Switch::new("developer-view")
+                                .checked(developer)
+                                .on_click(cx.listener(|this, checked: &bool, _, cx| {
                                     let on = *checked;
                                     this.services
                                         .nav
                                         .update(cx, |nav, cx| nav.set_developer_view(on, cx));
-                                }),
-                            )),
-                    )
+                                }))
+                                .into_any_element(),
+                        ),
+                        cx,
+                    ))
                     .when(developer, |el| {
                         let connection = match provider.connection() {
                             ConnectionState::Offline => dev::STATE_OFFLINE.to_string(),

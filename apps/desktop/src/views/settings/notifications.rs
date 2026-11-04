@@ -116,8 +116,11 @@ impl NotificationsPage {
         } else {
             ui::GroupGlyph::new().into_any_element()
         };
+        // One line per 群 or 私聊: the 52 pt list row, not the 60 pt
+        // two-line table row (§8.10).
         widgets::table_row()
-            .h(theme::size::SETTINGS_ROW)
+            .min_h(theme::size::SETTINGS_LIST_ROW)
+            .h(theme::size::SETTINGS_LIST_ROW)
             .py_0()
             .child(div().flex_none().child(leading))
             .child(

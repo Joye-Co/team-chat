@@ -910,8 +910,26 @@ per version.
 
 ### 8.10 Settings → 外观 (new) and the rest
 
-Settings keep the v2.2 layout (section list 200 on `rail`, centered column max 704, grouped tables
-with the header inside) with v3 tokens. New page **外观** (`palette` 16), first under 通用:
+Settings keep the v2.2 layout (section list 200 on `rail`, grouped tables with the header inside)
+with v3 tokens, in the macOS System Settings manner:
+
+- **Column**: centered, at most `SETTINGS_COLUMN` 664 (600 of content plus 32 each side), so fields
+  and tables never stretch across a wide window.
+- **List rows**: settings that are not tables are rows of one rounded group (radius 12, 1 pt
+  `border`, 0.5 pt `sep` between rows; a hairline, no extra fill): the label at the left (`ui`
+  14/20 `text-1`, an optional second line `small` 13/20 `text-2`), the control at the right. Rows
+  are at least `SETTINGS_LIST_ROW` 52, padding 8 12 8 16. A text field in a row is
+  `SETTINGS_FIELD_WIDTH` 280 wide with its error 6 pt under it; a read-only value (服务器) is `ui`
+  `text-2`, one line, at most `SETTINGS_VALUE_MAX` 320. One-line table rows (通知) are 52 too;
+  two-line rows (成员, 机器) stay 60.
+- **我的资料**: one group 头像 (picture `SETTINGS_AVATAR` 40 and 更换头像…, the file hint as the
+  second line) / 名字 / 岗位, the save hint as a footnote under it; then 账号, one group whose rows
+  say what happens and whose buttons name the action (退出登录, 删除并退出 in `danger-text`), so
+  no row repeats its button.
+- **通用**: 服务器 is a label/value row in the 关于 group; 开发者视图 is a list row with its switch.
+- Dialogs (邀请成员, 添加自动成员, 新建群, 改名) keep labels above their fields (§7.12).
+
+New page **外观** (`palette` 16), first under 通用:
 **主题** segmented `跟随系统 / 浅色 / 深色`; **侧栏样式** three 120 × 84 previews of the rail modes (a
 miniature of each rail, selected with a 1.5 pt `ink` ring) with the names and the one-sentence
 tradeoff of §8.2 under each. Changes apply at once without animation.
