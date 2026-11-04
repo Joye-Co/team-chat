@@ -136,7 +136,7 @@ crate::copy! {
     GALLERY_ANATOMY = "每张卡的结构",
     GALLERY_ANATOMY_1 = "状态条：现在是什么状态，见下面的状态一览",
     GALLERY_ANATOMY_2 = "头部：谁 · 群 / 话题 · 时间",
-    GALLERY_ANATOMY_3 = "标题：一句话说清要什么，16 号字",
+    GALLERY_ANATOMY_3 = "标题：一句话说清要什么，14 号字加粗",
     GALLERY_ANATOMY_4 = "内容块：由下面 12 种组合",
     GALLERY_ANATOMY_5 = "底栏：操作，主按钮只有一个",
     GALLERY_COLORS = "状态只用一种标记",
