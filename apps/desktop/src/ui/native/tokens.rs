@@ -210,13 +210,19 @@ pub struct NativeColors {
     pub pressed: Hsla,
     /// `muted`: the selected row (D10).
     pub selection: Hsla,
-    /// `primary` (or the system accent the person picked).
+    /// `accent` (§1.2): the same value as `muted`. The highlight of a menu,
+    /// palette, picker or mention row; never an inverted row (D10).
     pub accent: Hsla,
+    /// `primary` (or the system accent the person picked): the primary
+    /// button, switch ON track, Progress value, a checked checkbox.
+    pub primary: Hsla,
+    /// `primary-foreground`: text and symbols on `primary`.
+    pub on_primary: Hsla,
     /// Text or a symbol on a selected row: `foreground` (or the system accent).
     pub accent_text: Hsla,
     /// `foreground`.
     pub ink: Hsla,
-    /// `primary-foreground`: text and symbols on `accent`.
+    /// `foreground`: text and symbols on an `accent` (highlighted) row.
     pub on_accent: Hsla,
     /// The 3 px focus ring: `ring` at 50 %.
     pub focus: Hsla,
@@ -236,8 +242,15 @@ pub struct NativeColors {
     pub blue: Hsla,
     pub red: Hsla,
     pub green: Hsla,
+    /// The destructive button fill (§1.3, T1-15): one value in both modes.
+    pub destructive_fill: Hsla,
     dark: bool,
 }
+
+/// The destructive button fill in both modes (COMPLETENESS.md §1.3):
+/// #dc2626 with white text, 4.8:1. Dark mode keeps #f87171 for icons and
+/// text only; white on #f87171 is 2.8:1.
+pub const DESTRUCTIVE_FILL: u32 = 0xDC2626FF;
 
 /// The app accent while the system accent is multicolor. Kept as a name:
 /// it is now `primary` of the light palette (#171717).
@@ -261,10 +274,12 @@ impl NativeColors {
             fill_hover: p.accent,
             pressed: p.pressed,
             selection: p.muted,
-            accent: p.primary,
+            accent: p.accent,
+            primary: p.primary,
+            on_primary: p.primary_foreground,
             accent_text: p.foreground,
             ink: p.foreground,
-            on_accent: p.primary_foreground,
+            on_accent: p.foreground,
             focus: p.focus(),
             glass_edge: p.border,
             capsule: p.card,
@@ -276,6 +291,7 @@ impl NativeColors {
             blue: p.info,
             red: p.destructive,
             green: p.success,
+            destructive_fill: c(DESTRUCTIVE_FILL),
             dark: p.dark,
         }
     }
@@ -378,11 +394,11 @@ pub fn native_colors(cx: &App) -> NativeColors {
     let dark = theme::is_dark(cx);
     let mut k = NativeColors::for_mode(dark);
     // The system accent the person picked, else `primary`.
-    k.accent = theme::app_accent(dark);
-    k.on_accent = theme::accent_ink(dark);
+    k.primary = theme::app_accent(dark);
+    k.on_primary = theme::accent_ink(dark);
     if let Some(accent) = theme::system_accent() {
         k.accent_text = accent;
-        k.knob_on = k.on_accent;
+        k.knob_on = k.on_primary;
     }
     k
 }
@@ -758,7 +774,9 @@ pub mod layout {
     pub const LIVE_PANE_SHARE: f32 = 0.5;
     pub const LIVE_PANE_MIN_WIDTH: Pixels = px(460.);
     pub const LIVE_PANE_MAX_WIDTH: Pixels = px(760.);
-    pub const ARTIFACT_PANE_WIDTH: Pixels = px(440.);
+    /// The live and 产出 panes (owner decision, v14): 400.
+    pub const LIVE_PANE_WIDTH: Pixels = px(400.);
+    pub const ARTIFACT_PANE_WIDTH: Pixels = px(400.);
     pub const ARTIFACT_RAIL_WIDTH: Pixels = RIGHT_PANE;
     pub const DESK_SIDE_WIDTH: Pixels = RIGHT_PANE;
     pub const MEMBERS_LIST_WIDTH: Pixels = px(480.);
@@ -788,8 +806,21 @@ pub mod layout {
     /// The message avatar (D7).
     pub const AVATAR_SIZE: Pixels = avatar::MD;
     pub const ROW_HEIGHT: Pixels = height::ROW;
-    /// The in-thread card and message measure (§2.4).
-    pub const MEASURE: Pixels = px(640.);
+    /// The one in-thread width (§2.4, T1): every message body, card,
+    /// attachment item, reference block and embed in a thread is
+    /// `min(IN_THREAD, text column)` wide. See [`in_thread_width`].
+    pub const IN_THREAD: Pixels = px(640.);
+    /// Older name of [`IN_THREAD`].
+    pub const MEASURE: Pixels = IN_THREAD;
+
+    /// The width of an in-thread item in a text column `column` wide.
+    pub fn in_thread_width(column: Pixels) -> Pixels {
+        if column < IN_THREAD {
+            column
+        } else {
+            IN_THREAD
+        }
+    }
     /// The message column gutter (§2.1).
     pub const CONTENT_GUTTER: Pixels = space::S24;
     pub const HAIRLINE: Pixels = px(1.);
@@ -926,8 +957,8 @@ pub mod card_v2 {
     pub const STRIP: Pixels = px(32.);
     /// The card title: 16 / 24, 600.
     pub const TITLE: (Pixels, Pixels) = text::HEADING;
-    /// The in-thread card width (§2.4).
-    pub const MAX_WIDTH: Pixels = px(640.);
+    /// The in-thread card width (§2.4): the one in-thread width.
+    pub const MAX_WIDTH: Pixels = super::layout::IN_THREAD;
     pub const TILE: Pixels = px(20.);
     pub const PATH_GROUP_MIN: Pixels = px(24.);
     /// Option rows (choice RadioGroup rows, §2.17).
@@ -1158,12 +1189,24 @@ mod tests {
     }
 
     #[test]
+    fn the_destructive_fill_carries_white_text() {
+        // T1-15: one destructive fill, 4.5:1 with its white label.
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            assert_eq!(k.destructive_fill, c(DESTRUCTIVE_FILL));
+            assert!(contrast(gpui::white(), k.destructive_fill) >= 4.5);
+        }
+    }
+
+    #[test]
     fn native_colors_hold_no_value_of_their_own() {
         for p in [Palette::light(), Palette::dark()] {
             let k = NativeColors::from_palette(&p);
             assert_eq!(k.secondary, k.tertiary);
             assert_eq!(k.separator, p.border);
-            assert_eq!(k.accent, p.primary);
+            assert_eq!(k.primary, p.primary);
+            // T1-01, D10: the highlight is `muted`, never `primary`.
+            assert_eq!(k.accent, p.muted);
+            assert_eq!(k.on_accent, p.foreground);
             assert_eq!(k.selection, p.muted);
             assert_eq!(k.menu.a, 1.);
         }
@@ -1174,11 +1217,11 @@ mod tests {
         // §2.22: ON knob on the ON track, and the OFF knob on the OFF track.
         for p in [Palette::light(), Palette::dark()] {
             let k = NativeColors::from_palette(&p);
-            assert!(contrast(k.knob_on, k.accent) >= 3.);
+            assert!(contrast(k.knob_on, k.primary) >= 3.);
         }
         let d = NativeColors::dark();
         assert_eq!(d.knob_on, c(0x171717FF));
-        assert_eq!(d.accent, c(0xE5E5E5FF));
+        assert_eq!(d.primary, c(0xE5E5E5FF));
         assert!(contrast(d.knob, Palette::dark().background) >= 3.);
     }
 
@@ -1292,6 +1335,14 @@ mod tests {
         assert_eq!(metrics::TOOLBAR_LEADING, metrics::CONTENT_LEADING);
         assert_eq!(metrics::PANE_TOP, metrics::TOOLBAR_ROW);
         assert_eq!(metrics::INSPECTOR_WIDTH, px(320.));
+        // Owner decision (v14): 320 for inspector and side chat, 400 for the
+        // live and 产出 panes; one in-thread width of 640.
+        assert_eq!(layout::SIDE_CHAT_WIDTH, px(320.));
+        assert_eq!(metrics::WIDE_PANE_WIDTH, px(400.));
+        assert_eq!(layout::ARTIFACT_PANE_WIDTH, px(400.));
+        assert_eq!(layout::IN_THREAD, px(640.));
+        assert_eq!(layout::in_thread_width(px(500.)), px(500.));
+        assert_eq!(layout::in_thread_width(px(808.)), px(640.));
     }
 
     #[test]

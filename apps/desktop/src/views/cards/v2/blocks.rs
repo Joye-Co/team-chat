@@ -818,12 +818,12 @@ pub(crate) fn chosen_badge(cx: &App) -> Div {
     div()
         .size(px(20.))
         .rounded_full()
-        .bg(n.accent)
+        .bg(n.primary)
         .shadow(n.float())
         .flex()
         .items_center()
         .justify_center()
-        .child(Sym::Check.inline_small().text_color(n.on_accent))
+        .child(Sym::Check.inline_small().text_color(n.on_primary))
 }
 
 /// A short option as a Regular push button (NATIVE.md §5.2): no letter
@@ -844,7 +844,7 @@ pub(crate) fn option_button(
     } else {
         nk::PushStyle::Outline
     };
-    let ink = if recommended { n.on_accent } else { n.label };
+    let ink = if recommended { n.on_primary } else { n.label };
     nk::disabled_push(
         nk::push_button(id, "", style, nk::PushSize::Regular, cx)
             .flex_none()

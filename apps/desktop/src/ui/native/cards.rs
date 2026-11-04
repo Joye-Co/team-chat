@@ -12,7 +12,10 @@ use gpui::{
 };
 
 use super::tokens::{NativeType as _, native_colors};
-use crate::ui::sf_symbols::{Sym, SymSize};
+use crate::ui::{
+    sf_symbols::{Sym, SymSize},
+    truncate::TruncText,
+};
 
 /// Card metrics: the compact card of COMPLETENESS.md §2.4, on the scales of
 /// ui/native/tokens.rs.
@@ -49,11 +52,17 @@ pub fn card_frame(cx: &App) -> gpui::Div {
     super::blocks::card_surface(cx).w_full().overflow_hidden()
 }
 
-/// A quiet well inside a card (draft, diff, code): `fill` on the card's
-/// `fill`, radius 8, no border.
+/// A well inside a card (draft, diff, code, compare panels, rank lists,
+/// time slots, "话题里" rows): radius 8, a 1 px border on the card fill
+/// (T1-04, §1.7: a fill step alone is not an edge). No muted fill, so muted
+/// text inside keeps 4.5:1.
 pub fn card_well(cx: &App) -> gpui::Div {
     let k = native_colors(cx);
-    div().rounded(card::WELL_RADIUS).bg(k.fill)
+    div()
+        .rounded(card::WELL_RADIUS)
+        .border_1()
+        .border_color(k.separator)
+        .bg(k.sheet)
 }
 
 /// A symbol + text run (`arrow.triangle.pull` `#61`): Callout 12, the
@@ -122,39 +131,79 @@ pub fn pr_facts(number: &str, added: Option<&str>, removed: Option<&str>, cx: &A
         .children(parts)
 }
 
-/// The state part of a card header: a 13 pt state symbol, the state word in
-/// the state color and an optional `secondary` detail, one line.
+/// The state part of a card header: the state symbol (the only part in the
+/// state color), the state words in `label` and an optional `secondary`
+/// detail, one line (T1-05, §1.3, §2.12).
+///
+/// The words never run into the card edge: the detail shrinks first, then
+/// the words cut with `…` and show the whole line in a tooltip. `_ink` is
+/// ignored (the words were the state color before); callers drop it when
+/// they move to [`state_words_parts`].
 pub fn state_words(
     mark: AnyElement,
     label: impl Into<SharedString>,
-    ink: Hsla,
+    _ink: Hsla,
+    detail: Option<SharedString>,
+    cx: &App,
+) -> gpui::Div {
+    state_words_parts(mark, label, None, None, detail, cx)
+}
+
+/// [`state_words`] with a name inside the words (`等 {name} 拍板`): the
+/// name cuts first, so the verb after it stays.
+pub fn state_words_parts(
+    mark: AnyElement,
+    lead: impl Into<SharedString>,
+    name: Option<SharedString>,
+    tail: Option<SharedString>,
     detail: Option<SharedString>,
     cx: &App,
 ) -> gpui::Div {
     let k = native_colors(cx);
+    let lead: SharedString = lead.into();
+    let whole: SharedString = match (&name, &tail) {
+        (None, None) => lead.clone(),
+        _ => format!(
+            "{lead}{}{}",
+            name.as_deref().unwrap_or(""),
+            tail.as_deref().unwrap_or("")
+        )
+        .into(),
+    };
     div()
         .min_w(px(0.))
         .flex()
         .items_center()
         .gap(card::SYMBOL_GAP + px(2.))
         .n_body()
-        .child(mark)
+        .text_color(k.label)
+        .child(div().flex_none().child(mark))
         .child(
             div()
-                .flex_none()
-                .whitespace_nowrap()
-                .text_color(ink)
-                .child(label.into()),
+                .min_w(px(0.))
+                .flex()
+                .items_center()
+                .child(
+                    TruncText::new(lead)
+                        .flex_shrink_0()
+                        .when(name.is_some(), |t| t.max_w(px(160.)))
+                        .tip(whole.clone()),
+                )
+                .when_some(name, |d, n| {
+                    d.child(TruncText::new(n).min_w(px(24.)).tip(whole.clone()))
+                })
+                .when_some(tail, |d, t| {
+                    d.child(div().flex_none().whitespace_nowrap().child(t))
+                }),
         )
         .when_some(detail.filter(|d| !d.is_empty()), |d, text| {
+            // The detail takes only the space left, so it cuts before the
+            // state words do.
             d.child(
-                div()
-                    .min_w(px(0.))
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .text_color(k.secondary)
-                    .child(text),
+                TruncText::new(text)
+                    .flex_1()
+                    .flex_basis(px(0.))
+                    .text_color(k.secondary),
             )
         })
 }
@@ -178,14 +227,7 @@ pub fn inline_ref(sym: Sym, text: impl Into<SharedString>, cx: &App) -> gpui::Di
         .n_body()
         .text_color(k.secondary)
         .child(sym.icon(SymSize::INLINE).text_color(k.secondary))
-        .child(
-            div()
-                .min_w(px(0.))
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(text.into()),
-        )
+        .child(TruncText::new(text))
 }
 
 /// A 4 pt media scrubber: `quaternary` track, `label` fill, a 10 pt knob

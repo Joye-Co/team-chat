@@ -1,10 +1,13 @@
 //! Floating surfaces (DESIGN.md §5, §7.12, §8.6): popovers, menus and their
 //! rows, the @mention popup, the hover toolbar, toasts and banners.
 
+use std::rc::Rc;
+
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ParentElement, RenderOnce,
     SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
+use gpui_component::{WindowExt as _, notification::Notification};
 
 use crate::{
     theme::{self, Type as _, size, space},
@@ -108,23 +111,42 @@ pub enum Tone {
     Danger,
 }
 
-/// A toast: the overlay surface, 44 pt, padding 0 12 0 14, a 16 pt glyph,
-/// `ui` 14 text and an optional `sm` action.
+/// The toast (COMPLETENESS.md §2.16, T1-06): float surface, radius 10, a
+/// 1 px border, shadow md, p 16, w 360; a 16 icon (the only part in a state
+/// color), title 14 medium, description 14 muted, an outline sm action and
+/// a 16 close. Draw it in place, or push it bottom-right with
+/// [`Toast::push`].
 #[derive(IntoElement)]
 pub struct Toast {
     glyph: Sym,
     tone: Tone,
-    text: SharedString,
-    action: Option<AnyElement>,
+    title: SharedString,
+    description: Option<SharedString>,
+    action: Option<ToastAction>,
+    /// In-place drawing only: an element action (the gallery).
+    action_el: Option<AnyElement>,
+    on_close: Option<Rc<dyn Fn(&mut Window, &mut App)>>,
+    id: Option<SharedString>,
+}
+
+/// The action of a pushed [`Toast`]: an outline sm button.
+#[derive(Clone)]
+pub struct ToastAction {
+    pub label: SharedString,
+    pub run: Rc<dyn Fn(&mut Window, &mut App)>,
 }
 
 impl Toast {
-    pub fn new(glyph: Sym, text: impl Into<SharedString>) -> Self {
+    pub fn new(glyph: Sym, title: impl Into<SharedString>) -> Self {
         Self {
             glyph,
             tone: Tone::Neutral,
-            text: text.into(),
+            title: title.into(),
+            description: None,
             action: None,
+            action_el: None,
+            on_close: None,
+            id: None,
         }
     }
 
@@ -133,41 +155,204 @@ impl Toast {
         self
     }
 
-    pub fn action(mut self, el: impl IntoElement) -> Self {
-        self.action = Some(el.into_any_element());
+    /// A 14 muted line under the title.
+    pub fn description(mut self, text: impl Into<SharedString>) -> Self {
+        self.description = Some(text.into());
         self
     }
+
+    /// The action: an outline sm button that runs `run` and closes the toast.
+    pub fn action_button(
+        mut self,
+        label: impl Into<SharedString>,
+        run: impl Fn(&mut Window, &mut App) + 'static,
+    ) -> Self {
+        self.action = Some(ToastAction {
+            label: label.into(),
+            run: Rc::new(run),
+        });
+        self
+    }
+
+    /// Any element as the action, for a toast drawn in place.
+    pub fn action(mut self, el: impl IntoElement) -> Self {
+        self.action_el = Some(el.into_any_element());
+        self
+    }
+
+    /// What the close button does in a toast drawn in place.
+    pub fn on_close(mut self, f: impl Fn(&mut Window, &mut App) + 'static) -> Self {
+        self.on_close = Some(Rc::new(f));
+        self
+    }
+
+    /// A toast with the same id replaces the one on screen.
+    pub fn id(mut self, id: impl Into<SharedString>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+
+    /// The toast as a gpui-component notification: the theme places it
+    /// bottom-right, 16 from the window edges, 360 wide.
+    pub fn notification(self) -> Notification {
+        let Toast {
+            glyph,
+            tone,
+            title,
+            description,
+            action,
+            id,
+            ..
+        } = self;
+        let mut note = Notification::new()
+            .close_button(false)
+            .autohide(action.is_none())
+            .p(space::S16)
+            .content(move |this, _window, cx| {
+                let close = cx.listener(|this, _, window, cx| this.dismiss(window, cx));
+                let run = action.clone().map(|a| {
+                    let r = a.run.clone();
+                    (
+                        a.label,
+                        cx.listener(move |this: &mut Notification, _, window, cx| {
+                            r(window, cx);
+                            this.dismiss(window, cx);
+                        }),
+                    )
+                });
+                let _ = this;
+                toast_body(
+                    glyph,
+                    tone,
+                    title.clone(),
+                    description.clone(),
+                    run.map(|(label, f)| {
+                        crate::ui::native::push_button(
+                            "toast-action",
+                            label,
+                            crate::ui::native::PushStyle::Outline,
+                            crate::ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(f)
+                        .into_any_element()
+                    }),
+                    close_button(cx).on_click(close).into_any_element(),
+                    cx,
+                )
+                .into_any_element()
+            });
+        if let Some(id) = id {
+            note = note.id1::<Toast>(id);
+        }
+        note
+    }
+
+    /// Pushes the toast on the active window (bottom-right, §2.16).
+    pub fn push(self, cx: &mut App) {
+        let note = self.notification();
+        let target = cx
+            .active_window()
+            .or_else(|| cx.windows().into_iter().next());
+        if let Some(window) = target {
+            let _ = window.update(cx, |_, window, cx| window.push_notification(note, cx));
+        }
+    }
+}
+
+/// The 16 close of a toast: a 28 ghost icon button.
+fn close_button(cx: &App) -> gpui_component::button::Button {
+    crate::ui::native::icon_button_sym(
+        "toast-close",
+        Sym::Close,
+        crate::copy::common::CLOSE,
+        crate::ui::native::IconSize::Small,
+        cx,
+    )
+}
+
+/// The inside of a toast: icon, title over description, action, close.
+fn toast_body(
+    glyph: Sym,
+    tone: Tone,
+    title: SharedString,
+    description: Option<SharedString>,
+    action: Option<AnyElement>,
+    close: AnyElement,
+    cx: &App,
+) -> gpui::Div {
+    let n = crate::ui::native::native_colors(cx);
+    let glyph_color = match tone {
+        Tone::Neutral => n.label,
+        Tone::Success => n.green,
+        Tone::Danger => n.red,
+    };
+    div()
+        .w_full()
+        .flex()
+        .items_start()
+        .gap(space::S12)
+        .child(
+            // The icon centers on the title line (20 high).
+            div()
+                .flex_none()
+                .h(px(20.))
+                .flex()
+                .items_center()
+                .child(icon(
+                    glyph,
+                    crate::ui::native::tokens::icon::MD,
+                    glyph_color,
+                )),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(div().n_headline().text_color(n.label).child(title))
+                .when_some(description, |d, t| {
+                    d.child(div().n_body().text_color(n.secondary).child(t))
+                }),
+        )
+        .children(action.map(|a| div().flex_none().self_center().child(a)))
+        .child(div().flex_none().mt(px(-4.)).mr(px(-6.)).child(close))
 }
 
 impl RenderOnce for Toast {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        // COMPLETENESS.md §2.16: the toast surface, a 16 icon, 14 medium
-        // text, an outline sm action.
-        let n = crate::ui::native::native_colors(cx);
-        let glyph_color = match self.tone {
-            Tone::Neutral => n.label,
-            Tone::Success => n.green,
-            Tone::Danger => n.red,
-        };
-        crate::ui::native::feedback::toast_surface(cx)
-            .flex()
-            .items_center()
-            .gap(space::S12)
-            .child(icon(
-                self.glyph,
-                crate::ui::native::tokens::icon::MD,
-                glyph_color,
-            ))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .n_headline()
-                    .text_color(n.label)
-                    .one_line()
-                    .child(self.text),
-            )
-            .children(self.action)
+        // A toast drawn in place (gallery, kit scene): the same body on the
+        // toast surface.
+        let t = self;
+        let action = t.action_el.or_else(|| {
+            t.action.map(|a| {
+                let run = a.run.clone();
+                crate::ui::native::push_button(
+                    "toast-action",
+                    a.label,
+                    crate::ui::native::PushStyle::Outline,
+                    crate::ui::native::PushSize::Small,
+                    cx,
+                )
+                .on_click(move |_, w, cx| run(w, cx))
+                .into_any_element()
+            })
+        });
+        let on_close = t.on_close.clone();
+        let close = close_button(cx)
+            .when_some(on_close, |b, f| b.on_click(move |_, w, cx| f(w, cx)))
+            .into_any_element();
+        crate::ui::native::feedback::toast_surface(cx).child(toast_body(
+            t.glyph,
+            t.tone,
+            t.title,
+            t.description,
+            action,
+            close,
+            cx,
+        ))
     }
 }
 

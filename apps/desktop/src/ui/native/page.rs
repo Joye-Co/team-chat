@@ -14,13 +14,14 @@
 //!
 //! Colors come from [`native_colors`]; text from the [`NativeType`] roles.
 
+use crate::ui::truncate::TruncText;
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Pixels,
     SharedString, Stateful, Styled, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{skeleton::Skeleton, tag::Tag};
+use gpui_component::tag::Tag;
 
-use super::{NativeType as _, native_colors};
+use super::{NativeType as _, feedback::Bone, native_colors};
 use crate::{
     app::Services,
     data::ConnectionState,
@@ -157,15 +158,7 @@ pub fn section_header(
                         )
                         .children(count.map(|n| count_pill(n, cx))),
                 )
-                .children(description.map(|d| {
-                    div()
-                        .n_body()
-                        .text_color(k.secondary)
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(d)
-                })),
+                .children(description.map(|d| TruncText::new(d).n_body().text_color(k.secondary))),
         )
         .children(action.map(|a| div().flex_none().h(px(28.)).flex().items_center().child(a)))
 }
@@ -281,15 +274,10 @@ impl PageRow {
                             .gap(px(8.))
                             .min_w(px(0.))
                             .child(
-                                div()
-                                    .min_w(px(0.))
+                                TruncText::new(self.title)
                                     .n_body()
                                     .font_weight(gpui::FontWeight::MEDIUM)
-                                    .text_color(k.label)
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(self.title),
+                                    .text_color(k.label),
                             )
                             .children(self.title_trailing),
                     )
@@ -403,16 +391,7 @@ pub fn kpi_card(
                 .items_center()
                 .justify_between()
                 .gap(px(8.))
-                .child(
-                    div()
-                        .min_w(px(0.))
-                        .n_body()
-                        .text_color(k.secondary)
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(label.into()),
-                )
+                .child(TruncText::new(label).n_body().text_color(k.secondary))
                 .children(icon.map(|(s, c)| row_icon(s, c))),
         )
         .child(
@@ -423,15 +402,7 @@ pub fn kpi_card(
                 .text_color(k.label)
                 .child(value.into()),
         )
-        .child(
-            div()
-                .n_callout()
-                .text_color(k.secondary)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(foot.into()),
-        )
+        .child(TruncText::new(foot).n_callout().text_color(k.secondary))
 }
 
 /// The states of §2.12, each with one icon and one color.
@@ -447,6 +418,10 @@ pub enum Status {
     Online,
     Offline,
     Deactivated,
+    Paused,
+    Merging,
+    /// A quiet waiting word (等李雪回答): clock, muted.
+    Waiting,
 }
 
 impl Status {
@@ -462,6 +437,9 @@ impl Status {
             Status::Online => (None, k.green),
             Status::Offline => (None, k.secondary),
             Status::Deactivated => (Some(Sym::Stopped), k.secondary),
+            Status::Paused => (Some(Sym::Pause), k.secondary),
+            Status::Merging => (Some(Sym::Spinner), k.blue),
+            Status::Waiting => (Some(Sym::Waiting), k.secondary),
         }
     }
 }
@@ -483,6 +461,9 @@ pub fn status_badge(status: Status, text: impl Into<SharedString>, _cx: &App) ->
         Status::Online => B::Online,
         Status::Offline => B::Offline,
         Status::Deactivated => B::Deactivated,
+        Status::Paused => B::Paused,
+        Status::Merging => B::Merging,
+        Status::Waiting => B::Quiet,
     };
     StatusBadge::new(state, text).into_any_element()
 }
@@ -515,7 +496,7 @@ pub enum AlertKind {
 
 /// An Alert (§2.15): radius 10, border, px16 py12, a 16 state icon, title
 /// 14 medium, description 14 muted, an action at the right. The error kind
-/// tints the title, icon and border. gpui-component's `Alert` has no action
+/// tints the icon and border; the title stays neutral (owner decision). gpui-component's `Alert` has no action
 /// slot and no muted description, so the frame is drawn here once.
 pub fn page_alert(
     id: impl Into<ElementId>,
@@ -567,7 +548,9 @@ pub fn page_alert(
                     div()
                         .n_body()
                         .font_weight(gpui::FontWeight::MEDIUM)
-                        .text_color(if error { k.red } else { k.label })
+                        // Owner decision v14 (T1-11): neutral title; the
+                        // state color is on the icon and the border.
+                        .text_color(k.label)
                         .child(title.into()),
                 )
                 .children(description.map(|d| div().n_body().text_color(k.secondary).child(d))),
@@ -665,52 +648,54 @@ pub fn compact_empty(
         .children(action)
 }
 
-/// The shapes of a loading region (§2.14).
+/// The shapes of a loading region (§2.14, T1-07): each kind is the final
+/// shape of the list it stands in for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SkeletonKind {
-    /// A list row: 32 box, then lines h14 and h12.
+    /// A framed list row (§2.6): h56, 32 box, then lines h14 and h12.
     Row,
-    /// A sidebar or inspector row: 16 square and one line.
+    /// A pane or inspector row: 16 square and one line, pitch 32.
     Compact,
+    /// A table (§2.7): an h40 header, then h48 rows, in a frame.
+    TableRow,
+    /// A member list row: unframed, a group label, then 32 avatar circle,
+    /// name over role, pitch 52.
+    MemberRow,
+    /// A sidebar item (§2.14): 16 square and a h14 bar, pitch 32, px 8, on
+    /// the sidebar fill.
+    SidebarItem,
 }
 
-/// `n` skeleton rows at the real row height, in a list frame for
-/// [`SkeletonKind::Row`].
+/// The pitch of a member list row.
+pub const MEMBER_ROW: Pixels = px(52.);
+
+/// `n` skeleton rows of `kind` at the real row height and frame.
 pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyElement {
     let k = native_colors(cx);
     let widths = [0.62, 0.45, 0.78, 0.54, 0.7, 0.4];
     let rows = (0..n).map(|i| {
         let w = widths[i % widths.len()];
+        let row_id = SharedString::from(format!("{id}-{i}"));
         match kind {
             SkeletonKind::Row => div()
-                .id(SharedString::from(format!("{id}-{i}")))
+                .id(row_id)
                 .relative()
                 .h(m::ROW)
                 .px(m::ROW_PAD)
                 .flex()
                 .items_center()
                 .gap(px(12.))
-                .child(Skeleton::new().size(m::MEDIA).rounded(px(6.)))
+                .child(Bone::new().size(m::MEDIA).rounded(px(6.)))
                 .child(
                     div()
                         .flex_1()
                         .flex()
                         .flex_col()
                         .gap(px(6.))
-                        .child(
-                            Skeleton::new()
-                                .h(px(14.))
-                                .w(gpui::relative(w))
-                                .rounded(px(8.)),
-                        )
-                        .child(
-                            Skeleton::new()
-                                .h(px(12.))
-                                .w(gpui::relative(w * 0.6))
-                                .rounded(px(8.)),
-                        ),
+                        .child(Bone::new().h(px(14.)).w(gpui::relative(w)))
+                        .child(Bone::new().h(px(12.)).w(gpui::relative(w * 0.6))),
                 )
-                .child(Skeleton::new().h(px(12.)).w(px(40.)).rounded(px(8.)))
+                .child(Bone::new().h(px(12.)).w(px(40.)))
                 .when(i + 1 < n, |d| {
                     d.child(
                         div()
@@ -724,24 +709,104 @@ pub fn skeleton_rows(id: &str, kind: SkeletonKind, n: usize, cx: &App) -> AnyEle
                 })
                 .into_any_element(),
             SkeletonKind::Compact => div()
-                .id(SharedString::from(format!("{id}-{i}")))
+                .id(row_id)
                 .h(px(32.))
                 .flex()
                 .items_center()
                 .gap(px(8.))
-                .child(Skeleton::new().size(px(16.)).rounded(px(4.)))
+                .child(Bone::new().size(px(16.)).rounded(px(4.)))
+                .child(Bone::new().h(px(14.)).w(gpui::relative(w)))
+                .into_any_element(),
+            SkeletonKind::TableRow => div()
+                .id(row_id)
+                .h(super::tokens::height::TABLE_ROW)
+                .px(px(16.))
+                .flex()
+                .items_center()
+                .gap(px(24.))
+                .when(i + 1 < n, |d| d.border_b_1().border_color(k.separator))
                 .child(
-                    Skeleton::new()
+                    div()
+                        .flex_1()
+                        .child(Bone::new().h(px(14.)).w(gpui::relative(w))),
+                )
+                .child(Bone::new().h(px(14.)).w(px(64.)))
+                .child(Bone::new().h(px(14.)).w(px(96.)))
+                .child(Bone::new().h(px(14.)).w(px(56.)))
+                .into_any_element(),
+            SkeletonKind::MemberRow => div()
+                .id(row_id)
+                .h(MEMBER_ROW)
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .child(Bone::new().size(m::MEDIA).rounded_full())
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(px(6.))
+                        .child(Bone::new().h(px(14.)).w(gpui::relative(w * 0.7)))
+                        .child(Bone::new().h(px(12.)).w(gpui::relative(w * 0.4))),
+                )
+                .into_any_element(),
+            SkeletonKind::SidebarItem => div()
+                .id(row_id)
+                .h(px(32.))
+                .px(px(8.))
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .child(Bone::new().size(px(16.)).rounded(px(4.)).on_fill(true))
+                .child(
+                    Bone::new()
                         .h(px(14.))
-                        .w(gpui::relative(w))
-                        .rounded(px(8.)),
+                        .w(gpui::relative(0.5 + 0.4 * w))
+                        .on_fill(true),
                 )
                 .into_any_element(),
         }
     });
     match kind {
         SkeletonKind::Row => frame(cx).children(rows).into_any_element(),
-        SkeletonKind::Compact => div().flex().flex_col().children(rows).into_any_element(),
+        SkeletonKind::TableRow => frame(cx)
+            .child(
+                div()
+                    .h(super::tokens::height::TABLE_HEAD)
+                    .px(px(16.))
+                    .bg(k.fill)
+                    .border_b_1()
+                    .border_color(k.separator)
+                    .flex()
+                    .items_center()
+                    .gap(px(24.))
+                    .child(
+                        div()
+                            .flex_1()
+                            .child(Bone::new().h(px(12.)).w(px(48.)).on_fill(true)),
+                    )
+                    .child(Bone::new().h(px(12.)).w(px(64.)).on_fill(true))
+                    .child(Bone::new().h(px(12.)).w(px(96.)).on_fill(true))
+                    .child(Bone::new().h(px(12.)).w(px(56.)).on_fill(true)),
+            )
+            .children(rows)
+            .into_any_element(),
+        SkeletonKind::MemberRow => div()
+            .flex()
+            .flex_col()
+            .child(
+                div()
+                    .h(px(32.))
+                    .flex()
+                    .items_center()
+                    .child(Bone::new().h(px(12.)).w(px(48.))),
+            )
+            .children(rows)
+            .into_any_element(),
+        SkeletonKind::Compact | SkeletonKind::SidebarItem => {
+            div().flex().flex_col().children(rows).into_any_element()
+        }
     }
 }
 
@@ -756,14 +821,14 @@ pub fn skeleton_cards(n: usize, cx: &App) -> AnyElement {
                 .p(px(16.))
                 .gap(px(8.))
                 .child(
-                    Skeleton::new()
+                    Bone::new()
                         .h(px(14.))
                         .w(gpui::relative(0.5))
                         .rounded(px(8.)),
                 )
-                .child(Skeleton::new().h(px(28.)).w(px(48.)).rounded(px(8.)))
+                .child(Bone::new().h(px(28.)).w(px(48.)).rounded(px(8.)))
                 .child(
-                    Skeleton::new()
+                    Bone::new()
                         .h(px(12.))
                         .w(gpui::relative(0.7))
                         .rounded(px(8.)),
@@ -918,24 +983,8 @@ pub fn card_row(
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .child(
-                    div()
-                        .n_body()
-                        .text_color(k.label)
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(title.into()),
-                )
-                .children(meta.map(|m| {
-                    div()
-                        .n_callout()
-                        .text_color(k.secondary)
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(m)
-                })),
+                .child(TruncText::new(title).n_body().text_color(k.label))
+                .children(meta.map(|m| TruncText::new(m).n_callout().text_color(k.secondary))),
         )
         .children(trailing.map(|t| div().flex_none().flex().items_center().gap(px(8.)).child(t)))
 }
@@ -951,26 +1000,22 @@ pub fn desc_row(label: impl Into<SharedString>, value: impl IntoElement, cx: &Ap
         .items_center()
         .gap(px(8.))
         .child(
-            div()
+            TruncText::new(label)
                 .flex_none()
                 .w(px(112.))
                 .n_body()
-                .text_color(k.secondary)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label.into()),
+                .text_color(k.secondary),
         )
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
-                .n_body()
-                .n_figures()
-                .text_color(k.label)
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
+                .n_body()
+                .n_figures()
+                .text_color(k.label)
                 .child(value),
         )
 }
@@ -1085,12 +1130,7 @@ pub fn table(
 /// One line of text that truncates with `…` (a table cell, a meta line).
 pub fn cell_text(text: impl Into<SharedString>, muted: bool, cx: &App) -> AnyElement {
     let k = native_colors(cx);
-    div()
-        .min_w(px(0.))
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .text_ellipsis()
+    TruncText::new(text)
         .text_color(if muted { k.secondary } else { k.label })
-        .child(text.into())
         .into_any_element()
 }

@@ -48,14 +48,14 @@ pub use blocks::{
 pub use buttons::{
     Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
     borderless_variant, chip_button, disabled_push, ghost_button, icon_button, icon_button_bare,
-    icon_button_styled, icon_button_sym, popup_button, pull_down, push_button, row_button,
-    screen_button, select_button, square_button, square_pair, tile_button, toolbar_item,
-    toolbar_item_sym, toolbar_tab,
+    icon_button_styled, icon_button_sym, loading_push, popup_button, pull_down, push_button,
+    row_button, screen_button, select_button, square_button, square_pair, tile_button,
+    toolbar_item, toolbar_item_sym, toolbar_tab,
 };
 #[allow(unused_imports)]
 pub use feedback::{
-    Alert, AlertTone, Empty, EmptyLine, SkeletonKind, icon_box, progress, progress_steps, skeleton,
-    skeleton_rows, toast_surface,
+    Alert, AlertTone, Bone, Empty, EmptyLine, SkeletonKind, icon_box, progress, progress_steps,
+    skeleton, skeleton_rows, toast_surface,
 };
 #[allow(unused_imports)]
 pub use fields::{FieldSize, NativeTextField, SearchField};
@@ -64,7 +64,7 @@ pub use form::{FormRow, GroupedForm, InlineValueField, inline_commit, inline_sta
 #[allow(unused_imports)]
 pub use inspector::{
     CompactRow, InspectorSection, determinate_bar, inspector_column, label_value, label_value_with,
-    steps_bar,
+    pane_fill, right_pane, steps_bar,
 };
 #[allow(unused_imports)]
 pub use menu::{MenuRow, menu_label, menu_separator, menu_surface, popover_surface};
@@ -73,16 +73,24 @@ pub use segmented::{Segment, Segmented};
 #[allow(unused_imports)]
 pub use sheet::{
     AlertLayout, SheetLayout, SheetWidth, alert_button, alert_surface, native_sheet, sheet_buttons,
-    sheet_surface,
+    sheet_status_error, sheet_surface,
 };
 #[allow(unused_imports)]
-pub use sidebar::{SidebarFooter, SidebarRow, SidebarSection, floating_sidebar};
+pub use sidebar::{
+    RightColumn, SidebarFooter, SidebarGroup, SidebarMedia, SidebarRow, SidebarSection,
+    floating_sidebar,
+};
 #[allow(unused_imports)]
 pub use toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize};
 #[allow(unused_imports)]
 pub use tokens::{NativeColors, NativeType, emphasized, metrics, native_colors};
 #[allow(unused_imports)]
 pub use toolbar::{ToolbarGroup, ToolbarRow, toolbar_slot};
+
+/// The one truncating label (T1-02): `…` at the end or in the middle, the
+/// full text in a tooltip when cut.
+#[allow(unused_imports)]
+pub use crate::ui::truncate::{Cut, TruncText};
 
 /// The busy spinner (§5.7): for unknown waits, never with "加载中…" text.
 #[allow(unused_imports)]

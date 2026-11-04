@@ -255,7 +255,8 @@ fn apply(t: &mut Theme, dark: bool) {
     t.border = k.border;
     t.input = k.control_border;
     t.ring = p.ring;
-    t.selection = soft(p.info, 0.25);
+    // Text selection is neutral (T1-15, §1.3): foreground at 15 %.
+    t.selection = soft(p.foreground, 0.15);
     t.caret = p.foreground;
     t.overlay = p.scrim;
     t.accent = p.accent;
@@ -289,13 +290,15 @@ fn apply(t: &mut Theme, dark: bool) {
     t.button_secondary_foreground = p.foreground;
 
     // State colors (§1.3): fills and their white text.
-    t.danger = p.destructive;
-    t.danger_hover = p.destructive.opacity(0.9);
-    t.danger_active = p.destructive.opacity(0.8);
+    // One destructive fill in both modes (T1-15): white text at 4.8:1.
+    let danger_fill = c(crate::ui::native::tokens::DESTRUCTIVE_FILL);
+    t.danger = danger_fill;
+    t.danger_hover = danger_fill.opacity(0.9);
+    t.danger_active = danger_fill.opacity(0.8);
     t.danger_foreground = white;
-    t.button_danger = p.destructive;
-    t.button_danger_hover = p.destructive.opacity(0.9);
-    t.button_danger_active = p.destructive.opacity(0.8);
+    t.button_danger = danger_fill;
+    t.button_danger_hover = danger_fill.opacity(0.9);
+    t.button_danger_active = danger_fill.opacity(0.8);
     t.button_danger_foreground = white;
     t.success = p.success;
     t.success_hover = p.success;
@@ -418,6 +421,10 @@ fn apply(t: &mut Theme, dark: bool) {
     t.mono_font_size = text::MONO.0;
     t.radius = r::CONTROL;
     t.radius_lg = r::CONTAINER;
+    // Toasts (§2.16, T1-06): bottom-right, 16 from the window edges, 360.
+    t.notification.placement = gpui::Anchor::BottomRight;
+    t.notification.width = px(360.);
+    t.notification.margins = gpui_component::Edges::all(space::S16);
     t.shadow = true;
     t.focus_ring = true;
     t.scrollbar_mode = ScrollbarMode::Scrolling;
@@ -1394,7 +1401,7 @@ pub fn set_system_accent(accent: Option<Hsla>) -> bool {
 
 /// The app accent of a mode: graphite, or the system accent.
 pub fn app_accent(dark: bool) -> Hsla {
-    system_accent().unwrap_or_else(|| crate::ui::native::NativeColors::for_mode(dark).accent)
+    system_accent().unwrap_or_else(|| crate::ui::native::NativeColors::for_mode(dark).primary)
 }
 
 /// Text and symbols on the app accent: white on graphite and on a system
@@ -1402,7 +1409,7 @@ pub fn app_accent(dark: bool) -> Hsla {
 pub fn accent_ink(dark: bool) -> Hsla {
     match system_accent() {
         Some(_) => c(0xFFFFFFFF),
-        None => crate::ui::native::NativeColors::for_mode(dark).on_accent,
+        None => crate::ui::native::NativeColors::for_mode(dark).on_primary,
     }
 }
 

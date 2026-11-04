@@ -322,7 +322,7 @@ impl NativeKit {
                     .child(sample(
                         t::STATE_PRESSED,
                         push_button("kb-5", t::APPROVE, PushStyle::Default, reg, cx)
-                            .bg(k.accent.opacity(0.82)),
+                            .bg(k.primary.opacity(0.82)),
                         &k,
                     ))
                     .child(sample(
@@ -771,7 +771,7 @@ impl NativeKit {
         let app_icon = div()
             .size(metrics::ALERT_ICON)
             .rounded(px(11.))
-            .bg(k.accent)
+            .bg(k.primary)
             .flex()
             .items_center()
             .justify_center()
@@ -779,7 +779,7 @@ impl NativeKit {
                 Sf::SideChat,
                 px(26.),
                 Weight::Medium,
-                k.on_accent,
+                k.on_primary,
                 window,
             ));
         let sheet = section(t::SEC_SHEET, &k).child(
@@ -870,7 +870,7 @@ impl NativeKit {
             Alert, AlertTone, Badge, BadgeState, BadgeVariant, Card, Column, CountPill, Empty,
             EmptyLine, IconSize, KeyCap, LIST_TITLE_INSET, ListRow, PushSize, PushStyle,
             SkeletonKind, StatusBadge, icon_button, list_frame, media_box, push_button,
-            skeleton_rows, table, toast_surface, tokens::space,
+            skeleton_rows, table, tokens::space,
         };
         use crate::ui::Sym;
         let k = native_colors(cx);
@@ -900,6 +900,9 @@ impl NativeKit {
             (BadgeState::Online, t::ST_ONLINE),
             (BadgeState::Offline, t::ST_OFFLINE),
             (BadgeState::Deactivated, t::ST_DEACTIVATED),
+            (BadgeState::Paused, t::ST_PAUSED),
+            (BadgeState::Merging, t::ST_MERGING),
+            (BadgeState::Quiet, t::ST_WAITING),
         ];
         let status = section(t::SEC_STATUS, &k).child(
             div()
@@ -1032,7 +1035,9 @@ impl NativeKit {
             Column::fixed(t::COL_VERSION, px(64.)).right(),
             Column::fixed(t::COL_UPDATED, px(80.)).right(),
         ];
-        let cell = |s: &'static str| div().child(s).into_any_element();
+        // §2.21: a cell cuts with "…" and shows the whole value in a
+        // tooltip (T1-19).
+        let cell = |s: &'static str| crate::ui::truncate::TruncText::new(s).into_any_element();
         let data = vec![
             vec![
                 cell(t::TOPIC_A),
@@ -1137,27 +1142,78 @@ impl NativeKit {
                         )),
                 )
                 .child(
-                    toast_surface(cx)
-                        .flex()
-                        .items_center()
-                        .gap(space::S12)
-                        .child(crate::ui::icons::icon(
-                            Sym::Done,
-                            super::tokens::icon::MD,
-                            k.green,
-                        ))
-                        .child(div().flex_1().n_headline().child(t::TOAST_TEXT)),
+                    crate::ui::overlay::Toast::new(Sym::Done, t::TOAST_TEXT)
+                        .tone(crate::ui::overlay::Tone::Success)
+                        .description(t::TOAST_DETAIL)
+                        .action(push_button(
+                            "k3-t1",
+                            t::TOAST_UNDO,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
+                        )),
                 ),
+        );
+        // The state matrix of the current kit (T1-18, §1.8): rest, hover,
+        // pressed, focus (3 px ring), loading and disabled, for the
+        // default and the outline button.
+        let matrix_row = |style: PushStyle, label: &'static str, id: &'static str| {
+            let base = |n: &str| {
+                push_button(format!("{id}-{n}"), label, style, PushSize::Small, cx).w(px(64.))
+            };
+            let look = super::buttons::look(style, &k);
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(base("rest"))
+                .child(base("hover").bg(look.hover))
+                .child(base("pressed").bg(look.pressed))
+                .child(
+                    div()
+                        .rounded(super::tokens::radius::CONTROL)
+                        .shadow(k.focus_ring())
+                        .child(base("focus")),
+                )
+                .child(super::loading_push(base("loading"), true, PushSize::Small))
+                .child(super::disabled_push(base("disabled"), true, cx))
+        };
+        let state_labels = [
+            t::STATE_REST,
+            t::STATE_HOVER,
+            t::STATE_PRESSED,
+            t::STATE_FOCUSED,
+            t::STATE_LOADING,
+            t::STATE_DISABLED,
+        ];
+        let matrix = section(t::SEC_STATES, &k).child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S8)
+                .child(
+                    div()
+                        .flex()
+                        .gap(space::S8)
+                        .n_footnote()
+                        .text_color(k.secondary)
+                        .children(state_labels.map(|l| div().w(px(64.)).child(l))),
+                )
+                .child(matrix_row(PushStyle::Default, t::CONTINUE, "k3-m1"))
+                .child(matrix_row(PushStyle::Outline, t::CANCEL, "k3-m2")),
         );
         let col = || div().w(px(440.)).flex().flex_col().gap(space::S24);
         div()
             .size_full()
             .bg(k.content)
             .p(space::S24)
+            // The traffic lights sit in the top 52 band; content starts
+            // under it (T1-19).
+            .pt(metrics::TOOLBAR_ROW)
             .flex()
             .gap(space::S24)
             .child(col().child(badges).child(status).child(buttons).child(card))
-            .child(col().child(list).child(tables))
+            .child(col().child(list).child(tables).child(matrix))
             .child(col().child(feedback).child(empty).child(loading))
             .into_any_element()
     }

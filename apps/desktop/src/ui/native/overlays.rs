@@ -26,8 +26,9 @@ use gpui_component::{
 
 use super::{
     sheet::SHEET_ENTRANCE,
-    tokens::{NativeType as _, metrics, native_colors},
+    tokens::{NativeType as _, metrics, native_colors, space},
 };
+use crate::theme::MEDIUM_WEIGHT;
 use crate::ui::{
     controls::placeholder_input,
     sf_symbols::{Sym, SymSize, Weight},
@@ -113,9 +114,9 @@ pub fn spotlight(dialog: Dialog, cx: &App) -> Dialog {
         .overflow_hidden()
 }
 
-/// The Spotlight field (§9.7): a 48 pt capsule row, a 20 pt
-/// `magnifyingglass` in `secondary`, 22 pt text; an optional token before
-/// the text (a scope) and an element at the trailing edge (a pop-up).
+/// The palette field (COMPLETENESS.md §2.11): an h48 row, a 16 search icon
+/// in `secondary`, 16 text, gap 8; an optional token before the text (a
+/// scope) and an element at the trailing edge (a pop-up).
 #[derive(IntoElement)]
 pub struct SpotlightField {
     state: Entity<InputState>,
@@ -155,11 +156,11 @@ impl RenderOnce for SpotlightField {
             .pr(px(12.))
             .flex()
             .items_center()
-            .gap(px(10.))
+            .gap(space::S8)
             .cursor_text()
             .child(
                 Sym::Search
-                    .icon(SymSize::new(20., 24., Weight::Regular))
+                    .icon(SymSize::new(16., 16., Weight::Regular))
                     .text_color(k.secondary),
             )
             .children(self.leading)
@@ -206,20 +207,18 @@ pub fn spotlight_section(label: impl Into<gpui::SharedString>, cx: &App) -> gpui
         .child(label.into())
 }
 
-/// The (text, secondary text) colors of a row: `onAccent` on the chosen
-/// row, `label` and `secondary` otherwise.
+/// The (text, secondary text) colors of a row. The chosen row is the
+/// `accent` (muted) fill, so its text stays `label` and `secondary` (D10):
+/// never an inverted row.
 pub fn spotlight_ink(active: bool, cx: &App) -> (Hsla, Hsla) {
+    let _ = active;
     let k = native_colors(cx);
-    if active {
-        (k.on_accent, k.on_accent.opacity(0.72))
-    } else {
-        (k.label, k.secondary)
-    }
+    (k.label, k.secondary)
 }
 
-/// A 32 pt result row (§9.7): inset 8 pt, radius 8; the chosen row has
-/// the `accent` fill (a focused list). No hover fill: the pointer moves the
-/// choice, as in Spotlight.
+/// A 32 result row (§2.11): inset 4, px 8, radius 6; the chosen row has the
+/// `accent` fill (muted, D10) and 500 text. No hover fill: the pointer moves
+/// the choice, as in Spotlight.
 pub fn spotlight_row(
     id: impl Into<ElementId>,
     active: bool,
@@ -239,7 +238,7 @@ pub fn spotlight_row(
         .gap(px(8.))
         .n_body()
         .text_color(ink)
-        .when(active, |d| d.bg(k.accent))
+        .when(active, |d| d.bg(k.accent).font_weight(MEDIUM_WEIGHT))
 }
 
 /// The leading slot of a row: an inline symbol (13 pt in a 20 pt slot).
@@ -285,21 +284,18 @@ pub fn sheet_list(rows: usize, cx: &App) -> gpui::Div {
         .overflow_hidden()
 }
 
-/// A row of a [`sheet_list`]: 32 pt, inset 5 pt, radius 6; a chosen row
-/// has the `accent` fill (`selection` when the list is not focused). No
-/// hover fill.
+/// A row of a [`sheet_list`]: 32, inset 5, radius 6; a chosen row has the
+/// muted `selection` fill and 500 text, focused or not (D10). No hover
+/// fill.
 pub fn sheet_list_row(
     id: impl Into<ElementId>,
     chosen: bool,
     focused: bool,
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
+    let _ = focused;
     let k = native_colors(cx);
-    let (fill, ink) = if focused {
-        (k.accent, k.on_accent)
-    } else {
-        (k.selection, k.label)
-    };
+    let (fill, ink) = (k.selection, k.label);
     div()
         .id(id)
         .flex_none()
@@ -312,7 +308,7 @@ pub fn sheet_list_row(
         .gap(px(8.))
         .n_body()
         .text_color(if chosen { ink } else { k.label })
-        .when(chosen, |d| d.bg(fill))
+        .when(chosen, |d| d.bg(fill).font_weight(MEDIUM_WEIGHT))
 }
 
 /// The red error line under a sheet field (Subheadline, `red`).
