@@ -1,5 +1,5 @@
 // Per-member room state that is not in the event log (per-topic read positions, follow flags,
-// mute and notify preferences). The archive snapshots it daily next to the group's events and
+// mute and notify preferences), and the 产出 page log (`page_events`, GAPS SF-2). The archive snapshots it daily next to the group's events and
 // restore writes it back after the events. Room RPCs, called with actor null (internal only).
 import { ApiError } from "../core/errors";
 import { registerGatewayRpc, registerRoomRpc } from "../core/registry";
@@ -7,7 +7,7 @@ import { registerGatewayRpc, registerRoomRpc } from "../core/registry";
 /**
  * Room tables copied whole: state the event log cannot give back. Each must have a primary key
  * so a re-import replaces rows. cards2: idempotency keys and causes of card events, the
- * requester of each ask round, answers a run took; files: the data snapshot of each 产出 page.
+ * requester of each ask round, answers a run took; files: the data snapshot and the page log of each 产出 page.
  */
 export const ROOM_STATE_TABLES = [
   "topic_states",
@@ -16,6 +16,7 @@ export const ROOM_STATE_TABLES = [
   "card_requesters",
   "card_consumed",
   "artifact_data",
+  "page_events",
 ] as const;
 
 export interface RoomStateSnapshot {
