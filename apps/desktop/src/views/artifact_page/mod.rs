@@ -30,6 +30,7 @@ use gpui::{
 };
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 
+use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, Services},
     copy::{artifact_page as c, fill},
@@ -728,7 +729,7 @@ impl ArtifactPage {
                 .child(
                     div()
                         .flex_none()
-                        .w(px(16.))
+                        .w(tsp::S16)
                         .flex()
                         .justify_center()
                         .child(if done {
@@ -821,7 +822,7 @@ impl ArtifactPage {
                     .child(
                         div()
                             .flex_none()
-                            .w(px(24.))
+                            .w(tsp::S24)
                             .mono()
                             .type_role(META)
                             .when(on, |el| el.semibold().text_color(k.ink))
@@ -946,7 +947,7 @@ impl ArtifactPage {
                     .gap(space::S10)
                     .child(
                         div()
-                            .mt(px(2.))
+                            .mt(tsp::S2)
                             .child(ui::icon(Sym::Done, px(14.), k.ink_3)),
                     )
                     .child(
@@ -992,7 +993,7 @@ impl ArtifactPage {
                     .flex()
                     .items_center()
                     .gap(space::S10)
-                    .h(px(32.))
+                    .h(tsp::S32)
                     .px(space::S6)
                     .rounded(theme::radius::MD)
                     .t_small()
@@ -1348,12 +1349,12 @@ impl ArtifactPage {
                             .child(thumbnail(&self.services, a, cx))
                             .child(
                                 div()
-                                    .p(px(12.))
+                                    .p(tsp::S12)
                                     .border_t_1()
                                     .border_color(n.separator)
                                     .flex()
                                     .flex_col()
-                                    .gap(px(2.))
+                                    .gap(tsp::S2)
                                     .child(
                                         div()
                                             .n_body()
@@ -1431,7 +1432,7 @@ impl ArtifactPage {
                 },
                 page::Col {
                     header: SharedString::default(),
-                    width: Some(px(48.)),
+                    width: Some(tsp::S48),
                     right: true,
                 },
             ];
@@ -1446,7 +1447,7 @@ impl ArtifactPage {
                         .min_w(px(0.))
                         .flex()
                         .items_center()
-                        .gap(px(8.))
+                        .gap(tsp::S8)
                         .child(
                             div()
                                 .flex_none()
@@ -1467,13 +1468,13 @@ impl ArtifactPage {
                         .min_w(px(0.))
                         .flex()
                         .items_center()
-                        .gap(px(8.))
+                        .gap(tsp::S8)
                         .child(
                             div()
                                 .flex_none()
                                 .child(crate::views::group_page::rows::avatar(
                                     by.as_ref(),
-                                    px(16.),
+                                    tsp::S16,
                                     cx,
                                 )),
                         )
@@ -1679,7 +1680,7 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
         .items_center()
         .justify_center();
     match picture {
-        Some(src) => well.p(px(8.)).child(
+        Some(src) => well.p(tsp::S8).child(
             gpui::img(src)
                 .size_full()
                 .object_fit(gpui::ObjectFit::Contain),

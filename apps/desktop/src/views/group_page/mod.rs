@@ -24,6 +24,7 @@ use gpui_component::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
 };
 
+use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
     copy::{common, fill, group_page as c, nav as nav_copy},
@@ -494,8 +495,8 @@ impl GroupPage {
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
-            .pt(px(4.))
-            .pb(px(24.))
+            .pt(tsp::S4)
+            .pb(tsp::S24)
             .flex()
             .flex_col();
 
@@ -538,12 +539,12 @@ impl GroupPage {
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-member-{}", m.id)))
-                    .h(px(32.))
+                    .h(tsp::S32)
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(tsp::S8)
                     .n_body()
-                    .child(rows::avatar(Some(&m), px(16.), cx))
+                    .child(rows::avatar(Some(&m), tsp::S16, cx))
                     .child(
                         line(m.name.clone())
                             .flex_none()
@@ -616,10 +617,10 @@ impl GroupPage {
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-decision-{i}")))
-                    .py(px(6.))
+                    .py(tsp::S6)
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
+                    .gap(tsp::S2)
                     .child(div().n_body().text_color(k.label).child(d.text.clone()))
                     .child(
                         div()
@@ -669,11 +670,11 @@ impl GroupPage {
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-output-{}", a.id)))
-                    .py(px(6.))
+                    .py(tsp::S6)
                     .flex()
                     .items_start()
-                    .gap(px(8.))
-                    .child(div().pt(px(2.)).child(page::row_icon(glyph, k.secondary)))
+                    .gap(tsp::S8)
+                    .child(div().pt(tsp::S2).child(page::row_icon(glyph, k.secondary)))
                     .child(
                         div()
                             .flex_1()
@@ -779,10 +780,10 @@ impl GroupPage {
                     .row(
                         div()
                             .id("group-machine")
-                            .py(px(6.))
+                            .py(tsp::S6)
                             .flex()
                             .items_center()
-                            .gap(px(8.))
+                            .gap(tsp::S8)
                             .child(page::row_icon(glyph, k.secondary))
                             .child(
                                 div()

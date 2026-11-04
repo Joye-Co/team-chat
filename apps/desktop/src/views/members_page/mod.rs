@@ -21,6 +21,7 @@ use gpui_component::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
 };
 
+use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
     copy::{fill, members_page as c},
@@ -282,7 +283,7 @@ impl MembersPage {
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
-            .pb(px(12.))
+            .pb(tsp::S12)
             .flex()
             .flex_col();
         let mut any = false;
@@ -311,11 +312,11 @@ impl MembersPage {
                 div()
                     .flex_none()
                     .h(px(28.))
-                    .mt(px(6.))
+                    .mt(tsp::S6)
                     .px(rows::LEADING)
                     .flex()
                     .items_end()
-                    .pb(px(4.))
+                    .pb(tsp::S4)
                     .n_section()
                     .text_color(k.secondary)
                     .child(label),
@@ -338,7 +339,7 @@ impl MembersPage {
                 .id("members-list")
                 .flex_1()
                 .min_h(px(0.))
-                .p(px(8.))
+                .p(tsp::S8)
                 .child(page::skeleton_rows(
                     "members-sk",
                     page::SkeletonKind::Row,
@@ -642,7 +643,7 @@ impl MembersPage {
         div()
             .flex()
             .items_center()
-            .gap(px(16.))
+            .gap(tsp::S16)
             .child(rows::avatar(Some(m), px(64.), cx))
             .child(
                 div()
@@ -650,7 +651,7 @@ impl MembersPage {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .gap(px(4.))
+                    .gap(tsp::S4)
                     .child(
                         rows::line(m.name.clone())
                             .n_large_title()
@@ -669,7 +670,7 @@ impl MembersPage {
                     .flex_none()
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(tsp::S8)
                     .children(actions),
             )
             .into_any_element()
@@ -729,7 +730,7 @@ impl MembersPage {
                     nav.update(cx, |n, cx| n.open_topic(g, t, cx))
                 }),
             );
-            body = body.child(div().pb(px(8.)).child(page::progress(
+            body = body.child(div().pb(tsp::S8).child(page::progress(
                 "member-now-progress",
                 value,
                 cx,
@@ -824,7 +825,7 @@ impl MembersPage {
             .unwrap_or_else(|| c::MEMBERS_NO_COST.to_string());
         let strip = div()
             .flex()
-            .gap(px(16.))
+            .gap(tsp::S16)
             .child(page::stat(
                 c::MEMBERS_DONE_TOPICS,
                 e.stats.done_this_week.to_string(),
@@ -848,7 +849,7 @@ impl MembersPage {
         let body = div()
             .flex()
             .flex_col()
-            .gap(px(16.))
+            .gap(tsp::S16)
             .child(strip)
             .children(pct.map(|p| page::progress("member-cost", p, cx)));
         page::titled_card(
@@ -953,7 +954,7 @@ impl MembersPage {
                         .min_w(px(0.))
                         .flex()
                         .items_center()
-                        .gap(px(8.))
+                        .gap(tsp::S8)
                         .child(div().flex_none().child(page::row_icon(glyph, k.secondary)))
                         .child(page::cell_text(title, false, cx))
                         .into_any_element();
@@ -1007,7 +1008,7 @@ impl MembersPage {
     fn problems(&self, e: &Entry, cx: &mut Context<Self>) -> AnyElement {
         let now = self.services.provider.clock_now();
         let name = e.member.name.clone();
-        let mut body = div().flex().flex_col().gap(px(8.));
+        let mut body = div().flex().flex_col().gap(tsp::S8);
         if e.stats.problems.is_empty() {
             body = body.child(page::compact_empty(
                 Sym::Done,
@@ -1125,7 +1126,7 @@ impl MembersPage {
                         div()
                             .flex()
                             .items_center()
-                            .gap(px(8.))
+                            .gap(tsp::S8)
                             .child(badge)
                             .children(open)
                             .into_any_element(),
@@ -1246,7 +1247,7 @@ impl MembersPage {
                     let (g, t) = (d.group_id.clone(), d.topic_id.clone());
                     page::card_row(
                         SharedString::from(format!("member-decision-{i}")),
-                        Some(rows::avatar(who.as_ref(), px(24.), cx)),
+                        Some(rows::avatar(who.as_ref(), tsp::S24, cx)),
                         d.text.clone(),
                         Some(
                             format!(
@@ -1337,16 +1338,16 @@ impl MembersPage {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(16.))
+                    .gap(tsp::S16)
                     .child(Skeleton::new().size(px(64.)).rounded_full())
                     .child(
                         div()
                             .flex_1()
                             .flex()
                             .flex_col()
-                            .gap(px(8.))
-                            .child(Skeleton::new().h(px(24.)).w(px(160.)).rounded(px(8.)))
-                            .child(Skeleton::new().h(px(14.)).w(px(280.)).rounded(px(8.))),
+                            .gap(tsp::S8)
+                            .child(Skeleton::new().h(tsp::S24).w(px(160.)).rounded(tsp::S8))
+                            .child(Skeleton::new().h(px(14.)).w(px(280.)).rounded(tsp::S8)),
                     ),
             )
             .child(page::skeleton_cards(2, cx))

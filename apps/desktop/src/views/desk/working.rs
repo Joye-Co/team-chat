@@ -9,6 +9,7 @@ use gpui::{
 };
 
 use super::{DeskPage, model::Snapshot};
+use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{RightPane, Services},
     copy::{desk as c, fill},
@@ -75,8 +76,8 @@ pub fn render(
         .flex_1()
         .min_h(px(0.))
         .overflow_y_scroll()
-        .pt(px(4.))
-        .pb(px(24.))
+        .pt(tsp::S4)
+        .pb(tsp::S24)
         .flex()
         .flex_col();
 
@@ -103,12 +104,12 @@ pub fn render(
         queue = queue.row(
             div()
                 .id(SharedString::from(format!("desk-queue-{i}")))
-                .h(px(32.))
+                .h(tsp::S32)
                 .flex()
                 .items_center()
-                .gap(px(8.))
+                .gap(tsp::S8)
                 .n_body()
-                .child(MemberAvatar::new(member.as_ref(), px(16.)))
+                .child(MemberAvatar::new(member.as_ref(), tsp::S16))
                 .child(line(full.clone()).flex_1().text_color(k.label))
                 .children(q.at.map(|at| {
                     div()
@@ -176,10 +177,10 @@ pub fn render(
         where_ = where_.row(
             div()
                 .id(SharedString::from(format!("desk-machine-{i}")))
-                .py(px(6.))
+                .py(tsp::S6)
                 .flex()
                 .items_center()
-                .gap(px(8.))
+                .gap(tsp::S8)
                 .child(page::row_icon(glyph, k.secondary))
                 .child(
                     div()
