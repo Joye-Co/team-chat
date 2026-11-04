@@ -19,6 +19,20 @@ pub const MEDIA_MAX_PDF_BYTES: u64 = 500_000_000;
 pub const MEDIA_MAX_PDF_PAGES: u64 = 2000;
 pub const MEDIA_MAX_HTML_BYTES: u64 = 20_000_000;
 pub const MEDIA_MAX_TEXT_BYTES: u64 = 5_000_000;
+pub const MEDIA_MAX_TABLE_BYTES: u64 = 200_000_000;
+pub const MEDIA_MAX_POSTER_BYTES: u64 = 200_000;
+pub const MEDIA_MAX_POSTER_PIXELS: u32 = 1280;
+pub const MEDIA_MAX_FRAME_BYTES: u64 = 200_000;
+pub const MEDIA_MAX_FRAME_PIXELS: u32 = 320;
+pub const MEDIA_MAX_TRANSCRIPT_BYTES: u64 = 2_000_000;
+
+/// What a writer knows of a file that media names: its size and, for images, its pixels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct MediaFileFacts {
+    pub size: u64,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -236,10 +250,47 @@ impl MediaInfo {
             MediaKind::Markdown | MediaKind::Code if self.bytes > MEDIA_MAX_TEXT_BYTES => {
                 return Some("text exceeds 5 MB");
             }
+            MediaKind::Table if self.bytes > MEDIA_MAX_TABLE_BYTES => {
+                return Some("table exceeds 200 MB");
+            }
             _ => {}
         }
         if self.focus.is_some_and(|f| f.from_line > f.to_line) {
             return Some("focus.fromLine is after toLine");
+        }
+        None
+    }
+
+    /// The first limit a file this media names breaks (poster and frames 200 KB and
+    /// 1280 / 320 px, transcript 2 MB), or `None`. `facts` gives `None` for an unknown file.
+    pub fn file_problem(
+        &self,
+        facts: impl Fn(&str) -> Option<MediaFileFacts>,
+    ) -> Option<&'static str> {
+        let big =
+            |f: &MediaFileFacts, px: u32| f.width.unwrap_or(0).max(f.height.unwrap_or(0)) > px;
+        if let Some(f) = self.poster_file_id.as_deref().and_then(&facts) {
+            if f.size > MEDIA_MAX_POSTER_BYTES {
+                return Some("poster exceeds 200 KB");
+            }
+            if big(&f, MEDIA_MAX_POSTER_PIXELS) {
+                return Some("poster exceeds 1280 px");
+            }
+        }
+        for fr in self.frames.iter().flatten() {
+            if let Some(f) = facts(&fr.file_id) {
+                if f.size > MEDIA_MAX_FRAME_BYTES {
+                    return Some("frame exceeds 200 KB");
+                }
+                if big(&f, MEDIA_MAX_FRAME_PIXELS) {
+                    return Some("frame exceeds 320 px");
+                }
+            }
+        }
+        if let Some(f) = self.transcript_file_id.as_deref().and_then(&facts)
+            && f.size > MEDIA_MAX_TRANSCRIPT_BYTES
+        {
+            return Some("transcript exceeds 2 MB");
         }
         None
     }
@@ -294,4 +345,63 @@ pub struct ArtifactPreviewReadyData {
     pub artifact_id: String,
     pub version: u32,
     pub media: MediaInfo,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn file_problem_checks_poster_frames_and_transcript() {
+        let m = MediaInfo {
+            kind: MediaKind::Video,
+            mime: "video/mp4".into(),
+            bytes: 10,
+            poster_file_id: Some("p".into()),
+            frames: Some(vec![MediaFrame {
+                t: 1.into(),
+                file_id: "f".into(),
+                label: None,
+            }]),
+            transcript_file_id: Some("t".into()),
+            preview: MediaPreview::Ready,
+            ..Default::default()
+        };
+        let ok = |id: &str| {
+            Some(MediaFileFacts {
+                size: 100,
+                width: Some(if id == "p" { 1280 } else { 320 }),
+                height: None,
+            })
+        };
+        assert_eq!(m.file_problem(ok), None);
+        let big_poster = |id: &str| {
+            Some(MediaFileFacts {
+                size: if id == "p" { 200_001 } else { 1 },
+                ..Default::default()
+            })
+        };
+        assert_eq!(m.file_problem(big_poster), Some("poster exceeds 200 KB"));
+        let wide_frame = |id: &str| {
+            Some(MediaFileFacts {
+                size: 1,
+                width: (id == "f").then_some(321),
+                height: None,
+            })
+        };
+        assert_eq!(m.file_problem(wide_frame), Some("frame exceeds 320 px"));
+        let long_text = |id: &str| {
+            Some(MediaFileFacts {
+                size: if id == "t" { 2_000_001 } else { 1 },
+                ..Default::default()
+            })
+        };
+        assert_eq!(m.file_problem(long_text), Some("transcript exceeds 2 MB"));
+        let table = MediaInfo {
+            kind: MediaKind::Table,
+            bytes: 200_000_001,
+            ..m
+        };
+        assert_eq!(table.problem(), Some("table exceeds 200 MB"));
+    }
 }

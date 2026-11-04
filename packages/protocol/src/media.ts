@@ -21,6 +21,16 @@ export const MEDIA_LIMITS = {
   pdfPages: 2000,
   htmlBytes: 20_000_000,
   textBytes: 5_000_000,
+  /** CSV / table (kind `table`). */
+  tableBytes: 200_000_000,
+  /** Poster (video poster, HTML snapshot, PDF page 1, image thumbnail): a JPEG of at most 1280 px. */
+  posterBytes: 200_000,
+  posterPixels: 1280,
+  /** One video frame: a JPEG of at most 320 px. */
+  frameBytes: 200_000,
+  framePixels: 320,
+  /** Transcript JSON. */
+  transcriptBytes: 2_000_000,
 } as const;
 
 const Px = z.int().positive();
@@ -71,7 +81,36 @@ export function mediaProblem(m: MediaInfo): string | undefined {
   if (m.kind === "pdf" && (m.bytes > L.pdfBytes || (m.pages ?? 0) > L.pdfPages)) return "pdf exceeds 500 MB or 2000 pages";
   if (m.kind === "html" && m.bytes > L.htmlBytes) return "html exceeds 20 MB";
   if ((m.kind === "markdown" || m.kind === "code") && m.bytes > L.textBytes) return "text exceeds 5 MB";
+  if (m.kind === "table" && m.bytes > L.tableBytes) return "table exceeds 200 MB";
   if (m.focus && m.focus.fromLine > m.focus.toLine) return "focus.fromLine is after toLine";
+  return undefined;
+}
+
+/** What a writer knows of a file that media names: its size and, for images, its pixels. */
+export type MediaFileFacts = { size: number; width?: number | null; height?: number | null };
+
+/**
+ * The first limit a file that `m` names breaks (poster and frames 200 KB and 1280 / 320 px,
+ * transcript 2 MB), or undefined. `facts` returns undefined for an unknown file; the caller
+ * checks that every named file exists.
+ */
+export function mediaFileProblem(m: MediaInfo, facts: (fileId: string) => MediaFileFacts | undefined): string | undefined {
+  const L = MEDIA_LIMITS;
+  const big = (f: MediaFileFacts | undefined, px: number) => f !== undefined && Math.max(f.width ?? 0, f.height ?? 0) > px;
+  if (m.posterFileId) {
+    const f = facts(m.posterFileId);
+    if (f && f.size > L.posterBytes) return "poster exceeds 200 KB";
+    if (big(f, L.posterPixels)) return "poster exceeds 1280 px";
+  }
+  for (const fr of m.frames ?? []) {
+    const f = facts(fr.fileId);
+    if (f && f.size > L.frameBytes) return "frame exceeds 200 KB";
+    if (big(f, L.framePixels)) return "frame exceeds 320 px";
+  }
+  if (m.transcriptFileId) {
+    const f = facts(m.transcriptFileId);
+    if (f && f.size > L.transcriptBytes) return "transcript exceeds 2 MB";
+  }
   return undefined;
 }
 

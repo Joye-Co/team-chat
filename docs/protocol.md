@@ -1309,8 +1309,10 @@ The version's creator may set `media` at any time; another group member only whi
 of the group.
 
 The sender's client computes `media`; the server checks the limits (`mediaProblem`: 2 GB, 4 h,
-images 50 MB / 100 MP, PDF 500 MB / 2000 pages, HTML 20 MB, Markdown and code 5 MB) and never
-decodes media.
+images 50 MB / 100 MP, PDF 500 MB / 2000 pages, HTML 20 MB, Markdown and code 5 MB, tables
+200 MB) and never decodes media. It also checks the files that `media` names
+(`mediaFileProblem`): a poster at most 200 KB and 1280 px, each frame at most 200 KB and 320 px,
+a transcript at most 2 MB (`too_large`).
 
 ### References to a part (引用提问)
 

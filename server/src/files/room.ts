@@ -10,6 +10,7 @@ import {
   type FileRef,
   MEDIA_LIMITS,
   MediaInfo,
+  mediaFileProblem,
   mediaProblem,
 } from "@chat/protocol";
 import { ApiError } from "../core/errors";
@@ -297,6 +298,8 @@ export function checkMedia(room: RoomContext, raw: unknown): MediaInfo {
   for (const id of mediaFileIds(parsed.data)) {
     if (!fileRecord(room, id)) throw new ApiError("invalid", "media names a file that is not a ready file of this group");
   }
+  const fileProblem = mediaFileProblem(parsed.data, (id) => fileRecord(room, id));
+  if (fileProblem) throw new ApiError("too_large", `media: ${fileProblem}`);
   return parsed.data;
 }
 
