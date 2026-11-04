@@ -544,15 +544,26 @@ fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
     let Some(steps) = interact::steps(name) else {
         return;
     };
+    // `TC_KEYS=tab,tab,down` replaces the keys of a key scene while you look
+    // for the right count, without a rebuild (like `TC_POINTER`).
+    // (The parsed keystroke borrows its text for 'static: leak the few
+    // override strings, as this runs once per scene.)
+    let keys: Vec<&'static str> = match std::env::var("TC_KEYS") {
+        Ok(v) => v
+            .split(',')
+            .map(|k| &*Box::leak(k.trim().to_string().into_boxed_str()))
+            .collect(),
+        Err(_) => steps.keys.to_vec(),
+    };
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
-            for key in steps.keys {
+            for key in keys.iter().copied() {
                 if let Ok(stroke) = gpui::Keystroke::parse(key) {
                     let handled = window.dispatch_keystroke(stroke, cx);
                     // A fresh window keeps the focus on gpui-base's `Root`,
                     // above the app view that handles `FocusNext`: move the
                     // focus the way the action does.
-                    match (handled, *key) {
+                    match (handled, key) {
                         (false, "tab") => window.focus_next(cx),
                         (false, "shift-tab") => window.focus_prev(cx),
                         _ => {}

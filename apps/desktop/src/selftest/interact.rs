@@ -10,7 +10,8 @@
 
 use gpui::{Pixels, Point, point, px};
 
-/// What the runner does in a scene before it captures.
+/// What the runner does in a scene before it captures. `TC_KEYS=tab,down`
+/// replaces the keys of a key scene while you look for the right count.
 #[derive(Clone, Copy, Debug)]
 pub struct Steps {
     /// Where the pointer rests while the window draws (`None`: outside).
@@ -62,9 +63,17 @@ const STEPS: &[(&str, Steps)] = &[
     ),
     // --- end r1-kit ---
     // --- v15/r5-cards ---
-    ("state-focus-page-list", keys(&["tab"])),
-    ("state-focus-card-option", keys(&["tab"])),
-    ("state-focus-picker", keys(&["tab"])),
+    // Tab past the sidebar rows and the toolbar to the first 话题 row, then ↓.
+    (
+        "state-focus-page-list",
+        keys(&[
+            "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab",
+            "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab", "tab",
+            "tab", "tab", "down",
+        ]),
+    ),
+    ("state-focus-card-option", keys(&["tab", "down"])),
+    ("state-focus-picker", keys(&["tab", "tab", "down"])),
     // --- end v15/r5-cards ---
 ];
 
