@@ -169,6 +169,13 @@ pub const SCENES: &[Scene] = &[
         open: |services, content, cx| open_login(services, content, "!0000-0000", false, cx),
     },
     Scene {
+        name: "login-signing-in",
+        about: "The login card while a complete code is checked: spinner and 正在验证…",
+        start: Start::SignedOut,
+        setup: |_, _| {},
+        open: |services, content, cx| open_login(services, content, "^K7QM2X9A", false, cx),
+    },
+    Scene {
         name: "offline",
         about: "The connection banner above the sidebar footer while reconnecting",
         start: Start::Offline,
@@ -347,6 +354,13 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: open_first_topic,
         open: crate::views::nav::selftest::scenes::new_group,
+    },
+    Scene {
+        name: "new-group-error",
+        about: "The new-群 sheet with a name over 64 characters: field and label destructive, the reason under the list",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::new_group_error,
     },
     Scene {
         name: "add-members",
@@ -1264,6 +1278,8 @@ pub fn open_login(
         login.update(cx, |l, cx| {
             if let Some(code) = code.strip_prefix('!') {
                 l.preview_submit(code, window, cx)
+            } else if let Some(code) = code.strip_prefix('^') {
+                l.preview_signing_in(code, window, cx)
             } else if let Some(server) = code.strip_prefix('~') {
                 l.preview_server(server, window, cx)
             } else {
