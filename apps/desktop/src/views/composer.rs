@@ -188,13 +188,27 @@ impl ComposerView {
                     this.on_refs_event(event, window, cx);
                 },
             ),
-            cx.on_focus_in(&input.focus_handle(cx), window, |_, _, cx| {
+            cx.on_focus_in(&input.focus_handle(cx), window, |this, window, cx| {
                 crate::views::refs::note_focus(false, cx);
+                // R1-15: pushed toasts end above the focused composer, so
+                // they never cover Send. Deferred, so it lands after the
+                // focus-out of another composer in the same move.
+                let anchor = this.anchor.clone();
+                window.defer(cx, move |window, cx| {
+                    let top = anchor.get().origin.y;
+                    if top > gpui::px(0.) {
+                        let floor = window.viewport_size().height - top;
+                        crate::ui::overlay::set_toast_floor(floor, cx);
+                    }
+                });
                 // The 单独问 hint shows only while the composer has focus.
                 cx.notify();
             }),
             // --- end inc-refs
-            cx.on_focus_out(&input.focus_handle(cx), window, |_, _, _, cx| cx.notify()),
+            cx.on_focus_out(&input.focus_handle(cx), window, |_, _, _, cx| {
+                crate::ui::overlay::set_toast_floor(gpui::px(0.), cx);
+                cx.notify()
+            }),
         ];
         let mut this = Self {
             services,

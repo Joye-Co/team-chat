@@ -441,6 +441,11 @@ impl RenderOnce for Banner {
     }
 }
 
+/// Tests that move the toast floor (one process-wide value) take this lock,
+/// so parallel tests never see each other's floor.
+#[cfg(test)]
+pub(crate) static TOAST_FLOOR_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 #[cfg(test)]
 mod toast_floor_tests {
     use gpui::{TestAppContext, px};
@@ -449,6 +454,9 @@ mod toast_floor_tests {
     /// come back down when it lets go.
     #[gpui::test]
     fn the_composer_lifts_toasts(cx: &mut TestAppContext) {
+        let _lock = super::TOAST_FLOOR_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         cx.update(|cx| {
             gpui_component::init(cx);
             super::set_toast_floor(px(120.), cx);
