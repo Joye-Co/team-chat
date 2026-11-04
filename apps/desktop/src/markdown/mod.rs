@@ -196,7 +196,17 @@ pub fn message_body_refs(
 fn body_style() -> TextViewStyle {
     let mut table = StyleRefinement::default();
     table.overflow.x = Some(Overflow::Scroll);
-    let mut code = StyleRefinement::default().pt(px(36.));
+    // §2.17: a long line scrolls sideways inside the block and ends 16
+    // before its right edge, never a hard clip at the border. A flex row
+    // keeps the unwrapped line at its full width (a block child would be
+    // cut to the block's width), so the scroll range covers the whole line
+    // plus the block's 16 right padding.
+    let mut code = StyleRefinement::default()
+        .pt(px(36.))
+        .pr(theme::space::S16)
+        .flex()
+        .flex_row()
+        .items_start();
     code.overflow.x = Some(Overflow::Scroll);
     code.text.white_space = Some(WhiteSpace::Nowrap);
     TextViewStyle::default().table(table).code_block(code)
