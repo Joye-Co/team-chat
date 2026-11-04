@@ -974,6 +974,10 @@ pub type Checks = fn(&Services, &mut App) -> Vec<Result<String, String>>;
 pub fn checks(name: &str) -> Option<Checks> {
     crate::views::topic_page::scenes::checks(name)
         .or_else(|| crate::views::cards::v21::scenes::checks(name))
+        .or_else(|| {
+            (name == "artifact-embed-states")
+                .then_some(crate::views::artifacts::state_scenes::embed_states_checks as Checks)
+        })
 }
 
 pub fn find(name: &str) -> Option<&'static Scene> {

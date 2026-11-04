@@ -206,3 +206,31 @@ async fn ask_once(
         .await;
     Ok(())
 }
+
+/// The checks of `artifact-embed-states`: the page that did not open keeps the page frame;
+/// the PDF is framed as a file (its kind, no sandbox, no page actions).
+pub fn embed_states_checks(
+    _: &Services,
+    _: &mut App,
+) -> Vec<Result<String, String>> {
+    use crate::selftest::drawn::{check, ids};
+    let frames = ids("embed-frame");
+    let kinds: Vec<&str> = frames
+        .iter()
+        .filter_map(|f| f.rsplit_once(':').map(|(_, k)| k))
+        .collect();
+    vec![
+        check(
+            kinds.contains(&crate::copy::media::KIND_PDF),
+            format!("the PDF embed is framed as a PDF file ({frames:?})"),
+        ),
+        check(
+            kinds
+                .iter()
+                .filter(|k| **k == crate::copy::cards21::EMBED_KIND)
+                .count()
+                == 1,
+            format!("only the web page keeps the 网页 frame ({frames:?})"),
+        ),
+    ]
+}

@@ -1960,13 +1960,13 @@ impl ChatProvider for V2Samples {
                 .join("team-chat-v2-samples")
                 .join(artifact_id);
             let _ = std::fs::create_dir_all(&dir);
-            let _ = std::fs::write(dir.join("预算.csv"), "渠道,预算\n小红书,6000\n");
+            let _ = std::fs::write(dir.join("预算.pdf"), "%PDF-1.4\n%%EOF\n");
             let (tx, rx) = futures::channel::oneshot::channel();
             let _ = tx.send(Ok(ArtifactFolder {
                 artifact_id: artifact_id.into(),
                 version: version.unwrap_or(1),
                 dir,
-                entry: "预算.csv".into(),
+                entry: "预算.pdf".into(),
                 is_page: false,
             }));
             return rx;
