@@ -44,8 +44,16 @@ pub fn app_menus_with(state: MenuState) -> Vec<Menu> {
     vec![
         Menu::new(env!("PRODUCT_NAME")).items([
             MenuItem::action(product(nav::MENU_ABOUT), About),
+            // v12/fx-overlays: 检查更新… and the download's progress.
+            update_item(),
             MenuItem::separator(),
             MenuItem::action(settings::MENU_SETTINGS, OpenSettings),
+            // v12/fx-overlays: the login window's 使用其他服务器… (as Mail's
+            // 添加账户…); off while no login window has the focus.
+            MenuItem::action(
+                crate::copy::login::OTHER_SERVER,
+                crate::views::login::UseOtherServer,
+            ),
             MenuItem::separator(),
             MenuItem::action(product(nav::MENU_HIDE), Hide),
             MenuItem::action(nav::MENU_HIDE_OTHERS, HideOthers),
@@ -184,6 +192,46 @@ impl Default for MenuState {
     }
 }
 
+// --- v12/fx-overlays: the update item of the app menu ---
+
+thread_local! {
+    /// The check marks the menus were last set with.
+    static LAST_STATE: std::cell::Cell<MenuState> = std::cell::Cell::new(MenuState::default());
+}
+
+/// The app menu's update item: 检查更新…, the download's progress, or
+/// 重启安装 (NATIVE.md: the download shows here and in Settings › 通用).
+fn update_item() -> MenuItem {
+    let (title, enabled) = UPDATE_ITEM.with(|i| i.borrow().clone());
+    MenuItem::action(title, crate::updater::UpdateCommand).disabled(!enabled)
+}
+
+thread_local! {
+    static UPDATE_ITEM: std::cell::RefCell<(String, bool)> = std::cell::RefCell::new((
+        crate::copy::overlays::MENU_CHECK.to_string(),
+        true,
+    ));
+}
+
+/// Sets the menus again when the update item changed (the updater calls
+/// this on every phase change).
+pub fn refresh_menus(cx: &mut App) {
+    let item = crate::updater::global(cx)
+        .map(|u| u.read(cx).menu_item())
+        .unwrap_or_else(|| (crate::copy::overlays::MENU_CHECK.to_string(), true));
+    let changed = UPDATE_ITEM.with(|i| {
+        let mut i = i.borrow_mut();
+        let changed = *i != item;
+        *i = item;
+        changed
+    });
+    if changed {
+        cx.set_menus(app_menus_with(LAST_STATE.with(|s| s.get())));
+    }
+}
+
+// --- end v12/fx-overlays ---
+
 /// The menu state of the main window now.
 fn menu_state(
     services: &crate::app::Services,
@@ -209,6 +257,7 @@ pub fn watch_menu_state<V: 'static>(
         std::rc::Rc::new(move |cx: &mut App| {
             let state = menu_state(&services, &rail, cx);
             if last.replace(state) != state {
+                LAST_STATE.with(|s| s.set(state));
                 cx.set_menus(app_menus_with(state));
             }
         })

@@ -41,23 +41,17 @@ struct RenameForm {
     group_id: String,
     topic_id: String,
     title: Entity<InputState>,
-    error: Option<&'static str>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl RenameForm {
+    /// An empty title only turns 保存 off (no error text, NATIVE.md §7.4).
     fn submit(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        match validate_title(&self.title.read(cx).value()) {
-            Ok(title) => {
-                self.services
-                    .provider
-                    .rename_topic(&self.group_id, &self.topic_id, title);
-                window.close_dialog(cx);
-            }
-            Err(e) => {
-                self.error = Some(e);
-                cx.notify();
-            }
+        if let Ok(title) = validate_title(&self.title.read(cx).value()) {
+            self.services
+                .provider
+                .rename_topic(&self.group_id, &self.topic_id, title);
+            window.close_dialog(cx);
         }
     }
 }
@@ -70,10 +64,10 @@ impl Render for RenameForm {
             r::RENAME_TITLE,
             o::RENAME_TOPIC_EXPLANATION,
             o::TOPIC_TITLE,
-            NativeTextField::new("rename-topic-title", &self.title)
-                .width(px(300.))
-                .error(self.error.is_some()),
-            self.error.map(SharedString::from),
+            NativeTextField::new("rename-topic-title", &self.title).width(
+                crate::views::nav::dialogs::form_field_width(SheetWidth::Form),
+            ),
+            None,
             cancel.on_click(|_, window, cx| window.close_dialog(cx)),
             disabled_push(save, !filled, cx)
                 .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx))),
@@ -99,10 +93,7 @@ pub fn open_rename(
             window,
             |this: &mut RenameForm, _, event: &InputEvent, window, cx| match event {
                 InputEvent::PressEnter { .. } => this.submit(window, cx),
-                InputEvent::Change => {
-                    this.error = None;
-                    cx.notify();
-                }
+                InputEvent::Change => cx.notify(),
                 _ => {}
             },
         )];
@@ -111,7 +102,6 @@ pub fn open_rename(
             group_id,
             topic_id,
             title,
-            error: None,
             _subscriptions: subscriptions,
         }
     });
@@ -122,7 +112,9 @@ pub fn open_rename(
             title.read(cx).focus_handle(cx).focus(window, cx);
             title.update(cx, |state, cx| state.select_all(window, cx));
         }
-        native_sheet(dialog, SheetWidth::Form, cx).child(form.clone())
+        native_sheet(dialog, SheetWidth::Form, cx)
+            .px(px(0.))
+            .child(form.clone())
     });
 }
 

@@ -16,8 +16,8 @@ mod members;
 pub(crate) use members::{open_add_bot, open_invite};
 mod notifications;
 pub mod prefs;
-mod shortcuts;
 pub mod selftest;
+mod shortcuts;
 pub(crate) mod widgets;
 mod window_fit;
 
@@ -436,6 +436,21 @@ pub fn open(services: Services, cx: &mut App) {
         return;
     }
     if let Ok((handle, _)) = open_window(services, last_page(), true, cx) {
+        cx.set_global(SettingsWindow(Some(handle)));
+    }
+}
+
+/// v12/fx-overlays: opens the settings window at `page` (the app menu's
+/// 检查更新… opens 通用), or brings the open one to the front.
+pub fn open_page(services: Services, page: Page, cx: &mut App) {
+    if let Some(handle) = cx.try_global::<SettingsWindow>().and_then(|w| w.0)
+        && handle
+            .update(cx, |_, window, _| window.activate_window())
+            .is_ok()
+    {
+        return;
+    }
+    if let Ok((handle, _)) = open_window(services, page, true, cx) {
         cx.set_global(SettingsWindow(Some(handle)));
     }
 }

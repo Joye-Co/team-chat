@@ -205,6 +205,10 @@ pub fn show_main_window(cx: &mut App) {
 
 fn show_main_window_now(cx: &mut App) {
     cx.activate(true);
+    // v12/fx-overlays: signed out, the Dock icon shows the login window.
+    if crate::views::login::show_login_window(services_of(cx), cx) {
+        return;
+    }
     if !with_main_window(cx, |window, _| window.activate_window()) {
         let services = services_of(cx);
         if let Err(error) = crate::app::open_main_window(services, true, None, cx) {
@@ -347,13 +351,16 @@ pub fn open_dm_with(member_id: MemberId, cx: &mut App) {
         if let Err(e) = result {
             cx.update(|cx| {
                 clear_pending(cx);
-                crate::views::files::notify_error(
-                    crate::copy::fill(
-                        crate::copy::nav::DM_FAILED,
-                        &[("reason", crate::views::settings::widgets::error_text(e))],
-                    ),
-                    cx,
-                );
+                // v12/fx-overlays: a refusal blocks: an alert, no toast.
+                in_main_window(cx, move |window, cx| {
+                    dialogs::error_alert(
+                        crate::copy::overlays::DM_REFUSED,
+                        crate::views::settings::widgets::error_text(e),
+                        |_, _| {},
+                        window,
+                        cx,
+                    )
+                });
             });
         }
     })

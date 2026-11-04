@@ -6,8 +6,7 @@
 use gpui::{
     App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
     IntoElement, ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, Selectable as _, WindowExt as _,
@@ -21,10 +20,11 @@ use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
+use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row, sheet_form_row_top};
 use crate::{
     app::{Changes, Services},
     characters::{self, CharacterId, CharacterStatus, status::StatusBoard},
-    copy::{common, fill, settings as s},
+    copy::{common, fill, overlays as o, settings as s},
     data::{
         ApprovalDefaults, ApproverRole, BotCreated, Change, InviteCreated, InviteRequest, Member,
         MemberKind, MemberLevel, RunnerSetup,
@@ -35,8 +35,8 @@ use crate::{
         native::{
             AlertLayout, FormRow, GroupedForm, InlineValueField, NativeSwitch, NativeTextField,
             NativeType as _, PushSize, PushStyle, SheetLayout, SheetWidth, alert_button,
-            disabled_push, inline_commit, metrics, native_colors, popup_button,
-            pull_down, push_button,
+            disabled_push, inline_commit, metrics, native_colors, popup_button, pull_down,
+            push_button,
         },
     },
 };
@@ -63,7 +63,11 @@ pub fn sorted(mut members: Vec<Member>, me: Option<&str>) -> Vec<Member> {
 
 /// 单次花费超过 ¥…: whole yuan, 1 to 1,000,000; empty is no limit.
 pub fn parse_spend(text: &str) -> Result<Option<u32>, ()> {
-    let t = text.trim().trim_start_matches('¥').trim().replace([',', '，'], "");
+    let t = text
+        .trim()
+        .trim_start_matches('¥')
+        .trim()
+        .replace([',', '，'], "");
     if t.is_empty() {
         return Ok(None);
     }
@@ -169,7 +173,10 @@ impl MembersPage {
             let _ = this.update_in(cx, |this, window, cx| {
                 match result {
                     Ok(rules) => {
-                        let text = rules.max_spend_cny.map(|n| n.to_string()).unwrap_or_default();
+                        let text = rules
+                            .max_spend_cny
+                            .map(|n| n.to_string())
+                            .unwrap_or_default();
                         this.spend
                             .update(cx, |st, cx| st.set_value(text, window, cx));
                         this.rules = Some(rules);
@@ -222,7 +229,10 @@ impl MembersPage {
             }
             Err(()) => {
                 self.rules_status = Status::Failed(s::SPEND_INVALID.into());
-                let back = rules.max_spend_cny.map(|n| n.to_string()).unwrap_or_default();
+                let back = rules
+                    .max_spend_cny
+                    .map(|n| n.to_string())
+                    .unwrap_or_default();
                 self.spend
                     .update(cx, |st, cx| st.set_value(back, window, cx));
                 cx.notify();
@@ -239,16 +249,22 @@ impl MembersPage {
                 .icon(widgets::app_icon(cx))
                 .message(fill(s::DEACTIVATE_BODY, &[("name", &name)]))
                 .buttons([
-                    alert_button("deactivate-ok", s::DEACTIVATE, PushStyle::Standard, true, cx)
-                        .on_click(move |_, window, cx| {
-                            let id = id.clone();
-                            page.update(cx, |p, cx| p.set_deactivated(id, true, cx));
-                            window.close_dialog(cx);
-                        }),
+                    alert_button(
+                        "deactivate-ok",
+                        s::DEACTIVATE,
+                        PushStyle::Standard,
+                        true,
+                        cx,
+                    )
+                    .on_click(move |_, window, cx| {
+                        let id = id.clone();
+                        page.update(cx, |p, cx| p.set_deactivated(id, true, cx));
+                        window.close_dialog(cx);
+                    }),
                     alert_button(
                         "deactivate-cancel",
                         common::CANCEL,
-                        PushStyle::Default,
+                        PushStyle::Standard,
                         false,
                         cx,
                     )
@@ -347,13 +363,11 @@ impl MembersPage {
         let row = FormRow::new(name)
             .detail(detail)
             .leading(
-                div()
-                    .when(m.deactivated, |d| d.opacity(0.5))
-                    .child(
-                        ui::MemberAvatar::new(Some(m), px(28.))
-                            .status(CharacterStatus::Idle)
-                            .on(k.window),
-                    ),
+                div().when(m.deactivated, |d| d.opacity(0.5)).child(
+                    ui::MemberAvatar::new(Some(m), px(28.))
+                        .status(CharacterStatus::Idle)
+                        .on(k.window),
+                ),
             )
             .control(level)
             .min_height(px(44.));
@@ -395,10 +409,15 @@ impl MembersPage {
                 }),
             )
         })
-            .into_any_element()
+        .into_any_element()
     }
 
-    fn rules_group(&self, owner: bool, window: &Window, cx: &mut Context<Self>) -> gpui::AnyElement {
+    fn rules_group(
+        &self,
+        owner: bool,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
         let k = native_colors(cx);
         let Some(r) = self.rules else {
             let body = match &self.rules_status {
@@ -423,7 +442,10 @@ impl MembersPage {
                 .into_any_element();
         };
         let page = cx.entity();
-        let switch = |id: &'static str, label: &'static str, on: bool, set: fn(&mut ApprovalDefaults, bool)| {
+        let switch = |id: &'static str,
+                      label: &'static str,
+                      on: bool,
+                      set: fn(&mut ApprovalDefaults, bool)| {
             let page = page.clone();
             FormRow::new(label).control(
                 NativeSwitch::new(id, on)
@@ -467,7 +489,13 @@ impl MembersPage {
         let current = r.approver;
         let approver_page = page.clone();
         let approver = disabled_push(
-            popup_button("rules-approver", approver_text(current), PushSize::Regular, window, cx),
+            popup_button(
+                "rules-approver",
+                approver_text(current),
+                PushSize::Regular,
+                window,
+                cx,
+            ),
             !owner,
             cx,
         )
@@ -487,15 +515,25 @@ impl MembersPage {
         });
         GroupedForm::new()
             .header(s::RULES)
-            .row(switch("rules-merge", s::RULES_MERGE, r.merge_main, |r, v| {
-                r.merge_main = v
-            }))
-            .row(switch("rules-deploy", s::RULES_DEPLOY, r.deploy_prod, |r, v| {
-                r.deploy_prod = v
-            }))
+            .row(switch(
+                "rules-merge",
+                s::RULES_MERGE,
+                r.merge_main,
+                |r, v| r.merge_main = v,
+            ))
+            .row(switch(
+                "rules-deploy",
+                s::RULES_DEPLOY,
+                r.deploy_prod,
+                |r, v| r.deploy_prod = v,
+            ))
             .row(FormRow::new(s::RULES_SPEND).control(spend))
             .row(FormRow::new(s::RULES_APPROVER).control(approver))
-            .footer(if owner { s::RULES_FOOTER } else { s::RULES_READONLY })
+            .footer(if owner {
+                s::RULES_FOOTER
+            } else {
+                s::RULES_READONLY
+            })
             .into_any_element()
     }
 }
@@ -511,7 +549,10 @@ impl Render for MembersPage {
             .collect();
         let services = self.services.clone();
         let bot_services = self.services.clone();
-        let header = fill(s::MEMBERS_HEADER, &[("n", &self.active_count().to_string())]);
+        let header = fill(
+            s::MEMBERS_HEADER,
+            &[("n", &self.active_count().to_string())],
+        );
         let mut group = GroupedForm::new().header(header).rows(rows);
         group = if owner {
             group.below(
@@ -597,13 +638,56 @@ fn secret_row(id: &'static str, label: &'static str, value: &str, cx: &App) -> g
         )
 }
 
-/// A form row with a standalone field (§5.6) in a sheet.
-fn field_row(label: &'static str, id: &'static str, state: &Entity<InputState>) -> FormRow {
-    FormRow::new(label).control(NativeTextField::new(id, state).width(SHEET_FIELD))
+/// A form row with a standalone field (§5.6) in a sheet: the label
+/// right-aligned, the field on the sheet background (no group fill).
+fn field_row(
+    label: &'static str,
+    id: &'static str,
+    state: &Entity<InputState>,
+    cx: &App,
+) -> gpui::Div {
+    sheet_form_row(
+        label,
+        NativeTextField::new(id, state).width(SHEET_FIELD),
+        cx,
+    )
+}
+
+/// The field problem of a name and 岗位 for the footnote: `None` when both
+/// are fine or the name is only empty (that only turns the button off).
+fn name_role_problem(name: &str, role: &str) -> (bool, Option<String>) {
+    if name.is_empty() {
+        return (true, None);
+    }
+    match widgets::check_len(name, 64).and(widgets::check_len(role, 64)) {
+        Ok(()) => (false, None),
+        Err(e) => (true, Some(e)),
+    }
+}
+
+/// A server refusal blocks: an alert over the sheet, once per refusal.
+fn alert_refusal(
+    status: &Status,
+    alerted: &mut bool,
+    title: &'static str,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if let Status::Failed(text) = status
+        && !*alerted
+    {
+        *alerted = true;
+        let text = text.clone();
+        window.defer(cx, move |window, cx| {
+            crate::views::nav::dialogs::error_alert(title, text, |_, _| {}, window, cx)
+        });
+    }
 }
 
 /// Standalone fields in a 460 pt sheet's form rows.
 const SHEET_FIELD: gpui::Pixels = px(240.);
+/// The pop-ups of a sheet form.
+const SHEET_POPUP: gpui::Pixels = px(140.);
 
 /// A pop-up row in a sheet: two choices, `on` is the second.
 fn choice_row(
@@ -615,11 +699,12 @@ fn choice_row(
     pick: impl Fn(bool, &mut Window, &mut App) + 'static,
     window: &Window,
     cx: &App,
-) -> FormRow {
+) -> gpui::Div {
     let pick = std::rc::Rc::new(pick);
-    FormRow::new(label).control(
+    sheet_form_row(
+        label,
         disabled_push(
-            widgets::popup_fixed(id, options[usize::from(second)], px(140.), window, cx),
+            widgets::popup_fixed(id, options[usize::from(second)], SHEET_POPUP, window, cx),
             disabled,
             cx,
         )
@@ -633,6 +718,7 @@ fn choice_row(
                 )
             })
         }),
+        cx,
     )
 }
 
@@ -718,7 +804,6 @@ pub fn default_character(name: &str, taken: &[CharacterId]) -> CharacterId {
         .unwrap_or(CharacterId::ALL[0])
 }
 
-
 // --- invite ---
 
 /// The 邀请成员 sheet: a form, then the code shown once.
@@ -729,6 +814,8 @@ pub struct InviteForm {
     kind: MemberKind,
     level: MemberLevel,
     status: Status,
+    /// The refusal in `status` was shown in an alert.
+    alerted: bool,
     created: Option<InviteCreated>,
 }
 
@@ -741,6 +828,7 @@ impl InviteForm {
             kind: MemberKind::Human,
             level: MemberLevel::Member,
             status: Status::Idle,
+            alerted: false,
             created: None,
         }
     }
@@ -774,6 +862,7 @@ impl InviteForm {
             cx.notify();
             return;
         }
+        self.alerted = false;
         let reply = self.services.provider.create_invite(InviteRequest {
             name,
             kind: self.kind,
@@ -804,7 +893,12 @@ impl Render for InviteForm {
         if let Some(created) = &self.created {
             return SheetLayout::new(s::INVITE_CREATED)
                 .explanation(s::SHOWN_ONCE)
-                .body(secret_row("invite-code", s::INVITE_CODE, created.code.expose(), cx))
+                .body(secret_row(
+                    "invite-code",
+                    s::INVITE_CODE,
+                    created.code.expose(),
+                    cx,
+                ))
                 .body(widgets::quiet(
                     fill(
                         s::INVITE_EXPIRES,
@@ -823,13 +917,25 @@ impl Render for InviteForm {
                 .into_any_element();
         }
         let busy = self.status.busy();
+        alert_refusal(
+            &self.status,
+            &mut self.alerted,
+            o::INVITE_REFUSED,
+            window,
+            cx,
+        );
+        let (off, footnote) = name_role_problem(
+            self.name.read(cx).value().trim(),
+            self.role.read(cx).value().trim(),
+        );
         let (kind_page, level_page, submit) = (cx.entity(), cx.entity(), cx.entity());
         SheetLayout::new(s::INVITE)
             .body(
-                GroupedForm::new()
-                    .row(field_row(s::NAME, "member-name", &self.name))
-                    .row(field_row(s::ROLE, "member-role", &self.role))
-                    .row(choice_row(
+                sheet_form()
+                    .child(field_row(s::NAME, "member-name", &self.name, cx))
+                    .child(field_row(s::ROLE, "member-role", &self.role, cx))
+                    .children(footnote.map(|f| sheet_footnote(f, cx)))
+                    .child(choice_row(
                         s::INVITE_KIND,
                         "invite-kind",
                         [s::KIND_HUMAN, s::KIND_AI],
@@ -837,14 +943,18 @@ impl Render for InviteForm {
                         busy,
                         move |bot, _, cx| {
                             kind_page.update(cx, |f, cx| {
-                                f.kind = if bot { MemberKind::Bot } else { MemberKind::Human };
+                                f.kind = if bot {
+                                    MemberKind::Bot
+                                } else {
+                                    MemberKind::Human
+                                };
                                 cx.notify();
                             })
                         },
                         window,
                         cx,
                     ))
-                    .row(choice_row(
+                    .child(choice_row(
                         s::MEMBER_LEVEL,
                         "invite-level",
                         [s::LEVEL_MEMBER, s::LEVEL_OWNER],
@@ -864,11 +974,10 @@ impl Render for InviteForm {
                         cx,
                     )),
             )
-            .when_some(widgets::native_status(&self.status, cx), |l, st| l.body(st))
             .buttons(sheet_actions(
                 "invite",
                 s::INVITE_CREATE,
-                busy,
+                busy || off,
                 move |_, cx| submit.update(cx, |f, cx| f.submit(cx)),
                 cx,
             ))
@@ -936,6 +1045,8 @@ pub struct BotForm {
     /// The character picked by hand; until then [`default_character`] for the typed name.
     character: Option<CharacterId>,
     status: Status,
+    /// The refusal in `status` was shown in an alert.
+    alerted: bool,
     created: Option<BotCreated>,
     _subscriptions: Vec<Subscription>,
 }
@@ -977,6 +1088,7 @@ impl BotForm {
             known_runtimes: Vec::new(),
             character: None,
             status: Status::Idle,
+            alerted: false,
             created: None,
             _subscriptions: subscriptions,
         }
@@ -1060,6 +1172,7 @@ impl BotForm {
             None
         };
         let character = Some(self.chosen_character(cx));
+        self.alerted = false;
         let reply = self.services.provider.create_bot_member(
             name,
             (!role.is_empty()).then_some(role),
@@ -1107,11 +1220,17 @@ impl Render for BotForm {
                 .into_any_element();
         }
         let busy = self.status.busy();
+        alert_refusal(&self.status, &mut self.alerted, o::BOT_REFUSED, window, cx);
+        let (off, footnote) =
+            name_role_problem(&self.value(&self.name, cx), &self.value(&self.role, cx));
+        // Work on the team's computers needs a runtime.
+        let off = off || (self.runner && self.value(&self.runtime, cx).is_empty());
         let (mode_page, pick_page, submit) = (cx.entity(), cx.entity(), cx.entity());
-        let mut form = GroupedForm::new()
-            .row(field_row(s::NAME, "member-name", &self.name))
-            .row(field_row(s::ROLE, "member-role", &self.role))
-            .row(choice_row(
+        let mut form = sheet_form()
+            .child(field_row(s::NAME, "member-name", &self.name, cx))
+            .child(field_row(s::ROLE, "member-role", &self.role, cx))
+            .children(footnote.map(|f| sheet_footnote(f, cx)))
+            .child(choice_row(
                 s::BOT_MODE,
                 "bot-mode",
                 [s::BOT_MODE_EXTERNAL, s::BOT_MODE_RUNNER],
@@ -1127,8 +1246,17 @@ impl Render for BotForm {
                 window,
                 cx,
             ));
+        form = form.child(sheet_footnote(
+            if self.runner {
+                s::BOT_MODE_RUNNER_HINT
+            } else {
+                s::BOT_MODE_EXTERNAL_HINT
+            },
+            cx,
+        ));
         if self.runner {
-            let runtime = FormRow::new(s::RUNNER_RUNTIME).control(
+            let runtime = sheet_form_row(
+                s::RUNNER_RUNTIME,
                 div()
                     .flex()
                     .items_center()
@@ -1158,34 +1286,28 @@ impl Render for BotForm {
                             }),
                         )
                     })
-                    .child(
-                        NativeTextField::new("member-runtime", &self.runtime)
-                            .width(px(150.)),
-                    ),
+                    .child(NativeTextField::new("member-runtime", &self.runtime).width(px(150.))),
+                cx,
             );
             form = form
-                .row(runtime)
-                .row(field_row(s::RUNNER_LABELS, "member-labels", &self.labels))
-                .row(field_row(s::RUNNER_REPO, "member-repo", &self.repo))
-                .row(field_row(s::RUNNER_BRANCH, "member-branch", &self.branch));
+                .child(runtime)
+                .child(field_row(
+                    s::RUNNER_LABELS,
+                    "member-labels",
+                    &self.labels,
+                    cx,
+                ))
+                .child(field_row(s::RUNNER_REPO, "member-repo", &self.repo, cx))
+                .child(field_row(
+                    s::RUNNER_BRANCH,
+                    "member-branch",
+                    &self.branch,
+                    cx,
+                ));
         }
-        let form = form.footer(if self.runner {
-            s::BOT_MODE_RUNNER_HINT
-        } else {
-            s::BOT_MODE_EXTERNAL_HINT
-        });
-        let looks = div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(
-                div()
-                    .px(px(2.))
-                    .n_headline()
-                    .text_color(native_colors(cx).label)
-                    .child(s::BOT_CHARACTER),
-            )
-            .child(character_picker(
+        let looks = sheet_form_row_top(
+            s::BOT_CHARACTER,
+            character_picker(
                 "bot-character",
                 Some(self.chosen_character(cx)),
                 busy,
@@ -1196,7 +1318,9 @@ impl Render for BotForm {
                     })
                 },
                 cx,
-            ));
+            ),
+            cx,
+        );
         SheetLayout::new(s::ADD_AI_TITLE)
             .body(
                 div()
@@ -1209,11 +1333,10 @@ impl Render for BotForm {
                     .child(form)
                     .child(looks),
             )
-            .when_some(widgets::native_status(&self.status, cx), |l, st| l.body(st))
             .buttons(sheet_actions(
                 "bot",
                 s::BOT_CREATE,
-                busy,
+                busy || off,
                 move |_, cx| submit.update(cx, |f, cx| f.submit(cx)),
                 cx,
             ))
@@ -1304,9 +1427,13 @@ pub fn open_character(services: Services, member: &Member, window: &mut Window, 
         selected: member.character,
         status: Status::Idle,
     });
-    widgets::open_sheet(window, cx, SheetWidth::Form, px(420.), move |dialog, _, _| {
-        dialog.child(form.clone())
-    });
+    widgets::open_sheet(
+        window,
+        cx,
+        SheetWidth::Form,
+        px(420.),
+        move |dialog, _, _| dialog.child(form.clone()),
+    );
 }
 
 #[cfg(test)]

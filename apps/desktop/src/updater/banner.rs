@@ -1,29 +1,23 @@
-//! The update sheet of the main window (NATIVE.md §7.1: 更新 default,
-//! 稍后), its quiet status line in the sidebar while it is hidden, and the
-//! about card of 通用 in settings.
-//! Both render [`Updater`] state and call its commands; nothing here touches the network.
+//! The update sheet of the main window (NATIVE.md §7.1): only for
+//! 重启安装, once a downloaded update is ready (稍后, default 重启安装); it
+//! follows the install and says what to do when it cannot finish. The
+//! download itself shows in Settings › 通用 and the app menu, never in a
+//! sheet or a banner. It renders [`Updater`] state and calls its commands;
+//! nothing here touches the network.
 
 use std::collections::HashSet;
 
 use gpui::{
-    App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement,
-    Render, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, Entity, IntoElement, ParentElement, Render, Styled,
+    Subscription, Window, div, px,
 };
 use gpui_component::{Sizable as _, WindowExt as _};
 
 use super::{Failure, Phase, Updater, version};
-use crate::ui::{
-    native::{
-        NativeType as _, PushSize, PushStyle, SheetLayout, SheetWidth, determinate_bar, metrics,
-        native_colors, native_sheet, push_button, spinner,
-    },
-    sf_symbols::SymSize,
-};
-use crate::{
-    copy::{fill, overlays as o, update as u},
-    theme::Type as _,
-    ui::Sym,
+use crate::copy::{fill, overlays as o, update as u};
+use crate::ui::native::{
+    PushSize, PushStyle, SheetLayout, SheetWidth, metrics, native_colors, native_sheet,
+    push_button, spinner,
 };
 
 /// The line of text for a phase, or `None` when the phase has no banner text.
@@ -39,6 +33,7 @@ pub fn banner_text(phase: &Phase) -> Option<String> {
                 &[("version", &info.version), ("percent", &pct)],
             )
         }
+        Phase::Ready { info, .. } => fill(o::UPDATE_READY, &[("version", &info.version)]),
         Phase::WaitingForSends(_) => u::WAITING_SENDS.to_string(),
         Phase::Installing(_) => u::INSTALLING.to_string(),
         Phase::Manual(_) => fill(u::MANUAL, &[("product", product)]),
@@ -53,23 +48,17 @@ pub fn banner_text(phase: &Phase) -> Option<String> {
     })
 }
 
-/// Which sheet a phase shows, keyed by phase kind and version: a sheet the
-/// user closed does not come back for the same key.
+/// Which sheet a phase shows, keyed by version: only a ready update asks
+/// (重启安装); a sheet the user closed does not come back for it.
 fn sheet_key(phase: &Phase) -> Option<String> {
-    let (kind, info) = match phase {
-        Phase::Available(i) => ("available", Some(i)),
-        Phase::Downloading { info, .. }
-        | Phase::WaitingForSends(info)
-        | Phase::Installing(info) => ("progress", Some(info)),
-        Phase::Manual(i) => ("manual", Some(i)),
-        Phase::Failed { info: Some(i), .. } => ("failed", Some(i)),
-        _ => ("", None),
-    };
-    info.map(|i| format!("{kind}-{}", i.version))
+    match phase {
+        Phase::Ready { info, .. } => Some(format!("ready-{}", info.version)),
+        _ => None,
+    }
 }
 
 /// The share of a download, 0–1.
-fn download_share(phase: &Phase) -> Option<f32> {
+pub fn download_share(phase: &Phase) -> Option<f32> {
     match phase {
         Phase::Downloading { info, done, total } => {
             let total = if *total == 0 { info.size } else { *total };
@@ -116,8 +105,8 @@ impl Render for UpdateSheet {
         let u1 = updater.clone();
         let u2 = updater.clone();
         let layout = match &phase {
-            Phase::Available(_) => SheetLayout::new(fill(o::UPDATE_TITLE, &[("version", v)]))
-                .explanation(o::UPDATE_EXPLANATION)
+            Phase::Ready { .. } => SheetLayout::new(fill(o::UPDATE_READY_TITLE, &[("version", v)]))
+                .explanation(o::UPDATE_READY_EXPLANATION)
                 .buttons([
                     button("update-later", u::LATER, PushStyle::Standard, cx).on_click(
                         move |_, window, cx| {
@@ -125,35 +114,9 @@ impl Render for UpdateSheet {
                             window.close_dialog(cx);
                         },
                     ),
-                    button("update-now", u::UPDATE, PushStyle::Default, cx)
-                        .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.start_update(cx))),
+                    button("update-restart", o::UPDATE_RESTART, PushStyle::Default, cx)
+                        .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.install_now(cx))),
                 ]),
-            Phase::Downloading { .. } => {
-                let share = download_share(&phase).unwrap_or(0.);
-                SheetLayout::new(fill(o::UPDATE_DOWNLOADING_TITLE, &[("version", v)]))
-                    .body(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(px(10.))
-                            .child(div().flex_1().child(determinate_bar(share, None, cx)))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .n_subheadline()
-                                    .n_figures()
-                                    .text_color(k.secondary)
-                                    .child(fill(
-                                        u::BANNER_PERCENT,
-                                        &[(
-                                            "percent",
-                                            &((share * 100.).round() as u32).to_string(),
-                                        )],
-                                    )),
-                            ),
-                    )
-                    .buttons([hide(cx)])
-            }
             Phase::WaitingForSends(_) | Phase::Installing(_) => {
                 let waiting = matches!(phase, Phase::WaitingForSends(_));
                 SheetLayout::new(fill(o::UPDATE_INSTALLING_TITLE, &[("version", v)]))
@@ -195,9 +158,9 @@ impl Render for UpdateSheet {
     }
 }
 
-/// The update in the main window: a sheet when an update is ready (and
-/// when it needs the user later), and, while the sheet is hidden during a
-/// download or install, a quiet status line in the sidebar (no banner).
+/// The update in the main window: the 重启安装 sheet once a downloaded
+/// update is ready; nothing while it downloads (Settings › 通用 and the app
+/// menu show that).
 pub struct UpdateBanner {
     updater: Option<Entity<Updater>>,
     sheet_open: bool,
@@ -235,6 +198,7 @@ impl UpdateBanner {
                 let this = this.clone();
                 let updater = updater.clone();
                 native_sheet(dialog, SheetWidth::Form, cx)
+                    .px(px(0.))
                     .on_close(move |_, _, cx| {
                         let key = sheet_key(updater.read(cx).phase());
                         let _ = this.update(cx, |b, cx| {
@@ -270,62 +234,10 @@ impl Render for UpdateBanner {
             self.open_sheet(updater, window, cx);
             return div().into_any_element();
         }
-        if self.sheet_open {
-            return div().into_any_element();
-        }
-        // The sheet is hidden: a quiet line while the update runs.
-        let k = native_colors(cx);
-        let Some(info) = phase.info() else {
-            return div().into_any_element();
-        };
-        let share = download_share(&phase);
-        let text = match &phase {
-            Phase::Downloading { .. } => fill(
-                o::UPDATE_STATUS,
-                &[
-                    ("version", &info.version),
-                    (
-                        "percent",
-                        &((share.unwrap_or(0.) * 100.).round() as u32).to_string(),
-                    ),
-                ],
-            ),
-            Phase::WaitingForSends(_) | Phase::Installing(_) => {
-                fill(o::UPDATE_INSTALLING_TITLE, &[("version", &info.version)])
-            }
-            _ => return div().into_any_element(),
-        };
-        div()
-            .id("update-status")
-            .flex_none()
-            .px(px(20.))
-            .pb(px(10.))
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .n_subheadline()
-                    .n_figures()
-                    .text_color(k.secondary)
-                    .child(
-                        Sym::Download
-                            .icon(SymSize::INLINE_SMALL)
-                            .text_color(k.secondary),
-                    )
-                    .child(div().min_w(px(0.)).one_line().child(text)),
-            )
-            .when_some(share, |d, s| d.child(determinate_bar(s, None, cx)))
-            .on_click(cx.listener(move |this, _, window, cx| {
-                // A click on the line shows the sheet again.
-                if let Some(u) = this.updater.clone() {
-                    this.open_sheet(u, window, cx);
-                }
-            }))
-            .into_any_element()
+        // The download and the install show in Settings › 通用 and the app
+        // menu; the main window shows nothing else.
+        let _ = window;
+        div().into_any_element()
     }
 }
 
@@ -363,9 +275,14 @@ mod tests {
         );
         let manual = banner_text(&Phase::Manual(info())).unwrap();
         assert!(manual.contains(env!("PRODUCT_NAME")) && !manual.contains('{'));
+        assert_eq!(sheet_key(&Phase::Installing(info())), None);
         assert_eq!(
-            sheet_key(&Phase::Installing(info())).as_deref(),
-            Some("progress-1.2.3")
+            sheet_key(&Phase::Ready {
+                info: info(),
+                dmg: "/tmp/x.dmg".into()
+            })
+            .as_deref(),
+            Some("ready-1.2.3")
         );
         assert_eq!(sheet_key(&Phase::Idle), None);
     }

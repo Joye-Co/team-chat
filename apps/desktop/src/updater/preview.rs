@@ -1,6 +1,8 @@
-//! Screenshot scenes of the update banner (`desktop --screenshot <dir> --scenes update,...`).
-//! The scene's window gets an [`Updater`] with a fixed phase and no client; the global is
-//! removed right after the window opens so later scenes do not see it.
+//! Screenshot scenes of the update (`desktop --screenshot <dir> --scenes update,...`).
+//! The download shows in Settings › 通用, so `update`, `update-dl` and
+//! `update-manual` open that pane; `update-ready` is the 重启安装 sheet over the main
+//! window. The scene's window gets an [`Updater`] with a fixed phase and no client; the
+//! global is removed right after the window opens so later scenes do not see it.
 
 use gpui::{AnyWindowHandle, App, AppContext as _, Pixels, Size};
 
@@ -25,6 +27,32 @@ fn open_with(
     content: Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
+    set_phase(phase, cx);
+    let result = open_main(services, content, cx);
+    cx.remove_global::<UpdaterGlobal>();
+    result
+}
+
+/// Settings › 通用 with the updater in `phase` (its version row).
+pub fn open_settings_with(
+    phase: Phase,
+    services: Services,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    set_phase(phase, cx);
+    crate::views::settings::prefs::stop_saving();
+    let result = crate::views::settings::open_window(
+        services,
+        crate::views::settings::Page::General,
+        false,
+        cx,
+    )
+    .map(|(h, _)| h);
+    cx.remove_global::<UpdaterGlobal>();
+    result
+}
+
+fn set_phase(phase: Phase, cx: &mut App) {
     let updater = cx.new(|_| Updater {
         source: std::sync::Arc::new(|| None),
         data_root: std::env::temp_dir(),
@@ -34,31 +62,27 @@ fn open_with(
         postponed: None,
     });
     cx.set_global(UpdaterGlobal(updater));
-    let result = open_main(services, content, cx);
-    cx.remove_global::<UpdaterGlobal>();
-    result
 }
 
 pub fn open_available(
     services: Services,
-    content: Size<Pixels>,
+    _content: Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    open_with(Phase::Available(sample()), services, content, cx)
+    open_settings_with(Phase::Available(sample()), services, cx)
 }
 
-pub fn open_downloading(
+/// The 重启安装 sheet over the main window.
+pub fn open_ready(
     services: Services,
     content: Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let info = sample();
-    let total = info.size;
+    let dmg = std::env::temp_dir().join("update-preview.dmg");
     open_with(
-        Phase::Downloading {
-            info,
-            done: total * 42 / 100,
-            total,
+        Phase::Ready {
+            info: sample(),
+            dmg,
         },
         services,
         content,
@@ -66,10 +90,37 @@ pub fn open_downloading(
     )
 }
 
-pub fn open_manual(
+pub fn open_downloading(
     services: Services,
-    content: Size<Pixels>,
+    _content: Size<Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    open_with(Phase::Manual(sample()), services, content, cx)
+    let info = sample();
+    let total = info.size;
+    open_settings_with(
+        Phase::Downloading {
+            info,
+            done: total * 42 / 100,
+            total,
+        },
+        services,
+        cx,
+    )
+}
+
+pub fn open_manual(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_settings_with(Phase::Manual(sample()), services, cx)
+}
+
+/// Settings › 通用 after 检查更新: 已是最新版本.
+pub fn open_up_to_date(
+    services: Services,
+    _content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    open_settings_with(Phase::UpToDate, services, cx)
 }

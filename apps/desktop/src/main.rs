@@ -261,7 +261,10 @@ fn main() {
             );
         } else {
             views::nav::restore(&services, cx);
-            if let Err(error) = app::open_main_window(services, true, None, cx) {
+            // v12/fx-overlays: signed out, the app opens the small login
+            // window (NATIVE.md §9.7) instead of the main window.
+            if views::login::show_login_window(services.clone(), cx) {
+            } else if let Err(error) = app::open_main_window(services, true, None, cx) {
                 eprintln!("failed to open the window: {error}");
                 cx.quit();
             }
