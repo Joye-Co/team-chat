@@ -74,6 +74,12 @@ jobs:
               - ops/**
               - server/wrangler.jsonc
               - server/src/ops/index.ts
+              - scripts/deploy-server.sh
+              - scripts/release-check.sh
+              - scripts/test-release-scripts.sh
+              - Cargo.toml
+              - CHANGELOG.md
+              - docs/releases/**
             desktop:
               - *rust
               - apps/desktop/**
@@ -169,6 +175,8 @@ jobs:
         run: scripts/ci-run.sh typecheck ops/*
       - name: Test
         run: scripts/ci-run.sh test ops/*
+      - name: Release script guards
+        run: scripts/test-release-scripts.sh
 
   desktop-test:
     name: Desktop tests (macOS)
