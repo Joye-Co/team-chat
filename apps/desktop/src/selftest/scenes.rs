@@ -679,7 +679,7 @@ pub const SCENES: &[Scene] = &[
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 17] = [
+    let slices: [&'static [Scene]; 18] = [
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -709,6 +709,9 @@ pub fn all() -> Vec<&'static Scene> {
         // --- v11/pl-sf-symbols ---
         crate::ui::sf_symbols::scene::SCENES,
         // --- end v11/pl-sf-symbols ---
+        // --- v12/kit ---
+        crate::ui::native::scene::SCENES,
+        // --- end v12/kit ---
     ];
     slices.into_iter().flatten().collect()
 }

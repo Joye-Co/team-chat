@@ -65,39 +65,15 @@ pub trait ButtonSpec: Sized {
 
 impl ButtonSpec for Button {
     fn spec(self, button: ButtonSize) -> Self {
-        // Icons stay gpui-component's 16 pt at `Size::Medium` (§4.2: 16 in
-        // buttons; pass `Icon::new(..).size(..)` for the 14 pt of `sm`).
+        // v12/kit: Tahoe push button sizes (NATIVE.md §5.2): regular 24 pt
+        // radius 6, small 20 pt radius 5, large a 28 pt capsule; Body 13
+        // (small: Callout 12), regular weight.
         let (h, pad, radius, text) = match button {
-            ButtonSize::Sm => (
-                size::BUTTON_SM,
-                space::S10,
-                theme::radius::SM,
-                type_scale::SMALL,
-            ),
-            ButtonSize::Md => (
-                size::BUTTON_MD,
-                space::S14,
-                theme::radius::MD,
-                type_scale::UI,
-            ),
-            ButtonSize::Page => (
-                size::BUTTON_PAGE,
-                space::S14,
-                theme::radius::MD,
-                type_scale::UI,
-            ),
-            ButtonSize::Lg => (
-                size::BUTTON_LG,
-                px(18.),
-                theme::radius::FIELD,
-                type_scale::BUTTON_LG,
-            ),
-            ButtonSize::Card => (
-                size::BUTTON_CARD,
-                size::BUTTON_CARD_PAD,
-                theme::radius::BUTTON_CARD,
-                type_scale::SMALL,
-            ),
+            ButtonSize::Sm => (size::BUTTON_SM, space::S10, px(5.), type_scale::SMALL),
+            ButtonSize::Md | ButtonSize::Page | ButtonSize::Card => {
+                (size::BUTTON_MD, space::S12, px(6.), type_scale::UI)
+            }
+            ButtonSize::Lg => (size::BUTTON_LG, space::S16, size::BUTTON_LG / 2., type_scale::UI),
         };
         self.with_size(gpui_component::Size::Medium)
             .h(h)
@@ -105,14 +81,17 @@ impl ButtonSpec for Button {
             .rounded(radius)
             .text_size(text.0)
             .line_height(text.1)
-            .medium()
+            .font_weight(gpui::FontWeight::NORMAL)
+            .when(button != ButtonSize::Sm, |b| b.min_w(px(64.)))
     }
 
     fn disabled_fill(self, disabled: bool, cx: &App) -> Self {
-        let k = theme::colors(cx);
+        // v12/kit: a disabled push button keeps its shape with `tertiary`
+        // text on `fill`.
+        let n = crate::ui::native::native_colors(cx);
         self.disabled(disabled).when(disabled, |b| {
-            b.bg(k.disabled_bg)
-                .text_color(k.disabled_text)
+            b.bg(n.fill)
+                .text_color(n.tertiary)
                 .border_color(gpui::transparent_black())
         })
     }
@@ -127,29 +106,35 @@ pub fn button(
     size: ButtonSize,
     cx: &App,
 ) -> Button {
-    let k = theme::colors(cx);
+    // v12/kit: no black rectangles, no outlines, no hover fill on push
+    // buttons (NATIVE.md §5.2). Primary is the default button (`accent` ink,
+    // `onAccent` text); secondary, quiet and danger are standard (`fill`);
+    // danger says what it destroys in red text, never a red outline.
+    let n = crate::ui::native::native_colors(cx);
+    let push = |fill: Hsla, text: Hsla, pressed: Hsla| {
+        ButtonCustomVariant::new(cx)
+            .color(fill)
+            .foreground(text)
+            .hover(fill)
+            .active(pressed)
+    };
     let b = Button::new(id).label(label);
     let b = match kind {
-        // v3: ink fill with the inner highlight (`--btn-hi`).
-        ButtonKind::Primary => b.primary().shadow(k.btn_hi()),
-        // v3: `bg` fill, 1 pt `line-2` and the hairline drop (`--sec-hi`).
-        ButtonKind::Secondary => b
-            .custom(secondary_variant(cx))
-            .outline()
-            .bg(k.bg)
-            .border_color(k.line_2)
-            .shadow(k.sec_hi()),
-        ButtonKind::Ghost => b.ghost(),
-        ButtonKind::Danger => b.danger(),
-        ButtonKind::Quiet => b.custom(
-            ButtonCustomVariant::new(cx)
-                .color(k.btn_quiet)
-                .foreground(k.ink)
-                .hover(k.btn_quiet_hover)
-                .active(k.btn_quiet_pressed),
-        ),
+        ButtonKind::Primary => b
+            .custom(push(n.accent, n.on_accent, n.accent.opacity(0.82)))
+            .bg(n.accent)
+            .text_color(n.on_accent),
+        ButtonKind::Secondary | ButtonKind::Quiet => b
+            .custom(push(n.fill, n.label, n.fill_hover))
+            .bg(n.fill)
+            .text_color(n.label),
+        ButtonKind::Danger => b
+            .custom(push(n.fill, n.red, n.fill_hover))
+            .bg(n.fill)
+            .text_color(n.red),
+        ButtonKind::Ghost => b.custom(crate::ui::native::borderless_variant(cx)),
     };
-    b.spec(size)
+    b.border_0().spec(size)
 }
 
 /// The secondary look (§7.1): no fill, so it sits on `content`, `raised`
@@ -210,11 +195,12 @@ impl NamedButton for Button {
 /// A ghost icon button: 32 x 32, radius 8, an 18 pt glyph in `text-2` that
 /// turns `text-1` on hover (§4.2). Name it with [`NamedButton::named`].
 pub fn icon_button(id: impl Into<ElementId>, name: Lucide) -> Button {
+    // v12/kit: borderless, `fillHover` hover, radius 6 (NATIVE.md §5.1).
     Button::new(id)
         .ghost()
         .icon(button_glyph(name, theme::icon::HEADER, size::ICON_BUTTON))
         .with_size(size::ICON_BUTTON)
-        .rounded(theme::radius::MD)
+        .rounded(px(6.))
 }
 
 /// The `sm` icon button: 28 x 28, radius 6, a 16 pt glyph (section `+`,
@@ -224,29 +210,30 @@ pub fn icon_button_sm(id: impl Into<ElementId>, name: Lucide) -> Button {
         .ghost()
         .icon(button_glyph(name, theme::icon::ROW, size::ICON_BUTTON_SM))
         .with_size(size::ICON_BUTTON_SM)
-        .rounded(theme::radius::SM)
+        .rounded(px(6.))
 }
 
 /// A text button in `accent-text` (重试 after a failed send, 查看过程,
 /// 更改): 22 pt, padding 0 6, radius 6, 13/20 500, no underline, hover
 /// `hover`, pressed `pressed` (§7.5).
 pub fn text_button(id: impl Into<ElementId>, label: impl Into<SharedString>, cx: &App) -> Button {
-    let k = theme::colors(cx);
+    // v12/kit: a borderless text button in `label` ink, not a web link.
+    let k = crate::ui::native::native_colors(cx);
     Button::new(id)
         .custom(
             ButtonCustomVariant::new(cx)
-                .foreground(k.accent_text)
-                .hover(k.hover)
-                .active(k.pressed),
+                .color(gpui::transparent_black())
+                .foreground(k.label)
+                .hover(k.fill_hover)
+                .active(k.quaternary),
         )
         .label(label)
         .with_size(gpui_component::Size::Small)
         .h(size::TEXT_BUTTON)
         .px(space::S6)
         .rounded(theme::radius::SM)
-        .text_size(type_scale::SMALL.0)
-        .line_height(type_scale::SMALL.1)
-        .medium()
+        .text_size(type_scale::UI.0)
+        .line_height(type_scale::UI.1)
 }
 
 /// Field kinds (§7.4).
@@ -321,41 +308,36 @@ impl TextField {
 
 impl RenderOnce for TextField {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        // v12/kit: native fields (NATIVE.md §5.6). Search: a `fill`
+        // capsule with no border; form: 24 pt, radius 6, `content` with a
+        // 1 px `separator` edge. Focus: the 3 pt accent ring; error: a red
+        // edge. No hover change.
         let k = theme::colors(cx);
+        let n = crate::ui::native::native_colors(cx);
         let focused = self.state.read(cx).focus_handle(cx).is_focused(window);
         let empty = self.state.read(cx).value().is_empty();
-        let (height, radius) = match self.kind {
-            FieldKind::Search | FieldKind::SearchBordered => {
-                (size::SEARCH_FIELD, theme::radius::MD)
-            }
-            FieldKind::Form => (size::FORM_FIELD, theme::radius::FIELD),
-        };
         let search = self.kind != FieldKind::Form;
-        let bordered = self.kind != FieldKind::Search;
-        let (fill, edge): (Hsla, Option<Hsla>) = if self.disabled {
-            (k.field, None)
-        } else if self.error {
-            (k.content, Some(k.danger))
-        } else if focused {
-            (
-                if bordered { k.content } else { k.field },
-                Some(k.focus_border),
-            )
-        } else if bordered {
-            (k.content, Some(k.border))
+        let height = if search {
+            size::SEARCH_FIELD
         } else {
-            (k.field, None)
+            size::FORM_FIELD
         };
-        let halo = if self.disabled {
-            vec![]
-        } else if self.error {
-            k.error_halo()
-        } else if focused {
-            k.focus_halo()
+        let radius = if search { height / 2. } else { px(6.) };
+        // A focused field is opaque: the ring's shadow would show through
+        // the translucent search fill.
+        let fill = if search && !focused { n.fill } else { n.content };
+        let edge = if self.error {
+            Some(n.red)
+        } else if search {
+            None
+        } else {
+            Some(n.separator)
+        };
+        let halo = if focused && !self.disabled {
+            n.focus_ring()
         } else {
             vec![]
         };
-        let hover_edge = bordered && !focused && !self.error && !self.disabled;
         div()
             .id(self.id)
             .flex_none()
@@ -366,20 +348,17 @@ impl RenderOnce for TextField {
             .h(height)
             .rounded(radius)
             .bg(fill)
-            .border_1()
-            .border_color(edge.unwrap_or(gpui::transparent_black()))
+            .when_some(edge, |el, e| el.border_1().border_color(e))
             .shadow(halo)
-            .when(hover_edge, |el| {
-                el.hover(|s| s.border_color(k.border_strong))
-            })
-            .pl(space::S12)
-            .pr(if search { space::S8 } else { space::S12 })
+            .when(self.disabled, |el| el.opacity(0.5))
+            .pl(if search { space::S8 } else { px(7.) })
+            .pr(px(7.))
             .flex()
             .items_center()
-            .gap(space::S8)
+            .gap(px(5.))
             .cursor_text()
             .when(search, |el| {
-                el.child(icon(Lucide::Search, theme::icon::ROW, k.text_3))
+                el.child(icon(Lucide::Search, px(13.), n.secondary))
             })
             .child(
                 div().flex_1().min_w(px(0.)).child(placeholder_input(
@@ -397,8 +376,10 @@ impl RenderOnce for TextField {
                 )),
             )
             .children(self.trailing)
-            .when_some(self.shortcut.filter(|_| empty), |el, s| {
-                el.child(Kbd::new(s))
+            // v12/kit: shortcut hints live in the menu bar, not in the field
+            // (NATIVE.md §5.6); `shortcut` is kept for its callers.
+            .when(false && empty, |el| {
+                el.children(self.shortcut.map(Kbd::new))
             })
     }
 }
@@ -519,30 +500,30 @@ pub fn select_trigger(
     label: impl Into<SharedString>,
     cx: &App,
 ) -> gpui::Stateful<gpui::Div> {
-    let k = theme::colors(cx);
+    // v12/kit: a pop-up button (NATIVE.md §5.3): the push button shape,
+    // `fill`, no border, no hover, `fillHover` pressed, a trailing
+    // up-down chevron; the arrow cursor.
+    let n = crate::ui::native::native_colors(cx);
     div()
         .id(id)
         .flex_none()
         .h(size::SELECT)
-        .w(size::SELECT_WIDTH)
+        .min_w(px(64.))
+        .max_w(size::SELECT_WIDTH * 2.)
         .pl(space::S12)
-        .pr(space::S8)
-        .rounded(theme::radius::MD)
-        .bg(k.content)
-        .border_1()
-        .border_color(k.border)
-        .hover(|s| s.border_color(k.border_strong))
-        .active(|s| s.bg(k.hover))
-        .cursor_pointer()
+        .pr(px(7.))
+        .rounded(px(6.))
+        .bg(n.fill)
+        .active(|s| s.bg(n.fill_hover))
         .flex()
         .items_center()
         .gap(space::S6)
         .t_ui()
         // 400 always: a row around the select may set a heavier weight.
         .font_weight(gpui::FontWeight::NORMAL)
-        .text_color(k.text_1)
+        .text_color(n.label)
         .child(div().flex_1().min_w(px(0.)).one_line().child(label.into()))
-        .child(icon(Lucide::ChevronsUpDown, theme::icon::CHIP, k.text_3))
+        .child(icon(Lucide::ChevronsUpDown, px(12.), n.secondary))
 }
 
 #[cfg(test)]

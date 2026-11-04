@@ -54,6 +54,9 @@ pub mod members_page;
 pub mod rail;
 pub mod side_chat;
 pub mod topic_rail;
+// --- v12/kit ---
+pub mod native_kit;
+// --- end v12/kit ---
 
 /// Declares catalog entries: `copy! { KEY = "text", ... }`.
 #[macro_export]
@@ -256,6 +259,13 @@ pub const SECTIONS: &[Section] = &[
         developer: false,
     },
     // --- end settings-backend track ---
+    // --- v12/kit ---
+    Section {
+        name: "native_kit",
+        entries: native_kit::ENTRIES,
+        developer: false,
+    },
+    // --- end v12/kit ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.
