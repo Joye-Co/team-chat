@@ -41,8 +41,11 @@ the process list or the shell history.
    reports: the release version when HEAD has a release tag `v<semver>`, otherwise the
    12-character commit (`-dirty` when `server/`, `packages/` or `protocol/` have uncommitted
    changes); `DEPLOY_VERSION=<v>` overrides it. See it first with
-   `scripts/deploy-server.sh staging --print-version`; check it after with
-   `curl -s https://chat-api-staging.huangdeshiou.workers.dev/v1/health`.
+   `scripts/deploy-server.sh staging --print-version`. A `0.0.0*` version is refused, and the
+   script fails unless `/v1/health` reports the deployed version within 60 seconds; check it
+   again any time with `scripts/deploy-server.sh staging --check-health --expect <v>`. Before a
+   release, `scripts/release-check.sh <v> --env staging` checks the versions, the changelog and
+   the notes as well.
 4. Wait for two green monitor checks of staging (10 minutes, no alert in the `运维` group), or run
    the end-to-end clients in `tools/e2e` against staging.
 5. Production: `cd server && bun run deploy:production`.

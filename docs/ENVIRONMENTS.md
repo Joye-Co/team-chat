@@ -78,7 +78,9 @@ the 12-character commit (`-dirty` when `server/`, `packages/` or `protocol/` hav
 changes). `DEPLOY_VERSION=<v>` overrides it, `--print-version` shows it, `--dry-run` builds
 without uploading. The `VERSION` values in `server/wrangler.jsonc` are only for `wrangler dev`.
 
-Then check that `/v1/health` reports that version and run `tools/e2e` against the env (below).
+It refuses a `0.0.0*` version and, after the deploy, fails unless `/v1/health` reports the
+deployed version (`--check-health [--expect <v>]` runs only that check). Then run `tools/e2e`
+against the env (below).
 
 State on 2026-11-03 (from `wrangler deployments list` and `wrangler d1 migrations list`):
 

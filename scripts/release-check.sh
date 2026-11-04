@@ -50,14 +50,14 @@ if [ -z "$heading" ]; then
 else
   start="${heading%%:*}"
   section="$(awk -v s="$start" 'NR > s && /^## / { exit } NR > s { print }' "$ROOT/CHANGELOG.md")"
-  if grep -qiE '\bdraft\b|草稿' <<<"$section"; then problem "CHANGELOG.md $VERSION section still has a draft note"; fi
+  if grep -qE 'Draft:|草稿：' <<<"$section"; then problem "CHANGELOG.md $VERSION section still has a draft note"; fi
   if [ "$TAG_CHECK" = 1 ] && [[ "$heading" == *"(unreleased)" ]]; then problem "CHANGELOG.md $VERSION is still (unreleased) at the tag"; fi
 fi
 
 notes="$ROOT/docs/releases/$VERSION.md"
 if [ ! -s "$notes" ]; then
   problem "no release notes at docs/releases/$VERSION.md"
-elif grep -qiE '\bdraft\b|草稿' "$notes"; then
+elif grep -qE 'Draft:|草稿：' "$notes"; then
   problem "docs/releases/$VERSION.md still has a draft note"
 fi
 

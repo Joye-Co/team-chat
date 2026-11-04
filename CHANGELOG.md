@@ -5,9 +5,14 @@ and their `.sha256` files. Release notes for the team are in Chinese in `docs/re
 
 ## 1.1.0 (unreleased)
 
-Notes: [docs/releases/1.1.0.md](docs/releases/1.1.0.md). Draft: the date, the final scope and the
-deploy facts are filled in at release time. The server deploys first (e2e, staging, production),
-then the app and the machine daemon.
+Notes: [docs/releases/1.1.0.md](docs/releases/1.1.0.md). `scripts/release.sh` writes the date in
+the release commit. The server deploys first (`bun run deploy:e2e`, `deploy:staging`,
+`deploy:production`; each one fails unless `/v1/health` then reports `1.1.0`), then the app and
+the machine daemon. 1.0.x clients keep working against the 1.1.0 server.
+
+Deferred to 1.2 (not in 1.1.0): real screen frames in 实时查看 (it shows the terminal rebuilt from
+tool events), scheduled jobs, typed asks from CLIs through a daemon MCP tool server, secret inputs,
+and the landing page.
 
 - Design v3 ([docs/DESIGN.md](docs/DESIGN.md), artboards in `docs/design/mockups-v3/`): HELMET2
   ink-on-paper tokens, ink primary buttons, grey selection, state colors amber (you), blue (live)
@@ -71,6 +76,9 @@ then the app and the machine daemon.
 - chat-core: a cache migration re-fetches group logs once, so events that 1.0.x skipped are read.
 - Protocol: additive only (new optional fields and new frame and event types); closed enums are
   unchanged. See docs/protocol.md and docs/machine-protocol.md.
+- Release: `scripts/deploy-server.sh` refuses a `0.0.0*` version and checks `/v1/health` after the
+  deploy (`--check-health [--expect <v>]` checks it alone); `scripts/release-check.sh <v>` checks
+  the workspace version, Cargo.lock, this file and the notes (`--tag`, `--env <env>`).
 
 ## 1.0.1 (2026-11-03)
 

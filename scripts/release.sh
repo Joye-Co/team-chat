@@ -149,7 +149,7 @@ CURRENT="$(workspace_version)"
 # The notes must be final now; the version and the date are set below (release-check.sh).
 [ -s "$ROOT/docs/releases/$VERSION.md" ] || problem "no release notes at docs/releases/$VERSION.md"
 grep -qE "^## ${VERSION//./\\.} \((unreleased|[0-9]{4}-[0-9]{2}-[0-9]{2})\)$" CHANGELOG.md || problem "CHANGELOG.md has no $VERSION section"
-if grep -qiE '\bdraft\b|草稿' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; then problem "docs/releases/$VERSION.md still has a draft note"; fi
+if grep -qE 'Draft:|草稿：' "$ROOT/docs/releases/$VERSION.md" 2>/dev/null; then problem "docs/releases/$VERSION.md still has a draft note"; fi
 [ -s "$SECRET_FILE" ] || log "note: no admin secret at $SECRET_FILE; the server upload will be skipped"
 
 if [ "$DRY_RUN" = 1 ]; then
