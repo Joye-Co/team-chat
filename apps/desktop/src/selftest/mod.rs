@@ -22,10 +22,12 @@
 pub mod capture;
 pub mod clock;
 pub mod drawn;
+pub mod interact;
 // --- v13/ux-pages ---
 pub mod page_states;
 // --- end v13/ux-pages ---
 pub mod scenes;
+pub mod states;
 pub mod worst_case;
 
 use std::{
@@ -409,9 +411,14 @@ async fn shoot(
                 cx.background_executor().timer(options.settle).await;
                 settled = true;
             }
-            park_pointer(handle, cx);
+            park_pointer(handle, interact::pointer(scene.name), cx);
             match next_frame(handle, cx).await {
-                Ok(()) => frames += 1,
+                Ok(()) => {
+                    frames += 1;
+                    if frames == 1 {
+                        press_keys(handle, scene.name, cx);
+                    }
+                }
                 Err(_) => {
                     let _ = cx.update(|cx| {
                         handle.update(cx, |_, window, _| capture::order_front(window))
@@ -436,12 +443,21 @@ async fn shoot(
             }
             cx.background_executor().timer(options.settle).await;
         }
+        // A hover or focus scene waits for its delay (tooltips, hover pills).
+        if let Some(steps) = interact::steps(scene.name) {
+            cx.background_executor()
+                .timer(Duration::from_millis(steps.settle_ms))
+                .await;
+            park_pointer(handle, interact::pointer(scene.name), cx);
+            let _ = next_frame(handle, cx).await;
+            let _ = next_frame(handle, cx).await;
+        }
         let number = cx
             .update(|cx| handle.update(cx, |_, window, _| capture::window_number(window)))
             .map_err(|e| e.to_string())??;
         // Hold the caret of the focused field visible while the window is
         // captured, so a capture never lands on the off half of a blink.
-        hold_caret(handle, cx);
+        hold_caret(handle, scene.name, cx);
         let _ = next_frame(handle, cx).await;
         let path = png.to_path_buf();
         let shot = cx
@@ -457,7 +473,7 @@ async fn shoot(
                     break;
                 }
                 futures::future::Either::Right(((), pending)) => {
-                    hold_caret(handle, cx);
+                    hold_caret(handle, scene.name, cx);
                     shot = pending;
                 }
             }
@@ -489,15 +505,16 @@ async fn shoot(
     result
 }
 
-/// Tells the window the pointer is far outside it, so no row, button or
-/// tooltip under the real pointer shows its hover state in the capture.
-/// The real pointer does not move.
-fn park_pointer(handle: AnyWindowHandle, cx: &mut AsyncApp) {
+/// Tells the window where the pointer is: far outside it, so no row, button
+/// or tooltip under the real pointer shows its hover state in the capture,
+/// or at the hover point of a hover scene ([`interact`]). The real pointer
+/// does not move.
+fn park_pointer(handle: AnyWindowHandle, at: gpui::Point<Pixels>, cx: &mut AsyncApp) {
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
             window.dispatch_event(
                 gpui::PlatformInput::MouseMove(gpui::MouseMoveEvent {
-                    position: gpui::point(px(-10_000.), px(-10_000.)),
+                    position: at,
                     pressed_button: None,
                     modifiers: gpui::Modifiers::default(),
                 }),
@@ -507,10 +524,32 @@ fn park_pointer(handle: AnyWindowHandle, cx: &mut AsyncApp) {
     });
 }
 
+/// Presses the keys of a focus scene ([`interact`]) once.
+fn press_keys(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
+    let Some(steps) = interact::steps(name) else {
+        return;
+    };
+    let _ = cx.update(|cx| {
+        handle.update(cx, |_, window, cx| {
+            for key in steps.keys {
+                if let Ok(key) = gpui::Keystroke::parse(key) {
+                    window.dispatch_keystroke(key, cx);
+                }
+            }
+        })
+    });
+}
+
 /// Shows the caret of the focused text field without blinking for the next
 /// 300 ms: gpui-component pauses the blink on every keystroke, and F20 has
 /// no binding and types nothing.
-fn hold_caret(handle: AnyWindowHandle, cx: &mut AsyncApp) {
+///
+/// A hover scene keeps its pointer instead: a key press marks the last input
+/// as keyboard, and GPUI then draws no hover.
+fn hold_caret(handle: AnyWindowHandle, name: &str, cx: &mut AsyncApp) {
+    if interact::steps(name).is_some_and(|s| s.pointer.is_some()) {
+        return park_pointer(handle, interact::pointer(name), cx);
+    }
     let _ = cx.update(|cx| {
         handle.update(cx, |_, window, cx| {
             if let Ok(key) = gpui::Keystroke::parse("f20") {
