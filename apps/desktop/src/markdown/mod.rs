@@ -180,6 +180,7 @@ pub fn message_body_refs(
                 .gap(theme::space::S4)
                 .children(ask)
                 .child(copy)
+                .child(code_edge_fade(&text, cx))
         })
         .on_link_click(|url, _event, _window, cx| {
             if let Some(url) = safe_link(url) {
@@ -196,22 +197,74 @@ pub fn message_body_refs(
 fn body_style() -> TextViewStyle {
     let mut table = StyleRefinement::default();
     table.overflow.x = Some(Overflow::Scroll);
-    // §2.17: a long line scrolls sideways inside the block and ends 16
-    // before its right edge, never a hard clip at the border. A flex row
-    // keeps the unwrapped line at its full width (a block child would be
-    // cut to the block's width), so the scroll range covers the whole line
-    // plus the block's 16 right padding.
+    TextViewStyle::default()
+        .table(table)
+        .code_block(code_block_style())
+}
+
+/// The top strip of a code block that holds 问这里 and the copy button.
+const CODE_STRIP: gpui::Pixels = px(28.);
+/// The bottom padding of a code block.
+const CODE_PAD_BOTTOM: gpui::Pixels = px(14.);
+
+/// The code block (§2.4, §2.17; review 2 R1-04):
+/// - one width: the in-thread width (640), or the column when it is
+///   narrower. A definite 640 capped at 100 % makes a short block as wide as
+///   a long one, also when its message has nothing else to set the width;
+/// - a long line never wraps: the block scrolls sideways (trackpad, or ⇧ and
+///   the wheel) and the line ends 16 before the right edge when scrolled to
+///   its end;
+/// - the actions (问这里, copy) sit in a 28 strip at the top and stay pinned
+///   while the code scrolls: `overflow.y = Scroll` makes the block a scroll
+///   viewport with its actions outside the scrolled content (the block has
+///   no max height, so it never scrolls vertically and a vertical wheel
+///   passes to the thread);
+/// - mono 13/20, so the edge fade ([`code_edge_fade`]) knows its height.
+fn code_block_style() -> StyleRefinement {
+    use crate::ui::native::tokens::{layout, text};
     let mut code = StyleRefinement::default()
-        .pt(px(36.))
+        .pt(CODE_STRIP)
+        .pb(CODE_PAD_BOTTOM)
         .pr(theme::space::S16)
-        // §2.4: a code block takes the one in-thread width, not its text's.
-        .w_full()
+        .w(layout::IN_THREAD)
+        .max_w_full()
+        .text_size(text::MONO.0)
+        .line_height(text::MONO.1)
         .flex()
         .flex_row()
         .items_start();
     code.overflow.x = Some(Overflow::Scroll);
+    code.overflow.y = Some(Overflow::Scroll);
     code.text.white_space = Some(WhiteSpace::Nowrap);
-    TextViewStyle::default().table(table).code_block(code)
+    code
+}
+
+/// The scroll cue of a code block (§2.17 "never a hard clip"): a 16 fade
+/// from transparent to the block fill over the block's right padding, from
+/// under the action strip to the bottom padding. A line that fits ends
+/// before it (the 16 padding), so the fade shows only on a line that runs
+/// past the edge, where it softens the cut into a cue that the block
+/// scrolls. It is drawn from the pinned actions, so it stays at the edge
+/// while the code scrolls.
+fn code_edge_fade(code: &str, cx: &App) -> impl IntoElement {
+    use crate::ui::native::tokens::text;
+    let lines = code.trim_end_matches('\n').lines().count().max(1) as f32;
+    let fill = gpui_component::ActiveTheme::theme(cx).muted;
+    // The actions sit 8 in from the block's top and right edges (gpui-base);
+    // the fade starts at the end of the strip and stops at the last line.
+    let inset = px(8.);
+    div()
+        .absolute()
+        .top(CODE_STRIP - inset)
+        // Inside the block's 1 px border.
+        .right(px(1.) - inset)
+        .w(theme::space::S16)
+        .h(text::MONO.1 * lines)
+        .bg(gpui::linear_gradient(
+            90.,
+            gpui::linear_color_stop(fill.opacity(0.), 0.),
+            gpui::linear_color_stop(fill, 1.),
+        ))
 }
 
 // --- v11/inc-diagrams: ```mermaid fences drawn as diagrams (REFS §B1) ---
