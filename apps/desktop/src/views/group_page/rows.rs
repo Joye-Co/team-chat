@@ -299,37 +299,9 @@ pub fn toolbar_separator(cx: &App) -> gpui::Div {
     div().flex_none().w(px(1.)).h(tsp::S16).bg(k.separator)
 }
 
-/// The region of a page whose first load failed (§2.15, §2.13): it takes
-/// the place of the content (no skeletons pulse under it), in a frame that
-/// hugs it, and says why, with `重试`, which reconnects now.
+/// The region of a page whose first load failed (§2.15, owner decision
+/// v15): the page Alert (icon, neutral title, the cause and `重试`, which
+/// reconnects now) in place of the content; no skeletons pulse under it.
 pub fn failed_region(id: &str, services: &Services, cx: &App) -> AnyElement {
-    use crate::{
-        copy::common as cc,
-        ui::native::{PushSize, PushStyle, page, push_button},
-    };
-    let k = native_colors(cx);
-    let services = services.clone();
-    let retry = push_button(
-        SharedString::from(format!("{id}-retry")),
-        cc::PAGE_RETRY,
-        PushStyle::Outline,
-        PushSize::Small,
-        cx,
-    )
-    .on_click(move |_, _, _| services.provider.reconnect_now());
-    div()
-        .id(SharedString::from(format!("{id}-failed")))
-        .flex_none()
-        .flex()
-        .rounded(page::m::FRAME_RADIUS)
-        .border_1()
-        .border_color(k.separator)
-        .child(page::page_empty(
-            Sym::Warning,
-            cc::PAGE_LOAD_FAILED,
-            cc::PAGE_LOAD_FAILED_LINE,
-            vec![retry.into_any_element()],
-            cx,
-        ))
-        .into_any_element()
+    crate::ui::native::page::load_failed(id, services, cx)
 }

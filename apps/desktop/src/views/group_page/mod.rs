@@ -465,12 +465,18 @@ impl GroupPage {
     fn inspector(
         &self,
         g: &str,
-        loading: bool,
+        load: PageLoad,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
         let p = self.services.provider.clone();
+        // Skeletons only while the page loads (§2.14); a failed load shows
+        // one compact line per section, never pulsing bones (§2.15).
+        let loading = load == PageLoad::Loading;
+        let failed = load == PageLoad::Failed;
+        let offline =
+            |sym: Sym, cx: &App| page::compact_empty(sym, c::GROUP_PAGE_OFFLINE, None, cx);
         let header = div()
             .flex_none()
             .h(metrics::TOOLBAR_ROW)
@@ -514,6 +520,8 @@ impl GroupPage {
                 4,
                 cx,
             ));
+        } else if failed {
+            sec = sec.row(offline(Sym::Members, cx));
         } else if members.is_empty() {
             sec = sec.row(page::compact_empty(
                 Sym::Members,
@@ -522,7 +530,7 @@ impl GroupPage {
                 cx,
             ));
         }
-        for m in members.into_iter().filter(|_| !loading) {
+        for m in members.into_iter().filter(|_| !loading && !failed) {
             let nav = self.services.nav.clone();
             let id = m.id.clone();
             let full = match &m.role {
@@ -564,14 +572,14 @@ impl GroupPage {
         col = col.child(sec);
 
         // 群里的决定.
-        let decisions = if loading {
+        let decisions = if loading || failed {
             Vec::new()
         } else {
             p.group_decisions(g)
         };
         let now = p.clock_now();
         let mut sec = InspectorSection::new("group-ins-decisions", c::GROUP_PAGE_DECISIONS);
-        if p.can_record_decision(g) && !loading {
+        if p.can_record_decision(g) && !loading && !failed {
             let services = self.services.clone();
             let group = g.to_string();
             sec = sec.action(
@@ -595,6 +603,8 @@ impl GroupPage {
                 2,
                 cx,
             ));
+        } else if failed {
+            sec = sec.row(offline(Sym::List, cx));
         } else if decisions.is_empty() {
             // A neutral icon: a check would read as a done item.
             let record = p.can_record_decision(g).then(|| {
@@ -627,13 +637,7 @@ impl GroupPage {
                     .flex()
                     .flex_col()
                     .gap(tsp::S2)
-                    .child(
-                        div()
-                            .n_body()
-                            .text_color(k.label)
-                            .line_clamp(2)
-                            .child(d.text.clone()),
-                    )
+                    .child(kit::decision_text(&d.text, k.label))
                     .child(
                         div()
                             .n_subheadline()
@@ -643,13 +647,19 @@ impl GroupPage {
                                 "{} · {date}",
                                 who.map(|m| m.name).unwrap_or_default()
                             )),
-                    ),
+                    )
+                    .tooltip({
+                        let text = d.text.clone();
+                        move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+                        }
+                    }),
             );
         }
         col = col.child(sec);
 
         // 最近的产出.
-        let outputs: Vec<_> = if loading {
+        let outputs: Vec<_> = if loading || failed {
             Vec::new()
         } else {
             p.group_artifacts(g).into_iter().take(3).collect()
@@ -662,6 +672,8 @@ impl GroupPage {
                 2,
                 cx,
             ));
+        } else if failed {
+            sec = sec.row(offline(Sym::Document, cx));
         } else if outputs.is_empty() {
             sec = sec.row(page::compact_empty(
                 Sym::Document,
@@ -727,7 +739,7 @@ impl GroupPage {
         col = col.child(sec);
 
         // 在哪干活: the team computer a member of this 群 works on now.
-        let run = if loading {
+        let run = if loading || failed {
             None
         } else {
             p.topics(g)
@@ -745,6 +757,9 @@ impl GroupPage {
                     1,
                     cx,
                 ));
+            }
+            None if failed => {
+                sec = sec.row(offline(Sym::Computer, cx));
             }
             None => {
                 sec = sec.row(page::compact_empty(
@@ -765,11 +780,7 @@ impl GroupPage {
                 let nav = self.services.nav.clone();
                 let (gid, tid, rid) = (run.group_id.clone(), run.topic_id.clone(), run.id.clone());
                 let name = run.machine_name.clone().unwrap_or_default();
-                let glyph = if name.to_lowercase().contains("mini") {
-                    Sym::MacMini
-                } else {
-                    Sym::Computer
-                };
+                let glyph = kit::machine_sym(&name, run.machine_id.as_deref());
                 let tip = format!("{name} · {step}");
                 sec = sec
                     .action(
@@ -1021,7 +1032,7 @@ impl Render for GroupPage {
             .child(content);
         let inspector = self
             .aside_open
-            .then(|| self.inspector(&g, load != PageLoad::Ready, window, cx));
+            .then(|| self.inspector(&g, load, window, cx));
         div()
             .size_full()
             .flex()

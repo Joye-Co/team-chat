@@ -407,3 +407,44 @@ pub fn note_alert(snap: &Snapshot, cx: &App) -> Option<AnyElement> {
         .into_any_element(),
     )
 }
+
+/// The skeleton of Jojo's priority note while the first sync runs (§2.14):
+/// the Alert's own frame and shapes (icon 16, a title and a line, the
+/// action), so the KPI row does not move when the note arrives.
+pub fn note_skeleton(cx: &App) -> AnyElement {
+    use crate::ui::native::{
+        Bone,
+        tokens::{height, space as tsp, text},
+    };
+    let k = native_colors(cx);
+    let text_line = |w: f32| {
+        div().h(text::UI.1).flex().items_center().child(
+            Bone::new()
+                .h(tsp::S12)
+                .w(gpui::relative(w))
+                .rounded(tsp::S6),
+        )
+    };
+    div()
+        .flex_none()
+        .rounded(m::FRAME_RADIUS)
+        .border_1()
+        .border_color(k.separator)
+        .px(tsp::S16)
+        .py(tsp::S12)
+        .flex()
+        .items_center()
+        .gap(tsp::S12)
+        .child(Bone::new().size(tsp::S16).rounded(tsp::S4))
+        .child(
+            div()
+                .flex_1()
+                .flex()
+                .flex_col()
+                .gap(tsp::S2)
+                .child(text_line(0.3))
+                .child(text_line(0.6)),
+        )
+        .child(Bone::new().h(height::SM).w(tsp::S48).rounded(tsp::S8))
+        .into_any_element()
+}

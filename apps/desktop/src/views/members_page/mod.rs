@@ -228,17 +228,6 @@ const DETAIL_MEASURE: gpui::Pixels = px(880.);
 /// The width of the 成本 bar.
 const COST_BAR: gpui::Pixels = px(120.);
 
-fn machine_sym(name: &str) -> Sym {
-    let n = name.to_lowercase();
-    if n.contains("mini") {
-        Sym::MacMini
-    } else if n.contains("book") || n.contains("笔记本") {
-        Sym::Laptop
-    } else {
-        Sym::Computer
-    }
-}
-
 impl MembersPage {
     fn list(
         &self,
@@ -264,7 +253,9 @@ impl MembersPage {
             window,
             cx,
         )
-        .disabled(!owner)
+        // Nothing to add to while the team has not loaded (§2.15: the
+        // toolbar stays in place, its controls disabled).
+        .disabled(!owner || load != PageLoad::Ready)
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let invite = services.clone();
             let bot = services.clone();
@@ -292,6 +283,7 @@ impl MembersPage {
             ],
         )
         .toolbar()
+        .disabled(load != PageLoad::Ready)
         .selected(match self.filter {
             Filter::All => 0,
             Filter::Working => 1,
@@ -387,20 +379,46 @@ impl MembersPage {
         }
         if load == PageLoad::Failed {
             // The failure shows in the detail (it takes the content's
-            // place); nothing pulses here.
-            list = div().id("members-list").flex_1().min_h_0();
-        } else if load != PageLoad::Ready {
-            // The list's own shape (§2.14): unframed member rows.
+            // place); the list keeps its column and says when it fills.
             list = div()
                 .id("members-list")
                 .flex_1()
                 .min_h_0()
-                .child(page::skeleton_rows(
-                    "members-sk",
-                    page::SkeletonKind::MemberRow,
-                    8,
+                .px(rows::LEADING)
+                .pt(tsp::S12)
+                .child(page::compact_empty(
+                    Sym::Members,
+                    crate::copy::group_page::GROUP_PAGE_OFFLINE,
+                    None,
                     cx,
                 ));
+        } else if load != PageLoad::Ready {
+            // The list's own shape (§2.14): member rows at the real x and
+            // pitch, with the row lines inset to the name.
+            list = div()
+                .id("members-list")
+                .flex_1()
+                .min_h_0()
+                .px(rows::LEADING)
+                .children((0..6).map(|i| {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .child(page::skeleton_rows(
+                            &format!("members-sk-{i}"),
+                            page::SkeletonKind::MemberRow,
+                            1,
+                            cx,
+                        ))
+                        .when(i < 5, |d| {
+                            d.child(
+                                div()
+                                    .h(crate::ui::native::metrics::HAIRLINE)
+                                    .ml(AVATAR + rows::ROW_GAP)
+                                    .bg(k.separator),
+                            )
+                        })
+                }));
         } else if !any {
             let this = cx.entity().downgrade();
             list = list.child(page::page_empty(
@@ -425,10 +443,6 @@ impl MembersPage {
                 ],
                 cx,
             ));
-        }
-        if load == PageLoad::Failed {
-            // The failure takes the whole page (§2.15); only the toolbar row stays.
-            return toolbar.w_full().into_any_element();
         }
         div()
             .flex_none()
@@ -854,7 +868,26 @@ impl MembersPage {
                 None => row.into_any_element(),
             });
         }
-        if rows_n == 0 {
+        // A person has no runs: the line they set (the one the list row
+        // shows) is what they are doing now, so list and detail agree (A5).
+        let said = e
+            .extras
+            .line
+            .clone()
+            .filter(|l| !e.member.is_bot() && !l.trim().is_empty());
+        if rows_n == 0
+            && let Some(said) = said
+        {
+            body = body.child(page::card_row(
+                "member-now-said",
+                Some(page::row_icon(Sym::AskAside, k.secondary)),
+                said,
+                None,
+                None,
+                true,
+                cx,
+            ));
+        } else if rows_n == 0 {
             body = body.child(page::compact_empty(
                 Sym::Circle,
                 c::MEMBERS_NOW_EMPTY,
@@ -1279,7 +1312,7 @@ impl MembersPage {
                 });
                 page::card_row(
                     "member-machine",
-                    Some(page::icon_box(machine_sym(&mc.name), None, cx)),
+                    Some(page::icon_box(kit::machine_sym(&mc.name, None), None, cx)),
                     mc.name.clone(),
                     detail,
                     Some(
@@ -1664,15 +1697,58 @@ impl MembersPage {
                             .child(Skeleton::new().h(px(14.)).w(px(280.)).rounded(tsp::S8)),
                     ),
             )
-            .child(page::skeleton_cards(2, cx))
-            .child(page::skeleton_rows(
-                "member-sk",
-                page::SkeletonKind::Row,
+            .child(
+                div()
+                    .h(crate::ui::native::metrics::HAIRLINE)
+                    .bg(native_colors(cx).separator),
+            )
+            .child(pair_skeleton("member-sk-a", cx))
+            // 最近交付 is a table in a card (§2.18): its header and rows.
+            .child(card_skeleton(
+                "member-sk-t",
+                page::SkeletonKind::TableRow,
                 3,
                 cx,
             ))
-            .child(page::skeleton_cards(2, cx))
+            .child(pair_skeleton("member-sk-b", cx))
     }
+}
+
+/// A detail card while the first sync runs (§2.14): the card's title and
+/// `n` rows of `kind` in its body, at the real card padding.
+fn card_skeleton(id: &str, kind: page::SkeletonKind, n: usize, cx: &App) -> gpui::Div {
+    use crate::ui::native::Bone;
+    page::card(cx)
+        .flex_1()
+        .p(page::m::GUTTER)
+        .gap(page::m::GUTTER)
+        .child(
+            Bone::new()
+                .h(crate::ui::native::tokens::text::HEADING.0)
+                .w(gpui::relative(0.3))
+                .rounded(tsp::S8),
+        )
+        .child(page::skeleton_rows(id, kind, n, cx))
+}
+
+/// Two detail cards side by side (现在在做 | 这周), as skeletons.
+fn pair_skeleton(id: &str, cx: &App) -> gpui::Div {
+    div()
+        .flex()
+        .flex_wrap()
+        .gap(page::m::GRID_GAP)
+        .child(card_skeleton(
+            &format!("{id}-0"),
+            page::SkeletonKind::Compact,
+            5,
+            cx,
+        ))
+        .child(card_skeleton(
+            &format!("{id}-1"),
+            page::SkeletonKind::Compact,
+            5,
+            cx,
+        ))
 }
 
 /// The narrowest card of a detail pair before the pair stacks.
@@ -1768,26 +1844,6 @@ impl Render for MembersPage {
                     .into_any_element()
             }
         };
-        if load == PageLoad::Failed {
-            return div()
-                .size_full()
-                .flex()
-                .flex_col()
-                .bg(k.content)
-                .child(list)
-                .child(
-                    div()
-                        .flex_1()
-                        .min_h_0()
-                        .px(page::m::EDGE)
-                        .pt(page::m::GUTTER)
-                        .pb(page::m::GUTTER)
-                        .flex()
-                        .flex_col()
-                        .child(rows::failed_region("members", &self.services, cx)),
-                )
-                .into_any_element();
-        }
         div()
             .size_full()
             .flex()

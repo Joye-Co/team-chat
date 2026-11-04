@@ -1019,13 +1019,7 @@ impl ArtifactPage {
                     .flex()
                     .flex_col()
                     .gap(tsp::S2)
-                    .child(
-                        div()
-                            .n_body()
-                            .text_color(k.label)
-                            .line_clamp(2)
-                            .child(d.text.clone()),
-                    )
+                    .child(kit::decision_text(&d.text, k.label))
                     .child(line(meta).n_subheadline().text_color(k.secondary))
                     .tooltip(tip(d.text.clone()))
                     .on_click(move |_, _, cx| {
@@ -1716,7 +1710,7 @@ fn content_leading(services: &Services, cx: &App) -> Pixels {
 }
 
 /// The symbol of a 产出's kind (NATIVE.md §6).
-fn kind_sym(kind: crate::data::ArtifactKind) -> Sym {
+pub(crate) fn kind_sym(kind: crate::data::ArtifactKind) -> Sym {
     use crate::data::ArtifactKind as K;
     match kind {
         K::Page | K::Decision => Sym::Document,

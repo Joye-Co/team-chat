@@ -164,8 +164,9 @@ impl Render for PlanForm {
                 .collect();
         let current = self.reports_to.clone();
         let this = cx.entity().downgrade();
+        // One width for every control in the value column (§2.8).
         let reports = popup_button("member-plan-reports", chosen, PushSize::Regular, window, cx)
-            .max_w(field_w)
+            .w(field_w)
             .dropdown_menu(move |menu, _, _| {
                 options.iter().fold(menu, |menu, (id, name)| {
                     let this = this.clone();

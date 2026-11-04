@@ -304,11 +304,7 @@ pub fn render(
         ));
     }
     for (i, (name, names, (g, t, run))) in machines.into_iter().enumerate() {
-        let glyph = if name.to_lowercase().contains("mini") {
-            Sym::MacMini
-        } else {
-            Sym::Computer
-        };
+        let glyph = crate::views::group_page::kit::machine_sym(&name, None);
         let users = fill(c::DESK_MACHINE_USERS, &[("names", &names.join("、"))]);
         let nav = services.nav.clone();
         where_ = where_.row(
