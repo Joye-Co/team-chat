@@ -780,7 +780,7 @@ impl Render for Switcher {
             .when(empty && has_query, |el| {
                 el.child(
                     div()
-                        .h(px(56.))
+                        .h(crate::ui::native::tokens::height::LIST_ROW)
                         .flex()
                         .items_center()
                         .justify_center()

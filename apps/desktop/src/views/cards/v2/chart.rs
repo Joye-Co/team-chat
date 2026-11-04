@@ -406,7 +406,7 @@ pub(crate) fn chart(
                 } else {
                     div()
                         .flex()
-                        .gap(px(2.))
+                        .gap(crate::ui::native::tokens::space::S2)
                         .children((0..3).map(|_| div().w(px(3.)).h(px(1.5)).bg(k.ink_2)))
                         .into_any_element()
                 };

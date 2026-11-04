@@ -746,7 +746,7 @@ fn ref_chip(label: &str, cx: &App) -> impl IntoElement {
                     .min_w_0()
                     .one_line()
                     .code_font()
-                    .text_size(px(11.))
+                    .text_size(crate::ui::native::tokens::text::META.0)
                     .text_color(k.label)
                     .child(first.to_string()),
             )

@@ -337,7 +337,7 @@ impl Render for SettingsView {
                     )
                     .child(div().h(TABS_BOTTOM)),
             )
-            .child(div().flex_none().h(px(1.)).w_full().bg(k.separator))
+            .child(div().flex_none().h(crate::ui::native::tokens::layout::BORDER).w_full().bg(k.separator))
             .child(
                 div()
                     .id("settings-page")

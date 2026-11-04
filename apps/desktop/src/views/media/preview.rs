@@ -357,7 +357,7 @@ impl Render for MediaPreview {
             .flex()
             .justify_center()
             .items_start()
-            .gap(px(32.))
+            .gap(crate::ui::native::tokens::space::S32)
             .pt(px(40.))
             .child(left)
             .child(right)

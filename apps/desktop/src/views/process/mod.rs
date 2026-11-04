@@ -633,7 +633,7 @@ pub fn status_badge(status: RunStatus, cx: &App) -> impl IntoElement {
         .flex_none()
         .flex()
         .items_center()
-        .gap(px(4.))
+        .gap(crate::ui::native::tokens::space::S4)
         .n_subheadline()
         .text_color(ink)
         .child(sym.icon(SymSize::INLINE_SMALL).text_color(color))

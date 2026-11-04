@@ -96,7 +96,7 @@ impl Render for Gallery {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
+                    .gap(crate::ui::native::tokens::space::S2)
                     .child(
                         div()
                             .text_xs()
@@ -118,7 +118,7 @@ impl Render for Gallery {
             .p(px(20.))
             .flex()
             .flex_col()
-            .gap(px(16.))
+            .gap(crate::ui::native::tokens::space::S16)
             .children(rows)
     }
 }

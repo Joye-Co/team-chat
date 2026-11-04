@@ -113,7 +113,7 @@ impl Render for ConnectionBanner {
             .pb(px(10.))
             .flex()
             .items_start()
-            .gap(px(6.))
+            .gap(crate::ui::native::tokens::space::S6)
             .child(
                 div().pt(px(3.)).child(
                     Sym::Offline

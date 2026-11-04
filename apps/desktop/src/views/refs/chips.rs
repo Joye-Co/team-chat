@@ -139,7 +139,7 @@ pub fn composer_chip(
         .px(space::S4)
         .rounded(radius::SM)
         .when(flashing, |d| d.bg(k.sel))
-        .text_size(px(13.))
+        .text_size(crate::ui::native::tokens::text::UI.0)
         .line_height(px(18.))
         .text_color(k.ink_3)
         .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))

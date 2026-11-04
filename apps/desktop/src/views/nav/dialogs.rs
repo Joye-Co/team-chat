@@ -439,12 +439,12 @@ impl Render for NewGroupForm {
             .w(field_w)
             .flex()
             .flex_col()
-            .gap(px(8.))
+            .gap(crate::ui::native::tokens::space::S8)
             .child(
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(12.))
+                    .gap(crate::ui::native::tokens::space::S12)
                     .child(SearchField::new("new-group-filter", &self.filter).width(px(220.)))
                     .child(div().flex_1())
                     .child(
@@ -518,7 +518,7 @@ fn member_line(m: &Member, surface: gpui::Hsla, role_color: gpui::Hsla) -> gpui:
         .min_w(px(0.))
         .flex()
         .items_center()
-        .gap(px(8.))
+        .gap(crate::ui::native::tokens::space::S8)
         .child(
             div().flex_none().child(
                 ui::MemberAvatar::new(Some(m), px(20.))

@@ -652,7 +652,7 @@ pub fn dot_text(color: Option<gpui::Hsla>, text: impl Into<SharedString>, cx: &A
     div()
         .flex()
         .items_center()
-        .gap(px(6.))
+        .gap(crate::ui::native::tokens::space::S6)
         .child(
             div()
                 .flex_none()
@@ -751,7 +751,7 @@ pub fn popup_fixed(
                 .flex()
                 .items_center()
                 .justify_between()
-                .gap(px(6.))
+                .gap(crate::ui::native::tokens::space::S6)
                 .child(
                     div()
                         .min_w(px(0.))
@@ -774,7 +774,7 @@ pub fn list_controls(buttons: impl IntoElement, note: impl Into<SharedString>, c
     div()
         .flex()
         .items_center()
-        .gap(px(10.))
+        .gap(crate::ui::native::tokens::space::S12)
         .child(buttons)
         .child(quiet(note, cx))
 }

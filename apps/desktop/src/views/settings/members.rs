@@ -460,7 +460,7 @@ impl MembersPage {
             div()
                 .flex()
                 .items_center()
-                .gap(px(2.))
+                .gap(crate::ui::native::tokens::space::S2)
                 .child(div().n_body().text_color(k.secondary).child("¥"))
                 .child(
                     InlineValueField::new(
@@ -558,7 +558,7 @@ impl Render for MembersPage {
             group.below(
                 div()
                     .flex()
-                    .gap(px(8.))
+                    .gap(crate::ui::native::tokens::space::S8)
                     .child(
                         push_button(
                             "member-invite",
@@ -608,7 +608,7 @@ fn secret_row(id: &'static str, label: &'static str, value: &str, cx: &App) -> g
         .w_full()
         .flex()
         .flex_col()
-        .gap(px(4.))
+        .gap(crate::ui::native::tokens::space::S4)
         .child(div().n_body().text_color(k.label).child(label))
         .child(
             div()
@@ -623,13 +623,13 @@ fn secret_row(id: &'static str, label: &'static str, value: &str, cx: &App) -> g
                 .border_color(k.separator)
                 .flex()
                 .items_start()
-                .gap(px(6.))
+                .gap(crate::ui::native::tokens::space::S6)
                 .child(
                     div()
                         .flex_1()
                         .min_w(px(0.))
                         .font_family(theme::MONO_FONT_FAMILY)
-                        .text_size(px(12.))
+                        .text_size(crate::ui::native::tokens::text::META.0)
                         .line_height(px(18.))
                         .text_color(k.label)
                         .child(value.clone()),
@@ -773,7 +773,7 @@ pub fn character_picker(
     div()
         .flex()
         .flex_wrap()
-        .gap(px(4.))
+        .gap(crate::ui::native::tokens::space::S4)
         .children(CharacterId::ALL.iter().enumerate().map(|(ix, c)| {
             let c = *c;
             let pick = pick.clone();
@@ -1258,7 +1258,7 @@ impl Render for BotForm {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.))
+                    .gap(crate::ui::native::tokens::space::S6)
                     .when(!self.known_runtimes.is_empty(), |d| {
                         let known = self.known_runtimes.clone();
                         let input = self.runtime.clone();
@@ -1327,7 +1327,7 @@ impl Render for BotForm {
                     .overflow_y_scroll()
                     .flex()
                     .flex_col()
-                    .gap(px(16.))
+                    .gap(crate::ui::native::tokens::space::S16)
                     .child(form)
                     .child(looks),
             )

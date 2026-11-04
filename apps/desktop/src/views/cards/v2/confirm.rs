@@ -7,7 +7,7 @@ use std::cell::Cell;
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement,
-    Render, SharedString, Styled, Subscription, Window, div, px,
+    Render, SharedString, Styled, Subscription, Window, div,
 };
 use gpui_component::{
     Sizable as _, WindowExt as _,
@@ -154,7 +154,7 @@ pub(crate) fn field_box(child: AnyElement, cx: &App) -> AnyElement {
         .shadow(n.focus_ring())
         .flex()
         .items_center()
-        .text_size(px(13.))
+        .text_size(crate::ui::native::tokens::text::UI.0)
         .text_color(n.label)
         .child(child)
         .into_any_element()
@@ -197,7 +197,7 @@ impl Render for ConfirmForm {
                         .with_size(gpui_component::Size::Small)
                         .px_0()
                         .py_0()
-                        .text_size(px(13.))
+                        .text_size(crate::ui::native::tokens::text::UI.0)
                         .text_color(k.ink),
                     window,
                     cx,

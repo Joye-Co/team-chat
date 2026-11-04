@@ -73,7 +73,7 @@ pub use sheet::{
     sheet_surface,
 };
 #[allow(unused_imports)]
-pub use sidebar::{SidebarRow, SidebarSection, floating_sidebar};
+pub use sidebar::{SidebarFooter, SidebarRow, SidebarSection, floating_sidebar};
 #[allow(unused_imports)]
 pub use toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize};
 #[allow(unused_imports)]

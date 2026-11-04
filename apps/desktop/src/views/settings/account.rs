@@ -517,7 +517,7 @@ impl AccountPage {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(10.))
+                    .gap(crate::ui::native::tokens::space::S12)
                     .child(account_avatar(me.as_ref(), px(88.), cx))
                     .child(
                         push_button(
@@ -619,7 +619,7 @@ impl AccountPage {
             .py(px(12.))
             .flex()
             .items_center()
-            .gap(px(14.))
+            .gap(crate::ui::native::tokens::space::S16)
             .child(account_avatar(me.as_ref(), px(64.), cx))
             .child(
                 div()
@@ -627,7 +627,7 @@ impl AccountPage {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .gap(px(2.))
+                    .gap(crate::ui::native::tokens::space::S2)
                     .child(
                         div()
                             .n_title3()
@@ -757,7 +757,7 @@ impl Render for AccountPage {
                     let line = (i > 0).then(|| {
                         div()
                             .mx(metrics::FORM_ROW_INSET + px(4.))
-                            .h(px(1.))
+                            .h(crate::ui::native::tokens::layout::BORDER)
                             .bg(k.separator)
                             .into_any_element()
                     });

@@ -77,7 +77,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
                             .child(
                                 div()
                                     .mono()
-                                    .text_size(px(24.))
+                                    .text_size(crate::ui::native::tokens::text::HERO.0)
                                     .line_height(px(32.))
                                     .font_weight(gpui::FontWeight::SEMIBOLD)
                                     .text_color(k.ink)
@@ -85,7 +85,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
                             )
                             .children(m.unit.clone().map(|u| {
                                 div()
-                                    .text_size(px(14.))
+                                    .text_size(crate::ui::native::tokens::text::UI.0)
                                     .medium()
                                     .text_color(k.ink_3)
                                     .child(u)
@@ -114,7 +114,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
             .child(
                 div()
                     .mt(space::S6)
-                    .h(px(32.))
+                    .h(crate::ui::native::tokens::height::DEFAULT)
                     .flex()
                     .items_center()
                     .t_meta()
@@ -127,7 +127,7 @@ fn page(preview: &ArtifactPreview, id: &str, cx: &App) -> AnyElement {
             .children(preview.rows.iter().enumerate().map(|(i, r)| {
                 let last = i + 1 == preview.rows.len();
                 div()
-                    .h(px(36.))
+                    .h(crate::ui::native::tokens::height::LG)
                     .flex()
                     .items_center()
                     .border_t_1()

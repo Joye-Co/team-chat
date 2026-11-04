@@ -29,6 +29,7 @@ pub fn watch<T: 'static>(services: &Services, cx: &mut Context<T>) -> Vec<Subscr
 
 /// The pane entities of one main window.
 pub struct Panes {
+    nav: Entity<crate::app::Navigation>,
     pub topic_rail: Entity<TopicRail>,
     pub changes: Entity<ChangesPane>,
     pub side_chat: Entity<SideChat>,
@@ -39,6 +40,7 @@ pub struct Panes {
 impl Panes {
     pub fn new(services: &Services, window: &mut Window, cx: &mut App) -> Self {
         Self {
+            nav: services.nav.clone(),
             topic_rail: cx.new(|cx| TopicRail::new(services.clone(), cx)),
             changes: cx.new(|cx| ChangesPane::new(services.clone(), cx)),
             side_chat: cx.new(|cx| SideChat::new(services.clone(), window, cx)),
@@ -103,17 +105,35 @@ impl Panes {
         // pane with its own header (单独问, 实时查看, the 产出 pane) draws it
         // in a 52 pt row at its top; the inspector panes have none, so the
         // shell starts them below the row.
-        let top = if header_less(pane) {
-            metrics::PANE_TOP
+        // §2.2, §2.5: every right pane starts with the h52 header band and
+        // its border-b. The inspector panes get theirs here (pane name 16
+        // medium, close at the far right); the others draw their own 52
+        // row, and the shell lays the border line at y 52 over it.
+        let k = super::chrome::colors(cx);
+        let body = if let Some(title) = header_less(pane).then(|| pane_title(pane)) {
+            div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .child(pane_header(title, self.nav.clone(), cx))
+                .child(div().flex_1().min_h(gpui::px(0.)).child(view))
         } else {
-            gpui::px(0.)
+            div().size_full().child(view)
         };
         let body = ui::motion::pane_enter(
             ElementId::Name(format!("pane-enter-{kind}").into()),
-            div().size_full().pt(top).child(view),
+            body,
             cx,
         );
-        let column = super::chrome::inspector_frame(width, cx).child(body);
+        let column = super::chrome::inspector_frame(width, cx).child(body).child(
+            div()
+                .absolute()
+                .left_0()
+                .right_0()
+                .top(metrics::TOOLBAR_ROW - gpui::px(1.))
+                .h(gpui::px(1.))
+                .bg(k.separator),
+        );
         Some(if floats {
             column
                 .absolute()
@@ -140,6 +160,53 @@ pub fn pane_width(pane: &RightPane) -> Pixels {
 }
 
 /// Whether `pane` has no header row of its own (the inspector panes).
+/// The name of a pane the shell draws the header for.
+fn pane_title(pane: &RightPane) -> &'static str {
+    match pane {
+        RightPane::Changes => crate::copy::topic_rail::TITLE_CHANGES,
+        _ => crate::copy::common::PANE_TOPIC,
+    }
+}
+
+/// The header band of a right pane (§2.2): h52, px 16, the pane name 16
+/// medium, a 32 ghost close button at the far right.
+fn pane_header(title: &'static str, nav: Entity<crate::app::Navigation>, cx: &App) -> AnyElement {
+    use crate::ui::native::{NativeType as _, icon_button_sym, IconSize};
+    let k = super::chrome::colors(cx);
+    div()
+        .flex_none()
+        .h(metrics::TOOLBAR_ROW)
+        .pl(metrics::INSPECTOR_PAD)
+        .pr(metrics::TOOLBAR_TRAILING)
+        .flex()
+        .items_center()
+        .gap(crate::ui::native::tokens::space::S8)
+        .child(
+            div()
+                .flex_1()
+                .min_w(gpui::px(0.))
+                .n_title3()
+                .text_color(k.label)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(title),
+        )
+        .child(
+            icon_button_sym(
+                "pane-close",
+                crate::ui::Sym::Close,
+                crate::copy::common::CLOSE,
+                IconSize::Regular,
+                cx,
+            )
+            .on_click(move |_, _, cx| {
+                nav.update(cx, |nav, cx| nav.set_right_pane(RightPane::None, cx))
+            }),
+        )
+        .into_any_element()
+}
+
 fn header_less(pane: &RightPane) -> bool {
     matches!(pane, RightPane::TopicRail | RightPane::Changes)
 }

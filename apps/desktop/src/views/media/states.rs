@@ -53,7 +53,7 @@ fn lead_el(lead: &Lead, cx: &App) -> Div {
         Lead::Thumb(path) => div()
             .flex_none()
             .w(px(64.))
-            .h(px(36.))
+            .h(crate::ui::native::tokens::height::LG)
             .rounded(radius::MARK)
             .overflow_hidden()
             .bg(super::screen(cx).bg)
@@ -61,7 +61,7 @@ fn lead_el(lead: &Lead, cx: &App) -> Div {
         Lead::Blank => div()
             .flex_none()
             .w(px(64.))
-            .h(px(36.))
+            .h(crate::ui::native::tokens::height::LG)
             .rounded(radius::MARK)
             .bg(super::screen(cx).bg),
     }

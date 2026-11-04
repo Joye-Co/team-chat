@@ -415,7 +415,7 @@ impl Render for GeneralPage {
                 div()
                     .flex()
                     .flex_col()
-                    .gap(px(6.))
+                    .gap(crate::ui::native::tokens::space::S6)
                     .child(
                         div().flex().child(
                             disabled_push(

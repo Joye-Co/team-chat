@@ -374,7 +374,7 @@ fn render_table(
     div()
         .flex()
         .flex_col()
-        .gap(px(4.))
+        .gap(crate::ui::native::tokens::space::S4)
         .child(
             div()
                 .id(ElementId::Name(format!("{key}-scroll").into()))

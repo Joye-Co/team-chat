@@ -354,6 +354,37 @@ impl RailView {
             .into_any_element()
     }
 
+    /// The pinned user footer (F04): me, my role (or the server), the
+    /// offline state when the connection dropped; it opens Settings.
+    fn footer(&self, cx: &App) -> Option<AnyElement> {
+        use crate::{
+            data::{ConnectionState, SessionState},
+            ui::native::{BadgeState, SidebarFooter, StatusBadge},
+        };
+        let SessionState::SignedIn { me, server_url } = self.services.provider.session() else {
+            return None;
+        };
+        let avatar = crate::ui::MemberAvatar::new(Some(&me), crate::ui::native::tokens::avatar::MD);
+        let footer = SidebarFooter::new("rail-footer", avatar, me.name.clone())
+            .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::OpenSettings), cx));
+        let footer = match self.services.provider.connection() {
+            ConnectionState::Online | ConnectionState::Connecting => {
+                let host = server_url
+                    .split("://")
+                    .nth(1)
+                    .unwrap_or(&server_url)
+                    .trim_end_matches('/')
+                    .to_string();
+                footer.detail(me.role.clone().unwrap_or(host), cx)
+            }
+            _ => footer.second(StatusBadge::new(
+                BadgeState::Offline,
+                crate::copy::connection::OFFLINE,
+            )),
+        };
+        Some(footer.into_any_element())
+    }
+
     /// Draws the inactive-window look (gray selection, `secondary` tools).
     pub fn set_show_inactive(&mut self, inactive: bool, cx: &mut Context<Self>) {
         if self.show_inactive != inactive {
@@ -467,13 +498,26 @@ impl Render for RailView {
                     )
                     .child(rows),
             )
-            // v12/fx-shell: nothing about the connection at the bottom of
-            // the sidebar (it is the toolbar subtitle and a 显示 command);
-            // only an update that runs while its sheet is hidden.
+            // An update that runs while its sheet is hidden.
             .children(
                 cx.try_global::<crate::views::banners::AppBanners>()
                     .map(|b| b.update.clone()),
             )
+            // COMPLETENESS.md §2.1, F04: the secondary items at the end of
+            // the groups, then the pinned user footer.
+            .child(
+                div()
+                    .flex_none()
+                    .pb(crate::ui::native::tokens::space::S8)
+                    .child(
+                        self.row("rail-settings", c::RAIL_SETTINGS)
+                            .symbol(Sf::Settings)
+                            .on_click(|_, window, cx| {
+                                window.dispatch_action(Box::new(crate::app::OpenSettings), cx)
+                            }),
+                    ),
+            )
+            .children(self.footer(cx))
     }
 }
 

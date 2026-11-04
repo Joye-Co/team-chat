@@ -78,8 +78,8 @@ impl Pages {
             Page::Desk | Page::Topic => false,
         };
         let toolbar = !own_header && spec != TitleBarSpec::default();
-        // The toolbar row paints after the body, so the shadows of its
-        // glass groups fall over the scroll edge.
+        // §2.2: the header band h52 with its border-b in the flow; the body
+        // scrolls under it with no fade.
         div()
             .flex_1()
             .min_w(px(0.))
@@ -89,30 +89,17 @@ impl Pages {
             .flex_col()
             .bg(k.content)
             .when(toolbar, |el| {
-                el.child(div().flex_none().h(crate::ui::native::metrics::TOOLBAR_ROW))
+                el.child(title_bar::render(
+                    &spec, open, leading, active, services, window, cx,
+                ))
             })
             .child(
                 div()
                     .flex_1()
                     .min_h(px(0.))
                     .relative()
-                    .child(div().size_full().child(body))
-                    .when(toolbar, |el| el.child(super::chrome::scroll_edge(cx))),
+                    .child(div().size_full().child(body)),
             )
-            // A page that draws its own header (首页 with an empty spec, or the
-            // 群, 成员 and 产出 pages) gets no toolbar row from here.
-            .when(toolbar, |el| {
-                el.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .child(title_bar::render(
-                            &spec, open, leading, active, services, window, cx,
-                        )),
-                )
-            })
             .into_any_element()
     }
 }
@@ -151,7 +138,7 @@ pub fn empty_page(leading: Pixels, active: bool, _window: &mut Window, cx: &App)
                 .justify_center()
                 // Optically centered in the window, not under the toolbar.
                 .pb(crate::ui::native::metrics::TOOLBAR_ROW)
-                .gap(px(16.))
+                .gap(crate::ui::native::tokens::space::S16)
                 .child(
                     div()
                         .n_body()

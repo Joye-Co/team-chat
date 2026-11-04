@@ -122,7 +122,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
         .flex()
         .items_center()
         .gap(space::S12)
-        .h(px(28.))
+        .h(crate::ui::native::tokens::height::SM)
         .border_b_1()
         .border_color(k.line)
         .text_color(k.ink_3)
@@ -183,7 +183,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             .h(m::TABLE_ROW)
             .mx(px(-6.))
             .px(px(6.))
-            .rounded(px(6.))
+            .rounded(crate::ui::native::tokens::radius::ITEM)
             .when(pos < last, |el| el.border_b_1().border_color(k.line))
             .when(on, |el| el.bg(k.sunken))
             .text_color(k.ink)
@@ -586,7 +586,7 @@ fn bar_rows(
     let emit = Emitter::of(ctx);
     let clear = super::interact::sends(ctx.card, b, "chart.clear");
     let skey = main.key().to_string();
-    let mut list = div().flex().flex_col().gap(px(2.)).min_w(px(0.));
+    let mut list = div().flex().flex_col().gap(crate::ui::native::tokens::space::S2).min_w(px(0.));
     for (i, xv) in xs.iter().enumerate() {
         let on = picked == Some(i);
         let (name_ink, weight, bar) = match picked {
@@ -617,7 +617,7 @@ fn bar_rows(
             .mx(-space::S6)
             .rounded(t::BAR_ROW_RADIUS)
             .when(hot == Some(i), |el| el.bg(k.hover))
-            .text_size(px(13.))
+            .text_size(crate::ui::native::tokens::text::UI.0)
             .relative()
             .child(
                 div()
@@ -711,7 +711,7 @@ fn bar_rows(
                     .flex()
                     .justify_end()
                     .mono()
-                    .text_size(px(12.))
+                    .text_size(crate::ui::native::tokens::text::META.0)
                     .text_color(k.ink_2)
                     .children(shown),
             );

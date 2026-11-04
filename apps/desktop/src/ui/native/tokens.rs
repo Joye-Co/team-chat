@@ -817,7 +817,7 @@ pub mod metrics {
     /// The gutter from the page column (x 264) to the content (x 288).
     pub const CONTENT_LEADING: Pixels = space::S24;
     pub const TOOLBAR_LEADING: Pixels = CONTENT_LEADING;
-    pub const TOOLBAR_TRAILING: Pixels = space::S12;
+    pub const TOOLBAR_TRAILING: Pixels = space::S16;
     pub const TOOLBAR_SYMBOL: Pixels = px(16.);
     pub const SIDEBAR_INSET: Pixels = space::S8;
     pub const SIDEBAR_RADIUS: Pixels = radius::SIDEBAR;

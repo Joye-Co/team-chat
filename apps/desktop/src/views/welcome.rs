@@ -55,7 +55,7 @@ impl RenderOnce for Welcome {
                         div()
                             .pt(px(20.))
                             .flex()
-                            .gap(px(12.))
+                            .gap(crate::ui::native::tokens::space::S12)
                             .child(
                                 push_button(
                                     "welcome-new-group",

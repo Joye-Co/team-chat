@@ -689,7 +689,7 @@ pub(crate) fn frame(_waits: bool, cx: &App) -> gpui::Div {
 
 /// 12/18 text, the artboard's meta line.
 pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
-    el.text_size(px(12.)).line_height(px(18.))
+    el.text_size(crate::ui::native::tokens::text::META.0).line_height(px(18.))
 }
 
 fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {

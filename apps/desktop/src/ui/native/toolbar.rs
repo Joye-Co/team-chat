@@ -8,7 +8,7 @@ use gpui::{
 };
 use gpui_component::button::Button;
 
-use super::tokens::{NativeType as _, emphasized, metrics, native_colors};
+use super::tokens::{NativeType as _, emphasized, icon, metrics, native_colors};
 use crate::ui::sf_symbols::{Sf, Weight, symbol};
 
 /// Related toolbar items in one glass capsule (§5.1): 36 pt tall, items 36
@@ -36,14 +36,15 @@ impl ToolbarGroup {
 
 impl RenderOnce for ToolbarGroup {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
-        let k = native_colors(cx);
+        // D4: toolbar items are 32 ghost icon buttons in a row, gap 8; no
+        // glass capsule and no drop shadow.
+        let _ = (self.bare, cx);
         div()
             .flex_none()
             .h(metrics::TOOLBAR_GROUP)
             .flex()
             .items_center()
-            .rounded(metrics::TOOLBAR_GROUP / 2.)
-            .when(!self.bare, |d| d.bg(k.capsule).shadow(k.glass()))
+            .gap(metrics::TOOLBAR_GROUP_GAP)
             .children(self.items)
     }
 }
@@ -111,10 +112,14 @@ impl RenderOnce for ToolbarRow {
             .map(|i| !i)
             .unwrap_or_else(|| emphasized(window));
         let title_ink = if active { k.label } else { k.secondary };
+        // §2.2: one header band h52 with a 1 px border-b.
         div()
             .flex_none()
             .w_full()
             .h(metrics::TOOLBAR_ROW)
+            .bg(k.content)
+            .border_b_1()
+            .border_color(k.separator)
             .pl(self.leading_inset)
             .pr(metrics::TOOLBAR_TRAILING)
             .flex()
@@ -142,7 +147,7 @@ impl RenderOnce for ToolbarRow {
                                 .items_center()
                                 .gap(px(4.))
                                 .when_some(self.state, |d, (sf, color)| {
-                                    d.child(symbol(sf, px(11.), Weight::Regular, color, window))
+                                    d.child(symbol(sf, icon::SM, Weight::Regular, color, window))
                                 })
                                 .child(
                                     div()

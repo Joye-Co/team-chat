@@ -31,7 +31,7 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .h(px(36.))
+        .h(crate::ui::native::tokens::height::LG)
         .px(space::S14)
         .flex()
         .items_center()
@@ -58,7 +58,7 @@ pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .h(px(52.))
+        .h(crate::ui::native::tokens::height::TOOLBAR)
         .px(space::S16)
         .flex()
         .items_center()
@@ -82,7 +82,7 @@ pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
 /// Meta figures: the system font with tabular figures (`text-3`, §3).
 pub fn mono(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
-        .text_size(px(12.))
+        .text_size(crate::ui::native::tokens::text::META.0)
         .line_height(px(16.))
         .figures()
         .text_color(color)
