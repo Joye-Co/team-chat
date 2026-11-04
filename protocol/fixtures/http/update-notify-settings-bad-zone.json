@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateNotifySettingsRequest",
+  "valid": false,
+  "description": "space in time zone",
+  "value": {
+    "timeZone": "Asia/Shang hai"
+  }
+}

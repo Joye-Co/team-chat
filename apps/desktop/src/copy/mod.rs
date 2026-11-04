@@ -28,6 +28,9 @@ pub mod page_host;
 // --- inc-refs ---
 pub mod refs;
 // --- end inc-refs ---
+// --- settings-backend track ---
+pub mod settings_backend;
+// --- end settings-backend track ---
 pub mod nav;
 pub mod notify;
 pub mod panel;
@@ -246,6 +249,13 @@ pub const SECTIONS: &[Section] = &[
         developer: false,
     },
     // --- end inc-refs ---
+    // --- settings-backend track ---
+    Section {
+        name: "settings_backend",
+        entries: settings_backend::ENTRIES,
+        developer: false,
+    },
+    // --- end settings-backend track ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.

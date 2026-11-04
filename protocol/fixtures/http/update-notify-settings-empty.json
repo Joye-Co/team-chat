@@ -1,0 +1,6 @@
+{
+  "kind": "UpdateNotifySettingsRequest",
+  "valid": true,
+  "description": "no change",
+  "value": {}
+}

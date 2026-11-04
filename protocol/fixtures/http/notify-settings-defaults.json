@@ -1,0 +1,21 @@
+{
+  "kind": "NotifySettings",
+  "valid": true,
+  "description": "never changed, no digest",
+  "value": {
+    "events": {
+      "waiting": true,
+      "mention": true,
+      "result": true,
+      "blocked": true
+    },
+    "digestAt": null,
+    "quietHours": {
+      "enabled": false,
+      "start": "22:00",
+      "end": "08:00"
+    },
+    "timeZone": "Asia/Shanghai",
+    "updatedAt": 0
+  }
+}

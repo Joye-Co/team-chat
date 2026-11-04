@@ -97,6 +97,16 @@ import {
 } from "./bots.ts";
 import { RunPlan } from "./plan.ts";
 import { MachineDownFrame, MachineUpFrame, RunEvent, RunLogEntry } from "./machine.ts";
+import {
+  ApprovalPolicy,
+  Device,
+  DevicesResponse,
+  DigestTransient,
+  eventFrameSettingsFields,
+  NotifySettings,
+  UpdateApprovalPolicyRequest,
+  UpdateNotifySettingsRequest,
+} from "./settings.ts";
 
 export * from "./common.ts";
 export * from "./characters.ts";
@@ -119,6 +129,7 @@ export * from "./audit.ts";
 export * from "./machine.ts";
 export * from "./bots.ts";
 export * from "./plan.ts";
+export * from "./settings.ts";
 
 // ---------------------------------------------------------------------------
 // Entities
@@ -341,6 +352,8 @@ export const TransientEvent = z.discriminatedUnion("type", [
   ArtifactEventTransient,
   ArtifactDataTransient,
   ArtifactReplyTransient,
+  // settings: only to connections whose hello has feature "settings/1".
+  DigestTransient,
 ]);
 export type TransientEvent = z.infer<typeof TransientEvent>;
 
@@ -490,7 +503,7 @@ export const WelcomeFrame = z.object({
   /** 1.1: what this server supports (`SERVER_FEATURES`). */
   features: z.array(z.string().min(1).max(32)).max(32).optional(),
 });
-export const EventFrame = z.object({ t: z.literal("event"), event: Event, ...eventFrameFields });
+export const EventFrame = z.object({ t: z.literal("event"), event: Event, ...eventFrameFields, ...eventFrameSettingsFields });
 export const TransientFrame = z.object({
   t: z.literal("transient"),
   event: TransientEvent,
@@ -736,6 +749,13 @@ export const schemas = {
   ArtifactDataAck,
   ArtifactDataResponse,
   PutArtifactDataRequest,
+  // settings
+  NotifySettings,
+  UpdateNotifySettingsRequest,
+  ApprovalPolicy,
+  UpdateApprovalPolicyRequest,
+  Device,
+  DevicesResponse,
 } as const;
 export type SchemaName = keyof typeof schemas;
 

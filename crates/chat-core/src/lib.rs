@@ -28,6 +28,7 @@ pub mod logging;
 pub mod proto;
 pub mod runs;
 pub mod search;
+pub mod settings;
 pub mod store;
 pub mod token;
 pub mod transient;

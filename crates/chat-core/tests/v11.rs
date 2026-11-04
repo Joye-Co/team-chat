@@ -879,7 +879,10 @@ async fn card_events_page_events_and_interact_transients() {
     client.start();
     until("connected", || client.server_has(FEATURE_INTERACT)).await;
     let hello = server.with(|s| s.hellos[0].clone());
-    assert_eq!(hello["features"], json!(["interact/1", "refs/1"]));
+    assert_eq!(
+        hello["features"],
+        json!(["interact/1", "refs/1", "settings/1"])
+    );
     assert_eq!(
         hello["supportedCatalogs"],
         json!(["tc.card/2.0", "tc.card/2.1"])
