@@ -108,9 +108,9 @@ export class Client {
   }
 
   /** Opens a socket and completes hello; returns the welcome frame too. */
-  static async connect(token: string, opts: { features?: string[] } = {}): Promise<{ c: Client; welcome: any }> {
+  static async connect(token: string, opts: { features?: string[]; supportedCatalogs?: string[] } = {}): Promise<{ c: Client; welcome: any }> {
     const c = await Client.open(token);
-    const welcome = await c.hello(opts.features);
+    const welcome = await c.hello(opts.features, opts.supportedCatalogs);
     return { c, welcome };
   }
 
@@ -122,8 +122,14 @@ export class Client {
     return `r${++this.n}`;
   }
 
-  async hello(features?: string[]): Promise<any> {
-    this.send({ t: "hello", protocol: 1, client: { name: "test", version: "0" }, ...(features ? { features } : {}) });
+  async hello(features?: string[], supportedCatalogs?: string[]): Promise<any> {
+    this.send({
+      t: "hello",
+      protocol: 1,
+      client: { name: "test", version: "0" },
+      ...(features ? { features } : {}),
+      ...(supportedCatalogs ? { supportedCatalogs } : {}),
+    });
     return this.next((f) => f.t === "welcome" || f.t === "error");
   }
 

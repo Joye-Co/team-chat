@@ -221,3 +221,30 @@ describe("error reasons (PC-12)", () => {
     cbot.close();
   });
 });
+
+describe("catalogs per socket (PC-13)", () => {
+  it("sends the derived v1 card only to sockets that do not read the card's catalog", async () => {
+    const w = await world();
+    const cbot = await w.connect(w.bot);
+    const v20 = (await Client.connect(w.alice.token, { features: FEATURES, supportedCatalogs: ["tc.card/2.0"] })).c;
+    const v21 = (await Client.connect(w.bob.token, { features: FEATURES, supportedCatalogs: ["tc.card/2.0", "tc.card/2.1"] })).c;
+    const old = (await Client.connect(w.owner.token)).c;
+    const m = (await send(cbot, w.gid, base({ blocks: [{ id: "t", type: "text", text: "x" }] }))).result.message;
+    const created = (c: Client) => c.waitEvent((e) => e.type === "message.created" && e.data.message.id === m.id);
+    const [a, b, o] = await Promise.all([created(v20), created(v21), created(old)]);
+    expect(a.data.message.card).toBeDefined();
+    expect(o.data.message.card).toBeDefined();
+    expect(b.data.message.card).toBeUndefined();
+    expect(b.data.message.cardV2.title).toBe("卡片");
+    const p = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 1, ops: [{ op: "set", id: "t", props: { text: "y" } }] });
+    expect(p).toMatchObject({ ok: true });
+    const updated = (c: Client) => c.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardV2);
+    const [ua, ub] = await Promise.all([updated(v20), updated(v21)]);
+    expect(ua.data.card).toBeDefined();
+    expect(ub.data.card).toBeUndefined();
+    // History keeps the fallback for everyone.
+    const h = await v21.request({ t: "history", groupId: w.gid, topicId: m.topicId });
+    expect(h.messages.find((x: any) => x.id === m.id).card).toBeDefined();
+    for (const c of [cbot, v20, v21, old]) c.close();
+  });
+});

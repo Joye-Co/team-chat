@@ -1105,6 +1105,10 @@ ErrorBody += { reason?: string /* 1..64, e.g. "card.already_answered" */ }
 ```
 
 - The new transient types go only to connections whose `hello.features` has `interact/1`.
+- The gateway keeps `hello.supportedCatalogs` per connection (the `tc.card/2.x` entries). A live
+  `message.created` / `message.updated` event whose `cardV2` catalog (absent = `tc.card/2.0`) is
+  in that list comes without the derived v1 `card`; other connections, `history` and `fetch`
+  pages keep it.
 - A 1.1 client hides an affordance (events, refs, diagrams) the server does not list.
 - Errors keep their `ErrorCode`; `reason` names the rule: `card.style_property`,
   `card.unknown_catalog`, `card.unknown_block`, `card.limits`, `card.depth`,
