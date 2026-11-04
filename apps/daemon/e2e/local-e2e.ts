@@ -6,6 +6,8 @@
 // the run log and the uploaded raw session. Then 停止: a second run hangs in the fake CLI, a member
 // stops it through the client API (the chat-core `cancel_run` example), and the run must end as
 // cancelled with the fake CLI stopped by the daemon's run.cancel, one bot note and the topic open.
+// Between them, an answer in the first topic after its CLI exited starts a run that resumes the
+// first run's CLI session (`--resume`).
 // The first run also uses `chat-run` (the fake CLI's word "chatcard"): it reads `chat-run card
 // schema`, posts a card built from it, posts it again (a retry: the idempotency key must give the
 // same message, and the topic must hold the card once), and patches the posted card at its rev
@@ -275,6 +277,7 @@ async function runDaemonCheck(
     const res = await fetch(`${BASE}/v1/runs/${runId}/session`, { headers: { authorization: `Bearer ${owner}` } });
     return res.ok ? new Uint8Array(await res.arrayBuffer()) : undefined;
   });
+  report.resume = await resumeCheck(groupId, topicId, runId, bot, work, events, ws);
   const stop = await cancelCheck(groupId, alice, bot, work, events, ws);
   ws.close();
   report.cancel = stop;
@@ -298,6 +301,28 @@ async function runDaemonCheck(
   });
   if (!report.sessionIsGzip) throw new Error("session is not gzip");
   step("run log and raw session checked");
+}
+
+/**
+ * Resume: after the first run ended (its CLI exited), a member answers in the same topic. The
+ * next run goes to the same machine with `run.assign.resumeSessionId`, and the daemon starts the
+ * fake CLI with `--resume` of the first run's session.
+ */
+async function resumeCheck(groupId: string, topicId: string, firstRunId: string, bot: { member: { id: string } }, work: string, events: any[], ws: WebSocket) {
+  const argvOf = (runId: string) => JSON.parse(readFileSync(join(work, "runs", runId, "work", "argv.json"), "utf8")) as string[];
+  const first = argvOf(firstRunId);
+  const s1 = first[first.indexOf("--session-id") + 1];
+  if (!s1) throw new Error("the first run has no --session-id");
+  ws.send(JSON.stringify({ t: "send", rid: "r-resume", groupId, topicId, clientMsgId: crypto.randomUUID(), body: "@dev 再看一下", mentions: [bot.member.id] }));
+  const ack = await until("send ack (resume)", () => events.find((e) => e.frame?.rid === "r-resume"));
+  if (!ack.frame.ok) throw new Error("send failed");
+  const runsOf = () => events.filter((e) => e.type === "run.updated" && e.data.run.topicId === topicId && e.data.run.id !== firstRunId).map((e) => e.data.run);
+  const second = await until("second run done", () => runsOf().find((r: any) => r.status === "done"), 60_000);
+  const argv = argvOf(second.id);
+  const i = argv.indexOf("--resume");
+  if (i < 0 || argv[i + 1] !== s1 || argv.includes("--session-id")) throw new Error(`run 2 did not resume ${s1}: ${JSON.stringify(argv)}`);
+  step(`answer after the CLI exited: run ${second.id} resumed session ${s1}`);
+  return { firstRunId, secondRunId: second.id, sessionId: s1 };
 }
 
 /** The first file named `name` under `dir`, at any depth. */
