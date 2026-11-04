@@ -102,6 +102,31 @@ impl Data {
 
 mod native;
 
+// --- v12/fx-topic: one trailing pane width (coordinator decision): the
+// inspector is 280 pt, the wider panes (单独问, 产出, 改动) are 400 pt. Use the
+// shell's token for the wide pane once it lands.
+/// The width of the wider trailing panes: 单独问, the topic's 产出 and 改动.
+pub const PANE_WIDE: Pixels = gpui::px(400.);
+// --- end v12/fx-topic ---
+
+/// The empty inspector (NATIVE.md §9.4 empty states): centered `secondary`
+/// Body text on the inspector fill, no illustration.
+fn rail_empty(cx: &App) -> AnyElement {
+    use crate::ui::native::{NativeType as _, native_colors};
+    let n = native_colors(cx);
+    div()
+        .size_full()
+        .bg(n.sidebar)
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(space::S16)
+        .n_body()
+        .text_color(n.secondary)
+        .child(c::TOPIC_RAIL_EMPTY)
+        .into_any_element()
+}
+
 pub struct TopicRail {
     services: Services,
     /// The inspector sections closed with their disclosure chevron.
@@ -142,7 +167,7 @@ impl TopicRail {
 
 impl PaneView for TopicRail {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        theme::TOPIC_RAIL_WIDTH
+        crate::ui::native::metrics::INSPECTOR_WIDTH
     }
 }
 
@@ -371,7 +396,7 @@ impl Render for TopicRail {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let k = ui::native::native_colors(cx);
         let Some((g, t)) = self.services.nav.read(cx).topic.clone() else {
-            return stub_body(Sym::Inspector, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
+            return rail_empty(cx);
         };
         let d = self.data(&g, &t);
         let topic = d.topic.as_ref();
@@ -396,14 +421,15 @@ impl Render for TopicRail {
         }
         sections.extend(self.native_cost(&d, cx));
         if sections.is_empty() {
-            return stub_body(Sym::Inspector, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
+            return rail_empty(cx);
         }
         div()
             .id("topic-rail")
             .size_full()
             .overflow_y_scroll()
             .bg(k.sidebar)
-            .pt(space::S4)
+            // Content starts below the 52 pt toolbar row, as on 首页 and 群.
+            .pt(crate::ui::native::metrics::TOOLBAR_ROW - gpui::px(12.))
             .pb(space::S16)
             .flex()
             .flex_col()
@@ -429,7 +455,7 @@ impl ChangesPane {
 
 impl PaneView for ChangesPane {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        theme::ARTIFACT_PANE_WIDTH
+        PANE_WIDE
     }
 }
 
