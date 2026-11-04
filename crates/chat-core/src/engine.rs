@@ -875,6 +875,7 @@ impl Session {
                     block_refs,
                     ..
                 } => ClientFrame::Send(SendFrame {
+                    from_aside: None,
                     rid: rid.clone(),
                     group_id,
                     topic_id,

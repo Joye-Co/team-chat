@@ -319,6 +319,13 @@ pub struct Message {
         skip_serializing_if = "Option::is_none"
     )]
     pub reactions: Option<Vec<Reaction>>,
+    /// 1.1: the side chat answer this message was posted from.
+    #[serde(
+        default,
+        deserialize_with = "crate::serde_util::non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub from_aside: Option<crate::topic::AsideOrigin>,
 }
 
 impl Message {

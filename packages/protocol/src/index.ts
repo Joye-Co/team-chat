@@ -84,7 +84,7 @@ import { eventFrameFields, groupSummaryPrefFields, UpdateGroupPrefsRequest, Upda
 import { groupSummaryReadFields, readFields, ReadsFrame, TopicState } from "./reads.ts";
 import { messageReactionFields, ReactFrame, ReactionChangedEvent } from "./reactions.ts";
 import { SearchFrame, SearchResultsFrame } from "./search.ts";
-import { sendContextFields, TopicContext, TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
+import { messageAsideFields, sendContextFields, TopicContext, TopicFollowFrame, topicFields, topicUpdatedFields, topicUpdateFields } from "./topic.ts";
 import { UpdateInfo } from "./updates.ts";
 import { DiagnosticsResponse } from "./diagnostics.ts";
 import { AuditResponse, AuditEntry } from "./audit.ts";
@@ -215,6 +215,7 @@ export const Message = z.object({
   streaming: z.boolean().optional(),
   ...messageFields,
   ...messageReactionFields,
+  ...messageAsideFields,
 });
 export type Message = z.infer<typeof Message>;
 

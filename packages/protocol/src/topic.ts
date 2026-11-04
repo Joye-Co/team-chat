@@ -27,9 +27,24 @@ export const topicFields = {
   contextOf: TopicContext.optional(),
 };
 
+/**
+ * 1.1: the 单独问 answer a message was posted from ("post to topic"): the side chat topic in
+ * the asker's DM with the bot, and the answer message there. See docs/protocol.md, "Side chats".
+ */
+export const AsideOrigin = z.object({ groupId: Id, topicId: Id, messageId: Id });
+export type AsideOrigin = z.infer<typeof AsideOrigin>;
+
 /** Fields added to the `send` client frame (1.1): start or move on a side chat. */
 export const sendContextFields = {
   context: TopicContext.optional(),
+  /** 1.1: this send posts a side chat answer to the side chat's source topic. */
+  fromAside: AsideOrigin.optional(),
+};
+
+/** Fields added to `Message` (1.1). */
+export const messageAsideFields = {
+  /** The side chat answer this message was posted from. */
+  fromAside: AsideOrigin.optional(),
 };
 
 /** Fields added to the `topic.update` client frame. Present = replace. */

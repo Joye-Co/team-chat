@@ -986,6 +986,9 @@ TopicContext = { groupId, topicId, uptoSeq }   // the topic, read up to this seq
 Topic += { contextOf?: TopicContext }          // set on a side chat topic
 { t: "send", ..., context?: TopicContext }     // in a DM with a bot only
 topic.updated data += { contextOf? }           // the context moved on
+AsideOrigin = { groupId /* the DM */, topicId /* the side chat */, messageId /* the answer */ }
+{ t: "send", ..., fromAside?: AsideOrigin }     // 1.1: post a side chat answer to its topic
+Message += { fromAside?: AsideOrigin }
 ```
 
 Rules:
@@ -1001,6 +1004,13 @@ Rules:
   `aside`; with none it ends `failed` with one note. It sets no status on the side chat topic.
   Its answers stay in the DM. Nothing is posted to the source topic: a
   "post to topic" button on the client sends a normal message by the person.
+- 1.1: that message carries `fromAside`. The server checks that the sender is a member of
+  `fromAside.groupId`, that its `topicId` is a side chat whose `contextOf` is the send's group
+  and topic (`invalid`, reason `aside.bad_origin`; a send without `topicId` too), and that the
+  answer message is in it (`not_found`). It stores `fromAside` on the message, so every client
+  shows the answer as posted after a restart. A second message with the same
+  `fromAside.messageId` in the topic is refused (`conflict`, reason `aside.already_posted`);
+  a resend with the same `clientMsgId` is a duplicate as usual.
 - Clients list the side chats of a topic by `contextOf` and hide side chat topics from the DM's
   normal topic list.
 

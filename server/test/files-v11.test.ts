@@ -5,7 +5,8 @@ import { SELF, env } from "cloudflare:test";
 import { afterAll, describe, expect, it } from "vitest";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations } from "./helpers";
 
-afterAll(() => {
+afterAll(async () => {
+  await new Promise((r) => setTimeout(r, 300));
   expect(protocolViolations).toEqual([]);
 });
 
@@ -236,5 +237,42 @@ describe("SF-8 / SF-9 group purpose and rename order", () => {
     await env.DB.prepare("UPDATE groups SET name = 'stale', update_seq = 0 WHERE id = ?").bind(gid).run();
     expect((await patch(gid, a.token, { name: lastName })).body.group.name).toBe(lastName);
     c.close();
+  });
+});
+
+describe("SF-4 post a side chat answer to its topic", () => {
+  it("store fromAside on the message, return it in history, and post an answer once", async () => {
+    const owner = await createMember({ level: "owner" });
+    const bot = await createMember({ kind: "bot", name: "forge" });
+    const gid = await createGroup(owner, [bot.id]);
+    const { c } = await Client.connect(owner.token);
+    const { c: cb } = await Client.connect(bot.token);
+    const t = await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "重连之后补发" });
+    const topicId = t.topic.id as string;
+    const dm = (await api("/v1/dms", { token: owner.token, body: { memberId: bot.id } })).body.group.id as string;
+    const side = await c.ok({ t: "send", groupId: dm, clientMsgId: clientMsgId(), body: "为什么会丢消息？", context: { groupId: gid, topicId, uptoSeq: t.message.createdSeq } });
+    const answer = await cb.ok({ t: "send", groupId: dm, topicId: side.topic.id, clientMsgId: clientMsgId(), body: "建议：重连后按 seq 补发。" });
+    const fromAside = { groupId: dm, topicId: side.topic.id, messageId: answer.message.id };
+    const posted = await c.ok({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "建议：重连后按 seq 补发。", fromAside });
+    expect(posted.message.fromAside).toEqual(fromAside);
+    // After a restart the history says it is posted.
+    const page = await c.request({ t: "history", groupId: gid, topicId });
+    expect(page.messages.find((m: any) => m.id === posted.message.id).fromAside).toEqual(fromAside);
+    // Posting the same answer again is refused, also with a new clientMsgId.
+    const again = await c.request({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "建议：重连后按 seq 补发。", fromAside });
+    expect(again).toMatchObject({ ok: false, error: { code: "conflict", reason: "aside.already_posted" } });
+    // The origin must be a side chat about this topic.
+    const other = (await c.ok({ t: "send", groupId: gid, clientMsgId: clientMsgId(), body: "另一个话题" })).topic.id;
+    const wrong = await c.request({ t: "send", groupId: gid, topicId: other, clientMsgId: clientMsgId(), body: "x", fromAside });
+    expect(wrong).toMatchObject({ ok: false, error: { code: "invalid", reason: "aside.bad_origin" } });
+    const missing = await c.request({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "x", fromAside: { ...fromAside, messageId: side.message.id.replace(/.$/, "Z") } });
+    expect(missing).toMatchObject({ ok: false, error: { code: "not_found" } });
+    // Someone outside the DM cannot name it.
+    const stranger = await createMember();
+    await api(`/v1/groups/${gid}/members`, { token: owner.token, body: { memberId: stranger.id } });
+    const { c: cs } = await Client.connect(stranger.token);
+    const theirs = await cs.request({ t: "send", groupId: gid, topicId, clientMsgId: clientMsgId(), body: "x", fromAside });
+    expect(theirs.ok).toBe(false);
+    for (const x of [c, cb, cs]) x.close();
   });
 });

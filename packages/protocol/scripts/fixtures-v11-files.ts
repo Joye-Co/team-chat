@@ -5,8 +5,6 @@ import type { InteractCtx } from "./fixtures-v11-interact.ts";
 
 export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx) {
   const FILE = "01JC0FIL0000000000000INDEX";
-  void ok;
-  void message;
 
   // SF-1: files over 100 MB upload in parts.
   const SHA = "b".repeat(64);
@@ -49,6 +47,13 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
   ok("http/update-group-request-clear-purpose.json", "UpdateGroupRequest", { name: "开发", purpose: "" }, "1.1: rename and clear the purpose");
   ok("events/group.updated-purpose.json", "Event", { ...base, seq: 70, type: "group.updated", data: { name: "开发", purpose: "qqbot、夹夹和 TeamChat 的开发" } }, "1.1: the purpose changed");
   ok("events/group.updated-purpose-cleared.json", "Event", { ...base, seq: 71, type: "group.updated", data: { name: "开发", purpose: "" } });
+
+  // SF-4: a side chat answer posted to its source topic.
+  const fromAside = { groupId: ID.dm, topicId: "01JC0SIDE00000000000000AS1", messageId: "01JC0MSG000000000000ANSWR1" };
+  ok("client/send-from-aside.json", "ClientFrame", { t: "send", rid: "r200", groupId: ID.general, topicId: ID.topic, clientMsgId: ID.cmid, body: "建议：重连后按 seq 补发。", fromAside }, "1.1: post to topic from 单独问");
+  bad("client/send-from-aside-missing-message.json", "ClientFrame", { t: "send", rid: "r201", groupId: ID.general, topicId: ID.topic, clientMsgId: ID.cmid, body: "x", fromAside: { groupId: ID.dm, topicId: fromAside.topicId } }, "fromAside names the answer message");
+  ok("http/post-message-from-aside.json", "PostMessageRequest", { topicId: ID.topic, clientMsgId: ID.cmid, body: "建议：重连后按 seq 补发。", fromAside });
+  ok("entities/message-from-aside.json", "Message", { ...message, fromAside });
 
   // SF-7: a table is at most 200 MB.
   const table = { kind: "table", mime: "text/csv", bytes: 120_000, rows: 124, cols: 6, preview: "ready" };
