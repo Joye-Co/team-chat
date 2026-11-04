@@ -694,10 +694,12 @@ impl ArtifactPage {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .pt(tsp::S4)
             .pb(tsp::S24)
             .flex()
-            .flex_col();
+            .flex_col()
+            // Pull the first GroupLabel up so its ink starts at y 68 (B2):
+            // the section's own 16 top sits under the header band.
+            .child(div().flex_none().mt(-tsp::S12));
 
         // 来自话题, then 做的人 and 要求 as a DescriptionList.
         let topic = story
@@ -727,13 +729,21 @@ impl ArtifactPage {
                 .items_center()
                 .gap(tsp::S8)
                 .child(MemberAvatar::new(m.as_ref(), tsp::S16))
-                .child(
-                    line(name)
-                        .flex_none()
-                        .max_w(gpui::relative(0.7))
-                        .text_color(k.label),
-                )
-                .child(line(role).flex_1().min_w_0().text_color(k.secondary))
+                // The role gives way first (§2.5): it shows only when at
+                // least a few glyphs of it fit beside the whole name, never
+                // as a lone "…"; the tooltip holds both.
+                .when(role_fits(&name), |d| {
+                    d.child(
+                        line(name.clone())
+                            .flex_none()
+                            .max_w(gpui::relative(0.7))
+                            .text_color(k.label),
+                    )
+                    .child(line(role).flex_1().min_w_0().text_color(k.secondary))
+                })
+                .when(!role_fits(&name), |d| {
+                    d.child(line(name).flex_1().min_w_0().text_color(k.label))
+                })
                 .tooltip(tip(full))
         };
         let mut from = InspectorSection::new("artifact-ins-topic", c::ARTIFACT_FROM_TOPIC);
@@ -952,6 +962,12 @@ impl ArtifactPage {
         }
         for (i, r) in responses.into_iter().enumerate() {
             let m = p.member(&r.member_id);
+            // The row names the actor from the member record, next to their
+            // avatar (the log's text is `{name} {action}` as it was sent).
+            let r = crate::data::pages::ArtifactResponse {
+                text: response_text(m.as_ref().map(|m| m.name.as_str()), &r.text),
+                ..r
+            };
             let mut row = div()
                 .id(SharedString::from(format!("artifact-response-{i}")))
                 .h(tsp::S32)
@@ -1131,37 +1147,30 @@ impl ArtifactPage {
             }),
         }
         let this = cx.entity().downgrade();
-        // Finder's view control (NATIVE.md §9.6, §5.1): `square.grid.2x2` / `list.bullet`
-        // in one toolbar group, the shown view on the toggled pill.
         let active = nk::emphasized(window);
-        let view_item = |grid: bool, cx: &mut Context<Self>| {
-            let on = self.grid == grid;
-            sym_toolbar_item(
-                if grid {
-                    "artifacts-view-grid"
-                } else {
-                    "artifacts-view-list"
-                },
-                if grid { Sym::Grid } else { Sym::List },
-                if grid {
-                    c::ARTIFACTS_VIEW_GRID
-                } else {
-                    c::ARTIFACTS_VIEW_LIST
-                },
-                on,
-                active,
-                cx,
-            )
-            .on_click(cx.listener(move |v, _, _, cx| {
-                v.grid = grid;
-                cx.notify();
-            }))
-        };
+        // The view control is one Segmented h32 (§2.2, §1.8): 图标 | 列表.
+        // With nothing to show it is disabled at 50 % (§1.8).
         let empty = total == 0;
-        let views = nk::ToolbarGroup::new([
-            view_item(true, cx).disabled(empty),
-            view_item(false, cx).disabled(empty),
-        ]);
+        let views = div().flex_none().when(empty, |d| d.opacity(0.5)).child(
+            nk::Segmented::new(
+                "artifacts-view",
+                [
+                    nk::Segment::Label(c::ARTIFACTS_VIEW_GRID.into()),
+                    nk::Segment::Label(c::ARTIFACTS_VIEW_LIST.into()),
+                ],
+            )
+            .selected(if self.grid { 0 } else { 1 })
+            .disabled(empty)
+            .on_change({
+                let this = this.clone();
+                move |ix, _, cx| {
+                    let _ = this.update(cx, |v, cx| {
+                        v.grid = ix == 0;
+                        cx.notify();
+                    });
+                }
+            }),
+        );
         // The sort pop-up as a toolbar item (`arrow.up.arrow.down`): its menu checks the
         // order; the tooltip names it.
         let sort = sym_toolbar_item(
@@ -1172,7 +1181,8 @@ impl ArtifactPage {
             active,
             cx,
         )
-        .disabled(total == 0)
+        .disabled(empty)
+        .when(empty, |b| b.opacity(0.5))
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, {
             let (this, current) = (this.clone(), self.sort);
             move |mut menu, _, _| {
@@ -1719,6 +1729,30 @@ pub(crate) fn kind_sym(kind: crate::data::ArtifactKind) -> Sym {
     }
 }
 
+/// True when a person value has room for its role beside the name: the name's
+/// width (CJK about 14, other glyphs about 8 at 14 pt) plus a gap and three
+/// glyphs of the role fit the 320 pane's value column after the avatar.
+fn role_fits(name: &str) -> bool {
+    let w: f32 = name
+        .chars()
+        .map(|c| if c.is_ascii() { 8. } else { 14. })
+        .sum();
+    w + 8. + 3. * 14. <= 152.
+}
+
+/// A 页面里的回应 line with the actor's current name: the log's text starts with
+/// the name the actor had when they acted.
+fn response_text(name: Option<&str>, text: &str) -> String {
+    match name.filter(|n| !n.is_empty()) {
+        Some(n) if text.starts_with(n) => text.to_string(),
+        Some(n) => match text.split_once(' ') {
+            Some((_, rest)) => format!("{n} {rest}"),
+            None => text.to_string(),
+        },
+        None => text.to_string(),
+    }
+}
+
 /// A 36 pt toolbar item drawn with a concept symbol (§5.1): `label` (or `secondary` in
 /// an inactive window), on a 28 pt `selection` pill with the symbol in `accent` when
 /// toggled. Like `native::toolbar_item`, for symbols outside its comparison set.
@@ -1748,9 +1782,13 @@ fn thumbnail(services: &Services, a: &crate::data::ArtifactSummary, cx: &App) ->
                 .artifact_poster(&a.id, a.version)
                 .map(gpui::ImageSource::from)
         });
+    // The well follows the tile's top corners (inside its 1 px line), so
+    // its fill never shows past the rounded border (§1.6).
     let well = div()
         .w_full()
         .h(px(132.))
+        .rounded_t(page::m::CARD_RADIUS - crate::ui::native::metrics::HAIRLINE)
+        .overflow_hidden()
         .bg(n.fill)
         .flex()
         .items_center()

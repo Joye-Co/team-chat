@@ -504,10 +504,12 @@ impl GroupPage {
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
-            .pt(tsp::S4)
             .pb(tsp::S24)
             .flex()
-            .flex_col();
+            .flex_col()
+            // Pull the first GroupLabel up so its ink starts at y 68 (B2):
+            // the section's own 16 top sits under the header band.
+            .child(div().flex_none().mt(-tsp::S12));
 
         // 成员: the name keeps its room; the 岗位 truncates first, and both
         // show in full in the tooltip.

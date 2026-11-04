@@ -290,6 +290,7 @@ impl Render for QuietPage {
             ..Capabilities::NONE
         });
         let page = WebEmbed::new("quiet-page", spec)
+            .forget_preview()
             .height(px(QUIET_HEIGHT))
             .rounded(theme::radius::LG)
             .on_event(move |event, _, cx| {

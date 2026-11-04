@@ -94,10 +94,12 @@ pub fn render(
         .flex_1()
         .min_h_0()
         .overflow_y_scroll()
-        .pt(tsp::S4)
         .pb(tsp::S24)
         .flex()
-        .flex_col();
+        .flex_col()
+        // Pull the first GroupLabel up so its ink starts at y 68 (B2):
+        // the section's own 16 top sits under the header band.
+        .child(div().flex_none().mt(-tsp::S12));
     let offline = || page::compact_empty(Sym::Offline, c::DESK_RAIL_OFFLINE, None, cx);
 
     // 这周: the team's week as a DescriptionList.

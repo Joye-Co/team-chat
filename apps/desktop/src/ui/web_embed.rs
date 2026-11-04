@@ -108,6 +108,8 @@ pub struct WebEmbed {
     autoplay: bool,
     /// The page's side and top padding in the host base stylesheet (`--tc-pad`).
     pad: Pixels,
+    /// Its snapshots stand for the 产出 version in thumbnails ([`page_preview`]).
+    remember: bool,
     on_event: Option<EventHandler>,
     on_host: Option<HostHandler>,
 }
@@ -125,9 +127,17 @@ impl WebEmbed {
             pass_scroll: false,
             autoplay: false,
             pad: crate::ui::native::tokens::space::S24,
+            remember: true,
             on_event: None,
             on_host: None,
         }
+    }
+
+    /// A page that is not the 产出's own (a self-test probe under the 产出's id):
+    /// its snapshots never stand for the version in thumbnails.
+    pub fn forget_preview(mut self) -> Self {
+        self.remember = false;
+        self
     }
 
     /// The page's padding in the base stylesheet (`--tc-pad`, 24 by default; 16 in
@@ -205,6 +215,7 @@ pub struct WebEmbedState {
     autoplay: bool,
     radius: Pixels,
     pad: Pixels,
+    remember: bool,
     on_event: Option<EventHandler>,
     on_host: Option<HostHandler>,
     window: Option<AnyWindowHandle>,
@@ -252,6 +263,7 @@ impl WebEmbedState {
             autoplay: false,
             radius: px(0.),
             pad: crate::ui::native::tokens::space::S24,
+            remember: true,
             on_event: None,
             on_host: None,
             window: None,
@@ -422,6 +434,7 @@ impl WebEmbedState {
         self.autoplay = embed.autoplay;
         self.radius = embed.radius;
         self.pad = embed.pad;
+        self.remember = embed.remember;
         self.on_event = embed.on_event.clone();
         self.on_host = embed.on_host.clone();
         self.spec.viewer = embed.spec.viewer.clone();
@@ -636,7 +649,9 @@ impl WebEmbedState {
             if let Ok(Some(png)) = rx.await {
                 let image = Arc::new(gpui::Image::from_bytes(gpui::ImageFormat::Png, png));
                 let _ = this.update(cx, |s, cx| {
-                    remember_preview(&s.artifact_id().to_string(), s.version(), image.clone());
+                    if s.remember {
+                        remember_preview(&s.artifact_id().to_string(), s.version(), image.clone());
+                    }
                     s.snapshot = Some(image);
                     cx.notify();
                 });
