@@ -369,19 +369,25 @@ impl RenderOnce for Bone {
         use gpui::{Animation, AnimationExt as _, bounce, ease_in_out};
         use gpui_component::StyledExt as _;
         let k = native_colors(cx);
-        div()
+        let bone = div()
             .w_full()
             .h(px(14.))
             .rounded(radius::CONTROL)
             .bg(bone_fill(self.on_fill, &k))
-            .refine_style(&self.style)
-            .with_animation(
-                "bone",
-                Animation::new(BONE_PULSE)
-                    .repeat()
-                    .with_easing(bounce(ease_in_out)),
-                |d, t| d.opacity(1. - (1. - BONE_LOW) * t),
-            )
+            .refine_style(&self.style);
+        // Reduce Motion: a still skeleton, no pulse (review-animations;
+        // review 2 R1-11).
+        if cx.reduce_motion() {
+            return bone.into_any_element();
+        }
+        bone.with_animation(
+            "bone",
+            Animation::new(BONE_PULSE)
+                .repeat()
+                .with_easing(bounce(ease_in_out)),
+            |d, t| d.opacity(1. - (1. - BONE_LOW) * t),
+        )
+        .into_any_element()
     }
 }
 

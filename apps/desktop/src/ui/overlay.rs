@@ -111,6 +111,34 @@ pub enum Tone {
     Danger,
 }
 
+/// How far above the window's bottom edge pushed toasts stop: 0, or the
+/// height of a docked element they must not cover (the focused composer).
+/// Kept in pixels × 100.
+static TOAST_FLOOR: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The bottom margin of pushed toasts: 16 above the window edge, or 16
+/// above the floor that [`set_toast_floor`] set.
+pub fn toast_bottom() -> gpui::Pixels {
+    let floor = TOAST_FLOOR.load(std::sync::atomic::Ordering::Relaxed) as f32 / 100.;
+    space::S16 + gpui::px(floor)
+}
+
+/// Lifts pushed toasts so they end above a docked element `height` tall
+/// at the window's bottom (§2.16, review 2 R1-15): the composer calls it
+/// with its height while it has the focus, and with 0 when it loses it, so
+/// a toast never covers Send. Applies at once to the toasts on screen.
+pub fn set_toast_floor(height: gpui::Pixels, cx: &mut App) {
+    let value = (f32::from(height).max(0.) * 100.).round() as u32;
+    let old = TOAST_FLOOR.swap(value, std::sync::atomic::Ordering::Relaxed);
+    if old != value {
+        gpui_component::Theme::global_mut(cx)
+            .notification
+            .margins
+            .bottom = toast_bottom();
+        cx.refresh_windows();
+    }
+}
+
 /// The toast (COMPLETENESS.md §2.16, T1-06): float surface, radius 10, a
 /// 1 px border, shadow md, p 16, w 360; a 16 icon (the only part in a state
 /// color), title 14 medium, description 14 muted, an outline sm action and
@@ -410,5 +438,31 @@ impl RenderOnce for Banner {
             alert = alert.action(a);
         }
         alert
+    }
+}
+
+#[cfg(test)]
+mod toast_floor_tests {
+    use gpui::{TestAppContext, px};
+
+    /// R1-15: a focused composer lifts pushed toasts over itself, and they
+    /// come back down when it lets go.
+    #[gpui::test]
+    fn the_composer_lifts_toasts(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            super::set_toast_floor(px(120.), cx);
+            let m = gpui_component::ActiveTheme::theme(cx)
+                .notification
+                .margins
+                .bottom;
+            assert_eq!(m, px(136.));
+            super::set_toast_floor(px(0.), cx);
+            let m = gpui_component::ActiveTheme::theme(cx)
+                .notification
+                .margins
+                .bottom;
+            assert_eq!(m, px(16.));
+        });
     }
 }

@@ -213,6 +213,7 @@ pub struct CompactRow {
     height: gpui::Pixels,
     children: Vec<AnyElement>,
     on_click: Option<Click>,
+    show_focus: bool,
 }
 
 impl CompactRow {
@@ -225,7 +226,14 @@ impl CompactRow {
             height: metrics::LIST_ROW,
             children: Vec::new(),
             on_click: None,
+            show_focus: false,
         }
+    }
+
+    /// Draws the keyboard focus ring whatever the focus (self-test scenes).
+    pub fn show_focus(mut self, show: bool) -> Self {
+        self.show_focus = show;
+        self
     }
 
     pub fn selected(mut self, selected: bool) -> Self {
@@ -300,6 +308,7 @@ impl RenderOnce for CompactRow {
                 d.bg(fill).font_weight(crate::theme::MEDIUM_WEIGHT)
             })
             .when(self.on_click.is_some(), |d| d.focus_row(self.selected, cx))
+            .when(self.show_focus, |d| d.shadow(super::row_focus_ring(cx)))
             .children(self.children)
             .when_some(self.on_click, |d, f| {
                 d.on_click(move |e, w, cx| f(e, w, cx))

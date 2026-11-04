@@ -764,6 +764,32 @@ pub fn icon_button_sym(
     ))
 }
 
+/// An outline icon button (§1.8, §2.7 table footer): `size` square, radius
+/// 8, a 16 symbol in `label`, the outline border and fill.
+pub fn icon_button_outline(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<SharedString>,
+    size: IconSize,
+    cx: &App,
+) -> Button {
+    let k = native_colors(cx);
+    let name = name.into();
+    let side = size.side();
+    let b = Button::new(id)
+        .with_size(side)
+        .size(side)
+        .p_0()
+        .rounded(metrics::BUTTON_REGULAR_RADIUS)
+        .accessibility_label(name.clone())
+        .tooltip(name);
+    styled(b, PushStyle::Outline, cx).child(crate::ui::icons::sym(
+        sym,
+        SymSize::for_slot(icon::MD),
+        k.label,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
