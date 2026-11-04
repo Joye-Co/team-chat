@@ -33,39 +33,40 @@ use crate::ui::{
     sf_symbols::{Sym, SymSize, Weight},
 };
 
-/// Sizes of the overlays (NATIVE.md §7.2, §9.7).
+/// Sizes of the overlays: the command palette of COMPLETENESS.md §2.11, on
+/// the scales of ui/native/tokens.rs.
 pub mod spot {
+    use crate::ui::native::tokens::{avatar, height, icon, radius, space, text};
     use gpui::{Pixels, px};
 
-    /// The Spotlight panel.
+    /// The command palette.
     pub const WIDTH: Pixels = px(600.);
-    /// The capsule field: 48 pt with 22 pt text.
-    pub const FIELD: Pixels = px(48.);
-    pub const FIELD_TEXT: Pixels = px(22.);
-    pub const FIELD_LINE: Pixels = px(28.);
+    /// The input row: h48 with 16 text.
+    pub const FIELD: Pixels = height::PALETTE_INPUT;
+    pub const FIELD_TEXT: Pixels = text::HEADING.0;
+    pub const FIELD_LINE: Pixels = text::HEADING.1;
     /// The search symbol in the field.
-    pub const FIELD_SYMBOL: Pixels = px(20.);
-    /// The panel's corner: half the field, so a panel with no results is a
-    /// capsule.
-    pub const RADIUS: Pixels = px(24.);
+    pub const FIELD_SYMBOL: Pixels = icon::MD;
+    /// The panel's corner.
+    pub const RADIUS: Pixels = radius::CONTAINER;
     /// A result row.
-    pub const ROW: Pixels = px(32.);
-    pub const ROW_RADIUS: Pixels = px(8.);
-    /// The leading slot of a row (an inline symbol or a 20 pt avatar).
-    pub const SLOT: Pixels = px(20.);
-    pub const AVATAR: Pixels = px(20.);
-    /// A section header above its rows.
-    pub const SECTION: Pixels = px(26.);
-    /// The inset of the rows from the panel edge.
-    pub const INSET: Pixels = px(8.);
+    pub const ROW: Pixels = height::ROW;
+    pub const ROW_RADIUS: Pixels = radius::ITEM;
+    /// The leading slot of a row (an inline symbol or a 16 avatar).
+    pub const SLOT: Pixels = icon::MD;
+    pub const AVATAR: Pixels = avatar::XS;
+    /// A group label above its rows.
+    pub const SECTION: Pixels = height::ROW;
+    /// The inset of the rows from the panel edge (list p 4).
+    pub const INSET: Pixels = space::S4;
     /// The panel's distance from the window top (Spotlight sits in the
     /// upper third).
     pub const TOP: Pixels = px(120.);
-    /// The bordered list in a sheet.
-    pub const LIST_ROW: Pixels = px(32.);
-    pub const LIST_RADIUS: Pixels = px(8.);
-    /// The app icon of the login window.
-    pub const LOGIN_ICON: Pixels = px(96.);
+    /// The bordered list in a sheet (list box radius 10).
+    pub const LIST_ROW: Pixels = height::ROW;
+    pub const LIST_RADIUS: Pixels = radius::CONTAINER;
+    /// The logo of the login card (§2.20).
+    pub const LOGIN_ICON: Pixels = px(48.);
 }
 
 /// Configures a gpui-component dialog as a Tahoe alert (§7.2): 260 wide,

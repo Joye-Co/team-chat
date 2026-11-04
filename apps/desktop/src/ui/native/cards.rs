@@ -14,28 +14,31 @@ use gpui::{
 use super::tokens::{NativeType as _, native_colors};
 use crate::ui::sf_symbols::{Sym, SymSize};
 
-/// Card metrics (§9.2).
+/// Card metrics: the compact card of COMPLETENESS.md §2.4, on the scales of
+/// ui/native/tokens.rs.
 pub mod card {
-    use gpui::{Pixels, px};
+    use crate::ui::native::tokens::{avatar, height, radius, space};
+    use gpui::Pixels;
 
     /// Corner radius of the card container.
-    pub const RADIUS: Pixels = px(12.);
-    /// Insets on every side.
-    pub const INSET: Pixels = px(14.);
+    pub const RADIUS: Pixels = radius::CARD;
+    /// Insets on every side (compact card p 16).
+    pub const INSET: Pixels = space::S16;
     /// Space between the facts of a fact run.
-    pub const FACT_GAP: Pixels = px(12.);
+    pub const FACT_GAP: Pixels = space::S12;
     /// Space between a symbol and its text in a run.
-    pub const SYMBOL_GAP: Pixels = px(4.);
+    pub const SYMBOL_GAP: Pixels = space::S4;
     /// The header avatar.
-    pub const AVATAR: Pixels = px(20.);
-    /// Space between the header, the title, the blocks and the footer.
-    pub const STACK: Pixels = px(10.);
-    /// Inner wells (draft, diff, code): radius 8.
-    pub const WELL_RADIUS: Pixels = px(8.);
-    /// Thumbnails inside a card: radius 6.
-    pub const THUMB_RADIUS: Pixels = px(6.);
+    pub const AVATAR: Pixels = avatar::SM;
+    /// Space between the header, the title, the blocks and the footer
+    /// (compact card gap 16).
+    pub const STACK: Pixels = space::S16;
+    /// Inner wells (draft, diff, code).
+    pub const WELL_RADIUS: Pixels = radius::CONTROL;
+    /// Thumbnails inside a card.
+    pub const THUMB_RADIUS: Pixels = radius::ITEM;
     /// The scrubber of a media block.
-    pub const SCRUBBER: Pixels = px(4.);
+    pub const SCRUBBER: Pixels = height::PROGRESS;
 }
 
 /// The card container: radius 12, `fill`, no border, no shadow. Callers add
