@@ -426,7 +426,7 @@ pub(crate) fn table_with_refs(
             .when_some(pct, |el, p| {
                 el.child(
                     div()
-                        .w(px(48.))
+                        .w(m::TABLE_PCT_BAR)
                         .h(px(3.))
                         .rounded(px(2.))
                         .bg(k.line_2)
