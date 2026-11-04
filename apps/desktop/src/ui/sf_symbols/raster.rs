@@ -120,11 +120,12 @@ pub fn draw_ink(
             }
             fit -= 0.25;
         }
-        // Filling a square: ink does not grow exactly linearly, so go up a
-        // quarter point at a time while the ink still fits the limit.
+        // Filling a square: ink does not grow exactly linearly and one
+        // quarter point can move an edge by two device pixels, so go up a
+        // twentieth of a point at a time while the ink still fits.
         if ink.is_some() {
-            for _ in 0..16 {
-                let next = fit + 0.25;
+            for _ in 0..80 {
+                let next = fit + 0.05;
                 let Some(c) = appkit::draw(name, next, weight, scale) else {
                     break;
                 };
