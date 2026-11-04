@@ -13,7 +13,7 @@ pub use steps::{error_line, glyph as step_glyph, step_line};
 use std::{path::PathBuf, time::Duration};
 
 use gpui::{
-    App, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::ActiveTheme as _;
@@ -28,7 +28,7 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{
         self, Sym,
-        native::{NativeType as _, PushSize, PushStyle, disabled_push, native_colors, push_button},
+        native::{PushSize, PushStyle, StatusKind, disabled_push, native_colors, push_button},
         sf_symbols::SymSize,
     },
     views::time_text,
@@ -428,7 +428,11 @@ impl ProcessView {
                 .one_line()
                 .child(bot.map(|b| b.name).unwrap_or_default()),
         )
-        .child(status_badge(run.status, cx))
+        .child(run_badge(
+            run,
+            self.services.provider.run_stopping(&run.id),
+            cx,
+        ))
         .child(
             div()
                 .flex_none()
@@ -464,7 +468,17 @@ impl ProcessView {
             facts.push(fill(p::DURATION, &[("d", &duration_text(ms))]));
         }
         let live = run.status.is_active() && self.visible;
-        // One `small` line of facts split by `·`, the summary in `body`.
+        // The facts split by `·`; each fact keeps its words on one line, so
+        // a wrap moves a whole fact (never `58 分` alone). The summary in
+        // `body`.
+        let last = facts.len().saturating_sub(1);
+        let facts = facts.into_iter().enumerate().map(|(i, f)| {
+            div().flex_none().whitespace_nowrap().child(if i < last {
+                format!("{f} ·")
+            } else {
+                f
+            })
+        });
         div()
             .pt(space::S8)
             .flex()
@@ -472,26 +486,20 @@ impl ProcessView {
             .gap(space::S6)
             .child(
                 div()
+                    .flex()
+                    .flex_wrap()
+                    .gap_x(space::S4)
                     .t_small()
                     .tnum()
                     .text_color(colors.text_2)
-                    .child(facts.join(" · ")),
+                    .children(facts),
             )
             .when(live, |el| {
-                el.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .t_meta()
-                        .text_color(colors.accent_text)
-                        .child(
-                            Sym::Live
-                                .icon(SymSize::INLINE_SMALL)
-                                .text_color(native_colors(cx).blue),
-                        )
-                        .child(p::LIVE),
-                )
+                el.child(div().flex().child(ui::native::status_badge(
+                    StatusKind::Working,
+                    p::LIVE,
+                    cx,
+                )))
             })
             .when_some(run.summary.clone(), |el, summary| {
                 el.child(div().t_body().text_color(colors.text_1).child(summary))
@@ -499,45 +507,35 @@ impl ProcessView {
             .when(developer, |el| {
                 let opt =
                     |t: Option<Millis>| t.map(|t| t.to_string()).unwrap_or_else(|| "-".into());
-                el.child(
-                    div()
-                        .p(space::S8)
-                        .rounded(theme::radius::MD)
-                        .bg(colors.code_bg)
-                        .t_code()
-                        .text_color(colors.text_2)
-                        .child(div().child(fill(dev::RUN_ID, &[("id", &run.id)])))
-                        .child(div().child(fill(dev::RUN_BOT, &[("id", &run.bot_id)])))
-                        .child(div().child(fill(
-                            dev::RUN_MACHINE,
-                            &[("id", run.machine_id.as_deref().unwrap_or("-"))],
-                        )))
-                        .child(
-                            div().child(fill(
-                                dev::RUN_STATUS,
-                                &[("status", run.status.wire_name())],
-                            )),
-                        )
-                        .child(div().child(fill(
-                            dev::RUN_TIMES,
-                            &[
-                                ("created", &run.created_at.to_string()),
-                                ("started", &opt(run.started_at)),
-                                ("ended", &opt(run.ended_at)),
-                                ("updated", &run.updated_at.to_string()),
-                            ],
-                        )))
-                        .child(div().child(fill(
-                            dev::RUN_LAST_SEQ,
-                            &[("seq", &self.process.last_seq.to_string())],
-                        )))
-                        .when_some(self.process.session.clone(), |el, (id, runtime)| {
-                            el.child(div().child(fill(
-                                dev::RUN_SESSION,
-                                &[("id", &id), ("runtime", &runtime)],
-                            )))
-                        }),
-                )
+                let mut lines = vec![
+                    fill(dev::RUN_ID, &[("id", &run.id)]),
+                    fill(dev::RUN_BOT, &[("id", &run.bot_id)]),
+                    fill(
+                        dev::RUN_MACHINE,
+                        &[("id", run.machine_id.as_deref().unwrap_or("-"))],
+                    ),
+                    fill(dev::RUN_STATUS, &[("status", run.status.wire_name())]),
+                    fill(
+                        dev::RUN_TIMES,
+                        &[
+                            ("created", &run.created_at.to_string()),
+                            ("started", &opt(run.started_at)),
+                            ("ended", &opt(run.ended_at)),
+                            ("updated", &run.updated_at.to_string()),
+                        ],
+                    ),
+                    fill(
+                        dev::RUN_LAST_SEQ,
+                        &[("seq", &self.process.last_seq.to_string())],
+                    ),
+                ];
+                if let Some((id, runtime)) = self.process.session.clone() {
+                    lines.push(fill(
+                        dev::RUN_SESSION,
+                        &[("id", &id), ("runtime", &runtime)],
+                    ));
+                }
+                el.child(developer_panel(lines, cx))
             })
     }
 
@@ -611,33 +609,92 @@ impl ProcessView {
     }
 }
 
-/// The status of a run (NATIVE.md §6): its state symbol and the word, no
-/// chip. Working is a `blue` dot, a problem `red`, the rest `secondary`.
-pub fn status_badge(status: RunStatus, cx: &App) -> impl IntoElement {
-    let k = native_colors(cx);
-    let (sym, color) = match status {
-        RunStatus::Created => (Sym::Todo, k.secondary),
-        RunStatus::Running => (Sym::Live, k.blue),
-        RunStatus::Waiting => (Sym::Waiting, k.secondary),
-        RunStatus::Blocked => (Sym::Problem, k.red),
-        RunStatus::Failed => (Sym::Failed, k.red),
-        RunStatus::Done => (Sym::Check, k.secondary),
-        RunStatus::Cancelled => (Sym::Stopped, k.secondary),
+/// The developer panel of a run: a framed log panel with a 40 pt header
+/// (its title and a copy button) and the facts in 13 pt monospace, one per
+/// line.
+fn developer_panel(lines: Vec<String>, cx: &App) -> AnyElement {
+    use gpui_component::{
+        Sizable as _,
+        button::{Button, ButtonVariants as _},
     };
-    let ink = if matches!(status, RunStatus::Blocked | RunStatus::Failed) {
-        k.red
-    } else {
-        k.secondary
-    };
+    let colors = theme::colors(cx);
+    let n = native_colors(cx);
+    let text = lines.join("\n");
     div()
-        .flex_none()
-        .flex()
-        .items_center()
-        .gap(px(4.))
-        .n_subheadline()
-        .text_color(ink)
-        .child(sym.icon(SymSize::INLINE_SMALL).text_color(color))
-        .child(status_text(status))
+        .mt(space::S4)
+        .rounded(theme::radius::FIELD)
+        .border_1()
+        .border_color(n.separator)
+        .overflow_hidden()
+        .child(
+            div()
+                .h(ui::native::tokens::height::FOOTER_ROW)
+                .pl(space::S12)
+                .pr(space::S8)
+                .flex()
+                .items_center()
+                .border_b_1()
+                .border_color(n.separator)
+                .bg(colors.code_bg)
+                .child(
+                    div()
+                        .flex_1()
+                        .t_meta_medium()
+                        .text_color(n.secondary)
+                        .child(dev::RUN_PANEL_TITLE),
+                )
+                .child(
+                    Button::new("run-details-copy")
+                        .custom(ui::native::borderless_variant(cx))
+                        .with_size(ui::native::metrics::BUTTON_REGULAR)
+                        .size(ui::native::metrics::BUTTON_REGULAR)
+                        .p_0()
+                        .rounded(ui::native::metrics::BUTTON_REGULAR_RADIUS)
+                        .accessibility_label(dev::RUN_PANEL_COPY)
+                        .tooltip(dev::RUN_PANEL_COPY)
+                        .child(Sym::Copy.icon(SymSize::INLINE).text_color(n.secondary))
+                        .on_click(move |_, _, cx| {
+                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
+                        }),
+                ),
+        )
+        .child(
+            div()
+                .px(space::S12)
+                .py(space::S8)
+                .t_code()
+                .text_color(colors.text_2)
+                .children(lines.into_iter().map(|l| div().child(l))),
+        )
+        .into_any_element()
+}
+
+/// The status of a run as a status badge (COMPLETENESS §2.12): one
+/// mapping in the run list, the pane headers and the inspector. A run that
+/// is being stopped says 停止中.
+pub fn status_badge(status: RunStatus, cx: &App) -> impl IntoElement {
+    ui::native::status_badge(status_kind(status), status_text(status), cx)
+}
+
+/// The badge kind of a run status.
+pub fn status_kind(status: RunStatus) -> StatusKind {
+    match status {
+        RunStatus::Created => StatusKind::Queued,
+        RunStatus::Running => StatusKind::Working,
+        RunStatus::Waiting => StatusKind::NeedsYou,
+        RunStatus::Blocked | RunStatus::Failed => StatusKind::Failed,
+        RunStatus::Done => StatusKind::Done,
+        RunStatus::Cancelled => StatusKind::Idle,
+    }
+}
+
+/// The badge of a run, 停止中 while a stop is on its way.
+pub fn run_badge(run: &BotRunSummary, stopping: bool, cx: &App) -> AnyElement {
+    if stopping && run.status.is_active() {
+        ui::native::status_badge(StatusKind::Stopping, p::STATUS_STOPPING, cx).into_any_element()
+    } else {
+        status_badge(run.status, cx).into_any_element()
+    }
 }
 
 impl Render for ProcessView {
@@ -705,11 +762,7 @@ impl Render for ProcessView {
                                 .items_center()
                                 .gap(space::S8)
                                 .t_small()
-                                .text_color(if retry {
-                                    colors.danger_text
-                                } else {
-                                    colors.text_3
-                                })
+                                .text_color(if retry { colors.text_2 } else { colors.text_3 })
                                 .when(retry, |el| {
                                     el.child(ui::icon(
                                         ui::Sym::Alert,
@@ -807,6 +860,15 @@ mod tests {
         run.requested_by = None;
         assert!(!asked_by(&run, None));
         assert_eq!(stop_error_text(AdminError::Forbidden), p::STOP_FORBIDDEN);
+    }
+
+    #[test]
+    fn failed_and_stuck_runs_badge_as_failed() {
+        assert_eq!(status_kind(RunStatus::Failed), StatusKind::Failed);
+        assert_eq!(status_kind(RunStatus::Blocked), StatusKind::Failed);
+        assert_eq!(status_kind(RunStatus::Running), StatusKind::Working);
+        assert_eq!(status_kind(RunStatus::Done), StatusKind::Done);
+        assert_eq!(status_kind(RunStatus::Cancelled), StatusKind::Idle);
     }
 
     #[test]

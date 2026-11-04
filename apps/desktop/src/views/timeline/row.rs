@@ -75,9 +75,13 @@ impl TimelineView {
             item = item.pt(if start { space::S16 } else { space::S10 });
         }
         if v2 {
-            // The v2 page has no start block: the first row is the date.
+            // The thread-start block opens a 话题 whose first message is
+            // loaded; the date of the first message follows it.
+            if start && let Some(topic) = self.topic.clone() {
+                item = item.child(self.render_start_v2(&topic, cx));
+            }
             if start || new_day {
-                item = item.child(super::v2::date_divider(message.created_at, start, cx));
+                item = item.child(super::v2::date_divider(message.created_at, false, cx));
             }
         } else {
             if start && let Some(topic) = self.topic.clone() {
@@ -107,12 +111,12 @@ impl TimelineView {
         if self
             .arrived
             .get(&key)
-            .is_some_and(|at| at.elapsed() < theme::motion::FAST)
+            .is_some_and(|at| at.elapsed() < theme::motion::SLOW)
         {
-            // Opacity only, so it stays with reduce motion (§12).
-            message_row = ui::motion::fade_in(
+            // A message that arrives while the 话题 is open rises in once
+            // (200 ms, out curve); with Reduce motion it only fades (§12).
+            message_row = ui::motion::arrive(
                 ElementId::Name(format!("arrive-{key}").into()),
-                theme::motion::FAST,
                 div().child(message_row),
                 cx,
             );
@@ -129,22 +133,9 @@ impl TimelineView {
             .child(message_row)
             .children(plans);
         if v2 {
-            // First paint: the rows of a 话题 that just opened rise in, 40 ms
-            // apart from the top (CONCEPT2 §5); later rows only fade.
-            let first_paint = self
-                .opened_at
-                .is_some_and(|at| at.elapsed() < super::v2::FIRST_PAINT);
-            let item: AnyElement = if first_paint {
-                let from_top = ix.saturating_sub(self.messages.len().saturating_sub(10));
-                ui::motion::rise(
-                    ElementId::Name(format!("v2-rise-{key}").into()),
-                    from_top,
-                    item.w_full(),
-                    cx,
-                )
-            } else {
-                item.into_any_element()
-            };
+            // Opening a 话题 paints its rows at rest (§12: switching topics
+            // is never animated); only a message that arrives rises in.
+            let item: AnyElement = item.into_any_element();
             // NATIVE.md §9.2: the transcript takes the full content width;
             // avatars start on the shared leading inset, the trailing inset
             // is 24 pt; message text stops at 680 pt.
@@ -303,9 +294,15 @@ impl TimelineView {
                     block_offset: usize::from(shown_body.len() != message.body.len()),
                 }
             });
+            // The message a search opened at: its matched words in bold
+            // and underlined while the search bar shows (§2.17).
+            let body_source = match self.search_query_for(&message.id) {
+                Some(query) => markdown::mark_query(shown_body, &query),
+                None => shown_body.to_string(),
+            };
             let (view, inline) = markdown::message_body_refs(
                 ElementId::Name(format!("body-{key}").into()),
-                shown_body.to_string(),
+                body_source,
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
                 edited,
                 Some(&markdown::DiagramContext {
@@ -516,7 +513,8 @@ impl TimelineView {
             .gap(space::S12)
             // The search highlight, fading out (§7.5).
             .when(self.highlight_alpha(key) > 0., |el| {
-                el.bg(colors.me_bg.opacity(self.highlight_alpha(key)))
+                let band = crate::ui::native::native_colors(cx).fill;
+                el.bg(band.opacity(self.highlight_alpha(key)))
             })
             .on_hover(cx.listener(move |this, hovering: &bool, _, cx| {
                 let key = hover_key.to_string();
@@ -809,6 +807,90 @@ impl TimelineView {
         cx.notify();
     }
 
+    /// The thread-start block of the v2 page (COMPLETENESS §2.17): a 40 pt
+    /// symbol box, the 话题 title and `Joye 在 开发 发起 · 今天 09:12`. It
+    /// sits at the top of the list, so a short 话题 reads from the top.
+    fn render_start_v2(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::native::{NativeType as _, native_colors};
+        let n = native_colors(cx);
+        let starter = self
+            .members
+            .iter()
+            .find(|m| m.id == topic.created_by)
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
+        let group = self
+            .services
+            .provider
+            .groups()
+            .into_iter()
+            .find(|g| g.id == topic.group_id);
+        let who = match group {
+            Some(g) if g.dm_peer.is_none() && !g.name.is_empty() => fill(
+                t::STARTED_IN,
+                &[
+                    ("starter", &crate::copy::isolate(&starter)),
+                    ("group", &crate::copy::isolate(&g.name)),
+                ],
+            ),
+            _ => fill(
+                t::STARTED_LINE_NO_OWNER,
+                &[("starter", &crate::copy::isolate(&starter))],
+            ),
+        };
+        let when = model::local_day(topic.created_at).map(|day| {
+            format!(
+                "{} {}",
+                model::day_label(day, crate::selftest::clock::local_now().date_naive()),
+                model::clock(topic.created_at)
+            )
+        });
+        let (title, untitled) = crate::views::sidebar::topic_display_title(&topic.title);
+        div()
+            .mx(ROW_INSET)
+            .pb(space::S8)
+            .flex()
+            .flex_col()
+            .gap(space::S12)
+            .child(
+                div()
+                    .size(crate::ui::native::tokens::avatar::LG)
+                    .rounded(theme::radius::FIELD)
+                    .bg(n.fill)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(ui::sym(Sym::Topic, ui::SymSize::TOOLBAR, n.secondary)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(
+                        div()
+                            .n_title2()
+                            .text_color(if untitled { n.secondary } else { n.label })
+                            .line_clamp(2)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .n_body()
+                            .text_color(n.secondary)
+                            .child(div().min_w_0().one_line().child(who))
+                            .children(
+                                when.map(|w| {
+                                    div().flex_none().n_figures().child(format!(" · {w}"))
+                                }),
+                            ),
+                    ),
+            )
+            .into_any_element()
+    }
+
     /// The topic start block (§8.1): the responsible member at 48 pt, the
     /// title in `display` (two lines at most), `Joye 发起 · Taro 负责 · 今天
     /// 14:05`, and a 1 pt rule under it.
@@ -1032,10 +1114,12 @@ fn date_divider(at: crate::data::Millis, cx: &App) -> impl IntoElement {
         .child(div().flex_1().h(theme::HAIRLINE).bg(colors.sep))
 }
 
-/// The new-messages divider (§7.5): a `danger` hairline with `新消息`
-/// 12/500 `danger-text` at the right.
+/// The new-messages divider: a neutral hairline (the separator token) with
+/// `新消息` in 12/500 `secondary` at the trailing end. Never a state color:
+/// red means a problem in this app, and an unread marker is not one.
 fn new_messages_divider(cx: &App) -> impl IntoElement {
     let colors = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     div()
         .mx(ROW_INSET)
         .mt(space::S16)
@@ -1045,8 +1129,8 @@ fn new_messages_divider(cx: &App) -> impl IntoElement {
         .items_center()
         .gap(space::S8)
         .t_meta_medium()
-        .text_color(colors.danger_text)
-        .child(div().flex_1().h(theme::BORDER).bg(colors.danger))
+        .text_color(n.secondary)
+        .child(div().flex_1().h(theme::HAIRLINE).bg(colors.sep))
         .child(t::NEW_MESSAGES)
 }
 

@@ -66,12 +66,75 @@ pub const SCENES: &[Scene] = &[
     // --- end r2-trust ---
     Scene {
         name: "artifacts-v2",
-        about: "产出 destination: every 产出 with its thumbnail",
+        about: "产出 destination: the table of every 产出 (名称, 类型, 话题, 做的人, 版本, 更新) with its footer",
         start: Start::V2,
         setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_artifacts(cx)),
         open: open_main,
     },
+    // --- v13/ux-pages ---
+    Scene {
+        name: "artifacts-grid",
+        about: "产出 in the icon view: tiles grouped by day, the page snapshot fitted whole",
+        start: Start::V2,
+        setup: |s, cx| {
+            list_start(true, None);
+            s.nav.update(cx, |nav, cx| nav.open_artifacts(cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "artifacts-no-match",
+        about: "产出 with a search that finds nothing: the Empty state with 清空搜索",
+        start: Start::V2,
+        setup: |s, cx| {
+            list_start(false, Some("季度预算"));
+            s.nav.update(cx, |nav, cx| nav.open_artifacts(cx))
+        },
+        open: open_main,
+    },
+    Scene {
+        name: "artifacts-empty",
+        about: "产出 before any member made one: the Empty state",
+        start: Start::V2Bare,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_artifacts(cx)),
+        open: open_main,
+    },
+    Scene {
+        name: "artifacts-loading",
+        about: "产出 before the first sync: table skeleton",
+        start: Start::V2Unsynced,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_artifacts(cx)),
+        open: open_main,
+    },
+    Scene {
+        name: "artifacts-failed",
+        about: "产出 with nothing cached while the server cannot be reached: the Alert with 重试",
+        start: Start::V2Unreachable,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_artifacts(cx)),
+        open: open_main,
+    },
+    // --- end v13/ux-pages ---
 ];
+
+/// How the next 产出 list starts in a scene: the icon view, a search.
+#[derive(Clone, Default)]
+pub struct ListStart {
+    pub grid: bool,
+    pub query: Option<&'static str>,
+}
+
+static LIST_START: std::sync::Mutex<Option<ListStart>> = std::sync::Mutex::new(None);
+
+fn list_start(grid: bool, query: Option<&'static str>) {
+    if let Ok(mut s) = LIST_START.lock() {
+        *s = Some(ListStart { grid, query });
+    }
+}
+
+/// Takes the start a scene set for the 产出 list (once).
+pub fn take_list_start() -> Option<ListStart> {
+    LIST_START.lock().ok().and_then(|mut s| s.take())
+}
 
 /// True once the 产出 page's web view loaded and shows.
 pub fn ready(cx: &gpui::App) -> bool {

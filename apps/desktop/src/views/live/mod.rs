@@ -29,10 +29,10 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            NativeType as _, PushSize, PushStyle, ToolbarGroup, borderless_text, disabled_push,
-            metrics, native_colors,
-            overlays::{decision_bar, sym_toolbar_item},
-            push_button,
+            NativeType as _, PushSize, PushStyle, StatusKind, ToolbarGroup, disabled_push, metrics,
+            native_colors,
+            overlays::{decision_bar, sym_toolbar_item, sym_toolbar_toggle},
+            push_button, status_badge, steps_bar,
         },
         sf_symbols::SymSize,
     },
@@ -56,16 +56,16 @@ const TRAFFIC: Pixels = px(10.);
 /// The terminal cursor: 7 x 14.
 const CURSOR_W: Pixels = px(7.);
 const CURSOR_H: Pixels = px(14.);
-/// The 回放 track: 44 pt tall, the line at 11, marks 24 pt targets.
-const TRACK_HEIGHT: Pixels = px(44.);
+/// The 回放 track: marks are 24 pt targets, the line at 11; one label row
+/// under it.
 const TRACK_LINE_TOP: Pixels = px(11.);
 const MARK: Pixels = px(24.);
 const MARK_DOT: Pixels = px(10.);
 const MARK_NOW: Pixels = px(12.);
-/// A step label under the track, centered on its mark.
-const MARK_LABEL_W: Pixels = px(150.);
-/// Rows of the 验收标准 card: at least 40 pt.
+/// Rows of the 验收标准 card: at least 40 pt; the evidence and the badge
+/// sit in a 160 pt value column at the trailing edge.
 const CRITERION_MIN: Pixels = px(40.);
+const VALUE_COLUMN: Pixels = px(160.);
 /// Rows of the plan card: 34 pt.
 const PLAN_ROW: Pixels = px(34.);
 /// The held banner: 48 pt.
@@ -169,6 +169,7 @@ impl LivePane {
         held_by_me: bool,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
+        let developer = self.developer_toggle(cx);
         let n = native_colors(cx);
         let state: Option<(Sym, gpui::Hsla, String)> = match &screen.paused_by {
             Some(_) if held_by_me => Some((Sym::Pointer, n.label, c::LIVE_YOU_HOLD.to_string())),
@@ -242,6 +243,7 @@ impl LivePane {
                     .child(subtitle),
             )
             .child(ToolbarGroup::new([
+                developer,
                 sym_toolbar_item(
                     "live-expand",
                     if self.expanded {
@@ -427,7 +429,7 @@ impl LivePane {
                             d.mt(space::S8)
                         })
                         .one_line();
-                    let row = match l.kind {
+                    (match l.kind {
                         ScreenLineKind::Command => row
                             .child(div().flex_none().text_color(k.ink_3).child("$ "))
                             .flex()
@@ -441,13 +443,8 @@ impl LivePane {
                         ScreenLineKind::Output => row.text_color(k.ink_2).child(l.text.clone()),
                         ScreenLineKind::Result => row.text_color(k.ink).child(l.text.clone()),
                         ScreenLineKind::Error => row.text_color(k.bad_ink).child(l.text.clone()),
-                    };
-                    ui::motion::rise(
-                        SharedString::from(format!("live-line-{}-{i}", screen.run_id)),
-                        i,
-                        row,
-                        cx,
-                    )
+                    })
+                    .into_any_element()
                 })
                 .collect()
         };
@@ -553,7 +550,6 @@ impl LivePane {
         let active = run.status.is_active();
         let last = current.unwrap_or(times.len().saturating_sub(1));
         let mut marks: Vec<AnyElement> = Vec::new();
-        let mut labels: Vec<AnyElement> = Vec::new();
         for i in 0..times.len() {
             let is_last = i == last;
             let pos = if is_last {
@@ -565,7 +561,6 @@ impl LivePane {
                 }
             };
             let selected = shown == Some(i);
-            let step_text = run.plan.get(i).map(|p| p.text.clone()).unwrap_or_default();
             let dot = if is_last && active {
                 div()
                     .relative()
@@ -625,62 +620,6 @@ impl LivePane {
                     }))
                     .into_any_element(),
             );
-            if is_last {
-                let word = if active {
-                    c::LIVE_NOW_AT
-                } else {
-                    c::LIVE_ENDED_AT
-                };
-                labels.push(
-                    div()
-                        .absolute()
-                        .top(px(26.))
-                        .right(-MARK / 2.)
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .t_meta()
-                        .medium()
-                        .text_color(k.ink)
-                        .child(word)
-                        .child(
-                            div()
-                                .mono()
-                                .font_weight(gpui::FontWeight::NORMAL)
-                                .text_color(k.ink_3)
-                                .child(clock(if active { now_ms() } else { end })),
-                        )
-                        .into_any_element(),
-                );
-            } else {
-                labels.push(
-                    div()
-                        .absolute()
-                        .top(px(26.))
-                        .left(relative(pos))
-                        .ml(-MARK_LABEL_W / 2.)
-                        .w(MARK_LABEL_W)
-                        .flex()
-                        .justify_center()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::S4)
-                                .t_meta()
-                                .text_color(if selected { k.ink } else { k.ink_2 })
-                                .max_w(MARK_LABEL_W)
-                                .min_w_0()
-                                .child(div().flex_none().child(ui::icon(
-                                    Sym::Check,
-                                    theme::icon::TAG,
-                                    k.ink_3,
-                                )))
-                                .child(div().min_w_0().one_line().child(step_text)),
-                        )
-                        .into_any_element(),
-                );
-            }
         }
         let fill_line = div()
             .absolute()
@@ -701,9 +640,60 @@ impl LivePane {
                 )
                 .into_any_element()
         };
-        Some(ui::motion::rise(
-            "live-replay",
-            1,
+        // One label row under the track (never a label per mark, so two
+        // labels never share a span): the step 回放 shows, or the step the
+        // run is on, at the leading edge; `现在 10:21` in its own slot at the
+        // trailing edge.
+        let (label, done) = match shown.filter(|&i| i != last) {
+            Some(i) => (run.plan.get(i).map(|p| p.text.clone()), true),
+            None => (run.plan.get(last).map(|p| p.text.clone()), false),
+        };
+        let word = if active {
+            c::LIVE_NOW_AT
+        } else {
+            c::LIVE_ENDED_AT
+        };
+        let labels = div()
+            .h(px(20.))
+            .flex()
+            .items_center()
+            .gap(space::S12)
+            .t_meta()
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .items_center()
+                    .gap(space::S4)
+                    .text_color(if done { k.ink } else { k.ink_2 })
+                    .when(done, |d| {
+                        d.child(div().flex_none().child(ui::icon(
+                            Sym::Check,
+                            theme::icon::TAG,
+                            k.ink_3,
+                        )))
+                    })
+                    .children(label.map(|t| div().min_w_0().one_line().child(t))),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .medium()
+                    .text_color(k.ink)
+                    .child(word)
+                    .child(
+                        div()
+                            .mono()
+                            .font_weight(gpui::FontWeight::NORMAL)
+                            .text_color(k.ink_3)
+                            .child(clock(if active { now_ms() } else { end })),
+                    ),
+            );
+        Some(
             div()
                 .flex_none()
                 .mt(space::S16)
@@ -714,33 +704,39 @@ impl LivePane {
                     div()
                         .flex_none()
                         .t_meta()
-                        .line_height(px(24.))
+                        .line_height(MARK)
                         .text_color(k.ink_3)
                         .child(c::LIVE_REPLAY),
                 )
                 .child(
                     div()
-                        .relative()
                         .flex_1()
                         .min_w_0()
-                        .h(TRACK_HEIGHT)
-                        .mx(space::S12)
+                        .flex()
+                        .flex_col()
+                        .gap(space::S2)
                         .child(
                             div()
-                                .absolute()
-                                .left_0()
-                                .right_0()
-                                .top(TRACK_LINE_TOP)
-                                .h(px(2.))
-                                .rounded(px(1.))
-                                .bg(k.line_2),
+                                .relative()
+                                .mx(space::S12)
+                                .h(MARK)
+                                .child(
+                                    div()
+                                        .absolute()
+                                        .left_0()
+                                        .right_0()
+                                        .top(TRACK_LINE_TOP)
+                                        .h(px(2.))
+                                        .rounded(px(1.))
+                                        .bg(k.line_2),
+                                )
+                                .child(fill_line)
+                                .children(marks),
                         )
-                        .child(fill_line)
-                        .children(labels)
-                        .children(marks),
-                ),
-            cx,
-        ))
+                        .child(labels),
+                )
+                .into_any_element(),
+        )
     }
 
     /// The file, link and 产出 a criterion's proof points at; each opens it.
@@ -855,37 +851,13 @@ impl LivePane {
         };
         let active = run.status.is_active();
         let rows = items.iter().enumerate().map(|(i, item)| {
-            let status: AnyElement = match item.met {
-                Some(true) => ui::icon(Sym::Check, theme::icon::CHIP, k.ok).into_any_element(),
-                Some(false) => div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
-                    .child(div().text_color(k.bad_ink).child(c::LIVE_NOT_MET))
-                    .child(ui::icon(Sym::Close, theme::icon::CHIP, k.bad))
-                    .into_any_element(),
-                None if active => div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
-                    .child(div().text_color(k.live_ink).child(c::LIVE_CHECKING))
-                    .child(
-                        div()
-                            .size(px(12.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .child(ui::motion::breathe(
-                                SharedString::from(format!("live-check-{i}")),
-                                div().size(px(8.)).rounded_full().bg(k.live),
-                                cx,
-                            )),
-                    )
-                    .into_any_element(),
-                None => div()
-                    .text_color(k.ink_3)
-                    .child(c::LIVE_UNCHECKED)
-                    .into_any_element(),
+            // The state as a status badge (never a bare colored dot or
+            // colored words), in a 160 pt value column with the evidence.
+            let status = match item.met {
+                Some(true) => status_badge(StatusKind::Done, c::LIVE_MET, cx),
+                Some(false) => status_badge(StatusKind::Failed, c::LIVE_NOT_MET, cx),
+                None if active => status_badge(StatusKind::Working, c::LIVE_CHECKING, cx),
+                None => status_badge(StatusKind::Pending, c::LIVE_UNCHECKED, cx),
             };
             div()
                 .min_h(CRITERION_MIN)
@@ -900,29 +872,30 @@ impl LivePane {
                         .min_w_0()
                         .t_small()
                         .text_color(k.ink)
+                        .line_clamp(2)
                         .child(item.text.clone()),
                 )
                 .child(
                     div()
                         .flex_none()
+                        .w(VALUE_COLUMN)
                         .flex()
                         .items_center()
                         .justify_end()
                         .gap(space::S8)
                         .t_meta()
+                        .tnum()
                         .text_color(k.ink_2)
                         .children(
                             item.evidence
                                 .clone()
-                                .map(|e| div().max_w(px(220.)).one_line().child(e)),
+                                .map(|e| div().min_w_0().one_line().child(e)),
                         )
                         .children(self.evidence_chips(run, i, item, cx))
                         .child(status),
                 )
         });
-        Some(ui::motion::rise(
-            "live-acceptance",
-            2,
+        Some(
             div()
                 .flex_none()
                 .mt(space::S16)
@@ -946,9 +919,9 @@ impl LivePane {
                         .child(div().flex_1())
                         .child(div().t_meta().text_color(k.ink_3).child(summary)),
                 )
-                .child(div().mt(space::S6).children(rows)),
-            cx,
-        ))
+                .child(div().mt(space::S6).children(rows))
+                .into_any_element(),
+        )
     }
 
     /// 计划 n/m with its bar and steps (the plan card of the artboard).
@@ -976,17 +949,19 @@ impl LivePane {
             .iter()
             .position(|p| matches!(p.state, PlanState::Current | PlanState::Waiting))
             .map_or(done, |i| i + 1);
-        let bar = div()
-            .flex()
-            .gap(space::S4)
-            .children(run.plan.iter().map(|p| {
-                div().flex_1().h(px(3.)).rounded(px(2.)).bg(match p.state {
-                    PlanState::Done => k.ink_3,
-                    PlanState::Current => k.live,
-                    PlanState::Waiting => k.you,
-                    PlanState::Pending => k.line_2,
-                })
-            }));
+        // The one progress drawing (D12): the steps done as a determinate
+        // bar, `blue` while the member works, as in the 话题's plan card.
+        let finished = run
+            .plan
+            .iter()
+            .filter(|p| p.state == PlanState::Done)
+            .count();
+        let bar = steps_bar(
+            finished,
+            total,
+            (run.status.is_active() && !held).then_some(native_colors(cx).blue),
+            cx,
+        );
         let now = run.ended_at.unwrap_or_else(now_ms);
         let rows = run.plan.iter().enumerate().map(|(i, p)| {
             let started = times.get(i).copied();
@@ -1109,9 +1084,7 @@ impl LivePane {
                 }
             }
         });
-        Some(ui::motion::rise(
-            "live-plan",
-            3,
+        Some(
             div()
                 .flex_none()
                 .mt(space::S16)
@@ -1152,9 +1125,9 @@ impl LivePane {
                         .flex_col()
                         .gap(space::S2)
                         .children(rows),
-                ),
-            cx,
-        ))
+                )
+                .into_any_element(),
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1167,7 +1140,7 @@ impl LivePane {
         held_by_me: bool,
         can_control: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
+    ) -> AnyElement {
         let active = run.status.is_active();
         let stopping = self.services.provider.run_stopping(&run.id);
         let n = native_colors(cx);
@@ -1209,10 +1182,13 @@ impl LivePane {
         } else {
             None
         };
-        let developer_on = self.developer.is_some();
-        // The bottom bar: the hint at the leading edge, the developer view
-        // as a borderless button, then 停止 and the default 接管 at the
-        // trailing edge.
+        // The bottom bar: the hint on its own line (it wraps, so the one
+        // sentence that explains 接管 is never cut), then 停止… and the
+        // default 接管 at the trailing edge. The developer view is a toggle
+        // in the pane's toolbar row.
+        if hint.is_none() && stop.is_none() && take.is_none() {
+            return div().into_any_element();
+        }
         div()
             .flex_none()
             .px(px(20.))
@@ -1220,40 +1196,45 @@ impl LivePane {
             .border_t_1()
             .border_color(n.separator)
             .flex()
-            .items_center()
-            .gap(px(12.))
+            .flex_col()
+            .gap(space::S8)
+            .children(hint.map(|h| div().n_subheadline().text_color(n.secondary).child(h)))
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .one_line()
-                    .n_subheadline()
-                    .text_color(n.secondary)
-                    .children(hint),
+                    .flex()
+                    .items_center()
+                    .justify_end()
+                    .gap(px(12.))
+                    .children(stop)
+                    .children(take),
             )
-            .child(
-                borderless_text(
-                    "live-developer",
-                    if developer_on {
-                        c::LIVE_BACK_TO_SCREEN
-                    } else {
-                        c::LIVE_DEVELOPER
-                    },
-                    cx,
-                )
-                .text_color(n.secondary)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    if this.developer.take().is_none() {
-                        let services = this.services.clone();
-                        let view = cx.new(|cx| ProcessView::new(services, cx));
-                        view.update(cx, |v, cx| v.set_visible(true, cx));
-                        this.developer = Some(view);
-                    }
-                    cx.notify();
-                })),
-            )
-            .children(stop)
-            .children(take)
+            .into_any_element()
+    }
+
+    /// 开发者视图 as a toolbar toggle: on, the run's steps take the place of
+    /// the screen.
+    fn developer_toggle(&self, cx: &mut Context<Self>) -> gpui_component::button::Button {
+        let on = self.developer.is_some();
+        sym_toolbar_toggle(
+            "live-developer",
+            Sym::Terminal,
+            if on {
+                c::LIVE_BACK_TO_SCREEN
+            } else {
+                c::LIVE_DEVELOPER
+            },
+            on,
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            if this.developer.take().is_none() {
+                let services = this.services.clone();
+                let view = cx.new(|cx| ProcessView::new(services, cx));
+                view.update(cx, |v, cx| v.set_visible(true, cx));
+                this.developer = Some(view);
+            }
+            cx.notify();
+        }))
     }
 }
 
@@ -1294,22 +1275,44 @@ impl LivePane {
             )
             .on_click(move |_, _, cx| stop_run(&services, &run, cx))
         });
+        let developer = self.services.nav.read(cx).developer_view;
+        let nav = self.services.nav.clone();
+        let badge = crate::views::process::run_badge(run, stopping, cx);
         div()
             .size_full()
             .flex()
             .flex_col()
             .bg(n.content)
-            // The pane's toolbar row (52 pt): its title, Title 3.
+            // The pane's toolbar row (52 pt): its title (Title 3), the run's
+            // status badge and the 开发者视图 toggle.
             .child(
                 div()
                     .flex_none()
                     .h(metrics::TOOLBAR_ROW)
-                    .px(space::S16)
+                    .pl(space::S16)
+                    .pr(metrics::TOOLBAR_TRAILING)
                     .flex()
                     .items_center()
-                    .n_title3()
-                    .text_color(n.label)
-                    .child(crate::copy::process::RUNS),
+                    .gap(space::S8)
+                    .child(
+                        div()
+                            .flex_none()
+                            .n_title3()
+                            .text_color(n.label)
+                            .child(crate::copy::process::RUNS),
+                    )
+                    .child(badge)
+                    .child(div().flex_1())
+                    .child(ToolbarGroup::new([sym_toolbar_toggle(
+                        "steps-developer",
+                        Sym::Terminal,
+                        c::LIVE_DEVELOPER,
+                        developer,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        nav.update(cx, |nav, cx| nav.set_developer_view(!developer, cx))
+                    })])),
             )
             .child(div().flex_1().min_h(px(0.)).child(view))
             .children(stop.map(|stop| {
@@ -1569,7 +1572,8 @@ impl Render for LivePane {
                     div()
                         .pt(space::S4)
                         .px(SIDE)
-                        .pb(space::S20)
+                        // Nothing ends cut under the bottom bar (§2.21).
+                        .pb(space::S24)
                         .flex()
                         .flex_col()
                         .children(held.then(|| {

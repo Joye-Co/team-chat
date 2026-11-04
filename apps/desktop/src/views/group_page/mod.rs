@@ -16,7 +16,7 @@ pub mod scenes;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    Window, div, prelude::FluentBuilder as _, px,
+    Window, div, px,
 };
 use gpui_component::{
     WindowExt as _,
@@ -24,17 +24,20 @@ use gpui_component::{
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
 };
 
+use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{Place, RightPane, Services},
     copy::{common, fill, group_page as c, nav as nav_copy},
     data::{ArtifactKind, BotRunSummary, PlanState, Topic, TopicStatus},
     ui::{
         native::{
-            InspectorSection, NativeTextField, NativeType as _, SheetLayout, SheetWidth,
-            ToolbarGroup, ToolbarItemKind, ToolbarRow, borderless_button, emphasized,
-            inspector_column, metrics, native_colors, native_sheet, sheet_buttons, toolbar_item,
+            InspectorSection, NativeTextField, NativeType as _, PushSize, PushStyle, SheetLayout,
+            SheetWidth, ToolbarGroup, ToolbarItemKind, ToolbarRow, borderless_button, emphasized,
+            inspector_column, metrics, native_colors, native_sheet,
+            page::{self, PageLoad, Status},
+            push_button, sheet_buttons, toolbar_item,
         },
-        sf_symbols::{Sf, Sym, SymSize},
+        sf_symbols::{Sf, Sym},
     },
     views::{
         composer::ComposerView,
@@ -42,11 +45,13 @@ use crate::{
     },
 };
 
-use rows::{AVATAR, ROW, RowInk, line, mail_row, state_line};
+use rows::line;
 
 pub struct GroupPage {
     services: Services,
     aside_open: bool,
+    /// 进行中 shows every 话题 (`看全部`), not the first [`ACTIVE_ROWS`].
+    show_all: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -62,6 +67,7 @@ impl GroupPage {
             _subscriptions: watch(&services, cx),
             services,
             aside_open: true,
+            show_all: false,
         }
     }
 
@@ -186,10 +192,20 @@ pub fn short_time(now: crate::data::Millis, at: crate::data::Millis) -> String {
     }
 }
 
+/// The 进行中 rows shown before `看全部`.
+const ACTIVE_ROWS: usize = 8;
+/// The columns of the 群's lists: StatusBadge and time.
+const COLUMNS: page::Columns = page::Columns {
+    status: Some(px(112.)),
+    time: Some(page::m::TIME_COLUMN),
+    actions: None,
+};
+
 impl GroupPage {
-    /// The toolbar row: the 群's name over its purpose; 产出 and 群设置, then
-    /// the inspector toggle.
+    /// The toolbar row: the 群's name over its purpose; 产出 and 群设置, the
+    /// primary `新话题`, then the right-pane toggle.
     fn toolbar(&self, g: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+        let k = native_colors(cx);
         let p = &self.services.provider;
         let group = p.groups().into_iter().find(|x| x.id == g);
         let n = group.as_ref().map(|x| x.member_ids.len()).unwrap_or(0);
@@ -216,60 +232,64 @@ impl GroupPage {
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             group_menu(menu, &services, &group_id)
         });
-        ToolbarRow::new(group.map(|x| x.name).unwrap_or_default())
-            .subtitle(subtitle)
-            .leading_inset(rows::toolbar_leading(&self.services, cx))
-            .group(ToolbarGroup::new([
-                toolbar_item(
-                    "group-new-topic",
-                    Sf::NewTopic,
-                    nav_copy::NEW_TOPIC,
-                    ToolbarItemKind::Plain,
-                    active,
-                    window,
-                    cx,
-                )
-                .on_click(|_, window, cx| {
-                    window.dispatch_action(Box::new(crate::app::NewTopic), cx)
-                }),
-                toolbar_item(
-                    "group-outputs",
-                    Sf::Outputs,
-                    c::GROUP_PAGE_OUTPUTS,
-                    ToolbarItemKind::Plain,
-                    active,
-                    window,
-                    cx,
-                )
-                .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_artifacts(cx))),
-            ]))
-            .group(rows::toolbar_capsule(more, cx))
-            .group(ToolbarGroup::new([toolbar_item(
-                "group-inspector",
-                Sf::PaneRight,
-                if self.aside_open {
-                    c::GROUP_PAGE_COLLAPSE
-                } else {
-                    c::GROUP_PAGE_EXPAND
-                },
-                if self.aside_open {
-                    ToolbarItemKind::Toggled
-                } else {
-                    ToolbarItemKind::Plain
-                },
-                active,
-                window,
-                cx,
+        let new_topic = push_button(
+            "group-new-topic",
+            c::GROUP_PAGE_NEW_TOPIC,
+            PushStyle::Default,
+            PushSize::Small,
+            cx,
+        )
+        .on_click(|_, window, cx| window.dispatch_action(Box::new(crate::app::NewTopic), cx));
+        div()
+            .flex_none()
+            .border_b_1()
+            .border_color(k.separator)
+            .child(
+                ToolbarRow::new(group.map(|x| x.name).unwrap_or_default())
+                    .subtitle(subtitle)
+                    .leading_inset(rows::toolbar_leading(&self.services, cx))
+                    .group(ToolbarGroup::new([toolbar_item(
+                        "group-outputs",
+                        Sf::Outputs,
+                        c::GROUP_PAGE_OUTPUTS,
+                        ToolbarItemKind::Plain,
+                        active,
+                        window,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        nav.update(cx, |n, cx| n.open_artifacts(cx))
+                    })]))
+                    .group(rows::toolbar_capsule(more, cx))
+                    .group(new_topic)
+                    .group(ToolbarGroup::new([toolbar_item(
+                        "group-inspector",
+                        Sf::PaneRight,
+                        if self.aside_open {
+                            c::GROUP_PAGE_COLLAPSE
+                        } else {
+                            c::GROUP_PAGE_EXPAND
+                        },
+                        if self.aside_open {
+                            ToolbarItemKind::Toggled
+                        } else {
+                            ToolbarItemKind::Plain
+                        },
+                        active,
+                        window,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.aside_open = !this.aside_open;
+                        cx.notify();
+                    }))])),
             )
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.aside_open = !this.aside_open;
-                cx.notify();
-            }))]))
             .into_any_element()
     }
 
-    /// One 进行中 row: the owner, the title, the state as a symbol and text
-    /// in its state color, the time; a run shows its step at the end.
+    /// One 进行中 row (§2.6): a topic-status icon box (not the owner's
+    /// avatar, which repeats), the title over the owner and the step or
+    /// note, then the StatusBadge and the time at fixed columns.
     fn topic_row(
         &self,
         t: &Topic,
@@ -284,35 +304,33 @@ impl GroupPage {
             .map(|r| r.bot_id.clone())
             .or_else(|| t.owner_id.clone())
             .unwrap_or_else(|| t.created_by.clone());
-        let owner = p.member(&owner_id);
         let glance = p.topic_glance(&t.group_id, &t.id);
-        let owner_name = owner.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let owner_name = member_name(&self.services, &owner_id);
         let with_note = |first: String| match &glance.state_note {
             Some(n) => format!("{first} · {n}"),
             None => first,
         };
-        let (second, slot): (AnyElement, Option<AnyElement>) = match st {
+        let (glyph, second, badge): (Sym, String, Option<AnyElement>) = match st {
             Standing::OnMe => {
-                let label = match t.status {
-                    TopicStatus::WaitingReview => p
-                        .topic_changes(&t.group_id, &t.id)
-                        .map(|ch| {
+                let (label, pr) = match t.status {
+                    TopicStatus::WaitingReview => (
+                        c::GROUP_PAGE_STATUS_REVIEW,
+                        p.topic_changes(&t.group_id, &t.id).map(|ch| {
                             fill(
-                                c::GROUP_PAGE_NEEDS_REVIEW_PR,
+                                crate::copy::desk::DESK_PROOF_PR,
                                 &[("n", &ch.number.to_string())],
                             )
-                        })
-                        .unwrap_or_else(|| c::GROUP_PAGE_NEEDS_REVIEW.to_string()),
-                    TopicStatus::WaitingAnswer => c::GROUP_PAGE_NEEDS_DECISION.to_string(),
-                    _ => c::GROUP_PAGE_NEEDS_ANSWER.to_string(),
-                };
-                (
-                    state_line(
-                        Some((Sym::NeedsYou, k.amber, label)),
-                        Some(with_note(owner_name)),
-                        k.secondary,
+                        }),
                     ),
-                    None,
+                    TopicStatus::WaitingAnswer => (c::GROUP_PAGE_STATUS_DECIDE, None),
+                    _ => (c::GROUP_PAGE_STATUS_ANSWER, None),
+                };
+                let mut parts: Vec<String> = pr.into_iter().collect();
+                parts.push(with_note(owner_name));
+                (
+                    Sym::NeedsYou,
+                    parts.join(" · "),
+                    Some(page::status_badge(Status::NeedsYou, label, cx)),
                 )
             }
             Standing::Running => {
@@ -325,42 +343,42 @@ impl GroupPage {
                 let mut parts = vec![owner_name];
                 parts.extend(step.map(|i| r.plan[i].text.clone()));
                 parts.push(kit::elapsed(p.clock_now(), since));
-                let progress = kit::plan_progress(&r.plan)
-                    .map(|(n, m)| rows::progress_slot(n, m, k.blue, k.secondary));
+                let text = match kit::plan_progress(&r.plan) {
+                    Some((n, m)) => fill(
+                        c::GROUP_PAGE_STATUS_WORKING,
+                        &[("n", &n.to_string()), ("m", &m.to_string())],
+                    ),
+                    None => c::GROUP_PAGE_STATUS_STARTED.to_string(),
+                };
                 (
-                    state_line(None, Some(parts.join(" · ")), k.secondary),
-                    progress,
+                    Sym::Spinner,
+                    parts.join(" · "),
+                    Some(page::status_badge(Status::Working, text, cx)),
                 )
             }
             Standing::OnOthers => {
-                let who = t
-                    .waiting_on
-                    .iter()
-                    .map(|w| member_name(&self.services, w))
-                    .collect::<Vec<_>>()
-                    .join("、");
-                (
-                    state_line(
-                        Some((
-                            Sym::Waiting,
-                            k.secondary,
-                            fill(c::GROUP_PAGE_WAITING_ON, &[("name", &who)]),
-                        )),
-                        glance.state_note.clone(),
-                        k.secondary,
+                let text = match t.waiting_on.as_slice() {
+                    [one] => fill(
+                        c::GROUP_PAGE_STATUS_WAITING,
+                        &[("name", &member_name(&self.services, one))],
                     ),
-                    None,
+                    many => fill(
+                        c::GROUP_PAGE_STATUS_WAITING_MANY,
+                        &[("n", &many.len().to_string())],
+                    ),
+                };
+                (
+                    Sym::Waiting,
+                    glance.state_note.clone().unwrap_or(owner_name),
+                    Some(page::status_badge(Status::Queued, text, cx)),
                 )
             }
             Standing::Other => (
-                state_line(
-                    None,
-                    Some(with_note(fill(
-                        c::GROUP_PAGE_ASKED_BY,
-                        &[("name", &member_name(&self.services, &t.created_by))],
-                    ))),
-                    k.secondary,
-                ),
+                Sym::Topic,
+                with_note(fill(
+                    c::GROUP_PAGE_ASKED_BY,
+                    &[("name", &member_name(&self.services, &t.created_by))],
+                )),
                 None,
             ),
         };
@@ -371,20 +389,23 @@ impl GroupPage {
             .map(|r| r.id.clone());
         let menu_nav = self.services.nav.clone();
         let (mg, mt) = (gid.clone(), tid.clone());
-        mail_row(
+        let title = t.title.clone();
+        page::PageRow {
+            media: Some(page::icon_box(glyph, Some(k.label), cx)),
+            second: Some(line(second).into_any_element()),
+            status: badge,
+            time: Some(clock(t.last_activity_at).into()),
+            separator: !last,
+            ..page::PageRow::new(t.title.clone())
+        }
+        .render(
             SharedString::from(format!("group-topic-{}", t.id)),
-            ROW,
-            rows::avatar(owner.as_ref(), AVATAR, cx),
-            t.title.clone(),
-            // One trailing slot per line: the time on the title line, the
-            // progress of a run on the second line.
-            Some(rows::time_slot(clock(t.last_activity_at), k.secondary)),
-            second,
-            slot,
-            !last,
-            RowInk::new(None, cx),
+            COLUMNS,
             cx,
         )
+        .tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
+        })
         .on_click(move |_, _, cx| {
             let (gid, tid, live) = (gid.clone(), tid.clone(), live.clone());
             nav.update(cx, |nav, cx| {
@@ -414,23 +435,18 @@ impl GroupPage {
         done.into_iter()
             .enumerate()
             .map(|(i, d)| {
-                let member = p.member(&d.member_id);
                 let nav = self.services.nav.clone();
                 let (gid, tid) = (d.group_id.clone(), d.topic_id.clone());
-                let mut rest = vec![member.as_ref().map(|m| m.name.clone()).unwrap_or_default()];
+                let mut rest = vec![member_name(&self.services, &d.member_id)];
                 rest.extend(d.note.clone());
-                mail_row(
-                    SharedString::from(format!("group-done-{i}")),
-                    ROW,
-                    rows::avatar(member.as_ref(), AVATAR, cx),
-                    d.title.clone(),
-                    Some(rows::time_slot(kit::month_day(d.at), k.secondary)),
-                    state_line(None, Some(rest.join(" · ")), k.secondary),
-                    None,
-                    i + 1 < n,
-                    RowInk::new(None, cx),
-                    cx,
-                )
+                page::PageRow {
+                    media: Some(page::icon_box(Sym::Done, Some(k.label), cx)),
+                    second: Some(line(rest.join(" · ")).into_any_element()),
+                    time: Some(kit::month_day(d.at).into()),
+                    separator: i + 1 < n,
+                    ..page::PageRow::new(d.title.clone())
+                }
+                .render(SharedString::from(format!("group-done-{i}")), COLUMNS, cx)
                 .on_click(move |_, _, cx| {
                     let (gid, tid) = (gid.clone(), tid.clone());
                     nav.update(cx, |nav, cx| nav.open_topic(gid, tid, cx))
@@ -440,17 +456,52 @@ impl GroupPage {
             .collect()
     }
 
-    /// The inspector: the 群's info, Contacts-style.
-    fn inspector(&self, g: &str, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    /// The right pane (§2.5): the header band `群资料`, then 成员, 群里的决定,
+    /// 最近的产出 and 在哪干活, each with a compact empty when it has nothing.
+    /// `loading` draws skeleton rows instead.
+    fn inspector(
+        &self,
+        g: &str,
+        loading: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let k = native_colors(cx);
         let p = self.services.provider.clone();
-        let mut col = inspector_column(cx)
+        let header = div()
+            .flex_none()
+            .h(metrics::TOOLBAR_ROW)
+            .px(metrics::INSPECTOR_PAD)
+            .border_b_1()
+            .border_color(k.separator)
+            .flex()
+            .flex_col()
+            .justify_center()
+            .child(
+                div()
+                    .n_title3()
+                    .font_weight(gpui::FontWeight::MEDIUM)
+                    .text_color(k.label)
+                    .child(c::GROUP_PAGE_INFO),
+            )
+            .child(
+                div()
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .child(c::GROUP_PAGE_INFO_LINE),
+            );
+        let mut col = div()
             .id("group-inspector")
+            .flex_1()
+            .min_h(px(0.))
             .overflow_y_scroll()
-            .pt(metrics::TOOLBAR_ROW - px(12.))
-            .pb(px(16.));
+            .pt(tsp::S4)
+            .pb(tsp::S24)
+            .flex()
+            .flex_col();
 
-        // 成员.
+        // 成员: the name keeps its room; the 岗位 truncates first, and both
+        // show in full in the tooltip.
         let ids = p
             .groups()
             .into_iter()
@@ -463,24 +514,51 @@ impl GroupPage {
             .filter(|m| !m.deactivated)
             .collect();
         let mut sec = InspectorSection::new("group-ins-members", c::GROUP_PAGE_MEMBERS_TITLE);
-        for m in members {
+        if loading {
+            sec = sec.row(page::skeleton_rows(
+                "group-sk-m",
+                page::SkeletonKind::Compact,
+                4,
+                cx,
+            ));
+        } else if members.is_empty() {
+            sec = sec.row(page::compact_empty(
+                Sym::Members,
+                c::GROUP_PAGE_MEMBERS_EMPTY,
+                None,
+                cx,
+            ));
+        }
+        for m in members.into_iter().filter(|_| !loading) {
             let nav = self.services.nav.clone();
             let id = m.id.clone();
+            let full = match &m.role {
+                Some(r) if !r.is_empty() => format!("{} · {r}", m.name),
+                _ => m.name.clone(),
+            };
             sec = sec.row(
                 div()
                     .id(SharedString::from(format!("group-member-{}", m.id)))
-                    .h(metrics::INSPECTOR_ROW)
+                    .h(tsp::S32)
                     .flex()
                     .items_center()
-                    .gap(px(8.))
+                    .gap(tsp::S8)
                     .n_body()
-                    .child(rows::avatar(Some(&m), px(16.), cx))
-                    .child(div().flex_none().text_color(k.label).child(m.name.clone()))
+                    .child(rows::avatar(Some(&m), tsp::S16, cx))
+                    .child(
+                        line(m.name.clone())
+                            .flex_none()
+                            .max_w(px(160.))
+                            .text_color(k.label),
+                    )
                     .child(
                         line(m.role.clone().unwrap_or_default())
                             .flex_1()
                             .text_color(k.secondary),
                     )
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
+                    })
                     .on_click(move |_, _, cx| {
                         let id = id.clone();
                         nav.update(cx, |n, cx| n.open_members(Some(id), cx))
@@ -490,10 +568,14 @@ impl GroupPage {
         col = col.child(sec);
 
         // 群里的决定.
-        let decisions = p.group_decisions(g);
+        let decisions = if loading {
+            Vec::new()
+        } else {
+            p.group_decisions(g)
+        };
         let now = p.clock_now();
         let mut sec = InspectorSection::new("group-ins-decisions", c::GROUP_PAGE_DECISIONS);
-        if p.can_record_decision(g) {
+        if p.can_record_decision(g) && !loading {
             let services = self.services.clone();
             let group = g.to_string();
             sec = sec.action(
@@ -510,16 +592,22 @@ impl GroupPage {
                 }),
             );
         }
-        if decisions.is_empty() {
-            sec = sec.row(
-                div()
-                    .py(px(4.))
-                    .n_subheadline()
-                    .text_color(k.secondary)
-                    .child(c::GROUP_PAGE_DECISIONS_NOTE),
-            );
+        if loading {
+            sec = sec.row(page::skeleton_rows(
+                "group-sk-d",
+                page::SkeletonKind::Compact,
+                2,
+                cx,
+            ));
+        } else if decisions.is_empty() {
+            sec = sec.row(page::compact_empty(
+                Sym::Check,
+                c::GROUP_PAGE_DECISIONS_NOTE,
+                None,
+                cx,
+            ));
         }
-        for d in decisions {
+        for (i, d) in decisions.into_iter().enumerate() {
             let who = p.member(&d.by);
             let date = if now - d.at < 60_000 {
                 c::GROUP_PAGE_JUST_NOW.to_string()
@@ -528,9 +616,11 @@ impl GroupPage {
             };
             sec = sec.row(
                 div()
-                    .py(px(4.))
+                    .id(SharedString::from(format!("group-decision-{i}")))
+                    .py(tsp::S6)
                     .flex()
                     .flex_col()
+                    .gap(tsp::S2)
                     .child(div().n_body().text_color(k.label).child(d.text.clone()))
                     .child(
                         div()
@@ -547,152 +637,179 @@ impl GroupPage {
         col = col.child(sec);
 
         // 最近的产出.
-        let outputs: Vec<_> = p.group_artifacts(g).into_iter().take(3).collect();
-        if !outputs.is_empty() {
-            let mut sec = InspectorSection::new("group-ins-outputs", c::GROUP_PAGE_RECENT_OUTPUTS);
-            for a in outputs {
-                let nav = self.services.nav.clone();
-                let id = a.id.clone();
-                let glyph = match a.kind {
-                    ArtifactKind::Image => Sym::Image,
-                    ArtifactKind::File => Sym::File,
-                    _ => Sym::Document,
-                };
-                sec = sec.row(
-                    div()
-                        .id(SharedString::from(format!("group-output-{}", a.id)))
-                        .py(px(4.))
-                        .flex()
-                        .items_start()
-                        .gap(px(8.))
-                        .child(div().pt(px(1.)).child(rows::sym(
-                            glyph,
-                            SymSize::INLINE,
-                            k.secondary,
-                        )))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .flex()
-                                .flex_col()
-                                .child(line(a.title.clone()).n_body().text_color(k.label))
-                                .child(
-                                    line(fill(
-                                        c::GROUP_PAGE_ARTIFACT_META,
-                                        &[
-                                            ("v", &a.version.to_string()),
-                                            ("kind", kind_label(a.kind)),
-                                            ("name", &member_name(&self.services, &a.created_by)),
-                                        ],
-                                    ))
-                                    .n_subheadline()
-                                    .text_color(k.secondary),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .n_subheadline()
-                                .n_figures()
-                                .text_color(k.secondary)
-                                .child(short_time(p.clock_now(), a.updated_at)),
-                        )
-                        .on_click(move |_, _, cx| {
-                            let id = id.clone();
-                            nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
-                        }),
-                );
-            }
-            col = col.child(sec);
+        let outputs: Vec<_> = if loading {
+            Vec::new()
+        } else {
+            p.group_artifacts(g).into_iter().take(3).collect()
+        };
+        let mut sec = InspectorSection::new("group-ins-outputs", c::GROUP_PAGE_RECENT_OUTPUTS);
+        if loading {
+            sec = sec.row(page::skeleton_rows(
+                "group-sk-o",
+                page::SkeletonKind::Compact,
+                2,
+                cx,
+            ));
+        } else if outputs.is_empty() {
+            sec = sec.row(page::compact_empty(
+                Sym::Document,
+                c::GROUP_PAGE_OUTPUTS_EMPTY,
+                None,
+                cx,
+            ));
         }
+        for a in outputs {
+            let nav = self.services.nav.clone();
+            let id = a.id.clone();
+            let glyph = match a.kind {
+                ArtifactKind::Image => Sym::Image,
+                ArtifactKind::File => Sym::File,
+                _ => Sym::Document,
+            };
+            let title = a.title.clone();
+            sec = sec.row(
+                div()
+                    .id(SharedString::from(format!("group-output-{}", a.id)))
+                    .py(tsp::S6)
+                    .flex()
+                    .items_start()
+                    .gap(tsp::S8)
+                    .child(div().pt(tsp::S2).child(page::row_icon(glyph, k.secondary)))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w(px(0.))
+                            .flex()
+                            .flex_col()
+                            .child(line(a.title.clone()).n_body().text_color(k.label))
+                            .child(
+                                line(fill(
+                                    c::GROUP_PAGE_ARTIFACT_META,
+                                    &[
+                                        ("v", &a.version.to_string()),
+                                        ("kind", kind_label(a.kind)),
+                                        ("name", &member_name(&self.services, &a.created_by)),
+                                    ],
+                                ))
+                                .n_subheadline()
+                                .text_color(k.secondary),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_none()
+                            .n_subheadline()
+                            .n_figures()
+                            .text_color(k.secondary)
+                            .child(short_time(p.clock_now(), a.updated_at)),
+                    )
+                    .tooltip(move |window, cx| {
+                        gpui_component::tooltip::Tooltip::new(title.clone()).build(window, cx)
+                    })
+                    .on_click(move |_, _, cx| {
+                        let id = id.clone();
+                        nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
+                    }),
+            );
+        }
+        col = col.child(sec);
 
         // 在哪干活: the team computer a member of this 群 works on now.
-        let run = p
-            .topics(g)
-            .into_iter()
-            .flat_map(|t| p.runs(g, &t.id))
-            .filter(|r| r.status.is_active() && r.machine_name.is_some())
-            .max_by_key(|r| r.updated_at);
-        if let Some(run) = run {
-            let who = member_name(&self.services, &run.bot_id);
-            let step = run
-                .plan
-                .iter()
-                .find(|s| s.state == PlanState::Current)
-                .map(|s| format!("{who} {}", s.text))
-                .unwrap_or_else(|| who.clone());
-            let nav = self.services.nav.clone();
-            let (gid, tid, rid) = (run.group_id.clone(), run.topic_id.clone(), run.id.clone());
-            let name = run.machine_name.clone().unwrap_or_default();
-            let glyph = if name.to_lowercase().contains("mini") {
-                Sym::MacMini
-            } else {
-                Sym::Computer
-            };
-            let sec = InspectorSection::new("group-ins-where", c::GROUP_PAGE_WHERE)
-                .action(
-                    borderless_button(
-                        "group-machine-open",
-                        Sf::Open,
-                        fill(c::GROUP_PAGE_SEE_COMPUTER, &[("name", &who)]),
-                        window,
-                        cx,
+        let run = if loading {
+            None
+        } else {
+            p.topics(g)
+                .into_iter()
+                .flat_map(|t| p.runs(g, &t.id))
+                .filter(|r| r.status.is_active() && r.machine_name.is_some())
+                .max_by_key(|r| r.updated_at)
+        };
+        let mut sec = InspectorSection::new("group-ins-where", c::GROUP_PAGE_WHERE);
+        match run {
+            None if loading => {
+                sec = sec.row(page::skeleton_rows(
+                    "group-sk-w",
+                    page::SkeletonKind::Compact,
+                    1,
+                    cx,
+                ));
+            }
+            None => {
+                sec = sec.row(page::compact_empty(
+                    Sym::Computer,
+                    c::GROUP_PAGE_WHERE_EMPTY,
+                    None,
+                    cx,
+                ));
+            }
+            Some(run) => {
+                let who = member_name(&self.services, &run.bot_id);
+                let step = run
+                    .plan
+                    .iter()
+                    .find(|s| s.state == PlanState::Current)
+                    .map(|s| format!("{who} {}", s.text))
+                    .unwrap_or_else(|| who.clone());
+                let nav = self.services.nav.clone();
+                let (gid, tid, rid) = (run.group_id.clone(), run.topic_id.clone(), run.id.clone());
+                let name = run.machine_name.clone().unwrap_or_default();
+                let glyph = if name.to_lowercase().contains("mini") {
+                    Sym::MacMini
+                } else {
+                    Sym::Computer
+                };
+                let tip = format!("{name} · {step}");
+                sec = sec
+                    .action(
+                        borderless_button(
+                            "group-machine-open",
+                            Sf::Open,
+                            fill(c::GROUP_PAGE_SEE_COMPUTER, &[("name", &who)]),
+                            window,
+                            cx,
+                        )
+                        .on_click(move |_, _, cx| {
+                            cx.stop_propagation();
+                            let (gid, tid, rid) = (gid.clone(), tid.clone(), rid.clone());
+                            nav.update(cx, |nav, cx| {
+                                nav.open_topic(gid, tid, cx);
+                                nav.set_right_pane(RightPane::Live(rid), cx);
+                            })
+                        }),
                     )
-                    .on_click(move |_, _, cx| {
-                        cx.stop_propagation();
-                        let (gid, tid, rid) = (gid.clone(), tid.clone(), rid.clone());
-                        nav.update(cx, |nav, cx| {
-                            nav.open_topic(gid, tid, cx);
-                            nav.set_right_pane(RightPane::Live(rid), cx);
-                        })
-                    }),
-                )
-                .row(
-                    div()
-                        .py(px(4.))
-                        .flex()
-                        .items_start()
-                        .gap(px(8.))
-                        .child(div().pt(px(1.)).child(rows::sym(
-                            glyph,
-                            SymSize::INLINE,
-                            k.secondary,
-                        )))
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w(px(0.))
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(6.))
-                                        .n_body()
-                                        .child(line(name).text_color(k.label))
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .size(px(6.))
-                                                .rounded_full()
-                                                .bg(k.blue),
-                                        )
-                                        .child(
-                                            div()
-                                                .flex_none()
-                                                .n_subheadline()
-                                                .text_color(k.secondary)
-                                                .child(c::GROUP_PAGE_IN_USE),
-                                        ),
-                                )
-                                .child(line(step).n_subheadline().text_color(k.secondary)),
-                        ),
-                );
-            col = col.child(sec);
+                    .row(
+                        div()
+                            .id("group-machine")
+                            .py(tsp::S6)
+                            .flex()
+                            .items_center()
+                            .gap(tsp::S8)
+                            .child(page::row_icon(glyph, k.secondary))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(0.))
+                                    .flex()
+                                    .flex_col()
+                                    .child(line(name).n_body().text_color(k.label))
+                                    .child(line(step).n_subheadline().text_color(k.secondary)),
+                            )
+                            .child(page::status_badge(
+                                Status::Working,
+                                c::GROUP_PAGE_IN_USE,
+                                cx,
+                            ))
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                            }),
+                    );
+            }
         }
-        col.into_any_element()
+        col = col.child(sec);
+        inspector_column(cx)
+            .child(header)
+            .child(col)
+            .into_any_element()
     }
 }
 
@@ -721,51 +838,127 @@ impl Render for GroupPage {
         let on_me = active.iter().filter(|(s, ..)| *s == Standing::OnMe).count();
         crate::selftest::drawn::mark("group-page", format!("{g} active={n} on_me={on_me}"));
         let toolbar = self.toolbar(&g, window, cx);
+        let done = self.done_rows(&g, cx);
+        let load = PageLoad::of(
+            &self.services,
+            n > 0 || !done.is_empty() || !p.topics(&g).is_empty(),
+        );
+        let shown = if self.show_all { n } else { n.min(ACTIVE_ROWS) };
         let topic_rows: Vec<AnyElement> = active
             .iter()
+            .take(shown)
             .enumerate()
-            .map(|(i, (st, t, run))| self.topic_row(t, *st, run.as_ref(), i + 1 == n, cx))
+            .map(|(i, (st, t, run))| self.topic_row(t, *st, run.as_ref(), i + 1 == shown, cx))
             .collect();
-        let done = self.done_rows(&g, cx);
-        let mut list = div()
+        let mut content = div()
+            .px(page::m::EDGE)
+            .pt(page::m::GUTTER)
+            .pb(page::m::GUTTER)
+            .flex()
+            .flex_col()
+            .gap(page::m::GUTTER);
+        let section = |header: gpui::Div, body: gpui::Div| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(page::m::HEADER_GAP)
+                .child(header)
+                .child(body)
+        };
+        match load {
+            PageLoad::Loading | PageLoad::Failed => {
+                if load == PageLoad::Failed {
+                    content = content.child(page::load_failed("group", &self.services, cx));
+                }
+                content = content.child(section(
+                    page::section_header(c::GROUP_PAGE_ACTIVE, None, None, None, cx),
+                    div().child(page::skeleton_rows(
+                        "group-sk",
+                        page::SkeletonKind::Row,
+                        4,
+                        cx,
+                    )),
+                ));
+            }
+            PageLoad::Ready if n == 0 && done.is_empty() => {
+                content = content.child(
+                    div()
+                        .min_h(px(360.))
+                        .flex()
+                        .rounded(page::m::FRAME_RADIUS)
+                        .border_1()
+                        .border_color(k.separator)
+                        .child(page::page_empty(
+                            Sym::Topic,
+                            c::GROUP_PAGE_EMPTY_TITLE,
+                            c::GROUP_PAGE_EMPTY_BODY,
+                            vec![
+                                push_button(
+                                    "group-empty-new",
+                                    c::GROUP_PAGE_NEW_TOPIC,
+                                    PushStyle::Default,
+                                    PushSize::Small,
+                                    cx,
+                                )
+                                .on_click(|_, window, cx| {
+                                    window.dispatch_action(Box::new(crate::app::NewTopic), cx)
+                                })
+                                .into_any_element(),
+                            ],
+                            cx,
+                        )),
+                );
+            }
+            PageLoad::Ready => {
+                if n > 0 {
+                    let footer = (n > ACTIVE_ROWS).then(|| {
+                        let text = if self.show_all {
+                            c::GROUP_PAGE_SHOW_LESS.to_string()
+                        } else {
+                            fill(c::GROUP_PAGE_SHOW_ALL, &[("n", &n.to_string())])
+                        };
+                        page::list_footer("group-more-topics", text, None, cx)
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.show_all = !this.show_all;
+                                cx.notify();
+                            }))
+                    });
+                    let waiting = (on_me > 0).then(|| {
+                        page::status_badge(
+                            Status::NeedsYou,
+                            fill(c::GROUP_PAGE_WAITING_YOU, &[("n", &on_me.to_string())]),
+                            cx,
+                        )
+                    });
+                    content = content.child(section(
+                        page::section_header(c::GROUP_PAGE_ACTIVE, Some(n), None, waiting, cx),
+                        page::frame(cx).children(topic_rows).children(footer),
+                    ));
+                }
+                if !done.is_empty() {
+                    content = content.child(section(
+                        page::section_header(
+                            c::GROUP_PAGE_RECENT_DONE,
+                            Some(done.len()),
+                            None,
+                            None,
+                            cx,
+                        ),
+                        page::frame(cx).children(done),
+                    ));
+                }
+            }
+        }
+        let list = div()
             .id("group-main")
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
-            .pt(px(4.))
-            .pb(px(20.))
-            .flex()
-            .flex_col();
-        if !topic_rows.is_empty() {
-            list = list
-                .child(
-                    rows::section_header(c::GROUP_PAGE_ACTIVE, Some(n.to_string()), cx).child(
-                        div()
-                            .when(on_me == 0, |d| d.invisible())
-                            .flex()
-                            .items_center()
-                            .gap(px(3.))
-                            .n_body()
-                            .text_color(k.amber)
-                            .child(rows::sym(Sym::NeedsYou, SymSize::INLINE_SMALL, k.amber))
-                            .child(fill(
-                                c::GROUP_PAGE_WAITING_YOU,
-                                &[("n", &on_me.to_string())],
-                            )),
-                    ),
-                )
-                .children(topic_rows);
-        }
-        if !done.is_empty() {
-            list = list
-                .child(rows::section_header(
-                    c::GROUP_PAGE_RECENT_DONE,
-                    Some(c::GROUP_PAGE_THIS_WEEK.to_string()),
-                    cx,
-                ))
-                .children(done);
-        }
-        let inspector = self.aside_open.then(|| self.inspector(&g, window, cx));
+            .child(content);
+        let inspector = self
+            .aside_open
+            .then(|| self.inspector(&g, load != PageLoad::Ready, window, cx));
         div()
             .size_full()
             .flex()

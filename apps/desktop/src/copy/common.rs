@@ -30,4 +30,9 @@ crate::copy! {
     CLOSE = "关闭",
     MEMBER_DEACTIVATED = "已停用",
     MORE_ITEMS = "等 {n} 人",
+    // --- v13/ux-pages: page states (COMPLETENESS.md §2.14, §2.15) ---
+    PAGE_LOAD_FAILED = "连不上服务器",
+    PAGE_LOAD_FAILED_LINE = "这台电脑上还没有这一页的内容，连上后会显示。",
+    PAGE_RETRY = "重试",
+    // --- end v13/ux-pages ---
 }
