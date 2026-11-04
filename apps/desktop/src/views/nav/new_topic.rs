@@ -161,9 +161,11 @@ impl Render for NewTopicSheet {
         let groups = self.groups.clone();
         let current = self.group.clone();
         let this = cx.entity().downgrade();
+        let group_tip = group_name.clone();
         let group_popup =
             popup_button("new-topic-group", group_name, PushSize::Regular, window, cx)
-                .max_w(px(280.))
+                .w(form_field_width(SheetWidth::Form))
+                .tooltip(group_tip)
                 .dropdown_menu(move |menu, _, _| {
                     groups.iter().fold(menu, |menu, (id, name)| {
                         let this = this.clone();
@@ -182,12 +184,11 @@ impl Render for NewTopicSheet {
                     })
                 });
         let body_focused = self.body.read(cx).focus_handle(cx).is_focused(window);
-        let field_w = form_field_width(SheetWidth::Form);
         // A quiet multi-line field: `content` fill, a 1 px `separator` edge,
         // and the soft focus halo only while it has the focus.
         let body_field = div()
             .id("new-topic-body")
-            .w(field_w)
+            .w_full()
             .h(BODY_FIELD)
             .px(metrics::FIELD_PAD)
             .py(px(4.))
@@ -220,7 +221,7 @@ impl Render for NewTopicSheet {
                             .child(sheet_form_row(o::NEW_TOPIC_GROUP, group_popup, cx))
                             .child(sheet_form_row(
                                 o::NEW_TOPIC_NAME,
-                                NativeTextField::new("new-topic-title", &self.title).width(field_w),
+                                NativeTextField::new("new-topic-title", &self.title).full_width(),
                                 cx,
                             ))
                             .child(sheet_form_row_top(o::NEW_TOPIC_BODY, body_field, cx)),

@@ -1,8 +1,9 @@
 //! The 重命名群 sheet (NATIVE.md §7.1), from a 群's menu in the sidebar.
 //! The same sheet as 重命名话题: one prefilled field with its text
 //! selected, 取消 and 保存; 保存 is off while the name is empty, unchanged
-//! or too long (one quiet footnote says why); a refusal from the server
-//! opens an alert (NATIVE.md §7.4).
+//! or too long; a too-long name or a refusal from the server marks the
+//! field and says why under the form (2.8), without a second modal. Only
+//! a refusal because I left the 群 opens an alert, and closes the sheet.
 
 use std::cell::Cell;
 
@@ -16,7 +17,7 @@ use gpui_component::{
 };
 
 use super::dialogs::{
-    error_alert, form_field_width, sheet_footnote, sheet_form, sheet_form_row, validate_group_name,
+    error_alert, sheet_form, sheet_form_row_invalid, validate_group_name, with_error_below,
 };
 use crate::{
     app::Services,
@@ -56,6 +57,10 @@ struct RenameGroupForm {
     current: String,
     name: Entity<InputState>,
     busy: bool,
+    /// The server's last refusal, under the form until the next edit.
+    refusal: Option<AdminError>,
+    /// The name the refusal was about.
+    typed_at_refusal: Option<String>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -78,8 +83,13 @@ impl RenameGroupForm {
                 this.busy = false;
                 match result {
                     Ok(()) => window.close_dialog(cx),
+                    Err(AdminError::Forbidden) => {
+                        refused(AdminError::Forbidden, window, cx);
+                        cx.notify();
+                    }
                     Err(e) => {
-                        refused(e, window, cx);
+                        this.refusal = Some(e);
+                        this.typed_at_refusal = Some(this.name.read(cx).value().to_string());
                         cx.notify();
                     }
                 }
@@ -89,8 +99,8 @@ impl RenameGroupForm {
     }
 }
 
-/// A refused rename blocks: an alert over the sheet. Removed from the 群,
-/// the sheet closes with the alert; otherwise it stays to try again.
+/// Removed from the 群 while the sheet was open: an alert, and the sheet
+/// closes with it.
 fn refused(e: AdminError, window: &mut Window, cx: &mut gpui::App) {
     let gone = e == AdminError::Forbidden;
     error_alert(
@@ -111,13 +121,15 @@ impl Render for RenameGroupForm {
         let typed = self.name.read(cx).value().to_string();
         let ready = !self.busy && can_save(&self.current, &typed);
         let [cancel, save] = sheet_buttons("rename-group", common::CANCEL, common::SAVE, cx);
+        let problem = name_problem(&typed)
+            .or_else(|| self.refusal.map(|e| refusal_text(e).to_string()))
+            .map(SharedString::from);
         rename_sheet(
             nav::RENAME_GROUP_TITLE,
             o::RENAME_GROUP_EXPLANATION,
             o::GROUP_NAME,
-            NativeTextField::new("rename-group-name", &self.name)
-                .width(form_field_width(SheetWidth::Form)),
-            name_problem(&typed).map(SharedString::from),
+            NativeTextField::new("rename-group-name", &self.name).full_width(),
+            problem,
             cancel.on_click(|_, window, cx| window.close_dialog(cx)),
             disabled_push(save, !ready, cx)
                 .loading(self.busy)
@@ -127,9 +139,11 @@ impl Render for RenameGroupForm {
     }
 }
 
-/// The rename sheet (§7.1) of a 群 or a 话题: Title 2, one line that says
-/// who sees the change, the labelled field on the sheet background, an
-/// optional quiet footnote under it, then 取消 and 保存.
+/// The rename sheet (2.9) of a 群 or a 话题: the title, one line that says
+/// who sees the change, the labelled field in a group box, then 取消 and
+/// 保存. A `footnote` is a field error: the field and its label turn
+/// destructive and the text sits under the group, in the gap above the
+/// buttons, so the sheet keeps its height.
 #[allow(clippy::too_many_arguments)]
 pub fn rename_sheet(
     title: &'static str,
@@ -141,13 +155,19 @@ pub fn rename_sheet(
     save: gpui_component::button::Button,
     cx: &App,
 ) -> SheetLayout {
+    let invalid = footnote.is_some();
     SheetLayout::new(title)
         .explanation(explanation)
-        .body(
-            sheet_form()
-                .child(sheet_form_row(label, field, cx))
-                .children(footnote.map(|f| sheet_footnote(f, cx))),
-        )
+        .body(with_error_below(
+            sheet_form().child(sheet_form_row_invalid(
+                label,
+                field.full_width().error(invalid),
+                invalid,
+                cx,
+            )),
+            footnote,
+            cx,
+        ))
         .buttons([cancel, save])
 }
 
@@ -163,7 +183,8 @@ pub fn open_rename_group(
 }
 
 /// [`open_rename_group`] with the field set to `typed` and, for the
-/// self-test, the server's refusal `e` already shown in its alert.
+/// self-test, the server's refusal `e` already shown (under the field, or
+/// in its alert when I left the 群).
 pub fn open_with(
     services: Services,
     group_id: GroupId,
@@ -177,6 +198,8 @@ pub fn open_with(
         .map(|(t, _)| t.clone())
         .unwrap_or_else(|| current.clone());
     let refusal = preview.as_ref().map(|(_, e)| *e);
+    let shown = refusal.filter(|e| *e != AdminError::Forbidden);
+    let typed_at_refusal = shown.map(|_| typed.clone());
     let form = cx.new(|cx| {
         let name = cx.new(|cx| InputState::new(window, cx).default_value(typed));
         let subscriptions = vec![cx.subscribe_in(
@@ -184,7 +207,14 @@ pub fn open_with(
             window,
             |this: &mut RenameGroupForm, _, event: &InputEvent, window, cx| match event {
                 InputEvent::PressEnter { .. } => this.submit(window, cx),
-                InputEvent::Change => cx.notify(),
+                InputEvent::Change => {
+                    if this.typed_at_refusal.as_deref() != Some(this.name.read(cx).value().as_ref())
+                    {
+                        this.refusal = None;
+                        this.typed_at_refusal = None;
+                    }
+                    cx.notify()
+                }
                 _ => {}
             },
         )];
@@ -194,6 +224,8 @@ pub fn open_with(
             current,
             name,
             busy: false,
+            refusal: shown,
+            typed_at_refusal,
             _subscriptions: subscriptions,
         }
     });
@@ -208,8 +240,8 @@ pub fn open_with(
             .px(px(0.))
             .child(form.clone())
     });
-    if let Some(e) = refusal {
-        refused(e, window, cx);
+    if refusal == Some(AdminError::Forbidden) {
+        refused(AdminError::Forbidden, window, cx);
     }
 }
 
@@ -223,7 +255,7 @@ mod tests {
         assert!(!can_save("全员", "  全员 "));
         assert!(!can_save("全员", "   "));
         assert!(can_save("General", "全员"));
-        // Too long: 保存 is off and the footnote says why.
+        // Too long: 保存 is off and the field error says why.
         assert!(!can_save("全员", &"长".repeat(65)));
         assert_eq!(
             name_problem(&"长".repeat(65)).as_deref(),
