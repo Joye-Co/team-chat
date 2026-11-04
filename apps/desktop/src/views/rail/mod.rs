@@ -31,7 +31,7 @@ use gpui::{
     WeakEntity, Window, div, list, px,
 };
 use gpui_component::{
-    button::{Button, ButtonVariants as _},
+    button::Button,
     input::InputState,
     menu::{DropdownMenu as _, PopupMenu, PopupMenuItem},
 };

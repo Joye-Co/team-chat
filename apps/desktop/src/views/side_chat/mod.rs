@@ -19,7 +19,6 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    button::ButtonVariants as _,
     input::{InputEvent, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };

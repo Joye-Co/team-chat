@@ -17,7 +17,6 @@ use gpui::{
 };
 use gpui_component::{
     WindowExt as _,
-    button::ButtonVariants as _,
     input::{InputEvent, InputState},
 };
 

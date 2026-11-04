@@ -24,7 +24,7 @@ use crate::{
     ui::{
         self, Sym, SymSize,
         native::{
-            AlertLayout, GroupedForm, ListRow, NativeCheckbox, NativeTextField, NativeType as _,
+            AlertLayout, GroupedForm, CompactRow, NativeCheckbox, NativeTextField, NativeType as _,
             PushSize, PushStyle, SheetLayout, SheetWidth, alert_button, disabled_push, emphasized,
             metrics, native_colors, push_button, square_button,
         },
@@ -663,11 +663,11 @@ impl AccountPage {
             )
     }
 
-    fn device_row(&self, d: &DeviceInfo, window: &Window, cx: &mut Context<Self>) -> ListRow {
+    fn device_row(&self, d: &DeviceInfo, window: &Window, cx: &mut Context<Self>) -> CompactRow {
         let k = native_colors(cx);
         let selected = self.selected_device.as_deref() == Some(d.id.as_str());
         let focused = self.device_list.is_focused(window);
-        let ink = ListRow::selection_ink(selected, focused, emphasized(window), cx);
+        let ink = CompactRow::selection_ink(selected, focused, emphasized(window), cx);
         let text = ink.map(|i| i.1).unwrap_or(k.label);
         let quiet = if ink.is_some_and(|(fill, _)| fill == k.accent) {
             k.on_accent
@@ -690,7 +690,7 @@ impl AccountPage {
         };
         let id = d.id.clone();
         let list = self.device_list.clone();
-        ListRow::new(ElementId::Name(format!("device-{}", d.id).into()))
+        CompactRow::new(ElementId::Name(format!("device-{}", d.id).into()))
             .height(metrics::FORM_ROW - px(4.))
             .selected(selected)
             .list_focused(focused)

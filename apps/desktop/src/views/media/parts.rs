@@ -8,7 +8,7 @@ use gpui::{
     ParentElement, SharedString, Styled, div, px,
 };
 use gpui_component::{
-    button::{Button, ButtonVariants as _},
+    button::Button,
     notification::Notification,
 };
 

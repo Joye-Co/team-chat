@@ -20,7 +20,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::Disableable as _;
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::button::Button;
 
 use crate::ui::NamedButton as _;
 use crate::{

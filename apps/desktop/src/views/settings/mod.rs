@@ -28,7 +28,7 @@ use gpui::{
     IntoElement, MouseButton, ParentElement, Render, StatefulInteractiveElement as _, Styled,
     Subscription, TitlebarOptions, Window, WindowBounds, WindowOptions, canvas, div, px, size,
 };
-use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::button::Button;
 
 use crate::{
     app::Services,

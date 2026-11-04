@@ -13,7 +13,7 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     input::Textarea,
     menu::{ContextMenuExt as _, DropdownMenu as _},
     popover::Popover,

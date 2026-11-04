@@ -13,7 +13,7 @@ use gpui::{
     StyledImage as _, Window, div, img, prelude::FluentBuilder as _, px, relative, uniform_list,
 };
 
-use gpui_component::{Selectable as _, button::ButtonVariants as _};
+use gpui_component::{Selectable as _};
 
 use super::{
     inline::{code_line, fit, group_digits},

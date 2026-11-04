@@ -792,7 +792,7 @@ pub mod layout {
     pub const MEASURE: Pixels = px(640.);
     /// The message column gutter (§2.1).
     pub const CONTENT_GUTTER: Pixels = space::S24;
-    pub const HAIRLINE: Pixels = px(0.5);
+    pub const HAIRLINE: Pixels = px(1.);
     pub const BORDER: Pixels = px(1.);
     pub const EMBED_FADE: Pixels = space::S48;
 }
@@ -802,7 +802,7 @@ pub mod metrics {
     use super::{height, radius, space};
     use gpui::{Pixels, px};
 
-    pub const HAIRLINE: Pixels = px(0.5);
+    pub const HAIRLINE: Pixels = px(1.);
     pub const FOCUS_RING: Pixels = px(3.);
 
     // Window (§2.1, §2.2)

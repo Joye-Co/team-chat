@@ -21,7 +21,7 @@ use super::{
     },
     fields::{FieldSize, NativeTextField, SearchField},
     form::{FormRow, GroupedForm, InlineValueField},
-    inspector::{InspectorSection, ListRow, determinate_bar, inspector_column, label_value},
+    inspector::{InspectorSection, CompactRow, determinate_bar, inspector_column, label_value},
     menu::{MenuRow, menu_separator, menu_surface, popover_surface},
     segmented::{Segment, Segmented},
     sheet::{
@@ -722,7 +722,7 @@ impl NativeKit {
         );
         let row = |id: &'static str, title: &'static str, cx: &App| {
             let _ = cx;
-            ListRow::new(id)
+            CompactRow::new(id)
                 .child(div().flex_1().child(title))
                 .child(div().n_subheadline().child(t::TIME_A))
         };

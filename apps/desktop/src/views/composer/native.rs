@@ -11,8 +11,8 @@ use gpui::{
     SharedString, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Sizable as _,
-    button::{Button, ButtonVariants as _},
+    Sizable as _,
+    button::Button,
     input::Textarea,
     menu::{DropdownMenu as _, PopupMenuItem},
 };

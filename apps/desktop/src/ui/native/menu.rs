@@ -12,7 +12,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
-use super::tokens::{NativeType as _, metrics, native_colors};
+use super::tokens::{NativeType as _, metrics, native_colors, space};
 use crate::ui::sf_symbols::{Sf, Weight, symbol};
 
 /// The menu surface: children are [`MenuRow`]s and [`menu_separator`]s.
@@ -20,11 +20,13 @@ pub fn menu_surface(cx: &App) -> gpui::Div {
     let k = native_colors(cx);
     div()
         .flex_none()
-        .min_w(px(180.))
+        .min_w(px(128.))
         .p(metrics::MENU_PAD)
         .rounded(metrics::MENU_RADIUS)
         .bg(k.menu)
-        .shadow(k.glass())
+        .border_1()
+        .border_color(k.separator)
+        .shadow(super::tokens::shadow::md())
         .flex()
         .flex_col()
 }
@@ -65,18 +67,28 @@ pub fn popover_surface(arrow_x: gpui::Pixels, cx: &App) -> gpui::Div {
 }
 
 /// A 1 px separator inset to the text column.
-pub fn menu_separator(with_symbols: bool, cx: &App) -> gpui::Div {
+pub fn menu_separator(_with_symbols: bool, cx: &App) -> gpui::Div {
+    // §2.11: 1 px, mx -4, my 4 (edge to edge of the surface).
     let k = native_colors(cx);
     div()
-        .my(px(4.))
-        .ml(if with_symbols {
-            metrics::MENU_ROW_PAD + metrics::MENU_SYMBOL + px(6.)
-        } else {
-            metrics::MENU_ROW_PAD
-        })
-        .mr(metrics::MENU_ROW_PAD)
+        .my(space::S4)
+        .mx(-metrics::MENU_PAD)
         .h(px(1.))
         .bg(k.separator)
+}
+
+/// A group label inside a menu (§2.11): h28, px 8, 12 medium muted.
+pub fn menu_label(label: impl Into<SharedString>, cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .flex_none()
+        .h(super::tokens::height::MENU_LABEL)
+        .px(metrics::MENU_ROW_PAD)
+        .flex()
+        .items_center()
+        .n_section()
+        .text_color(k.secondary)
+        .child(label.into())
 }
 
 /// A 24 pt menu row: an optional leading 13 pt symbol (all items of a group
@@ -149,9 +161,9 @@ impl RenderOnce for MenuRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         let hl = self.highlighted && !self.disabled;
-        let text = if hl {
-            k.on_accent
-        } else if self.disabled {
+        // D10: the highlight is the `accent` (muted) fill with foreground
+        // text, never an inverted row.
+        let text = if self.disabled {
             k.tertiary
         } else if self.destructive {
             k.red
@@ -169,8 +181,9 @@ impl RenderOnce for MenuRow {
             .rounded(metrics::MENU_ROW_RADIUS)
             .flex()
             .items_center()
-            .gap(px(6.))
-            .when(hl, |d| d.bg(k.accent))
+            .gap(space::S8)
+            .when(hl, |d| d.bg(k.fill_hover))
+            .when(self.disabled, |d| d.opacity(0.5))
             .when(self.symbol_column, |d| {
                 d.child(
                     div()
@@ -195,9 +208,9 @@ impl RenderOnce for MenuRow {
                 d.child(
                     div()
                         .flex_none()
-                        .pl(px(16.))
-                        .n_body()
-                        .text_color(if hl { k.on_accent } else { k.secondary })
+                        .pl(space::S16)
+                        .n_footnote()
+                        .text_color(k.secondary)
                         .child(s),
                 )
             })

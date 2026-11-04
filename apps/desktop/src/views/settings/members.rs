@@ -9,8 +9,8 @@ use gpui::{
     Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    Disableable as _, Selectable as _, WindowExt as _,
-    button::{Button, ButtonVariants as _},
+    Disableable as _, WindowExt as _,
+    button::Button,
     clipboard::Clipboard,
     input::{InputEvent, InputState},
     menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},

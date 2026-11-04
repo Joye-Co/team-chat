@@ -7,7 +7,7 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     clipboard::Clipboard,
 };
 

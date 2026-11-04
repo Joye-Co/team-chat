@@ -230,13 +230,8 @@ impl RenderOnce for Band {
 /// in dark). Nothing inside a card has its own outline. Padding 14 16 16 is
 /// the caller's (`card_padding`).
 pub fn card(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    div()
-        .rounded(theme::radius::LG)
-        .bg(k.bg)
-        .border_1()
-        .border_color(k.line)
-        .shadow(k.lift())
+    // COMPLETENESS.md §2.4: the one card surface.
+    crate::ui::native::card_surface(cx)
 }
 
 /// A rail section (topic rail, 正在做, 群资料, 来龙去脉, 工作环境): no

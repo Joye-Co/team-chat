@@ -7,7 +7,7 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
-    button::{Button, ButtonVariants as _},
+    button::Button,
     hover_card::HoverCard,
 };
 

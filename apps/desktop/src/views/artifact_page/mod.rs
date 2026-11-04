@@ -1282,7 +1282,7 @@ impl ArtifactPage {
             let active = nk::emphasized(window);
             let rows = all.iter().map(|(g, a)| {
                 let selected = self.selected.as_deref() == Some(a.id.as_str());
-                let ink = nk::ListRow::selection_ink(selected, true, active, cx);
+                let ink = nk::CompactRow::selection_ink(selected, true, active, cx);
                 let sub = ink.map(|i| i.1).unwrap_or(n.secondary);
                 let id = a.id.clone();
                 let this = this.clone();
@@ -1299,7 +1299,7 @@ impl ArtifactPage {
                         move |menu, _, _| artifact_menu(menu, &services, &a)
                     })
                     .child(
-                        nk::ListRow::new(SharedString::from(format!("artifact-{}", a.id)))
+                        nk::CompactRow::new(SharedString::from(format!("artifact-{}", a.id)))
                             .selected(selected)
                             .on_click(move |e, w, cx| {
                                 if e.click_count() >= 2 {

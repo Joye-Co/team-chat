@@ -4,7 +4,7 @@
 //! the toolbar inset of a page that draws its own toolbar row.
 //!
 //! Rows have no hover fill and the arrow cursor (§10); a row that is
-//! selected uses the native list selection of `ui::native::ListRow`.
+//! selected uses the native list selection of `ui::native::CompactRow`.
 
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Pixels,

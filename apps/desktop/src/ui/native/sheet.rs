@@ -23,7 +23,7 @@ use gpui_component::{
 
 use super::{
     buttons::{PushSize, PushStyle, push_button},
-    tokens::{NativeType as _, metrics, native_colors},
+    tokens::{NativeType as _, metrics, native_colors, space},
 };
 
 /// The width of a sheet.
@@ -64,7 +64,9 @@ pub fn native_sheet(dialog: Dialog, width: SheetWidth, cx: &App) -> Dialog {
         .keyboard(true)
         .overlay_closable(false)
         .bg(k.sheet)
-        .border_color(k.glass_edge)
+        .border_1()
+        .border_color(k.separator)
+        .shadow(super::tokens::shadow::lg())
         .rounded(metrics::SHEET_RADIUS)
         .pt(px(0.))
         .pb(px(0.))
@@ -130,7 +132,7 @@ impl RenderOnce for SheetLayout {
                     .pt(metrics::SHEET_PAD)
                     .flex()
                     .flex_col()
-                    .gap(px(4.))
+                    .gap(space::S8)
                     .child(div().n_title2().text_color(k.label).child(self.title))
                     .when_some(self.explanation, |d, t| {
                         d.child(div().n_body().text_color(k.secondary).child(t))
@@ -139,16 +141,16 @@ impl RenderOnce for SheetLayout {
             .child(
                 div()
                     .px(metrics::SHEET_PAD)
-                    .pt(px(16.))
+                    .pt(space::S16)
                     .flex()
                     .flex_col()
-                    .gap(px(12.))
+                    .gap(space::S12)
                     .children(self.body),
             )
             .child(
                 div()
                     .px(metrics::SHEET_BUTTON_EDGE)
-                    .pt(px(20.))
+                    .pt(space::S24)
                     .pb(metrics::SHEET_BUTTON_EDGE)
                     .flex()
                     .items_center()
@@ -169,7 +171,9 @@ pub fn sheet_surface(width: SheetWidth, cx: &App) -> gpui::Div {
         .w(width.px())
         .rounded(metrics::SHEET_RADIUS)
         .bg(k.sheet)
-        .shadow(k.glass())
+        .border_1()
+        .border_color(k.separator)
+        .shadow(super::tokens::shadow::lg())
 }
 
 /// The large 28 pt capsule buttons at the bottom of a sheet: `取消` and the
@@ -185,14 +189,14 @@ pub fn sheet_buttons(
             format!("{id}-cancel"),
             cancel,
             PushStyle::Outline,
-            PushSize::Large,
+            PushSize::Regular,
             cx,
         ),
         push_button(
             format!("{id}-default"),
             default,
             PushStyle::Default,
-            PushSize::Large,
+            PushSize::Regular,
             cx,
         ),
     ]
@@ -247,22 +251,29 @@ impl RenderOnce for AlertLayout {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
         div()
+            // COMPLETENESS.md §2.10: w 260, p 16; the 48 icon, 12 below the
+            // title 14 semibold, 4 below the body 12 muted, 16 below the
+            // buttons stacked full width h32, gap 8.
             .w(metrics::ALERT_WIDTH)
             .p(metrics::ALERT_PAD)
-            .pt(px(20.))
             .flex()
             .flex_col()
             .items_center()
-            .gap(px(10.))
             .when_some(self.icon, |d, icon| {
-                d.child(div().size(metrics::ALERT_ICON).flex_none().child(icon))
+                d.child(
+                    div()
+                        .size(metrics::ALERT_ICON)
+                        .mb(space::S12)
+                        .flex_none()
+                        .child(icon),
+                )
             })
             .child(
                 div()
                     .w_full()
                     .text_center()
                     .n_headline()
-                    .font_weight(gpui::FontWeight::BOLD)
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
                     .text_color(k.label)
                     .child(self.title),
             )
@@ -270,22 +281,23 @@ impl RenderOnce for AlertLayout {
                 d.child(
                     div()
                         .w_full()
+                        .pt(space::S4)
                         .text_center()
-                        .n_callout()
-                        .text_color(k.label)
+                        .n_footnote()
+                        .text_color(k.secondary)
                         .child(m),
                 )
             })
             .when_some(self.checkbox, |d, c| {
-                d.child(div().w_full().pt(px(2.)).child(c))
+                d.child(div().w_full().pt(space::S12).child(c))
             })
             .child(
                 div()
                     .w_full()
-                    .pt(px(6.))
+                    .pt(space::S16)
                     .flex()
                     .flex_col()
-                    .gap(px(8.))
+                    .gap(space::S8)
                     .children(self.buttons.into_iter().map(|b| b.w_full())),
             )
     }
@@ -303,10 +315,15 @@ pub fn alert_button(
     destructive: bool,
     cx: &App,
 ) -> Button {
-    let k = native_colors(cx);
+    // §2.10: the destructive confirm is the destructive variant (red fill,
+    // white text); Cancel is outline; every alert button is h32.
     let label = label.into();
-    let style = alert_style(&label, style);
-    push_button(id, label, style, PushSize::Large, cx).when(destructive, |b| b.text_color(k.red))
+    let style = if destructive {
+        PushStyle::Destructive
+    } else {
+        alert_style(&label, style)
+    };
+    push_button(id, label, style, PushSize::Regular, cx)
 }
 
 /// The style an alert button gets: `取消` is Standard.
@@ -325,7 +342,9 @@ pub fn alert_surface(cx: &App) -> gpui::Div {
         .flex_none()
         .rounded(metrics::SHEET_RADIUS)
         .bg(k.sheet)
-        .shadow(k.glass())
+        .border_1()
+        .border_color(k.separator)
+        .shadow(super::tokens::shadow::lg())
 }
 
 #[cfg(test)]
