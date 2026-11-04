@@ -175,7 +175,6 @@ pub fn text_link(id: impl Into<ElementId>, label: &str, cx: &App) -> Stateful<Di
         .rounded(px(6.))
         .flex()
         .items_center()
-        .cursor_pointer()
         .type_role(META)
         .text_color(k.ink_2)
         .hover(|s| s.bg(k.hover))

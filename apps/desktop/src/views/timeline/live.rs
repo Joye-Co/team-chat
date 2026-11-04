@@ -214,7 +214,6 @@ impl TimelineView {
             .gap(space::S6)
             .self_start()
             .rounded(theme::radius::SM)
-            .cursor_pointer()
             .hover(|el| el.bg(colors.hover))
             .active(|el| el.bg(colors.pressed))
             .t_small()

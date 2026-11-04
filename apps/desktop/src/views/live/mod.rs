@@ -614,7 +614,6 @@ impl LivePane {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .cursor_pointer()
                     .child(dot)
                     .tooltip({
                         let tip: SharedString = if is_last {

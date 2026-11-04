@@ -442,7 +442,6 @@ pub fn side_toggle(id: &'static str, hide: bool, cx: &mut Context<DeskPage>) -> 
         .flex()
         .items_center()
         .justify_center()
-        .cursor_pointer()
         .hover(|s| s.bg(k.hover))
         .child(ui::icon(Lucide::PanelRight, theme::icon::ROW, k.ink_3))
         .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(name).build(window, cx))

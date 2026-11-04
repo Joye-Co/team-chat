@@ -275,13 +275,11 @@ pub fn plan_row(
                     .items_center()
                     .gap(space::S4)
                     .text_color(k.ink_2)
-                    .cursor_pointer()
                     .child(action)
                     .child(ui::icon(glyph, px(14.), k.ink_3)),
             )
             .when(working, |el| {
-                el.cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
+                el.hover(|s| s.bg(k.hover))
                     .on_click(move |_, window, cx| a.open_live(run.as_deref(), window, cx))
             })
             .into_any_element(),

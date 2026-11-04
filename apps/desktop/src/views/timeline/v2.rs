@@ -360,7 +360,6 @@ impl TimelineView {
                 .items_center()
                 .t_meta()
                 .text_color(k.ink_2)
-                .cursor_pointer()
                 .hover(|s| s.bg(k.hover))
                 .child(c::SEE_QUESTION)
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
@@ -821,7 +820,6 @@ impl TimelineView {
                         .flex()
                         .items_center()
                         .gap(space::S12)
-                        .cursor_pointer()
                         .hover(|s| s.bg(k.hover))
                         .child(thumb)
                         .child(
@@ -872,8 +870,6 @@ fn link_row(id: ElementId, cx: &App) -> gpui::Stateful<gpui::Div> {
         .gap(space::S10)
         .t_small()
         .text_color(k.ink)
-        .cursor_pointer()
-        .hover(|s| s.bg(k.hover))
 }
 
 #[cfg(test)]

@@ -280,7 +280,6 @@ pub fn play_button(
         .bg(k.text_1)
         .hover(|s| s.opacity(0.88))
         .active(|s| s.opacity(0.76))
-        .cursor_pointer()
         .flex()
         .items_center()
         .justify_center()

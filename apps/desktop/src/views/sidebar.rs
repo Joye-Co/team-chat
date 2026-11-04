@@ -242,7 +242,6 @@ impl Sidebar {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .cursor_pointer()
                     .hover(|s| s.bg(k.sidebar_hover))
                     .child(ui::icon(chevron, theme::icon::TAG, k.text_3))
                     .on_click(cx.listener(move |this, _, _, cx| this.toggle(section, cx))),
@@ -259,7 +258,6 @@ impl Sidebar {
                     .flex()
                     .items_center()
                     .gap(space::S6)
-                    .cursor_pointer()
                     // Quieter than the rows under it (the mockup): GPUI draws
                     // 600 heavier than the browser, so the label takes 500.
                     .t_meta_medium()
@@ -795,9 +793,6 @@ impl Render for Sidebar {
                                         .rounded(theme::radius::MD)
                                         // Under the titles: 8 + 24 + 10 pt.
                                         .pl(px(42.))
-                                        .cursor_pointer()
-                                        .hover(|s| s.bg(k.sidebar_hover))
-                                        .active(|s| s.bg(k.pressed))
                                         .flex()
                                         .items_center()
                                         .t_meta_medium()

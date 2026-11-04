@@ -236,7 +236,6 @@ fn path(
             .id(SharedString::from(format!("desk-path-{which}-{key}")))
             .min_w(px(0.))
             .one_line()
-            .cursor_pointer()
             .hover(|s| s.text_color(k.ink))
             .on_click(move |_, _, cx| {
                 let (g, t) = (g.clone(), t.clone());
@@ -289,7 +288,6 @@ fn title(a: &AskCard, page: &DeskPage, cx: &mut Context<DeskPage>) -> impl IntoE
         .mt(space::S10)
         .t_title()
         .text_color(k.ink)
-        .cursor_pointer()
         .child(text)
         .on_click(move |_, _, cx| {
             let (g, t) = (g.clone(), t.clone());
@@ -466,7 +464,6 @@ fn options(
                         .rounded(px(9.))
                         .bg(k.bg)
                         .shadow(k.sec_hi())
-                        .cursor_pointer()
                         .hover(|s| s.border_color(k.ink_3))
                         .t_small()
                         .text_color(k.ink)

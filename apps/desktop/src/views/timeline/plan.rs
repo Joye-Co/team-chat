@@ -141,7 +141,6 @@ impl TimelineView {
                 .gap(space::S4)
                 .t_meta()
                 .text_color(k.ink_2)
-                .cursor_pointer()
                 .hover(|s| s.bg(k.hover))
                 .child(if open {
                     c::PLAN_COLLAPSE

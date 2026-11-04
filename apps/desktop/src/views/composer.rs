@@ -1452,7 +1452,6 @@ impl Render for ComposerView {
                         .pr(space::S8)
                         .t_meta()
                         .text_color(colors.ink_3)
-                        .cursor_pointer()
                         .child(crate::copy::topic_rail::JUST_ASK)
                         .child(
                             div()

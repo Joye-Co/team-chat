@@ -600,7 +600,6 @@ impl AskPalette {
             .flex()
             .items_center()
             .gap(space::S12)
-            .cursor_pointer()
             .when(active, |el| el.bg(k.sunken))
             .active(|s| s.bg(k.pressed))
             .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {

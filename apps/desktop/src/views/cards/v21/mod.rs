@@ -721,7 +721,7 @@ fn group(
         .min_w(px(0.))
         .h(px(28.))
         .when(can_collapse, |el| {
-            el.cursor_pointer().on_click(move |_, _, cx| {
+            el.on_click(move |_, _, cx| {
                 ui.update(cx, |u, cx| {
                     let b = u.block_mut(&gid);
                     b.collapsed = Some(!closed);
@@ -825,7 +825,7 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
                         .font_weight(theme::MEDIUM_WEIGHT)
                         .shadow(k.sec_hi())
                 })
-                .when(!on, |el| el.cursor_pointer().hover(|s| s.text_color(k.ink)))
+                .when(!on, |el| el.hover(|s| s.text_color(k.ink)))
                 .on_click(move |_, _, cx| {
                     let first = ui.update(cx, |u, cx| {
                         let b = u.block_mut(&bid);

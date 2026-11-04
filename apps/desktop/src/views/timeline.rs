@@ -833,7 +833,6 @@ fn jump_pill(
         .pr(space::S10)
         .rounded_full()
         .gap(space::S6)
-        .cursor_pointer()
         .t_ui()
         .medium()
         .tnum()

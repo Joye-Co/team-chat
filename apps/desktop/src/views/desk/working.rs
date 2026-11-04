@@ -200,8 +200,6 @@ fn run_card(
         .px(space::S8 + theme::RAIL_SECTION_PAD_X)
         .py(space::S12)
         .rounded(theme::radius::MD)
-        .cursor_pointer()
-        .when(!live, |el| el.hover(|s| s.bg(k.hover)))
         .flex()
         .flex_col()
         .gap(space::S10)

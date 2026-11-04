@@ -53,7 +53,6 @@ impl AppearancePage {
             .flex()
             .flex_col()
             .gap(space::S8)
-            .cursor_pointer()
             .child(
                 div()
                     .relative()
