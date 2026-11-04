@@ -1287,12 +1287,13 @@ impl PopupMenu {
 
         match item {
             PopupMenuItem::Separator => match &style {
-                // team-chat patch: a 1 px line inset to the text column.
+                // team-chat patch: a 1 px line from edge to edge of the
+                // surface (COMPLETENESS.md §2.11: mx -4 past the item area).
                 Some(st) => this
                     .h(st.separator_height)
                     .p_0()
                     .my(st.separator_margin)
-                    .mx(st.row_padding)
+                    .mx(-st.padding)
                     .bg(st.separator)
                     .rounded(px(0.))
                     .disabled(true),
