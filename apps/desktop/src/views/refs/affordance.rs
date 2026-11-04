@@ -111,7 +111,7 @@ pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
     )
     .bg(n.sheet)
     .shadow(n.float())
-    .icon(ui::icon(Sym::Quote, px(14.), n.secondary))
+    .icon(ui::icon(Sym::Quote, px(16.), n.secondary))
 }
 
 /// Starts the 300 ms hover timer of `id`, or clears it.
@@ -254,6 +254,19 @@ pub fn inline_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App)
             cx.stop_propagation();
             ask_about(target(cx), RefIntent::Topic, window, cx);
         })
+        .into_any_element()
+}
+
+/// The 问这里 button of a part whose renderer has no hover of its own (the action strip of a
+/// code fence): it keeps its place but shows only while the pointer is over it, so a capture
+/// or a glance at rest never shows it (§2.6 hover, E2).
+pub fn hover_button(id: &str, target: Rc<dyn Fn(&App) -> PartTarget>, cx: &App) -> AnyElement {
+    let shown = hub_of(cx).is_some_and(|h| h.read(cx).hovered(id));
+    div()
+        .id(ElementId::Name(format!("ask-slot-{id}").into()))
+        .on_hover(track_hover(id.to_string()))
+        .when(!shown, |d| d.opacity(0.))
+        .child(inline_button(id, target, cx))
         .into_any_element()
 }
 

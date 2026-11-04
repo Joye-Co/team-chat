@@ -25,6 +25,13 @@ pub const SCENES: &[Scene] = &[
         setup: open_first_topic,
         open: open_main,
     },
+    Scene {
+        name: "state-hover-code",
+        about: "process with the pointer on a code fence's action strip: 问这里 shows only on hover",
+        start: Start::SignedIn,
+        setup: crate::views::process::preview::open_running,
+        open: open_main,
+    },
     // --- end t5 ---
     // --- t5-media ---
     Scene {

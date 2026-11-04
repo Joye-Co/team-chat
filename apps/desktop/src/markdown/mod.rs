@@ -168,7 +168,7 @@ pub fn message_body_refs(
                     crate::views::refs::markdown::code_target(body, source, &text)
                 })
                 .map(|target| {
-                    crate::views::refs::affordance::inline_button(
+                    crate::views::refs::affordance::hover_button(
                         &format!("code-{}-{hash:x}", target.block_id),
                         std::rc::Rc::new(move |_: &gpui::App| target.clone()),
                         cx,

@@ -44,6 +44,7 @@ const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
     ("state-hover-message", hover(400., 250., 600)),
     ("state-focus-tab", keys(&["tab"])),
+    ("state-hover-code", hover(690., 424., 400)),
     // --- end t5 ---
     // --- t5-cards ---
     ("state-card-option-hover", hover(1011., 290., 400)),

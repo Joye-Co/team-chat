@@ -1021,7 +1021,12 @@ impl ChatProvider for WorstCase {
         let i = self.member_index(id);
         self.inner.member(id).map(|m| member(m, i))
     }
-    fn quoted_message( &self, group_id: &str, quoting_id: &str, quoted_id: &str, ) -> Option<QuotedMessage> {
+    fn quoted_message(
+        &self,
+        group_id: &str,
+        quoting_id: &str,
+        quoted_id: &str,
+    ) -> Option<QuotedMessage> {
         self.inner.quoted_message(group_id, quoting_id, quoted_id)
     }
     fn rename_topic(&self, group_id: &str, topic_id: &str, title: String) {
@@ -1033,7 +1038,11 @@ impl ChatProvider for WorstCase {
     fn rename_group(&self, group_id: &str, name: String) -> AdminReply<()> {
         self.inner.rename_group(group_id, name)
     }
-    fn set_member_character( &self, member_id: &str, character: Option<CharacterId>, ) -> AdminReply<Member> {
+    fn set_member_character(
+        &self,
+        member_id: &str,
+        character: Option<CharacterId>,
+    ) -> AdminReply<Member> {
         self.inner.set_member_character(member_id, character)
     }
     fn set_member_plan(&self, member_id: &str, plan: pages::MemberPlan) -> AdminReply<Member> {

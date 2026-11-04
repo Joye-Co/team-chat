@@ -1328,7 +1328,9 @@ fn worst_login_code(code: &'static str) -> &'static str {
         // A checked code becomes a 12-character legacy code.
         "^K7QM2X9A" => "^ABCDEFGHJKLM",
         "!0000-0000" => "!WRONG-CODE-0000",
-        "~https://team.joye.co" => "~https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2",
+        "~https://team.joye.co" => {
+            "~https://team-chat.internal.northwind-industries-holdings.example.com/workspaces/product-design-and-frontend/region-ap-southeast-2"
+        }
         other => other,
     }
 }
