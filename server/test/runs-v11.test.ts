@@ -340,6 +340,48 @@ describe("1.1 runs", () => {
     d.close();
   });
 
+  it("keep a newer pause when the paused: false of an earlier resume arrives late (SB-16)", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["pause"]);
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await startRun(w, c, d);
+    const pause = () => api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} });
+    const resume = () => api(`/v1/runs/${runId}/resume`, { token: w.human.token, body: {} });
+    expect((await pause()).status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    expect((await resume()).status).toBe(200);
+    await d.next((f) => f.t === "run.resume");
+    // A second pause before the daemon reports the first resume.
+    const again = await pause();
+    expect(again.status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    // The daemon's answer to the resume arrives now, then its answer to the new pause.
+    const late = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, late);
+    const got = await api(`/v1/runs/${runId}`, { token: w.human.token });
+    expect(got.body.pausedBy).toBe(w.human.id);
+    const seq = d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    await d.acked(runId, seq);
+    // Still paused: no stall, and the requester can hand it back.
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state) => {
+      state.storage.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
+    });
+    await runInDurableObject(deskOf(w.bot.id), (o) => (o as unknown as { alarm(): Promise<void> }).alarm());
+    expect(botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.stalled)).toBe(false);
+    const back = await resume();
+    expect(back.status, JSON.stringify(back.body)).toBe(200);
+    expect(back.body.pausedBy).toBeUndefined();
+    // After the daemon took every pause, a paused: false clears pausedBy again.
+    expect((await pause()).status).toBe(200);
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    const on = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, on);
+    expect((await api(`/v1/runs/${runId}`, { token: w.human.token })).body.pausedBy).toBeUndefined();
+    c.close();
+    d.close();
+  });
+
   it("retry an ended run with the same request, for the requester or an owner, audited", async () => {
     const w = await world();
     const d = await Daemon.connect(w.machineToken, []);

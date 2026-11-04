@@ -138,9 +138,15 @@ export abstract class DeskEvents extends DeskRuns {
           break;
         }
         case "paused":
+          // The daemon took a pause: count it (at most the pauses sent).
+          if (ev.paused === true && r.pause_seen < r.pause_gen) {
+            this.sql.exec("UPDATE runs SET pause_seen = pause_seen + 1 WHERE id = ?", r.id);
+            r.pause_seen += 1;
+          }
           // The CLI goes on without a resume from here (for example the daemon restarted it):
-          // the run is no longer taken over.
-          if (ev.paused === false && r.paused_by) {
+          // the run is no longer taken over. A `paused: false` from before the daemon took the
+          // latest pause (the answer to an earlier resume) is stale and keeps pausedBy.
+          if (ev.paused === false && r.paused_by && r.pause_seen >= r.pause_gen) {
             this.sql.exec("UPDATE runs SET paused_by = NULL, paused_at = NULL WHERE id = ?", r.id);
             r.paused_by = null;
             r.paused_at = null;

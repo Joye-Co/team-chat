@@ -43,9 +43,12 @@ export abstract class DeskTakeover extends DeskInput {
         const sent = await linkStub(this.env, r.machine_id).toRun({ t: "run.pause", runId, by: actor.id } as never);
         if (!sent.ok) throw new ApiError("conflict", "the run is not open on its machine");
         const now = Date.now();
-        this.sql.exec("UPDATE runs SET paused_by = ?, paused_at = ? WHERE id = ?", actor.id, now, runId);
+        // A new pause generation: a `paused: false` sent before the daemon took this pause does
+        // not clear it (events.ts).
+        this.sql.exec("UPDATE runs SET paused_by = ?, paused_at = ?, pause_gen = pause_gen + 1 WHERE id = ?", actor.id, now, runId);
         r.paused_by = actor.id;
         r.paused_at = now;
+        r.pause_gen += 1;
         await this.setStatus(r, r.status);
         this.log.info("run paused", { runId, actorId: actor.id });
         return this.toRun(r);

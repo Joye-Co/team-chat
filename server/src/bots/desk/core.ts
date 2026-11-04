@@ -87,6 +87,11 @@ export type RunRow = {
   session_id: string | null;
   /** The runtime the run was assigned to, or null. */
   runtime: string | null;
+  // desk-7-pause-order (GAPS SB-16)
+  /** run.pause frames the server sent for this run. */
+  pause_gen: number;
+  /** `paused: true` events the daemon reported for this run (at most `pause_gen`). */
+  pause_seen: number;
 };
 
 /** A CLI session id BotDesk keeps and sends back (`run.assign.resumeSessionId`). */
@@ -302,6 +307,16 @@ export abstract class DeskCore extends DurableObject<BotsEnv> {
           up: `
             ALTER TABLE runs ADD COLUMN session_id TEXT;
             ALTER TABLE runs ADD COLUMN runtime TEXT;
+          `,
+        },
+        {
+          // GAPS SB-16: pause order. A `paused: false` event clears pausedBy only after the
+          // daemon reported every pause the server sent; a late one from an earlier resume does
+          // not clear a newer pause. Old rows read as 0/0: the event clears as before.
+          name: "desk-7-pause-order",
+          up: `
+            ALTER TABLE runs ADD COLUMN pause_gen INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE runs ADD COLUMN pause_seen INTEGER NOT NULL DEFAULT 0;
           `,
         },
       ]);
