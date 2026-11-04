@@ -2765,8 +2765,12 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         .filter(|r| !r.plan.is_empty() && topic.as_ref().is_some_and(|t| t.status != TopicStatus::Done))
                         .map(|r| {
                             let done = r.plan.iter().filter(|x| x.state == crate::data::PlanState::Done).count();
-                            // One count rule everywhere: steps done of all (§2.12).
-                            format!("{done}/{}", r.plan.len())
+                            // One count rule everywhere: steps done of all, with
+                            // its word (§2.12: 在做 3/5).
+                            fill(
+                                c::STRIP_WORKING_COUNT,
+                                &[("n", &done.to_string()), ("total", &r.plan.len().to_string())],
+                            )
                         });
                     (
                         ref_tile(Sym::List, false, cx),
@@ -2857,7 +2861,10 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         Some(state) => ui::native::StatusBadge::new(state, r)
                             .max_w(m::MAX_WIDTH / 4.)
                             .into_any_element(),
+                        // Every badge has an icon (§2.12): a newer version
+                        // reads with the refresh mark.
                         None => ui::native::Badge::new(r)
+                            .icon(Sym::Refresh, ui::native::native_colors(cx).secondary)
                             .max_w(m::MAX_WIDTH / 4.)
                             .into_any_element(),
                     })
