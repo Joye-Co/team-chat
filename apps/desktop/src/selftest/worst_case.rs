@@ -85,7 +85,9 @@ const ATTACHMENT_NAMES: &[&str] = &[
     "IMG_20250914_183022_HDR_portrait_edited_edited.HEIC",
 ];
 
-const PLAN_TEXTS: &[&str] = &[
+/// Worst plan steps. A run's plan and a card's plan block take the same ones at the same
+/// steps (every second step, [`worst_plan_step`]), so the card and the inspector agree.
+pub(crate) const PLAN_TEXTS: &[&str] = &[
     "把登录页、设置窗口和侧边栏的所有颜色、间距、圆角与动效统一到主题令牌里，并在浅色和深色模式下逐屏截图核对，最后提交评审",
     "1",
     "Verify https://example.com/workspaces/acme/projects/q3-launch/docs/9f8e7d6c5b4a?tab=comments",
@@ -166,11 +168,19 @@ fn topic(mut t: Topic, i: usize, now: Millis) -> Topic {
 }
 
 /// An 产出 with a long title, a 999 / 1 / 12 version and 100 MB / 0 / 1,284 B.
+/// One 产出's worst name, version and size from its place `i` in the team's 产出
+/// ([`WorstCase::artifact_index`], C-07), so every list, the thumbnail, the page and the
+/// pane show the same 产出 the same way.
 fn worst_artifact(mut a: ArtifactSummary, i: usize) -> ArtifactSummary {
     a.title = pick(FILE_TITLES, i).to_string();
     a.version = [999, 1, 12][i % 3];
     a.size_bytes = a.size_bytes.map(|_| [104_857_600, 0, 1_284][i % 3]);
     a
+}
+
+/// The worst text of plan step `j`, or `None` to keep it (one rule for runs and cards).
+pub(crate) fn worst_plan_step(j: usize) -> Option<&'static str> {
+    j.is_multiple_of(2).then(|| pick(PLAN_TEXTS, j / 2))
 }
 
 /// A stable index for a message id, so each card gets its own worst cases.
@@ -245,6 +255,16 @@ impl WorstCase {
             inner,
             now: now_ms(),
         })
+    }
+
+    /// The place of 产出 `id` among all the team's 产出 (or a hash of its id): one
+    /// worst name per 产出 in every list and view.
+    fn artifact_index(&self, id: &str) -> usize {
+        self.inner
+            .all_artifacts()
+            .iter()
+            .position(|(_, a)| a.id == id)
+            .unwrap_or_else(|| hash_index(id))
     }
 
     fn member_index(&self, id: &str) -> usize {
@@ -485,8 +505,10 @@ impl ChatProvider for WorstCase {
         self.inner
             .artifacts(group_id, topic_id)
             .into_iter()
-            .enumerate()
-            .map(|(i, a)| worst_artifact(a, i))
+            .map(|a| {
+                let i = self.artifact_index(&a.id);
+                worst_artifact(a, i)
+            })
             .collect()
     }
     fn send(&self, request: SendRequest) -> ClientMsgId {
@@ -633,8 +655,8 @@ impl ChatProvider for WorstCase {
             .map(|(i, mut r)| {
                 r.machine_name = r.machine_name.map(|_| pick(MACHINE_NAMES, i).to_string());
                 for (j, item) in r.plan.iter_mut().enumerate() {
-                    if j.is_multiple_of(2) {
-                        item.text = pick(PLAN_TEXTS, j / 2).to_string();
+                    if let Some(t) = worst_plan_step(j) {
+                        item.text = t.to_string();
                     }
                 }
                 r
@@ -718,7 +740,11 @@ impl ChatProvider for WorstCase {
         self.inner.refresh_artifacts(group_id, topic_id)
     }
     fn artifact(&self, artifact_id: &str) -> Option<ArtifactDetail> {
-        self.inner.artifact(artifact_id)
+        self.inner.artifact(artifact_id).map(|mut d| {
+            let i = self.artifact_index(artifact_id);
+            d.summary = worst_artifact(d.summary, i);
+            d
+        })
     }
     fn request_artifact(&self, group_id: &str, topic_id: &str, artifact_id: &str) {
         self.inner.request_artifact(group_id, topic_id, artifact_id)
@@ -805,7 +831,12 @@ impl ChatProvider for WorstCase {
         self.inner.media_duration(file)
     }
     fn artifact_preview(&self, artifact_id: &str, version: u32) -> Option<v2::ArtifactPreview> {
-        self.inner.artifact_preview(artifact_id, version)
+        self.inner
+            .artifact_preview(artifact_id, version)
+            .map(|mut p| {
+                p.title = pick(FILE_TITLES, self.artifact_index(artifact_id)).to_string();
+                p
+            })
     }
     // --- end inc-host track ---
     fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
@@ -1157,15 +1188,31 @@ impl ChatProvider for WorstCase {
         self.inner
             .all_artifacts()
             .into_iter()
-            .enumerate()
-            .map(|(i, (g, a))| (g, worst_artifact(a, i)))
+            .map(|(g, a)| {
+                let i = self.artifact_index(&a.id);
+                (g, worst_artifact(a, i))
+            })
             .collect()
     }
     fn artifact_story(&self, artifact_id: &str) -> Option<v2::ArtifactStory> {
         self.inner.artifact_story(artifact_id)
     }
     fn message_proof(&self, group_id: &str, message_id: &str) -> Vec<v2::Proof> {
-        self.inner.message_proof(group_id, message_id)
+        let mut proof = self.inner.message_proof(group_id, message_id);
+        // The 产出 row of a done card names the 产出 as every other view does (C-07).
+        for p in proof.iter_mut() {
+            if let v2::Proof::Artifact {
+                artifact_id,
+                title,
+                version,
+            } = p
+            {
+                let i = self.artifact_index(artifact_id);
+                *title = pick(FILE_TITLES, i).to_string();
+                *version = [999, 1, 12][i % 3];
+            }
+        }
+        proof
     }
     fn changes_approval(&self, group_id: &str, topic_id: &str) -> Option<(MemberId, Millis)> {
         self.inner.changes_approval(group_id, topic_id)
@@ -1192,12 +1239,17 @@ impl ChatProvider for WorstCase {
         self.inner
             .group_artifacts(group_id)
             .into_iter()
-            .enumerate()
-            .map(|(i, a)| worst_artifact(a, i))
+            .map(|a| {
+                let i = self.artifact_index(&a.id);
+                worst_artifact(a, i)
+            })
             .collect()
     }
     fn artifact_thumb(&self, artifact_id: &str) -> Option<pages::ArtifactThumb> {
-        self.inner.artifact_thumb(artifact_id)
+        self.inner.artifact_thumb(artifact_id).map(|mut t| {
+            t.title = pick(FILE_TITLES, self.artifact_index(artifact_id)).to_string();
+            t
+        })
     }
     fn can_record_decision(&self, group_id: &str) -> bool {
         self.inner.can_record_decision(group_id)

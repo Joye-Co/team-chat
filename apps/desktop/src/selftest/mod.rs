@@ -181,11 +181,13 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
             fake::v2::V2Samples::new(),
             crate::data::ConnectionState::Connecting,
         ),
+        // Worst: a long wait before the next try (C-07), so the failed pages' cause line
+        // carries worst data too.
         Start::V2Unreachable => page_states::Unsynced::new(
             fake::v2::V2Samples::new(),
             crate::data::ConnectionState::Reconnecting {
-                attempt: 3,
-                retry_in_ms: 8_000,
+                attempt: if worst_case { 99 } else { 3 },
+                retry_in_ms: if worst_case { 3_599_000 } else { 8_000 },
             },
         ),
         Start::V2Bare => page_states::Unsynced::new(
