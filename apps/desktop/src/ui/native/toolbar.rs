@@ -52,6 +52,17 @@ impl RenderOnce for ToolbarGroup {
 /// The 52 pt toolbar row: title (Title 3) over subtitle (Subheadline,
 /// `secondary`) starting 20 pt from the leading edge, at most three groups
 /// 8 pt apart ending 12 pt from the trailing edge (§2).
+/// A toolbar slot around an item that is not a plain `Button` (a pull-down
+/// toolbar item): h32, no capsule and no shadow (D4).
+pub fn toolbar_slot(item: impl IntoElement) -> gpui::Div {
+    div()
+        .flex_none()
+        .h(metrics::TOOLBAR_GROUP)
+        .flex()
+        .items_center()
+        .child(item)
+}
+
 #[derive(IntoElement)]
 pub struct ToolbarRow {
     title: SharedString,

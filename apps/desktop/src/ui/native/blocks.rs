@@ -660,6 +660,7 @@ pub fn table(
                 .text_color(k.label)
                 .overflow_hidden()
                 .whitespace_nowrap()
+                .text_ellipsis()
                 .child(cell);
             td = match c.width {
                 Some(w) => td.w(w).flex_none(),

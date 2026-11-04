@@ -1131,18 +1131,7 @@ impl ArtifactPage {
             .subtitle(fill(c::ARTIFACTS_COUNT, &[("n", &total.to_string())]))
             .leading_inset(px(0.))
             .group(views)
-            // The same glass capsule as `ToolbarGroup`, around a menu button.
-            .group(
-                div()
-                    .flex_none()
-                    .h(nk::metrics::TOOLBAR_GROUP)
-                    .rounded(nk::metrics::TOOLBAR_GROUP / 2.)
-                    .bg(n.capsule)
-                    .shadow(n.glass())
-                    .flex()
-                    .items_center()
-                    .child(sort),
-            )
+            .group(nk::toolbar_slot(sort))
             .group(
                 nk::SearchField::new("artifacts-search", &search)
                     .sidebar()

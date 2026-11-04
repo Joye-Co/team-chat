@@ -79,7 +79,7 @@ pub use toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize};
 #[allow(unused_imports)]
 pub use tokens::{NativeColors, NativeType, emphasized, metrics, native_colors};
 #[allow(unused_imports)]
-pub use toolbar::{ToolbarGroup, ToolbarRow};
+pub use toolbar::{ToolbarGroup, ToolbarRow, toolbar_slot};
 
 /// The busy spinner (§5.7): for unknown waits, never with "加载中…" text.
 #[allow(unused_imports)]

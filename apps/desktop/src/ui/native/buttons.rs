@@ -114,13 +114,18 @@ fn look(style: PushStyle, k: &NativeColors) -> Look {
             pressed: k.pressed,
             border: None,
         },
-        PushStyle::Destructive => Look {
-            fill: k.red,
-            text: gpui::white(),
-            hover: k.red.opacity(0.9),
-            pressed: k.red.opacity(0.8),
-            border: None,
-        },
+        // shadcn: `bg-destructive text-white`, at 60 % in dark so the white
+        // text keeps its contrast on the lighter dark-mode red.
+        PushStyle::Destructive => {
+            let fill = if k.is_dark() { k.red.opacity(0.6) } else { k.red };
+            Look {
+                fill,
+                text: gpui::white(),
+                hover: fill.opacity(0.9),
+                pressed: fill.opacity(0.8),
+                border: None,
+            }
+        }
         PushStyle::Link => Look {
             fill: clear,
             text: k.label,
@@ -773,7 +778,7 @@ mod tests {
             assert_ne!(primary.fill, outline.fill);
             // Destructive: red fill, white text.
             let red = look(PushStyle::Destructive, &k);
-            assert_eq!(red.fill, k.red);
+            assert_eq!(red.fill.h, k.red.h);
             assert_eq!(red.text, gpui::white());
             // Ghost: no fill at rest, accent on hover.
             let ghost = look(PushStyle::Ghost, &k);
