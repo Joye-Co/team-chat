@@ -56,7 +56,7 @@ async fn mock() -> Mock {
             if s.peek(&mut head).await.is_err() {
                 continue;
             }
-            if &head == b"PUT" {
+            if &head == b"PUT" || &head == b"POS" {
                 let puts = puts2.clone();
                 tokio::spawn(handle_put(s, puts));
                 continue;
@@ -119,8 +119,24 @@ async fn handle_put(mut s: TcpStream, puts: Arc<Mutex<Vec<Put>>>) {
         headers,
         body: buf[header_end..header_end + len].to_vec(),
     });
+    // chat-run files and 产出 (machine routes) answer JSON; a session upload answers nothing.
+    let n = puts.lock().unwrap().len();
+    let last = puts.lock().unwrap().last().map(|p| p.path.clone()).unwrap_or_default();
+    let body = if last.ends_with("/files") {
+        format!(r#"{{"id":"F{n}","status":"ready"}}"#)
+    } else if last.contains("/artifacts") {
+        r#"{"artifact":{"id":"A1"},"version":{"artifactId":"A1","version":1,"runId":"a1"}}"#.to_string()
+    } else {
+        String::new()
+    };
     let _ = s
-        .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+        .write_all(
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                body.len()
+            )
+            .as_bytes(),
+        )
         .await;
 }
 
@@ -1147,6 +1163,63 @@ async fn pause_and_cancel_cover_tool_children() {
         "tool children outlived the cancel: {left:?}"
     );
 
+    stop_tx.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(20), daemon)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+}
+
+/// 1.1 `chat-run artifact create`: the daemon uploads each file of the folder from the run's
+/// working folder (text redacted) and makes the 产出 with the machine token; the CLI gets its id.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn chat_run_artifact_create_uploads_the_folder_and_makes_the_artifact() {
+    daemon::chat_run::set_exe(PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let tmp = tempfile::tempdir().unwrap();
+    let mut m = mock().await;
+    let cfg = write_config(tmp.path(), &m.url);
+    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel::<()>();
+    let daemon = tokio::spawn(daemon::daemon::run(cfg, async {
+        let _ = stop_rx.await;
+    }));
+    let (mut ws, _) = m.conns.recv().await.unwrap();
+    assert!(matches!(next(&mut ws).await, Up::Hello { .. }));
+    send(&mut ws, &welcome(vec![])).await;
+    send(&mut ws, &assign("a1", "fake", "artifact", None)).await;
+    let frames = collect(&mut ws, "a1", true, |f| matches!(f, Up::RunDone(_))).await;
+    assert_eq!(done(&frames).status, "succeeded");
+    let report = chat_run_report(&tmp.path().join("work/runs/a1/work"), 1).await;
+    assert_eq!(report["code"], 0, "{report}");
+    let out: serde_json::Value = serde_json::from_str(report["out"].as_str().unwrap()).unwrap();
+    assert_eq!(out["artifact"]["id"], "A1");
+    let puts = m.puts.lock().unwrap().clone();
+    let files: Vec<&Put> = puts.iter().filter(|p| p.path == "/v1/machine/runs/a1/files").collect();
+    assert_eq!(files.len(), 2);
+    for p in &files {
+        assert_eq!(p.headers["authorization"], format!("Bearer {TOKEN}"));
+    }
+    let page = files
+        .iter()
+        .find(|p| p.headers["x-file-name"] == "index.html")
+        .unwrap();
+    assert_eq!(page.headers["content-type"], "text/html");
+    let text = String::from_utf8_lossy(&page.body);
+    assert!(!text.contains("tm_fakefake") && text.contains("<redacted>"), "{text}");
+    use sha2::Digest;
+    let sha: String = sha2::Sha256::digest(&page.body).iter().map(|b| format!("{b:02x}")).collect();
+    assert_eq!(page.headers["x-file-sha256"], sha);
+    let made = puts
+        .iter()
+        .find(|p| p.path == "/v1/machine/runs/a1/artifacts")
+        .expect("artifact create");
+    let body: serde_json::Value = serde_json::from_slice(&made.body).unwrap();
+    assert_eq!(body["title"], "看板");
+    assert_eq!(body["kind"], "html");
+    assert_eq!(body["entry"], "index.html");
+    let paths: Vec<&str> = body["files"].as_array().unwrap().iter().map(|f| f["path"].as_str().unwrap()).collect();
+    assert_eq!(paths, ["app.js", "index.html"]);
+    assert!(body["files"][0]["fileId"].as_str().unwrap().starts_with('F'));
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)
         .await

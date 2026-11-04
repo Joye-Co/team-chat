@@ -340,6 +340,56 @@ describe("1.1 runs", () => {
     d.close();
   });
 
+  it("let a run's daemon upload files and make 产出 as the runner member, shown as proof in the done card", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["output"]);
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await startRun(w, c, d);
+    const page = new TextEncoder().encode("<!doctype html><p>看板</p>");
+    const sha = async (b: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    const put = (token: string, bytes: Uint8Array, hash: string, id = runId) =>
+      SELF.fetch(`${BASE}/v1/machine/runs/${id}/files`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "text/html", "content-length": String(bytes.length), "x-file-name": encodeURIComponent("首页.html"), "x-file-sha256": hash },
+        body: bytes,
+      });
+    const post = (path: string, body: unknown, token = w.machineToken) =>
+      SELF.fetch(`${BASE}/v1/machine/runs/${runId}${path}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    // A wrong hash stores nothing; another machine cannot write for this run.
+    expect((await put(w.machineToken, page, "0".repeat(64))).status).toBe(400);
+    const other = await api("/v1/machines", { token: w.owner.token, body: { name: "other", labels: ["x"] } });
+    expect((await put(other.body.token, page, await sha(page))).status).toBe(404);
+    const up = await put(w.machineToken, page, await sha(page));
+    expect(up.status).toBe(200);
+    const file = (await up.json()) as any;
+    expect(file).toMatchObject({ name: "首页.html", status: "ready", createdBy: w.bot.id, topicId, groupId: w.gid, mime: "text/html" });
+
+    const made = await post("/artifacts", { title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: file.id }] });
+    expect(made.status, await made.clone().text()).toBe(200);
+    const art = (await made.json()) as any;
+    expect(art.artifact).toMatchObject({ topicId, createdBy: w.bot.id });
+    expect(art.version).toMatchObject({ version: 1, runId });
+    const v2 = await post(`/artifacts/${art.artifact.id}/versions`, { entry: "index.html", files: [{ path: "index.html", fileId: file.id }], note: "第二版" });
+    expect(v2.status, await v2.clone().text()).toBe(200);
+    expect(((await v2.json()) as any).version).toMatchObject({ version: 2, runId });
+    // The writes are the member's, through the machine.
+    const audit = await env.DB.prepare("SELECT actor_id, credential_id FROM audit WHERE action = 'artifact.create' AND target = ?").bind(art.artifact.id).first<any>();
+    expect(audit).toMatchObject({ actor_id: w.bot.id });
+    expect(audit.credential_id).toMatch(/^machine:/);
+
+    const seq = d.done(runId, { status: "succeeded", resultText: "看板做好了。" });
+    await d.acked(runId, seq);
+    const card = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.cardV2), 5000, "done card");
+    expect(card.cardV2.blocks).toContainEqual({ type: "ref", id: "artifact-1", label: "看板（第 2 版）", target: { kind: "artifact", artifactId: art.artifact.id, version: 2 } });
+    // An ended run writes nothing more.
+    const late = await put(w.machineToken, page, await sha(page));
+    expect(late.status).toBe(409);
+    expect(((await late.json()) as any).error.reason).toBe("run.ended");
+    c.close();
+    d.close();
+  });
+
   it("refuse to pause a run whose machine cannot pause", async () => {
     const w = await world();
     const d = await Daemon.connect(w.machineToken, []);

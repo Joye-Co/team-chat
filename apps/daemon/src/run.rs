@@ -250,6 +250,14 @@ pub async fn supervise(ctx: RunCtx) {
                 None
             } else {
                 let files = rt.kind == "codex";
+                // Files and 产出 go up over HTTP as the run's member, from its working folder.
+                outputs.set_local(crate::chat_run_files::Local {
+                    server_url: cfg.server_url.clone(),
+                    token: token.clone(),
+                    run_id: run_id.clone(),
+                    root: cwd.clone(),
+                    redactor: redactor.clone(),
+                });
                 start_chat_run(&dir, &cwd, files, &run_id, &out, outputs, &mut env)
             };
             let spec = RunSpec {

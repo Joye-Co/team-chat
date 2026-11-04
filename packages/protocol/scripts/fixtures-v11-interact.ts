@@ -667,6 +667,11 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     data: { asOf: "2026-10-31", channels: { all: 38, xhs: 14, invite: 10, bili: 9, douyin: 5 } },
   };
   ok("http/create-artifact-media-data.json", "CreateArtifactRequest", createArt, "V11-INTERACT 7.3 (declarations on `events`, R5)");
+  {
+    const { groupId: _g, topicId: _t, runId: _r, ...machineArt } = createArt as Record<string, unknown>;
+    ok("http/machine-create-artifact-request.json", "MachineCreateArtifactRequest", machineArt, "chat-run artifact create: the run gives group, topic and run");
+    bad("http/machine-create-artifact-request-no-files.json", "MachineCreateArtifactRequest", { ...machineArt, files: [] }, "at least one file");
+  }
   bad("entities/artifact-version-bad-event-name.json", "CreateArtifactRequest", { ...createArt, events: [{ name: "Breakdown!", kind: "ask" }] }, "event names are [a-z][A-Za-z0-9_.-]{0,63}");
   bad("http/create-artifact-schema-ref.json", "CreateArtifactRequest", { ...createArt, events: [{ name: "x", schema: { $ref: "#/data/x" } }] }, "no $ref in a page event schema");
   bad("http/create-artifact-reserved-path.json", "CreateArtifactRequest", { ...createArt, files: [{ path: "__teamchat/mermaid.min.js", fileId: FILE }] }, "paths under __teamchat/ are reserved");

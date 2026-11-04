@@ -532,6 +532,50 @@ impl AddArtifactVersionRequest {
     }
 }
 
+/// `POST /v1/machine/runs/:id/artifacts` (1.1, `chat-run artifact create`): a 产出 of the run's
+/// runner member in the run's topic; the run gives the group, topic and run id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineCreateArtifactRequest {
+    pub title: String,
+    pub kind: ArtifactKind,
+    pub entry: String,
+    pub files: Vec<VersionFileInput>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub note: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub events: Option<Vec<ArtifactEventDecl>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub media: Option<MediaInfo>,
+    #[serde(
+        default,
+        deserialize_with = "any_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub data: Option<Value>,
+}
+
+impl MachineCreateArtifactRequest {
+    pub fn validate(&self) -> Validation {
+        check_chars("title", &self.title, 1, MAX_TITLE_CHARS)?;
+        check_version_input(&self.entry, &self.files, self.note.as_deref())?;
+        check_events(self.events.as_deref())?;
+        check_version_extras(self.media.as_ref(), self.data.as_ref())
+    }
+}
+
 /// Response of `POST /v1/artifacts` and `POST /v1/artifacts/:id/versions`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtifactVersionResponse {

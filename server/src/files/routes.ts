@@ -173,48 +173,9 @@ export function registerFileRoutes(): void {
       const a = auth as AuthContext;
       const req = await body(CreateFileRequest);
       await requireGroupMember(env, req.groupId, a);
-      if ((req.width !== undefined || req.height !== undefined) && !req.mime.startsWith("image/")) {
-        throw new ApiError("invalid", "width and height are for images only");
-      }
-      // Per member and hour: a leaked token or a loop cannot fill R2 without limit.
-      if (!(await rateHit(env.DB, `files:n:${a.memberId}`, FILE_RATE.windowMs, FILE_RATE.files))) {
-        throw new ApiError("rate_limited", "too many files this hour");
-      }
-      if (!(await rateHit(env.DB, `files:b:${a.memberId}`, FILE_RATE.windowMs, FILE_RATE.bytes, req.size))) {
-        throw new ApiError("rate_limited", "too many bytes uploaded this hour");
-      }
-      const used = await env.DB.prepare("SELECT coalesce(sum(size), 0) AS n FROM files WHERE created_by = ? AND deleted_at IS NULL")
-        .bind(a.memberId)
-        .first<{ n: number }>();
-      if ((used?.n ?? 0) + req.size > MEMBER_FILE_QUOTA) throw new ApiError("too_large", "file storage quota reached");
-      const now = Date.now();
-      const id = ulid(now);
-      await env.DB.batch([
-        env.DB.prepare(
-          `INSERT INTO files (id, group_id, topic_id, name, size, mime, sha256, width, height, status, created_by, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
-        ).bind(
-          id,
-          req.groupId,
-          req.topicId ?? null,
-          req.name,
-          req.size,
-          req.mime.toLowerCase(),
-          req.sha256,
-          req.width ?? null,
-          req.height ?? null,
-          a.memberId,
-          now,
-        ),
-        auditStatement(env.DB, a, {
-          action: "file.create",
-          target: id,
-          details: { groupId: req.groupId, size: req.size, mime: req.mime },
-        }),
-      ]);
+      const row = await reserveFile(env, a, req);
       ctx.waitUntil(deleteStalePending(env).catch(() => {}));
-      const row = (await env.DB.prepare("SELECT * FROM files WHERE id = ?").bind(id).first<FileRow>()) as FileRow;
-      return { file: toFileMeta(row), uploadUrl: `${url.origin}/v1/files/${id}/content` };
+      return { file: toFileMeta(row), uploadUrl: `${url.origin}/v1/files/${row.id}/content` };
     },
   });
 
@@ -227,33 +188,7 @@ export function registerFileRoutes(): void {
       const row = await loadFile(env, params.id, a);
       if (row.created_by !== a.memberId) throw new ApiError("forbidden", "only the creator may upload");
       if (row.status === "ready") throw new ApiError("conflict", "file already uploaded");
-      if (row.size > MAX_FILE_BYTES) throw new ApiError("too_large", "file too large");
-      checkDeclaredLength(request, row.size);
-      await putVerified(env.FILES, fileKey(row.group_id, row.id), request.body, row.size, row.sha256, {
-        contentType: row.mime,
-      });
-      const reg: RegisterFileArgs = {
-        id: row.id,
-        topicId: row.topic_id,
-        name: row.name,
-        size: row.size,
-        mime: row.mime,
-        sha256: row.sha256,
-        width: row.width,
-        height: row.height,
-        createdBy: row.created_by,
-        createdAt: row.created_at,
-      };
-      // The room learns about the file before D1 says ready, so a ready file is always usable.
-      unwrap(await roomStub(env, row.group_id).rpc(row.group_id, "files.register", null, reg));
-      const now = Date.now();
-      await env.DB.batch([
-        env.DB.prepare("UPDATE files SET status = 'ready', ready_at = ? WHERE id = ? AND status = 'pending'").bind(
-          now,
-          row.id,
-        ),
-        auditStatement(env.DB, a, { action: "file.upload", target: row.id, details: { groupId: row.group_id } }, now),
-      ]);
+      await completeFile(env, a, row, request);
       return toFileMeta({ ...row, status: "ready" });
     },
   });
@@ -298,37 +233,7 @@ export function registerFileRoutes(): void {
       const a = auth as AuthContext;
       const req = await body(CreateArtifactRequest);
       await requireGroupMember(env, req.groupId, a);
-      const now = Date.now();
-      const id = ulid(now);
-      // Index row first (harmless if the room rejects; removed below), so the id resolves to its group.
-      await env.DB.prepare(
-        "INSERT INTO artifacts (id, group_id, topic_id, created_by, created_at) VALUES (?, ?, ?, ?, ?)",
-      )
-        .bind(id, req.groupId, req.topicId, a.memberId, now)
-        .run();
-      const r = await roomStub(env, req.groupId).rpc(req.groupId, "artifacts.create", actorOf(a), {
-        id,
-        topicId: req.topicId,
-        title: req.title,
-        kind: req.kind,
-        entry: req.entry,
-        files: req.files,
-        note: req.note,
-        events: req.events,
-        runId: req.runId,
-        media: req.media,
-        data: req.data,
-      });
-      if (!r.ok) {
-        await env.DB.prepare("DELETE FROM artifacts WHERE id = ?").bind(id).run();
-        throw new ApiError(r.error.code, r.error.message, r.error.reason);
-      }
-      await auditStatement(env.DB, a, {
-        action: "artifact.create",
-        target: id,
-        details: { groupId: req.groupId, topicId: req.topicId, kind: req.kind },
-      }).run();
-      return r.value as ArtifactVersionResponse;
+      return createArtifactAs(env, a, req);
     },
   });
 
@@ -342,25 +247,7 @@ export function registerFileRoutes(): void {
       const a = auth as AuthContext;
       const groupId = await artifactGroup(env, params.id, a);
       const req = await body(AddArtifactVersionRequest);
-      const out = unwrap(
-        await roomStub(env, groupId).rpc(groupId, "artifacts.addVersion", actorOf(a), {
-          artifactId: params.id,
-          entry: req.entry,
-          files: req.files,
-          note: req.note,
-          title: req.title,
-          events: req.events,
-          runId: req.runId,
-          media: req.media,
-          data: req.data,
-        }),
-      ) as ArtifactVersionResponse;
-      await auditStatement(env.DB, a, {
-        action: "artifact.version.add",
-        target: params.id,
-        details: { groupId, version: out.version.version },
-      }).run();
-      return out;
+      return addArtifactVersionAs(env, a, groupId, params.id, req);
     },
   });
 
@@ -492,4 +379,150 @@ async function artifactGroup(env: Env, id: string, auth: AuthContext): Promise<s
   if (!row) throw new ApiError("not_found", "产出 not found");
   await requireGroupMember(env, row.group_id, auth);
   return row.group_id;
+}
+
+/** Who writes a file or a 产出: a member's token, or a runner member's run (machine routes). */
+export type WriterContext = Pick<AuthContext, "memberId" | "tokenId"> & { member: Pick<AuthContext["member"], "level" | "kind"> };
+
+/**
+ * Checks the writer's limits and stores a `pending` file record (audited as `file.create`).
+ * The caller checked group membership.
+ */
+export async function reserveFile(env: Env, a: WriterContext, req: CreateFileRequest): Promise<FileRow> {
+  if ((req.width !== undefined || req.height !== undefined) && !req.mime.startsWith("image/")) {
+    throw new ApiError("invalid", "width and height are for images only");
+  }
+  // Per member and hour: a leaked token or a loop cannot fill R2 without limit.
+  if (!(await rateHit(env.DB, `files:n:${a.memberId}`, FILE_RATE.windowMs, FILE_RATE.files))) {
+    throw new ApiError("rate_limited", "too many files this hour");
+  }
+  if (!(await rateHit(env.DB, `files:b:${a.memberId}`, FILE_RATE.windowMs, FILE_RATE.bytes, req.size))) {
+    throw new ApiError("rate_limited", "too many bytes uploaded this hour");
+  }
+  const used = await env.DB.prepare("SELECT coalesce(sum(size), 0) AS n FROM files WHERE created_by = ? AND deleted_at IS NULL")
+    .bind(a.memberId)
+    .first<{ n: number }>();
+  if ((used?.n ?? 0) + req.size > MEMBER_FILE_QUOTA) throw new ApiError("too_large", "file storage quota reached");
+  const now = Date.now();
+  const id = ulid(now);
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO files (id, group_id, topic_id, name, size, mime, sha256, width, height, status, created_by, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)`,
+    ).bind(
+      id,
+      req.groupId,
+      req.topicId ?? null,
+      req.name,
+      req.size,
+      req.mime.toLowerCase(),
+      req.sha256,
+      req.width ?? null,
+      req.height ?? null,
+      a.memberId,
+      now,
+    ),
+    auditStatement(env.DB, a, {
+      action: "file.create",
+      target: id,
+      details: { groupId: req.groupId, size: req.size, mime: req.mime },
+    }),
+  ]);
+  return (await env.DB.prepare("SELECT * FROM files WHERE id = ?").bind(id).first<FileRow>()) as FileRow;
+}
+
+/** Stores the bytes of a `pending` file (checked against its size and sha256) and makes it ready. */
+export async function completeFile(env: Env, a: WriterContext, row: FileRow, request: Request): Promise<void> {
+  if (row.size > MAX_FILE_BYTES) throw new ApiError("too_large", "file too large");
+  checkDeclaredLength(request, row.size);
+  await putVerified(env.FILES, fileKey(row.group_id, row.id), request.body, row.size, row.sha256, {
+    contentType: row.mime,
+  });
+  const reg: RegisterFileArgs = {
+    id: row.id,
+    topicId: row.topic_id,
+    name: row.name,
+    size: row.size,
+    mime: row.mime,
+    sha256: row.sha256,
+    width: row.width,
+    height: row.height,
+    createdBy: row.created_by,
+    createdAt: row.created_at,
+  };
+  // The room learns about the file before D1 says ready, so a ready file is always usable.
+  unwrap(await roomStub(env, row.group_id).rpc(row.group_id, "files.register", null, reg));
+  const now = Date.now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE files SET status = 'ready', ready_at = ? WHERE id = ? AND status = 'pending'").bind(now, row.id),
+    auditStatement(env.DB, a, { action: "file.upload", target: row.id, details: { groupId: row.group_id } }, now),
+  ]);
+}
+
+/** Makes a 产出 and its version 1 as `a` (audited as `artifact.create`). The caller checked membership. */
+export async function createArtifactAs(env: Env, a: WriterContext, req: CreateArtifactRequest): Promise<ArtifactVersionResponse> {
+  const now = Date.now();
+  const id = ulid(now);
+  // Index row first (harmless if the room rejects; removed below), so the id resolves to its group.
+  await env.DB.prepare("INSERT INTO artifacts (id, group_id, topic_id, created_by, created_at) VALUES (?, ?, ?, ?, ?)")
+    .bind(id, req.groupId, req.topicId, a.memberId, now)
+    .run();
+  const r = await roomStub(env, req.groupId).rpc(req.groupId, "artifacts.create", actorOf(a as AuthContext), {
+    id,
+    topicId: req.topicId,
+    title: req.title,
+    kind: req.kind,
+    entry: req.entry,
+    files: req.files,
+    note: req.note,
+    events: req.events,
+    runId: req.runId,
+    media: req.media,
+    data: req.data,
+  });
+  if (!r.ok) {
+    await env.DB.prepare("DELETE FROM artifacts WHERE id = ?").bind(id).run();
+    throw new ApiError(r.error.code, r.error.message, r.error.reason);
+  }
+  await auditStatement(env.DB, a, {
+    action: "artifact.create",
+    target: id,
+    details: { groupId: req.groupId, topicId: req.topicId, kind: req.kind },
+  }).run();
+  return r.value as ArtifactVersionResponse;
+}
+
+/** Adds a version to a 产出 of `groupId` as `a` (audited as `artifact.version.add`). */
+export async function addArtifactVersionAs(
+  env: Env,
+  a: WriterContext,
+  groupId: string,
+  artifactId: string,
+  req: AddArtifactVersionRequest,
+): Promise<ArtifactVersionResponse> {
+  const out = unwrap(
+    await roomStub(env, groupId).rpc(groupId, "artifacts.addVersion", actorOf(a as AuthContext), {
+      artifactId,
+      entry: req.entry,
+      files: req.files,
+      note: req.note,
+      title: req.title,
+      events: req.events,
+      runId: req.runId,
+      media: req.media,
+      data: req.data,
+    }),
+  ) as ArtifactVersionResponse;
+  await auditStatement(env.DB, a, {
+    action: "artifact.version.add",
+    target: artifactId,
+    details: { groupId, version: out.version.version },
+  }).run();
+  return out;
+}
+
+/** The group of a 产出 (D1 index), or null. */
+export async function artifactGroupOf(env: Env, id: string): Promise<string | null> {
+  const row = await env.DB.prepare("SELECT group_id FROM artifacts WHERE id = ?").bind(id).first<{ group_id: string }>();
+  return row?.group_id ?? null;
 }

@@ -39,6 +39,7 @@ check!(
     Card,
     CreateFileRequest,
     CreateArtifactRequest,
+    MachineCreateArtifactRequest,
     AddArtifactVersionRequest,
     UpdateMemberRequest,
     UpdateGroupPrefsRequest,
@@ -116,6 +117,10 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ("Artifact", plain::<Artifact>),
     ("ArtifactVersion", plain::<ArtifactVersion>),
     ("CreateArtifactRequest", validated::<CreateArtifactRequest>),
+    (
+        "MachineCreateArtifactRequest",
+        validated::<MachineCreateArtifactRequest>,
+    ),
     (
         "AddArtifactVersionRequest",
         validated::<AddArtifactVersionRequest>,

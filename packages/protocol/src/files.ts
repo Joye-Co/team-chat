@@ -217,6 +217,12 @@ export const AddArtifactVersionRequest = z.object({
   title: Title.optional(),
 });
 export type AddArtifactVersionRequest = z.infer<typeof AddArtifactVersionRequest>;
+/**
+ * `POST /v1/machine/runs/:id/artifacts` (1.1, `chat-run artifact create`): a 产出 of the run's
+ * runner member in the run's topic. The run gives `groupId`, `topicId` and `runId`.
+ */
+export const MachineCreateArtifactRequest = CreateArtifactRequest.omit({ groupId: true, topicId: true, runId: true });
+export type MachineCreateArtifactRequest = z.infer<typeof MachineCreateArtifactRequest>;
 /** Response of `POST /v1/artifacts` and `POST /v1/artifacts/:id/versions`. */
 export const ArtifactVersionResponse = z.object({ artifact: Artifact, version: ArtifactVersion });
 export type ArtifactVersionResponse = z.infer<typeof ArtifactVersionResponse>;

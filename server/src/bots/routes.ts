@@ -1,7 +1,11 @@
 // HTTP routes of the bots feature (docs/protocol.md, "Bot runs").
 import {
+  AddArtifactVersionRequest,
+  CreateFileRequest,
   CreateMachineRequest,
   EndRunRequest,
+  MachineCreateArtifactRequest,
+  RUN_KIND_ASIDE,
   ResumeRunRequest,
   SetBotRunnerRequest,
   SetRunAcceptanceRequest,
@@ -15,6 +19,7 @@ import { getMember, isGroupMember } from "../core/db";
 import { ApiError, unwrap } from "../core/errors";
 import { ulid } from "../core/ids";
 import { registerRoute } from "../core/registry";
+import { type WriterContext, addArtifactVersionAs, artifactGroupOf, completeFile, createArtifactAs, reserveFile, toFileMeta } from "../files/routes";
 import { toMachine } from "./dispatch";
 import { deskStub, linkStub } from "./env";
 import type { TakeoverActor } from "./desk/takeover";
@@ -39,6 +44,26 @@ async function visibleRun(db: D1Database, auth: AuthContext, runId: string) {
   const row = await runIndex(db, runId);
   if (!row || !(await isGroupMember(db, row.group_id, auth.memberId))) throw new ApiError("not_found", "run not found");
   return row;
+}
+
+/**
+ * A machine route of a run (`chat-run` files and 产出): the run must be on the calling machine,
+ * active, not a side chat, and its runner member still in the group. The member writes, with
+ * `machine:{id}` as the audit credential.
+ */
+async function machineRun(request: Request, env: Parameters<typeof deskStub>[0], runId: string) {
+  const machine = await authenticateMachine(request, env.DB);
+  const run = await runIndex(env.DB, runId);
+  if (!run || run.machine_id !== machine.id) throw new ApiError("not_found", "run not found");
+  const info = await deskStub(env, run.bot_id).getRun(run.bot_id, run.id);
+  if (!info || info.endedAt !== undefined) throw new ApiError("conflict", "the run ended", "run.ended");
+  if (info.kind === RUN_KIND_ASIDE) throw new ApiError("forbidden", "a side chat run is read only", "output.read_only");
+  const bot = await getMember(env.DB, run.bot_id);
+  if (!bot || bot.deactivated || !(await isGroupMember(env.DB, run.group_id, run.bot_id))) {
+    throw new ApiError("forbidden", "the run's member is not in the group");
+  }
+  const writer: WriterContext = { memberId: run.bot_id, tokenId: `machine:${machine.id}`, member: { level: bot.level, kind: bot.kind } };
+  return { run, writer };
 }
 
 export function registerBotRoutes(): void {
@@ -245,6 +270,70 @@ export function registerBotRoutes(): void {
         await piping;
       }
       return { ok: true };
+    },
+  });
+
+  // -------------------------------------------------------------------------
+  // chat-run: files and 产出 of a run (docs/machine-protocol.md, "Files and 产出")
+  // -------------------------------------------------------------------------
+
+  registerRoute({
+    method: "PUT",
+    path: "/v1/machine/runs/:id/files",
+    auth: "none",
+    async handler({ request, env, params }) {
+      const { run, writer } = await machineRun(request, env, params.id);
+      const declared = request.headers.get("content-length");
+      if (declared === null || !/^\d+$/.test(declared)) throw new ApiError("invalid", "Content-Length is required");
+      let name: string;
+      try {
+        name = decodeURIComponent(request.headers.get("x-file-name") ?? "");
+      } catch {
+        throw new ApiError("invalid", "X-File-Name is not URI-encoded UTF-8");
+      }
+      const req = CreateFileRequest.safeParse({
+        groupId: run.group_id,
+        topicId: run.topic_id,
+        name,
+        size: Number(declared),
+        mime: (request.headers.get("content-type") ?? "application/octet-stream").split(";")[0].trim().toLowerCase(),
+        sha256: (request.headers.get("x-file-sha256") ?? "").toLowerCase(),
+      });
+      if (!req.success) {
+        const issue = req.error.issues[0];
+        throw new ApiError("invalid", `invalid file: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim());
+      }
+      const row = await reserveFile(env, writer, req.data);
+      await completeFile(env, writer, row, request);
+      return toFileMeta({ ...row, status: "ready" });
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/machine/runs/:id/artifacts",
+    auth: "none",
+    // The first data snapshot may be 256 KiB on its own.
+    bodyLimit: 640 * 1024,
+    async handler({ request, env, params, body }) {
+      const { run, writer } = await machineRun(request, env, params.id);
+      const req = await body(MachineCreateArtifactRequest);
+      return createArtifactAs(env, writer, { ...req, groupId: run.group_id, topicId: run.topic_id, runId: run.id });
+    },
+  });
+
+  registerRoute({
+    method: "POST",
+    path: "/v1/machine/runs/:id/artifacts/:artifactId/versions",
+    auth: "none",
+    bodyLimit: 640 * 1024,
+    async handler({ request, env, params, body }) {
+      const { run, writer } = await machineRun(request, env, params.id);
+      const req = await body(AddArtifactVersionRequest);
+      // A run adds versions only to 产出 of its own group.
+      const groupId = await artifactGroupOf(env, params.artifactId);
+      if (groupId !== run.group_id) throw new ApiError("not_found", "产出 not found");
+      return addArtifactVersionAs(env, writer, groupId, params.artifactId, { ...req, runId: run.id });
     },
   });
 

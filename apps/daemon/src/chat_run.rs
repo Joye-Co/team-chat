@@ -68,9 +68,12 @@ answer in the group, use the `chat-run` command (on PATH): `chat-run card post -
 [--cause <eventId>]`, `chat-run card patch --message <messageId> --base-rev <rev> --ops ops.json \
 [--cause <eventId>]`, `chat-run resolve --event <eventId> --result ignored|failed [--note <text>]`, \
 `chat-run artifact data --artifact <id> --version <n> --file data.json [--cause <eventId>]`, \
-`chat-run artifact reply --event <eventId> --file reply.json` or `--decline <text>`. Each prints \
-the JSON result and exits 0, or prints the error with its reason and exits 1. `chat-run --help` \
-shows more.",
+`chat-run artifact reply --event <eventId> --file reply.json` or `--decline <text>`. To deliver a \
+page or a file as a 产出 (a deliverable people open in the group), write it in your working \
+folder and run `chat-run artifact create --title <title> --dir <folder>` (or `--file <path>`; \
+`chat-run artifact version --artifact <id> --dir <folder>` adds a version); `chat-run file \
+upload --file <path>` uploads one file. Each prints the JSON result and exits 0, or prints the \
+error with its reason and exits 1. `chat-run --help` shows more.",
         name = crate::product::name(),
         scheme = crate::product::url_scheme(),
     )
@@ -94,9 +97,16 @@ struct Pending {
 pub struct Outputs {
     pending: Mutex<HashMap<String, Pending>>,
     next: AtomicU64,
+    /// What the daemon needs for the ops it answers itself (files and 产出).
+    local: OnceLock<Arc<crate::chat_run_files::Local>>,
 }
 
 impl Outputs {
+    /// Lets the run's `chat-run` upload files and make 产出 (see [`crate::chat_run_files`]).
+    pub fn set_local(&self, local: crate::chat_run_files::Local) {
+        let _ = self.local.set(Arc::new(local));
+    }
+
     fn add(&self) -> (String, oneshot::Receiver<RunOutputResult>) {
         let id = format!("o{}", self.next.fetch_add(1, Ordering::Relaxed) + 1);
         let (tx, rx) = oneshot::channel();
@@ -437,16 +447,47 @@ pub async fn handle(
         Ok(v) => v,
         Err(e) => return error("invalid", None, format!("request is not JSON: {e}")),
     };
-    let Some(op) = req["op"].as_str().filter(|o| OPS.contains(o)) else {
+    let local_op = req["op"]
+        .as_str()
+        .filter(|o| crate::chat_run_files::OPS.contains(o));
+    let Some(op) = req["op"]
+        .as_str()
+        .filter(|o| OPS.contains(o) || local_op.is_some())
+    else {
         return error(
             "invalid",
             None,
-            format!("op must be one of {}", OPS.join(", ")),
+            format!(
+                "op must be one of {}, {}",
+                OPS.join(", "),
+                crate::chat_run_files::OPS.join(", ")
+            ),
         );
     };
     let body = req.get("body").cloned().unwrap_or(Value::Null);
     if !body.is_object() {
         return error("invalid", None, "body must be a JSON object");
+    }
+    // Files and 产出: the daemon answers them itself over HTTP.
+    if local_op.is_some() {
+        let Some(local) = outputs.local.get().cloned() else {
+            return error(
+                "unavailable",
+                None,
+                "this run cannot send files (no server connection is set up for it)",
+            );
+        };
+        let answer = crate::chat_run_files::handle(op, &body, &local).await;
+        eprintln!(
+            "{} chat-run {op}: {}",
+            crate::proto::now_ms(),
+            if answer["ok"] == json!(true) {
+                "ok".to_string()
+            } else {
+                safe_word(answer["error"]["code"].as_str().unwrap_or("failed"))
+            }
+        );
+        return answer;
     }
     let (output_id, rx) = outputs.add();
     emit(RunEvent::Output {
@@ -547,10 +588,15 @@ pub const USAGE: &str = "usage:
   chat-run resolve --event <eventId> --result ignored|failed [--note <text>]
   chat-run artifact data --artifact <artifactId> --version <n> --file data.json [--base-data-rev <n>] [--cause <eventId>]
   chat-run artifact reply --event <eventId> (--file reply.json | --decline <text>)
+  chat-run file upload --file <path> [--name <name>] [--mime <type>]
+  chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
+  chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
 
 card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); ops.json is a list of
-patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Each command waits up
-to 15 s and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
+patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, folders and
+产出 come from the run's working folder only; a folder's entry is index.html unless --entry
+says otherwise. Each command waits up to 15 s (file upload and artifact create/version: 5
+minutes) and prints the JSON result (exit 0) or {\"ok\":false,\"error\":{code,reason,message}}
 (exit 1). When the CLI's sandbox blocks the connection to the daemon, the reason is
 sandbox.blocked.";
 
@@ -636,6 +682,21 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
             &args[2..],
             &["event", "file", "decline"],
         ),
+        ["file", "upload"] => (
+            crate::chat_run_files::FILE_UPLOAD,
+            &args[2..],
+            &["file", "name", "mime"],
+        ),
+        ["artifact", "create"] => (
+            crate::chat_run_files::ARTIFACT_CREATE,
+            &args[2..],
+            &["title", "dir", "file", "entry", "kind", "note", "events", "media", "data"],
+        ),
+        ["artifact", "version"] => (
+            crate::chat_run_files::ARTIFACT_VERSION,
+            &args[2..],
+            &["artifact", "dir", "file", "entry", "title", "note", "events", "media", "data"],
+        ),
         _ => return Err("unknown command".into()),
     };
     let f = Flags::parse(rest, allowed)?;
@@ -644,6 +705,45 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         body.insert(k.to_string(), v);
     };
     match op {
+        crate::chat_run_files::FILE_UPLOAD => {
+            put("path", json!(absolute(f.req("file")?)?));
+            for k in ["name", "mime"] {
+                if let Some(v) = f.opt(k) {
+                    put(k, json!(v));
+                }
+            }
+        }
+        crate::chat_run_files::ARTIFACT_CREATE | crate::chat_run_files::ARTIFACT_VERSION => {
+            if op == crate::chat_run_files::ARTIFACT_CREATE {
+                put("title", json!(f.req("title")?));
+                if let Some(k) = f.opt("kind") {
+                    if !matches!(k, "html" | "file") {
+                        return Err("--kind must be html or file".into());
+                    }
+                    put("kind", json!(k));
+                }
+            } else {
+                put("artifactId", json!(f.req("artifact")?));
+                if let Some(t) = f.opt("title") {
+                    put("title", json!(t));
+                }
+            }
+            match (f.opt("dir"), f.opt("file")) {
+                (Some(d), None) => put("dir", json!(absolute(d)?)),
+                (None, Some(p)) => put("file", json!(absolute(p)?)),
+                _ => return Err("give one of --dir and --file".into()),
+            }
+            for k in ["entry", "note"] {
+                if let Some(v) = f.opt(k) {
+                    put(k, json!(v));
+                }
+            }
+            for k in ["events", "media", "data"] {
+                if let Some(path) = f.opt(k) {
+                    put(k, read_json(path)?);
+                }
+            }
+        }
         output_op::CARD_POST => {
             let card = read_json(f.req("file")?)?;
             match card {
@@ -724,6 +824,13 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         }
     }
     Ok((op, Value::Object(body)))
+}
+
+/// `path` made absolute against the current folder (the daemon runs elsewhere).
+fn absolute(path: &str) -> Result<String, String> {
+    std::fs::canonicalize(path)
+        .map(|p| p.display().to_string())
+        .map_err(|e| format!("cannot read {path}: {e}"))
 }
 
 /// Sends one request to the run's socket and reads the answer line.
@@ -860,8 +967,12 @@ pub fn main(args: Vec<String>) -> i32 {
         }
     };
     let var = |k: &str| std::env::var_os(k).filter(|s| !s.is_empty());
-    // The daemon answers within TIMEOUT; the extra time covers a slow machine.
-    let wait = TIMEOUT + Duration::from_secs(5);
+    // The daemon answers within TIMEOUT (uploads: their own); the extra time covers a slow machine.
+    let wait = if crate::chat_run_files::OPS.contains(&op) {
+        crate::chat_run_files::TIMEOUT
+    } else {
+        TIMEOUT
+    } + Duration::from_secs(5);
     let answer = match (var(ENV_SOCKET), var(ENV_DIR)) {
         (Some(socket), _) => call(Path::new(&socket), op, body, wait),
         (None, Some(dir)) => call_files(Path::new(&dir), op, body, wait),

@@ -405,6 +405,44 @@ Server rules (BotDesk):
   `conflict` and reason `output.expired`, so an output that `chat-run` reported as timed out (15 s)
   is never done later, and a machine clock behind the server drops nothing.
 
+### Files and 产出 (`chat-run`, daemon over HTTP)
+
+A run delivers pages and files as 产出 of its runner member. These `chat-run` ops are answered by
+the daemon itself, not sent as `output` run events (files can be larger than a frame): it reads
+the files, redacts text files like run events, and calls the server with the machine token as
+the run's member. The server gives the run's group, topic and `runId`, so the done card lists the
+产出 as proof. `chat-run` waits up to 5 minutes for them.
+
+| `op` | `body` | `chat-run` command |
+| --- | --- | --- |
+| `file.upload` | `{ path, name?, mime? }` | `chat-run file upload --file <path> [--name N] [--mime T]` → `{ file: FileMeta }` |
+| `artifact.create` | `{ title, dir \| file, entry?, kind?, note?, events?, media?, data? }` | `chat-run artifact create --title T (--dir D \| --file F) [--entry P] [--kind html\|file] [--note …] [--events e.json] [--media m.json] [--data d.json]` → `ArtifactVersionResponse` |
+| `artifact.version` | `{ artifactId, dir \| file, entry?, title?, note?, events?, media?, data? }` | `chat-run artifact version --artifact A (--dir D \| --file F) [...]` → `ArtifactVersionResponse` |
+
+- Paths are made absolute by `chat-run` and must be inside the run's working folder after
+  symbolic links are resolved; anything else gets `forbidden` with reason
+  `file.outside_workspace`. `--dir` sends every regular file below the folder that is not
+  hidden (a name starting with `.`), at most 500, with `/` paths relative to it. The entry is
+  `--entry`, else `index.html` when the folder has one, else the only file. `kind` defaults to
+  `html` for an `.html`/`.htm` entry and `file` otherwise. The type of each file comes from its
+  extension.
+
+```ts
+PUT  /v1/machine/runs/:id/files      // machine token; body = the file's bytes
+     headers: Content-Length, Content-Type (the file's type), X-File-Name (URI-encoded UTF-8), X-File-Sha256
+     -> FileMeta (ready, createdBy = the run's member, in the run's group and topic)
+POST /v1/machine/runs/:id/artifacts  MachineCreateArtifactRequest -> ArtifactVersionResponse   // version.runId = the run
+POST /v1/machine/runs/:id/artifacts/:artifactId/versions  AddArtifactVersionRequest -> ArtifactVersionResponse
+MachineCreateArtifactRequest = CreateArtifactRequest without { groupId, topicId, runId }
+```
+
+The run must be on the calling machine (`not_found` otherwise), active (`conflict`, reason
+`run.ended`) and not a side chat (`forbidden`, `output.read_only`); its member must still be in
+the group. A version is added only to a 产出 of the run's group, and its `runId` is always the
+run. The member's file limits and quota apply. The audit log has `file.create`, `file.upload`,
+`artifact.create` and `artifact.version.add` with the member as the actor and
+`machine:{machineId}` as the credential.
+
 ## Raw session upload
 
 After `run.done` the daemon uploads the CLI's own raw session file, so the process view and

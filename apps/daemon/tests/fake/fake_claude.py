@@ -7,7 +7,8 @@ writes fake.pid and appends to ticks.txt 30 times, 0.1 s apart (a stopped proces
 in a new process group (setpgid), each appending to <name>.ticks every 0.05 s, writes their pids
 to children.txt and then hangs like "hang";
 "chatrun" runs `chat-run card patch` from PATH and writes its exit code, output and the socket's
-mode to chatrun-<n>.json.
+mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and runs
+`chat-run artifact create --title 看板 --dir page`, writing its result to chatrun-<n>.json.
 The arguments are written to argv.json in the working directory.
 The session file goes to $CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as ->/<id>.jsonl.
 """
@@ -58,6 +59,12 @@ for line in sys.stdin:
         r = subprocess.run(["chat-run", "card", "patch", "--message", "M", "--base-rev", "1", "--ops", "ops.json", "--cause", "EV1"],
                            capture_output=True, text=True)
         open("chatrun-%d.json" % n, "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr, "mode": mode, "socket": sock}))
+    if "artifact" in text:
+        os.makedirs("page", exist_ok=True)
+        open("page/index.html", "w").write("<!doctype html><p>key tm_fakefakefakefakefakefake01</p><script src=app.js></script>")
+        open("page/app.js", "w").write("console.log(1)")
+        r = subprocess.run(["chat-run", "artifact", "create", "--title", "看板", "--dir", "page"], capture_output=True, text=True)
+        open("chatrun-%d.json" % n, "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr}))
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
     k = 5 if "slow" in text else 2
