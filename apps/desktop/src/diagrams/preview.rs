@@ -231,9 +231,11 @@ pub fn open(
 ) -> Result<AnyWindowHandle, String> {
     clear_cache_once();
     super::clear_memory(cx);
-    if scene == Scene::Loading {
-        LOADING.store(true, std::sync::atomic::Ordering::Relaxed);
-    }
+    // Only diagram-loading holds diagrams pending; every later scene draws them.
+    LOADING.store(
+        scene == Scene::Loading,
+        std::sync::atomic::Ordering::Relaxed,
+    );
     let worst = crate::selftest::worst_case();
     let extras = messages(scene, worst)
         .into_iter()

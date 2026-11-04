@@ -362,6 +362,8 @@ async fn shoot(
         // under a sample 产出's key (the host scenes) must not leak it into a later scene
         // that shows that 产出, whatever the scene order.
         crate::views::media::store::clear(cx);
+        // Only diagram-loading holds diagrams pending; no other scene inherits it.
+        crate::diagrams::preview::LOADING.store(false, std::sync::atomic::Ordering::Relaxed);
         let services = Services::new(provider, cx);
         *keep.borrow_mut() = Some(services.clone());
         (scene.setup)(&services, cx);
