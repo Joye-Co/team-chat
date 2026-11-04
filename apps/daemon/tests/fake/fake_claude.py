@@ -53,12 +53,15 @@ n = 0
 for line in sys.stdin:
     msg = json.loads(line)
     text = "".join(c.get("text", "") for c in msg["message"]["content"])
+    # Modes come from the request and what follows it, not from the rules the server puts in
+    # front of it (the acceptance rule says "changes" and "artifact").
+    cue = text.rsplit("\nRequest from ", 1)[-1]
     session.write(json.dumps({"type": "user", "text": text}) + "\n"); session.flush()
     if n == 0:
         out({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": sid, "model": "fake-model"})
     n += 1
     mid = "msg_%d" % n
-    if "spawn" in text:
+    if "spawn" in cue:
         loop = "import time\nwhile True:\n    open(%r, 'a').write('x\\n')\n    time.sleep(0.05)\n"
         quiet = {"stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL}
         kids = [subprocess.Popen([sys.executable, "-c", loop % "session.ticks"], start_new_session=True, **quiet),
@@ -66,36 +69,36 @@ for line in sys.stdin:
         open("children.txt", "w").write(" ".join(str(k.pid) for k in kids))
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
-    if "orphan" in text:
+    if "orphan" in cue:
         # A tool that daemonizes: the shell starts a ticker in the background and exits, so the
         # ticker's parent is pid 1 and it is no longer below the CLI.
         loop = "import time\nwhile True:\n    open('orphan.ticks', 'a').write('x\\n')\n    time.sleep(0.05)\n"
         subprocess.run(["/bin/sh", "-c", "%s -c \"$0\" >/dev/null 2>&1 </dev/null & echo $! > orphan.txt" % sys.executable, loop], check=True)
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
-    if "hang" in text:
+    if "hang" in cue:
         open("fake.pid", "w").write(str(os.getpid()))
         time.sleep(600)
-    if "tick" in text:
+    if "tick" in cue:
         open("fake.pid", "w").write(str(os.getpid()))
         for i in range(30):
             with open("ticks.txt", "a") as t:
                 t.write("%d\n" % i)
             time.sleep(0.1)
-    if "chatrun" in text:
+    if "chatrun" in cue:
         sock = os.environ.get("CHAT_RUN_SOCKET", "")
         mode = oct(os.stat(sock).st_mode & 0o777) if sock and os.path.exists(sock) else "none"
         open("ops.json", "w").write(json.dumps([{"op": "set", "id": "note", "props": {"text": "key tm_fakefakefakefakefakefake01"}}]))
         r = subprocess.run(["chat-run", "card", "patch", "--message", "M", "--base-rev", "1", "--ops", "ops.json", "--cause", "EV1"],
                            capture_output=True, text=True)
         open("chatrun-%d.json" % n, "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr, "mode": mode, "socket": sock}))
-    if "artifact" in text:
+    if "artifact" in cue:
         os.makedirs("page", exist_ok=True)
         open("page/index.html", "w").write("<!doctype html><p>key tm_fakefakefakefakefakefake01</p><script src=app.js></script>")
         open("page/app.js", "w").write("console.log(1)")
         r = subprocess.run(["chat-run", "artifact", "create", "--title", "看板", "--dir", "page"], capture_output=True, text=True)
         open("chatrun-%d.json" % n, "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr}))
-    if "chatcard" in text:
+    if "chatcard" in cue:
         def run(*a):
             r = subprocess.run(["chat-run", *a], capture_output=True, text=True)
             try:
@@ -118,12 +121,12 @@ for line in sys.stdin:
         open("chatcard-%d.json" % n, "w").write(json.dumps({"kinds": kinds, "post": post, "again": again, "patch": patch}))
     out({"type": "stream_event", "event": {"type": "message_start", "message": {"id": mid}}, "session_id": sid})
     reply = "reply %d: %s" % (n, text)
-    k = 5 if "slow" in text else 2
+    k = 5 if "slow" in cue else 2
     step = max(1, len(reply) // k + 1)
     chunks = [reply[i:i + step] for i in range(0, len(reply), step)]
     for c in chunks:
         out({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": c}}, "session_id": sid})
-        if "slow" in text:
+        if "slow" in cue:
             time.sleep(0.3)
     out({"type": "assistant", "message": {"id": mid, "content": [{"type": "text", "text": reply}]}, "session_id": sid})
     if n == 1:
