@@ -1,6 +1,8 @@
 //! 群 page (NATIVE.md §1, §9.4 lists, §9.3 inspector): the toolbar row says
-//! the 群's name and purpose; the content is the composer that starts a
-//! 话题, then a Mail-like list of 进行中 and 最近完成 话题; the inspector is
+//! the 群's name and purpose; the content is a Mail-like list of 进行中 and
+//! 最近完成 话题 (a 话题 starts from `square.and.pencil` in the toolbar or
+//! the sidebar, or ⌘N, which open the 新话题 sheet preset to this 群; there
+//! is no inline post box); the inspector is
 //! the 群's info like a Contacts group: 成员, 群里的决定 (记一条… opens a
 //! sheet), 最近的产出 and 在哪干活.
 //!
@@ -19,15 +21,14 @@ use gpui::{
 use gpui_component::{
     WindowExt as _,
     input::{InputEvent, InputState},
-    menu::{ContextMenuExt as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem},
 };
 
 use crate::{
     app::{Place, RightPane, Services},
-    copy::{common, fill, group_page as c},
+    copy::{common, fill, group_page as c, nav as nav_copy},
     data::{ArtifactKind, BotRunSummary, PlanState, Topic, TopicStatus},
     ui::{
-        MemberAvatar,
         native::{
             InspectorSection, NativeTextField, NativeType as _, SheetLayout, SheetWidth,
             ToolbarGroup, ToolbarItemKind, ToolbarRow, borderless_button, emphasized,
@@ -43,23 +44,19 @@ use crate::{
 
 use rows::{AVATAR, ROW, RowInk, line, mail_row, state_line};
 
-/// The trailing slot of a 话题 row (the plan step of a run), so the times
-/// of all rows line up.
-const ROW_SLOT: gpui::Pixels = px(52.);
-
 pub struct GroupPage {
     services: Services,
-    composer: Entity<ComposerView>,
     aside_open: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl GroupPage {
-    pub fn new(services: Services, composer: Entity<ComposerView>, cx: &mut Context<Self>) -> Self {
+    /// `_composer`: the shared composer, which this page no longer shows
+    /// (topics start in the 新话题 sheet); the shell still passes it.
+    pub fn new(services: Services, _composer: Entity<ComposerView>, cx: &mut Context<Self>) -> Self {
         Self {
             _subscriptions: watch(&services, cx),
             services,
-            composer,
             aside_open: true,
         }
     }
@@ -207,10 +204,35 @@ impl GroupPage {
         let active = emphasized(window);
         let nav = self.services.nav.clone();
         let services = self.services.clone();
+        let group_id = g.to_string();
+        let more = toolbar_item(
+            "group-more",
+            Sf::More,
+            c::GROUP_PAGE_SETTINGS,
+            ToolbarItemKind::Plain,
+            active,
+            window,
+            cx,
+        )
+        .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+            group_menu(menu, &services, &group_id)
+        });
         ToolbarRow::new(group.map(|x| x.name).unwrap_or_default())
             .subtitle(subtitle)
             .leading_inset(rows::toolbar_leading(&self.services, cx))
             .group(ToolbarGroup::new([
+                toolbar_item(
+                    "group-new-topic",
+                    Sf::NewTopic,
+                    nav_copy::NEW_TOPIC,
+                    ToolbarItemKind::Plain,
+                    active,
+                    window,
+                    cx,
+                )
+                .on_click(|_, window, cx| {
+                    window.dispatch_action(Box::new(crate::app::NewTopic), cx)
+                }),
                 toolbar_item(
                     "group-outputs",
                     Sf::Outputs,
@@ -221,17 +243,8 @@ impl GroupPage {
                     cx,
                 )
                 .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_artifacts(cx))),
-                toolbar_item(
-                    "group-settings",
-                    Sf::More,
-                    c::GROUP_PAGE_SETTINGS,
-                    ToolbarItemKind::Plain,
-                    active,
-                    window,
-                    cx,
-                )
-                .on_click(move |_, _, cx| crate::app::open_settings_window(services.clone(), cx)),
             ]))
+            .group(rows::toolbar_capsule(more, cx))
             .group(ToolbarGroup::new([toolbar_item(
                 "group-inspector",
                 Sf::PaneRight,
@@ -306,21 +319,8 @@ impl GroupPage {
                 let mut parts = vec![owner_name];
                 parts.extend(step.map(|i| r.plan[i].text.clone()));
                 parts.push(kit::elapsed(p.clock_now(), since));
-                let progress = kit::plan_progress(&r.plan).map(|(n, m)| {
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(6.))
-                        .child(rows::sym(Sym::Live, SymSize::INLINE, k.blue))
-                        .child(
-                            div()
-                                .n_subheadline()
-                                .n_figures()
-                                .text_color(k.secondary)
-                                .child(format!("{n}/{m}")),
-                        )
-                        .into_any_element()
-                });
+                let progress = kit::plan_progress(&r.plan)
+                    .map(|(n, m)| rows::progress_slot(n, m, k.blue, k.secondary));
                 (state_line(None, Some(parts.join(" · ")), k.secondary), progress)
             }
             Standing::OnOthers => {
@@ -365,18 +365,13 @@ impl GroupPage {
         mail_row(
             SharedString::from(format!("group-topic-{}", t.id)),
             ROW,
-            MemberAvatar::new(owner.as_ref(), AVATAR).into_any_element(),
+            rows::avatar(owner.as_ref(), AVATAR, cx),
             t.title.clone(),
-            Some(clock(t.last_activity_at)),
+            // One trailing slot per line: the time on the title line, the
+            // progress of a run on the second line.
+            Some(rows::time_slot(clock(t.last_activity_at), k.secondary)),
             second,
-            Some(
-                div()
-                    .min_w(ROW_SLOT)
-                    .flex()
-                    .justify_end()
-                    .children(slot)
-                    .into_any_element(),
-            ),
+            slot,
             !last,
             RowInk::new(None, cx),
             cx,
@@ -416,11 +411,11 @@ impl GroupPage {
                 mail_row(
                     SharedString::from(format!("group-done-{i}")),
                     ROW,
-                    MemberAvatar::new(member.as_ref(), AVATAR).into_any_element(),
+                    rows::avatar(member.as_ref(), AVATAR, cx),
                     d.title.clone(),
-                    Some(kit::month_day(d.at)),
+                    Some(rows::time_slot(kit::month_day(d.at), k.secondary)),
                     state_line(None, Some(rest.join(" · ")), k.secondary),
-                    Some(div().min_w(ROW_SLOT).into_any_element()),
+                    None,
                     i + 1 < n,
                     RowInk::new(None, cx),
                     cx,
@@ -468,7 +463,7 @@ impl GroupPage {
                     .items_center()
                     .gap(px(8.))
                     .n_body()
-                    .child(MemberAvatar::new(Some(&m), px(16.)))
+                    .child(rows::avatar(Some(&m), px(16.), cx))
                     .child(div().flex_none().text_color(k.label).child(m.name.clone()))
                     .child(
                         line(m.role.clone().unwrap_or_default())
@@ -709,11 +704,10 @@ impl Render for GroupPage {
             .flex_1()
             .min_h(px(0.))
             .overflow_y_scroll()
+            .pt(px(4.))
             .pb(px(20.))
             .flex()
-            .flex_col()
-            // The shared composer starts a 话题 here (§9.2 composer).
-            .child(div().px(px(16.)).pt(px(4.)).pb(px(4.)).child(self.composer.clone()));
+            .flex_col();
         if !topic_rows.is_empty() {
             list = list
                 .child(
@@ -758,4 +752,65 @@ impl Render for GroupPage {
             .children(inspector)
             .into_any_element()
     }
+}
+
+/// The 群 commands of the toolbar's `ellipsis` pull-down: the same items as
+/// the 群's context menu in the sidebar (§7.3: every context-menu item also
+/// exists in the main UI). 静音 or 取消静音; for a 群 also 重命名群…,
+/// 添加成员… and, apart, 离开群… (it asks first).
+fn group_menu(
+    menu: gpui_component::menu::PopupMenu,
+    services: &Services,
+    group_id: &str,
+) -> gpui_component::menu::PopupMenu {
+    use crate::views::nav as nav_views;
+    let p = &services.provider;
+    let Some(g) = p.groups().into_iter().find(|g| g.id == group_id) else {
+        return menu;
+    };
+    let muted = p.group_muted(&g.id);
+    let (s, id) = (services.clone(), g.id.clone());
+    let menu = menu.item(
+        PopupMenuItem::new(if muted { nav_copy::UNMUTE } else { nav_copy::MUTE })
+            .on_click(move |_, _, _| s.provider.set_group_muted(&id, !muted)),
+    );
+    if g.kind != crate::data::GroupKind::Group {
+        return menu;
+    }
+    let (rename, add, leave) = (services.clone(), services.clone(), services.clone());
+    let (g1, g2, g3) = (g.clone(), g.clone(), g);
+    menu.item(
+        PopupMenuItem::new(nav_copy::RENAME_GROUP).on_click(move |_, window, cx| {
+            nav_views::rename::open_rename_group(
+                rename.clone(),
+                g1.id.clone(),
+                g1.name.clone(),
+                window,
+                cx,
+            )
+        }),
+    )
+    .item(
+        PopupMenuItem::new(nav_copy::ADD_MEMBERS).on_click(move |_, window, cx| {
+            nav_views::dialogs::open_add_members(
+                add.clone(),
+                g2.id.clone(),
+                g2.name.clone(),
+                window,
+                cx,
+            )
+        }),
+    )
+    .separator()
+    .item(
+        PopupMenuItem::new(nav_copy::LEAVE_GROUP).on_click(move |_, window, cx| {
+            nav_views::dialogs::confirm_leave(
+                leave.clone(),
+                g3.id.clone(),
+                g3.name.clone(),
+                window,
+                cx,
+            )
+        }),
+    )
 }
