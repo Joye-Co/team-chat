@@ -592,14 +592,15 @@ pub fn dialog_footer(buttons: Vec<Button>) -> Div {
 
 // --- v12/settings track: native pane parts (NATIVE.md §5, §7, §8) ---
 
-/// The body of a pane (§8): 20 pt side margins, groups 20 pt apart.
+/// The body of a pane (2.19): content x 24-616, the first element 24
+/// below the toolbar border, sections 24 apart, 24 at the end.
 pub fn pane() -> Div {
     use crate::ui::native::metrics;
     div()
         .w_full()
         .px(metrics::GROUP_MARGIN)
-        .pt(px(20.))
-        .pb(px(20.))
+        .pt(metrics::GROUP_MARGIN)
+        .pb(metrics::GROUP_MARGIN)
         .flex()
         .flex_col()
         .gap(metrics::GROUP_GAP)
@@ -816,6 +817,307 @@ pub fn time_popup(
 }
 
 // --- end v12/settings track ---
+
+// --- v14/t4: settings sections, item rows and list states (COMPLETENESS 2.19) ---
+
+/// A settings section (2.19): the section header (2.3), 12 above its
+/// group, card or list.
+pub fn section(header: crate::ui::native::SectionTitle, body: impl IntoElement) -> Div {
+    use crate::ui::native::metrics;
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .gap(metrics::GROUP_HEADER_GAP)
+        .child(header)
+        .child(body)
+}
+
+/// The 28 icon box of a machine or device row (2.19): radius 6, muted
+/// fill, a 16 icon.
+pub fn icon_box_28(sym: Sym, cx: &App) -> Div {
+    use crate::ui::native::{native_colors, tokens};
+    let k = native_colors(cx);
+    div()
+        .flex_none()
+        .size(tokens::height::SM)
+        .rounded(tokens::radius::ITEM)
+        .bg(k.fill)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(crate::ui::icons::icon(sym, tokens::icon::MD, k.label))
+}
+
+/// A list row of a settings group (2.19): an optional media (28 icon box
+/// or avatar), title 14 medium over an optional description 12 muted (two
+/// lines: h64; one line: h44), then the value column (a badge, a select)
+/// and the row's "⋯". Text truncates with a tooltip of the full value.
+#[derive(IntoElement)]
+pub struct ItemRow {
+    id: ElementId,
+    media: Option<AnyElement>,
+    title: SharedString,
+    title_lead: Option<AnyElement>,
+    description: Option<SharedString>,
+    meta: Option<SharedString>,
+    value: Option<AnyElement>,
+    menu: Option<AnyElement>,
+    muted: bool,
+}
+
+impl ItemRow {
+    pub fn new(id: impl Into<ElementId>, title: impl Into<SharedString>) -> Self {
+        Self {
+            id: id.into(),
+            media: None,
+            title: title.into(),
+            title_lead: None,
+            description: None,
+            meta: None,
+            value: None,
+            menu: None,
+            muted: false,
+        }
+    }
+
+    pub fn media(mut self, el: impl IntoElement) -> Self {
+        self.media = Some(el.into_any_element());
+        self
+    }
+
+    /// Something right after the title on its line (an outline badge).
+    pub fn title_lead(mut self, el: impl IntoElement) -> Self {
+        self.title_lead = Some(el.into_any_element());
+        self
+    }
+
+    pub fn description(mut self, text: impl Into<SharedString>) -> Self {
+        let t = text.into();
+        if !t.is_empty() {
+            self.description = Some(t);
+        }
+        self
+    }
+
+    /// A 12 muted tabular meta in front of the value column (a time).
+    pub fn meta(mut self, text: impl Into<SharedString>) -> Self {
+        self.meta = Some(text.into());
+        self
+    }
+
+    pub fn value(mut self, el: impl IntoElement) -> Self {
+        self.value = Some(el.into_any_element());
+        self
+    }
+
+    pub fn menu(mut self, el: impl IntoElement) -> Self {
+        self.menu = Some(el.into_any_element());
+        self
+    }
+
+    /// A deactivated row: title and media in muted ink.
+    pub fn muted(mut self, muted: bool) -> Self {
+        self.muted = muted;
+        self
+    }
+}
+
+impl gpui::RenderOnce for ItemRow {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        use crate::ui::native::{NativeType as _, metrics, native_colors, tokens};
+        use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
+        let k = native_colors(cx);
+        let two_line = self.description.is_some();
+        let tip = |text: SharedString| {
+            move |window: &mut Window, cx: &mut App| {
+                gpui_component::tooltip::Tooltip::new(text.clone()).build(window, cx)
+            }
+        };
+        let title_id = SharedString::from(format!("{}-title", self.id));
+        let title = div()
+            .id(ElementId::Name(title_id))
+            .min_w(gpui::Pixels::ZERO)
+            .n_headline()
+            .text_color(if self.muted { k.secondary } else { k.label })
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis()
+            .tooltip(tip(self.title.clone()))
+            .child(self.title.clone());
+        let description = self.description.clone().map(|d| {
+            let desc_id = SharedString::from(format!("{}-desc", self.id));
+            div()
+                .id(ElementId::Name(desc_id))
+                .min_w(gpui::Pixels::ZERO)
+                .n_subheadline()
+                .text_color(k.secondary)
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .tooltip(tip(d.clone()))
+                .child(d)
+        });
+        div()
+            .id(self.id)
+            .w_full()
+            .h(if two_line {
+                crate::ui::native::tokens::height::FORM_ROW_TWO
+            } else {
+                metrics::FORM_ROW
+            })
+            .px(metrics::FORM_ROW_INSET)
+            .flex()
+            .items_center()
+            .gap(tokens::space::S12)
+            .children(self.media.map(|m| {
+                div()
+                    .flex_none()
+                    .when(self.muted, |d| d.opacity(0.5))
+                    .child(m)
+            }))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(gpui::Pixels::ZERO)
+                    .flex()
+                    .flex_col()
+                    .gap(tokens::space::S4)
+                    .child(
+                        div()
+                            .w_full()
+                            .min_w(gpui::Pixels::ZERO)
+                            .flex()
+                            .items_center()
+                            .gap(tokens::space::S8)
+                            .child(title)
+                            .children(self.title_lead.map(|el| div().flex_none().child(el))),
+                    )
+                    .children(description),
+            )
+            .children(self.meta.map(|t| {
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(k.secondary)
+                    .whitespace_nowrap()
+                    .child(t)
+            }))
+            .children(
+                self.value
+                    .map(|v| div().flex_none().flex().justify_end().child(v)),
+            )
+            .children(self.menu.map(|m| div().flex_none().child(m)))
+    }
+}
+
+/// The ghost 28 "⋯" of a row (2.19): it opens the row's DropdownMenu.
+pub fn more_button(id: impl Into<ElementId>, window: &Window, cx: &App) -> Button {
+    use crate::ui::native::{IconSize, icon_button};
+    icon_button(id, Sym::More, s::ROW_MORE, IconSize::Small, window, cx)
+}
+
+/// The outline sm "重试" of a failed list (2.15).
+pub fn retry_button(id: impl Into<ElementId>, cx: &App) -> Button {
+    use crate::ui::native::{PushSize, PushStyle, push_button};
+    push_button(id, s::RETRY, PushStyle::Outline, PushSize::Small, cx)
+}
+
+/// A list's loading state (2.19): skeleton rows at the row height, in the
+/// group the list will fill.
+pub fn list_loading(_id: &str, rows: usize, two_line: bool, cx: &App) -> AnyElement {
+    use crate::ui::native::{metrics, native_colors, tokens};
+    use gpui_component::skeleton::Skeleton;
+    let k = native_colors(cx);
+    let widths = [0.46, 0.62, 0.38];
+    let mut group = div().w_full().flex().flex_col();
+    for i in 0..rows {
+        if i > 0 {
+            group = group.child(
+                div()
+                    .ml(metrics::FORM_ROW_INSET)
+                    .h(tokens::layout::HAIRLINE)
+                    .bg(k.separator),
+            );
+        }
+        let w = widths[i % widths.len()];
+        group = group.child(
+            div()
+                .h(if two_line {
+                    crate::ui::native::tokens::height::FORM_ROW_TWO
+                } else {
+                    metrics::FORM_ROW
+                })
+                .px(metrics::FORM_ROW_INSET)
+                .flex()
+                .items_center()
+                .gap(tokens::space::S12)
+                .child(
+                    Skeleton::new()
+                        .size(tokens::height::SM)
+                        .rounded(tokens::radius::ITEM),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .flex()
+                        .flex_col()
+                        .gap(tokens::space::S6)
+                        .child(Skeleton::new().h(tokens::text::UI.0).w(gpui::relative(w)))
+                        .when(two_line, |d| {
+                            d.child(
+                                Skeleton::new()
+                                    .h(tokens::text::META.0)
+                                    .w(gpui::relative(w * 0.7)),
+                            )
+                        }),
+                ),
+        );
+    }
+    group.into_any_element()
+}
+
+/// A list's empty state inside its group (2.19, 2.13 compact): a 16 icon,
+/// one 14 muted line and an optional add action, in one row.
+pub fn list_empty(
+    sym: Sym,
+    text: impl Into<SharedString>,
+    action: Option<AnyElement>,
+    cx: &App,
+) -> Div {
+    use crate::ui::native::{metrics, page::compact_empty};
+    div()
+        .w_full()
+        .min_h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .flex()
+        .items_center()
+        .child(div().flex_1().child(compact_empty(sym, text, action, cx)))
+}
+
+/// A failed list or request (2.15): an Alert with the cause and an outline
+/// sm "重试", in the section it belongs to.
+pub fn failed_alert(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    description: Option<SharedString>,
+    retry: Option<Button>,
+    cx: &App,
+) -> AnyElement {
+    use crate::ui::native::page::{AlertKind, page_alert};
+    page_alert(
+        id,
+        AlertKind::Error,
+        title,
+        description,
+        retry.map(IntoElement::into_any_element),
+        cx,
+    )
+    .into_any_element()
+}
+
+// --- end v14/t4 settings sections ---
 
 #[cfg(test)]
 mod tests {

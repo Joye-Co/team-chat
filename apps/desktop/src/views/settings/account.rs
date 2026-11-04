@@ -532,7 +532,6 @@ impl AccountPage {
                     )
                     .children(avatar_status);
                 let fields = sheet_form()
-                    .pt(px(4.))
                     .child(sheet_form_row(
                         s::NAME,
                         NativeTextField::new("profile-name", &page.name)

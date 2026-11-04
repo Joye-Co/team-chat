@@ -32,90 +32,174 @@ use crate::{
     },
 };
 
-// --- v12/fx-overlays: the one form pattern of every sheet ---
+// --- v14/t4: the one form pattern of every sheet (COMPLETENESS 2.8, D8) ---
 
-/// The label column of a sheet form: fits 第一条消息 (five characters).
-pub const FORM_LABEL: gpui::Pixels = px(72.);
+/// The label column of a sheet form (2.8): 112 in every sheet, so fields
+/// start at one x in new-topic, rename and new-group.
+pub const FORM_LABEL: gpui::Pixels = metrics::LABEL_COLUMN;
 /// The gap between a label and its control.
-pub const FORM_GAP: gpui::Pixels = px(8.);
-/// The space between the rows of a sheet form.
-pub const FORM_ROW_GAP: gpui::Pixels = px(12.);
+pub const FORM_GAP: gpui::Pixels = metrics::LABEL_GAP;
 
-/// The width a control takes in the form of a `width` sheet: from the
-/// control column to the sheet's trailing inset.
+/// The width a control takes in a row of a `width` sheet's form: from the
+/// control column to the group's trailing inset.
 pub fn form_field_width(width: SheetWidth) -> gpui::Pixels {
-    width.px() - metrics::SHEET_PAD * 2. - FORM_LABEL - FORM_GAP
+    width.px()
+        - metrics::SHEET_PAD * 2.
+        - crate::ui::native::tokens::layout::BORDER * 2.
+        - metrics::FORM_ROW_INSET * 2.
+        - FORM_LABEL
+        - FORM_GAP
 }
 
-/// A sheet form (the Messages Name and Photo sheet): right-aligned labels
-/// in one column, standalone controls on the sheet background, no group
-/// fill under them.
-pub fn sheet_form() -> gpui::Div {
-    div().w_full().flex().flex_col().gap(FORM_ROW_GAP)
+/// A sheet form (2.8 GroupBox): one group, radius 10, a 1 px border, the
+/// group fill; its rows are separated by 1 px lines inset to the label x.
+pub fn sheet_form() -> SheetForm {
+    SheetForm::default()
 }
 
-/// One row of a [`sheet_form`]: the label right-aligned in the label column,
-/// the control after it, centred on the control's first line.
+/// The group of a [`sheet_form`]; children are its rows.
+#[derive(IntoElement, Default)]
+pub struct SheetForm {
+    rows: Vec<gpui::AnyElement>,
+}
+
+impl ParentElement for SheetForm {
+    fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
+        self.rows.extend(elements);
+    }
+}
+
+impl gpui::RenderOnce for SheetForm {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = native_colors(cx);
+        let n = self.rows.len();
+        let mut group = div()
+            .w_full()
+            .rounded(metrics::GROUP_RADIUS)
+            .border_1()
+            .border_color(k.separator)
+            .bg(k.group)
+            .flex()
+            .flex_col();
+        for (ix, row) in self.rows.into_iter().enumerate() {
+            group = group.child(row);
+            if ix + 1 < n {
+                group = group.child(
+                    div()
+                        .ml(metrics::FORM_ROW_INSET)
+                        .h(crate::ui::native::tokens::layout::HAIRLINE)
+                        .bg(k.separator),
+                );
+            }
+        }
+        group
+    }
+}
+
+/// One row of a [`sheet_form`] (2.8 FormRow, h44): the label (14
+/// foreground) in the 112 column at x + 16, the control after it.
 pub fn sheet_form_row(
     label: impl Into<gpui::SharedString>,
     control: impl IntoElement,
     cx: &App,
 ) -> gpui::Div {
-    form_row(label.into(), control.into_any_element(), false, cx)
+    form_row(label.into(), control.into_any_element(), false, false, cx)
 }
 
-/// A row whose control is taller than one line (a multi-line field, a
-/// grid): the label sits on the control's first line.
+/// A [`sheet_form_row`] whose field is invalid: the label turns
+/// destructive (the field draws its own destructive border and ring).
+pub fn sheet_form_row_invalid(
+    label: impl Into<gpui::SharedString>,
+    control: impl IntoElement,
+    invalid: bool,
+    cx: &App,
+) -> gpui::Div {
+    form_row(label.into(), control.into_any_element(), false, invalid, cx)
+}
+
+/// A full-width row (a textarea, a list, a grid): the label at the same x
+/// on its own line, the control under it across the row.
 pub fn sheet_form_row_top(
     label: impl Into<gpui::SharedString>,
     control: impl IntoElement,
     cx: &App,
 ) -> gpui::Div {
-    form_row(label.into(), control.into_any_element(), true, cx)
+    form_row(label.into(), control.into_any_element(), true, false, cx)
 }
 
 fn form_row(
     label: gpui::SharedString,
     control: gpui::AnyElement,
     top: bool,
+    invalid: bool,
     cx: &App,
 ) -> gpui::Div {
     let k = native_colors(cx);
+    let label = div()
+        .flex_none()
+        .n_body()
+        .text_color(if invalid { k.red } else { k.label })
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .child(label);
+    if top {
+        return div()
+            .w_full()
+            .px(metrics::FORM_ROW_INSET)
+            .py(crate::ui::native::tokens::space::S12)
+            .flex()
+            .flex_col()
+            .gap(crate::ui::native::tokens::space::S8)
+            .child(label)
+            .child(
+                div()
+                    .w_full()
+                    .min_w(gpui::Pixels::ZERO)
+                    .flex()
+                    .child(control),
+            );
+    }
     div()
         .w_full()
+        .min_h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .py(crate::ui::native::tokens::space::S6)
         .flex()
+        .items_center()
         .gap(FORM_GAP)
-        .map(|d| {
-            if top {
-                d.items_start()
-            } else {
-                d.items_center()
-            }
-        })
+        .child(label.w(FORM_LABEL))
         .child(
             div()
-                .flex_none()
-                .w(FORM_LABEL)
-                .min_h(metrics::FIELD)
+                .flex_1()
+                .min_w(gpui::Pixels::ZERO)
                 .flex()
-                .items_center()
-                .justify_end()
-                .n_body()
-                .text_color(k.label)
-                .child(label),
+                .child(control),
         )
-        .child(div().flex_1().min_w(px(0.)).flex().child(control))
 }
 
-/// The one quiet footnote of a sheet form (a field problem, a hint):
-/// Subheadline in `secondary`, on the control column. Never red.
+/// A dependent row of a [`sheet_form`] (2.8): a 12 muted hint for the row
+/// above it, from the control column.
 pub fn sheet_footnote(text: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
+    dependent_row(text.into(), false, cx)
+}
+
+/// A dependent row with a field error: 12 destructive text from the
+/// control column, under the invalid row.
+pub fn sheet_error(text: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
+    dependent_row(text.into(), true, cx)
+}
+
+fn dependent_row(text: gpui::SharedString, error: bool, cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
     div()
         .w_full()
-        .pl(FORM_LABEL + FORM_GAP)
+        .px(metrics::FORM_ROW_INSET)
+        .py(crate::ui::native::tokens::space::S8)
+        .pl(metrics::FORM_ROW_INSET + FORM_LABEL + FORM_GAP)
         .n_subheadline()
-        .text_color(native_colors(cx).secondary)
-        .child(text.into())
+        .text_color(if error { k.red } else { k.secondary })
+        .child(text)
 }
 
 /// Configures a dialog as a window-modal alert (§7.2): the Tahoe alert,
@@ -136,8 +220,8 @@ pub fn window_alert(
         .bg(k.sheet)
         .border_color(k.glass_edge)
         .rounded(metrics::SHEET_RADIUS)
-        .p(px(0.))
-        .gap(px(0.))
+        .p(gpui::Pixels::ZERO)
+        .gap(gpui::Pixels::ZERO)
 }
 
 /// A blocking error (§7.4): an alert with the app icon, the title, the
@@ -181,7 +265,7 @@ pub fn error_alert(
     });
 }
 
-// --- end v12/fx-overlays ---
+// --- end v14/t4 sheet form ---
 
 /// Members I can add to a group or DM: everyone but me and deactivated members.
 pub fn pickable_members(members: &[Member], me: Option<&str>) -> Vec<Member> {

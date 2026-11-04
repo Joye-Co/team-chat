@@ -294,4 +294,7 @@ crate::copy! {
     // 快捷键
     SHORTCUTS_FOOTER = "这些快捷键也写在菜单栏的菜单里。",
     // --- end v12/settings track ---
+    // --- v14/t4 shared ---
+    ROW_MORE = "更多",
+    // --- end v14/t4 shared ---
 }
