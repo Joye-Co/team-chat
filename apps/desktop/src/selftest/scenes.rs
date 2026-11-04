@@ -5,7 +5,7 @@
 //! feature folder (`views/desk/scenes.rs`, …), which [`all`] chains: a name (the PNG is `<name>-<theme>.png`), what it shows, the
 //! data it starts from, a `setup` that moves navigation (or anything else in
 //! `Services`) into place, and an `open` that opens the window. Use
-//! [`open_main`] or [`open_settings`], or write your own opener for a new
+//! [`open_main`] or a settings opener, or write your own opener for a new
 //! window kind. The runner forces the theme, waits for the frames, captures
 //! the window and closes it.
 
@@ -90,7 +90,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "todo",
-        about: "The 待办 list (its sidebar header selected) with the first entry that waits on me open and selected",
+        about: "首页 opened from the sidebar on the v1 sample team: what waits on me, with no 话题 open",
         start: Start::SignedIn,
         setup: open_todo,
         open: open_main,
@@ -209,13 +209,6 @@ pub const SCENES: &[Scene] = &[
         start: Start::SignedIn,
         setup: |_, _| {},
         open: settings_scenes::open_machine_dialog,
-    },
-    Scene {
-        name: "settings",
-        about: "The settings window",
-        start: Start::SignedIn,
-        setup: |_, _| {},
-        open: open_settings,
     },
     Scene {
         name: "settings-members",
@@ -513,7 +506,7 @@ pub const SCENES: &[Scene] = &[
     },
     Scene {
         name: "topic-compose",
-        about: "The composer while reconnecting: the sidebar banner, a quote chip, the format bar and the emoji picker",
+        about: "The composer while reconnecting: the offline Alert above it, a quote chip, a markdown draft and the queued line",
         start: Start::SignedIn,
         setup: |_, _| {},
         open: crate::views::timeline::preview::open_compose,
@@ -1207,19 +1200,10 @@ pub fn open_first_topic(services: &Services, cx: &mut App) {
 }
 
 pub fn open_todo(services: &Services, cx: &mut App) {
-    // An entry that waits on me stays in the list once read (a mention
-    // leaves it), so the list shows its row selected.
-    let todo = services.provider.todo();
-    let first = todo
-        .iter()
-        .find(|item| item.reason == crate::data::TodoReason::WaitingOnMe)
-        .or(todo.first())
-        .cloned();
+    // The 待办 list became 首页: the place opens with no 话题, so the scene
+    // shows the page, not the first entry's 话题 (that is topic-dm).
     services.nav.update(cx, |nav, cx| {
         nav.open_todo(cx);
-        if let Some(item) = first {
-            nav.open_topic(item.group_id, item.topic.id, cx);
-        }
         debug_assert_eq!(nav.place, Some(Place::Todo));
     });
 }
@@ -1333,15 +1317,6 @@ fn worst_login_code(code: &'static str) -> &'static str {
         }
         other => other,
     }
-}
-
-/// The settings window at its own size (the requested size is ignored).
-pub fn open_settings(
-    services: Services,
-    content: Size<Pixels>,
-    cx: &mut App,
-) -> Result<AnyWindowHandle, String> {
-    settings_scenes::open_profile(services, content, cx)
 }
 
 /// The main window with the quick switcher open (DESIGN.md §13.12).
