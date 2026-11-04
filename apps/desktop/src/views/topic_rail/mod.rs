@@ -1151,26 +1151,29 @@ impl Render for TopicRail {
         }
         // One id per place, not per 话题: the rail rises on its first paint
         // only, never again on a 话题 switch (§12).
-        let cards = cards.into_iter().enumerate().map(|(i, el)| {
-            ui::motion::rise(
-                SharedString::from(format!("topic-rail-{i}")),
-                i + 1,
-                ui::card(cx).flex_none().p(space::S12).child(el),
-                cx,
-            )
-        });
+        let cards: Vec<AnyElement> = cards
+            .into_iter()
+            .enumerate()
+            .map(|(i, el)| {
+                ui::motion::rise(
+                    SharedString::from(format!("topic-rail-{i}")),
+                    i + 1,
+                    ui::rail_section(cx).flex_none().child(el),
+                    cx,
+                )
+            })
+            .collect();
         div()
             .id("topic-rail")
             .size_full()
             .overflow_y_scroll()
             .bg(k.rail)
-            .pt(space::S8)
+            .pt(space::S4)
             .px(space::S16)
             .pb(space::S16)
             .flex()
             .flex_col()
-            .gap(space::S10)
-            .children(cards)
+            .child(ui::rail_stack(cards, cx))
             .into_any_element()
     }
 }

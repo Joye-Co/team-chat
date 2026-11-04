@@ -289,7 +289,7 @@ impl TopicPage {
                                 "pinned-see-changes",
                                 c::SEE_CHANGES,
                                 ButtonKind::Ghost,
-                                ButtonSize::Md,
+                                ButtonSize::Card,
                                 cx,
                             )
                             .on_click(cx.listener(
@@ -301,20 +301,31 @@ impl TopicPage {
                             )),
                         )
                         .child(
-                            ui::secondary_button("pinned-request", c::REQUEST_CHANGES, cx)
-                                .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
-                                    this.request_changes(window, cx)
-                                })),
+                            ui::button(
+                                "pinned-request",
+                                c::REQUEST_CHANGES,
+                                ButtonKind::Quiet,
+                                ButtonSize::Card,
+                                cx,
+                            )
+                            .on_click(cx.listener(
+                                |this, _: &ClickEvent, window, cx| this.request_changes(window, cx),
+                            )),
                         )
                         .child(
-                            ui::primary_button("pinned-approve", c::APPROVE_MERGE, cx).on_click(
-                                cx.listener({
-                                    let (g, t) = (g.clone(), t.clone());
-                                    move |this, _: &ClickEvent, _, cx| {
-                                        this.approve(g.clone(), t.clone(), cx)
-                                    }
-                                }),
-                            ),
+                            ui::button(
+                                "pinned-approve",
+                                c::APPROVE_MERGE,
+                                ButtonKind::Primary,
+                                ButtonSize::Card,
+                                cx,
+                            )
+                            .on_click(cx.listener({
+                                let (g, t) = (g.clone(), t.clone());
+                                move |this, _: &ClickEvent, _, cx| {
+                                    this.approve(g.clone(), t.clone(), cx)
+                                }
+                            })),
                         ),
                 )
                 .into_any_element(),
@@ -372,14 +383,14 @@ impl TopicPage {
                                     let kind = if primary {
                                         ButtonKind::Primary
                                     } else {
-                                        ButtonKind::Secondary
+                                        ButtonKind::Quiet
                                     };
                                     let (g, t, m) = (g.clone(), t.clone(), message_id.clone());
                                     ui::button(
                                         ElementId::Name(format!("pinned-action-{i}").into()),
                                         label,
                                         kind,
-                                        ButtonSize::Md,
+                                        ButtonSize::Card,
                                         cx,
                                     )
                                     .on_click(cx.listener(

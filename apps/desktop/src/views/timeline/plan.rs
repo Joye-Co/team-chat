@@ -356,7 +356,6 @@ impl TimelineView {
                 .gap(space::S6)
                 .border_t_1()
                 .border_color(k.line)
-                .bg(k.raised)
                 .t_meta()
                 .text_color(k.ink_3)
                 .child(div().flex_none().child(span_text(USED, now - at)))

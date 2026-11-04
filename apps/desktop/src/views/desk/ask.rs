@@ -498,16 +498,7 @@ fn options(
 
 /// The footer band of a card: answers at the start, a quiet note at the end.
 fn footer_band(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    div()
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .px(space::S16)
-        .py(space::S10)
-        .border_t_1()
-        .border_color(k.line)
-        .bg(k.raised)
+    ui::card_footer(cx)
 }
 
 /// The note at the end of a footer, with an optional glyph.
@@ -640,11 +631,16 @@ fn answer_button(
     let ok_label = label.to_string();
     let danger = kind == ButtonKind::Danger;
     let page = cx.entity();
+    let kind = if kind == ButtonKind::Secondary {
+        ButtonKind::Quiet
+    } else {
+        kind
+    };
     ui::button(
         ElementId::Name(format!("desk-act-{}-{ix}", a.key()).into()),
         label.to_string(),
         kind,
-        ButtonSize::Md,
+        ButtonSize::Card,
         cx,
     )
     .when(kind == ButtonKind::Ghost, |b| {
@@ -709,7 +705,7 @@ fn link_button(
         ElementId::Name(format!("desk-link-{}-{ix}", a.key()).into()),
         label.to_string(),
         ButtonKind::Ghost,
-        ButtonSize::Md,
+        ButtonSize::Card,
         cx,
     )
     .text_color(k.ink_2)
@@ -1128,7 +1124,7 @@ fn open_topic_button(a: &AskCard, s: &Services, cx: &mut Context<DeskPage>) -> A
         ElementId::Name(format!("desk-open-{}", a.key()).into()),
         c::DESK_OPEN_TOPIC,
         ButtonKind::Primary,
-        ButtonSize::Md,
+        ButtonSize::Card,
         cx,
     )
     .on_click(move |_, _, cx| {

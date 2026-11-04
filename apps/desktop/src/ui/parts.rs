@@ -262,10 +262,68 @@ pub fn card(cx: &App) -> gpui::Div {
         .shadow(k.lift())
 }
 
-/// A rail card (v3 topic rail, 群 page side column): a [`card`] with the
-/// rail's 12 pt padding.
+/// A rail section (topic rail, 正在做, 群资料, 来龙去脉, 工作环境): no
+/// border, fill or shadow, so a right pane has no box in a box. Sections
+/// stack in a [`rail_stack`], which divides them with a 1 pt `line`.
+pub fn rail_section(_cx: &App) -> gpui::Div {
+    div()
+        .py(theme::RAIL_SECTION_PAD_Y)
+        .px(theme::RAIL_SECTION_PAD_X)
+        .flex()
+        .flex_col()
+        .gap(space::S8)
+}
+
+/// The older name of [`rail_section`].
 pub fn rail_card(cx: &App) -> gpui::Div {
-    card(cx).p(space::S12).flex().flex_col().gap(space::S8)
+    rail_section(cx)
+}
+
+/// A column of rail sections with a 1 pt `line` between each two.
+pub fn rail_stack(sections: impl IntoIterator<Item = AnyElement>, cx: &App) -> gpui::Div {
+    divided(sections, theme::RAIL_SECTION_PAD_X, cx)
+}
+
+/// A column of rows with a 1 pt `line` between each two, inset `inset` on
+/// both sides: a list inside a card or rail section without a box of its
+/// own (§7.10 Refs). Rows that hover pull out with [`inset_row`].
+pub fn divided(rows: impl IntoIterator<Item = AnyElement>, inset: Pixels, cx: &App) -> gpui::Div {
+    let k = theme::colors(cx);
+    let mut out: Vec<AnyElement> = Vec::new();
+    for (i, el) in rows.into_iter().enumerate() {
+        if i > 0 {
+            out.push(
+                div()
+                    .flex_none()
+                    .mx(inset)
+                    .h(theme::BORDER)
+                    .bg(k.line)
+                    .into_any_element(),
+            );
+        }
+        out.push(el);
+    }
+    div().flex().flex_col().children(out)
+}
+
+/// The row of a boxless list: its hover fill reaches `theme::LIST_ROW_BLEED`
+/// past the text on each side, so the text stays on the card's column. Put
+/// the list in a container with `.mx(-LIST_ROW_BLEED)` and divide it with
+/// [`divided`] at the same inset.
+pub fn inset_row<E: Styled>(el: E) -> E {
+    el.px(theme::LIST_ROW_BLEED).rounded(theme::radius::MD)
+}
+
+/// The action row of a card: in the card under its blocks, with no band,
+/// rule or fill of its own (§7.10). Answers at the start, a note at the end.
+pub fn card_footer(_cx: &App) -> gpui::Div {
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .px(space::S16)
+        .pb(theme::card_v2::FOOTER_BOTTOM)
 }
 
 /// The inner padding of a card: 14 top, 16 sides and bottom.

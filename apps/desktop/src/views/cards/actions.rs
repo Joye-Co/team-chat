@@ -159,7 +159,7 @@ fn button(
     let kind = match action.style.unwrap_or_default() {
         ActionStyle::Primary => ui::ButtonKind::Primary,
         ActionStyle::Default if quiet => ui::ButtonKind::Ghost,
-        ActionStyle::Default => ui::ButtonKind::Secondary,
+        ActionStyle::Default => ui::ButtonKind::Quiet,
         ActionStyle::Danger => ui::ButtonKind::Danger,
     };
     let pressed = sending == Some(action.id.as_str());
@@ -169,7 +169,7 @@ fn button(
             id.clone(),
             action.label.clone(),
             kind,
-            ui::ButtonSize::Md,
+            ui::ButtonSize::Card,
             cx,
         )
         .loading(loading)

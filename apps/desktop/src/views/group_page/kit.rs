@@ -137,9 +137,10 @@ pub fn aside(
         )
 }
 
-/// A card of a side column: radius 12, `line`, `--lift`, padding 12.
+/// A section of a side column: no border, fill or shadow; a
+/// [`ui::rail_stack`] divides sections with a 1 pt `line` (§7.8).
 pub fn side_card(cx: &App) -> Div {
-    ui::card(cx).p(space::S12).flex().flex_col()
+    ui::rail_section(cx).gap_0()
 }
 
 /// The label row of a side card (12/18 500 `ink-3`), with an optional mono
