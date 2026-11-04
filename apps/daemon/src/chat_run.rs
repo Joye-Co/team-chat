@@ -73,10 +73,35 @@ page or a file as a 产出 (a deliverable people open in the group), write it in
 folder and run `chat-run artifact create --title <title> --dir <folder>` (or `--file <path>`; \
 `chat-run artifact version --artifact <id> --dir <folder>` adds a version); `chat-run file \
 upload --file <path>` uploads one file. Each prints the JSON result and exits 0, or prints the \
-error with its reason and exits 1. `chat-run --help` shows more.",
+error with its reason and exits 1. A card is a Card v2 \
+document `{{\"v\":2,\"rev\":1,\"intent\":\"done\"|\"working\"|\"ask\",\"title\":…,\"fallback\":…,\"blocks\":[…]}}`; block \
+types: {blocks}. `chat-run card schema` prints its JSON Schema; `chat-run --help` shows more.",
         name = crate::product::name(),
         scheme = crate::product::url_scheme(),
+        blocks = block_types().join(", "),
     )
+}
+
+/// The JSON Schema of a Card v2 document (`protocol/schema/CardV2.schema.json`, made from the
+/// protocol package's Zod with `bun run gen:schema`): the shape; the server checks the write
+/// rules too.
+pub const CARD_SCHEMA: &str = include_str!("../../../protocol/schema/CardV2.schema.json");
+
+/// The block types of [`CARD_SCHEMA`], in catalog order.
+pub fn block_types() -> &'static [String] {
+    static TYPES: OnceLock<Vec<String>> = OnceLock::new();
+    TYPES.get_or_init(|| {
+        let v: Value = serde_json::from_str(CARD_SCHEMA).unwrap_or_default();
+        v["properties"]["blocks"]["items"]["oneOf"]
+            .as_array()
+            .map(|a| {
+                a.iter()
+                    .filter_map(|b| b["properties"]["type"]["const"].as_str())
+                    .map(str::to_string)
+                    .collect()
+            })
+            .unwrap_or_default()
+    })
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -277,7 +302,7 @@ fn spool_file(name: &str) -> bool {
 
 /// Removes the files of the file transport from `dir`, then `dir` when it is empty. Other
 /// files (and the folder that holds them) stay.
-fn remove_spool(dir: &Path) {
+pub fn remove_spool(dir: &Path) {
     if let Ok(entries) = std::fs::read_dir(dir) {
         for e in entries.flatten() {
             let name = e.file_name().to_string_lossy().to_string();
@@ -641,6 +666,7 @@ fn result_json(r: RunOutputResult) -> Value {
 // ---------------------------------------------------------------------------------------------
 
 pub const USAGE: &str = "usage:
+  chat-run card schema
   chat-run card post --file card.json [--cause <eventId>]
   chat-run card patch --message <messageId> --base-rev <rev> --ops ops.json [--cause <eventId>]
   chat-run resolve --event <eventId> --result ignored|failed [--note <text>]
@@ -650,7 +676,8 @@ pub const USAGE: &str = "usage:
   chat-run artifact create --title <title> (--dir <folder> | --file <path>) [--entry <path>] [--kind html|file] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
   chat-run artifact version --artifact <artifactId> (--dir <folder> | --file <path>) [--entry <path>] [--title <title>] [--note <text>] [--events events.json] [--media media.json] [--data data.json]
 
-card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); ops.json is a list of
+card.json is a Card v2 document (or {\"cardV2\": ..., \"body\": ...}); `chat-run card schema`
+prints its JSON Schema (no daemon needed). ops.json is a list of
 patch ops (or {\"ops\": [...]}). A file name of - reads standard input. Files, folders and
 产出 come from the run's working folder only; a folder's entry is index.html unless --entry
 says otherwise. Each command waits up to 15 s (file upload and artifact create/version: 5
@@ -1013,6 +1040,10 @@ pub fn main(args: Vec<String>) -> i32 {
         println!("{USAGE}");
         return if args.is_empty() { 1 } else { 0 };
     }
+    if args.len() == 2 && args[0] == "card" && args[1] == "schema" {
+        println!("{CARD_SCHEMA}");
+        return 0;
+    }
     let fail = |code: &str, msg: String| {
         println!("{}", error(code, None, msg));
         1
@@ -1247,6 +1278,41 @@ mod tests {
         assert!(!msg.contains("nothing was done"), "{msg}");
         assert!(!msg.contains("too old"), "{msg}");
         assert!(msg.contains("Retrying the same command is safe"), "{msg}");
+    }
+
+    #[test]
+    fn the_card_schema_takes_every_valid_card_fixture_and_the_note_lists_its_blocks() {
+        let schema: Value = serde_json::from_str(CARD_SCHEMA).unwrap();
+        let v = jsonschema::validator_for(&schema).unwrap();
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../protocol/fixtures/entities");
+        let mut checked = 0;
+        for e in std::fs::read_dir(&dir).unwrap() {
+            let f: Value =
+                serde_json::from_str(&std::fs::read_to_string(e.unwrap().path()).unwrap()).unwrap();
+            if f["kind"] != "CardV2" || f["valid"] != true {
+                continue;
+            }
+            let errs: Vec<String> = v.iter_errors(&f["value"]).map(|e| e.to_string()).collect();
+            assert!(errs.is_empty(), "{}: {errs:?}", f["description"]);
+            checked += 1;
+        }
+        assert!(checked >= 10, "only {checked} fixtures");
+        // A shape error is refused.
+        assert!(!v.is_valid(&json!({ "v": 2, "title": "t", "blocks": [{ "type": "nope" }] })));
+        let types = block_types();
+        for t in [
+            "text",
+            "fields",
+            "table",
+            "decision",
+            "chart",
+            "questionnaire",
+        ] {
+            assert!(types.iter().any(|x| x == t), "{t}: {types:?}");
+        }
+        let n = note();
+        assert!(n.contains("chat-run card schema"), "{n}");
+        assert!(n.contains(&types.join(", ")), "{n}");
     }
 
     #[test]

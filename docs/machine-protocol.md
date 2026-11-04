@@ -379,7 +379,12 @@ daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
 
 A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", reason:
 "sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
-`reason` (exit 1). The CLI learns about `chat-run` from a short note: Claude Code
+`reason` (exit 1). `chat-run card schema` prints the JSON Schema of a Card v2 document
+(`protocol/schema/CardV2.schema.json`, made from the protocol package's Zod with
+`bun run gen:schema` and built into the daemon) without asking the daemon; it holds the shape,
+and the server checks the write rules too. The CLI learns about `chat-run` from a short note
+that names the commands, the card fields, every block type of that schema and
+`chat-run card schema`: Claude Code
 `--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP the text before the
 first prompt; the PTY gets none.
 
