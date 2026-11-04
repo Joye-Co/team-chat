@@ -172,10 +172,6 @@ fn version_chip(v: u32, cx: &App) -> gpui::Div {
     div()
         .flex_none()
         .h(px(20.))
-        .px(space::S6)
-        .rounded(radius::SM)
-        .border_1()
-        .border_color(k.border)
         .flex()
         .items_center()
         .child(mono(
