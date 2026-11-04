@@ -288,6 +288,18 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         }
         return line;
     }
+    // R2-11: a run that waits on other members (not on a person's answer,
+    // which `waiting_on` says) is still at work: `Jojo 在做 2/3`, as the
+    // 首页 and the sidebar's 在做 section say.
+    if topic.waiting_on.is_empty()
+        && let Some(run) = runs
+            .iter()
+            .filter(|r| r.status == RunStatus::Waiting)
+            .max_by_key(|r| r.started_at.unwrap_or(r.created_at))
+    {
+        let who = name(&run.bot_id);
+        return run_state(run, &who, None, me, name);
+    }
     // The newest run failed and the 话题 is not done: say it, the same word
     // as the run log and the inspector.
     let latest_failed = runs

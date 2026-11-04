@@ -19,16 +19,21 @@ use crate::{
     data::{ChatProvider, FileAttachment, FileError, RejectedFile},
 };
 
-/// Largest inline preview box (§7.11: 360 x 320).
-pub const PREVIEW_MAX_W: Pixels = px(360.);
-pub const PREVIEW_MAX_H: Pixels = px(320.);
+/// Inline image previews (§2.4, R2-10): one image takes the one in-thread
+/// width (640); two or more sit in 2 columns of 312, gap 16. Heights follow
+/// the aspect ratio between these bounds; the picture covers its box.
+pub const PREVIEW_MAX_W: Pixels = crate::views::timeline::v2::TEXT_MAX;
+pub const PREVIEW_HALF_W: Pixels = px(312.);
+pub const PREVIEW_MAX_H: Pixels = px(360.);
+/// The gap between 2 image columns.
+pub const PREVIEW_GAP: Pixels = px(16.);
 /// Smallest preview side, so a thin image stays clickable.
 pub const PREVIEW_MIN: Pixels = px(48.);
 /// Width of a file row in the timeline: the one in-thread width (§2.4).
 pub const FILE_ROW_W: Pixels = crate::views::timeline::v2::TEXT_MAX;
-/// Height of a file row: 12 + two lines + 12 + the 4 pt bar room (fixed, so progress does not
-/// change the row height).
-pub const FILE_ROW_H: Pixels = px(52.);
+/// Height of a file item (§2.6 ListRow): 12 + two lines + the 4 pt bar room + 12 (fixed, so
+/// progress does not change the row height).
+pub const FILE_ROW_H: Pixels = px(60.);
 /// Height of a 产出 or file row in the side panel (§7.11).
 pub const PANEL_ROW_H: Pixels = px(48.);
 
@@ -293,19 +298,27 @@ pub fn notify(note: Notification, cx: &mut App) {
     }
 }
 
-/// The size of the inline preview box of an image: its aspect ratio inside
-/// [`PREVIEW_MAX_W`] x [`PREVIEW_MAX_H`].
-pub fn preview_size(width: Option<u32>, height: Option<u32>) -> (Pixels, Pixels) {
-    let (max_w, max_h) = (f32::from(PREVIEW_MAX_W), f32::from(PREVIEW_MAX_H));
-    let min = f32::from(PREVIEW_MIN);
-    match (width, height) {
-        (Some(w), Some(h)) if w > 0 && h > 0 => {
-            let (w, h) = (w as f32, h as f32);
-            let scale = (max_w / w).min(max_h / h).min(1.0);
-            (px((w * scale).max(min)), px((h * scale).max(min)))
-        }
-        _ => (PREVIEW_MAX_W * 0.66, PREVIEW_MAX_H * 0.66),
-    }
+/// The inline preview box of an image (§2.4): the full in-thread width for
+/// one image, a 312 column when the message has more; the height from the
+/// aspect ratio (4:3 when unknown), between [`PREVIEW_MIN`] x 2 and
+/// [`PREVIEW_MAX_H`] (a half column at most 3:4 tall).
+pub fn preview_size(width: Option<u32>, height: Option<u32>, images: usize) -> (Pixels, Pixels) {
+    let w = if images > 1 {
+        PREVIEW_HALF_W
+    } else {
+        PREVIEW_MAX_W
+    };
+    let ratio = match (width, height) {
+        (Some(w), Some(h)) if w > 0 && h > 0 => h as f32 / w as f32,
+        _ => 0.75,
+    };
+    let max_h = if images > 1 {
+        f32::from(PREVIEW_HALF_W) * 4. / 3.
+    } else {
+        f32::from(PREVIEW_MAX_H)
+    };
+    let h = (f32::from(w) * ratio).clamp(f32::from(PREVIEW_MIN) * 2., max_h);
+    (w, px(h.round()))
 }
 
 #[cfg(test)]
@@ -360,12 +373,14 @@ mod tests {
     }
 
     #[test]
-    fn previews_keep_the_aspect_ratio() {
-        let (w, h) = preview_size(Some(4000), Some(3000));
-        assert_eq!((f32::from(w), f32::from(h)), (360., 270.));
-        let (w, h) = preview_size(Some(100), Some(50));
-        assert_eq!((f32::from(w), f32::from(h)), (100., 50.));
-        let (w, h) = preview_size(Some(2000), Some(10));
-        assert_eq!((f32::from(w), f32::from(h)), (360., 48.));
+    fn previews_take_the_column_or_its_halves() {
+        let (w, h) = preview_size(Some(4000), Some(3000), 1);
+        assert_eq!((f32::from(w), f32::from(h)), (640., 360.));
+        let (w, h) = preview_size(Some(2000), Some(10), 1);
+        assert_eq!((f32::from(w), f32::from(h)), (640., 96.));
+        let (w, h) = preview_size(Some(400), Some(300), 2);
+        assert_eq!((f32::from(w), f32::from(h)), (312., 234.));
+        let (w, h) = preview_size(None, None, 3);
+        assert_eq!((f32::from(w), f32::from(h)), (312., 234.));
     }
 }

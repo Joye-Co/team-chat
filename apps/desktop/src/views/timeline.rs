@@ -790,6 +790,41 @@ impl Render for TimelineView {
         // block and a compact "no messages" line, never a blank column.
         let empty = (self.v2 && self.messages.is_empty() && !self.has_older)
             .then(|| self.render_empty_thread(&topic, cx));
+        // R2-15: once the thread scrolls (or opens at its end, cut at the
+        // top), the day of the first row on screen stays as the thread's
+        // date divider in a 32 band under the header line (content scrolls
+        // under it), so a date label is never left cut under the header.
+        let sticky_date = (self.v2 && jump_unread.is_none())
+            .then(|| self.list.logical_scroll_top())
+            .filter(|top| top.item_ix > 0 || top.offset_in_item > px(0.))
+            .and_then(|top| self.messages.get(top.item_ix))
+            .map(|m| {
+                use crate::ui::native::{NativeType as _, native_colors};
+                let n = native_colors(cx);
+                let rule = || div().flex_1().h(px(1.)).bg(n.separator);
+                div()
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .right_0()
+                    .h(space::S32)
+                    .pl(v2::LEADING)
+                    .pr(v2::SIDE)
+                    .bg(colors.content)
+                    .flex()
+                    .items_center()
+                    .child(rule())
+                    .child(
+                        div()
+                            .flex_none()
+                            .px(space::S8)
+                            .n_section()
+                            .n_figures()
+                            .text_color(n.secondary)
+                            .child(v2::date_label(m.created_at)),
+                    )
+                    .child(rule())
+            });
         // §2.2: content scrolls under the header band with no fade. When
         // there is more below (the jump pill shows), the list's bottom edge
         // fades over 24 so its last row is never a hard mid-glyph cut.
@@ -826,6 +861,7 @@ impl Render for TimelineView {
                     .min_h(px(0.))
                     .child(timeline)
                     .children(bottom_edge)
+                    .children(sticky_date)
                     .children(jump_unread),
             })
             .children(jump)

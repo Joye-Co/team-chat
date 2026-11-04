@@ -9,7 +9,7 @@ use std::sync::Arc;
 use gpui::{
     AnyElement, App, ElementId, InteractiveElement as _, IntoElement, ObjectFit, ParentElement,
     SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
-    prelude::FluentBuilder as _, px, relative,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _,
@@ -28,8 +28,7 @@ use crate::{
     theme::{self, Type as _, space},
     ui::{
         self, Sym,
-        native::{NativeType as _, metrics as n_metrics, native_colors},
-        sf_symbols::{SymSize, Weight},
+        native::{NativeType as _, native_colors},
     },
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
@@ -57,7 +56,16 @@ impl MessageExtra for AttachmentsExtra {
         } else {
             message.id.as_str()
         };
-        let mut images = div().flex().flex_wrap().gap(space::S8);
+        let n_shown_images = message
+            .attachments
+            .iter()
+            .filter(|f| f.is_uploaded() && f.is_image() && f.size <= THUMB_SOURCE_MAX_BYTES)
+            .count();
+        let mut images = div()
+            .max_w(FILE_ROW_W)
+            .flex()
+            .flex_wrap()
+            .gap(super::PREVIEW_GAP);
         let mut files = div().flex().flex_col().gap(space::S8);
         let (mut n_images, mut n_files) = (0, 0);
         for (index, file) in message.attachments.iter().enumerate() {
@@ -87,7 +95,14 @@ impl MessageExtra for AttachmentsExtra {
                 }
                 n_files += 1;
             } else if file.is_image() && file.size <= THUMB_SOURCE_MAX_BYTES {
-                images = images.child(image_preview(message, file, ctx.provider, id, cx));
+                images = images.child(image_preview(
+                    message,
+                    file,
+                    n_shown_images,
+                    ctx.provider,
+                    id,
+                    cx,
+                ));
                 n_images += 1;
             } else {
                 files = files.child(file_row(message, file, ctx.provider, id, cx));
@@ -110,12 +125,13 @@ impl MessageExtra for AttachmentsExtra {
 fn image_preview(
     message: &Message,
     file: &FileAttachment,
+    images: usize,
     provider: &Arc<dyn ChatProvider>,
     id: impl Fn(&str) -> ElementId,
     cx: &mut App,
 ) -> AnyElement {
     let k = theme::colors(cx);
-    let (w, h) = preview_size(file.width, file.height);
+    let (w, h) = preview_size(file.width, file.height, images);
     let (g, t) = (message.group_id.clone(), message.topic_id.clone());
     let thumb = provider.thumbnail(&g, &t, file);
     let state = provider.file_transfer(&download_key(file));
@@ -216,23 +232,13 @@ fn kind_word(file: &FileAttachment) -> &'static str {
 /// radius 2, `quaternary` track and `label` fill, under the text column
 /// (as Messages draws a transfer), 6 pt from the row's bottom.
 fn track(percent: f32, cx: &App) -> gpui::Div {
-    let n = native_colors(cx);
+    // D12: the one Progress (h4, primary on primary 20 %).
     div()
         .absolute()
         .left(space::S12)
         .right(space::S12)
         .bottom(space::S6)
-        .h(n_metrics::BAR)
-        .rounded(n_metrics::BAR_RADIUS)
-        .bg(n.quaternary)
-        .overflow_hidden()
-        .child(
-            div()
-                .h_full()
-                .w(relative((percent / 100.).clamp(0., 1.)))
-                .rounded(n_metrics::BAR_RADIUS)
-                .bg(n.label),
-        )
+        .child(crate::ui::native::progress(percent / 100., cx))
 }
 
 /// The frame of a file row (NATIVE.md §9.2 attachments, like a Card v2
@@ -261,6 +267,9 @@ fn row_frame(
         .items_center()
         .gap(space::S10)
         .overflow_hidden();
+    // R2-10, §2.4: one file item everywhere: a bordered container (radius
+    // 10, 1 px border), the 32 media box, the name 14 medium cut in the
+    // middle, 12 muted meta, and the Progress inside the item.
     let row = if compact {
         row.h(super::PANEL_ROW_H)
             .mx(-space::S8)
@@ -272,71 +281,79 @@ fn row_frame(
             .h(FILE_ROW_H)
             .pl(space::S12)
             .pr(space::S8)
-            .rounded(px(12.))
-            .bg(n.fill)
+            .gap(space::S12)
+            .rounded(crate::ui::native::tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.content)
     };
-    row.child(
-        div()
-            .flex_none()
-            .size(px(28.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(ui::icons::sym(
-                file_icon(file),
-                SymSize::new(22., 28., Weight::Regular),
-                n.secondary,
-            )),
-    )
-    .child(
-        div()
-            .flex_1()
-            .min_w(px(0.))
-            .flex()
-            .flex_col()
-            .child(
-                // Middle cut on the measured width: the last 12 characters
-                // and the extension stay (§15).
-                div()
-                    .n_body()
-                    .text_color(n.label)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis_middle()
-                    .child(file.name.clone()),
-            )
-            .child(
-                div()
-                    .n_subheadline()
-                    .n_figures()
-                    .text_color(n.secondary)
-                    .one_line()
-                    .child(meta),
-            ),
-    )
-    .child(
-        div()
-            .flex_none()
-            .flex()
-            .gap(space::S2)
-            .when(!pin_actions, |el| {
-                el.invisible().group_hover(group, |s| s.visible())
+    row.child(file_media(file_icon(file), cx))
+        .child(
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .flex()
+                .flex_col()
+                .child(
+                    // Middle cut on the measured width: the last 12 characters
+                    // and the extension stay (§15).
+                    div()
+                        .n_headline()
+                        .text_color(n.label)
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis_middle()
+                        .child(file.name.clone()),
+                )
+                .child(
+                    div()
+                        .n_subheadline()
+                        .n_figures()
+                        .text_color(n.secondary)
+                        .one_line()
+                        .child(meta),
+                ),
+        )
+        .child(
+            div()
+                .flex_none()
+                .flex()
+                .gap(space::S2)
+                .when(!pin_actions, |el| {
+                    el.invisible().group_hover(group, |s| s.visible())
+                })
+                .children(actions),
+        )
+        .when_some(progress, |el, p| {
+            // In the side panel the track runs under the text column, 2 pt
+            // from the row's bottom, so it never covers the meta line.
+            el.child(if compact {
+                track(p, cx).left(px(46.)).right(space::S8).bottom(px(1.))
+            } else {
+                // Under the name and meta: the media box, then the gap.
+                track(p, cx)
+                    .left(space::S12 + px(32.) + space::S12)
+                    .right(px(44.))
+                    .bottom(px(7.))
             })
-            .children(actions),
-    )
-    .when_some(progress, |el, p| {
-        // In the side panel the track runs under the text column, 2 pt
-        // from the row's bottom, so it never covers the meta line.
-        el.child(if compact {
-            track(p, cx).left(px(46.)).right(space::S8).bottom(px(1.))
-        } else {
-            // Under the name and meta: the symbol slot, then the gap.
-            track(p, cx)
-                .left(space::S12 + px(28.) + space::S10)
-                .right(px(44.))
-                .bottom(px(5.))
         })
-    })
+}
+
+/// The 32 media box of a file item (§2.6): radius 6, a 1 px border, the
+/// muted fill and a 16 symbol.
+pub fn file_media(sym: Sym, cx: &App) -> gpui::Div {
+    let n = native_colors(cx);
+    div()
+        .flex_none()
+        .size(px(32.))
+        .rounded(crate::ui::native::tokens::radius::ITEM)
+        .border_1()
+        .border_color(n.separator)
+        .bg(n.fill)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(ui::sym(sym, ui::SymSize::INLINE, n.secondary))
 }
 
 /// A borderless symbol button inside a file row (§5.2, §6): 24 × 24,

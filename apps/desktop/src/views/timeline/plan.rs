@@ -143,11 +143,15 @@ impl TimelineView {
             .flex()
             .items_center()
             .gap(space::S8)
+            // A2-24: while it stops, the badge says 停止中 and the title
+            // names the member only (never `Forge 在做` beside `停止中`).
             .child(div().flex_none().n_headline().text_color(n.label).child(
-                if run.plan.is_empty() {
-                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
-                } else {
+                if !run.plan.is_empty() {
                     l::LIVE_PLAN.to_string()
+                } else if stopping {
+                    name.clone()
+                } else {
+                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
                 },
             ))
             .children(progress.as_ref().map(|(step, total, _)| {
@@ -426,7 +430,13 @@ impl TimelineView {
             .as_ref()
             .and_then(|(_, _, now)| now.clone())
             .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))
-            .unwrap_or_else(|| fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)]));
+            .unwrap_or_else(|| {
+                if stopping {
+                    name.clone()
+                } else {
+                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
+                }
+            });
         let done_steps = run
             .plan
             .iter()
