@@ -20,7 +20,9 @@
 //! | [`scene`] | §11 | the `native-kit` self-test scenes |
 
 pub mod badge;
+pub mod blocks;
 pub mod buttons;
+pub mod feedback;
 pub mod fields;
 pub mod form;
 pub mod inspector;
@@ -34,11 +36,26 @@ pub mod tokens;
 pub mod toolbar;
 
 #[allow(unused_imports)]
-pub use badge::{StatusKind, status_badge};
+pub use badge::{
+    Badge, BadgeState, BadgeVariant, CountPill, KeyCap, StatusBadge, StatusKind, status_badge,
+};
+#[allow(unused_imports)]
+pub use blocks::{
+    Card, Column, LIST_TITLE_INSET, ListRow, SectionTitle, card_surface, description_row,
+    group_label, list_frame, media_box, separator, table,
+};
 #[allow(unused_imports)]
 pub use buttons::{
-    PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text, borderless_variant,
-    disabled_push, popup_button, pull_down, push_button, square_button, square_pair, toolbar_item,
+    Glyph, IconSize, PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text,
+    borderless_variant, chip_button, disabled_push, ghost_button, icon_button, icon_button_bare,
+    icon_button_styled, icon_button_sym, popup_button, pull_down, push_button, row_button,
+    screen_button, select_button, square_button, square_pair, tile_button, toolbar_item,
+    toolbar_item_sym, toolbar_tab,
+};
+#[allow(unused_imports)]
+pub use feedback::{
+    Alert, AlertTone, Empty, EmptyLine, SkeletonKind, icon_box, progress, progress_steps, skeleton,
+    skeleton_rows, toast_surface,
 };
 #[allow(unused_imports)]
 pub use fields::{FieldSize, NativeTextField, SearchField};
@@ -46,11 +63,11 @@ pub use fields::{FieldSize, NativeTextField, SearchField};
 pub use form::{FormRow, GroupedForm, InlineValueField, inline_commit, inline_state};
 #[allow(unused_imports)]
 pub use inspector::{
-    InspectorSection, ListRow, determinate_bar, inspector_column, label_value, label_value_with,
+    CompactRow, InspectorSection, determinate_bar, inspector_column, label_value, label_value_with,
     steps_bar,
 };
 #[allow(unused_imports)]
-pub use menu::{MenuRow, menu_separator, menu_surface, popover_surface};
+pub use menu::{MenuRow, menu_label, menu_separator, menu_surface, popover_surface};
 #[allow(unused_imports)]
 pub use segmented::{Segment, Segmented};
 #[allow(unused_imports)]
@@ -59,13 +76,13 @@ pub use sheet::{
     sheet_surface,
 };
 #[allow(unused_imports)]
-pub use sidebar::{SidebarRow, SidebarSection, floating_sidebar};
+pub use sidebar::{SidebarFooter, SidebarRow, SidebarSection, floating_sidebar};
 #[allow(unused_imports)]
 pub use toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize};
 #[allow(unused_imports)]
 pub use tokens::{NativeColors, NativeType, emphasized, metrics, native_colors};
 #[allow(unused_imports)]
-pub use toolbar::{ToolbarGroup, ToolbarRow};
+pub use toolbar::{ToolbarGroup, ToolbarRow, toolbar_slot};
 
 /// The busy spinner (§5.7): for unknown waits, never with "加载中…" text.
 #[allow(unused_imports)]

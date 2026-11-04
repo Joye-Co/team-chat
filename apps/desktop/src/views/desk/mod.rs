@@ -537,7 +537,7 @@ impl Render for DeskPage {
                     let artifacts = push_button(
                         "desk-empty-artifacts",
                         c::DESK_SEE_ARTIFACTS,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     )

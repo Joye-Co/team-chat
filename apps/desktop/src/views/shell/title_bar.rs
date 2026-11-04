@@ -12,12 +12,10 @@
 //!   it moves the window and a double click zooms it. An inactive window
 //!   draws the title and the symbols in `secondary`.
 
-use std::ops::Range;
-
 use gpui::{
-    AnyElement, App, HighlightStyle, Hsla, InteractiveElement as _, IntoElement, MouseButton,
-    ParentElement, Pixels, SharedString, StatefulInteractiveElement as _, Styled, StyledText,
-    TextLayout, Window, div, px,
+    AnyElement, App, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
+    Pixels, SharedString, StatefulInteractiveElement as _, Styled, StyledText, TextLayout, Window,
+    div, px,
 };
 
 use crate::{
@@ -27,7 +25,8 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            NativeColors, NativeType as _, ToolbarGroup, ToolbarItemKind, metrics, toolbar_item,
+            BadgeState, NativeColors, NativeType as _, StatusBadge, ToolbarGroup, ToolbarItemKind,
+            metrics, tokens::space, toolbar_item,
         },
         sf_symbols::Sf,
     },
@@ -106,7 +105,7 @@ pub struct TitleButton {
 }
 
 impl TitleButton {
-    pub fn new(kind: TitleButtonKind, pane: RightPane) -> Self {
+    pub fn of(kind: TitleButtonKind, pane: RightPane) -> Self {
         Self { kind, pane }
     }
 }
@@ -145,8 +144,12 @@ impl TitleBarSpec {
 /// words with their color, and the state symbol before the line.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Subtitle {
+    /// The muted text: breadcrumb, detail, subtitle (`·` between).
     pub text: String,
-    pub state: Option<(Range<usize>, Hsla)>,
+    /// The state words and their §2.12 state: drawn as a StatusBadge before
+    /// the text (§2.2), never as colored text.
+    pub state: Option<(String, BadgeState)>,
+    /// A muted symbol before the text (the dropped connection).
     pub symbol: Option<(Sym, Hsla)>,
 }
 
@@ -155,71 +158,43 @@ const DOT: &str = " · ";
 
 /// The state color of a tone (§4): amber, blue, red, green; quiet words
 /// stay `secondary`.
-fn tone_color(tone: StateTone, k: &NativeColors) -> Option<Hsla> {
-    match tone {
-        StateTone::You => Some(k.amber),
-        StateTone::Live => Some(k.blue),
-        StateTone::Problem => Some(k.red),
-        StateTone::Done => Some(k.green),
-        StateTone::Quiet => None,
-    }
-}
-
-/// The SF Symbol of a state (§6), drawn before the subtitle.
-fn tone_symbol(tone: StateTone, paused: bool) -> Option<Sym> {
-    if paused {
-        return Some(Sym::Pause);
-    }
-    match tone {
-        StateTone::You => Some(Sym::NeedsYou),
-        StateTone::Live => Some(Sym::Live),
-        StateTone::Problem => Some(Sym::Problem),
-        StateTone::Done => Some(Sym::Done),
-        StateTone::Quiet => None,
-    }
-}
-
-/// The subtitle of `spec`: `群 · state words · detail · subtitle`, the
-/// parts that are there, in that order. The end goes first when the line
-/// is cut, so the step is cut before the state words. The state color is
-/// only on the leading symbol; the words stay `secondary` (D3: no colored
-/// text runs).
-pub fn subtitle(spec: &TitleBarSpec, k: &NativeColors) -> Option<Subtitle> {
+pub fn subtitle(spec: &TitleBarSpec, _k: &NativeColors) -> Option<Subtitle> {
     let mut text = String::new();
-    let state = None;
-    let mut symbol = None;
-    let push = |part: &str, text: &mut String| -> Range<usize> {
+    let push = |part: &str, text: &mut String| {
         if !text.is_empty() {
             text.push_str(DOT);
         }
-        let start = text.len();
         text.push_str(part);
-        start..text.len()
     };
     if let Some(crumb) = spec.breadcrumb.as_deref().filter(|c| !c.is_empty()) {
         push(crumb, &mut text);
     }
-    if let Some((words, tone)) = spec.state.as_ref().filter(|(w, _)| !w.is_empty()) {
-        push(words, &mut text);
-        // A paused run is quiet: its symbol says so.
-        let color = (!spec.state_paused).then(|| tone_color(*tone, k)).flatten();
-        symbol = tone_symbol(*tone, spec.state_paused).map(|s| (s, color.unwrap_or(k.secondary)));
-    }
+    let state = spec
+        .state
+        .as_ref()
+        .filter(|(w, _)| !w.is_empty())
+        .map(|(words, tone)| {
+            // A paused run is quiet: no state icon.
+            let state = if spec.state_paused {
+                BadgeState::Quiet
+            } else {
+                BadgeState::from_tone(*tone)
+            };
+            (words.clone(), state)
+        });
     if let Some(detail) = spec.state_detail.as_deref().filter(|d| !d.is_empty()) {
         push(detail, &mut text);
     }
     if let Some(sub) = spec.subtitle.as_deref().filter(|s| !s.is_empty()) {
         push(sub, &mut text);
     }
-    (!text.is_empty()).then_some(Subtitle {
+    (!text.is_empty() || state.is_some()).then_some(Subtitle {
         text,
         state,
-        symbol,
+        symbol: None,
     })
 }
 
-/// The kinds of `spec`'s items in their capsule groups, in order (at most
-/// three groups, §2).
 pub fn groups(spec: &TitleBarSpec) -> Vec<Vec<TitleButtonKind>> {
     let mut out: Vec<Vec<TitleButtonKind>> = vec![Vec::new(), Vec::new()];
     for b in &spec.buttons {
@@ -277,6 +252,9 @@ pub fn connection_subtitle(
 }
 // --- end v12/fx-shell ---
 
+/// The widest a state badge in the subtitle gets before it truncates.
+const BADGE_MAX: Pixels = px(240.);
+
 /// [`heading`] with a subtitle that replaces the spec's (the connection
 /// state).
 fn heading_with(
@@ -302,32 +280,24 @@ fn heading_with(
             ui::truncate::text_tip(full_title.clone())
         }));
     let sub = over.or_else(|| subtitle(spec, &k)).map(|s| {
-        let highlights: Vec<(Range<usize>, HighlightStyle)> = s
-            .state
-            .iter()
-            .map(|(range, color)| {
-                (
-                    range.clone(),
-                    HighlightStyle {
-                        color: Some(*color),
-                        ..HighlightStyle::default()
-                    },
-                )
-            })
-            .collect();
         let full: SharedString = s.text.clone().into();
-        let styled = StyledText::new(s.text.clone()).with_highlights(highlights);
+        let styled = StyledText::new(s.text.clone());
         let layout = styled.layout().clone();
         let line = div()
             .id("toolbar-subtitle")
             .min_w(px(0.))
             .flex()
             .items_center()
-            .gap(px(4.))
+            .gap(space::S6)
             .children(s.symbol.map(|(sym, color)| {
                 div()
                     .flex_none()
                     .child(ui::sym(sym, ui::SymSize::INLINE_SMALL, color))
+            }))
+            .children(s.state.clone().map(|(words, state)| {
+                div()
+                    .flex_none()
+                    .child(StatusBadge::new(state, words).max_w(BADGE_MAX))
             }))
             .child(
                 div()
@@ -388,6 +358,11 @@ pub fn render(
         .flex_none()
         .w_full()
         .h(metrics::TOOLBAR_ROW)
+        // §2.2: one header band h52, a 1 px border-b; content scrolls under
+        // it with no fade.
+        .bg(k.content)
+        .border_b_1()
+        .border_color(k.separator)
         .pl(leading)
         .pr(metrics::TOOLBAR_TRAILING)
         .flex()
@@ -401,7 +376,18 @@ pub fn render(
             }
         })
         .child(heading);
-    for group in groups(spec) {
+    for (gix, group) in groups(spec).into_iter().enumerate() {
+        // §2.2: a vertical separator h16, mx 8, before the right-pane toggle.
+        if gix > 0 {
+            row = row.child(
+                div()
+                    .flex_none()
+                    .mx(space::S8)
+                    .w(px(1.))
+                    .h(ui::native::tokens::icon::MD)
+                    .bg(k.separator),
+            );
+        }
         let items: Vec<gpui_component::button::Button> = group
             .into_iter()
             .filter_map(|kind| spec.buttons.iter().find(|b| b.kind == kind))
@@ -459,35 +445,41 @@ mod tests {
     }
 
     #[test]
-    fn the_group_leads_the_subtitle_and_only_the_symbol_has_the_state_color() {
+    fn the_group_leads_the_subtitle_and_the_state_is_a_status_badge() {
         let k = NativeColors::dark();
         let s = subtitle(&live(), &k).expect("a subtitle");
-        assert_eq!(s.text, "开发 · Forge 在做 3/5 · 跑一万条消息的压测");
-        // D3: the words stay `secondary`; the color is on the symbol.
-        assert!(s.state.is_none());
-        assert_eq!(s.symbol, Some((Sym::Live, k.blue)));
-        // Needs you: the amber symbol; no breadcrumb slash.
+        // §2.2: the state is a StatusBadge, not colored text in the line.
+        assert_eq!(s.text, "开发 · 跑一万条消息的压测");
+        assert_eq!(
+            s.state,
+            Some(("Forge 在做 3/5".to_string(), BadgeState::Working))
+        );
+        // Needs you: the warning state.
         let you = TitleBarSpec {
             state: Some(("等你审 PR #61".into(), StateTone::You)),
             state_detail: None,
             ..live()
         };
         let s = subtitle(&you, &k).unwrap();
-        assert_eq!(s.text, "开发 · 等你审 PR #61");
-        assert_eq!(s.symbol, Some((Sym::NeedsYou, k.amber)));
-        // Quiet words stay `secondary`, with no symbol.
+        assert_eq!(s.text, "开发");
+        assert_eq!(s.state.unwrap().1, BadgeState::NeedsYou);
+        // Quiet words have no state icon.
         let quiet = TitleBarSpec {
             state: Some(("等李雪".into(), StateTone::Quiet)),
             ..live()
         };
-        let s = subtitle(&quiet, &k).unwrap();
-        assert!(s.state.is_none() && s.symbol.is_none());
+        assert_eq!(
+            subtitle(&quiet, &k).unwrap().state.unwrap().1,
+            BadgeState::Quiet
+        );
         // A page with a date only.
         let desk = TitleBarSpec {
             subtitle: Some("11 月 3 日 周二".into()),
             ..TitleBarSpec::page("首页")
         };
-        assert_eq!(subtitle(&desk, &k).unwrap().text, "11 月 3 日 周二");
+        let s = subtitle(&desk, &k).unwrap();
+        assert_eq!(s.text, "11 月 3 日 周二");
+        assert!(s.state.is_none());
         assert!(subtitle(&TitleBarSpec::page("成员"), &k).is_none());
     }
 
@@ -509,20 +501,19 @@ mod tests {
     }
 
     #[test]
-    fn a_paused_run_shows_the_pause_symbol_in_secondary() {
+    fn a_paused_run_has_a_quiet_badge() {
         let k = NativeColors::light();
         let paused = TitleBarSpec {
             state_paused: true,
             ..live()
         };
         let s = subtitle(&paused, &k).unwrap();
-        assert_eq!(s.symbol, Some((Sym::Pause, k.secondary)));
-        assert!(s.state.is_none());
+        assert_eq!(s.state.unwrap().1, BadgeState::Quiet);
     }
 
     #[test]
     fn the_panes_share_a_capsule_and_the_inspector_has_its_own() {
-        let b = |kind| TitleButton::new(kind, RightPane::TopicRail);
+        let b = |kind| TitleButton::of(kind, RightPane::TopicRail);
         let spec = TitleBarSpec {
             buttons: vec![
                 b(TitleButtonKind::SideChat),

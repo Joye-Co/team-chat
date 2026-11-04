@@ -7,17 +7,13 @@ use gpui::{
     App, ClipboardEntry, ClipboardItem, Div, ElementId, Hsla, ImageFormat, IntoElement,
     ParentElement, SharedString, Styled, div, px,
 };
-use gpui_component::{
-    Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
-    notification::Notification,
-};
+use gpui_component::{button::Button, notification::Notification};
 
 use super::{Screen, state::Target};
 use crate::{
     copy::media as cm,
     data::{DraftKey, NewFile},
-    theme::{self, Type as _, radius, space},
+    theme::{self, Type as _, space},
     ui::{self, NamedButton as _, Sym},
 };
 
@@ -32,7 +28,7 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .h(px(36.))
+        .h(crate::ui::native::tokens::height::LG)
         .px(space::S14)
         .flex()
         .items_center()
@@ -59,7 +55,7 @@ pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .h(px(52.))
+        .h(crate::ui::native::tokens::height::TOOLBAR)
         .px(space::S16)
         .flex()
         .items_center()
@@ -83,7 +79,7 @@ pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
 /// Meta figures: the system font with tabular figures (`text-3`, §3).
 pub fn mono(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
-        .text_size(px(12.))
+        .text_size(crate::ui::native::tokens::text::META.0)
         .line_height(px(16.))
         .figures()
         .text_color(color)
@@ -123,7 +119,7 @@ pub fn footer(cx: &App) -> Div {
 
 /// A named 28 pt tool button.
 pub fn tool(id: impl Into<ElementId>, icon: Sym, name: &'static str) -> Button {
-    ui::icon_button_sm(id, icon).named(name)
+    ui::native::icon_button_bare(id, icon, ui::native::IconSize::Small).named(name)
 }
 
 /// A tool button on the dark screen (lightbox, video): `screen-ink` glyph.
@@ -134,18 +130,7 @@ pub fn screen_tool(
     s: &Screen,
     cx: &App,
 ) -> Button {
-    Button::new(id)
-        .custom(
-            ButtonCustomVariant::new(cx)
-                .color(gpui::transparent_black())
-                .foreground(s.ink)
-                .hover(gpui::hsla(0., 0., 1., 0.10))
-                .active(gpui::hsla(0., 0., 1., 0.16)),
-        )
-        .icon(ui::button_glyph(icon, theme::icon::ROW, px(28.)))
-        .with_size(px(28.))
-        .rounded(radius::SM)
-        .named(name)
+    crate::ui::native::screen_button(id, icon, name, false, s.ink, cx)
 }
 
 // --- actions ------------------------------------------------------------------------

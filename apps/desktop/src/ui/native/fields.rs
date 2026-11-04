@@ -1,42 +1,78 @@
-//! Standalone text fields and search fields (NATIVE.md §5.6) around
-//! gpui-component's `Input`.
+//! The one field family (COMPLETENESS.md §1.8, §2.8, K04): the Input and
+//! the SearchField around gpui-component's `Input`. Input: h32 (sm 28, lg
+//! 36), px 12, radius 8, 1 px `input` border, shadow xs, 14 text. Search
+//! field: h32, radius full, a 16 search icon at x + 12. Focus: the ring color
+//! border plus a 3 px ring at 50 %. Error: the destructive border plus a 3 px
+//! destructive ring at 20 %.
 
 use gpui::{
-    App, ElementId, Entity, Focusable as _, InteractiveElement as _, IntoElement, ParentElement,
-    Pixels, RenderOnce, Styled, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, BoxShadow, ElementId, Entity, Focusable as _, Hsla, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, point,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
     input::{Input, InputState},
 };
 
-use super::tokens::{NativeType as _, metrics, native_colors};
+use super::tokens::{NativeColors, NativeType as _, icon, metrics, native_colors, shadow, space};
 use crate::ui::{
     controls::placeholder_input,
     sf_symbols::{Sf, Weight, symbol},
 };
 
-/// The size of a standalone field.
+/// The size of a field (§1.8).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FieldSize {
-    /// 24 pt: sheets and settings.
+    /// h32: the default, sheets and settings.
     Regular,
-    /// 28 pt: the login window.
+    /// h28: inside a dense row.
+    Small,
+    /// h36: the login card.
     Large,
 }
 
-/// A standalone text field (§5.6): 24 pt (28 large), radius 6, `content`
-/// fill, 1 px `separator` border, 7 pt side padding, the 3 pt focus ring.
-/// Width fits the expected text (name 220, code 140), never the window.
+impl FieldSize {
+    pub fn height(self) -> Pixels {
+        match self {
+            FieldSize::Regular => metrics::FIELD,
+            FieldSize::Small => metrics::BUTTON_SMALL,
+            FieldSize::Large => metrics::FIELD_LARGE,
+        }
+    }
+}
+
+fn ring(color: Hsla) -> BoxShadow {
+    BoxShadow {
+        color,
+        offset: point(px(0.), px(0.)),
+        blur_radius: px(0.),
+        spread_radius: metrics::FOCUS_RING,
+        inset: false,
+    }
+}
+
+/// The (border, shadows) of a field in its state (§1.8).
+pub fn field_edge(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<BoxShadow>) {
+    let red = k.red;
+    match (error, focused) {
+        (true, _) => (red, vec![ring(red.opacity(0.2))]),
+        (false, true) => (Hsla { a: 1., ..k.focus }, vec![ring(k.focus)]),
+        (false, false) => (k.quaternary, shadow::xs()),
+    }
+}
+
+/// A single-line Input (§1.8).
 #[derive(IntoElement)]
 pub struct NativeTextField {
     id: ElementId,
     state: Entity<InputState>,
     size: FieldSize,
-    width: Pixels,
+    width: Option<Pixels>,
     disabled: bool,
     error: bool,
     focused: Option<bool>,
+    trailing: Option<AnyElement>,
 }
 
 impl NativeTextField {
@@ -45,10 +81,11 @@ impl NativeTextField {
             id: id.into(),
             state: state.clone(),
             size: FieldSize::Regular,
-            width: metrics::FIELD_NAME_WIDTH,
+            width: Some(metrics::FIELD_NAME_WIDTH),
             disabled: false,
             error: false,
             focused: None,
+            trailing: None,
         }
     }
 
@@ -58,7 +95,13 @@ impl NativeTextField {
     }
 
     pub fn width(mut self, width: Pixels) -> Self {
-        self.width = width;
+        self.width = Some(width);
+        self
+    }
+
+    /// Fills its column (a full-width row in a sheet or the login card).
+    pub fn full_width(mut self) -> Self {
+        self.width = None;
         self
     }
 
@@ -67,14 +110,20 @@ impl NativeTextField {
         self
     }
 
-    /// The error look: a `red` border (the message goes in the row footer).
     pub fn error(mut self, error: bool) -> Self {
         self.error = error;
         self
     }
 
+    /// Draws the focus ring whatever the focus (self-test scenes).
     pub fn show_focus(mut self, focused: bool) -> Self {
         self.focused = Some(focused);
+        self
+    }
+
+    /// A trailing element inside the field (a clear button, a spinner).
+    pub fn trailing(mut self, el: impl IntoElement) -> Self {
+        self.trailing = Some(el.into_any_element());
         self
     }
 }
@@ -84,26 +133,27 @@ impl RenderOnce for NativeTextField {
         let k = native_colors(cx);
         let focused = self
             .focused
-            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
-        let h = match self.size {
-            FieldSize::Regular => metrics::FIELD,
-            FieldSize::Large => metrics::FIELD_LARGE,
-        };
-        let edge = if self.error { k.red } else { k.separator };
+            .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
+            && !self.disabled;
+        let (edge, shadows) = field_edge(&k, focused, self.error);
         div()
             .id(self.id)
             .flex_none()
-            .w(self.width)
-            .h(h)
+            .map(|d| match self.width {
+                Some(w) => d.w(w),
+                None => d.w_full(),
+            })
+            .h(self.size.height())
             .px(metrics::FIELD_PAD)
             .rounded(metrics::FIELD_RADIUS)
             .bg(k.content)
             .border_1()
             .border_color(edge)
-            .when(focused && !self.disabled, |d| d.shadow(k.focus_ring()))
+            .shadow(shadows)
             .when(self.disabled, |d| d.opacity(0.5))
             .flex()
             .items_center()
+            .gap(space::S8)
             .cursor_text()
             .child(
                 div().flex_1().min_w(px(0.)).child(placeholder_input(
@@ -119,12 +169,11 @@ impl RenderOnce for NativeTextField {
                     cx,
                 )),
             )
+            .children(self.trailing)
     }
 }
 
-/// A search field (§5.6): a capsule, 30 pt in the sidebar (24 elsewhere),
-/// `fill`, a 13 pt `magnifyingglass` in `secondary`, placeholder `搜索`.
-/// Shortcut hints live in the menu bar, not in the field.
+/// The search field (§1.8): h32, radius full, a 16 search icon at x + 12.
 #[derive(IntoElement)]
 pub struct SearchField {
     id: ElementId,
@@ -145,7 +194,7 @@ impl SearchField {
         }
     }
 
-    /// The 30 pt sidebar size.
+    /// The sidebar's field: the same shape with no shadow (§2.1).
     pub fn sidebar(mut self) -> Self {
         self.sidebar = true;
         self
@@ -168,10 +217,11 @@ impl RenderOnce for SearchField {
         let focused = self
             .focused
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
-        let h = if self.sidebar {
-            metrics::SEARCH_SIDEBAR
+        let (edge, shadows) = field_edge(&k, focused, false);
+        let shadows = if self.sidebar && !focused {
+            Vec::new()
         } else {
-            metrics::SEARCH
+            shadows
         };
         div()
             .id(self.id)
@@ -180,21 +230,21 @@ impl RenderOnce for SearchField {
                 Some(w) => d.w(w),
                 None => d.w_full(),
             })
-            .h(h)
-            .pl(px(8.))
-            .pr(px(10.))
-            .rounded(h / 2.)
-            // A translucent fill would show the ring's shadow through it:
-            // a focused field is opaque `content`.
-            .bg(if focused { k.content } else { k.fill })
-            .when(focused, |d| d.shadow(k.focus_ring()))
+            .h(metrics::SEARCH)
+            .pl(metrics::FIELD_PAD)
+            .pr(metrics::FIELD_PAD)
+            .rounded_full()
+            .bg(k.content)
+            .border_1()
+            .border_color(edge)
+            .shadow(shadows)
             .flex()
             .items_center()
-            .gap(px(5.))
+            .gap(space::S8)
             .cursor_text()
             .child(symbol(
                 Sf::Search,
-                metrics::SEARCH_SYMBOL,
+                icon::MD,
                 Weight::Regular,
                 k.secondary,
                 window,
@@ -212,5 +262,33 @@ impl RenderOnce for SearchField {
                     cx,
                 )),
             )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fields_are_on_the_control_scale() {
+        assert_eq!(FieldSize::Regular.height(), px(32.));
+        assert_eq!(FieldSize::Small.height(), px(28.));
+        assert_eq!(FieldSize::Large.height(), px(36.));
+        assert_eq!(metrics::SEARCH, px(32.));
+        assert_eq!(metrics::FIELD_RADIUS, px(8.));
+    }
+
+    #[test]
+    fn error_and_focus_rings() {
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            let (rest, s) = field_edge(&k, false, false);
+            assert_eq!(rest, k.quaternary);
+            assert_eq!(s, shadow::xs());
+            let (err, s) = field_edge(&k, true, true);
+            assert_eq!(err, k.red);
+            assert_eq!(s[0].spread_radius, metrics::FOCUS_RING);
+            let (_, s) = field_edge(&k, true, false);
+            assert_eq!(s[0].color, k.focus);
+        }
     }
 }

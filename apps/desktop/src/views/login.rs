@@ -371,7 +371,7 @@ impl LoginView {
                 .when(focused, |d| d.shadow(k.focus_ring()))
                 .flex()
                 .items_center()
-                .gap(px(6.))
+                .gap(crate::ui::native::tokens::space::S6)
                 .n_body()
                 .text_color(k.secondary)
                 .child(Sym::Lock.icon(SymSize::INLINE).text_color(k.secondary))
@@ -431,7 +431,7 @@ impl Render for LoginView {
             div()
                 .flex()
                 .items_center()
-                .gap(px(4.))
+                .gap(crate::ui::native::tokens::space::S4)
                 .n_subheadline()
                 .text_color(k.secondary)
                 .child(
@@ -470,7 +470,7 @@ impl Render for LoginView {
             push_button(
                 "login-server-cancel",
                 common::CANCEL,
-                PushStyle::Standard,
+                PushStyle::Outline,
                 PushSize::Large,
                 cx,
             )

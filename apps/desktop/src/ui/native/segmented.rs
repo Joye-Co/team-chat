@@ -6,14 +6,14 @@ use std::rc::Rc;
 
 use gpui::{
     AnyElement, App, ElementId, IntoElement, ParentElement, RenderOnce, SharedString, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    Window, div, prelude::FluentBuilder as _,
 };
 use gpui_component::{
     Sizable as _,
     button::{Button, ButtonCustomVariant, ButtonVariants as _},
 };
 
-use super::tokens::{NativeType as _, metrics, native_colors};
+use super::tokens::{NativeType as _, height, icon, metrics, native_colors, radius, shadow, space};
 use crate::ui::sf_symbols::{Sf, Weight, symbol};
 
 /// One segment: a label or a symbol (symbols carry a name for VoiceOver).
@@ -21,16 +21,19 @@ use crate::ui::sf_symbols::{Sf, Weight, symbol};
 pub enum Segment {
     Label(SharedString),
     Symbol(Sf, SharedString),
+    /// A label with a count pill after it.
+    Counted(SharedString, u32),
 }
 
-/// A segmented control. 24 pt; [`Segmented::toolbar`] makes it the 32 pt
-/// toolbar size.
+/// The one tabs control (COMPLETENESS.md §1.8, K09): a list h32, p 3,
+/// radius 10, `muted` fill; triggers h26, px 8, 14 medium, inactive at 60 %
+/// foreground, the active one on `background` with shadow sm.
 #[derive(IntoElement)]
 pub struct Segmented {
     id: ElementId,
     segments: Vec<Segment>,
     selected: usize,
-    height: gpui::Pixels,
+    disabled: bool,
     on_change: Option<Rc<dyn Fn(usize, &mut Window, &mut App)>>,
 }
 
@@ -40,7 +43,7 @@ impl Segmented {
             id: id.into(),
             segments: segments.into_iter().collect(),
             selected: 0,
-            height: metrics::SEGMENTED,
+            disabled: false,
             on_change: None,
         }
     }
@@ -50,8 +53,14 @@ impl Segmented {
         self
     }
 
-    pub fn toolbar(mut self) -> Self {
-        self.height = metrics::SEGMENTED_TOOLBAR;
+    /// Kept for its callers: every segmented control is h32 (§1.8).
+    pub fn toolbar(self) -> Self {
+        self
+    }
+
+    /// No hover or press; the value stays readable.
+    pub fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
         self
     }
 
@@ -64,62 +73,100 @@ impl Segmented {
 impl RenderOnce for Segmented {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = native_colors(cx);
-        let inner = self.height - metrics::SEGMENT_INSET * 2.;
         let clear = gpui::transparent_black();
         let id = self.id.clone();
+        let disabled = self.disabled;
         let items: Vec<AnyElement> = self
             .segments
             .into_iter()
             .enumerate()
             .map(|(ix, seg)| {
                 let selected = ix == self.selected;
+                let ink = if selected {
+                    k.label
+                } else {
+                    k.label.opacity(0.6)
+                };
                 let content: AnyElement = match &seg {
                     Segment::Label(l) => div()
-                        .n_body()
-                        .text_color(k.label)
+                        .n_headline()
+                        .text_color(ink)
+                        .whitespace_nowrap()
                         .child(l.clone())
                         .into_any_element(),
-                    Segment::Symbol(sf, _) => {
-                        symbol(*sf, px(15.), Weight::Regular, k.label, window)
-                    }
+                    Segment::Counted(l, n) => div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S6)
+                        .n_headline()
+                        .text_color(ink)
+                        .whitespace_nowrap()
+                        .child(l.clone())
+                        .child(super::badge::CountPill::new(*n))
+                        .into_any_element(),
+                    Segment::Symbol(sf, _) => symbol(*sf, icon::MD, Weight::Regular, ink, window),
                 };
                 let on_change = self.on_change.clone();
+                let rest = if selected { k.content } else { clear };
                 Button::new(ElementId::NamedInteger(
                     format!("{id:?}-seg").into(),
                     ix as u64,
                 ))
                 .custom(
                     ButtonCustomVariant::new(cx)
-                        .color(clear)
-                        .foreground(k.label)
-                        .hover(if selected { k.segment } else { clear })
-                        .active(if selected { k.segment } else { k.fill_hover }),
+                        .color(rest)
+                        .foreground(ink)
+                        .hover(if selected || disabled {
+                            rest
+                        } else {
+                            k.content.opacity(0.5)
+                        })
+                        .active(rest),
                 )
-                .with_size(gpui_component::Size::Small)
-                .h(inner)
+                .with_size(gpui_component::Size::Medium)
+                .h(height::SEGMENT_TRIGGER)
                 .px(metrics::SEGMENT_PAD)
-                .rounded(inner / 2.)
-                .when(selected, |b| b.bg(k.segment).shadow(k.segment()))
+                .rounded(radius::ITEM)
+                .bg(rest)
+                .when(selected, |b| b.shadow(shadow::sm()))
                 .when_some(
                     match &seg {
                         Segment::Symbol(_, name) => Some(name.clone()),
-                        Segment::Label(_) => None,
+                        _ => None,
                     },
                     |b, name| b.accessibility_label(name.clone()).tooltip(name),
                 )
                 .child(content)
-                .when_some(on_change, |b, f| b.on_click(move |_, w, cx| f(ix, w, cx)))
+                .when(!disabled, |b| {
+                    b.when_some(on_change, |b, f| b.on_click(move |_, w, cx| f(ix, w, cx)))
+                })
                 .into_any_element()
             })
             .collect();
         div()
             .flex_none()
-            .h(self.height)
+            .h(metrics::SEGMENTED)
             .p(metrics::SEGMENT_INSET)
-            .rounded(self.height / 2.)
+            .rounded(radius::CONTAINER)
             .bg(k.fill)
             .flex()
             .items_center()
             .children(items)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::px;
+
+    #[test]
+    fn the_list_and_trigger_heights() {
+        // §1.8: list h32 with p 3, trigger h26.
+        assert_eq!(metrics::SEGMENTED, px(32.));
+        assert_eq!(
+            metrics::SEGMENTED - metrics::SEGMENT_INSET * 2.,
+            height::SEGMENT_TRIGGER
+        );
     }
 }

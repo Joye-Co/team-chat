@@ -86,7 +86,7 @@ impl AppearancePage {
                         .p(px(4.))
                         .flex()
                         .flex_col()
-                        .gap(px(3.))
+                        .gap(crate::ui::native::tokens::space::S4)
                         .child(div().h(px(3.)).w(px(10.)).rounded(px(1.5)).bg(line))
                         .child(div().h(px(3.)).w(px(8.)).rounded(px(1.5)).bg(line)),
                 )
@@ -96,7 +96,7 @@ impl AppearancePage {
                         .p(px(5.))
                         .flex()
                         .flex_col()
-                        .gap(px(3.))
+                        .gap(crate::ui::native::tokens::space::S4)
                         .child(div().h(px(3.)).w(px(22.)).rounded(px(1.5)).bg(line))
                         .child(div().h(px(3.)).w(px(16.)).rounded(px(1.5)).bg(line)),
                 )
@@ -133,7 +133,7 @@ impl Render for AppearancePage {
                     .flex()
                     .flex_col()
                     .items_center()
-                    .gap(px(5.))
+                    .gap(crate::ui::native::tokens::space::S4)
                     .child(
                         div()
                             .p(RING)
@@ -187,7 +187,12 @@ impl Render for AppearancePage {
                     .text_color(k.label)
                     .child(s::APPEARANCE),
             )
-            .child(div().flex().gap(px(16.)).children(tiles));
+            .child(
+                div()
+                    .flex()
+                    .gap(crate::ui::native::tokens::space::S16)
+                    .children(tiles),
+            );
         widgets::pane().child(
             GroupedForm::new().row(theme_row).row(
                 FormRow::new(s::MESSAGE_TEXT_SIZE).control(
@@ -195,7 +200,7 @@ impl Render for AppearancePage {
                         .w(px(220.))
                         .flex()
                         .items_center()
-                        .gap(px(10.))
+                        .gap(crate::ui::native::tokens::space::S12)
                         .child(mark(px(11.)))
                         .child(
                             div().flex_1().child(

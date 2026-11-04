@@ -105,7 +105,7 @@ pub fn ask_button(id: impl Into<ElementId>, cx: &App) -> Button {
     crate::ui::native::push_button(
         id,
         c::ASK_HERE,
-        crate::ui::native::PushStyle::Standard,
+        crate::ui::native::PushStyle::Outline,
         crate::ui::native::PushSize::Small,
         cx,
     )

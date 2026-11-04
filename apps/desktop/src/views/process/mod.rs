@@ -29,7 +29,6 @@ use crate::{
     ui::{
         self, Sym,
         native::{PushSize, PushStyle, StatusKind, disabled_push, native_colors, push_button},
-        sf_symbols::SymSize,
     },
     views::time_text,
 };
@@ -584,7 +583,7 @@ impl ProcessView {
                     push_button(
                         "download-session",
                         dev::RUN_DOWNLOAD_SESSION,
-                        PushStyle::Standard,
+                        PushStyle::Outline,
                         PushSize::Small,
                         cx,
                     ),
@@ -613,10 +612,6 @@ impl ProcessView {
 /// (its title and a copy button) and the facts in 13 pt monospace, one per
 /// line.
 fn developer_panel(lines: Vec<String>, cx: &App) -> AnyElement {
-    use gpui_component::{
-        Sizable as _,
-        button::{Button, ButtonVariants as _},
-    };
     let colors = theme::colors(cx);
     let n = native_colors(cx);
     let text = lines.join("\n");
@@ -644,18 +639,16 @@ fn developer_panel(lines: Vec<String>, cx: &App) -> AnyElement {
                         .child(dev::RUN_PANEL_TITLE),
                 )
                 .child(
-                    Button::new("run-details-copy")
-                        .custom(ui::native::borderless_variant(cx))
-                        .with_size(ui::native::metrics::BUTTON_REGULAR)
-                        .size(ui::native::metrics::BUTTON_REGULAR)
-                        .p_0()
-                        .rounded(ui::native::metrics::BUTTON_REGULAR_RADIUS)
-                        .accessibility_label(dev::RUN_PANEL_COPY)
-                        .tooltip(dev::RUN_PANEL_COPY)
-                        .child(Sym::Copy.icon(SymSize::INLINE).text_color(n.secondary))
-                        .on_click(move |_, _, cx| {
-                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
-                        }),
+                    ui::native::icon_button_sym(
+                        "run-details-copy",
+                        Sym::Copy,
+                        dev::RUN_PANEL_COPY,
+                        ui::native::IconSize::Small,
+                        cx,
+                    )
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()))
+                    }),
                 ),
         )
         .child(
@@ -777,7 +770,7 @@ impl Render for ProcessView {
                                         push_button(
                                             "process-retry",
                                             p::RETRY,
-                                            PushStyle::Standard,
+                                            PushStyle::Outline,
                                             PushSize::Small,
                                             cx,
                                         )

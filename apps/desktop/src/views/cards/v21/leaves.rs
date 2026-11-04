@@ -35,7 +35,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, card_v21 as t, space},
-    ui::{self, ButtonKind, Sym, native::NativeType as _},
+    ui::{self, PushStyle, Sym, native::NativeType as _},
     views::cards::v2::{
         Ctx, blocks as b20, button, disabled_button, form::Val, meta, state::CardState,
     },
@@ -509,7 +509,7 @@ impl Render for RankGhost {
             .shadow(k.lift())
             .flex()
             .items_center()
-            .text_size(px(13.))
+            .text_size(crate::ui::native::tokens::text::UI.0)
             .text_color(k.ink)
             .child(self.0.clone())
     }
@@ -561,7 +561,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         .flex()
         .flex_col()
         .p(space::S4)
-        .rounded(px(8.))
+        .rounded(crate::ui::native::tokens::radius::CONTROL)
         .bg(crate::ui::native::native_colors(cx).fill)
         .min_w(px(0.));
     if live {
@@ -604,7 +604,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 ))
                 .flex_none()
                 .size(px(24.))
-                .rounded(px(6.))
+                .rounded(crate::ui::native::tokens::radius::ITEM)
                 .flex()
                 .items_center()
                 .justify_center()
@@ -627,16 +627,16 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         let nk = crate::ui::native::native_colors(cx);
         let mut row = div()
             .id(eid(node, format!("rank-{id}-{item_id}")))
-            .h(px(32.))
+            .h(crate::ui::native::tokens::height::DEFAULT)
             .pl(space::S12)
             .pr(space::S8)
-            .rounded(px(6.))
+            .rounded(crate::ui::native::tokens::radius::ITEM)
             .when(is_focus, |el| el.bg(nk.selection))
             .when(i > 0, |el| el.border_t_1().border_color(nk.separator))
             .flex()
             .items_center()
             .gap(space::S10)
-            .text_size(px(13.))
+            .text_size(crate::ui::native::tokens::text::UI.0)
             .text_color(k.ink)
             .child(
                 meta(div())
@@ -707,7 +707,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .child(
                         div()
                             .flex_1()
-                            .h(px(1.))
+                            .h(crate::ui::native::tokens::layout::BORDER)
                             .border_t_1()
                             .border_dashed()
                             .border_color(k.line_2),
@@ -721,7 +721,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .child(
                         div()
                             .flex_1()
-                            .h(px(1.))
+                            .h(crate::ui::native::tokens::layout::BORDER)
                             .border_t_1()
                             .border_dashed()
                             .border_color(k.line_2),
@@ -766,7 +766,7 @@ fn grip(color: gpui::Hsla) -> Div {
         div()
             .flex()
             .flex_col()
-            .gap(px(2.))
+            .gap(crate::ui::native::tokens::space::S2)
             .children((0..3).map(|_| div().size(px(2.5)).rounded_full().bg(color)))
     };
     div()
@@ -774,7 +774,7 @@ fn grip(color: gpui::Hsla) -> Div {
         .w(px(14.))
         .flex()
         .justify_center()
-        .gap(px(2.5))
+        .gap(crate::ui::native::tokens::space::S2)
         .child(col())
         .child(col())
 }
@@ -872,7 +872,7 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .h(px(24.))
             // A segment-like cell (NATIVE.md §5.5): `fill`, the chosen one in `accent`;
             // no outlines, no hover.
-            .rounded(px(6.))
+            .rounded(crate::ui::native::tokens::radius::ITEM)
             .bg(if on { nk.accent } else { nk.fill })
             .flex()
             .items_center()
@@ -938,9 +938,9 @@ pub fn confirm(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             eid(node, format!("confirm-{id}-{value}")),
             label.to_string(),
             if on {
-                ButtonKind::Primary
+                PushStyle::Default
             } else {
-                ButtonKind::Secondary
+                PushStyle::Outline
             },
             cx,
         )
@@ -1059,7 +1059,7 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                         .relative()
                         .w_full()
                         .h(t::IMAGE)
-                        .rounded(px(8.))
+                        .rounded(crate::ui::native::tokens::radius::CONTROL)
                         .overflow_hidden()
                         .bg(k.ph[i % k.ph.len()])
                         .when_some(path, |el, p| {
@@ -1105,7 +1105,7 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let head = div()
         .flex()
         .items_center()
-        .h(px(28.))
+        .h(crate::ui::native::tokens::height::SM)
         .border_b_1()
         .border_color(k.line)
         .child(
@@ -1128,7 +1128,7 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
         let mut line = div()
             .flex()
             .items_center()
-            .h(px(40.))
+            .h(crate::ui::native::tokens::height::FOOTER_ROW)
             .when(ri + 1 < rows.len(), |el| {
                 el.border_b_1().border_color(k.line)
             })
@@ -1277,7 +1277,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             // A quiet well; the chosen slot gets `selection` and a checkmark badge,
             // never an outline (NATIVE.md rule 4).
             .relative()
-            .rounded(px(8.))
+            .rounded(crate::ui::native::tokens::radius::CONTROL)
             .bg(if on { nk.selection } else { nk.fill })
             .when(on, |el| {
                 el.child(
@@ -1699,9 +1699,9 @@ pub fn buttons(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App)
                 eid(node, format!("btn-{id}-{}", x.id)),
                 label,
                 if danger || is_armed {
-                    ButtonKind::Danger
+                    PushStyle::Destructive
                 } else {
-                    ButtonKind::Secondary
+                    PushStyle::Outline
                 },
                 cx,
             )
@@ -2180,7 +2180,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
         .flex_col()
         .child(
             meta(div())
-                .h(px(36.))
+                .h(crate::ui::native::tokens::height::LG)
                 .px(space::S12)
                 .flex()
                 .items_center()
@@ -2231,7 +2231,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .when(file.is_some(), |el| el.ml_auto())
                         .flex_none()
                         .size(px(24.))
-                        .rounded(px(6.))
+                        .rounded(crate::ui::native::tokens::radius::ITEM)
                         .flex()
                         .items_center()
                         .justify_center()
@@ -2244,7 +2244,7 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
         .when(file.is_none(), |el| {
             el.child(
                 meta(div())
-                    .h(px(32.))
+                    .h(crate::ui::native::tokens::height::DEFAULT)
                     .px(space::S12)
                     .flex()
                     .items_center()
@@ -2398,7 +2398,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
             button(
                 ctx.id("update"),
                 fill(c::UPDATE_APP, &[("product", env!("PRODUCT_NAME"))]),
-                ButtonKind::Secondary,
+                PushStyle::Outline,
                 cx,
             )
             .on_click(|_, _, cx| {
@@ -2417,7 +2417,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
             button(
                 ctx.id("retry21"),
                 c::PENDING_RETRY.to_string(),
-                ButtonKind::Secondary,
+                PushStyle::Outline,
                 cx,
             )
             .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
@@ -2490,9 +2490,9 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                     ctx.id(format!("act-{}", x.id)),
                     x.label.clone(),
                     if primary {
-                        ButtonKind::Primary
+                        PushStyle::Default
                     } else {
-                        ButtonKind::Secondary
+                        PushStyle::Outline
                     },
                     cx,
                 )

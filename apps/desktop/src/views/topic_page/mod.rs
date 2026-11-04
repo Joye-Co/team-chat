@@ -237,13 +237,13 @@ pub fn pane_buttons(services: &Services, group_id: &str, topic_id: &str) -> Vec<
     let p = &services.provider;
     let mut out = Vec::new();
     if let Some(m) = p.side_chat_default_member() {
-        out.push(TitleButton::new(
+        out.push(TitleButton::of(
             TitleButtonKind::SideChat,
             RightPane::SideChat(m),
         ));
     }
     if let Some(a) = p.artifacts(group_id, topic_id).first() {
-        out.push(TitleButton::new(
+        out.push(TitleButton::of(
             TitleButtonKind::Outputs,
             RightPane::Artifact {
                 id: a.id.clone(),
@@ -256,21 +256,18 @@ pub fn pane_buttons(services: &Services, group_id: &str, topic_id: &str) -> Vec<
         .iter()
         .find(|r| r.status.is_active())
     {
-        out.push(TitleButton::new(
+        out.push(TitleButton::of(
             TitleButtonKind::Machine,
             RightPane::Live(r.id.clone()),
         ));
     }
     if p.topic_changes(group_id, topic_id).is_some() {
-        out.push(TitleButton::new(
+        out.push(TitleButton::of(
             TitleButtonKind::Changes,
             RightPane::Changes,
         ));
     }
-    out.push(TitleButton::new(
-        TitleButtonKind::Rail,
-        RightPane::TopicRail,
-    ));
+    out.push(TitleButton::of(TitleButtonKind::Rail, RightPane::TopicRail));
     out
 }
 
@@ -341,6 +338,11 @@ impl Render for TopicPage {
                     .flex_col()
                     .gap(space::S10)
                     .children(pinned)
+                    // §2.15: the offline Alert docked above the composer.
+                    .children(
+                        cx.try_global::<crate::views::banners::AppBanners>()
+                            .map(|b| b.connection.clone()),
+                    )
                     .child(self.composer.clone()),
             )
     }

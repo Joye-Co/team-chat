@@ -172,7 +172,7 @@ impl Render for MachinesPage {
                         push_button(
                             "machines-retry",
                             s::RETRY,
-                            PushStyle::Standard,
+                            PushStyle::Outline,
                             PushSize::Small,
                             cx,
                         )
@@ -346,7 +346,7 @@ impl Render for MachineForm {
                     .w_full()
                     .flex()
                     .flex_col()
-                    .gap(px(4.))
+                    .gap(crate::ui::native::tokens::space::S4)
                     .child(div().n_body().text_color(k.label).child(label))
                     .child(
                         div()
@@ -361,13 +361,13 @@ impl Render for MachineForm {
                             .border_color(k.separator)
                             .flex()
                             .items_start()
-                            .gap(px(6.))
+                            .gap(crate::ui::native::tokens::space::S6)
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w(px(0.))
                                     .font_family(theme::MONO_FONT_FAMILY)
-                                    .text_size(px(12.))
+                                    .text_size(crate::ui::native::tokens::text::META.0)
                                     .line_height(px(18.))
                                     .text_color(k.label)
                                     .child(value.clone()),
@@ -426,7 +426,7 @@ impl Render for MachineForm {
                 push_button(
                     "machine-cancel",
                     common::CANCEL,
-                    PushStyle::Standard,
+                    PushStyle::Outline,
                     PushSize::Large,
                     cx,
                 )

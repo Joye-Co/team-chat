@@ -375,8 +375,8 @@ impl ArtifactPage {
         )
         .custom(nk::borderless_variant(cx))
         .h(nk::metrics::TOOLBAR_ITEM)
-        .px(px(14.))
-        .rounded(nk::metrics::TOOLBAR_ITEM / 2.)
+        .px(nk::metrics::FIELD_PAD)
+        .rounded(nk::metrics::BUTTON_REGULAR_RADIUS)
         .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
             let mut menu = menu.label(c::ARTIFACT_VERSIONS);
             for v in &versions {
@@ -548,7 +548,7 @@ impl ArtifactPage {
                     crate::ui::native::push_button(
                         "artifact-back-latest",
                         fill(c::ARTIFACT_BACK_TO, &[("v", &latest.to_string())]),
-                        crate::ui::native::PushStyle::Standard,
+                        crate::ui::native::PushStyle::Outline,
                         crate::ui::native::PushSize::Small,
                         cx,
                     )
@@ -794,7 +794,7 @@ impl ArtifactPage {
                 crate::ui::native::push_button(
                     "artifact-compare",
                     fill(c::ARTIFACT_COMPARE, &[("v", &(shown - 1).to_string())]),
-                    crate::ui::native::PushStyle::Standard,
+                    crate::ui::native::PushStyle::Outline,
                     crate::ui::native::PushSize::Small,
                     cx,
                 )
@@ -1162,18 +1162,7 @@ impl ArtifactPage {
         let mut toolbar_row = nk::ToolbarRow::new(c::ARTIFACTS_TITLE)
             .leading_inset(leading)
             .group(views)
-            // The same glass capsule as `ToolbarGroup`, around a menu button.
-            .group(
-                div()
-                    .flex_none()
-                    .h(nk::metrics::TOOLBAR_GROUP)
-                    .rounded(nk::metrics::TOOLBAR_GROUP / 2.)
-                    .bg(n.capsule)
-                    .shadow(n.glass())
-                    .flex()
-                    .items_center()
-                    .child(sort),
-            )
+            .group(nk::toolbar_slot(sort))
             .group(
                 nk::SearchField::new("artifacts-search", &search)
                     .sidebar()
@@ -1242,7 +1231,7 @@ impl ArtifactPage {
                                 nk::push_button(
                                     "artifacts-empty-desk",
                                     crate::copy::desk::DESK_TITLE,
-                                    nk::PushStyle::Standard,
+                                    nk::PushStyle::Outline,
                                     nk::PushSize::Small,
                                     cx,
                                 )
@@ -1291,7 +1280,7 @@ impl ArtifactPage {
                 nk::push_button(
                     "artifacts-clear",
                     c::ARTIFACTS_CLEAR_SEARCH,
-                    nk::PushStyle::Standard,
+                    nk::PushStyle::Outline,
                     nk::PushSize::Small,
                     cx,
                 )
@@ -1622,39 +1611,7 @@ fn sym_toolbar_item(
     active: bool,
     cx: &App,
 ) -> gpui_component::button::Button {
-    use crate::ui::native::{self as nk, metrics};
-    use gpui_component::{Sizable as _, button::ButtonVariants as _};
-    let n = nk::native_colors(cx);
-    let ink = match (toggled, active) {
-        (true, true) => n.accent,
-        (_, true) => n.label,
-        _ => n.secondary,
-    };
-    let glyph = sym.toolbar().text_color(ink);
-    gpui_component::button::Button::new(id)
-        .custom(nk::borderless_variant(cx))
-        .with_size(metrics::TOOLBAR_ITEM)
-        .size(metrics::TOOLBAR_ITEM)
-        .p_0()
-        .rounded(metrics::TOOLBAR_ITEM / 2.)
-        .accessibility_label(name)
-        .tooltip(name)
-        .map(|b| {
-            if toggled {
-                b.child(
-                    div()
-                        .size(metrics::TOOLBAR_PILL)
-                        .rounded_full()
-                        .bg(n.selection)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .child(glyph),
-                )
-            } else {
-                b.child(glyph)
-            }
-        })
+    crate::ui::native::toolbar_item_sym(id, sym, name, toggled, active, cx)
 }
 
 /// The picture of a tile (§9.6, R11): the page's snapshot scaled to fit

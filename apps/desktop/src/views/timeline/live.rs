@@ -398,12 +398,14 @@ impl TimelineView {
         } else {
             self.services.provider.run_stopping(&run.id)
         };
-        let button = ui::text_button(
+        let button = ui::native::push_button(
             ElementId::Name(format!("live-stop-{}", run.id).into()),
             if stopping { pr::STOPPING } else { pr::STOP },
+            ui::PushStyle::Ghost,
+            ui::PushSize::Small,
             cx,
         )
-        .ml(-space::S6)
+        .ml(-space::S12)
         .disabled(stopping || leaving)
         .when(stopping || leaving, |b| b.text_color(colors.text_3))
         .on_click({
@@ -490,12 +492,14 @@ impl TimelineView {
                     })
                     .child(div().flex_none().text_color(colors.text_3).child("·"))
                     .child(
-                        ui::text_button(
+                        ui::native::push_button(
                             ElementId::Name(format!("live-process-{}", run.id).into()),
                             t::VIEW_PROCESS,
+                            ui::PushStyle::Ghost,
+                            ui::PushSize::Small,
                             cx,
                         )
-                        .ml(-space::S6)
+                        .ml(-space::S12)
                         .on_click(cx.listener(|this, _, _, cx| this.open_process(cx))),
                     )
                     .children(stop.into_iter().flatten()),

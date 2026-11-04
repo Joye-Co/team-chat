@@ -20,7 +20,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::Disableable as _;
-use gpui_component::button::{Button, ButtonCustomVariant, ButtonVariants as _};
+use gpui_component::button::Button;
 
 use crate::ui::NamedButton as _;
 use crate::{
@@ -572,11 +572,11 @@ impl SidePanel {
         let k = theme::colors(cx);
         let stopping = self.services.provider.run_stopping(&run.id);
         Some(
-            ui::button(
+            ui::native::push_button(
                 "panel-stop",
                 if stopping { pc::STOPPING } else { pc::STOP },
-                ui::ButtonKind::Secondary,
-                ui::ButtonSize::Md,
+                ui::native::PushStyle::Outline,
+                ui::native::PushSize::Regular,
                 cx,
             )
             .mr(space::S4)
@@ -598,12 +598,16 @@ impl SidePanel {
             .gap(space::S4)
             .when(sub, |el| {
                 el.child(
-                    ui::icon_button("panel-back", Sym::ChevronLeft)
-                        .named(p::BACK)
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            cx.stop_propagation();
-                            this.set_tab(0, cx)
-                        })),
+                    ui::native::icon_button_bare(
+                        "panel-back",
+                        Sym::ChevronLeft,
+                        ui::native::IconSize::Regular,
+                    )
+                    .named(p::BACK)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.set_tab(0, cx)
+                    })),
                 )
             })
             .child(
@@ -619,14 +623,18 @@ impl SidePanel {
                 el.child(b)
             })
             .child(
-                ui::icon_button("panel-close", Sym::Close)
-                    .named(p::CLOSE)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        cx.stop_propagation();
-                        this.services
-                            .nav
-                            .update(cx, |nav, cx| nav.set_side_panel_open(false, cx));
-                    })),
+                ui::native::icon_button_bare(
+                    "panel-close",
+                    Sym::Close,
+                    ui::native::IconSize::Regular,
+                )
+                .named(p::CLOSE)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    this.services
+                        .nav
+                        .update(cx, |nav, cx| nav.set_side_panel_open(false, cx));
+                })),
             );
         let context = topic.map(|t| self.context_line(t)).unwrap_or_default();
         ui::header_band(cx).child(title_row).child(
@@ -763,8 +771,14 @@ impl SidePanel {
             .when(has_run, |el| {
                 el.child(
                     div().mt(space::S4).ml(-space::S6).flex().child(
-                        ui::text_button("panel-view-process", p::VIEW_PROCESS, cx)
-                            .on_click(cx.listener(|this, _, _, cx| this.set_tab(1, cx))),
+                        ui::native::push_button(
+                            "panel-view-process",
+                            p::VIEW_PROCESS,
+                            ui::native::PushStyle::Ghost,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.set_tab(1, cx))),
                     ),
                 )
             })
@@ -830,14 +844,7 @@ impl SidePanel {
                     )
                 })
         });
-        let add = Button::new("panel-add-member")
-            .custom(
-                ButtonCustomVariant::new(cx)
-                    .foreground(k.accent_text)
-                    .hover(k.hover)
-                    .active(k.pressed),
-            )
-            .w_full()
+        let add = crate::ui::native::row_button("panel-add-member", cx)
             .h(size::PANEL_ROW)
             .mx(-space::S8)
             .px(space::S8)

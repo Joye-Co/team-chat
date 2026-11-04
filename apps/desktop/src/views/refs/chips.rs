@@ -139,7 +139,7 @@ pub fn composer_chip(
         .px(space::S4)
         .rounded(radius::SM)
         .when(flashing, |d| d.bg(k.sel))
-        .text_size(px(13.))
+        .text_size(crate::ui::native::tokens::text::UI.0)
         .line_height(px(18.))
         .text_color(k.ink_3)
         .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
@@ -172,15 +172,19 @@ pub fn composer_chip(
             d.child(div().flex_none().text_color(k.ink_3).child(c::UPDATED))
         })
         .child(
-            ui::icon_button(ElementId::Name(format!("{id:?}-x").into()), Sym::Close)
-                .with_size(px(18.))
-                .rounded(px(9.))
-                .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))
-                .named(c::REMOVE)
-                .on_click(move |_, window, cx| {
-                    cx.stop_propagation();
-                    on_remove(window, cx)
-                }),
+            ui::native::icon_button_bare(
+                ElementId::Name(format!("{id:?}-x").into()),
+                Sym::Close,
+                ui::native::IconSize::Regular,
+            )
+            .with_size(px(18.))
+            .rounded(px(9.))
+            .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))
+            .named(c::REMOVE)
+            .on_click(move |_, window, cx| {
+                cx.stop_propagation();
+                on_remove(window, cx)
+            }),
         )
         .into_any_element()
 }

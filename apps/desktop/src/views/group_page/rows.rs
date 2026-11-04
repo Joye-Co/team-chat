@@ -4,7 +4,7 @@
 //! the toolbar inset of a page that draws its own toolbar row.
 //!
 //! Rows have no hover fill and the arrow cursor (§10); a row that is
-//! selected uses the native list selection of `ui::native::ListRow`.
+//! selected uses the native list selection of `ui::native::CompactRow`.
 
 use gpui::{
     AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Pixels,
@@ -296,15 +296,6 @@ pub fn state_line(
 
 /// A toolbar group capsule (§5.1) around an item that is not a plain
 /// `Button` (a pull-down toolbar item): the look of `ToolbarGroup`.
-pub fn toolbar_capsule(item: impl IntoElement, cx: &App) -> gpui::Div {
-    let k = native_colors(cx);
-    div()
-        .flex_none()
-        .h(metrics::TOOLBAR_GROUP)
-        .flex()
-        .items_center()
-        .rounded(metrics::TOOLBAR_GROUP / 2.)
-        .bg(k.capsule)
-        .shadow(k.glass())
-        .child(item)
+pub fn toolbar_capsule(item: impl IntoElement, _cx: &App) -> gpui::Div {
+    crate::ui::native::toolbar_slot(item)
 }

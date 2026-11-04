@@ -12,7 +12,7 @@ use crate::{
     copy::{cards_v2 as c, fill},
     data::cards_v2::{CardActionKind, CardIntent, CardV2Block, CardV2Message},
     theme::{self, Type as _, card_v2 as m, space},
-    ui::{self, ButtonKind, Ring, Sym, native::NativeType as _},
+    ui::{self, PushStyle, Ring, Sym, native::NativeType as _},
 };
 
 /// The state overview: the strip, then the title on one line.
@@ -100,7 +100,7 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                     div()
                         .flex_none()
                         .size(px(32.))
-                        .rounded(px(8.))
+                        .rounded(crate::ui::native::tokens::radius::CONTROL)
                         .border_1()
                         .border_color(k.line)
                         .bg(k.bg)
@@ -123,7 +123,7 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                                         .flex_1()
                                         .min_w(px(0.))
                                         .one_line()
-                                        .text_size(px(13.))
+                                        .text_size(crate::ui::native::tokens::text::UI.0)
                                         .line_height(px(20.))
                                         .font_weight(FontWeight::SEMIBOLD)
                                         .text_color(k.ink)
@@ -133,7 +133,7 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                         )
                         .child(
                             div()
-                                .text_size(px(13.))
+                                .text_size(crate::ui::native::tokens::text::UI.0)
                                 .line_height(px(20.))
                                 .text_color(k.ink_2)
                                 .one_line()
@@ -153,9 +153,9 @@ pub(crate) fn notification(ctx: &Ctx, _window: &mut Window, cx: &App) -> AnyElem
                             ctx.id(format!("notify-{i}")),
                             action.label.clone(),
                             if primary {
-                                ButtonKind::Primary
+                                PushStyle::Default
                             } else {
-                                ButtonKind::Secondary
+                                PushStyle::Outline
                             },
                             cx,
                         )
@@ -236,7 +236,7 @@ pub fn plan_row(
             .flex()
             .items_center()
             .gap(space::S10)
-            .h(px(36.))
+            .h(crate::ui::native::tokens::height::LG)
             .px(space::S12)
             .rounded(ui::native::cards::card::RADIUS)
             .bg(ui::native::native_colors(cx).fill)

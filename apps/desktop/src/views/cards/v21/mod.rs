@@ -715,7 +715,7 @@ fn group(
         .items_center()
         .gap(space::S8)
         .min_w(px(0.))
-        .h(px(28.))
+        .h(crate::ui::native::tokens::height::SM)
         .when(can_collapse, |el| {
             el.on_click(move |_, _, cx| {
                 ui.update(cx, |u, cx| {
@@ -796,7 +796,7 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
         .flex()
         .flex_none()
         .p(px(2.))
-        .gap(px(2.))
+        .gap(crate::ui::native::tokens::space::S2)
         .rounded(theme::radius::MD)
         .bg(k.sunken)
         .children(tabs.iter().map(|t| {
@@ -811,10 +811,10 @@ fn tabs(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) -> AnyE
                 .id(node.ctx.id(format!("tab-{id}-{}", t.id)))
                 .h(px(26.))
                 .px(space::S10)
-                .rounded(px(6.))
+                .rounded(crate::ui::native::tokens::radius::ITEM)
                 .flex()
                 .items_center()
-                .text_size(px(13.))
+                .text_size(crate::ui::native::tokens::text::UI.0)
                 .text_color(if on { k.ink } else { k.ink_2 })
                 .when(on, |el| {
                     el.bg(k.bg)
@@ -951,7 +951,12 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
         let show_body = live || !numbered;
         col = col
             .when(i > 0 && live, |el| {
-                el.child(div().my(space::S14).h(px(1.)).bg(k.line))
+                el.child(
+                    div()
+                        .my(space::S14)
+                        .h(crate::ui::native::tokens::layout::BORDER)
+                        .bg(k.line),
+                )
             })
             .when(i > 0 && !live, |el| el.child(div().h(space::S6)))
             .children(head)

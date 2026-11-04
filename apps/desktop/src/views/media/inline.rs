@@ -429,7 +429,7 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
                                 .flex()
                                 .items_center()
                                 .justify_center()
-                                .text_size(px(18.))
+                                .text_size(crate::ui::native::tokens::text::TITLE.0)
                                 .font_weight(gpui::FontWeight::SEMIBOLD)
                                 .text_color(gpui::white())
                                 .child(format!("+{n}")),
@@ -498,7 +498,11 @@ pub fn play_badge(size: f32) -> gpui::Div {
 
 /// Chapter ticks along the bottom edge of a poster or scrubber: one segment per chapter.
 pub fn chapter_ticks(chapters: &[store::Cue], duration: f64, color: gpui::Hsla) -> gpui::Div {
-    let mut row = div().w_full().h(px(3.)).flex().gap(px(3.));
+    let mut row = div()
+        .w_full()
+        .h(px(3.))
+        .flex()
+        .gap(crate::ui::native::tokens::space::S4);
     if duration <= 0. || chapters.is_empty() {
         return row;
     }
@@ -545,14 +549,14 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
         .relative()
         .w(px(VIDEO_W))
         .h(px(h))
-        .rounded(px(10.))
+        .rounded(crate::ui::native::tokens::radius::CONTAINER)
         .overflow_hidden()
         .bg(s.bg)
         .when_some(poster_of(spec, v), |el, p| {
             el.child(
                 img(p)
                     .size_full()
-                    .rounded(px(10.))
+                    .rounded(crate::ui::native::tokens::radius::CONTAINER)
                     .object_fit(ObjectFit::Contain),
             )
         })
@@ -685,7 +689,11 @@ pub fn waveform(
     on: gpui::Hsla,
     off: gpui::Hsla,
 ) -> gpui::Div {
-    let mut row = div().h(px(height)).flex().items_center().gap(px(1.5));
+    let mut row = div()
+        .h(px(height))
+        .flex()
+        .items_center()
+        .gap(crate::ui::native::tokens::space::S2);
     if peaks.is_empty() {
         return row;
     }
@@ -741,7 +749,7 @@ fn audio(
         .max_w_full()
         .child(
             div()
-                .h(px(56.))
+                .h(crate::ui::native::tokens::height::LIST_ROW)
                 .px(space::S12)
                 .flex()
                 .items_center()
@@ -845,7 +853,7 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         .child(thumbs)
         .child(
             div()
-                .h(px(44.))
+                .h(crate::ui::native::tokens::height::FORM_ROW)
                 .px(space::S12)
                 .flex()
                 .items_center()
@@ -978,13 +986,13 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         if header {
             el.t_meta_medium().text_color(k.text_2).child(text)
         } else if numeric {
-            el.child(mono(text, k.text_1).text_size(px(13.)))
+            el.child(mono(text, k.text_1).text_size(crate::ui::native::tokens::text::MONO.0))
         } else {
             el.t_small().text_color(k.text_1).child(text)
         }
     };
     let mut head = div()
-        .h(px(32.))
+        .h(crate::ui::native::tokens::height::DEFAULT)
         .flex()
         .items_center()
         .border_b_1()

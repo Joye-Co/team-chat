@@ -13,7 +13,7 @@ use gpui::{
 };
 use gpui_component::{
     Sizable as _,
-    button::{Button, ButtonVariants as _},
+    button::Button,
     input::Textarea,
     menu::{ContextMenuExt as _, DropdownMenu as _},
     popover::Popover,
@@ -381,11 +381,17 @@ impl TimelineView {
                         .child(t::FAILED),
                 )
                 .child(
-                    ui::text_button(ElementId::Name(format!("retry-{key}").into()), t::RETRY, cx)
-                        .on_click(cx.listener({
-                            let message = message.clone();
-                            move |this, _, _, _| this.retry(&message)
-                        })),
+                    ui::native::push_button(
+                        ElementId::Name(format!("retry-{key}").into()),
+                        t::RETRY,
+                        ui::native::PushStyle::Ghost,
+                        ui::native::PushSize::Small,
+                        cx,
+                    )
+                    .on_click(cx.listener({
+                        let message = message.clone();
+                        move |this, _, _, _| this.retry(&message)
+                    })),
                 )
                 .into_any_element()
         });
@@ -582,8 +588,12 @@ impl TimelineView {
         let can_edit = self.can_edit(message);
         let can_delete = self.can_delete(message);
         let tool = |id: &str, glyph: Sym| {
-            ui::icon_button(ElementId::Name(format!("{id}-{key}").into()), glyph)
-                .rounded(theme::radius::SM)
+            ui::native::icon_button_bare(
+                ElementId::Name(format!("{id}-{key}").into()),
+                glyph,
+                ui::native::IconSize::Regular,
+            )
+            .rounded(theme::radius::SM)
         };
         ui::capsule(cx)
             .id(ElementId::Name(format!("hover-bar-{key}").into()))
@@ -1023,16 +1033,24 @@ impl TimelineView {
                     .flex()
                     .gap(space::S8)
                     .child(
-                        Button::new("edit-save")
-                            .primary()
-                            .label(common::SAVE)
-                            .h(theme::size::BUTTON_SM)
-                            .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
+                        ui::native::push_button(
+                            "edit-save",
+                            common::SAVE,
+                            ui::native::PushStyle::Default,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.save_edit(cx))),
                     )
                     .child(
-                        ui::secondary_button("edit-cancel", common::CANCEL, cx)
-                            .h(theme::size::BUTTON_SM)
-                            .on_click(cx.listener(|this, _, _, cx| this.cancel_edit(cx))),
+                        ui::native::push_button(
+                            "edit-cancel",
+                            common::CANCEL,
+                            ui::native::PushStyle::Outline,
+                            ui::native::PushSize::Small,
+                            cx,
+                        )
+                        .on_click(cx.listener(|this, _, _, cx| this.cancel_edit(cx))),
                     ),
             )
             .into_any_element()

@@ -1,22 +1,17 @@
-//! The quiet connection status at the bottom of the sidebar while the connection is not up:
-//! connecting, reconnecting (with the next retry) or offline. Hidden when
-//! online or signed out.
+//! The connection Alert docked above the composer while the connection is
+//! not up (COMPLETENESS.md §2.15): connecting, reconnecting (with the next
+//! retry) or offline. Hidden when online or signed out.
 
 use gpui::{
     Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _,
-    Subscription, Window, div, px,
+    Subscription, Window, div,
 };
 
 use crate::{
     app::{Changes, Services},
     copy::{connection as c, fill},
     data::{Change, ConnectionState, SessionState},
-    theme::Type as _,
-    ui::{
-        Sym,
-        native::{NativeType as _, borderless_text, native_colors},
-        sf_symbols::SymSize,
-    },
+    ui::Sym,
 };
 
 pub struct ConnectionBanner {
@@ -84,55 +79,34 @@ impl Render for ConnectionBanner {
         let Some((title, detail)) = banner_lines(state).filter(|_| signed_in) else {
             return div().into_any_element();
         };
-        // A quiet status line at the bottom of the sidebar (NATIVE.md §7.4,
-        // as Mail shows it), never a banner and never red: being offline is
-        // not an error the user made, and messages still queue.
-        let k = native_colors(cx);
+        // COMPLETENESS.md §2.15: a warning Alert docked above the composer
+        // (title, the retry time, an outline sm "立即重连"); never red.
         let can_retry = !matches!(state, ConnectionState::Connecting);
         let retry = can_retry.then(|| {
-            borderless_text(
+            crate::ui::native::push_button(
                 "reconnect-now",
                 if state == ConnectionState::TokenUnreadable {
                     c::RETRY_TOKEN
                 } else {
                     c::RECONNECT
                 },
+                crate::ui::native::PushStyle::Outline,
+                crate::ui::native::PushSize::Small,
                 cx,
             )
-            .h(px(20.))
-            .px(px(6.))
-            .n_subheadline()
-            .text_color(k.label)
             .on_click(cx.listener(|this, _, _, _| this.services.provider.reconnect_now()))
         });
+        let mut alert = crate::ui::native::Alert::new(Sym::Offline, title)
+            .tone(crate::ui::native::AlertTone::Warning)
+            .description(detail);
+        if let Some(r) = retry {
+            alert = alert.action(r);
+        }
         div()
             .id("connection-status")
             .flex_none()
-            .pl(px(20.))
-            .pr(px(14.))
-            .pb(px(10.))
-            .flex()
-            .items_start()
-            .gap(px(6.))
-            .child(
-                div().pt(px(3.)).child(
-                    Sym::Offline
-                        .icon(SymSize::INLINE_SMALL)
-                        .text_color(k.secondary),
-                ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .flex()
-                    .flex_col()
-                    .n_subheadline()
-                    .n_figures()
-                    .child(div().text_color(k.label).one_line().child(title))
-                    .child(div().text_color(k.secondary).one_line().child(detail)),
-            )
-            .children(retry)
+            .w_full()
+            .child(alert)
             .into_any_element()
     }
 }

@@ -179,7 +179,7 @@ fn member_item(member: &Member, me: Option<&str>) -> PopupMenuItem {
         div()
             .flex()
             .items_center()
-            .gap(px(6.))
+            .gap(crate::ui::native::tokens::space::S6)
             .child(presence_dot(online, cx))
             .child(name.clone())
     })

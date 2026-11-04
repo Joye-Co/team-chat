@@ -55,7 +55,7 @@ impl RenderOnce for Welcome {
                         div()
                             .pt(px(20.))
                             .flex()
-                            .gap(px(12.))
+                            .gap(crate::ui::native::tokens::space::S12)
                             .child(
                                 push_button(
                                     "welcome-new-group",
@@ -72,7 +72,7 @@ impl RenderOnce for Welcome {
                                 push_button(
                                     "welcome-start-dm",
                                     nav::START_DM,
-                                    PushStyle::Standard,
+                                    PushStyle::Outline,
                                     PushSize::Regular,
                                     cx,
                                 )
