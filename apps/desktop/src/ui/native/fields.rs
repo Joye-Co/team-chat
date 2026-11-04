@@ -7,7 +7,7 @@
 
 use gpui::{
     AnyElement, App, BoxShadow, ElementId, Entity, Focusable as _, Hsla, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, RenderOnce, Styled, Window, div, point,
+    IntoElement, ParentElement, Pixels, RenderOnce, Styled, TextAlign, Window, div, point,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
@@ -65,23 +65,6 @@ pub fn field_edge(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<Bo
     }
 }
 
-/// The 12 px fade at the end of a field's text box at rest: a value that
-/// runs past the box ends in a fade, not on a glyph cut in half. A value that
-/// fits ends before it, so it shows nothing.
-fn rest_fade(fill: Hsla) -> impl IntoElement {
-    div()
-        .absolute()
-        .top_0()
-        .bottom_0()
-        .right_0()
-        .w(space::S12)
-        .bg(gpui::linear_gradient(
-            90.,
-            gpui::linear_color_stop(fill.opacity(0.), 0.),
-            gpui::linear_color_stop(fill, 1.),
-        ))
-}
-
 /// A single-line Input (§1.8).
 #[derive(IntoElement)]
 pub struct NativeTextField {
@@ -93,6 +76,7 @@ pub struct NativeTextField {
     error: bool,
     focused: Option<bool>,
     trailing: Option<AnyElement>,
+    align: TextAlign,
 }
 
 impl NativeTextField {
@@ -106,7 +90,15 @@ impl NativeTextField {
             error: false,
             focused: None,
             trailing: None,
+            align: TextAlign::Left,
         }
+    }
+
+    /// Aligns the text, while editing and at rest: `Right` for numbers
+    /// (§2.8 number field).
+    pub fn align(mut self, align: TextAlign) -> Self {
+        self.align = align;
+        self
     }
 
     pub fn size(mut self, size: FieldSize) -> Self {
@@ -156,6 +148,14 @@ impl RenderOnce for NativeTextField {
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
             && !self.disabled;
         let (edge, shadows) = field_edge(&k, focused, self.error);
+        // The value drawn at rest; `None` while editing, when empty (the
+        // placeholder shows) and for a masked input (a secret never shows).
+        let at_rest = {
+            let state = self.state.read(cx);
+            (!focused && !state.presentation().is_masked())
+                .then(|| state.value())
+                .filter(|v| !v.is_empty())
+        };
         div()
             .id(self.id)
             .flex_none()
@@ -177,26 +177,41 @@ impl RenderOnce for NativeTextField {
             .cursor_text()
             .child(
                 // The text clips at the 12 px padding, never at the border
-                // (T1-12); at rest a value longer than the field fades out
-                // over its last 12 px instead of ending on a cut glyph.
+                // (T1-12). At rest a value longer than the field ends in
+                // "…" with the whole value in a tooltip (§2.21), never on a
+                // cut glyph; the input stays mounted under it (invisible),
+                // so a click or Tab still lands in it.
                 div()
                     .flex_1()
                     .min_w(px(0.))
                     .relative()
                     .overflow_hidden()
-                    .child(placeholder_input(
-                        Input::new(&self.state)
-                            .appearance(false)
-                            .disabled(self.disabled)
-                            .with_size(gpui_component::Size::Small)
-                            .px_0()
-                            .py_0()
-                            .n_body()
-                            .text_color(k.label),
-                        window,
-                        cx,
-                    ))
-                    .when(!focused, |d| d.child(rest_fade(k.control))),
+                    .child(
+                        div()
+                            .when(at_rest.is_some(), |d| d.opacity(0.))
+                            .child(placeholder_input(
+                                Input::new(&self.state)
+                                    .appearance(false)
+                                    .disabled(self.disabled)
+                                    .with_size(gpui_component::Size::Small)
+                                    .px_0()
+                                    .py_0()
+                                    .n_body()
+                                    .text_align(self.align)
+                                    .text_color(k.label),
+                                window,
+                                cx,
+                            )),
+                    )
+                    .children(at_rest.map(|value| {
+                        div().absolute().inset_0().flex().items_center().child(
+                            crate::ui::truncate::TruncText::new(value)
+                                .w_full()
+                                .n_body()
+                                .text_color(k.label)
+                                .when(self.align == TextAlign::Right, |t| t.text_right()),
+                        )
+                    })),
             )
             .children(self.trailing)
     }
