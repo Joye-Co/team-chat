@@ -41,7 +41,10 @@ pub use fields::{FieldSize, NativeTextField, SearchField};
 #[allow(unused_imports)]
 pub use form::{FormRow, GroupedForm, InlineValueField, inline_commit, inline_state};
 #[allow(unused_imports)]
-pub use inspector::{InspectorSection, ListRow, determinate_bar, inspector_column, label_value};
+pub use inspector::{
+    InspectorSection, ListRow, determinate_bar, inspector_column, label_value, label_value_with,
+    steps_bar,
+};
 #[allow(unused_imports)]
 pub use menu::{MenuRow, menu_separator, menu_surface, popover_surface};
 #[allow(unused_imports)]

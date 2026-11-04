@@ -143,6 +143,7 @@ pub struct SidebarRow {
     selected: bool,
     unread: bool,
     trailing: Option<SharedString>,
+    dot: Option<Hsla>,
     count: Option<u32>,
     inactive: Option<bool>,
     on_click: Option<Click>,
@@ -157,6 +158,7 @@ impl SidebarRow {
             selected: false,
             unread: false,
             trailing: None,
+            dot: None,
             count: None,
             inactive: None,
             on_click: None,
@@ -193,6 +195,13 @@ impl SidebarRow {
     /// Trailing 11 pt `secondary` text (a time).
     pub fn trailing(mut self, text: impl Into<SharedString>) -> Self {
         self.trailing = Some(text.into());
+        self
+    }
+
+    /// A 6 pt state dot at the trailing edge (§6: blue live work, amber
+    /// needs you).
+    pub fn trailing_dot(mut self, color: Hsla) -> Self {
+        self.dot = Some(color);
         self
     }
 
@@ -280,6 +289,16 @@ impl RenderOnce for SidebarRow {
                         .n_figures()
                         .text_color(k.secondary)
                         .child(t),
+                )
+            })
+            .when_some(self.dot, |d, color| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .w(px(16.))
+                        .flex()
+                        .justify_center()
+                        .child(div().size(px(6.)).rounded_full().bg(color)),
                 )
             })
             .when_some(self.count, |d, n| {

@@ -9,7 +9,8 @@
 //!
 //! An alert (Tahoe layout) shows the app icon, a bold title, the message,
 //! an optional checkbox and full-width stacked buttons: the default on top,
-//! `取消` below; a destructive choice has red text.
+//! `取消` (Standard) below; a destructive choice has red text. A
+//! window-modal alert attaches at the top center like a sheet.
 
 use gpui::{
     AnyElement, App, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window, div,
@@ -51,7 +52,8 @@ pub const SHEET_ENTRANCE: DialogEntrance = DialogEntrance::FadeSlide;
 
 /// Configures a gpui-component dialog as a native sheet (§7.1). Lay out
 /// its content with [`SheetLayout`]; it has no close button (Escape and
-/// `取消` close it).
+/// `取消` close it). The dim covers the whole window, toolbar row
+/// included; the sheet hangs from under the toolbar row.
 pub fn native_sheet(dialog: Dialog, width: SheetWidth, cx: &App) -> Dialog {
     let k = native_colors(cx);
     dialog
@@ -290,7 +292,10 @@ impl RenderOnce for AlertLayout {
 }
 
 /// An alert button: full width, 28 pt capsule. `destructive` draws red
-/// text on the standard fill; the default uses `accent`.
+/// text on the standard fill; the default uses `accent`. `取消` is always
+/// Standard: next to a destructive choice it must not be the most
+/// prominent button, and an alert has at most one Default button (the
+/// affirmative one).
 pub fn alert_button(
     id: impl Into<gpui::ElementId>,
     label: impl Into<SharedString>,
@@ -299,7 +304,18 @@ pub fn alert_button(
     cx: &App,
 ) -> Button {
     let k = native_colors(cx);
+    let label = label.into();
+    let style = alert_style(&label, style);
     push_button(id, label, style, PushSize::Large, cx).when(destructive, |b| b.text_color(k.red))
+}
+
+/// The style an alert button gets: `取消` is Standard.
+fn alert_style(label: &str, style: PushStyle) -> PushStyle {
+    if label == crate::copy::common::CANCEL {
+        PushStyle::Standard
+    } else {
+        style
+    }
 }
 
 /// The alert surface: `sheet` fill, radius 22, glass edge and `float`.
@@ -310,4 +326,18 @@ pub fn alert_surface(cx: &App) -> gpui::Div {
         .rounded(metrics::SHEET_RADIUS)
         .bg(k.sheet)
         .shadow(k.glass())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cancel_in_an_alert_is_never_the_default() {
+        assert_eq!(
+            alert_style(crate::copy::common::CANCEL, PushStyle::Default),
+            PushStyle::Standard
+        );
+        assert_eq!(alert_style("离开", PushStyle::Default), PushStyle::Default);
+    }
 }

@@ -22,7 +22,8 @@ pub struct NativeColors {
     pub window: Hsla,
     /// Sheets, alerts, popovers and menus.
     pub sheet: Hsla,
-    /// Menus: `sheet` at 92 %.
+    /// Menus: opaque `sheet` (a translucent fill without a real blur lets
+    /// the rows behind show through).
     pub menu: Hsla,
     /// Sidebar and inspector glass.
     pub sidebar: Hsla,
@@ -39,8 +40,16 @@ pub struct NativeColors {
     pub fill_hover: Hsla,
     /// Sidebar selection and unfocused list selection.
     pub selection: Hsla,
-    /// The app accent (ink).
+    /// The app accent: graphite `#6E6E73` while the system accent is
+    /// multicolor, else `NSColor.controlAccentColor` (see `native_colors`).
     pub accent: Hsla,
+    /// The accent as text or a symbol on a gray selection (§9.1): the
+    /// system accent when one is picked, else `label` (graphite text on a
+    /// gray selection does not read).
+    pub accent_text: Hsla,
+    /// Ink: the strongest text color, `#1D1D1F` / `#F5F5F7` (body text of
+    /// the older tokens, never a fill).
+    pub ink: Hsla,
     /// Text and symbols on `accent`.
     pub on_accent: Hsla,
     /// The 3 pt focus ring: accent at 50 %.
@@ -63,6 +72,13 @@ pub struct NativeColors {
     dark: bool,
 }
 
+/// The app accent while the system accent is multicolor: graphite, in
+/// light and dark (coordinator decision, NATIVE.md §4). White text on it
+/// reads at 5.1:1.
+pub const GRAPHITE: u32 = 0x6E6E73FF;
+/// Graphite at 35 %: the focus halo.
+const GRAPHITE_HALO: u32 = 0x6E6E7359;
+
 fn c(hex: u32) -> Hsla {
     rgba(hex).into()
 }
@@ -73,7 +89,7 @@ impl NativeColors {
             content: c(0xFFFFFFFF),
             window: c(0xFFFFFFFF),
             sheet: c(0xFFFFFFFF),
-            menu: c(0xFFFFFFEB),
+            menu: c(0xFFFFFFFF),
             sidebar: c(0xF7F7F8FF),
             group: c(0x0000000A),
             label: c(0x000000D9),
@@ -84,9 +100,11 @@ impl NativeColors {
             fill: c(0x0000000D),
             fill_hover: c(0x00000014),
             selection: c(0x0000000F),
-            accent: c(0x1D1D1FFF),
+            accent: c(GRAPHITE),
+            accent_text: c(0x000000D9),
+            ink: c(0x1D1D1FFF),
             on_accent: c(0xFFFFFFFF),
-            focus: c(0x1D1D1F80),
+            focus: c(GRAPHITE_HALO),
             glass_edge: c(0xFFFFFFB3),
             capsule: c(0xFFFFFFCC),
             dim: c(0x00000033),
@@ -105,7 +123,7 @@ impl NativeColors {
             content: c(0x1E1E1EFF),
             window: c(0x1E1E1EFF),
             sheet: c(0x2C2C2EFF),
-            menu: c(0x2C2C2EEB),
+            menu: c(0x2C2C2EFF),
             sidebar: c(0x2A2A2CFF),
             group: c(0xFFFFFF0F),
             label: c(0xFFFFFFD9),
@@ -116,9 +134,11 @@ impl NativeColors {
             fill: c(0xFFFFFF14),
             fill_hover: c(0xFFFFFF1F),
             selection: c(0xFFFFFF1A),
-            accent: c(0xF5F5F7FF),
-            on_accent: c(0x1D1D1FFF),
-            focus: c(0xF5F5F780),
+            accent: c(GRAPHITE),
+            accent_text: c(0xFFFFFFD9),
+            ink: c(0xF5F5F7FF),
+            on_accent: c(0xFFFFFFFF),
+            focus: c(GRAPHITE_HALO),
             glass_edge: c(0xFFFFFF1F),
             capsule: c(0xFFFFFF14),
             dim: c(0x00000066),
@@ -197,18 +217,25 @@ impl NativeColors {
         }]
     }
 
-    /// The switch knob shadow.
+    /// The switch knob shadow: a soft drop and a 0.5 pt black edge, so the
+    /// white knob shows on a light track in dark mode (§5.4). Checkbox and
+    /// radio marks use the edge alone.
     pub fn knob_shadow(&self) -> Vec<BoxShadow> {
+        let (drop, edge) = if self.dark {
+            (0x00000059, 0x00000033)
+        } else {
+            (0x00000026, 0x0000001A)
+        };
         vec![
             BoxShadow {
-                color: c(0x00000026),
+                color: c(drop),
                 offset: point(px(0.), px(1.)),
-                blur_radius: px(1.),
+                blur_radius: px(1.5),
                 spread_radius: px(0.),
                 inset: false,
             },
             BoxShadow {
-                color: c(0x0000000F),
+                color: c(edge),
                 offset: point(px(0.), px(0.)),
                 blur_radius: px(0.),
                 spread_radius: metrics::HAIRLINE,
@@ -232,7 +259,7 @@ impl NativeColors {
     /// in the key window, `secondary`/`label` when the window is inactive.
     pub fn selected_ink(&self, emphasized: bool) -> (Hsla, Hsla) {
         if emphasized {
-            (self.accent, self.accent)
+            (self.accent_text, self.accent_text)
         } else {
             (self.secondary, self.label)
         }
@@ -241,11 +268,12 @@ impl NativeColors {
 
 /// The native colors of the current mode.
 pub fn native_colors(cx: &App) -> NativeColors {
-    // v12 integration: the system accent (or ink) and the 35 % focus halo.
+    // The system accent (or graphite) and the 35 % focus halo (§4).
     let dark = theme::is_dark(cx);
     let mut k = NativeColors::for_mode(dark);
     k.accent = theme::app_accent(dark);
     k.on_accent = theme::accent_ink(dark);
+    k.accent_text = theme::system_accent().unwrap_or(k.label);
     k.focus = k.accent.opacity(theme::FOCUS_HALO);
     k
 }
@@ -273,7 +301,19 @@ pub mod metrics {
     pub const TOOLBAR_PILL: Pixels = px(28.);
     pub const TOOLBAR_PILL_INSET: Pixels = px(4.);
     pub const TOOLBAR_GROUP_GAP: Pixels = px(8.);
-    pub const TOOLBAR_LEADING: Pixels = px(20.);
+    /// The gap between the visible sidebar edge and the content's leading
+    /// edge (§2): the toolbar title, lists, transcript avatars and detail
+    /// titles all start 20 pt after the sidebar.
+    pub const CONTENT_GAP: Pixels = px(20.);
+    /// The one leading content inset, measured from the page column's
+    /// leading edge. The page column starts in the sidebar's 8 pt gap, so
+    /// 12 here is 20 after the visible sidebar edge. Every page, list and
+    /// detail starts its content here; with the sidebar hidden the shell
+    /// shifts the page so the content still sits 20 pt from the window
+    /// edge.
+    pub const CONTENT_LEADING: Pixels = px(12.);
+    /// Where a toolbar title starts: the content inset.
+    pub const TOOLBAR_LEADING: Pixels = CONTENT_LEADING;
     pub const TOOLBAR_TRAILING: Pixels = px(12.);
     pub const TOOLBAR_SYMBOL: Pixels = px(15.);
     pub const SIDEBAR_INSET: Pixels = px(8.);
@@ -285,7 +325,13 @@ pub mod metrics {
     pub const SIDEBAR_SLOT: Pixels = px(18.);
     pub const SIDEBAR_SYMBOL: Pixels = px(15.);
     pub const SIDEBAR_SECTION: Pixels = px(28.);
+    /// The inspector (topic rail, 改动) and every narrow trailing pane.
     pub const INSPECTOR_WIDTH: Pixels = px(280.);
+    /// The wider trailing panes: 单独问, the 产出 pane and 实时查看.
+    pub const WIDE_PANE_WIDTH: Pixels = px(400.);
+    /// Where a trailing pane's content starts: below the toolbar row, on
+    /// every screen.
+    pub const PANE_TOP: Pixels = TOOLBAR_ROW;
 
     // Push buttons (§5.2)
     pub const BUTTON_REGULAR: Pixels = px(24.);
@@ -344,6 +390,10 @@ pub mod metrics {
     // Inspector and lists
     pub const INSPECTOR_ROW: Pixels = px(24.);
     pub const INSPECTOR_PAD: Pixels = px(16.);
+    /// The label column of a label/value row (fits five CJK characters).
+    pub const LABEL_COLUMN: Pixels = px(72.);
+    /// The least space between a label and its value.
+    pub const LABEL_GAP: Pixels = px(8.);
     pub const LIST_ROW: Pixels = px(28.);
     pub const LIST_ROW_RADIUS: Pixels = px(6.);
     pub const LIST_ROW_INSET: Pixels = px(8.);
@@ -468,5 +518,28 @@ mod tests {
         assert_eq!(text::SUBHEADLINE.0, px(11.));
         assert_eq!(metrics::BUTTON_REGULAR, px(24.));
         assert_eq!(metrics::SIDEBAR_ROW, px(32.));
+    }
+
+    #[test]
+    fn content_starts_20_pt_after_the_visible_sidebar() {
+        assert_eq!(
+            metrics::SIDEBAR_INSET + metrics::CONTENT_LEADING,
+            metrics::CONTENT_GAP
+        );
+        assert_eq!(metrics::CONTENT_GAP, px(20.));
+        assert_eq!(metrics::TOOLBAR_LEADING, metrics::CONTENT_LEADING);
+        assert_eq!(metrics::PANE_TOP, metrics::TOOLBAR_ROW);
+    }
+
+    #[test]
+    fn the_accent_is_graphite_with_white_text_and_menus_are_opaque() {
+        for k in [NativeColors::light(), NativeColors::dark()] {
+            assert_eq!(k.accent, c(GRAPHITE));
+            assert_eq!(k.on_accent, c(0xFFFFFFFF));
+            assert_eq!(k.menu.a, 1.);
+            assert!((k.focus.a - 0.35).abs() < 0.01);
+            // The knob has a hairline edge, so it shows on any track.
+            assert_eq!(k.knob_shadow().len(), 2);
+        }
     }
 }

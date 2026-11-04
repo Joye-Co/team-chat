@@ -440,6 +440,7 @@ pub fn set_mode(mode: ThemeMode, cx: &mut App) {
     crate::ui::motion::sync_accessibility(cx);
     let dark = mode.is_dark();
     Theme::update(cx, |theme| apply(theme, dark));
+    apply_menu_style(cx);
 }
 
 /// Applies a change of the accessibility display options (Increase
@@ -448,6 +449,7 @@ pub fn set_mode(mode: ThemeMode, cx: &mut App) {
 pub fn refresh_accessibility(cx: &mut App) {
     let dark = is_dark(cx);
     Theme::update(cx, |theme| apply(theme, dark));
+    apply_menu_style(cx);
     cx.refresh_windows();
 }
 
@@ -458,6 +460,45 @@ pub fn is_dark(cx: &App) -> bool {
 fn c(hex: u32) -> Hsla {
     rgba(hex).into()
 }
+
+// --- v12/fx-shell: every menu (NATIVE.md §7.3) ---
+/// The style of every gpui-component menu, dropdown and context menu
+/// (NATIVE.md §7.3): an opaque `sheet` fill, radius 12, the glass edge and
+/// `float`, 5 pt inner padding, 24 pt rows with 13 pt text, the `accent`
+/// highlight inset 5 pt with radius 6, 1 px separators inset to the text.
+pub fn apply_menu_style(cx: &mut App) {
+    use crate::ui::native::{metrics, tokens::text};
+    let k = crate::ui::native::native_colors(cx);
+    let mut shadow = k.glass();
+    if k.is_dark() {
+        // A dark outer hairline keeps the menu off a dark page (AppKit draws one).
+        shadow.push(BoxShadow {
+            color: c(0x00000099),
+            offset: point(px(0.), px(0.)),
+            blur_radius: px(0.),
+            spread_radius: metrics::HAIRLINE,
+            inset: false,
+        });
+    }
+    gpui_component::menu::MenuStyle {
+        fill: k.sheet,
+        radius: metrics::MENU_RADIUS,
+        shadow,
+        padding: metrics::MENU_PAD,
+        row_height: metrics::MENU_ROW,
+        row_radius: metrics::MENU_ROW_RADIUS,
+        row_padding: metrics::MENU_ROW_PAD,
+        text_size: text::BODY.0,
+        line_height: text::BODY.1,
+        highlight: k.accent,
+        highlight_text: k.on_accent,
+        separator: k.separator,
+        separator_height: px(1.),
+        separator_margin: px(5.),
+    }
+    .set(cx);
+}
+// --- end v12/fx-shell ---
 
 /// Every gpui-component slot the app can show (DESIGN.md §2.8).
 fn apply(t: &mut Theme, dark: bool) {
@@ -667,14 +708,14 @@ fn apply(t: &mut Theme, dark: bool) {
     t.switch = n.quaternary;
     t.switch_thumb = n.knob;
     // Menus and popovers: `sheet` (menus at 92 %).
-    t.popover = n.menu;
+    t.popover = n.sheet;
     t.popover_foreground = n.label;
     t.overlay = n.dim;
     t.progress_bar = n.label;
     t.tab_bar_segmented = n.fill;
     t.sidebar = n.sidebar;
     t.sidebar_accent = n.selection;
-    t.sidebar_accent_foreground = n.accent;
+    t.sidebar_accent_foreground = n.accent_text;
     t.background = n.content;
     t.window_border = n.separator;
     // --- end v12/kit ---
@@ -689,7 +730,7 @@ fn apply(t: &mut Theme, dark: bool) {
     t.primary_hover = accent;
     t.primary_active = accent.opacity(0.82);
     t.primary_foreground = on_accent;
-    t.sidebar_accent_foreground = accent;
+    t.sidebar_accent_foreground = system_accent().unwrap_or(n.label);
     t.ring = focus_ring_color(accent, n.content);
     // --- end v12/shell ---
 }
@@ -1444,12 +1485,13 @@ fn native_surfaces(mut k: Colors, dark: bool) -> Colors {
         k.text_3 = k.ink_3;
         k.offline = k.ink_3;
     }
-    // Ink: the text, the default button and the accent are one color.
-    k.ink = n.accent;
-    k.text_1 = n.accent;
-    k.foreground = n.accent;
-    k.code_text = n.accent;
-    k.sel_glyph = n.accent;
+    // Ink: the strongest text. The accent (graphite or the system
+    // accent) is a fill, never body text.
+    k.ink = n.ink;
+    k.text_1 = n.ink;
+    k.foreground = n.ink;
+    k.code_text = n.ink;
+    k.sel_glyph = n.ink;
     k.overlay = n.sheet;
     k.elevated = n.sheet;
     k.scrim = n.dim;
@@ -1503,6 +1545,8 @@ fn native_surfaces(mut k: Colors, dark: bool) -> Colors {
     k.btn = n.accent;
     k.on_accent = n.on_accent;
     k.btn_ink = n.on_accent;
+    // A solid count carries `onAccent` (white) text: graphite, like the accent.
+    k.count_solid = n.accent;
     k.focus = n.focus;
     k.focus_border = n.accent;
     k.control_border_focus = n.accent;
@@ -1997,13 +2041,13 @@ pub mod card_v2 {
 // ---------------------------------------------------------------------------
 // --- v12/shell: the app accent (NATIVE.md §4) ---
 //
-// The accent is ink (`#1D1D1F` / `#F5F5F7`) while the system accent is
-// multicolor (`AppleAccentColor` unset). When the person picked an accent
+// The accent is graphite (`#6E6E73`, light and dark, white text on it)
+// while the system accent is multicolor (`AppleAccentColor` unset). When the person picked an accent
 // color in System Settings, the app uses `NSColor.controlAccentColor`, read
 // again when the system colors change. Self-tests never read it: they draw
 // the ink accent.
 
-/// The system accent as `0xRRGGBBAA`, or 0 for multicolor (ink).
+/// The system accent as `0xRRGGBBAA`, or 0 for multicolor (graphite).
 static SYSTEM_ACCENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
 /// The accent the person picked in System Settings; `None` for multicolor.
@@ -2025,13 +2069,13 @@ pub fn set_system_accent(accent: Option<Hsla>) -> bool {
     SYSTEM_ACCENT.swap(v, Ordering::Relaxed) != v
 }
 
-/// The app accent of a mode: ink, or the system accent.
+/// The app accent of a mode: graphite, or the system accent.
 pub fn app_accent(dark: bool) -> Hsla {
     system_accent().unwrap_or_else(|| crate::ui::native::NativeColors::for_mode(dark).accent)
 }
 
-/// Text and symbols on the app accent: the ink's opposite, or white on a
-/// system accent color.
+/// Text and symbols on the app accent: white on graphite and on a system
+/// accent color.
 pub fn accent_ink(dark: bool) -> Hsla {
     match system_accent() {
         Some(_) => c(0xFFFFFFFF),
@@ -2104,6 +2148,7 @@ fn sync_system_accent(cx: &mut App) {
     if set_system_accent(read_system_accent()) {
         let dark = is_dark(cx);
         Theme::update(cx, |theme| apply(theme, dark));
+        apply_menu_style(cx);
         cx.refresh_windows();
     }
 }
@@ -2165,11 +2210,13 @@ mod tests {
 
     // --- v12/shell ---
     #[test]
-    fn the_accent_is_ink_until_a_system_accent_is_set() {
+    fn the_accent_is_graphite_until_a_system_accent_is_set() {
         set_system_accent(None);
-        let ink = crate::ui::native::NativeColors::dark();
-        assert_eq!(app_accent(true), ink.accent);
-        assert_eq!(accent_ink(true), ink.on_accent);
+        let graphite: Hsla = rgba(crate::ui::native::tokens::GRAPHITE).into();
+        for dark in [false, true] {
+            assert_eq!(app_accent(dark), graphite);
+            assert_eq!(accent_ink(dark), rgba(0xFFFFFFFF).into());
+        }
         let blue: Hsla = rgba(0x007AFFFF).into();
         assert!(set_system_accent(Some(blue)));
         assert!(!set_system_accent(Some(blue)), "the same accent is no change");
@@ -2307,13 +2354,16 @@ mod tests {
     }
 
     #[test]
-    fn primary_is_ink_and_selection_is_grey() {
+    fn primary_is_graphite_and_selection_is_grey() {
+        // No white or black filled buttons: the default button is the
+        // graphite accent with white text, in both modes.
         for k in [build(false), build(true)] {
             assert_eq!(k.accent, k.btn);
-            assert_eq!(k.btn, k.ink);
+            assert_ne!(k.btn, k.ink);
+            assert_eq!(k.btn, rgba(crate::ui::native::tokens::GRAPHITE).into());
             assert_eq!(k.selected, k.sel);
             assert!(k.sel.s < 0.1, "selection has no hue");
-            assert!(contrast(k.btn_ink, k.btn) >= 12.0);
+            assert!(contrast(k.btn_ink, k.btn) >= 4.5);
         }
     }
 
