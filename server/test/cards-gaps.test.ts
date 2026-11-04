@@ -93,3 +93,70 @@ describe("files and 产出 a card names (PC-2)", () => {
     cbot.close();
   });
 });
+
+async function hex(text: string): Promise<string> {
+  return sha(new TextEncoder().encode(text));
+}
+
+describe("increment rules (PC-6)", () => {
+  it("stores the content hash of a draft answer and refuses a stale one", async () => {
+    const w = await world();
+    const [ca, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bot)]);
+    const card = base({
+      intent: "ask",
+      title: "公告稿",
+      ask: { from: [w.alice.id] },
+      blocks: [{ id: "d", type: "draft", text: "明天发版。", editable: true }],
+      actions: [{ id: "ok", label: "发", inputs: ["d"] }],
+    });
+    const m = (await send(cbot, w.gid, card)).result.message;
+    const stale = await ca.request({ t: "card.answer", groupId: w.gid, messageId: m.id, rev: 1, actionId: "ok", contentHash: await hex("今天发版。") });
+    expect(stale, JSON.stringify(stale)).toMatchObject({ ok: false, error: { code: "conflict", reason: "card.superseded" } });
+    const edited = "明天上午发版。";
+    const r = await ca.request({ t: "card.answer", groupId: w.gid, messageId: m.id, rev: 1, actionId: "ok", editedValues: { d: edited }, contentHash: await hex(edited) });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    const u = await cbot.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardState.answers.length === 1);
+    expect(u.data.cardState.answers[0].contentHash).toBe(await hex(edited));
+    for (const c of [ca, cbot]) c.close();
+  });
+
+  it("refuses 产出 paths under __teamchat/", async () => {
+    const w = await world();
+    const cbot = await w.connect(w.bot);
+    const root = (await cbot.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "页面" })).message;
+    const html = await upload(w.bot, w.gid, "index.html", "text/html", "<p>x</p>");
+    const files = (path: string) => [{ path: "index.html", fileId: html }, { path, fileId: html }];
+    const bad = await api("/v1/artifacts", { token: w.bot.token, body: { groupId: w.gid, topicId: root.topicId, title: "页", kind: "html", entry: "index.html", files: files("__teamchat/x.js") } });
+    expect(bad.status, JSON.stringify(bad.body)).toBe(400);
+    expect(bad.body.error.code).toBe("invalid");
+    const ok = await api("/v1/artifacts", { token: w.bot.token, body: { groupId: w.gid, topicId: root.topicId, title: "页", kind: "html", entry: "index.html", files: files("teamchat/x.js") } });
+    expect(ok.status, JSON.stringify(ok.body)).toBe(200);
+    const v2 = await api(`/v1/artifacts/${ok.body.artifact.id}/versions`, { token: w.bot.token, body: { entry: "index.html", files: files("__teamchat/diagram.js") } });
+    expect(v2.status, JSON.stringify(v2.body)).toBe(400);
+    cbot.close();
+  });
+
+  it("gives members who do not see the answers of an anonymous questionnaire the count", async () => {
+    const w = await world();
+    const [ca, cb, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bob), w.connect(w.bot)]);
+    const card = base({
+      intent: "ask",
+      title: "实习反馈",
+      ask: { from: [w.alice.id, w.bob.id], blocking: false },
+      blocks: [
+        { id: "q", type: "questionnaire", children: ["mood", "next"], anonymous: true, fallbackText: "实习反馈" },
+        { id: "mood", type: "input", kind: "text", label: "感受" },
+        { id: "next", type: "input", kind: "text", label: "建议" },
+      ],
+    });
+    const m = (await send(cbot, w.gid, card)).result.message;
+    const r = await ca.request({ t: "card.event", groupId: w.gid, messageId: m.id, rev: 1, clientEventId: crypto.randomUUID(), blockId: "q", event: "action.press", inputs: { mood: { value: "还行" } } });
+    expect(r, JSON.stringify(r)).toMatchObject({ ok: true });
+    const u = await cb.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id);
+    expect(u.data.cardState.answers).toEqual([]);
+    expect(u.data.cardState.answerCount).toBe(1);
+    const h = await cb.request({ t: "history", groupId: w.gid, topicId: m.topicId });
+    expect(h.messages.find((x: any) => x.id === m.id).cardState.answerCount).toBe(1);
+    for (const c of [ca, cb, cbot]) c.close();
+  });
+});

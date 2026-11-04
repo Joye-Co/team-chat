@@ -9116,6 +9116,11 @@
                         "at",
                         "event"
                       ]
+                    },
+                    "answerCount": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
                     }
                   },
                   "required": [
@@ -18077,6 +18082,11 @@
                     "at",
                     "event"
                   ]
+                },
+                "answerCount": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
@@ -19687,6 +19697,10 @@
                 "type": "string",
                 "maxLength": 32768
               }
+            },
+            "contentHash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
             },
             "answerId": {
               "type": "string",

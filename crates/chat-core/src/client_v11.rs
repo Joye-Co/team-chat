@@ -59,6 +59,30 @@ pub struct SideChatStarted {
     pub client_msg_id: String,
 }
 
+/// The `contentHash` of an answer by `action_id`: sha256 (hex) of the draft text it approves.
+fn draft_hash(
+    card: &crate::proto::CardV2,
+    action_id: &str,
+    edited: Option<&AnswerEdits>,
+) -> Option<String> {
+    use sha2::{Digest, Sha256};
+    let action = card.actions.iter().flatten().find(|a| a.id == action_id);
+    let ids: std::collections::BTreeSet<String> = match action.and_then(|a| a.inputs.as_ref()) {
+        Some(ids) => ids.iter().cloned().collect(),
+        None => card
+            .all_blocks()
+            .into_iter()
+            .filter_map(|b| match b {
+                crate::proto::CardV2Block::Draft { id, .. } => Some(id.clone()),
+                _ => None,
+            })
+            .collect(),
+    };
+    let text = crate::proto::draft_content_text(card, &ids, edited)?;
+    let digest = Sha256::digest(text.as_bytes());
+    Some(digest.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 impl Client {
     // ------------------------------------------------------------------
     // Card v2
@@ -81,9 +105,10 @@ impl Client {
             .store()
             .message(message_id)?
             .ok_or(ClientError::NotFound)?;
-        if m.card_v2.is_none() {
+        let Some(card) = m.card_v2.as_ref() else {
             return Err(ClientError::Invalid("not a v2 card"));
-        }
+        };
+        let content_hash = draft_hash(card, action_id, edited_values.as_ref());
         self.enqueue(
             crate::new_id(),
             OutboxOp::CardAnswer {
@@ -94,6 +119,7 @@ impl Client {
                 action_id: action_id.into(),
                 inputs,
                 edited_values,
+                content_hash,
             },
         )
     }
@@ -153,6 +179,7 @@ impl Client {
             value: req.value.clone(),
             inputs: req.inputs.clone(),
             part: req.part.clone(),
+            content_hash: None,
         };
         frame
             .validate()

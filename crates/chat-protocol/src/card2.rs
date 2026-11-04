@@ -17,7 +17,7 @@ use crate::bots::{RunPlanItem, check_plan};
 use crate::card::{CardField, CardListItem, LinkTarget, check_action_id, check_web_url};
 use crate::entities::{Message, Millis};
 use crate::limits::{Validation, ValidationError, check_chars, check_id};
-use crate::message::ArtifactRef;
+use crate::message::{ArtifactRef, check_sha256};
 use crate::serde_util::{any_value, non_null, nullable};
 
 pub const CARD_V2_VERSION: u32 = 2;
@@ -3456,6 +3456,13 @@ pub struct CardAnswerFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub client_event_id: Option<String>,
+    /// 1.1: sha256 (hex) of the draft text the answer approves ([`draft_content_text`]).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_hash: Option<String>,
 }
 
 /// Checks answer fields: ids, rev, block-id keys and the 64 KiB total.
@@ -3493,6 +3500,9 @@ impl CardAnswerFrame {
         check_id("messageId", &self.message_id)?;
         if let Some(c) = &self.client_event_id {
             check_client_event_id("clientEventId", c)?;
+        }
+        if let Some(h) = &self.content_hash {
+            check_sha256("contentHash", h)?;
         }
         check_answer(
             self.rev,
@@ -3566,6 +3576,13 @@ pub struct CardEventFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub part: Option<PartRef>,
+    /// 1.1: sha256 (hex) of the draft text the answer approves ([`draft_content_text`]).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_hash: Option<String>,
 }
 
 /// The event name of a retract.
@@ -3621,6 +3638,9 @@ impl CardEventFrame {
             .is_some_and(|v| json_bytes(v) > MAX_CARD_EVENT_INPUTS_BYTES)
         {
             return fail("inputs", "inputs exceed 16 KiB");
+        }
+        if let Some(h) = &self.content_hash {
+            check_sha256("contentHash", h)?;
         }
         if let Some(p) = &self.part {
             if !part_allowed(&self.event, &p.kind) {
@@ -4206,6 +4226,38 @@ pub struct CardState {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_cause: Option<Cause>,
+    /// 1.1, private cards: live answers of the current ask round, for viewers who do not get
+    /// the answers (an anonymous questionnaire, a private poll).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub answer_count: Option<u32>,
+}
+
+/// The text a draft `contentHash` covers: the draft blocks an answer submits (`ids`), in card
+/// order, each with its edited text when edited, joined with U+0000. `None` without drafts.
+pub fn draft_content_text(
+    card: &CardV2,
+    ids: &BTreeSet<String>,
+    edited: Option<&AnswerEdits>,
+) -> Option<String> {
+    let mut texts: Vec<&str> = Vec::new();
+    for b in card.all_blocks() {
+        if let CardV2Block::Draft { id, text, .. } = b {
+            if !ids.contains(id) {
+                continue;
+            }
+            texts.push(
+                edited
+                    .and_then(|e| e.get(id))
+                    .map(String::as_str)
+                    .unwrap_or(text.as_str()),
+            );
+        }
+    }
+    (!texts.is_empty()).then(|| texts.join("\u{0}"))
 }
 
 impl CardState {

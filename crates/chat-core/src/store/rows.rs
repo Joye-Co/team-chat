@@ -173,6 +173,9 @@ pub enum OutboxOp {
         inputs: Option<AnswerInputs>,
         #[serde(default)]
         edited_values: Option<AnswerEdits>,
+        /// sha256 of the draft text the answer approves (rows queued before 1.1.0 have none).
+        #[serde(default)]
+        content_hash: Option<String>,
     },
     /// 1.1: an event an interactive 产出 page sent.
     ArtifactEvent {

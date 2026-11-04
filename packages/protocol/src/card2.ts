@@ -1034,6 +1034,8 @@ const answerFields = {
   inputs: AnswerInputs.optional(),
   /** Edited text of `draft` blocks, by block id. */
   editedValues: AnswerEdits.optional(),
+  /** 1.1: sha256 (hex) of the draft text the answer approves (`draftContentHash`). */
+  contentHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
 };
 const answerSize = (a: { inputs?: unknown; editedValues?: unknown }) =>
   utf8Bytes(JSON.stringify([a.inputs ?? null, a.editedValues ?? null])) <= MAX_CARD_ANSWER_BYTES;
@@ -1086,6 +1088,8 @@ export const CardEventFrame = z
     value: z.json().optional(),
     inputs: AnswerInputs.optional(),
     part: PartRef.optional(),
+    /** 1.1: sha256 (hex) of the draft text the answer approves (`draftContentHash`). */
+    contentHash: z.string().regex(/^[0-9a-f]{64}$/).optional(),
   })
   .refine((f) => (f.event === "answer.retract" ? f.blockId === undefined && f.actionId === undefined : (f.blockId === undefined) !== (f.actionId === undefined)), {
     message: "exactly one of blockId and actionId (neither for answer.retract)",
@@ -1269,8 +1273,28 @@ export const CardState = z.object({
   emitters: z.record(BlockId, z.array(Id)).optional(),
   /** The event the newest rev answered. */
   lastCause: Cause.optional(),
+  /**
+   * 1.1, private cards: live answers of the current ask round. Viewers who do not get the
+   * answers (an anonymous questionnaire, a private poll) see this count.
+   */
+  answerCount: Count.optional(),
 });
 export type CardState = z.infer<typeof CardState>;
+
+/**
+ * The text a draft `contentHash` covers: the draft blocks an answer submits, in card order,
+ * each with its edited text when edited, joined with U+0000. `contentHash` is its sha256 (hex
+ * of the UTF-8 bytes).
+ */
+export function draftContentText(card: Pick<CardV2, "blocks">, ids: Iterable<string>, edited?: Record<string, string>): string | undefined {
+  const want = new Set(ids);
+  const texts: string[] = [];
+  for (const b of allBlocks(card)) {
+    if (b.type !== "draft" || !want.has(b.id)) continue;
+    texts.push(edited?.[b.id] ?? b.text);
+  }
+  return texts.length > 0 ? texts.join("\u0000") : undefined;
+}
 
 /** Transient (2.1, to the card's author): a live event of one of its cards. */
 export const CardEventTransient = z.object({

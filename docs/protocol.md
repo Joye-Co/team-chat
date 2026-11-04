@@ -1159,8 +1159,9 @@ Readers keep unknown event names and an unknown `diagram.syntax` (show the sourc
 
 ```ts
 { t: "card.event", rid, groupId, messageId, rev, clientEventId, blockId? | actionId?, event: CardEventName,
-  value?: JSON /* <= 4 KiB */, inputs?: Record<blockId, JSON> /* <= 16 KiB, action.press only */, part?: PartRef }
-{ t: "card.answer", ..., clientEventId? }        // short form of card.event action.press
+  value?: JSON /* <= 4 KiB */, inputs?: Record<blockId, JSON> /* <= 16 KiB, action.press only */, part?: PartRef,
+  contentHash?: string /* 1.1: sha256 hex of the draft text the answer approves */ }
+{ t: "card.answer", ..., clientEventId?, contentHash? }        // short form of card.event action.press
 { t: "card.answer.retract", rid, groupId, messageId, answerId }   // short form of card.event answer.retract
 ack.result = CardEventAck { eventId, stored, answerId?, duplicate?, expect: Expect }
 Expect = { by: memberId, mode: "live" | "run" | "starting" | "offline" | "none", etaMs? }
@@ -1170,7 +1171,7 @@ card.retracted (stored) data: { messageId, answerId, askId?, eventId? }         
 Message += { cardState?: CardState, cause?: Cause }       message.updated data += { cardState?, cause? }
 CardState = { ask?: { id, status: "open"|"answered"|"expired"|"closed"|"superseded", from: memberId[], blocking,
               expiresAt?, answeredBy?, answeredAt? }, answers: CardAnswer[] /* <= 500 */,
-              tally?, tallyBy?, emitters?, lastCause?: Cause }
+              tally?, tallyBy?, emitters?, lastCause?: Cause, answerCount? /* 1.1, private cards */ }
 Cause = { eventId, actorId, at, event, blockId?, actionId? }
 transient card.event: { groupId, topicId, messageId, eventId, rev, blockId?, actionId?, event, value?, inputs?, part?, actorId, at }
 ```
@@ -1182,6 +1183,12 @@ answer.retract`. `chart.select` sends `part {kind: "point"|"bar", keys: {series,
 other part kinds, have no `part` (`invalid`). A live event goes to
 the card's author only (transient `card.event`, audit action `card.event`); answers are stored.
 Members never write `cardState` or `cause`.
+
+Draft answers: an answer that submits `draft` blocks (a footer action whose inputs name them,
+or a 2.0 submit) stores `contentHash` in its `CardAnswer`: the sha256 (lowercase hex of the
+UTF-8 bytes) of the draft texts it approves, in card order, each the edited text when edited,
+joined with U+0000 (`draftContentText`). A client may send the same `contentHash`; when it
+differs from the server's, the answer gets `conflict`, `card.superseded` (the draft changed).
 
 Edit marks: a `message.updated` that the server makes for a state change (an answer, a
 retract or an expiry of a card ask; a ref whose source was deleted) has no `cardV2` and carries
@@ -1205,7 +1212,8 @@ their own answers in full. Every other answer, `card.answered`, `card.retracted`
 `cardState.ask.answeredBy`, `tallyBy` and the voter in `lastCause`/`cause` are left out. The
 card's author gets the values of `card.answered`, and for an anonymous questionnaire the other
 answers in `cardState.answers` (with `actorId: "anonymous"`); other members get neither (a poll's
-`tally` is for everyone). The derived v1 status of an answered private card is "已回答".
+`tally` is for everyone). Every viewer of a private card gets `cardState.answerCount`, the
+number of live answers of the current ask round (the aggregate in place of hidden answers). The derived v1 status of an answered private card is "已回答".
 
 The card's author never learns who used a private card. An SDK author gets the live
 `card.event` transient with `actorId: "anonymous"`. A runner author's run gets `run.answer`

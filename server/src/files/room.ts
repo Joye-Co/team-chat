@@ -246,12 +246,17 @@ export function versionRow(room: RoomContext, artifactId: string, version: numbe
     .toArray()[0] as VersionRow | undefined;
 }
 
+/** 产出 file paths the client reserves for the files it serves itself. */
+export const RESERVED_PATH_PREFIX = "__teamchat/";
+
 /** Checks a version's files against the room's ready files and returns them with size and mime. */
 function resolveVersionFiles(room: RoomContext, kind: ArtifactKind, input: VersionInput): ArtifactFile[] {
   const paths = new Set<string>();
   const files: ArtifactFile[] = [];
   for (const f of input.files) {
     if (paths.has(f.path)) throw new ApiError("invalid", "duplicate path in 产出 version");
+    // REFS §B: the client serves its own files (the diagram library) under this prefix.
+    if (f.path.startsWith(RESERVED_PATH_PREFIX)) throw new ApiError("invalid", `paths under ${RESERVED_PATH_PREFIX} are reserved`);
     paths.add(f.path);
     const rec = fileRecord(room, f.fileId);
     if (!rec) throw new ApiError("invalid", "file is not a ready file of this group");

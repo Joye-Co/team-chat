@@ -91,6 +91,9 @@ export function viewState(state: CardState, viewerId: string, p: Private): CardS
   }
   if (out.lastCause && out.lastCause.actorId !== viewerId) out.lastCause = { ...out.lastCause, actorId: ANONYMOUS_ID };
   delete out.tallyBy;
+  // The aggregate every viewer gets in place of the hidden answers.
+  const round = state.ask?.id;
+  out.answerCount = state.answers.filter((a) => a.retractedAt === undefined && (round === undefined || a.askId === round)).length;
   return out;
 }
 

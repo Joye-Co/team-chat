@@ -17698,6 +17698,10 @@
             "maxLength": 32768
           }
         },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "clientEventId": {
           "type": "string",
           "minLength": 1,
@@ -17858,6 +17862,10 @@
           "required": [
             "kind"
           ]
+        },
+        "contentHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
         }
       },
       "required": [

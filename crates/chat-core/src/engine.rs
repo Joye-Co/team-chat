@@ -982,6 +982,7 @@ impl Session {
                     action_id,
                     inputs,
                     edited_values,
+                    content_hash,
                     ..
                 } => ClientFrame::CardAnswer(CardAnswerFrame {
                     rid: rid.clone(),
@@ -992,6 +993,7 @@ impl Session {
                     inputs,
                     edited_values,
                     client_event_id: Some(item.id.clone()),
+                    content_hash,
                 }),
                 OutboxOp::ArtifactEvent {
                     group_id,
@@ -1034,6 +1036,7 @@ impl Session {
                     value,
                     inputs,
                     part,
+                    content_hash: None,
                 }),
             };
             if let Err(e) = self.shared.store.outbox_attempt(&item.id) {

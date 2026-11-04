@@ -231,16 +231,16 @@ const rpc = async (frame: { groupId: string }, c: { env: Parameters<typeof roomS
 registerFrameHandler<ClientFrameOf<"card.event">>("card.event", {
   rate: "write",
   handle(f, c) {
-    const { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part } = f;
-    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part });
+    const { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part, contentHash } = f;
+    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part, contentHash });
   },
 });
 
 registerFrameHandler<ClientFrameOf<"card.answer">>("card.answer", {
   rate: "write",
   handle(f, c) {
-    const { messageId, rev, actionId, inputs, editedValues, clientEventId } = f;
-    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, actionId, inputs, editedValues, clientEventId, event: "action.press" });
+    const { messageId, rev, actionId, inputs, editedValues, clientEventId, contentHash } = f;
+    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, actionId, inputs, editedValues, clientEventId, contentHash, event: "action.press" });
   },
 });
 
