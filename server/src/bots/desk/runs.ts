@@ -67,7 +67,7 @@ export abstract class DeskRuns extends DeskCore {
 
         const prompt = claim.contextOf
           ? await this.asidePrompt(m, claim, claim.contextOf, followUps)
-          : await this.topicPrompt(m, claim, followUps);
+          : await this.topicPrompt(m, claim, followUps, hasFeature(machine, "acceptance"));
         // Sources of refs the run saw: later run.input texts give their context only once.
         if (m.refs && m.refs.length > 0) {
           this.seeRefs(runId, [...claim.messages.map((x) => x.id), ...m.refs.map((x) => x.messageId)]);
@@ -90,7 +90,7 @@ export abstract class DeskRuns extends DeskCore {
     return pickMachine(usable, runner, Date.now(), excluded);
   }
 
-  protected async topicPrompt(m: TopicMessage, claim: ClaimResult, followUps: { authorId: string; body: string }[]): Promise<string> {
+  protected async topicPrompt(m: TopicMessage, claim: ClaimResult, followUps: { authorId: string; body: string }[], acceptance = false): Promise<string> {
     const botId = this.botId as string;
     const refIds = (m.refs ?? []).map((x) => x.fromId).filter((x): x is string => Boolean(x));
     const names = await this.names([...claim.messages.map((x) => x.authorId), m.authorId, botId, ...refIds]);
@@ -104,6 +104,7 @@ export abstract class DeskRuns extends DeskCore {
       request: { authorId: m.authorId, body: m.body },
       followUps,
       refs,
+      acceptance,
     });
   }
 

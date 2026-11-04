@@ -162,6 +162,30 @@ describe("done card rules", () => {
 });
 
 describe("1.1 runs", () => {
+  it("tell a CLI on a machine that reads acceptance blocks how to write them", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["acceptance"]);
+    const { c } = await Client.connect(w.human.token);
+    const sent = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev ship it", mentions: [w.bot.id] });
+    const assign = await d.next((f) => f.t === "run.assign" && f.topicId === sent.message.topicId);
+    expect(assign.prompt).toContain("```acceptance");
+    expect(assign.prompt).toContain("At most 20 items");
+    d.send({ t: "run.accept", runId: assign.runId });
+    // What the daemon parses from the CLI's block becomes the run's 验收标准.
+    const items = [{ text: "Tests pass", state: "pass", evidence: { text: "cargo test: 42 passed" } }];
+    d.event(assign.runId, { type: "acceptance", items });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === assign.runId && e.data.run.acceptance);
+    expect((await api(`/v1/runs/${assign.runId}`, { token: w.human.token })).body.acceptance).toEqual(items);
+    // A daemon without the feature does not get the rule.
+    const old = await Daemon.connect(w.machineToken, []);
+    d.close();
+    const sent2 = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev again", mentions: [w.bot.id] });
+    const assign2 = await old.next((f) => f.t === "run.assign" && f.topicId === sent2.message.topicId);
+    expect(assign2.prompt).not.toContain("```acceptance");
+    c.close();
+    old.close();
+  });
+
   it("take acceptance criteria from the run event and from the run's bot, and show them with 产出 in the done card", async () => {
     const w = await world();
     const d = await Daemon.connect(w.machineToken, ["acceptance"]);

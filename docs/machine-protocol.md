@@ -291,7 +291,8 @@ How the 1.1 daemon does each one:
   cuts texts to the limits (text 500, evidence text 1000 characters, at most 20 items), reads
   `passed`/`met`/`done` as `pass` and `failed`/`unmet` as `fail`, drops unknown states and
   malformed evidence, and sends the `acceptance` event only when the list changed. The message
-  itself is sent unchanged.
+  itself is sent unchanged. The server's `run.assign.prompt` for a machine with this feature
+  says how to write the block (format, states and limits); side chat prompts do not.
 
 `takeoverUrl` comes from `daemon.toml` (`takeover_url`, for example `vnc://mac-mini.tailnet`).
 It must be `scheme://host...`, at most 2048 bytes, with no spaces and no password (`daemon
