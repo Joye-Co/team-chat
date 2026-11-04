@@ -12,7 +12,8 @@ mode to chatrun-<n>.json; "artifact" writes page/index.html and page/app.js and 
 "chatcard" reads `chat-run card schema`, posts a card built from it with `chat-run card post`,
 posts it again (a retry: the idempotency key gives the same message), patches the posted card
 with `chat-run card patch` at its rev and writes each answer to chatcard-<n>.json.
-The arguments are written to argv.json in the working directory.
+The arguments are written to argv.json in the working directory; with --settings, the settings
+and the ASIDE_PROBE variable they set go to settings-seen.json.
 The session file goes to $CLAUDE_CONFIG_DIR/projects/<cwd with non-alphanumerics as ->/<id>.jsonl.
 """
 import json, os, re, subprocess, sys, time
@@ -21,6 +22,11 @@ args = sys.argv[1:]
 sid = args[args.index("--session-id") + 1] if "--session-id" in args else "fake-session"
 assert "--input-format" in args and "stream-json" in args
 open("argv.json", "w").write(json.dumps(args))
+# Like Claude Code: the env of --settings applies to the session (a side chat run's auth).
+if "--settings" in args:
+    seen = json.load(open(args[args.index("--settings") + 1]))
+    os.environ.update(seen.get("env", {}))
+    open("settings-seen.json", "w").write(json.dumps({"settings": seen, "probe": os.environ.get("ASIDE_PROBE")}))
 cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.environ["HOME"], ".claude")
 proj = os.path.join(cfg, "projects", re.sub(r"[^A-Za-z0-9]", "-", os.path.realpath(os.getcwd())))
 os.makedirs(proj, exist_ok=True)

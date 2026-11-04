@@ -270,10 +270,13 @@ How the 1.1 daemon does each one:
   read-only mode the daemon can force). A `kind` this daemon does not know is rejected with
   `invalid`. Claude Code gets `--permission-mode plan --tools Read,Grep,Glob --disallowedTools
   "Bash Edit Write MultiEdit NotebookEdit WebFetch WebSearch mcp__*" --strict-mcp-config
-  --mcp-config '{"mcpServers":{}}' --setting-sources user`: no MCP servers, and only the
-  user's own settings file (its env, `apiKeyHelper` and model keep the run's auth and model);
-  the project and local settings come from the repo and stay out. The tool set keeps a user
-  allow rule for a command or edit tool from widening the run. Codex gets
+  --mcp-config '{"mcpServers":{}}' --setting-sources "" --settings <run folder>/.aside-settings.json`:
+  no MCP servers and no settings files (the user's hooks could run commands; the project and
+  local settings come from the repo). The settings file holds only `env` (string values),
+  `apiKeyHelper` and `model` of the user's `settings.json` (`$CLAUDE_CONFIG_DIR`, default
+  `~/.claude`), so the run keeps its auth and model; it is mode 0600, never on the command line,
+  left out when there is nothing to keep, and removed when the run ends. The tool set keeps a
+  user allow rule for a command or edit tool from widening the run. Codex gets
   `approvalPolicy: "never"` and `sandbox: "read-only"` (no writes, no network for commands),
   and `-c` overrides that turn off web search, apps, plugins, browser and computer use, and
   each MCP server in `$CODEX_HOME/config.toml` and the `.codex/config.toml` files of the

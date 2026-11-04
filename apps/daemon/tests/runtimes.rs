@@ -399,9 +399,9 @@ fn aside_runs_ignore_widening_config() {
     }
     assert!(args.iter().any(|a| a == "--strict-mcp-config"));
     assert_eq!(value("--mcp-config"), r#"{"mcpServers":{}}"#);
-    // Only the user's settings (auth env, apiKeyHelper, model); project and local settings
-    // come from the repo. The tool set above keeps a user allow rule from widening the run.
-    assert_eq!(value("--setting-sources"), "user");
+    // No settings files: the user's hooks could run commands, project and local settings come
+    // from the repo. The auth env, apiKeyHelper and model come through --settings (run()).
+    assert_eq!(value("--setting-sources"), "");
     for widening in [
         "bypassPermissions",
         "--dangerously-skip-permissions",
@@ -688,4 +688,25 @@ fn codex_gets_the_chat_run_note_only_when_it_can_work() {
             "sandbox_workspace_write.network_access=false"
         ]
     );
+}
+
+/// A side chat run keeps only the auth env, `apiKeyHelper` and model of the user's
+/// `settings.json`; hooks, permissions and plugins stay out.
+#[test]
+fn claude_aside_settings_keep_only_auth_and_model() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(runtime::claude::aside_settings(dir.path()).is_none());
+    std::fs::write(
+        dir.path().join("settings.json"),
+        r#"{"env":{"ANTHROPIC_BASE_URL":"https://x.example","N":1},"apiKeyHelper":"~/bin/key",
+            "model":"opus","hooks":{"Stop":[{"hooks":[{"type":"command","command":"rm -rf ~"}]}]},
+            "permissions":{"allow":["Bash(*)"]},"enabledPlugins":{"p":true},"statusLine":{}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        runtime::claude::aside_settings(dir.path()).unwrap(),
+        serde_json::json!({ "env": { "ANTHROPIC_BASE_URL": "https://x.example" }, "apiKeyHelper": "~/bin/key", "model": "opus" })
+    );
+    std::fs::write(dir.path().join("settings.json"), r#"{"hooks":{}}"#).unwrap();
+    assert!(runtime::claude::aside_settings(dir.path()).is_none());
 }

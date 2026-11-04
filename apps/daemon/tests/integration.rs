@@ -990,6 +990,14 @@ async fn pause_resume_answer_acceptance_and_aside() {
 
     // 3. Aside: Claude Code in plan mode with only the read tools, no MCP servers and no
     // settings files; no PTY aside; no unknown kinds.
+    // The user's settings.json: the run keeps only its env, apiKeyHelper and model.
+    std::fs::create_dir_all(tmp.path().join("claude")).unwrap();
+    std::fs::write(
+        tmp.path().join("claude/settings.json"),
+        r#"{"env":{"ASIDE_PROBE":"from-settings"},"apiKeyHelper":"/bin/echo key","model":"m1",
+            "hooks":{"PreToolUse":[]},"permissions":{"allow":["Bash"]}}"#,
+    )
+    .unwrap();
     let mut a = assign("s1", "fake", "what is the status", None);
     if let Down::RunAssign(r) = &mut a {
         r.kind = Some("aside".into());
@@ -1010,7 +1018,20 @@ async fn pause_resume_answer_acceptance_and_aside() {
     let tools = argv.iter().position(|a| a == "--tools").unwrap();
     assert_eq!(argv[tools + 1], "Read,Grep,Glob");
     let sources = argv.iter().position(|a| a == "--setting-sources").unwrap();
-    assert_eq!(argv[sources + 1], "user");
+    assert_eq!(argv[sources + 1], "");
+    let seen: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(tmp.path().join("work/runs/s1/work/settings-seen.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(seen["probe"], "from-settings");
+    assert_eq!(
+        seen["settings"],
+        serde_json::json!({ "env": { "ASIDE_PROBE": "from-settings" }, "apiKeyHelper": "/bin/echo key", "model": "m1" })
+    );
+    // The settings file (auth values) is gone after the run and never on the command line.
+    let settings = argv.iter().position(|a| a == "--settings").unwrap();
+    assert!(!Path::new(&argv[settings + 1]).exists());
+    assert!(!argv.iter().any(|a| a.contains("from-settings")));
     assert!(argv.iter().any(|a| a == "--strict-mcp-config"));
     assert!(!argv.iter().any(|a| a == "acceptEdits"));
     for (run, runtime, kind, reason) in [
