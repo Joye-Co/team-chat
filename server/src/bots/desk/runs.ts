@@ -79,7 +79,13 @@ export abstract class DeskRuns extends DeskCore {
 
         const prompt = claim.contextOf
           ? await this.asidePrompt(m, claim, claim.contextOf, followUps)
-          : await this.topicPrompt(m, claim, followUps, hasFeature(machine, "acceptance"));
+          : await this.topicPrompt(
+              m,
+              claim,
+              followUps,
+              // A queued run gets its machine later: ask for the block when any machine reads it.
+              machine ? hasFeature(machine, "acceptance") : machines.some((x) => hasFeature(x, "acceptance")),
+            );
         // Sources of refs the run saw: later run.input texts give their context only once.
         if (m.refs && m.refs.length > 0) {
           this.seeRefs(runId, [...claim.messages.map((x) => x.id), ...m.refs.map((x) => x.messageId)]);
