@@ -1,0 +1,24 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.interaction",
+    "runId": "01JBX0RUN000000000000000AU",
+    "inputId": "in-9",
+    "source": {
+      "kind": "artifact",
+      "artifactId": "01JC0ART00000000000000OCT3",
+      "version": 1,
+      "eventId": "01JC0EV0000000000000000020",
+      "ask": true
+    },
+    "event": "breakdown",
+    "value": {
+      "channel": "douyin"
+    },
+    "actor": {
+      "id": "01JBX0OWNER0000000000000AA",
+      "name": "Joye"
+    }
+  }
+}

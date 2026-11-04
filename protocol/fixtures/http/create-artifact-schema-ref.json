@@ -1,0 +1,43 @@
+{
+  "kind": "CreateArtifactRequest",
+  "valid": false,
+  "description": "no $ref in a page event schema",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "title": "10 月数据看板",
+    "kind": "html",
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX"
+      }
+    ],
+    "note": "按渠道筛选；发现数不对可以直接告诉 Ledger。",
+    "events": [
+      {
+        "name": "x",
+        "schema": {
+          "$ref": "#/data/x"
+        }
+      }
+    ],
+    "media": {
+      "kind": "html",
+      "mime": "text/html",
+      "bytes": 12000,
+      "preview": "pending"
+    },
+    "data": {
+      "asOf": "2026-10-31",
+      "channels": {
+        "all": 38,
+        "xhs": 14,
+        "invite": 10,
+        "bili": 9,
+        "douyin": 5
+      }
+    }
+  }
+}

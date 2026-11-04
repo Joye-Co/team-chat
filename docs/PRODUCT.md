@@ -40,6 +40,20 @@ The interface is in Simplified Chinese. It uses only these four nouns for produc
   实时查看 (watch a member's computer while it works), 接管 and 交还 (pause the member and take over,
   then hand back), 交代 (hand work to a member), 来龙去脉 (where a 产出 came from), 群里的决定 (the
   decisions recorded in a 群), 验收标准 (the checks a result must pass), 回放 (replay a run by step).
+- Words for cards, the interaction loop and 产出 pages (1.1.0 part 2; DESIGN.md §7.13, §7.14): the
+  card band words 等你, 等{name}, 处理中, 完成, 失败, 已作废, 已过期; the choice forms 单选, 多选, 排序,
+  评分 (打分), 量表, 是或否, 图片选择, 矩阵, 时间段, 投票, 问卷, 对比; and 等 {name} 回应, {name} 还在处理,
+  {name} 没有回应, 重试, 不等了, {name} 不在线，这一步没有发出, {name} 不在线，回来后会看到,
+  {name} 现在接不了，稍后再试, 卡片刚更新了，请再看一眼, 内容变了, 用新的, {name} 更新了这张卡,
+  刚刚, 按你点的「…」, 按你的选择, 按 {name} 的选择, {name} 刚加的, {name} 回了一条新消息, 已更新到 v{n}, 有 v{n}, 页面里的操作会发给 {name},
+  回答会记在 {name} 的工作记录里, 回答会记进工作记录, 页面能做的：读这份数据.
+- Words for 引用提问 and diagrams (DESIGN.md §7.15, §7.16); 图 (a diagram) is an allowed word, not a
+  product noun: 问这里, 就这里提问, 单独问这里, 就这张卡提问, 最多引用 5 处, 已更新, 原消息已删除,
+  已放进话题的输入框, 去提问, 整行, 整列, 全部, 第 {n} 步, 第 {n} 行, 第 {k} 段, 截图 {k}, 图片, 表格, 图表,
+  指标, 清单, 计划, 改动, 证据, 图, 代码, 正在画图, 放大, 缩小, 适合窗口, 看原文, 复制原文, 复制图片, 展开,
+  图没有画出来, 这种图还画不了, 图太大了，只显示原文, 图里有不支持的写法, 第 {n} 行看不懂, {n} 个节点, 流程图, 时序图, 状态图, 类图,
+  关系图, 甘特图, 时间线, and the 产出 footer chip 图 n. Never `Mermaid`, `block`, `render` or `event`
+  in UI text.
 - The settings window may also use 岗位 (role and how the member works), 权限 (permissions),
   机器 (machines) and 成本 (cost).
 - Developer words appear only in the developer view (开发者视图) and in logs: session, CLI,
@@ -96,6 +110,35 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
   edit, plans, numbers and charts, tables, diffs, evidence, and links. A card shows who must act;
   only they get live controls. After an answer the card becomes a one-line record of who answered
   and when.
+- **Composed cards and choice forms (Card v2.1)**: a card combines blocks (上下叠, 并排, 分组, 对比,
+  标签页, 问卷; 并排 becomes 上下叠 in a narrow window) and asks with more forms: 排序, 打分, 量表, 确认,
+  图片选择, 矩阵, 时间段 and 投票. A status band at the top of every card says the state once (等你,
+  等{name}, 处理中, 完成, 失败, 已作废). A question with two short options shows them side by side as
+  two buttons; three or more are stacked. The card header shows when the card was sent, also after
+  the member changes it. In card tables, number columns are right-aligned. Artboard: CardsCompose.
+- **The interaction loop**: every pick, chart point, table row, input and button in a card goes
+  back to the member that made it; the member changes the card in place. The card's band then says
+  {name} 更新了这张卡 with 刚刚 · 按你点的「B 站」 for the person whose pick caused it and 按 {name} 的选择
+  for everyone else; blocks the member added say {name} 刚加的 and keep a light tint until the next
+  change. A bar chart you can pick from reads as rows, one per bar, and the picked bar is dark. While the member has not answered, the band says 等 {name} 回应, then
+  {name} 还在处理, then {name} 没有回应 with 重试 and 不等了. 产出 pages talk both ways: page buttons go to
+  the member, the member pushes new data into the open page or a new version, and the page can ask
+  the member and show the answer. Under the page, 页面里的操作会发给 {name} says who gets its
+  actions, followed by what the page can send. Artboard: Interact.
+- **引用提问**: point at one part (a table cell or row, a chart point, a metric, a plan step, a diff
+  line, a screenshot, a diagram node, an element of a 产出 page) with 问这里, ⌥-click or the context
+  menu; it becomes a chip in the composer (at most 5) and the member gets the question with the part
+  and the value that was seen. 单独问这里 puts it into 单独问. Artboard: Refs.
+- **Diagrams (图)**: flowcharts, sequence, state, class, ER, gantt and timeline diagrams in messages,
+  cards and Markdown 产出, drawn on this computer in the app's colors; a viewer with zoom; when one
+  cannot be drawn, the source shows with the reason: the line that could not be read
+  (第 {n} 行看不懂), or for a diagram past 150 nodes 图太大了，只显示原文 with its node count.
+  Artboard: Refs.
+- **产出 media**: inline in the 话题 and full in the 产出 pane: live HTML pages, Markdown, images,
+  video (poster, chapters, frames to send into the 话题), audio (waveform, key points, transcript),
+  PDF, code and tables; upload and preview states. Previews are made by the sender's computer.
+  An inline page starts at its top and fades out at the bottom edge when more lies below; 展开
+  opens all of it. Artboard: Media.
 - **Settings**: 外观 (theme: follow the system, light or dark; 侧栏样式), my profile (name, 岗位,
   avatar), 成员 (invite, change level, deactivate, add a bot member and its 岗位, 机器 and
   credential), 机器 (connected machines and their health), 通知 (mute a 群, follow topics),
@@ -118,8 +161,10 @@ The layout and look of every screen are in [DESIGN.md](DESIGN.md) v3 and its art
 - Cards are declarative JSON. Card v1 (status, fields, table, progress, list, code, image,
   actions) still works. Card v2 adds intents (ask, done, working, info), typed blocks and states
   (pending, waiting on someone, sent, answered, executing, done, failed, expired, superseded).
-  Bots and integrations post them; answers go back to the card's author. Clients before 1.1.0 see
-  a v1 card that the server derives.
+  Card v2.1 adds containers, choice forms, `buttons`, `diagram` and `embed`. Bots and integrations
+  post them; every interaction (not only answers) goes back to the card's author, which may change
+  the card in place. Only people send interactions; a bot's message never starts a run. Clients
+  before 1.1.0 see a v1 card that the server derives and refreshes on every change.
 - Permissions: levels `owner` (Joye and the bots at Joye's level) and `member` (interns and
   their bots). Clients and bots use the same API. Every write is audited with who asked, who
   did it, which credential, and what changed.

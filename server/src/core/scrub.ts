@@ -6,23 +6,23 @@
 export function scrubDeletedMessage(sql: SqlStorage, messageId: string, deletedAt: number): void {
   sql.exec(
     `UPDATE messages SET body = '', deleted_at = ?, streaming = 0,
-       ext = json_remove(ext, '$.card', '$.cardV2', '$.replyTo', '$.reactions') WHERE id = ?`,
+       ext = json_remove(ext, '$.card', '$.cardV2', '$.cardState', '$.blockRefs', '$.replyTo', '$.reactions') WHERE id = ?`,
     deletedAt,
     messageId,
   );
   sql.exec(
     `UPDATE events SET data = json_remove(json_set(data, '$.message.body', ''),
-       '$.message.card', '$.message.cardV2', '$.message.replyTo', '$.message.reactions')
+       '$.message.card', '$.message.cardV2', '$.message.cardState', '$.message.blockRefs', '$.message.replyTo', '$.message.reactions')
      WHERE message_id = ? AND type = 'message.created'`,
     messageId,
   );
   sql.exec(
-    "UPDATE events SET data = json_remove(json_set(data, '$.body', ''), '$.card', '$.cardV2') WHERE message_id = ? AND type = 'message.updated'",
+    "UPDATE events SET data = json_remove(json_set(data, '$.body', ''), '$.card', '$.cardV2', '$.cardState', '$.blockRefs') WHERE message_id = ? AND type = 'message.updated'",
     messageId,
   );
   // Answers to a deleted card lose what the answerer typed (1.1).
   sql.exec(
-    "UPDATE events SET data = json_remove(data, '$.inputs', '$.editedValues') WHERE message_id = ? AND type = 'card.answered'",
+    "UPDATE events SET data = json_remove(data, '$.inputs', '$.editedValues', '$.value') WHERE message_id = ? AND type = 'card.answered'",
     messageId,
   );
   // Quotes of the deleted message keep the link but lose its text.

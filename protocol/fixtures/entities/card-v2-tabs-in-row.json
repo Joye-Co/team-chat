@@ -1,0 +1,59 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "tabs inside a row",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "r",
+        "type": "row",
+        "children": [
+          "tb",
+          "c"
+        ]
+      },
+      {
+        "id": "tb",
+        "type": "tabs",
+        "tabs": [
+          {
+            "id": "t1",
+            "label": "一",
+            "children": [
+              "a"
+            ]
+          },
+          {
+            "id": "t2",
+            "label": "二",
+            "children": [
+              "b"
+            ]
+          }
+        ]
+      },
+      {
+        "id": "a",
+        "type": "text",
+        "text": "a"
+      },
+      {
+        "id": "b",
+        "type": "text",
+        "text": "b"
+      },
+      {
+        "id": "c",
+        "type": "text",
+        "text": "c"
+      }
+    ]
+  }
+}

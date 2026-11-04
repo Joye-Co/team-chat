@@ -243,6 +243,7 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
                 action_id: "ok".into(),
                 inputs: Some([("choice".to_string(), json!("backoff"))].into()),
                 edited_values: None,
+                ..Default::default()
             }),
         ),
         ev(
@@ -414,6 +415,45 @@ mod tests {
 
         // Without a review card there is nothing to approve.
         assert_eq!(p.changes_approval(GROUP, TOPIC_WEEKLY), None);
+        p.sign_out_local_for_selftest();
+        let _ = std::fs::remove_dir_all(&root);
+    }
+    #[test]
+    fn an_anonymous_run_names_no_requester() {
+        let root = std::env::temp_dir().join(format!("seeded-anon-{}", std::process::id()));
+        let now = chrono::Utc::now().timestamp_millis() as u64;
+        let p = seeded(&root, now);
+        assert_eq!(
+            p.runs(GROUP, TOPIC)
+                .iter()
+                .find(|r| r.id == RUN)
+                .and_then(|r| r.requested_by.clone())
+                .as_deref(),
+            Some(ME)
+        );
+
+        // An answer to a private card started the run: the server names nobody.
+        let run: proto::BotRun = from(json!({
+            "id": RUN, "botId": FORGE, "groupId": GROUP, "topicId": TOPIC, "status": "done",
+            "requestedBy": "anonymous", "createdAt": now - 60_000, "updatedAt": now
+        }));
+        let event = Event {
+            seq: 15,
+            group_id: GROUP.into(),
+            at: now,
+            actor_id: FORGE.into(),
+            data: EventData::RunUpdated(RunUpdatedData { run }),
+        };
+        let a = p.account().expect("signed in");
+        a.client
+            .store()
+            .apply_events(GROUP, &[event])
+            .expect("event");
+        let runs = p.runs(GROUP, TOPIC);
+        let r = runs.iter().find(|r| r.id == RUN).expect("the run");
+        assert_eq!(r.requested_by, None);
+        let story = p.artifact_story(ARTIFACT).expect("来龙去脉");
+        assert_eq!(story.asked_by, None);
         p.sign_out_local_for_selftest();
         let _ = std::fs::remove_dir_all(&root);
     }

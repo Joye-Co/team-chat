@@ -35,3 +35,6 @@ export const AuditResponse = z.object({
   hasMore: z.boolean(),
 });
 export type AuditResponse = z.infer<typeof AuditResponse>;
+
+/** Audit actions of the 1.1 interaction loop (live card events, page events, data pushes). */
+export const AUDIT_ACTIONS_INTERACT = ["card.event", "artifact.event", "artifact.data"] as const;

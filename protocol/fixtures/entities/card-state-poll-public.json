@@ -1,0 +1,42 @@
+{
+  "kind": "CardState",
+  "valid": true,
+  "description": "a public poll: counts and voters",
+  "value": {
+    "ask": {
+      "id": "a1",
+      "status": "open",
+      "from": [
+        "01JBX0OWNER0000000000000AA",
+        "01JBX0ALICE0000000000000AB"
+      ],
+      "blocking": false,
+      "expiresAt": 1762214400000
+    },
+    "answers": [
+      {
+        "answerId": "01JC0AN0000000000000000002",
+        "askId": "a1",
+        "eventId": "01JC0EV0000000000000000004",
+        "actorId": "01JBX0ALICE0000000000000AB",
+        "at": 1762128000000,
+        "rev": 1,
+        "event": "choice.submit",
+        "blockId": "vote",
+        "value": {
+          "value": "B"
+        }
+      }
+    ],
+    "tally": {
+      "A": 0,
+      "B": 1
+    },
+    "tallyBy": {
+      "A": [],
+      "B": [
+        "01JBX0ALICE0000000000000AB"
+      ]
+    }
+  }
+}

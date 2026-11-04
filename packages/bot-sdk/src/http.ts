@@ -23,6 +23,7 @@ import type {
 } from "@chat/protocol";
 import { MAX_FILE_BYTES } from "@chat/protocol";
 import { ChatError, isRetryable } from "./errors.ts";
+import { checkArtifactEvents } from "./pattern.ts";
 
 export interface HttpClientOptions {
   /** Base URL of the server, for example `http://127.0.0.1:8789`. */
@@ -118,9 +119,9 @@ export class HttpClient {
       }
     }
     if (!res.ok) {
-      const e = (data as { error?: { code?: string; message?: string } } | undefined)?.error;
+      const e = (data as { error?: { code?: string; message?: string; reason?: string } } | undefined)?.error;
       const code = (e?.code as ChatError["code"]) ?? (res.status === 401 ? "unauthorized" : res.status >= 500 ? "internal" : "invalid");
-      throw new ChatError(code, e?.message ?? `HTTP ${res.status}`, res.status);
+      throw new ChatError(code, e?.message ?? `HTTP ${res.status}`, res.status, typeof e?.reason === "string" ? e.reason : undefined);
     }
     return data as T;
   }
@@ -249,10 +250,14 @@ export class HttpClient {
     };
   }
 
-  createArtifact(req: CreateArtifactRequest): Promise<ArtifactVersionResponse> {
+  /** Throws `ChatError` `invalid` before the request when `events` has a schema the server refuses. */
+  async createArtifact(req: CreateArtifactRequest): Promise<ArtifactVersionResponse> {
+    checkArtifactEvents(req.events);
     return this.request("POST", "/v1/artifacts", { json: req });
   }
-  addArtifactVersion(artifactId: string, req: AddArtifactVersionRequest): Promise<ArtifactVersionResponse> {
+  /** Throws `ChatError` `invalid` before the request when `events` has a schema the server refuses. */
+  async addArtifactVersion(artifactId: string, req: AddArtifactVersionRequest): Promise<ArtifactVersionResponse> {
+    checkArtifactEvents(req.events);
     return this.request("POST", `/v1/artifacts/${encodeURIComponent(artifactId)}/versions`, { json: req });
   }
   listArtifacts(groupId: string, topicId?: string): Promise<Artifact[]> {
@@ -281,6 +286,8 @@ export class HttpClient {
     /** 1.1: this bot's run that made the version (`Bot.currentRun(topicId)`). */
     runId?: string;
   }): Promise<ArtifactVersionResponse> {
+    // Before the uploads: a declaration the server refuses fails here.
+    checkArtifactEvents(input.events);
     const entry = "index.html";
     const files = [
       { path: entry, fileId: (await this.uploadFile({ groupId: input.groupId, topicId: input.topicId, name: entry, mime: "text/html", data: new TextEncoder().encode(input.html) })).fileId },

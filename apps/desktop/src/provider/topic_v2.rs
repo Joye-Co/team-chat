@@ -750,13 +750,21 @@ impl CoreProvider {
         let made_by = oldest
             .map(|v| v.created_by.clone())
             .unwrap_or_else(|| art.created_by.clone());
-        let asked_by = row
+        let run = row
             .versions
             .iter()
             .filter_map(|v| v.run_id.as_deref())
-            .find_map(|id| a.client.store().run(id).ok().flatten())
-            .and_then(|r| r.requested_by)
+            .find_map(|id| a.client.store().run(id).ok().flatten());
+        // An anonymous run (a private card's answer started it) names nobody.
+        let anonymous = run.as_ref().is_some_and(|r| {
+            r.requested_by.is_some() && super::process::requester(r.requested_by.clone()).is_none()
+        });
+        let asked_by = run
+            .and_then(|r| super::process::requester(r.requested_by))
             .or_else(|| {
+                if anonymous {
+                    return None;
+                }
                 self.topic(&art.group_id, &art.topic_id)
                     .map(|t| t.created_by)
             })

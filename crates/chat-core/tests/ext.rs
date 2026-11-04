@@ -79,6 +79,8 @@ fn version(id: &str, v: u32) -> ArtifactVersion {
     ArtifactVersion {
         events: None,
         run_id: None,
+        media: None,
+        data_rev: None,
         artifact_id: id.into(),
         version: v,
         entry: "index.html".into(),
@@ -412,6 +414,7 @@ async fn upload_streams_with_hash_and_download_is_verified_and_cached() {
         width: None,
         height: None,
         sha256: fsha,
+        media: None,
     };
     let (progress, seen) = recorder();
     let p = client
@@ -476,6 +479,7 @@ async fn upload_streams_with_hash_and_download_is_verified_and_cached() {
         width: None,
         height: None,
         sha256: fsha2.clone(),
+        media: None,
     };
     let e = client
         .download_file(bad.clone(), no_progress())
@@ -550,6 +554,7 @@ async fn file_cache_drops_least_recently_used_past_its_limit() {
                 width: None,
                 height: None,
                 sha256,
+                media: None,
             }
         })
         .collect();

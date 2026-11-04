@@ -1,0 +1,24 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "发布流程",
+    "fallback": "发布流程图",
+    "blocks": [
+      {
+        "id": "flow",
+        "type": "diagram",
+        "syntax": "mermaid",
+        "source": "flowchart TD\n  build[构建] --> test[测试]\n  test --> ship[发布]",
+        "title": "发布流程",
+        "caption": "测试通过才发布",
+        "alt": "构建，然后测试，然后发布",
+        "fallbackText": "图：构建、测试、发布"
+      }
+    ]
+  }
+}

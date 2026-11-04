@@ -1,0 +1,38 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "action inputs name input blocks, not a group",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "g",
+        "type": "group",
+        "title": "填",
+        "blocks": [
+          {
+            "id": "i",
+            "type": "input",
+            "kind": "text",
+            "label": "名字"
+          }
+        ]
+      }
+    ],
+    "actions": [
+      {
+        "id": "s",
+        "label": "交",
+        "inputs": [
+          "g"
+        ]
+      }
+    ]
+  }
+}

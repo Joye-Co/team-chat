@@ -69,6 +69,12 @@ fn message_of(m: &proto::Message, old: Option<&CardV2Message>) -> Option<CardV2M
         Some(o) if *o.card == *card => o.card.clone(),
         _ => Arc::new(card.clone()),
     };
+    // --- inc-cards21 ---
+    let card_state = match (old.and_then(|o| o.card_state.as_ref()), &m.card_state) {
+        (Some(o), Some(n)) if **o == *n => Some(o.clone()),
+        (_, n) => n.clone().map(Arc::new),
+    };
+    // --- end inc-cards21 ---
     Some(CardV2Message {
         group_id: m.group_id.clone(),
         topic_id: m.topic_id.clone(),
@@ -77,6 +83,8 @@ fn message_of(m: &proto::Message, old: Option<&CardV2Message>) -> Option<CardV2M
         created_at: millis(m.created_at),
         edited_at: m.edited_at().map(millis),
         card,
+        card_state,
+        cause: m.cause.clone(),
     })
 }
 

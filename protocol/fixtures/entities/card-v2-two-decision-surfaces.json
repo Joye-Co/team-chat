@@ -1,0 +1,55 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "card.decision_surfaces: a compare and a questionnaire for one ask",
+  "reason": "card.decision_surfaces",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "ask",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "cmp",
+        "type": "compare",
+        "options": [
+          {
+            "id": "A",
+            "label": "A"
+          },
+          {
+            "id": "B",
+            "label": "B"
+          }
+        ]
+      },
+      {
+        "id": "qs",
+        "type": "questionnaire",
+        "children": [
+          "q1",
+          "q2"
+        ]
+      },
+      {
+        "id": "q1",
+        "type": "input",
+        "kind": "text",
+        "label": "一"
+      },
+      {
+        "id": "q2",
+        "type": "input",
+        "kind": "text",
+        "label": "二"
+      }
+    ],
+    "ask": {
+      "from": [
+        "owners"
+      ]
+    }
+  }
+}

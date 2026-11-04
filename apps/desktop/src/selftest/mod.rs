@@ -14,7 +14,8 @@
 //! only that window with `screencapture -l <windowNumber> -o -x`, writes
 //! `<dir>/<scene>-<theme>.png` (`-worst` before `.png` with `--worst-case`)
 //! and `<dir>/screenshots.json`, closes the window and finally exits
-//! (0 = every PNG written). Scenes live in [`scenes::all`].
+//! (0 = every PNG written and every ready and verify check passed, else 1).
+//! Scenes live in [`scenes::all`].
 
 pub mod capture;
 pub mod clock;
@@ -149,12 +150,24 @@ fn parse(args: &[String]) -> Result<Options, String> {
     Ok(options)
 }
 
+// --- v11/inc-diagrams: scenes that build their own data read the worst-case flag ---
+static WORST_CASE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// True while the self-test runs with `--worst-case`.
+pub fn worst_case() -> bool {
+    WORST_CASE.load(std::sync::atomic::Ordering::Relaxed)
+}
+// --- end v11/inc-diagrams ---
+
 fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
     let base: Arc<dyn ChatProvider> = match start {
         Start::SignedOut => fake::FakeProvider::signed_out(),
         Start::SignedIn | Start::Empty => fake::FakeProvider::new(),
         Start::V2 => fake::v2::V2Samples::new(),
         Start::V2Quiet => fake::v2::V2Samples::quiet(),
+        // --- inc-refs
+        Start::V2Refs => fake::v2::V2Samples::with_refs(),
+        Start::V2RefParts => fake::v2::V2Samples::with_card_parts(),
         // --- provider track ---
         Start::Core => {
             static SHOT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
@@ -189,6 +202,7 @@ fn provider(start: Start, worst_case: bool) -> Arc<dyn ChatProvider> {
 }
 
 fn run(options: Options) -> i32 {
+    WORST_CASE.store(options.worst_case, std::sync::atomic::Ordering::Relaxed);
     if let Err(error) = std::fs::create_dir_all(&options.dir) {
         eprintln!("cannot create {}: {error}", options.dir.display());
         return 1;
@@ -215,7 +229,9 @@ fn run(options: Options) -> i32 {
                     started.elapsed().as_secs_f32()
                 );
                 code.set(if ok { 0 } else { 1 });
-                cx.update(|cx| cx.quit());
+                // AppKit ends the process with 0 when the app quits, so `run` never
+                // returns: exit here with the result.
+                exit_now(code.get());
             })
             .detach();
             // Never hang: quit after a generous per-shot budget.
@@ -224,11 +240,20 @@ fn run(options: Options) -> i32 {
                     .timer(Duration::from_secs(60 + 15 * shots))
                     .await;
                 eprintln!("screenshot self-test timed out");
-                cx.update(|cx| cx.quit());
+                exit_now(1);
             })
             .detach();
         });
     result.get()
+}
+
+/// Ends the self-test with `code`. `cx.quit()` would end it with 0 on macOS
+/// whatever the result, because AppKit's terminate exits the process itself.
+fn exit_now(code: i32) -> ! {
+    use std::io::Write as _;
+    let _ = std::io::stderr().flush();
+    let _ = std::io::stdout().flush();
+    std::process::exit(code)
 }
 
 async fn run_all(options: &Options, cx: &mut AsyncApp) -> bool {
@@ -291,6 +316,10 @@ async fn shoot(
     let provider = provider(scene.start, options.worst_case);
     let content = options.size;
     let handle: AnyWindowHandle = cx.update(|cx| {
+        // Every scene starts from an empty media store: a scene that put its own page
+        // under a sample 产出's key (the host scenes) must not leak it into a later scene
+        // that shows that 产出, whatever the scene order.
+        crate::views::media::store::clear(cx);
         let services = Services::new(provider, cx);
         (scene.setup)(&services, cx);
         (scene.open)(services, content, cx)

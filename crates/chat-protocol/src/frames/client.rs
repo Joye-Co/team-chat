@@ -6,11 +6,16 @@ use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
 
 use crate::card::{Card, check_action_id};
-use crate::card2::{CardAnswerFrame, CardV2};
+use crate::card2::{
+    CardAnswerFrame, CardAnswerRetractFrame, CardEventFrame, CardPatchFrame, CardV2,
+    InteractionResolveFrame,
+};
 use crate::entities::{Seq, TopicStatus};
-use crate::files::ArtifactEventFrame;
+use crate::files::{ArtifactDataFrame, ArtifactEventFrame, ArtifactReplyFrame};
 use crate::limits::*;
-use crate::message::{ArtifactRef, FileRef, ReplyToRef, check_refs};
+use crate::message::{
+    ArtifactRef, BlockRefInput, FileRef, ReplyToRef, check_block_refs, check_refs,
+};
 use crate::reactions::ReactFrame;
 use crate::search::SearchFrame;
 use crate::serde_util::{any_value, non_null, nullable};
@@ -55,6 +60,19 @@ pub enum ClientFrame {
     CardAnswer(CardAnswerFrame),
     #[serde(rename = "artifact.event")]
     ArtifactEvent(ArtifactEventFrame),
+    // 1.1 interaction loop
+    #[serde(rename = "card.event")]
+    CardEvent(CardEventFrame),
+    #[serde(rename = "card.answer.retract")]
+    CardAnswerRetract(CardAnswerRetractFrame),
+    #[serde(rename = "card.patch")]
+    CardPatch(CardPatchFrame),
+    #[serde(rename = "interaction.resolve")]
+    InteractionResolve(InteractionResolveFrame),
+    #[serde(rename = "artifact.data")]
+    ArtifactData(ArtifactDataFrame),
+    #[serde(rename = "artifact.reply")]
+    ArtifactReply(ArtifactReplyFrame),
 }
 
 impl ClientFrame {
@@ -78,6 +96,12 @@ impl ClientFrame {
             Self::React(_) => "react",
             Self::CardAnswer(_) => "card.answer",
             Self::ArtifactEvent(_) => "artifact.event",
+            Self::CardEvent(_) => "card.event",
+            Self::CardAnswerRetract(_) => "card.answer.retract",
+            Self::CardPatch(_) => "card.patch",
+            Self::InteractionResolve(_) => "interaction.resolve",
+            Self::ArtifactData(_) => "artifact.data",
+            Self::ArtifactReply(_) => "artifact.reply",
         }
     }
 
@@ -96,6 +120,12 @@ impl ClientFrame {
             Self::React(f) => Some(&f.rid),
             Self::CardAnswer(f) => Some(&f.rid),
             Self::ArtifactEvent(f) => Some(&f.rid),
+            Self::CardEvent(f) => Some(&f.rid),
+            Self::CardAnswerRetract(f) => Some(&f.rid),
+            Self::CardPatch(f) => Some(&f.rid),
+            Self::InteractionResolve(f) => Some(&f.rid),
+            Self::ArtifactData(f) => Some(&f.rid),
+            Self::ArtifactReply(f) => Some(&f.rid),
             Self::Hello(_) | Self::Delta(_) | Self::Typing(_) | Self::Read(_) | Self::Ping => None,
         }
     }
@@ -110,6 +140,20 @@ impl ClientFrame {
                         field: "protocol",
                         message: "must be positive".into(),
                     });
+                }
+                for (field, list, max) in [
+                    ("features", &f.features, 32),
+                    ("supportedCatalogs", &f.supported_catalogs, 16),
+                ] {
+                    if let Some(l) = list {
+                        if l.len() > max {
+                            return Err(ValidationError {
+                                field,
+                                message: format!("at most {max}"),
+                            });
+                        }
+                        l.iter().try_for_each(|x| check_chars(field, x, 1, 32))?;
+                    }
                 }
                 Ok(())
             }
@@ -133,6 +177,10 @@ impl ClientFrame {
                 check_refs(f.attachments.as_deref(), f.artifact_refs.as_deref())?;
                 f.card.as_ref().map_or(Ok(()), Card::validate)?;
                 f.card_v2.as_ref().map_or(Ok(()), CardV2::validate)?;
+                if let Some(c) = &f.cause_event_id {
+                    check_id("causeEventId", c)?;
+                }
+                check_block_refs(f.block_refs.as_deref())?;
                 f.context.as_ref().map_or(Ok(()), TopicContext::validate)
             }
             Self::Edit(f) => {
@@ -142,7 +190,16 @@ impl ClientFrame {
                 check_body("body", &f.body)?;
                 check_refs(f.attachments.as_deref(), f.artifact_refs.as_deref())?;
                 f.card.as_ref().map_or(Ok(()), Card::validate)?;
-                f.card_v2.as_ref().map_or(Ok(()), CardV2::validate)
+                f.card_v2.as_ref().map_or(Ok(()), CardV2::validate)?;
+                if f.base_rev == Some(0) {
+                    return Err(ValidationError {
+                        field: "baseRev",
+                        message: "must be positive".into(),
+                    });
+                }
+                f.cause_event_id
+                    .as_deref()
+                    .map_or(Ok(()), |c| check_id("causeEventId", c))
             }
             Self::Delta(f) => {
                 check_id("groupId", &f.group_id)?;
@@ -202,6 +259,12 @@ impl ClientFrame {
             Self::React(f) => f.validate(),
             Self::CardAnswer(f) => f.validate(),
             Self::ArtifactEvent(f) => f.validate(),
+            Self::CardEvent(f) => f.validate(),
+            Self::CardAnswerRetract(f) => f.validate(),
+            Self::CardPatch(f) => f.validate(),
+            Self::InteractionResolve(f) => f.validate(),
+            Self::ArtifactData(f) => f.validate(),
+            Self::ArtifactReply(f) => f.validate(),
         }
     }
 }
@@ -226,6 +289,20 @@ pub struct HelloFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub cursors: Option<BTreeMap<String, Seq>>,
+    /// 1.1: what this client handles ([`crate::CLIENT_FEATURES`]).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub features: Option<Vec<String>>,
+    /// 1.1: Card v2 catalogs this client renders.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub supported_catalogs: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -300,6 +377,20 @@ pub struct SendFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub context: Option<TopicContext>,
+    /// 2.1: the event (`eventId`) this message answers; the server fills `Message.cause`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cause_event_id: Option<String>,
+    /// 1.1: refs to parts; the server writes their quote lines in front of the body.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub block_refs: Option<Vec<BlockRefInput>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
@@ -341,6 +432,20 @@ pub struct EditFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub card_v2: Option<CardV2>,
+    /// 2.1: with `cardV2`, the rev the edit is based on (`conflict`, `card.stale_rev`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub base_rev: Option<u32>,
+    /// 2.1: the event this edit answers.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cause_event_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

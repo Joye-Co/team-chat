@@ -1,0 +1,36 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "an element of a 产出 page",
+  "value": {
+    "t": "send",
+    "rid": "r60",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JC0CMI000000000000000010",
+    "body": "@Ledger 为什么比上月少了 1 个？",
+    "mentions": [
+      "01JBX0BOT000000000000000AC"
+    ],
+    "blockRefs": [
+      {
+        "artifact": {
+          "artifactId": "01JC0ART00000000000000OCT3",
+          "version": 1
+        },
+        "blockId": "page",
+        "part": {
+          "kind": "element",
+          "keys": {
+            "selector": "#chart > g:nth-of-type(2)"
+          }
+        },
+        "label": "10 月数据看板 v1 · 抖音",
+        "value": {
+          "channel": "douyin",
+          "count": 5
+        }
+      }
+    ]
+  }
+}

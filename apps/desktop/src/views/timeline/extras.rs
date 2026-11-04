@@ -83,6 +83,9 @@ pub trait MessageExtra: Sync {
 /// Every extra, in display order within its placement.
 pub static REGISTRY: &[&dyn MessageExtra] = &[
     &QuoteExtra,
+    // --- inc-refs: the references of a message above its body (引用提问).
+    &crate::views::refs::chips::RefsExtra,
+    // --- end inc-refs
     &crate::views::cards::CardExtra,
     &crate::views::files::extra::AttachmentsExtra,
     &crate::views::artifacts::extra::ArtifactRefsExtra,

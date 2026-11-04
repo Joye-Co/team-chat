@@ -99,6 +99,12 @@ pub enum OutboxOp {
         /// 1.1: a side chat's context (a send in a DM with a bot).
         #[serde(default, skip_serializing_if = "Option::is_none")]
         context: Option<TopicContext>,
+        /// 2.1: the event this message answers.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cause_event_id: Option<String>,
+        /// 1.1: refs to parts (引用提问).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_refs: Option<Vec<crate::proto::BlockRefInput>>,
         /// A follow-up into a topic that is still being started: the `clientMsgId` of the
         /// topic's first message. The row waits until that message is acked or applied, and
         /// then gets the topic id.
@@ -178,6 +184,26 @@ pub enum OutboxOp {
         #[serde(default)]
         payload: Option<serde_json::Value>,
     },
+    /// 2.1: a card event that is an answer or a retract (`card.event`), resent with the same
+    /// `clientEventId` after a reconnect. Live events never use the outbox.
+    CardEvent {
+        group_id: String,
+        topic_id: Option<String>,
+        message_id: String,
+        rev: u32,
+        client_event_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        block_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        action_id: Option<String>,
+        event: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        value: Option<serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        inputs: Option<AnswerInputs>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        part: Option<crate::proto::PartRef>,
+    },
 }
 
 impl OutboxOp {
@@ -192,6 +218,7 @@ impl OutboxOp {
             OutboxOp::React { .. } => "react",
             OutboxOp::CardAnswer { .. } => "card_answer",
             OutboxOp::ArtifactEvent { .. } => "artifact_event",
+            OutboxOp::CardEvent { .. } => "card_event",
         }
     }
     pub fn group_id(&self) -> &str {
@@ -204,7 +231,8 @@ impl OutboxOp {
             | OutboxOp::CardAction { group_id, .. }
             | OutboxOp::React { group_id, .. }
             | OutboxOp::CardAnswer { group_id, .. }
-            | OutboxOp::ArtifactEvent { group_id, .. } => group_id,
+            | OutboxOp::ArtifactEvent { group_id, .. }
+            | OutboxOp::CardEvent { group_id, .. } => group_id,
         }
     }
     pub fn topic_id(&self) -> Option<&str> {
@@ -215,7 +243,8 @@ impl OutboxOp {
             | OutboxOp::CardAction { topic_id, .. }
             | OutboxOp::React { topic_id, .. }
             | OutboxOp::CardAnswer { topic_id, .. }
-            | OutboxOp::ArtifactEvent { topic_id, .. } => topic_id.as_deref(),
+            | OutboxOp::ArtifactEvent { topic_id, .. }
+            | OutboxOp::CardEvent { topic_id, .. } => topic_id.as_deref(),
             OutboxOp::TopicUpdate { topic_id, .. } | OutboxOp::TopicFollow { topic_id, .. } => {
                 Some(topic_id)
             }

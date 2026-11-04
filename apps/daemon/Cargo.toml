@@ -29,5 +29,6 @@ regex = "1"
 
 [dev-dependencies]
 tempfile = "3"
+tokio = { version = "1", features = ["test-util"] }
 roxmltree = "0.21"
 libc = "0.2"

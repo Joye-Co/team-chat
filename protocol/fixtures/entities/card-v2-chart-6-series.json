@@ -1,0 +1,59 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a chart has 1..5 series (V11-INTERACT §2.5)",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "c",
+        "type": "chart",
+        "kind": "line",
+        "series": [
+          {
+            "name": "s0",
+            "values": [
+              0
+            ]
+          },
+          {
+            "name": "s1",
+            "values": [
+              1
+            ]
+          },
+          {
+            "name": "s2",
+            "values": [
+              2
+            ]
+          },
+          {
+            "name": "s3",
+            "values": [
+              3
+            ]
+          },
+          {
+            "name": "s4",
+            "values": [
+              4
+            ]
+          },
+          {
+            "name": "s5",
+            "values": [
+              5
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

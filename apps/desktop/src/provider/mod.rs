@@ -16,6 +16,9 @@ pub mod app_glue;
 mod cards;
 // --- cards v2 track ---
 mod cards_v2;
+// --- inc-cards21 ---
+mod card_events;
+// --- end inc-cards21 ---
 // --- end cards v2 track ---
 pub mod convert;
 // Desk track (1.1.0 首页).
@@ -31,18 +34,25 @@ pub mod persist;
 mod proof;
 // pages track: the 群, 成员 and 产出 pages.
 mod pages;
+// --- inc-host track ---
+mod page_host;
+// --- end inc-host track ---
 mod process;
 mod realtime;
 #[cfg(test)]
 mod realtime_live;
 #[cfg(test)]
 mod search_live;
+pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
 // provider track: v2 topic surfaces and the seeded cache of the `topic-core` scene.
 pub mod seeded;
 mod topic_v2;
+// --- inc-refs: 引用提问 (references, chips, sends with blockRefs).
+mod refs;
+// --- end inc-refs
 
 use std::{
     collections::{HashMap, HashSet},
@@ -157,11 +167,22 @@ struct Shared {
     // --- cards v2 track ---
     cards_v2: cards_v2::CardV2Cache,
     // --- end cards v2 track ---
+    // --- inc-cards21: my card events (card.event) ---
+    card_events: card_events::CardEventLog,
+    // --- end inc-cards21 ---
     /// 群里的决定 from the server (`provider/pages.rs`).
     decisions: pages::DecisionsCache,
+    /// R5: page events this window saw (they are not in the group log).
+    page_events: pages::PageEventLog,
     // --- provider track: v2 topic surfaces (provider/topic_v2.rs) ---
     topic_v2: topic_v2::TopicV2Cache,
     // --- end provider track ---
+    // --- inc-host track: acks, replies and data pushes for open 产出 pages ---
+    page_signals: page_host::PageSignals,
+    // --- end inc-host track ---
+    // --- inc-refs ---
+    refs: refs::RefsCache,
+    // --- end inc-refs ---
 }
 
 /// [`ChatProvider`] on chat-core. Cheap to clone.
@@ -196,8 +217,12 @@ impl CoreProvider {
                 cards: cards::CardCache::default(),
                 panes: panes::PanesCache::default(),
                 cards_v2: cards_v2::CardV2Cache::default(),
+                card_events: card_events::CardEventLog::default(),
                 decisions: pages::DecisionsCache::default(),
+                page_events: pages::PageEventLog::default(),
                 topic_v2: topic_v2::TopicV2Cache::default(),
+                page_signals: page_host::PageSignals::default(),
+                refs: refs::RefsCache::default(),
             }),
         });
         if provider.shared.config.restore {
@@ -391,6 +416,7 @@ impl CoreProvider {
         self.shared.files.reset();
         self.shared.cards.clear();
         self.shared.cards_v2.clear();
+        self.shared.card_events.clear();
         self.spawn_pump(generation, updates);
         self.emit(vec![
             Change::Session,
@@ -421,6 +447,7 @@ impl CoreProvider {
         self.shared.files.reset();
         self.shared.cards.clear();
         self.shared.cards_v2.clear();
+        self.shared.card_events.clear();
         if let Some(a) = &account {
             a.client.stop();
         }
@@ -606,6 +633,8 @@ impl CoreProvider {
     }
 
     fn on_update(&self, generation: u64, u: ClientUpdate, out: &mut Vec<Change>) {
+        // inc-host track: page acks, replies and data pushes go to the page host.
+        self.emit_page_signal(&u);
         match u {
             ClientUpdate::Connection(c) => {
                 use chat_core::ConnectionState as C;
@@ -813,6 +842,51 @@ impl CoreProvider {
                 }
             }
             ClientUpdate::SearchResults { .. } | ClientUpdate::SearchFailed { .. } => {}
+            ClientUpdate::ArtifactEvent(t) => {
+                self.shared.page_events.record_transient(&t);
+                out.push(Change::Artifacts {
+                    group_id: t.group_id.clone(),
+                    topic_id: t.topic_id.clone(),
+                });
+            }
+            // --- inc-cards21: acks and responses of my card events ---
+            ClientUpdate::CardEventAcked {
+                client_event_id,
+                message_id,
+                result,
+            } => {
+                let now = crate::selftest::clock::now_ms();
+                if self
+                    .shared
+                    .card_events
+                    .acked(&message_id, &client_event_id, &result, now)
+                    && let Some(a) = self.account()
+                    && let Some(m) = a.client.store().message(&message_id).ok().flatten()
+                {
+                    out.push(Change::Messages {
+                        group_id: m.group_id,
+                        topic_id: m.topic_id,
+                    });
+                }
+            }
+            ClientUpdate::InteractionResolved(t) => {
+                let now = crate::selftest::clock::now_ms();
+                if let Some(message_id) = self.shared.card_events.resolved(&t, now)
+                    && let Some(a) = self.account()
+                    && let Some(m) = a.client.store().message(&message_id).ok().flatten()
+                {
+                    out.push(Change::Messages {
+                        group_id: m.group_id,
+                        topic_id: m.topic_id,
+                    });
+                }
+            }
+            // --- end inc-cards21 ---
+            // 1.1 interaction loop: the 产出 host track handles these.
+            ClientUpdate::ArtifactEventAcked { .. }
+            | ClientUpdate::CardEvent(_)
+            | ClientUpdate::ArtifactData(_)
+            | ClientUpdate::ArtifactReply(_) => {}
         }
     }
 
@@ -1085,6 +1159,15 @@ impl ChatProvider for CoreProvider {
             let mut msgs = a.client.messages(&real, None, n + 1).unwrap_or_default();
             self.shared.cards.remember(&msgs);
             self.shared.cards_v2.remember(&msgs);
+            // --- inc-cards21: a new message that names my event ends its pending state ---
+            let now = crate::selftest::clock::now_ms();
+            for m in msgs.iter().filter(|m| m.cause.is_some()) {
+                if let Some(c) = &m.cause {
+                    self.shared.card_events.caused_anywhere(c, now, &m.id);
+                }
+            }
+            // --- end inc-cards21 ---
+            self.shared.refs.remember(&msgs);
             let cached_more = msgs.len() > n;
             if cached_more {
                 msgs.remove(0);
@@ -1717,7 +1800,15 @@ impl ChatProvider for CoreProvider {
         message_id: &str,
     ) -> Option<crate::data::cards_v2::CardV2Message> {
         let a = self.account()?;
-        self.shared.cards_v2.card(&a.client, message_id)
+        let card = self.shared.cards_v2.card(&a.client, message_id);
+        // --- inc-cards21: a rev that names my event ends its pending state ---
+        if let Some(c) = card.as_ref().and_then(|c| c.cause.as_ref()) {
+            self.shared
+                .card_events
+                .caused(message_id, c, crate::selftest::clock::now_ms());
+        }
+        // --- end inc-cards21 ---
+        card
     }
 
     fn card_v2_answers(
@@ -1737,7 +1828,11 @@ impl ChatProvider for CoreProvider {
         message_id: &str,
     ) -> Option<crate::data::cards_v2::CardV2Pending> {
         let a = self.account()?;
-        self.shared.cards_v2.pending(&a.client, message_id)
+        self.shared
+            .cards_v2
+            .pending(&a.client, message_id)
+            // --- inc-cards21: a 2.1 answer is a durable card event ---
+            .or_else(|| card_events::pending_answer(&self.shared.card_events.events(message_id)))
     }
 
     fn answer_card_v2(
@@ -1765,6 +1860,109 @@ impl ChatProvider for CoreProvider {
             }]);
         }
     }
+
+    // --- inc-cards21: the interaction loop ---
+    fn send_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        request: crate::data::cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        let a = self.account()?;
+        let now = crate::selftest::clock::now_ms();
+        let req = chat_core::CardEventRequest {
+            message_id: message_id.to_string(),
+            rev: request.rev,
+            block_id: request.block_id.clone(),
+            action_id: request.action_id.clone(),
+            event: request.event.clone(),
+            value: request.value.clone(),
+            inputs: request.inputs.clone(),
+            part: request.part.clone(),
+        };
+        let out = match a.client.send_card_event(req) {
+            Ok(sent) => {
+                self.shared.card_events.sent(
+                    message_id,
+                    sent.client_event_id.clone(),
+                    request,
+                    sent.durable,
+                    now,
+                );
+                Some(sent.client_event_id)
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "card event refused");
+                self.shared.card_events.failed_now(
+                    message_id,
+                    request,
+                    crate::data::cards_v2::CardEventFailure::Other,
+                    now,
+                );
+                None
+            }
+        };
+        self.emit(vec![Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }]);
+        out
+    }
+
+    fn card_v2_events(
+        &self,
+        _group_id: &str,
+        message_id: &str,
+    ) -> Vec<crate::data::cards_v2::MyCardEvent> {
+        self.shared.card_events.events(message_id)
+    }
+
+    fn drop_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        self.shared
+            .card_events
+            .drop_pending(message_id, client_event_id);
+        self.emit(vec![Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }]);
+    }
+
+    fn retry_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) -> bool {
+        let Some(a) = self.account() else {
+            return false;
+        };
+        let Some(e) = self.shared.card_events.get(message_id, client_event_id) else {
+            return false;
+        };
+        // Only a queued answer keeps its id; a refused live event is sent again as new.
+        if !e.durable || a.client.retry_failed(client_event_id).is_err() {
+            return false;
+        }
+        self.shared.card_events.resending(
+            message_id,
+            client_event_id,
+            crate::selftest::clock::now_ms(),
+        );
+        self.emit(vec![Change::Messages {
+            group_id: group_id.to_string(),
+            topic_id: topic_id.to_string(),
+        }]);
+        true
+    }
+    // --- end inc-cards21 ---
     // --- end cards v2 track ---
 
     fn card_image(&self, group_id: &str, topic_id: &str, file_id: &str) -> Option<PathBuf> {
@@ -1960,6 +2158,102 @@ impl ChatProvider for CoreProvider {
     }
 
     // --- end dfix-motion track ---
+
+    // --- inc-host track: the 产出 page host (provider/page_host.rs) ---
+
+    fn page_bridge(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::page_host::PageBridge> {
+        self.page_bridge_inner(artifact_id, version)
+    }
+
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        kind: crate::data::page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, crate::data::page_host::PageSendError> {
+        self.send_page_event_inner(artifact_id, version, name, kind, payload)
+    }
+
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        self.fetch_page_data_inner(artifact_id, version)
+    }
+
+    fn page_signals(&self) -> Option<UnboundedReceiver<crate::data::page_host::PageSignal>> {
+        Some(self.shared.page_signals.subscribe())
+    }
+
+    fn file_media(&self, file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
+        self.file_media_inner(file)
+    }
+
+    fn artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        self.artifact_media_inner(artifact_id, version)
+    }
+
+    fn file_poster(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<PathBuf> {
+        self.file_poster_inner(group_id, topic_id, file)
+    }
+
+    fn artifact_poster(&self, artifact_id: &str, version: u32) -> Option<PathBuf> {
+        self.artifact_poster_inner(artifact_id, version)
+    }
+
+    fn upload_generating(&self, key: &str) -> bool {
+        page_host::is_generating(key)
+    }
+
+    // --- end inc-host track ---
+    // --- inc-refs track ---
+
+    fn refs_supported(&self) -> bool {
+        self.refs_supported_inner()
+    }
+
+    fn add_draft_ref(&self, key: &DraftKey, r: crate::data::DraftRef) -> crate::data::AddRef {
+        self.add_draft_ref_inner(key, r)
+    }
+
+    fn remove_draft_ref(&self, key: &DraftKey, index: usize) {
+        self.remove_draft_ref_inner(key, index)
+    }
+
+    fn message_block_refs(
+        &self,
+        message: &crate::data::Message,
+    ) -> Vec<chat_core::proto::BlockRef> {
+        self.message_block_refs_inner(message)
+    }
+
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+        refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        self.send_with_refs_inner(request, key, files, refs)
+    }
+
+    // --- end inc-refs track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

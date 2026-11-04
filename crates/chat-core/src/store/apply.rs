@@ -591,13 +591,21 @@ fn apply_one(
             artifact_refs,
             card,
             card_v2,
+            card_state,
+            cause,
+            block_refs,
         }) => {
             out.replaced_bodies.push(message_id.clone());
+            // A server-made state update (a card answer, retract or expiry; a cleared ref) has
+            // no `cardV2` and carries `cardState` or `blockRefs`: not an edit, so the stored
+            // `edited_at` stays (docs/protocol.md, "Edit marks").
+            let state_only = card_v2.is_none() && (card_state.is_some() || block_refs.is_some());
             let topic: Option<String> = tx
                 .query_row(
-                    "UPDATE messages SET body = ?2, edited_at = ?3, streaming = ?4 WHERE id = ?1 AND deleted_at IS NULL
+                    "UPDATE messages SET body = ?2, edited_at = CASE WHEN ?5 THEN edited_at ELSE ?3 END, streaming = ?4
+                     WHERE id = ?1 AND deleted_at IS NULL
                      RETURNING topic_id",
-                    params![message_id, body, edited_at, streaming],
+                    params![message_id, body, edited_at, streaming, state_only],
                     |r| r.get(0),
                 )
                 .optional()?;
@@ -606,6 +614,9 @@ fn apply_one(
                     || artifact_refs.is_some()
                     || card.is_some()
                     || card_v2.is_some()
+                    || card_state.is_some()
+                    || cause.is_some()
+                    || block_refs.is_some()
                 {
                     update_message_raw(tx, message_id, |m| {
                         if let Some(a) = attachments {
@@ -619,6 +630,15 @@ fn apply_one(
                         }
                         if let Some(c) = card_v2 {
                             m.card_v2 = Some(c.clone());
+                        }
+                        if let Some(c) = card_state {
+                            m.card_state = Some(c.clone());
+                        }
+                        if let Some(c) = cause {
+                            m.cause = Some(c.clone());
+                        }
+                        if let Some(r) = block_refs {
+                            m.block_refs = Some(r.clone());
                         }
                     })?;
                 }
@@ -738,14 +758,38 @@ fn apply_one(
                        AND json_extract(payload, '$.rev') = ?4",
                     params![gid, d.message_id, d.action_id, d.rev],
                 )?;
+                tx.execute(
+                    "DELETE FROM outbox WHERE kind = 'card_event' AND group_id = ?1 AND attempts > 0
+                       AND json_extract(payload, '$.message_id') = ?2
+                       AND json_extract(payload, '$.rev') = ?3
+                       AND json_extract(payload, '$.event') != 'answer.retract'",
+                    params![gid, d.message_id, d.rev],
+                )?;
             }
             if let Some(t) = super::v11::topic_of_message(tx, &d.message_id)? {
                 out.message_topics.insert(t);
             }
             out.other_events.push(ev.clone());
         }
-        EventData::ArtifactEvented(d) => {
-            super::v11::insert_artifact_event(tx, ev, d)?;
+        EventData::CardRetracted(d) => {
+            super::v11::retract_card_answer(tx, ev, d)?;
+            if ev.actor_id == me {
+                tx.execute(
+                    "DELETE FROM outbox WHERE kind = 'card_event' AND group_id = ?1 AND attempts > 0
+                       AND json_extract(payload, '$.message_id') = ?2
+                       AND json_extract(payload, '$.event') = 'answer.retract'",
+                    params![gid, d.message_id],
+                )?;
+            }
+            if let Some(t) = super::v11::topic_of_message(tx, &d.message_id)? {
+                out.message_topics.insert(t);
+            }
+            out.other_events.push(ev.clone());
+        }
+        EventData::ArtifactPreviewReady(d) => {
+            if let Some(t) = super::v11::set_version_media(tx, d)? {
+                out.artifact_topics.insert(t);
+            }
             out.other_events.push(ev.clone());
         }
         EventData::TopicLinked(d) => {

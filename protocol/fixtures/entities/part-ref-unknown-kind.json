@@ -1,0 +1,11 @@
+{
+  "kind": "PartRef",
+  "valid": true,
+  "description": "open set: readers treat it as the whole block",
+  "value": {
+    "kind": "frame",
+    "keys": {
+      "t": 12
+    }
+  }
+}

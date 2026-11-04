@@ -7,11 +7,17 @@ use serde::{Deserialize, Serialize};
 
 use crate::bots::RunUpdatedData;
 use crate::card::Card;
-use crate::card2::{CardAnsweredData, CardV2, lenient_card_v2};
+use crate::card2::{
+    CardAnsweredData, CardEventTransient, CardRetractedData, CardState, CardV2, Cause,
+    InteractionResolvedTransient, lenient_card_v2,
+};
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
-use crate::files::{ArtifactEventData, ArtifactEventedData};
+use crate::files::{
+    ArtifactDataTransient, ArtifactEventData, ArtifactEventTransient, ArtifactReplyTransient,
+};
 use crate::links::TopicLinkedData;
-use crate::message::{ArtifactRef, FileRef};
+use crate::media::ArtifactPreviewReadyData;
+use crate::message::{ArtifactRef, BlockRef, FileRef};
 use crate::reactions::ReactionChangedData;
 use crate::serde_util::{any_value, non_null, nullable};
 use crate::topic::TopicContext;
@@ -36,6 +42,7 @@ impl Event {
 }
 
 /// `type` and `data` of an [`Event`].
+#[allow(clippy::large_enum_variant)] // events are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", content = "data")]
 pub enum EventData {
@@ -68,10 +75,14 @@ pub enum EventData {
     // 1.1
     #[serde(rename = "card.answered")]
     CardAnswered(CardAnsweredData),
-    #[serde(rename = "artifact.evented")]
-    ArtifactEvented(ArtifactEventedData),
     #[serde(rename = "topic.linked")]
     TopicLinked(TopicLinkedData),
+    /// 2.1: an answer was taken back.
+    #[serde(rename = "card.retracted")]
+    CardRetracted(CardRetractedData),
+    /// 1.1: the preview of a 产出 version is ready.
+    #[serde(rename = "artifact.previewReady")]
+    ArtifactPreviewReady(ArtifactPreviewReadyData),
 }
 
 impl EventData {
@@ -91,8 +102,9 @@ impl EventData {
             Self::RunUpdated(_) => "run.updated",
             Self::ReactionChanged(_) => "reaction.changed",
             Self::CardAnswered(_) => "card.answered",
-            Self::ArtifactEvented(_) => "artifact.evented",
             Self::TopicLinked(_) => "topic.linked",
+            Self::CardRetracted(_) => "card.retracted",
+            Self::ArtifactPreviewReady(_) => "artifact.previewReady",
         }
     }
 }
@@ -188,6 +200,27 @@ pub struct MessageUpdatedData {
         skip_serializing_if = "Option::is_none"
     )]
     pub card_v2: Option<CardV2>,
+    /// 2.1: the card's server-owned state after this rev.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card_state: Option<CardState>,
+    /// 2.1: the event this rev answered.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cause: Option<Cause>,
+    /// 1.1: present = the message's refs changed (a source was deleted).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub block_refs: Option<Vec<BlockRef>>,
 }
 
 /// Data of `card.actioned`. The event's `actorId` is the member who pressed.
@@ -235,6 +268,17 @@ pub enum TransientEvent {
     Presence(PresenceEvent),
     #[serde(rename = "message.delta")]
     MessageDelta(MessageDeltaEvent),
+    // 1.1: sent only to connections whose hello has feature "interact/1".
+    #[serde(rename = "card.event")]
+    CardEvent(CardEventTransient),
+    #[serde(rename = "interaction.resolved")]
+    InteractionResolved(InteractionResolvedTransient),
+    #[serde(rename = "artifact.event")]
+    ArtifactEvent(ArtifactEventTransient),
+    #[serde(rename = "artifact.data")]
+    ArtifactData(ArtifactDataTransient),
+    #[serde(rename = "artifact.reply")]
+    ArtifactReply(ArtifactReplyTransient),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

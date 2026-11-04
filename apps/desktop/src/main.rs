@@ -38,6 +38,9 @@ mod characters;
 mod copy;
 #[allow(dead_code)]
 mod data;
+// --- v11/inc-diagrams ---
+mod diagrams;
+// --- end v11/inc-diagrams ---
 mod drafts;
 #[allow(dead_code)]
 mod fake;
@@ -88,6 +91,7 @@ struct Args {
     live_url: Option<String>,
     token_file: Option<PathBuf>,
     read_only: bool,
+    interact: Option<PathBuf>,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -116,6 +120,9 @@ fn parse_args() -> Result<Args, String> {
                 args.token_file = Some(it.next().ok_or("--token-file needs a path")?.into())
             }
             "--read-only" => args.read_only = true,
+            "--interact" => {
+                args.interact = Some(it.next().ok_or("--interact needs a folder")?.into())
+            }
             "--hold-ms" => {
                 args.hold_ms = it
                     .next()
@@ -170,7 +177,7 @@ fn main() {
                 eprintln!("{error}");
             }
             eprintln!(
-                "usage: desktop [--fake | --signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]\n       desktop --selftest-live <url> --token-file <path> --report <path> [--read-only]"
+                "usage: desktop [--fake | --signed-out] [--selftest-smoke|--selftest-nav --report <path> [--hold-ms <n>]] [--selftest-timeline <n> --report <path>]\n       desktop --selftest-live <url> --token-file <path> --report <path> [--read-only | --interact <dir>]"
             );
             std::process::exit(2);
         }
@@ -188,6 +195,7 @@ fn main() {
                 token_file: args.token_file.clone().unwrap(),
                 report: args.report.clone().unwrap(),
                 read_only: args.read_only,
+                interact: args.interact.clone(),
             };
             provider::selftest_live::run(live, started, finish, cx);
             return;

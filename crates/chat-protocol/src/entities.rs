@@ -284,6 +284,27 @@ pub struct Message {
         skip_serializing_if = "Option::is_none"
     )]
     pub card_v2: Option<CardV2>,
+    /// 2.1: server-owned state of the card (asks, answers, tallies).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub card_state: Option<crate::card2::CardState>,
+    /// 2.1: the event this message (or its newest rev) answered.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cause: Option<crate::card2::Cause>,
+    /// 1.1: the parts this message asks about (引用提问).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub block_refs: Option<Vec<crate::message::BlockRef>>,
     /// Who reacted with which emoji; absent = none.
     #[serde(
         default,

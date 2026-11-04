@@ -16,6 +16,18 @@ pub mod connection;
 pub mod dev;
 pub mod files;
 pub mod login;
+// --- v11/media ---
+pub mod media;
+// --- end v11/media ---
+// --- v11/inc-diagrams ---
+pub mod diagrams;
+// --- end v11/inc-diagrams ---
+// --- inc-host track ---
+pub mod page_host;
+// --- end inc-host track ---
+// --- inc-refs ---
+pub mod refs;
+// --- end inc-refs ---
 pub mod nav;
 pub mod notify;
 pub mod panel;
@@ -29,6 +41,9 @@ pub mod update;
 pub mod appearance;
 pub mod artifact_page;
 pub mod cards_v2;
+// --- inc-cards21 ---
+pub mod cards21;
+// --- end inc-cards21 ---
 pub mod desk;
 pub mod group_page;
 pub mod live;
@@ -61,6 +76,13 @@ pub struct Section {
 
 /// Every section of the catalog. Add a new area file here too.
 pub const SECTIONS: &[Section] = &[
+    // --- inc-cards21 ---
+    Section {
+        name: "cards21",
+        entries: cards21::ENTRIES,
+        developer: false,
+    },
+    // --- end inc-cards21 ---
     Section {
         name: "common",
         entries: common::ENTRIES,
@@ -196,6 +218,34 @@ pub const SECTIONS: &[Section] = &[
         entries: cards_v2::ENTRIES,
         developer: false,
     },
+    // --- v11/media ---
+    Section {
+        name: "media",
+        entries: media::ENTRIES,
+        developer: false,
+    },
+    // --- end v11/media ---
+    // --- v11/inc-diagrams ---
+    Section {
+        name: "diagrams",
+        entries: diagrams::ENTRIES,
+        developer: false,
+    },
+    // --- end v11/inc-diagrams ---
+    // --- inc-host track ---
+    Section {
+        name: "page_host",
+        entries: page_host::ENTRIES,
+        developer: false,
+    },
+    // --- end inc-host track ---
+    // --- inc-refs ---
+    Section {
+        name: "refs",
+        entries: refs::ENTRIES,
+        developer: false,
+    },
+    // --- end inc-refs ---
 ];
 
 /// Replaces `{key}` placeholders: `fill(MINUTES_AGO, &[("n", "5")])`.

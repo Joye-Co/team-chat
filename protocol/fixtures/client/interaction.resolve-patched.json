@@ -1,0 +1,12 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "members resolve only as ignored or failed",
+  "value": {
+    "t": "interaction.resolve",
+    "rid": "b12",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000001",
+    "result": "patched"
+  }
+}

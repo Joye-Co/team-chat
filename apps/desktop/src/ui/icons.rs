@@ -92,6 +92,33 @@ gpui_kit::assets::icon_assets!(
         FileX,
         Target,
         // --- end cards v2 track ---
+        // --- v11/media: 产出 media previews ---
+        AppWindow,
+        AudioLines,
+        Video,
+        Pause,
+        Volume2,
+        Maximize,
+        PictureInPicture2,
+        Send,
+        Upload,
+        ZoomIn,
+        ZoomOut,
+        PanelLeft,
+        RotateCw,
+        Shield,
+        Images,
+        ListTree,
+        ArrowUpDown,
+        // --- end v11/media ---
+        // --- v11/inc-diagrams: diagrams ---
+        Workflow,
+        Scan,
+        Maximize2,
+        // --- end v11/inc-diagrams ---
+        // --- inc-refs: 引用提问 chips ---
+        FileDiff,
+        // --- end inc-refs ---
     ]
 );
 

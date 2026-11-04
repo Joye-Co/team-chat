@@ -1,0 +1,14 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "artifact.reply",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000022",
+    "ok": false,
+    "error": {
+      "code": "failed",
+      "message": "没算出来"
+    }
+  }
+}

@@ -66,6 +66,15 @@ impl Inner {
     }
 }
 
+/// The `requestedBy` the server gives a run that an answer to a private card started: no
+/// person is named (cards2 privacy). Never shown.
+const ANONYMOUS_REQUESTER: &str = "anonymous";
+
+/// The requester of a run, or nobody for an anonymous one.
+pub(super) fn requester(requested_by: Option<String>) -> Option<String> {
+    requested_by.filter(|id| id != ANONYMOUS_REQUESTER)
+}
+
 fn run_status(s: chat_core::proto::RunStatus) -> RunStatus {
     use chat_core::proto::RunStatus as R;
     match s {
@@ -319,7 +328,7 @@ impl CoreProvider {
                 topic_id: topic_id.to_string(),
                 machine_id: r.machine_id,
                 status: run_status(r.status),
-                requested_by: r.requested_by,
+                requested_by: requester(r.requested_by),
                 created_at: r.created_at as i64,
                 started_at: r.started_at.map(|t| t as i64),
                 ended_at: r.ended_at.map(|t| t as i64),

@@ -1,5 +1,5 @@
 // Group decisions (群里的决定, docs/protocol.md "Cards v2"): answers to v2 asks whose
-// `ask.record` is true at the answered rev. The event writer keeps the question and the choice
+// `ask.record` is true at the answered rev, except on private cards. The event writer keeps the question and the choice
 // when the answer is stored, because the card's author usually edits the card afterwards (a
 // later rev without `ask`). The inputs stay in the event, so a delete scrubs them in one place.
 import { type CardV2, type CardV2Block, DecisionsResponse, type GroupDecision, MAX_DECISIONS_PAGE } from "@chat/protocol";
@@ -9,6 +9,7 @@ import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
 import { type ArchivedEvent, registerEventWriter, registerRoomMigration, registerRoomRpc, registerRoute } from "../core/registry";
 import type { CardAnswerArgs } from "./index";
+import { hidesCause } from "./privacy";
 
 export const DECISIONS_RPC = "cards.decisions";
 const DEFAULT_PAGE = 50;
@@ -32,15 +33,36 @@ registerRoomMigration({
   `,
 });
 
-/** Labels of the options an answer chose in the card's `decision` blocks, in block order. */
-export function chosenLabels(card: CardV2, inputs: Record<string, unknown> | undefined): string[] {
+/** Option ids of an input value: `"a"`, `["a"]`, `{value}`, `{values}`. */
+function pickedIds(v: unknown): unknown[] {
+  if (Array.isArray(v)) return v;
+  if (typeof v === "string") return [v];
+  if (v && typeof v === "object") {
+    const o = v as { value?: unknown; values?: unknown };
+    if (Array.isArray(o.values)) return o.values;
+    if (o.value !== undefined) return [o.value];
+  }
+  return [];
+}
+
+/**
+ * Labels of the options an answer chose, in block order: `decision`, `compare`, `imageChoice`,
+ * `poll` and `confirm` blocks, from `inputs` and from the value of an immediate commit.
+ */
+export function chosenLabels(card: CardV2, inputs: Record<string, unknown> | undefined, commit?: { blockId: string; value: unknown }): string[] {
   const out: string[] = [];
   const visit = (b: CardV2Block) => {
-    if (b.type === "group") return b.blocks.forEach(visit);
-    if (b.type !== "decision") return;
-    const v = inputs?.[b.id];
-    const ids = Array.isArray(v) ? v : typeof v === "string" ? [v] : [];
-    for (const o of b.options) if (ids.includes(o.id)) out.push(o.label);
+    if (b.type === "group") return (b.blocks ?? []).forEach(visit);
+    const v = commit && commit.blockId === b.id ? commit.value : inputs?.[b.id];
+    if (v === undefined) return;
+    const ids = pickedIds(v);
+    if (b.type === "confirm") {
+      if (ids[0] === true) out.push(b.yes);
+      if (ids[0] === false) out.push(b.no);
+      return;
+    }
+    if (b.type !== "decision" && b.type !== "compare" && b.type !== "imageChoice" && b.type !== "poll") return;
+    for (const o of b.options as { id: string; label: string }[]) if (ids.includes(o.id)) out.push(o.label);
   };
   card.blocks.forEach(visit);
   return out;
@@ -61,9 +83,14 @@ registerEventWriter((event: ArchivedEvent, sql) => {
   const d = event.data as CardAnswerArgs;
   const stored = storedCard(sql, d.messageId);
   if (!stored || stored.card.rev !== d.rev || stored.card.ask?.record !== true) return;
-  const action = stored.card.actions?.find((a) => a.id === d.actionId);
+  // A private card (a non-public poll, an anonymous questionnaire) records no group decision:
+  // a decision names who answered (cards2/privacy).
+  if (hidesCause(sql, d.messageId)) return;
+  // An immediate commit (2.1) has no action: the block is the "action", its pick the label.
+  const commit = d.actionId === undefined && d.blockId ? { blockId: d.blockId, value: d.value } : undefined;
+  const choices = chosenLabels(stored.card, d.inputs, commit);
+  const action = d.actionId !== undefined ? stored.card.actions?.find((a) => a.id === d.actionId) : commit && choices[0] ? { id: commit.blockId, label: [...choices[0]].slice(0, 40).join("") } : undefined;
   if (!action) return;
-  const choices = chosenLabels(stored.card, d.inputs);
   sql.exec(
     `INSERT OR IGNORE INTO card_decisions (seq, message_id, topic_id, rev, title, action_id, action_label, choices, actor_id, at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -109,7 +136,8 @@ registerRoomRpc(DECISIONS_RPC, (room, actor, args): DecisionsResponse => {
       `SELECT d.*, e.data FROM card_decisions d
        JOIN messages m ON m.id = d.message_id AND m.deleted_at IS NULL
        JOIN events e ON e.seq = d.seq
-       WHERE d.seq < ? ORDER BY d.seq DESC LIMIT ?`,
+       WHERE d.seq < ? AND d.message_id NOT IN (SELECT message_id FROM card_private)
+       ORDER BY d.seq DESC LIMIT ?`,
       beforeSeq ?? Number.MAX_SAFE_INTEGER,
       limit + 1,
     )

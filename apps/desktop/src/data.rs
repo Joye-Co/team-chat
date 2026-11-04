@@ -19,6 +19,9 @@ pub mod v2;
 // --- cards v2 track: Card v2 view types ---
 pub mod cards_v2;
 // --- end cards v2 track ---
+// --- inc-host track: 产出 page host types ---
+pub mod page_host;
+// --- end inc-host track ---
 use std::{fmt, path::PathBuf, sync::Arc};
 
 use futures::channel::mpsc::UnboundedReceiver;
@@ -355,7 +358,23 @@ pub struct ArtifactVersionInfo {
     pub note: Option<String>,
     pub created_by: MemberId,
     pub created_at: Millis,
+    // --- v11/media: what the version holds, so the timeline picks a preview before the
+    // files are on disk (the wire `ArtifactVersion.entry` and `files`). ---
+    /// Path of the file to open: the HTML page, or the only file.
+    pub entry: String,
+    pub files: Vec<ArtifactVersionFile>,
+    // --- end v11/media ---
 }
+
+// --- v11/media ---
+/// One file of a 产出 version (the wire `ArtifactFile` without its id).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ArtifactVersionFile {
+    pub path: String,
+    pub size: u64,
+    pub mime: String,
+}
+// --- end v11/media ---
 
 /// A 产出 with its known versions, newest first.
 #[derive(Clone, Debug, PartialEq)]
@@ -932,7 +951,50 @@ pub struct Draft {
     /// The message the reply quotes.
     pub quote_of: Option<MessageId>,
     pub files: Vec<PendingFile>,
+    /// inc-refs: the reference chips (引用提问, REFS §A4), at most 5, oldest first.
+    pub refs: Vec<DraftRef>,
 }
+
+// --- inc-refs track: 引用提问 drafts ---
+
+/// One reference chip of a draft: what is sent (`input`) and how the chip draws.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DraftRef {
+    pub input: chat_core::proto::BlockRefInput,
+    /// The 群 and 话题 of the source (to scroll back to it and to tell 已更新).
+    pub group_id: GroupId,
+    pub topic_id: TopicId,
+    /// Code points at the start of `input.label` drawn quiet (source and block); the rest is
+    /// the part, drawn strong.
+    pub lead_chars: usize,
+}
+
+impl DraftRef {
+    /// The address that makes two chips the same (dedupe, REFS §A4).
+    pub fn same_address(&self, other: &chat_core::proto::BlockRefInput) -> bool {
+        let a = &self.input;
+        a.message_id == other.message_id
+            && a.artifact == other.artifact
+            && a.block_id == other.block_id
+            && a.part == other.part
+    }
+}
+
+/// What adding a chip did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddRef {
+    Added,
+    /// The same part is a chip already, at this index.
+    Duplicate(usize),
+    /// Five chips already (最多引用 5 处).
+    Full,
+    /// This provider keeps no chips.
+    Unsupported,
+}
+
+/// Most chips of one message.
+pub const MAX_DRAFT_REFS: usize = chat_core::proto::MAX_BLOCK_REFS;
+// --- end inc-refs track ---
 
 /// A quoted message outside the timeline window ([`ChatProvider::quoted_message`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1863,6 +1925,47 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// refused one. Emits `Change::Messages` for the topic.
     fn withdraw_card_v2_answer(&self, _group_id: &str, _topic_id: &str, _message_id: &str) {}
 
+    // --- inc-cards21: the interaction loop (INTERACT §3, §4.4) ---
+
+    /// Sends one interaction with a v2 card (`card.event`). An answer goes through the
+    /// outbox and is resent with the same id; a live event is sent now or fails at once.
+    /// Returns the `clientEventId`, or `None` when it could not be made. Emits
+    /// `Change::Messages` for the topic.
+    fn send_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        None
+    }
+    /// My events on a v2 card this session, oldest first (at most 20). Cheap.
+    fn card_v2_events(&self, _group_id: &str, _message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        Vec::new()
+    }
+    /// 不等了: stop waiting for the author's response to one of my events.
+    fn drop_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _client_event_id: &str,
+    ) {
+    }
+    /// 重试 of a refused or stuck answer with the same `clientEventId`. False when it
+    /// cannot be resent (then the view sends a new event).
+    fn retry_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _message_id: &str,
+        _client_event_id: &str,
+    ) -> bool {
+        false
+    }
+    // --- end inc-cards21 ---
+
     // --- end cards v2 track ---
 
     // --- topic track (v11/topic): the 话题 page ---
@@ -2112,6 +2215,110 @@ pub trait ChatProvider: Send + Sync + 'static {
     }
 
     // --- end dfix-motion track ---
+
+    // --- inc-host track: the 产出 page host (INTERACT §5; all have defaults) ---
+
+    /// What the page of a version may do and who made it. `None` when unknown. The
+    /// default reads the 产出, its 群's members and [`ChatProvider::artifact_page_events`]
+    /// (every declared name an `emit`).
+    fn page_bridge(&self, artifact_id: &str, version: u32) -> Option<page_host::PageBridge> {
+        page_host::default_bridge(self, artifact_id, version)
+    }
+    /// Sends a page event or ask to the member that made the version (`artifact.event`)
+    /// now; never queued. The answer arrives as [`page_host::PageSignal::Acked`] with the
+    /// returned client event id.
+    fn send_page_event(
+        &self,
+        _artifact_id: &str,
+        _version: u32,
+        _name: &str,
+        _kind: page_host::PageEventKind,
+        _payload: Option<serde_json::Value>,
+    ) -> Result<String, page_host::PageSendError> {
+        Err(page_host::PageSendError::Refused)
+    }
+    /// The latest data snapshot of a version (`GET …/data`): `(data, dataRev)`, `None`
+    /// when it could not be read.
+    fn fetch_page_data(
+        &self,
+        _artifact_id: &str,
+        _version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let _ = tx.send(None);
+        rx
+    }
+    /// A new stream of page signals (acks, replies, data pushes). `None` when the provider
+    /// has none (samples).
+    fn page_signals(&self) -> Option<UnboundedReceiver<page_host::PageSignal>> {
+        None
+    }
+
+    /// The media metadata of a message file (R9), when its sender sent it.
+    fn file_media(&self, _file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
+        None
+    }
+    /// The media metadata of a 产出 version (R9), when its sender sent it.
+    fn artifact_media(
+        &self,
+        _artifact_id: &str,
+        _version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        None
+    }
+    /// The poster of a video or PDF file (the sender's, else made here from the file on
+    /// disk), or the image itself. `None` while it is not there yet.
+    fn file_poster(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<PathBuf> {
+        let kind = crate::views::media::file_kind(&file.name, &file.mime);
+        let path = self.cached_file(file)?;
+        crate::views::media::poster::poster(&path, kind, || {})
+    }
+    /// True while the sender makes the preview of an upload (`upload_key`): 正在生成预览.
+    fn upload_generating(&self, _key: &str) -> bool {
+        false
+    }
+    /// The poster or snapshot of a non-page 产出 version (lists and thumbnails).
+    fn artifact_poster(&self, _artifact_id: &str, _version: u32) -> Option<PathBuf> {
+        None
+    }
+
+    // --- end inc-host track ---
+    // --- inc-refs track: 引用提问 (REFS part A) ---
+
+    /// The server takes references to a part (`welcome.features` has `refs/1`). Without it the
+    /// views hide every 引用提问 affordance. False by default.
+    fn refs_supported(&self) -> bool {
+        false
+    }
+    /// Adds a reference chip to a draft: deduped by address, at most 5. Emits `Change::Draft`
+    /// when it was added.
+    fn add_draft_ref(&self, _key: &DraftKey, _r: DraftRef) -> AddRef {
+        AddRef::Unsupported
+    }
+    /// Removes the chip at `index`. Emits `Change::Draft`.
+    fn remove_draft_ref(&self, _key: &DraftKey, _index: usize) {}
+    /// The references of a sent (or queued) message, in send order. Empty by default.
+    fn message_block_refs(&self, _message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        Vec::new()
+    }
+    /// [`ChatProvider::send_with_files`] with references (`send.blockRefs`); the server writes
+    /// their quote lines in front of the body. The default drops the references.
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+        _refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        self.send_with_files(request, key, files)
+    }
+
+    // --- end inc-refs track ---
 
     // --- changes ---
 

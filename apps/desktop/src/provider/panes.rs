@@ -251,7 +251,7 @@ fn side_message(
                         posted_at: None,
                     })
                 }
-                CardV2Block::Group { blocks, .. } => stack.extend(blocks.iter().rev()),
+                CardV2Block::Group { blocks, .. } => stack.extend(blocks.iter().flatten().rev()),
                 _ => {}
             }
         }

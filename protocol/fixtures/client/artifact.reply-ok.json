@@ -1,0 +1,19 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "value": {
+    "t": "artifact.reply",
+    "rid": "b40",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000020",
+    "ok": true,
+    "payload": {
+      "series": [
+        1,
+        1,
+        1,
+        2
+      ]
+    }
+  }
+}

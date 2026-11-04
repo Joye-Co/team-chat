@@ -57,6 +57,108 @@ pub fn render(
     cx: &mut App,
 ) -> AnyElement {
     let key = part_id(message, ix);
+    // --- inc-refs: the parts of a v1 card block can be referenced (REFS §A2.2 `v1:<i>`).
+    let refs = v1_refs(message, ix, ctx, cx);
+    if let Some(r) = &refs
+        && !matches!(block, CardBlock::Table { .. } | CardBlock::List { .. })
+        && let Some(part) = crate::views::refs::parts::v1::whole_block(&r.card, ix)
+    {
+        let el = render_plain(block, ix, &key, message, ctx, _window, cx);
+        let spec = r.spec(format!("{}-whole", r.prefix), part);
+        return crate::views::refs::affordance::part(
+            div()
+                .id(ElementId::Name(format!("{key}-ref").into()))
+                .child(el),
+            spec,
+            _window,
+            cx,
+        );
+    }
+    match block {
+        CardBlock::Table { columns, rows } => {
+            return render_table(&key, columns, rows, refs.as_ref(), _window, cx);
+        }
+        CardBlock::List { items } if refs.is_some() => {
+            return render_list(&key, items, refs.as_ref(), _window, cx);
+        }
+        _ => {}
+    }
+    render_plain(block, ix, &key, message, ctx, _window, cx)
+}
+
+// --- inc-refs ---
+/// The references of one v1 card block.
+struct V1Refs {
+    card: std::sync::Arc<crate::data::card::Card>,
+    ix: usize,
+    prefix: String,
+    source: crate::views::refs::RefSource,
+}
+
+impl V1Refs {
+    fn target(&self, part: crate::views::refs::parts::Part) -> crate::views::refs::PartTarget {
+        crate::views::refs::parts::v1::target(&self.card, self.ix, part, self.source.clone())
+    }
+
+    fn spec(
+        &self,
+        id: String,
+        part: crate::views::refs::parts::Part,
+    ) -> crate::views::refs::affordance::PartSpec {
+        let target = self.target(part);
+        crate::views::refs::affordance::PartSpec::new(id, move |_| target.clone())
+    }
+
+    fn table(
+        &self,
+        columns: &[String],
+        rows: &[Vec<String>],
+    ) -> crate::views::refs::markdown::TableRefs {
+        use crate::views::refs::parts;
+        let (columns, rows) = (columns.to_vec(), rows.to_vec());
+        let (card, ix, source) = (self.card.clone(), self.ix, self.source.clone());
+        crate::views::refs::markdown::TableRefs {
+            prefix: self.prefix.clone(),
+            target: std::rc::Rc::new(move |pick| {
+                let data = parts::TableData {
+                    columns: &columns,
+                    rows: &rows,
+                    row_keys: None,
+                };
+                parts::table(&data, pick).map(|p| parts::v1::target(&card, ix, p, source.clone()))
+            }),
+        }
+    }
+}
+
+fn v1_refs(message: &Message, ix: usize, ctx: &ExtrasContext, cx: &App) -> Option<V1Refs> {
+    if message.id.is_empty() || !crate::views::refs::enabled(cx) {
+        return None;
+    }
+    let card = ctx.provider.card(&message.group_id, &message.id)?;
+    Some(V1Refs {
+        card,
+        ix,
+        prefix: format!("{}-v1:{ix}", message.id),
+        source: crate::views::refs::RefSource::Message {
+            group_id: message.group_id.clone(),
+            topic_id: message.topic_id.clone(),
+            message_id: message.id.clone(),
+        },
+    })
+}
+// --- end inc-refs ---
+
+fn render_plain(
+    block: &CardBlock,
+    _ix: usize,
+    key: &str,
+    message: &Message,
+    ctx: &ExtrasContext,
+    _window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let key = key.to_string();
     match block {
         CardBlock::Text { text } => markdown::message_body(
             ElementId::Name(key.into()),
@@ -66,8 +168,8 @@ pub fn render(
         .w_full()
         .into_any_element(),
         CardBlock::Fields { fields } => render_fields(fields, cx),
-        CardBlock::Table { columns, rows } => render_table(&key, columns, rows, cx),
-        CardBlock::List { items } => render_list(&key, items, cx),
+        CardBlock::Table { columns, rows } => render_table(&key, columns, rows, None, _window, cx),
+        CardBlock::List { items } => render_list(&key, items, None, _window, cx),
         CardBlock::Progress { label, .. } => {
             render_progress(&key, block.progress().unwrap_or(0.0), label.as_deref(), cx)
         }
@@ -162,11 +264,26 @@ fn more_button(key: &str, hidden: usize, expanded: bool) -> Button {
         .on_click(move |_, window, cx| toggle_expanded(toggle_key.clone(), window, cx))
 }
 
-fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
+fn render_table(
+    key: &str,
+    columns: &[String],
+    rows: &[Vec<String>],
+    refs: Option<&V1Refs>,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
     let colors = theme::colors(cx);
-    let widths: Vec<f32> = (0..columns.len())
+    // inc-refs: cells, columns and the 问这里 slot at the end of each row.
+    let table_refs = refs.map(|r| r.table(columns, rows));
+    let mut widths: Vec<f32> = (0..columns.len())
         .map(|i| column_width(columns, rows, i))
         .collect();
+    // Room for 问这里 after a row's name (Refs.dc.html).
+    if table_refs.is_some()
+        && let Some(w) = widths.first_mut()
+    {
+        *w += crate::views::refs::markdown::NAME_ROOM;
+    }
     let expanded = is_expanded(key, cx);
     let shown = if expanded {
         rows.len()
@@ -175,13 +292,27 @@ fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -
     };
     let hidden = rows.len() - rows.len().min(COLLAPSED_ROWS);
 
-    let cell = |text: String, width: f32| -> Div {
+    // Number columns are right-aligned, their numbers in mono (DESIGN §7.10 Table).
+    let numeric: Vec<bool> = (0..columns.len())
+        .map(|ci| {
+            ci > 0
+                && rows.iter().all(|r| {
+                    r.get(ci)
+                        .is_none_or(|v| v.is_empty() || super::v2::blocks::numeric(v))
+                })
+        })
+        .collect();
+    let cell_in = |ci: usize, text: String, width: f32, head: bool| -> Div {
+        let num = numeric.get(ci).copied().unwrap_or(false);
         div()
             .w(px(width))
             .flex_none()
             .px(space::S10)
             .py(space::S6)
-            .child(text)
+            .flex()
+            .items_center()
+            .when(num, |el| el.justify_end())
+            .child(div().when(num && !head, |el| el.mono()).child(text))
     };
     let header = div()
         .flex()
@@ -191,22 +322,53 @@ fn render_table(key: &str, columns: &[String], rows: &[Vec<String>], cx: &App) -
             columns
                 .iter()
                 .zip(&widths)
-                .map(|(name, w)| cell(name.clone(), *w)),
-        );
-    let body = rows[..shown].iter().map(|row| {
-        div()
+                .enumerate()
+                .map(|(i, (name, w))| {
+                    let el = cell_in(i, name.clone(), *w, true);
+                    match &table_refs {
+                        Some(r) => r.header(el, i, window, cx),
+                        None => el.into_any_element(),
+                    }
+                }),
+        )
+        .when(table_refs.is_some(), |el| {
+            el.child(
+                div()
+                    .w(px(crate::views::refs::markdown::ROW_BUTTON_SLOT))
+                    .flex_none(),
+            )
+        });
+    let body = rows[..shown].iter().enumerate().map(|(ri, row)| {
+        let line = div()
             .flex()
             .border_t(theme::HAIRLINE)
             .border_color(colors.sep)
             .t_small()
             .tnum()
-            .text_color(colors.text_1)
-            .children(
-                widths
-                    .iter()
-                    .enumerate()
-                    .map(|(i, w)| cell(row.get(i).cloned().unwrap_or_default(), *w)),
-            )
+            .text_color(colors.text_1);
+        let line = match &table_refs {
+            Some(r) => r.row(line, ri, window, cx),
+            None => line,
+        };
+        // 问这里 after the row's name when the first column holds both (Refs.dc.html).
+        let beside = table_refs.as_ref().is_some_and(|r| {
+            let name = row.first().map(String::as_str).unwrap_or("");
+            let inner = widths.first().map(|w| w - 2. * f32::from(space::S10));
+            r.beside(name, inner, window)
+        });
+        line.children(widths.iter().enumerate().map(|(i, w)| {
+            let mut el = cell_in(i, row.get(i).cloned().unwrap_or_default(), *w, false);
+            if i == 0 && beside {
+                el = el.children(table_refs.as_ref().and_then(|r| r.name_button(ri, 0., cx)));
+            }
+            match &table_refs {
+                Some(r) => r.cell(el, ri, i, window, cx),
+                None => el.into_any_element(),
+            }
+        }))
+        .when_some(table_refs.as_ref(), |el, r| {
+            el.child(r.row_end_unless(ri, beside, cx))
+        })
     });
     div()
         .flex()
@@ -259,7 +421,13 @@ fn list_status_text(status: CardListStatus) -> &'static str {
 /// A plan list (Slack Block Kit, §8.1): 28 pt rows, a 16 pt glyph, `small`
 /// 13/20 text; the current step `text-1` 500, the rest `text-2`; the state
 /// word at the right in `text-3` for failed and skipped steps.
-fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
+fn render_list(
+    key: &str,
+    items: &[CardListItem],
+    refs: Option<&V1Refs>,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
     let k = theme::colors(cx);
     let expanded = is_expanded(key, cx);
     let shown = if expanded {
@@ -271,10 +439,11 @@ fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
     div()
         .flex()
         .flex_col()
-        .children(items[..shown].iter().map(|item| {
+        .children(items[..shown].iter().enumerate().map(|(i, item)| {
             let skipped = item.status == Some(CardListStatus::Skipped);
             let now = item.status == Some(CardListStatus::InProgress);
-            div()
+            let row = div()
+                .id(ElementId::Name(format!("{key}-item-{i}").into()))
                 .min_h(px(28.))
                 .py(space::S4)
                 .flex()
@@ -317,7 +486,27 @@ fn render_list(key: &str, items: &[CardListItem], cx: &App) -> AnyElement {
                                 })
                                 .child(list_status_text(s))
                         }),
-                )
+                );
+            // inc-refs: an item of the list.
+            match refs {
+                Some(r) => {
+                    let status = item.status.map(|s| match s {
+                        CardListStatus::Todo => "todo",
+                        CardListStatus::InProgress => "inProgress",
+                        CardListStatus::Done => "done",
+                        CardListStatus::Failed => "failed",
+                        CardListStatus::Skipped => "skipped",
+                    });
+                    let part = crate::views::refs::parts::list_item(i, None, &item.text, status);
+                    crate::views::refs::affordance::part(
+                        row,
+                        r.spec(format!("{}-i{i}", r.prefix), part),
+                        window,
+                        cx,
+                    )
+                }
+                None => row.into_any_element(),
+            }
         }))
         .when(hidden > 0, |el| {
             el.child(div().flex().child(more_button(key, hidden, expanded)))

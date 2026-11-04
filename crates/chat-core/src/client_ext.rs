@@ -306,6 +306,23 @@ impl Client {
         })
     }
 
+    // --- inc-host track ---
+    /// Sends the media metadata of a 产出 version (`artifact.previewReady`, MEDIA §3).
+    pub fn put_artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        media: crate::proto::MediaInfo,
+    ) -> JoinHandle<Result<(), ClientError>> {
+        let http = self.http();
+        let id = artifact_id.to_string();
+        self.spawn(async move {
+            http.put_artifact_media(&id, version, &media).await?;
+            Ok(())
+        })
+    }
+    // --- end inc-host track ---
+
     /// Uploads the local files and makes a new 产出 or a new version; stores the result.
     pub fn create_artifact(
         &self,

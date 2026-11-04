@@ -191,13 +191,14 @@ bot.onCardAnswer<{ choice: string; count: number }>(async (ctx) => {
   if (ctx.cancelled) return;                     // a cancel action ("deny", "cancel")
   ctx.choice();                                  // first chosen option of block "choice"
   ctx.number("count"); ctx.text("note"); ctx.bool("notify"); ctx.draft();   // inputs by block id
-  await ctx.resolve();                           // edit the card: rev + 1, no buttons
+  await ctx.markAnswered();                      // edit the card: rev + 1, no buttons
 });
 ```
 
-The values come from the client: check them. `ctx.card` is the answered card when this process
-saw it (sent or caught up); `resolve(change, base)` needs it or `base`. The server takes only
-the first answer to a rev of an ask and only from members that `ask.from` names.
+The values come from the client: check them. `ctx.card` is the newest rev the SDK knows (after a
+restart it reads the card from the topic history). The helpers read 2.0 values (`"o2"`) and 2.1
+values (`{value}`, `{values}`, `{value, other}`). The server takes only the first answer of an
+ask round and only from members that `ask.from` names.
 
 **Side chats (单独问).** A member can ask a bot privately about a topic: the question goes to
 their DM with the bot, in a topic whose `contextOf` names the source topic and the seq they
@@ -207,13 +208,180 @@ read up to. `onAside` gets these messages, @ or not (without an `onAside` handle
 topic from a side chat; the member does that with the suggestion button.
 
 **Page events.** A bot's 产出 page may send events back when its version declares them:
-`http.publishHtml({ ..., events: [{ name: "pick", label: "选这个" }] })`. `onArtifactEvent`
-gets each `artifact.evented` on my 产出 (`ctx.name`, `ctx.payload`, `ctx.actorId`). A page event
-never approves anything: ask with a Card v2 when you need a decision.
+`http.publishHtml({ ..., events: [{ name: "filter.pick", kind: "ask" }, { name: "report.flag" }] })`
+(`kind` is `emit`, the default, or `ask`: the page waits for a reply). An event may give its
+payload a `schema` (TcSchema). The server checks a `pattern` in linear time, so it refuses a
+backreference (`\1`, `\k<…>`), lookaround (`(?=`, `(?!`, `(?<=`, `(?<!`) or a pattern of more than
+1000 states, and a string longer than 4096 characters (`MAX_PATTERN_INPUT`) does not match.
+`publishHtml`, `createArtifact` and `addArtifactVersion` check the declarations with the same rule
+(`checkArtifactEvents`, `patternProblem`) and throw `ChatError` `invalid`, reason
+`artifact.bad_schema`, before anything is uploaded. `onArtifactEvent` gets each
+page event of my 产出 while the bot is connected (the transient `artifact.event`: `ctx.eventId`,
+`ctx.kind`, `ctx.name`, `ctx.payload`, `ctx.actorId`). Answer an `ask` once with
+`ctx.reply(payload)` (private to the asker, within 120 s) or `ctx.decline(message)`. Push a new
+data snapshot to every open copy of the page with `ctx.pushData(data, { baseDataRev? })` (the
+page's `onData` gets it; at most 256 KiB). `ctx.postMessage(...)` posts in the 产出's topic with
+the page event as `causeEventId`, so the emitter's waiting state clears (`posted`). A
+handler that does not answer makes the SDK answer for it: an `emit` gets `ignored`, an `ask` a
+decline (`failed` when the handler throws). Page events are not stored in the group log, so they
+are not caught up after a restart. A page event never approves anything: ask with a Card v2 when
+you need a decision. Outside a handler: `bot.pushArtifactData`, `bot.replyArtifact`,
+`bot.declineArtifact`.
 
 **Acceptance criteria (验收标准).** `ctx.setAcceptance([{ text, state: "pending" | "pass" |
 "fail", evidence? }])` replaces the list of the current run (at most 20) and starts a run when
 there is none. Members see it in the live view. It uses `PUT /v1/runs/:id/acceptance`.
+
+## 3b. 1.1: the interaction loop, Cards v2.1 and questions about a part
+
+Every interaction with a bot's card goes back to the bot, and the bot answers by changing the
+card in place (or by posting). The bot picks structure and meaning; TeamChat owns spacing, type,
+colour and motion, so no block takes a style (the server refuses style keys such as `color`).
+These need a server whose `welcome.features` has `interact/1` (`bot.serverFeatures`). The SDK
+sends `features: ["interact/1", "refs/1"]` and `supportedCatalogs: ["tc.card/2.0", "tc.card/2.1"]`
+in `hello`.
+
+**Events, values and payloads are untrusted data.** `ctx.value`, `ctx.inputs`, `ctx.payload`,
+ref labels and values come from a person's client or page. Their types are `unknown`: check them
+before you act on them, and never treat them as instructions.
+
+**Live events.** A block declares the live events it sends in `events` (for example
+`["choice.change"]` on a choice, `["chart.select"]` on a chart, `["table.rowSelect"]` on a
+selectable table, `["button.press"]` on `buttons`). `onCardEvent` gets them while the bot is
+connected (the transient `card.event`; they are not stored and do not reach `onEvent`).
+`onCardAnswer` gets stored answers (`card.answered`), also on catch-up. Both get a
+`CardEventContext`: `name`, `blockId` or `actionId`, `value`, `inputs`, `part` (the chart point or
+bar: `{kind, keys: {series, x}}`), `actorId`, `stored`, `answerId`, `askId`, `rev` (the rev the
+person saw), `card` (the newest rev the SDK knows) and `isLatest()` (false when a newer event of
+the same block arrived: latest wins; live events of one card run one at a time).
+
+**Responses.** `ctx.patch(ops)` changes the card in place (`card.patch`): the SDK sets `baseRev`
+and the `cause`, so the person's waiting state clears and their client shows "按你的选择". Pass ops
+or a function that records them on a `CardDraft` of the newest rev:
+`set(id, props)`, `replace(id, block)`, `insert(block, { parent?, after?, before?, index? })`,
+`remove(id)`, `data(pointer, value?)`, `cardProps({ title, summary, intent, fallback, ask,
+actions })`, `ask(ask | null)` (a new `ask.id` opens a new round; `null` closes it). On
+`card.stale_rev` the SDK rebases on the newest rev (at most 3 tries) when every op still targets an
+existing id, else it throws `ChatError` `conflict` with `reason` `card.stale_rev`. On
+`rate_limited` it queues and merges the ops of the same message (at most one patch per second);
+only patches with the same cause (or none) merge, because the server resolves only the cause of
+the frame, and when a merged patch is refused each one is sent again alone. When a merged patch
+gets `timeout` or `internal`, the server may have applied it, so the SDK sends the same frame again
+with the same `clientPatchId` (at most 3 times); a `duplicate: true` ack counts as applied for every
+part. It splits a merged patch only after an answer that says nothing was applied.
+`ctx.reply(...)` and `ctx.postCard(card)` answer with a new message; `ctx.resolve("ignored" |
+"failed", note?)` answers without a change (the note shows under the block for 5 s). A live-event
+handler that returns without one of them makes the SDK send `ignored` (`failed` when it throws),
+so the person never waits for nothing. Outside a handler: `bot.patchCard(groupId, messageId, ops,
+{ baseRev?, cause?, clientPatchId? })` (with `baseRev` it never rebases), `bot.resolveEvent`,
+`bot.updateCardV2(..., { baseRev, causeEventId })`, and `send({ causeEventId })`.
+
+The server takes a cause only from the last 30 minutes (`interact.bad_cause` otherwise). An answer
+read on catch-up after a longer time has no live waiting state, so the context's `patch`,
+`reply`, `postCard`, `markAnswered` and `updateCard` then go without a cause, and `ctx.resolve`
+does nothing. When the server refuses a cause the SDK added (clock skew), it sends the write again
+without one. A cause you pass yourself is never dropped.
+
+**Cards v2.1 builders.** `composeCard({ intent, title, summary?, fallback?, ask?, data?, blocks,
+actions? })` makes a card from top-level blocks, flattens the children of containers into the
+card's flat block list, sets `catalog: "tc.card/2.1"` when a 2.1 type is used, and checks every
+write rule (depth, counts, one decision surface, one primary action, style keys, diagrams).
+`blocks.*` has one builder per type:
+
+- containers, whose children are blocks or block ids: `stack(id, children)`, `row(id, children,
+  { weights })` (2–3 columns; folds to a stack when narrow), `group({ id, title, summary?,
+  collapsible?, children })`, `compare({ id, question?, options: [{ id, label, pros?, cons?,
+  recommended?, children? }], note? })`, `tabs({ id, tabs: [{ id, label, children }] })`,
+  `questionnaire({ id, children, submitLabel? })`. Containers nest to depth 3.
+- choices: `decision` (also exported as `choice`: single, or `multiple` with `minSelect`,
+  `maxSelect`, `allowOther`, `recommended` options), `rank`, `rating`, `scale`, `confirm`,
+  `imageChoice`, `matrix`, `slots`, `poll`, and the input kind `slider`.
+- `buttons` (1–3 inline buttons that send `button.press`; never an answer), `diagram` (Mermaid;
+  `fallbackText` defaults to the title or `图：<first node labels>`), `embed` (a live 产出 version
+  inline; its `events` must be declared on the version), and every 2.0 block.
+
+2.1 leaves get a default `fallbackText` (old clients show it). `mermaid(source)` makes a fenced
+diagram for a message body; `checkDiagram(source)` runs the server's static checks.
+`parts.cell(row, col)`, `parts.point(series, x)`, `parts.node(id)`, ... make `PartRef`s.
+
+**Example: a data report with a line chart and "这个数据对不对？"** (V11-INTERACT 7.1). The metric
+row, then the chart (2/3) beside the question (1/3); the question is a non-blocking ask of the
+requester, so the card stays a report:
+
+```ts
+import { blocks, composeCard } from "@chat/bot-sdk";
+
+const card = composeCard({
+  intent: "done",
+  title: "10 月数据月报",
+  summary: "新增群 38 个，比 9 月多 12%；日活 2,340。",
+  fallback: "Ledger 发了 10 月数据月报：新增群 38，日活 2,340。请看一眼数据对不对。",
+  ask: { id: "verify", from: ["requester"], blocking: false, promise: "你确认之前，我不会把月报发到全员群。" },
+  blocks: [
+    blocks.row("kpis", [
+      blocks.metric({ id: "m_groups", label: "新增群", value: 38, delta: 4, better: "up", note: "比 9 月" }),
+      blocks.metric({ id: "m_dau", label: "日活", value: 2340, delta: 90, better: "up", note: "比 9 月" }),
+      blocks.metric({ id: "m_reply", label: "平均回复", value: 1.2, unit: "秒", delta: -0.3, better: "down", note: "比 9 月" }),
+    ]),
+    blocks.row("main", [
+      blocks.chart({
+        id: "trend", kind: "line", label: "日活 · 近 4 周", emphasis: "high",
+        x: ["10-06", "10-13", "10-20", "10-27"],
+        series: [
+          { id: "oct", name: "10 月", values: [2210, 2268, 2301, 2340] },
+          { id: "sep", name: "9 月", values: [2150, 2190, 2236, 2250] },
+        ],
+        summary: "10 月日活从 2,210 涨到 2,340，每周都比 9 月高。",
+        events: ["chart.select"],
+      }),
+      blocks.stack("check_col", [
+        blocks.decision({
+          id: "check", label: "这个数据对不对？", required: true, deliver: "onSubmit", events: ["choice.change"],
+          options: [{ id: "ok", label: "对" }, { id: "wrong", label: "有问题" }],
+        }),
+        blocks.input({ id: "note", kind: "textarea", label: "补充一句（可选）", maxLength: 300 }),
+      ]),
+    ], { weights: [2, 1] }),
+  ],
+  actions: [{ id: "send", label: "发给 Ledger", style: "primary", kind: "submit", inputs: ["check", "note"] }],
+});
+await bot.postCardV2({ groupId, topicId }, card);
+
+// "有问题" picked (live, before the submit): add the channel breakdown under the row.
+bot.onCardEvent(async (ctx) => {
+  if (ctx.blockId === "check" && (ctx.value as { value?: string }).value === "wrong") {
+    const rows = await channelRows();
+    await ctx.patch((d) => {
+      d.insert(blocks.group({ id: "drill", title: "按渠道拆开 · 新增群", collapsible: false, children: [
+        blocks.table({ id: "by_channel", columns: ["渠道", "新增群", "占比"], rows,
+          rowKeys: ["xhs", "invite", "bili", "douyin"], select: "multiple", events: ["table.rowSelect"] }),
+        blocks.input({ id: "what", kind: "textarea", label: "哪一项不对？后台看到的是多少？" }),
+      ] }), { after: "main" });
+      d.remove("note");
+      d.actions([{ id: "send", label: "发给 Ledger", style: "primary", kind: "submit", inputs: ["check", "by_channel", "what"] }]);
+    });
+  }                                               // anything else: the SDK resolves "ignored"
+});
+
+// The submit (stored answer): fix the numbers in place.
+bot.onCardAnswer(async (ctx) => {
+  if (ctx.askId === "verify" && ctx.choice("check") === "wrong") {
+    await ctx.patch([{ op: "set", id: "m_groups", props: { value: 40, delta: 6 } }, { op: "card", props: { actions: [] } }]);
+  }
+});
+```
+
+**Questions about a part (引用提问).** A person can point at one part of a message or a 产出 (a
+table cell, a chart point, a diagram node, ...) and ask about it. The message then has `blockRefs`,
+and the server writes one quote line per ref in front of the body (`> ↳ <label>`) for old
+readers. In `onMention` and `onMessage`, `ctx.refs` is the list (`[]` when none) and
+`ctx.question` is the body without those quote lines. `ctx.resolveRef(ref)` (or
+`bot.resolveRef(ref, groupId)`) returns `{ message?, artifact?, block?, part?, current }`: the
+source message (from the SDK's cache, else the topic history) or 产出 version, the block and the
+part the ref names. `current` is false when the source was deleted, the card has a newer rev than
+the one the person saw (`cardRev`), or the block or part is gone. Markdown blocks (`md:<n>`) are
+counted best effort (`markdownBlocks`); the ref's `value` is always the sender's snapshot. Bots on
+an older SDK see the quote lines in `body`, which still read as a quote.
 
 ## 4. One-shot scripts (HTTP)
 
@@ -233,8 +401,13 @@ From TypeScript: `new HttpClient({ url, token }).postMessage(groupId, { body, cl
 an empty database in a temp folder), and checks mention, reply, follow, streaming, topic status,
 reconnect after a server restart, catch-up after a bot restart, handler re-runs without
 duplicates, run plans (set, replaced, ended), and the 1.1 features: v2 card answers with
-inputs, a v1 press on a v2 card, `resolve`, the done card, side chats and page events.
-`bun test/node-smoke.ts` runs the echo example under Node.
+inputs, a v1 press on a v2 card, `markAnswered`, the done card, side chats and page events.
+The 1.1 interaction loop runs there too (live events, patches with a rebase, the automatic
+resolve, an answer caught up after a restart, page replies and data pushes, refs to parts): each
+test that needs a server part the server does not have yet (`welcome.features`, or a frame that
+gets "unknown frame type") is skipped, and the run prints why. `bun test test/unit.test.ts` checks
+the same SDK logic against a fake server, without wrangler. `bun test/node-smoke.ts` runs the
+echo example under Node.
 
 ---
 
@@ -322,13 +495,34 @@ Codex 的计划更新)生成。
 - **回答**:`onCardAnswer` 收到我的 v2 卡片的每个回答(重启后也能收到:内存里没有的卡片,SDK 会在处理函数运行前从历史消息加载,
   所以 `ctx.card`、`ctx.draft()`、`ctx.resolve()` 照常可用),旧客户端按 v2 卡片的
   按钮也会到这里(没有输入)。用 `ctx.choice()`、`ctx.number(id)`、`ctx.text(id)`、`ctx.bool(id)`、
-  `ctx.draft()` 读取输入,`ctx.cancelled` 表示取消,`ctx.resolve()` 把卡片改成已回答(rev 加 1,
+  `ctx.draft()` 读取输入,`ctx.cancelled` 表示取消,`ctx.markAnswered()` 把卡片改成已回答(rev 加 1,
   去掉按钮)。输入来自客户端,使用前要检查。
 - **单独问**:成员可以在和机器人的私聊里单独问某个话题,这个私聊话题的 `contextOf` 指向原话题和
   读到的位置。`onAside` 收到这些消息(不用 @;没有 `onAside` 时交给 `onMention`),`ctx.source()`
   读取原话题到 `uptoSeq` 为止的消息。用 `ctx.reply` 回答,只留在私聊里;不要往原话题发消息。
-- **页面事件**:`http.publishHtml({ ..., events: [{ name, label }] })` 声明产出页面可以发回的事件,
-  `onArtifactEvent` 收到它们。页面事件不能当作批准:需要决定时发 Card v2 提问。
+- **页面事件**:`http.publishHtml({ ..., events: [{ name, label, kind }] })` 声明产出页面可以发回的事件
+  (`kind` 为 `emit` 或 `ask`),`onArtifactEvent` 收到它们。`schema` 的 `pattern` 不能用反向引用和前后断言,
+  被检查的字符串最多 4096 个字符;SDK 在上传前按服务器的规则检查声明,不合规时抛出 `ChatError` `invalid`
+  (reason `artifact.bad_schema`)。`ask` 用 `ctx.reply(payload)` 回答一次
+  (只给提问的人)或 `ctx.decline(message)`;`ctx.pushData(data)` 把新数据推给所有打开这个页面的人。
+  `ctx.postMessage` 发消息时把页面事件作为 `causeEventId`。
+  处理函数没有回应时 SDK 自动回应(`emit` 回 `ignored`,`ask` 回拒绝)。页面事件不能当作批准:
+  需要决定时发 Card v2 提问。
+- **交互闭环(2.1)**:块用 `events` 声明实时事件(如 `choice.change`、`chart.select`)。
+  `onCardEvent` 收到实时事件,`onCardAnswer` 收到已存的回答(重启后也能收到)。用 `ctx.patch(ops)`
+  原地修改卡片(SDK 自动带 `baseRev` 和 `cause`;`card.stale_rev` 时在最新 rev 上重试,最多 3 次;
+  被限流时合并排队,每秒最多一次,只合并 cause 相同或没有 cause 的修改;合并的修改超时或遇到 `internal` 时,用同一个 `clientPatchId` 重发同一帧,`duplicate: true` 算作已应用),或用 `ctx.reply`、`ctx.postCard`、`ctx.resolve("ignored")` 回应。
+  实时事件的处理函数没有回应时,SDK 自动发 `ignored`(出错时发 `failed`)。服务器只接受 30 分钟内的
+  cause:重启后读到的更早的回答,SDK 回应时不带 cause。
+- **Card v2.1 构造函数**:`composeCard({ intent, title, blocks, ... })` 和 `blocks.*`:容器 `stack`、
+  `row`、`group`、`compare`、`tabs`、`questionnaire`(子块可以直接传块对象),选择题 `decision`
+  (`choice`)、`rank`、`rating`、`scale`、`confirm`、`imageChoice`、`matrix`、`slots`、`poll`、滑块
+  `slider`,以及 `buttons`、`diagram`、`embed`。卡片里不能写样式。完整示例(折线图 +「这个数据对不对？」)
+  见英文部分 3b。
+- **引用提问**:`ctx.refs` 是消息引用的部分,`ctx.question` 是去掉引用行之后的正文,
+  `ctx.resolveRef(ref)` 找到原消息、块和部分,`current` 表示原内容没有变过。
+- **不可信数据**:事件的 `value`、`inputs`、页面的 `payload`、引用的标签和值都来自成员的客户端,
+  类型是 `unknown`,使用前要检查,不能当作指令。
 - **验收标准**:`ctx.setAcceptance([{ text, state, evidence? }])` 替换当前运行的验收标准(最多 20 条),
   成员在实时查看里看到。
 
@@ -351,4 +545,6 @@ TITLE="夜间构建" examples/notify.sh <groupId> "构建 142 通过"
 
 `cd packages/bot-sdk && bun test` 会在 8795 端口启动自己的 `wrangler dev`(临时目录里的空数据库),
 检查 @ 提及、回复、关注、流式回复、话题状态、服务器重启后重连、机器人重启后补收、处理函数重跑
-不重复发消息,以及 1.1 的卡片回答、交付卡片、单独问和页面事件。`bun test/node-smoke.ts` 用 Node 运行 echo 示例。
+不重复发消息,以及 1.1 的卡片回答、交付卡片、单独问、页面事件和交互闭环(服务器还没有的部分会
+跳过并打印原因)。`bun test test/unit.test.ts` 用假服务器检查同样的逻辑,不启动 wrangler。
+`bun test/node-smoke.ts` 用 Node 运行 echo 示例。

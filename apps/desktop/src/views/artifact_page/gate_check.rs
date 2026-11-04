@@ -286,10 +286,9 @@ impl Render for QuietPage {
             ),
         )
         .capabilities(Capabilities {
-            get_data: false,
-            emit_event: true,
+            emit: true,
+            ..Capabilities::NONE
         });
-        let provider = self.provider.clone();
         let page = WebEmbed::new("quiet-page", spec)
             .height(px(QUIET_HEIGHT))
             .rounded(theme::radius::LG)
@@ -299,16 +298,18 @@ impl Render for QuietPage {
                     name,
                     payload,
                     user_action,
+                    reply_id,
                 } = event
                 {
                     PROBE.with(|p| p.borrow_mut().seen.push(*user_action));
                     super::forward_page_event(
-                        &provider,
+                        crate::views::artifacts::host::PageRef::Window(d::ART_REPORT.into()),
                         d::ART_REPORT,
                         *version,
                         name,
                         payload,
                         *user_action,
+                        reply_id.clone(),
                         cx,
                     );
                 }

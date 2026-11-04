@@ -273,27 +273,42 @@ async fn run_with_machine(
         )
         .await?;
     check!(answered["ok"] == true, "card answer refused: {answered}");
+    // A 1.1.0 daemon takes the typed `run.answer` (machine-protocol "Interaction loop");
+    // an older one gets `run.input` with `answer` and the text fallback.
     let input = m
-        .frame("run.input with the answer", |f| {
-            f["t"] == "run.input" && f["runId"] == run_id.as_str()
+        .frame("run.answer or run.input with the answer", |f| {
+            (f["t"] == "run.answer" || f["t"] == "run.input") && f["runId"] == run_id.as_str()
         })
         .await?;
-    check!(
-        input["answer"]["messageId"] == card_id.as_str(),
-        "run.input without the answer: {input}"
-    );
-    check!(
-        input["answer"]["actionId"] == "submit",
-        "wrong action: {input}"
-    );
-    check!(
-        input["answer"]["inputs"]["which"] == "o2",
-        "wrong inputs: {input}"
-    );
-    check!(
-        input["text"].as_str().is_some_and(|t| t.contains("去重")),
-        "text fallback lacks the choice: {input}"
-    );
+    if input["t"] == "run.answer" {
+        check!(
+            input["source"]["kind"] == "card" && input["source"]["messageId"] == card_id.as_str(),
+            "run.answer without the card: {input}"
+        );
+        check!(input["actionId"] == "submit", "wrong action: {input}");
+        check!(input["inputs"]["which"] == "o2", "wrong inputs: {input}");
+        check!(
+            input["actor"]["id"] == a.id.as_str(),
+            "run.answer without the answerer: {input}"
+        );
+    } else {
+        check!(
+            input["answer"]["messageId"] == card_id.as_str(),
+            "run.input without the answer: {input}"
+        );
+        check!(
+            input["answer"]["actionId"] == "submit",
+            "wrong action: {input}"
+        );
+        check!(
+            input["answer"]["inputs"]["which"] == "o2",
+            "wrong inputs: {input}"
+        );
+        check!(
+            input["text"].as_str().is_some_and(|t| t.contains("去重")),
+            "text fallback lacks the choice: {input}"
+        );
+    }
     let twice = ra
         .request(
             json!({ "t": "card.answer", "groupId": g, "messageId": card_id, "rev": 1,
@@ -304,7 +319,7 @@ async fn run_with_machine(
         twice["ok"] != true,
         "a second answer to the same rev must be refused: {twice}"
     );
-    c.note("card answer reached the run as run.input");
+    c.note("card answer reached the run as a typed answer");
 
     // 4. The run ends: one done card with proof; usage and duration are kept.
     let result = "修好了：重连后不再重复推送。\ntest result: ok. 12 passed; 0 failed";

@@ -1,0 +1,24 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "at most one placement",
+  "value": {
+    "t": "card.patch",
+    "rid": "b10",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "baseRev": 1,
+    "ops": [
+      {
+        "op": "insert",
+        "after": "a",
+        "index": 0,
+        "block": {
+          "id": "z",
+          "type": "text",
+          "text": "z"
+        }
+      }
+    ]
+  }
+}

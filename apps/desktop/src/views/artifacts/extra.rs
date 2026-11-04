@@ -22,7 +22,7 @@ impl MessageExtra for ArtifactRefsExtra {
         &self,
         message: &Message,
         ctx: &ExtrasContext,
-        _window: &mut Window,
+        window_: &mut Window,
         cx: &mut App,
     ) -> Option<AnyElement> {
         if message.artifact_refs.is_empty() {
@@ -36,6 +36,12 @@ impl MessageExtra for ArtifactRefsExtra {
                 ctx.provider
                     .request_artifact(&message.group_id, &message.topic_id, &r.artifact_id);
             }
+            // --- v11/media: a preview of what the version holds, in place of the file row ---
+            if let Some(el) = media_preview(message, r, detail.as_ref(), ctx, index, window_, cx) {
+                list = list.child(el);
+                continue;
+            }
+            // --- end v11/media ---
             let opening = window::is_opening(&r.artifact_id, cx);
             let (title, meta, icon) = match &detail {
                 Some(d) => {
@@ -150,3 +156,89 @@ impl MessageExtra for ArtifactRefsExtra {
         Some(list.into_any_element())
     }
 }
+
+// --- v11/media ---
+/// The inline media preview of one reference, when its version holds something the app
+/// can show (`views/media`). `None` keeps the file row.
+fn media_preview(
+    message: &Message,
+    r: &crate::data::ArtifactRef,
+    detail: Option<&crate::data::ArtifactDetail>,
+    ctx: &ExtrasContext,
+    index: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<AnyElement> {
+    use crate::views::media::{self, MediaFile, inline, state::Target, store::MediaKey};
+    let d = detail?;
+    let v = d.versions.iter().find(|v| v.version == r.version)?;
+    if v.entry.is_empty() {
+        return None;
+    }
+    let files: Vec<MediaFile> = v
+        .files
+        .iter()
+        .map(|f| MediaFile {
+            path: f.path.clone(),
+            size: f.size,
+            mime: f.mime.clone(),
+        })
+        .collect();
+    // inc-host (R9): the sender's metadata decides the kind when it came with the version;
+    // receivers compute nothing.
+    let sent = ctx.provider.artifact_media(&r.artifact_id, r.version);
+    let kind = sent
+        .as_ref()
+        .and_then(|m| media::poster::local_kind(m.kind))
+        .unwrap_or_else(|| media::classify(&v.entry, &files));
+    let key = if message.id.is_empty() {
+        &message.client_msg_id
+    } else {
+        &message.id
+    };
+    let spec = inline::InlineSpec {
+        key: MediaKey::new(r.artifact_id.clone(), r.version),
+        kind,
+        title: d.summary.title.clone(),
+        bytes: files.iter().map(|f| f.size).sum(),
+        target: Target {
+            provider: Some(ctx.provider.clone()),
+            group_id: message.group_id.clone(),
+            topic_id: message.topic_id.clone(),
+        },
+        id: SharedString::from(format!("media-{key}-{index}")),
+    };
+    // inc-host (R9): the sender's preview state. 正在生成预览 until `artifact.previewReady`;
+    // 预览失败 · 用系统应用打开 when the sender could not make one.
+    match sent.as_ref().map(|m| m.preview) {
+        Some(chat_core::proto::MediaPreview::Pending) if kind != media::MediaKind::Html => {
+            let lead = if kind == media::MediaKind::Video {
+                media::states::Lead::Blank
+            } else {
+                media::states::Lead::Icon(kind.icon())
+            };
+            return Some(
+                media::states::row(
+                    SharedString::from(format!("{}-pending", spec.id)),
+                    lead,
+                    spec.title.clone(),
+                    &media::states::Status::Generating {
+                        duration: sent
+                            .as_ref()
+                            .and_then(|m| m.duration.as_ref())
+                            .and_then(|d| d.as_f64()),
+                    },
+                    None,
+                    cx,
+                )
+                .into_any_element(),
+            );
+        }
+        Some(chat_core::proto::MediaPreview::Failed) => {
+            return Some(media::states::failed_row(&spec, cx).into_any_element());
+        }
+        _ => {}
+    }
+    inline::render(&spec, window, cx)
+}
+// --- end v11/media ---

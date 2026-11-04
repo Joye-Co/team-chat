@@ -636,7 +636,10 @@ impl ProcessView {
             }),
             RunEvent::Acceptance { items } => self.acceptance = Some(items.clone()),
             RunEvent::Paused { paused, by } => self.paused = Some((*paused, by.clone())),
-            RunEvent::InputAccepted { .. } | RunEvent::Plan { .. } | RunEvent::Unknown => {}
+            RunEvent::InputAccepted { .. }
+            | RunEvent::Plan { .. }
+            | RunEvent::Output { .. }
+            | RunEvent::Unknown => {}
         }
     }
 }

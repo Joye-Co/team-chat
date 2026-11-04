@@ -14,6 +14,7 @@ use crate::proto::{
     SendResult, ServerFrame, TopicFollowFrame, TopicState, TopicUpdateFrame, TransientEvent,
     TypingEvent, TypingFrame, WelcomeFrame,
 };
+use crate::proto::{CARD_CATALOGS, CLIENT_FEATURES, CardEventFrame};
 use crate::store::{ApplyOutcome, LogEntry, OutboxOp, OutboxState, PendingRead};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -92,8 +93,101 @@ pub(crate) enum Command {
         message_id: String,
         append: String,
     },
+    /// 1.1: a live write (card event, page event) that is never queued: it is sent now or
+    /// fails at once with reason `client.offline`.
+    Live {
+        frame: Box<ClientFrame>,
+        what: LiveWrite,
+    },
     ReconnectNow,
     Stop,
+}
+
+/// What a live write was, so its ack reaches the right `ClientUpdate`.
+#[derive(Debug, Clone)]
+pub(crate) enum LiveWrite {
+    Card {
+        client_event_id: String,
+        message_id: String,
+    },
+    Artifact {
+        client_event_id: String,
+        artifact_id: String,
+        version: u32,
+    },
+}
+
+/// The ack target of a card answer or card event outbox row (`CardEventAcked`).
+fn card_live_write(id: &str, op: &OutboxOp) -> Option<LiveWrite> {
+    match op {
+        OutboxOp::CardAnswer { message_id, .. } => Some(LiveWrite::Card {
+            client_event_id: id.to_string(),
+            message_id: message_id.clone(),
+        }),
+        OutboxOp::CardEvent {
+            message_id,
+            client_event_id,
+            ..
+        } => Some(LiveWrite::Card {
+            client_event_id: client_event_id.clone(),
+            message_id: message_id.clone(),
+        }),
+        _ => None,
+    }
+}
+
+/// The error a live write gets when it never left this client.
+pub(crate) fn offline_error() -> ErrorBody {
+    ErrorBody {
+        code: ErrorCode::Internal,
+        message: "not connected".into(),
+        reason: Some("client.offline".into()),
+    }
+}
+
+/// Emits the ack of a live write or of a durable card event.
+pub(crate) fn emit_live_ack(
+    shared: &Shared,
+    what: LiveWrite,
+    result: Result<Option<serde_json::Value>, ErrorBody>,
+) {
+    let bad_result = || ErrorBody {
+        code: ErrorCode::Internal,
+        message: "ack without a valid result".into(),
+        reason: None,
+    };
+    match what {
+        LiveWrite::Card {
+            client_event_id,
+            message_id,
+        } => {
+            let result = result.and_then(|v| {
+                v.and_then(|v| serde_json::from_value(v).ok())
+                    .ok_or_else(bad_result)
+            });
+            shared.emit(ClientUpdate::CardEventAcked {
+                client_event_id,
+                message_id,
+                result,
+            });
+        }
+        LiveWrite::Artifact {
+            client_event_id,
+            artifact_id,
+            version,
+        } => {
+            let result = result.and_then(|v| {
+                v.and_then(|v| serde_json::from_value(v).ok())
+                    .ok_or_else(bad_result)
+            });
+            shared.emit(ClientUpdate::ArtifactEventAcked {
+                client_event_id,
+                artifact_id,
+                version,
+                result,
+            });
+        }
+    }
 }
 
 enum ConnectError {
@@ -175,6 +269,7 @@ pub(crate) async fn run(
         };
         let mut session = Session::new(shared.clone(), &config, fetch_limit, history_limit);
         let end = session.run(ws, &mut cmds, &mut backoff).await;
+        session.fail_live();
         if session.too_large {
             fetch_limit = (fetch_limit / 4).max(1);
             history_limit = (history_limit / 4).max(1);
@@ -241,6 +336,7 @@ async fn wait(
                 None | Some(Command::Stop) => return WaitEnd::Stop,
                 Some(Command::ReconnectNow) => return WaitEnd::Now,
                 Some(Command::Search { rid, .. }) => fail_search(shared, rid),
+                Some(Command::Live { what, .. }) => emit_live_ack(shared, what, Err(offline_error())),
                 Some(_) => {}
             }
         }
@@ -302,6 +398,7 @@ enum Pending {
     Search {
         rid: String,
     },
+    Live(LiveWrite),
 }
 
 #[derive(Default)]
@@ -324,6 +421,9 @@ struct Session {
     next_rid: u64,
     pending: HashMap<String, (Pending, Instant)>,
     inflight_outbox: HashSet<String>,
+    /// Card answers and events in flight by outbox id: their ack still reaches subscribers
+    /// when my `card.answered` applied first and removed the row.
+    inflight_cards: HashMap<String, LiveWrite>,
     write_pace: WritePace,
     retry_at: HashMap<String, Instant>,
     /// `internal` answers per outbox row on this session.
@@ -375,6 +475,7 @@ impl Session {
             next_rid: 1,
             pending: HashMap::new(),
             inflight_outbox: HashSet::new(),
+            inflight_cards: HashMap::new(),
             write_pace: WritePace::new(now),
             retry_at: HashMap::new(),
             internal_failures: HashMap::new(),
@@ -420,6 +521,8 @@ impl Session {
             protocol: PROTOCOL_VERSION,
             client: self.client.clone(),
             cursors: Some(cursors),
+            features: Some(CLIENT_FEATURES.iter().map(|f| f.to_string()).collect()),
+            supported_catalogs: Some(CARD_CATALOGS.iter().map(|c| c.to_string()).collect()),
         }));
         let mut tick = tokio::time::interval(TICK);
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -547,8 +650,12 @@ impl Session {
     fn on_command(&mut self, c: Command) {
         if !self.welcomed {
             // Outbox rows and read cursors are in the store and go out after welcome.
-            if let Command::Search { rid, .. } = c {
-                fail_search(&self.shared, rid);
+            match c {
+                Command::Search { rid, .. } => fail_search(&self.shared, rid),
+                Command::Live { what, .. } => {
+                    emit_live_ack(&self.shared, what, Err(offline_error()))
+                }
+                _ => {}
             }
             return;
         }
@@ -611,7 +718,32 @@ impl Session {
                     append,
                 }));
             }
+            Command::Live { mut frame, what } => {
+                let rid = self.rid();
+                match frame.as_mut() {
+                    ClientFrame::CardEvent(f) => f.rid = rid.clone(),
+                    ClientFrame::ArtifactEvent(f) => f.rid = rid.clone(),
+                    _ => {}
+                }
+                self.out.push(*frame);
+                self.track(rid, Pending::Live(what));
+            }
             Command::ReconnectNow | Command::Stop => {}
+        }
+    }
+
+    /// Fails the live writes that have no ack yet (the session ends): they are not resent.
+    fn fail_live(&mut self) {
+        let live: Vec<String> = self
+            .pending
+            .iter()
+            .filter(|(_, (p, _))| matches!(p, Pending::Live(_)))
+            .map(|(rid, _)| rid.clone())
+            .collect();
+        for rid in live {
+            if let Some((Pending::Live(what), _)) = self.pending.remove(&rid) {
+                emit_live_ack(&self.shared, what, Err(offline_error()));
+            }
         }
     }
 
@@ -739,6 +871,8 @@ impl Session {
                     card,
                     card_v2,
                     context,
+                    cause_event_id,
+                    block_refs,
                     ..
                 } => ClientFrame::Send(SendFrame {
                     rid: rid.clone(),
@@ -755,6 +889,8 @@ impl Session {
                     card,
                     card_v2,
                     context,
+                    cause_event_id,
+                    block_refs,
                 }),
                 OutboxOp::Edit {
                     group_id,
@@ -776,6 +912,8 @@ impl Session {
                     artifact_refs,
                     card,
                     card_v2,
+                    base_rev: None,
+                    cause_event_id: None,
                 }),
                 OutboxOp::Delete {
                     group_id,
@@ -853,6 +991,7 @@ impl Session {
                     action_id,
                     inputs,
                     edited_values,
+                    client_event_id: Some(item.id.clone()),
                 }),
                 OutboxOp::ArtifactEvent {
                     group_id,
@@ -866,8 +1005,35 @@ impl Session {
                     group_id,
                     artifact_id,
                     version,
+                    client_event_id: None,
                     name,
+                    kind: None,
                     payload,
+                }),
+                OutboxOp::CardEvent {
+                    group_id,
+                    message_id,
+                    rev,
+                    client_event_id,
+                    block_id,
+                    action_id,
+                    event,
+                    value,
+                    inputs,
+                    part,
+                    ..
+                } => ClientFrame::CardEvent(CardEventFrame {
+                    rid: rid.clone(),
+                    group_id,
+                    message_id,
+                    rev,
+                    client_event_id,
+                    block_id,
+                    action_id,
+                    event,
+                    value,
+                    inputs,
+                    part,
                 }),
             };
             if let Err(e) = self.shared.store.outbox_attempt(&item.id) {
@@ -875,6 +1041,9 @@ impl Session {
             }
             debug!(id = %item.id, kind = item.op.kind(), attempts = item.attempts + 1, "outbox send");
             self.inflight_outbox.insert(item.id.clone());
+            if let Some(w) = card_live_write(&item.id, &item.op) {
+                self.inflight_cards.insert(item.id.clone(), w);
+            }
             self.out.push(frame);
             self.track(rid, Pending::Outbox { id: item.id });
         }
@@ -923,8 +1092,11 @@ impl Session {
                 me,
                 members,
                 groups,
+                features,
                 ..
             }) => {
+                self.shared
+                    .set_server_features(features.unwrap_or_default());
                 let out = match self.shared.store.apply_welcome(&me, &members, &groups) {
                     Ok(o) => o,
                     Err(e) => {
@@ -1036,6 +1208,14 @@ impl Session {
                         };
                         self.shared
                             .emit(ClientUpdate::SearchFailed { rid, code, message });
+                    }
+                    Pending::Live(what) => {
+                        let r = if ok {
+                            Ok(result)
+                        } else {
+                            Err(error.unwrap_or_else(offline_error))
+                        };
+                        emit_live_ack(&self.shared, what, r);
                     }
                 }
             }
@@ -1213,10 +1393,18 @@ impl Session {
         error: Option<ErrorBody>,
     ) -> Option<SessionEnd> {
         self.inflight_outbox.remove(&id);
+        let inflight_card = self.inflight_cards.remove(&id);
         let item = match self.shared.store.outbox_get(&id) {
             Ok(Some(i)) => i,
             // Already removed: its event arrived first, or the UI discarded it.
             _ => {
+                if ok
+                    && result.is_some()
+                    && let Some(what) = inflight_card
+                {
+                    emit_live_ack(&self.shared, what, Ok(result));
+                    return None;
+                }
                 if ok
                     && let Some(r) =
                         result.and_then(|v| serde_json::from_value::<SendResult>(v).ok())
@@ -1231,6 +1419,20 @@ impl Session {
             }
         };
         let group_id = item.op.group_id().to_string();
+        let card_ack = card_live_write(&id, &item.op);
+        if ok {
+            if let Some(what) = card_ack.clone() {
+                // A 1.0 server acks card.answer without a result: no CardEventAcked then.
+                if result.is_some() {
+                    emit_live_ack(&self.shared, what, Ok(result.clone()));
+                }
+            }
+        } else if let Some(what) = card_ack.clone()
+            && let Some(e) = &error
+            && !matches!(e.code, ErrorCode::Internal | ErrorCode::RateLimited)
+        {
+            emit_live_ack(&self.shared, what, Err(e.clone()));
+        }
         if ok {
             self.retry_at.remove(&id);
             match &item.op {
@@ -1271,6 +1473,11 @@ impl Session {
                     topic_id: Some(topic_id),
                     ..
                 }
+                | OutboxOp::CardEvent {
+                    group_id,
+                    topic_id: Some(topic_id),
+                    ..
+                }
                 | OutboxOp::React {
                     group_id,
                     topic_id: Some(topic_id),
@@ -1292,6 +1499,7 @@ impl Session {
         let err = error.unwrap_or(ErrorBody {
             code: ErrorCode::Internal,
             message: String::new(),
+            reason: None,
         });
         let internal_failures = if err.code == ErrorCode::Internal {
             let n = self.internal_failures.entry(id.clone()).or_default();
@@ -1434,6 +1642,19 @@ impl Session {
                 self.shared.transient().append_delta(&message_id, &append);
                 self.shared
                     .emit(ClientUpdate::MessagesChanged { group_id, topic_id });
+            }
+            TransientEvent::CardEvent(e) => self.shared.emit(ClientUpdate::CardEvent(Box::new(e))),
+            TransientEvent::InteractionResolved(e) => {
+                self.shared.emit(ClientUpdate::InteractionResolved(e))
+            }
+            TransientEvent::ArtifactEvent(e) => {
+                self.shared.emit(ClientUpdate::ArtifactEvent(Box::new(e)))
+            }
+            TransientEvent::ArtifactData(e) => {
+                self.shared.emit(ClientUpdate::ArtifactData(Box::new(e)))
+            }
+            TransientEvent::ArtifactReply(e) => {
+                self.shared.emit(ClientUpdate::ArtifactReply(Box::new(e)))
             }
         }
     }

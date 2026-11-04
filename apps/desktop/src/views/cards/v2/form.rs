@@ -21,6 +21,14 @@ pub enum Val {
     Text(String),
     Choice(Vec<String>),
     Switch(bool),
+    // --- inc-cards21: 2.1 inputs ---
+    /// A rank: item ids in order.
+    Order(Vec<String>),
+    /// A rating, a scale or a slider.
+    Num(f64),
+    /// A matrix: row id → column id.
+    Rows(BTreeMap<String, String>),
+    // --- end inc-cards21 ---
 }
 
 /// The viewer's values by block id.
@@ -69,6 +77,9 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
     let mut out = Vec::new();
     for block in card.all_blocks() {
         match block {
+            CardV2Block::Decision { .. } if super::super::v21::is_21(card) => {
+                out.extend(super::super::v21::form21::problem(card, block, values));
+            }
             CardV2Block::Decision { id, .. } => {
                 if choice_of(values, id).is_empty() {
                     out.push(Problem::Missing(String::new()));
@@ -98,7 +109,7 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
                 }
                 let text = text_of(values, id);
                 let bad = match kind {
-                    InputKind::Number => match number(text) {
+                    InputKind::Number | InputKind::Slider => match number(text) {
                         None => true,
                         Some(v) => f(min).is_some_and(|m| v < m) || f(max).is_some_and(|m| v > m),
                     },
@@ -116,7 +127,9 @@ pub fn problems(card: &CardV2, values: &Values) -> Vec<Problem> {
                     out.push(Problem::Invalid(label.clone()));
                 }
             }
-            _ => {}
+            // --- inc-cards21 ---
+            b => out.extend(super::super::v21::form21::problem(card, b, values)),
+            // --- end inc-cards21 ---
         }
     }
     out
@@ -137,6 +150,11 @@ pub fn missing_labels(problems: &[Problem]) -> Vec<String> {
 /// Decisions send one option id (an array with `multiple`); chips an array;
 /// select one id; switch a bool; number a number; the rest text.
 pub fn to_inputs(card: &CardV2, values: &Values) -> Option<AnswerInputs> {
+    // --- inc-cards21: 2.1 cards send the CARD21 §4 shapes ---
+    if super::super::v21::is_21(card) {
+        return super::super::v21::form21::to_inputs(card, values, None);
+    }
+    // --- end inc-cards21 ---
     let mut out = BTreeMap::new();
     for block in card.all_blocks() {
         match block {
@@ -265,6 +283,18 @@ pub struct Preset {
     pub editing: bool,
     /// Expand the answer record.
     pub expanded: bool,
+    /// inc-cards21: the rev the viewer saw before (screenshot scenes of a new rev).
+    pub prev: Option<std::sync::Arc<CardV2>>,
+    /// v11/pb-cards: blocks whose typed text a new rev kept (内容变了 · 用新的).
+    pub drafts_kept: Vec<&'static str>,
+}
+
+/// v11/pb-cards: the picked values of one block at one moment.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct FormSnap {
+    choices: Vec<(String, Vec<String>)>,
+    switches: Vec<(String, bool)>,
+    other: Vec<(String, Val)>,
 }
 
 /// The viewer's work on one card.
@@ -279,6 +309,8 @@ pub struct CardForm {
     pub editing: Option<u32>,
     /// The answer record is expanded (展开).
     pub expanded: bool,
+    /// inc-cards21: rank orders, numbers and matrix rows.
+    other: HashMap<String, Val>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -304,10 +336,10 @@ impl CardForm {
                 Val::Switch(b) => {
                     switches.insert(k.clone(), *b);
                 }
-                Val::Text(_) => {}
+                Val::Text(_) | Val::Order(_) | Val::Num(_) | Val::Rows(_) => {}
             }
         }
-        Self {
+        let mut s = Self {
             rev: card.rev,
             choices,
             switches,
@@ -315,14 +347,170 @@ impl CardForm {
             initial,
             editing,
             expanded,
+            other: HashMap::new(),
             _subscriptions: Vec::new(),
+        };
+        for (k, v) in &s.initial {
+            if let Val::Order(_) | Val::Num(_) | Val::Rows(_) = v {
+                s.other.insert(k.clone(), v.clone());
+            }
         }
+        s
     }
 
     /// Starts over for a newer rev of the card.
     pub fn reset(&mut self, card: &CardV2) {
         *self = Self::new(card, None);
     }
+
+    // --- inc-cards21: local values survive revs (INTERACT §4.4) ---
+
+    /// Moves to a newer rev and keeps what the viewer chose or typed for every block that
+    /// still exists (choices only when their option ids still exist). A block replaced by
+    /// another type starts over.
+    ///
+    /// v11/pb-cards: a typed text the viewer did not change follows a block the rev
+    /// changed; an edited one stays, and its block id is returned (内容变了 · 用新的).
+    pub fn rebase(&mut self, old: &CardV2, card: &CardV2, cx: &mut Context<Self>) -> Vec<String> {
+        let same_type = |id: &str| {
+            matches!((old.block(id), card.block(id)), (Some(a), Some(b))
+                if a.type_name() == b.type_name())
+        };
+        let changed = |id: &str| old.block(id) != card.block(id);
+        let ids = |id: &str| super::super::v21::form21::option_ids(card, id);
+        self.choices.retain(|k, v| {
+            let base = k.split('#').next().unwrap_or(k);
+            same_type(base) && ids(base).is_none_or(|known| v.iter().all(|o| known.contains(o)))
+        });
+        self.switches.retain(|k, _| same_type(k));
+        self.fields
+            .retain(|k, _| same_type(k.split('#').next().unwrap_or(k)));
+        self.other.retain(|k, _| same_type(k));
+        let fresh = defaults(card);
+        // Texts of changed blocks: an untouched one takes the new text, an edited one stays.
+        let mut kept = Vec::new();
+        let touched: Vec<String> = self
+            .fields
+            .keys()
+            .filter(|k| changed(k.split('#').next().unwrap_or(k)))
+            .cloned()
+            .collect();
+        for k in touched {
+            let text = self.fields.get(&k).map(|f| f.text(cx)).unwrap_or_default();
+            let was = match self.initial.get(&k) {
+                Some(Val::Text(t)) => t.clone(),
+                _ => String::new(),
+            };
+            if text == was {
+                self.fields.remove(&k);
+                match fresh.get(&k) {
+                    Some(v) => self.initial.insert(k.clone(), v.clone()),
+                    None => self.initial.remove(&k),
+                };
+            } else {
+                let base = k.split('#').next().unwrap_or(&k).to_string();
+                if !kept.contains(&base) {
+                    kept.push(base);
+                }
+            }
+        }
+        for (k, v) in fresh {
+            if !self.initial.contains_key(&k) || !same_type(&k) {
+                self.initial.insert(k, v);
+            }
+        }
+        self.initial
+            .retain(|k, _| card.block(k.split('#').next().unwrap_or(k)).is_some());
+        self.rev = card.rev;
+        cx.notify();
+        kept
+    }
+
+    /// v11/pb2-cards: true while the viewer holds a text of `block` (a field of it is
+    /// drawn and not dropped by 用新的 or a rebase).
+    pub fn holds_text(&self, block: &str) -> bool {
+        self.fields
+            .keys()
+            .any(|k| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#')))
+    }
+
+    /// v11/pb-cards: 用新的: drops the viewer's text of `block` for the card's new one.
+    pub fn use_new(&mut self, card: &CardV2, block: &str, cx: &mut Context<Self>) {
+        let mine =
+            |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        self.fields.retain(|k, _| !mine(k));
+        self.initial.retain(|k, _| !mine(k));
+        for (k, v) in defaults(card) {
+            if mine(&k) {
+                self.initial.insert(k, v);
+            }
+        }
+        cx.notify();
+    }
+
+    /// A 2.1 value (rank order, number, matrix rows).
+    pub fn value21(&self, block: &str) -> Option<&Val> {
+        self.other.get(block)
+    }
+
+    pub fn set_value21(&mut self, block: &str, v: Val, cx: &mut Context<Self>) {
+        self.other.insert(block.to_string(), v);
+        cx.notify();
+    }
+
+    /// Sets the whole choice of `block` (a matrix row, a table selection).
+    pub fn set_choice(&mut self, block: &str, ids: Vec<String>, cx: &mut Context<Self>) {
+        self.choices.insert(block.to_string(), ids);
+        cx.notify();
+    }
+    // --- end inc-cards21 ---
+
+    // --- v11/pb-cards: undo an optimistic pick (INTERACT §4.4) ---
+
+    /// The chosen, switched and 2.1 values of `block` (its own key and `block#…`), not its
+    /// typed text.
+    pub fn snap(&self, block: &str) -> FormSnap {
+        let mine =
+            |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        let mut s = FormSnap {
+            choices: self
+                .choices
+                .iter()
+                .filter(|(k, _)| mine(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+            switches: self
+                .switches
+                .iter()
+                .filter(|(k, _)| mine(k))
+                .map(|(k, v)| (k.clone(), *v))
+                .collect(),
+            other: self
+                .other
+                .iter()
+                .filter(|(k, _)| mine(k))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect(),
+        };
+        s.choices.sort();
+        s.switches.sort();
+        s.other.sort_by(|a, b| a.0.cmp(&b.0));
+        s
+    }
+
+    /// Puts back what [`snap`](Self::snap) took for `block`.
+    pub fn restore(&mut self, block: &str, snap: &FormSnap, cx: &mut Context<Self>) {
+        let mine =
+            |k: &String| k == block || k.strip_prefix(block).is_some_and(|r| r.starts_with('#'));
+        self.choices.retain(|k, _| !mine(k));
+        self.switches.retain(|k, _| !mine(k));
+        self.other.retain(|k, _| !mine(k));
+        self.choices.extend(snap.choices.iter().cloned());
+        self.switches.extend(snap.switches.iter().cloned());
+        self.other.extend(snap.other.iter().cloned());
+        cx.notify();
+    }
+    // --- end v11/pb-cards ---
 
     pub fn choice(&self, block: &str) -> &[String] {
         self.choices.get(block).map(Vec::as_slice).unwrap_or(&[])
@@ -345,6 +533,12 @@ impl CardForm {
 
     pub fn switch(&self, block: &str) -> bool {
         self.switches.get(block).copied().unwrap_or(false)
+    }
+
+    /// inc-cards21: sets a switch (a confirm's yes or no).
+    pub fn toggle_switch_to(&mut self, block: &str, value: bool, cx: &mut Context<Self>) {
+        self.switches.insert(block.to_string(), value);
+        cx.notify();
     }
 
     pub fn toggle_switch(&mut self, block: &str, cx: &mut Context<Self>) {
@@ -427,6 +621,9 @@ impl CardForm {
         }
         for (k, f) in &self.fields {
             v.insert(k.clone(), Val::Text(f.text(cx)));
+        }
+        for (k, x) in &self.other {
+            v.insert(k.clone(), x.clone());
         }
         v
     }
@@ -526,5 +723,61 @@ mod tests {
         assert!(valid_date("2026-11-10"));
         assert!(!valid_date("2026-13-01"));
         assert!(!valid_date("11/10"));
+    }
+
+    // v11/pb-cards: a rev that changes a block I typed in keeps my text.
+    struct Root;
+    impl gpui::Render for Root {
+        fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl gpui::IntoElement {
+            gpui::div()
+        }
+    }
+
+    fn rev(rev: u32, note: &str, greet: &str) -> CardV2 {
+        serde_json::from_value(serde_json::json!({
+            "v": 2, "catalog": "tc.card/2.1", "rev": rev, "intent": "info", "title": "t", "fallback": "f",
+            "blocks": [
+                { "type": "input", "id": "note", "kind": "text", "label": "备注", "default": note },
+                { "type": "input", "id": "greet", "kind": "text", "label": "欢迎语", "default": greet },
+                { "type": "input", "id": "same", "kind": "text", "label": "不变", "default": "一样" }
+            ]
+        }))
+        .unwrap()
+    }
+
+    #[gpui::test]
+    fn a_changed_block_keeps_my_typed_text_and_takes_untouched_ones(cx: &mut gpui::TestAppContext) {
+        cx.update(gpui_component::init);
+        let (_, vcx) = cx.add_window_view(|_, _| Root);
+        let old = rev(1, "旧备注", "旧欢迎");
+        let new = rev(2, "新备注", "新欢迎");
+        let form = vcx.update(|_, cx| cx.new(|_| CardForm::new(&old, None)));
+        vcx.update(|window, cx| {
+            form.update(cx, |f, cx| {
+                for id in ["note", "greet", "same"] {
+                    f.field(id, None, false, window, cx);
+                }
+            });
+            if let Some(Field::Line(s)) = form.read(cx).fields.get("note").cloned() {
+                s.update(cx, |s, cx| s.set_value("我写的", window, cx));
+            }
+        });
+        let kept = vcx.update(|_, cx| form.update(cx, |f, cx| f.rebase(&old, &new, cx)));
+        assert_eq!(kept, ["note"], "only the edited text of a changed block");
+        let text = |vcx: &mut gpui::VisualTestContext, id: &str| {
+            vcx.update(|_, cx| match form.read(cx).values(cx).get(id) {
+                Some(Val::Text(t)) => t.clone(),
+                _ => String::new(),
+            })
+        };
+        assert_eq!(text(vcx, "note"), "我写的");
+        assert_eq!(
+            text(vcx, "greet"),
+            "新欢迎",
+            "untouched text follows the rev"
+        );
+        assert_eq!(text(vcx, "same"), "一样");
+        vcx.update(|_, cx| form.update(cx, |f, cx| f.use_new(&new, "note", cx)));
+        assert_eq!(text(vcx, "note"), "新备注", "用新的");
     }
 }

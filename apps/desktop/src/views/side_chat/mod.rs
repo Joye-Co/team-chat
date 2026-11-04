@@ -11,9 +11,10 @@
 pub mod scenes;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _,
-    Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement, Pixels, Render, ScrollHandle, SharedString,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Sizable as _,
@@ -68,6 +69,20 @@ impl SideChat {
                 .submit_on_enter(true)
         });
         let mut subs = watch(&services, cx);
+        // --- inc-refs: chips of this composer, and which composer had focus last.
+        let refs_hub = crate::views::refs::hub(cx);
+        subs.push(cx.subscribe(
+            &refs_hub,
+            |_, _, event: &crate::views::refs::RefsEvent, cx| {
+                if matches!(event, crate::views::refs::RefsEvent::SideChanged(_)) {
+                    cx.notify();
+                }
+            },
+        ));
+        subs.push(cx.on_focus_in(&input.focus_handle(cx), window, |_, _, cx| {
+            crate::views::refs::note_focus(true, cx);
+        }));
+        // --- end inc-refs
         subs.push(cx.subscribe_in(
             &input,
             window,
@@ -104,9 +119,19 @@ impl SideChat {
         let Some((g, t, m)) = self.target(cx) else {
             return;
         };
-        if body.is_empty() {
+        // inc-refs: the chips travel as quote lines in front of the question (a side chat
+        // lives in the member's DM, where `blockRefs` to the 话题 are not accepted).
+        let key = (g.clone(), t.clone(), m.clone());
+        let has_refs = crate::views::refs::hub(cx)
+            .read(cx)
+            .side_refs
+            .get(&key)
+            .is_some_and(|r| !r.is_empty());
+        if body.is_empty() && !has_refs {
             return;
         }
+        let refs = crate::views::refs::hub(cx).update(cx, |h, cx| h.take_side(&key, cx));
+        let body = crate::views::refs::side_chat_body(&body, &refs);
         self.services.provider.send_side_chat(&g, &t, &m, body);
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.scroll.scroll_to_bottom();
@@ -279,7 +304,18 @@ impl SideChat {
                     .bg(k.sel)
                     .t_body()
                     .text_color(k.ink)
-                    .child(msg.body.clone()),
+                    // inc-refs: the quote lines of the chips the question carried.
+                    .child({
+                        let (labels, rest) = crate::views::refs::split_quote_lines(&msg.body);
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(space::S4)
+                            .when(!labels.is_empty(), |d| {
+                                d.child(crate::views::refs::chips::side_lines(&labels, cx))
+                            })
+                            .when(!rest.is_empty(), |d| d.child(rest.to_string()))
+                    }),
             ),
             cx,
         )
@@ -538,7 +574,44 @@ impl SideChat {
         self.input.update(cx, |s, cx| {
             s.set_placeholder(placeholder.clone(), window, cx)
         });
-        let ready = !self.input.read(cx).value().trim().is_empty();
+        // --- inc-refs: the chips of this aside's composer.
+        let key = self.target(cx);
+        let side_refs: Vec<crate::data::DraftRef> = key
+            .as_ref()
+            .and_then(|k| {
+                crate::views::refs::hub(cx)
+                    .read(cx)
+                    .side_refs
+                    .get(k)
+                    .cloned()
+            })
+            .unwrap_or_default();
+        let chip_row = (!side_refs.is_empty()).then(|| {
+            let chips = side_refs
+                .iter()
+                .enumerate()
+                .map(|(i, r)| {
+                    let (open, k2) = (r.clone(), key.clone());
+                    crate::views::refs::chips::composer_chip(
+                        gpui::ElementId::Name(format!("side-ref-{i}").into()),
+                        r,
+                        false,
+                        crate::views::refs::chips::flashing(r, cx),
+                        move |_, cx| crate::views::refs::chips::open_source(&open, cx),
+                        move |_, cx| {
+                            if let Some(k) = &k2 {
+                                crate::views::refs::hub(cx)
+                                    .update(cx, |h, cx| h.remove_side(k, i, cx));
+                            }
+                        },
+                        cx,
+                    )
+                })
+                .collect();
+            crate::views::refs::chips::row(chips)
+        });
+        // --- end inc-refs
+        let ready = !self.input.read(cx).value().trim().is_empty() || chip_row.is_some();
         let editor = ui::placeholder_input(
             Textarea::new(&self.input)
                 .appearance(false)
@@ -554,6 +627,7 @@ impl SideChat {
             .pb(space::S16)
             .child(
                 ui::ComposerShell::new("side-chat-composer", editor)
+                    .when_some(chip_row, |shell, row| shell.above(row))
                     .tool(
                         div()
                             .ml(space::S4)

@@ -300,6 +300,106 @@ change is not sent either.
 The owner turns on macOS Screen Sharing by hand; the daemon never changes system settings, and
 no credentials pass through chat. The server shows the address to owners and run requesters.
 
+### Interaction loop (features `interact` and `output`)
+
+```ts
+// server -> daemon (feature "interact"; an old daemon gets run.input with the text envelope instead)
+{ t: "run.answer", runId, inputId, source: { kind: "card", messageId, askId, answerId, rev },
+  actionId?, blockId?, event, value?, inputs?, editedValues?, actor: { id, name }, eventId?, block? /* the block at rev */ }
+{ t: "run.interaction", runId, inputId,
+  source: { kind: "card", messageId, blockId?, actionId?, rev } | { kind: "artifact", artifactId, version, eventId, ask },
+  event, value?, actor: { id, name }, eventId?, block? /* card events: the block or action at rev */ }
+// daemon -> server (feature "output", `chat-run`): a normal run.event with seq and ack
+RunEvent += { type: "output", outputId, op: "card.post" | "card.patch" | "interaction.resolve" | "artifact.data" | "artifact.reply", body: JSON }
+// server -> daemon
+{ t: "run.output.result", runId, outputId, ok, result?, error? { code, reason?, message } }
+run.input.answer += { answerId?, askId?, eventId?, event?, blockId?, value? }
+```
+
+On a private card (a non-public poll, an anonymous questionnaire; protocol.md "Private
+answers"), `actor` is `{ id: "anonymous", name: "anonymous" }`, and `run.input.authorId` too.
+
+The daemon gives `run.answer` and `run.interaction` to the CLI as one user turn: a
+`<teamchat-event v="1" id="{inputId}" kind="card.answer|card.event|artifact.emit|artifact.ask">`
+envelope with the JSON, followed by the line that it is data, not an instruction. It answers
+`input.accepted {inputId}` as for `run.input`. BotDesk performs each `output` op as the bot member
+with the rules of the matching WebSocket frame. The `output` body is that frame without `t`, `rid` and
+`groupId` (BotDesk takes the group and topic from the run):
+
+| `op` | `body` | `chat-run` command |
+| --- | --- | --- |
+| `card.post` | `{ cardV2, body?, causeEventId? }` (a `send`) | `chat-run card post --file card.json [--cause ev]` |
+| `card.patch` | `{ messageId, baseRev, ops, cause? }` | `chat-run card patch --message M --base-rev N --ops ops.json [--cause ev]` |
+| `interaction.resolve` | `{ eventId, result: "ignored" \| "failed", note? }` | `chat-run resolve --event ev --result ignored\|failed [--note …]` |
+| `artifact.data` | `{ artifactId, version, data, baseDataRev?, cause? }` | `chat-run artifact data --artifact A --version V --file data.json [--base-data-rev N] [--cause ev]` |
+| `artifact.reply` | `{ eventId, ok: true, payload? }` or `{ eventId, ok: false, error: { code: "declined", message } }` | `chat-run artifact reply --event ev --file reply.json` or `--decline "…"` |
+
+`chat-run` is the daemon binary started by the name `chat-run` (argv0). The daemon links it as
+`<run folder>/bin/chat-run` and puts that folder first on the CLI's `PATH`. Side chat runs
+(`aside`) get no `chat-run`. One request is one JSON document `{ op, body }`; the daemon sends the
+`output` run event (redacted like every frame) and answers one JSON document `{ ok, result? ,
+error? }` when `run.output.result` comes. With no result in 15 s it answers `{ ok: false, error:
+{ code: "timeout", reason: "server.too_old" } }` ("server too old") when the server acked the
+`output` event (it got it and did not understand it), else `{ ok: false, error: { code:
+"unavailable", reason: "server.not_connected" } }` ("not connected": the daemon's link to the
+server was down; the result is unknown, because a lost ack does not show that the server never
+got the output, and the server refuses the output as `output.expired` if it comes later). A
+daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
+"daemon.no_answer" }`. The transport depends on the runtime:
+
+- Socket (Claude Code, ACP agents, the PTY): `CHAT_RUN_SOCKET` names a unix socket of the run
+  (`<run folder>/chat-run.sock`, or a short path in `$TMPDIR` when that one is too long for a
+  socket address), mode 0600, accepting only the daemon's own user. A request and its answer
+  are one JSON line each. The socket is removed when the run ends.
+- Files (Codex): Codex's sandbox counts a unix socket connect as network, and the daemon does
+  not open the network (`sandbox_workspace_write.network_access`) for it; it never adds a
+  sandbox or network override to the user's Codex args. `CHAT_RUN_DIR` names
+  `<working folder>/.chat-run-<run id>`, a new folder inside the writable workspace (never one
+  that is already there, so a folder of the repository is never used), mode 0700, with a
+  `.gitignore` of `*`. `chat-run` writes `<id>.req` atomically (a temp file renamed into place, mode 0600);
+  the daemon watches the folder, takes (reads and removes) the request and writes `<id>.res`
+  the same way; `chat-run` reads and removes it, waiting at most 20 s. A request nobody takes
+  is removed and reported as `unavailable`. When the run ends the daemon removes only the
+  transport's own files (`.gitignore`, `<id>.req`, `<id>.res` and their temp files), then the
+  folder if it is empty. Codex runs
+  in the `read-only` sandbox cannot write the folder and get no note.
+
+A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", reason:
+"sandbox.blocked" }`. `chat-run` prints the result JSON (exit 0) or the error JSON with its
+`reason` (exit 1). The CLI learns about `chat-run` from a short note: Claude Code
+`--append-system-prompt`, Codex `thread/start.developerInstructions`, ACP the text before the
+first prompt; the PTY gets none.
+
+The envelope JSON holds `messageId`, `rev`, `askId`, `answerId`, `eventId`, `event`, `actionId`,
+`blockId`, `value`, `inputs`, `editedValues`, `actor` and `block` (card), or `artifactId`,
+`version`, `eventId`, `event`, `value` and `actor` (page). `<` is written as `\u003c`, so the
+data cannot close the envelope. References to a part (`blockRefs`) do not change
+this protocol: they travel inside `prompt` and `run.input.text`.
+
+Server rules (BotDesk):
+
+- A daemon takes `run.answer` and `run.interaction` when it reports feature `interact` or
+  `daemonVersion` 1.1.0 or newer. Another daemon gets `run.input` with `text` = a short summary
+  line and the same envelope (and the typed `answer` with feature `answer`).
+- Live card events are coalesced per card: the first event goes at once, then only the newest
+  event per block in each 3 s window. Page `ask` events are never merged.
+- With no active run in the topic, a stored answer starts a run (as before), and a live event
+  starts a short follow-up run whose prompt carries the envelope: at most 1 per card at a time
+  (later events join it), 6 per hour per card, 30 per hour per member; over the limit the ack's
+  `expect.mode` is `none`.
+- `output` bodies are the fields of the matching client frame without `t`, `rid` and `groupId`
+  (always the run's group): `card.post {card | cardV2, cause?, body?}` (in the run's topic),
+  `card.patch {messageId, baseRev, ops, cause?}`, `interaction.resolve {eventId, result, note?}`,
+  `artifact.data {artifactId, version, data, baseDataRev?, cause?}`, `artifact.reply {eventId, ok,
+  payload? | error?}` or `{eventId, decline: "…"}`. Without `clientPatchId` / `clientPushId` in
+  the body, the key is `o:{runId}:{outputId}`, so a later run's `o1` is never a repeat. An unknown op gets `invalid` with reason
+  `output.unknown_op`; an aside run gets `forbidden` (`output.read_only`). The server measures an
+  `output`'s age on its own clock: the frame's `at` moved by the clock offset of the last
+  `heartbeat` (or the arrival time before the first heartbeat), never later than the arrival. An
+  `output` older than 12 s when it is applied is not performed; it gets `ok: false` with code
+  `conflict` and reason `output.expired`, so an output that `chat-run` reported as timed out (15 s)
+  is never done later, and a machine clock behind the server drops nothing.
+
 ## Raw session upload
 
 After `run.done` the daemon uploads the CLI's own raw session file, so the process view and
@@ -349,7 +449,8 @@ LANG LC_ALL LC_CTYPE TERM SSH_AUTH_SOCK CODEX_HOME CLAUDE_CONFIG_DIR` from the d
 name in `run.assign.envAllowlist` that the machine's config also lists in `env_passthrough`
 (so the server can choose per bot among the variables the machine owner allowed, never more);
 the runtime's fixed `env` from the config; and `CHAT_RUN_ID`, `CHAT_GROUP_ID`,
-`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`.
+`CHAT_TOPIC_ID`, `CHAT_BOT_MEMBER_ID`; 1.1 runs that are not side chats also get `CHAT_RUN_SOCKET`
+(Codex runs: `CHAT_RUN_DIR`) and `<run folder>/bin` (with `chat-run`) first on `PATH`.
 
 Group members read run events, so the daemon redacts every frame before it sends or stores
 it, and the session file before upload: the exact values of the `env_passthrough` variables

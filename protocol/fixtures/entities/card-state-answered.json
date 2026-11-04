@@ -1,0 +1,43 @@
+{
+  "kind": "CardState",
+  "valid": true,
+  "value": {
+    "ask": {
+      "id": "verify",
+      "status": "answered",
+      "from": [
+        "01JBX0OWNER0000000000000AA"
+      ],
+      "blocking": false,
+      "answeredBy": "01JBX0OWNER0000000000000AA",
+      "answeredAt": 1762128005000
+    },
+    "answers": [
+      {
+        "answerId": "01JC0AN0000000000000000001",
+        "askId": "verify",
+        "eventId": "01JC0EV0000000000000000003",
+        "actorId": "01JBX0OWNER0000000000000AA",
+        "at": 1762128005000,
+        "rev": 3,
+        "event": "action.press",
+        "actionId": "send",
+        "inputs": {
+          "check": {
+            "value": "wrong"
+          },
+          "what": {
+            "value": "后台是 7 个，差 2 个"
+          }
+        }
+      }
+    ],
+    "lastCause": {
+      "eventId": "01JC0EV0000000000000000001",
+      "actorId": "01JBX0OWNER0000000000000AA",
+      "at": 1762128001000,
+      "event": "choice.change",
+      "blockId": "check"
+    }
+  }
+}

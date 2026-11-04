@@ -1,0 +1,44 @@
+{
+  "kind": "FileRef",
+  "valid": true,
+  "description": "a message attachment with media metadata (R9)",
+  "value": {
+    "fileId": "01JC0FIL0000000000000INDEX",
+    "name": "demo.mp4",
+    "size": 48000000,
+    "mime": "video/mp4",
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "media": {
+      "kind": "video",
+      "mime": "video/mp4",
+      "bytes": 48000000,
+      "width": 1920,
+      "height": 1080,
+      "duration": 312.5,
+      "posterFileId": "01JC0FIL0000000000000INDEX",
+      "frames": [
+        {
+          "t": 0,
+          "fileId": "01JC0FIL0000000000000INDEX"
+        },
+        {
+          "t": 60,
+          "fileId": "01JC0FIL0000000000000INDEX",
+          "label": "登录"
+        }
+      ],
+      "chapters": [
+        {
+          "t": 0,
+          "title": "开头"
+        },
+        {
+          "t": 120,
+          "title": "演示"
+        }
+      ],
+      "transcriptFileId": "01JC0FIL0000000000000INDEX",
+      "preview": "ready"
+    }
+  }
+}

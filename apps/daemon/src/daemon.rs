@@ -30,6 +30,8 @@ pub const FEATURES: &[&str] = &[
     feature::ANSWER,
     feature::ASIDE,
     feature::ACCEPTANCE,
+    feature::INTERACT,
+    feature::OUTPUT,
 ];
 
 /// `run.resume.note` limit (docs/machine-protocol.md).
@@ -50,6 +52,8 @@ struct RunEntry {
     finished: bool,
     orphan: bool,
     log: Option<std::fs::File>,
+    /// `chat-run` outputs waiting for `run.output.result`.
+    outputs: Arc<crate::chat_run::Outputs>,
 }
 
 pub struct Daemon {
@@ -317,6 +321,7 @@ impl Daemon {
                     finished: true,
                     orphan: false,
                     log: None,
+                    outputs: Arc::default(),
                 },
             );
         }
@@ -497,6 +502,7 @@ impl Daemon {
                         Some(acked) => {
                             let r = self.runs.get_mut(&id).expect("run");
                             r.orphan = false;
+                            r.outputs.acked(*acked);
                             while r.buffer.front().is_some_and(|(s, _, _)| s <= acked) {
                                 r.buffer.pop_front();
                             }
@@ -572,6 +578,7 @@ impl Daemon {
             }
             Down::Ack { run_id, seq } => {
                 if let Some(r) = self.runs.get_mut(&run_id) {
+                    r.outputs.acked(seq);
                     while r.buffer.front().is_some_and(|(s, _, _)| *s <= seq) {
                         r.buffer.pop_front();
                     }
@@ -579,6 +586,38 @@ impl Daemon {
                 }
             }
             Down::Error { error } => log!("server error {}: {}", error.code, error.message),
+            // 1.1 interaction loop: one `<teamchat-event>` user turn; the runtime answers
+            // `input.accepted` as for `run.input`. A run that has ended takes nothing (BotDesk
+            // starts a follow-up run).
+            Down::RunAnswer(a) => {
+                if let Some(r) = self.runs.get(&a.run_id).filter(|r| !r.done) {
+                    let text = crate::input::answer_envelope(&a);
+                    let input_id = a.input_id;
+                    let _ = r.control.send(Control::Input { input_id, text }.into());
+                }
+            }
+            Down::RunInteraction(i) => {
+                if let Some(r) = self.runs.get(&i.run_id).filter(|r| !r.done) {
+                    let text = crate::input::interaction_envelope(&i);
+                    let input_id = i.input_id;
+                    let _ = r.control.send(Control::Input { input_id, text }.into());
+                }
+            }
+            Down::RunOutputResult(res) => {
+                let run_id = res.run_id.clone();
+                let output_id = res.output_id.clone();
+                let taken = self
+                    .runs
+                    .get(&run_id)
+                    .is_some_and(|r| r.outputs.resolve(res));
+                if !taken {
+                    log!(
+                        "run {}: no chat-run waits for output {}",
+                        crate::chat_run::safe_word(&run_id),
+                        crate::chat_run::safe_word(&output_id)
+                    );
+                }
+            }
         }
     }
 
@@ -644,6 +683,7 @@ impl Daemon {
             Some(_) => return self.reject(&id, "invalid", "unknown run kind"),
         }
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
+        let outputs: Arc<crate::chat_run::Outputs> = Arc::default();
         self.runs.insert(
             id.clone(),
             RunEntry {
@@ -654,6 +694,7 @@ impl Daemon {
                 finished: false,
                 orphan: false,
                 log: None,
+                outputs: outputs.clone(),
             },
         );
         log!("run {id} accepted ({})", a.runtime);
@@ -666,6 +707,7 @@ impl Daemon {
             control_rx: ctl_rx,
             out: self.run_tx.clone(),
             redactor: self.redactor.clone(),
+            outputs,
         }));
     }
 
@@ -690,6 +732,14 @@ impl Daemon {
                     }
                 );
                 match &mut up {
+                    Up::RunEvent {
+                        seq: s,
+                        event: RunEvent::Output { output_id, .. },
+                        ..
+                    } => {
+                        *s = seq;
+                        r.outputs.sent(output_id, seq);
+                    }
                     Up::RunEvent { seq: s, .. } => *s = seq,
                     Up::RunDone(d) => {
                         d.seq = seq;

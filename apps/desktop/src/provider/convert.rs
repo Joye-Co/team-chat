@@ -150,6 +150,8 @@ pub fn message(m: &proto::Message) -> Message {
 }
 
 pub fn file_ref(f: &proto::FileRef) -> crate::data::FileAttachment {
+    // inc-host: keep the sender's media metadata (R9) for the views.
+    super::page_host::note_file_media(f);
     crate::data::FileAttachment {
         file_id: f.file_id.clone(),
         name: f.name.clone(),
@@ -170,6 +172,7 @@ pub fn to_file_ref(f: &crate::data::FileAttachment) -> proto::FileRef {
         width: f.width,
         height: f.height,
         sha256: f.sha256.clone(),
+        media: None,
     }
 }
 

@@ -1,0 +1,17 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "artifact.data",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 1,
+    "dataRev": 2,
+    "data": {
+      "channels": {
+        "douyin": 7
+      }
+    },
+    "cause": "01JC0EV0000000000000000021"
+  }
+}

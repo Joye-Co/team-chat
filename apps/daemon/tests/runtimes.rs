@@ -37,6 +37,7 @@ fn spec(dir: &std::path::Path, kind: &str, command: &str, args: &[&str], prompt:
             ("HOME".into(), dir.to_string_lossy().into()),
         ],
         aside: false,
+        note: None,
     }
 }
 
@@ -469,4 +470,222 @@ fn codex_aside_mcp_overrides_load_in_real_cli() {
     for e in list {
         assert_eq!(e["enabled"], false, "{e}");
     }
+}
+
+/// `codex app-server` with `args`: runs `command` through `command/exec` (the server's sandbox,
+/// no model call) and returns its result.
+fn codex_exec(
+    codex: &std::path::Path,
+    args: &[String],
+    home: &std::path::Path,
+    cwd: &std::path::Path,
+    command: &[String],
+    env: serde_json::Value,
+) -> serde_json::Value {
+    use std::io::{BufRead, Write};
+    let mut p = std::process::Command::new(codex)
+        .args(args)
+        .current_dir(cwd)
+        .env("CODEX_HOME", home)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let mut stdin = p.stdin.take().unwrap();
+    let mut out = std::io::BufReader::new(p.stdout.take().unwrap());
+    for m in [
+        serde_json::json!({ "id": 1, "method": "initialize", "params": { "clientInfo": { "name": "daemon-test", "version": "1" } } }),
+        serde_json::json!({ "method": "initialized" }),
+        serde_json::json!({ "id": 2, "method": "command/exec", "params": {
+            "command": command, "cwd": cwd.to_string_lossy(), "env": env, "timeoutMs": 20000 } }),
+    ] {
+        writeln!(stdin, "{m}").unwrap();
+    }
+    let mut line = String::new();
+    let result = loop {
+        line.clear();
+        assert!(
+            out.read_line(&mut line).unwrap() > 0,
+            "codex app-server ended"
+        );
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap_or_default();
+        if v["id"] == 2 {
+            break v;
+        }
+    };
+    let _ = p.kill();
+    let _ = p.wait();
+    result
+}
+
+/// A Codex run in the default `workspace-write` sandbox can use `chat-run` without network:
+/// the real Codex CLI runs the real client through `command/exec` (the server's sandbox, no
+/// model call) with the app-server args the daemon builds. The sandbox blocks the run's unix
+/// socket, so a Codex run uses the request folder in its working folder. Skipped without
+/// `codex` on PATH.
+#[tokio::test(flavor = "multi_thread")]
+async fn codex_sandbox_lets_chat_run_answer_without_network() {
+    let Some(codex) = std::env::var_os("PATH").and_then(|p| {
+        std::env::split_paths(&p)
+            .map(|d| d.join("codex"))
+            .find(|f| f.is_file())
+    }) else {
+        eprintln!("codex not on PATH; skipped");
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("codex-home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "hi");
+    s.cfg.approval_policy = None;
+    s.note = Some(daemon::chat_run::note());
+    assert!(runtime::codex::chat_run_works(&s));
+    let args = runtime::codex::app_server_args(&s).unwrap();
+    assert_eq!(args, ["app-server"], "no sandbox or network override");
+
+    daemon::chat_run::set_exe(std::path::PathBuf::from(env!("CARGO_BIN_EXE_daemon")));
+    let bin = daemon::chat_run::install_link(tmp.path()).unwrap();
+    let outputs = std::sync::Arc::new(daemon::chat_run::Outputs::default());
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let tx2 = tx.clone();
+    let server = daemon::chat_run::Server::start(
+        daemon::chat_run::socket_path(tmp.path()),
+        outputs.clone(),
+        move |e| {
+            let _ = tx2.send(e);
+        },
+        daemon::chat_run::TIMEOUT,
+    )
+    .unwrap();
+    let spool = daemon::chat_run::Spool::start(
+        daemon::chat_run::spool_dir(&s.cwd, "x1"),
+        outputs.clone(),
+        move |e| {
+            let _ = tx.send(e);
+        },
+        daemon::chat_run::TIMEOUT,
+    )
+    .unwrap();
+    let command: Vec<String> = [
+        bin.join("chat-run").to_string_lossy().to_string(),
+        "resolve".into(),
+        "--event".into(),
+        "EV1".into(),
+        "--result".into(),
+        "ignored".into(),
+    ]
+    .into();
+    // The daemon sends the sandbox in `thread/start`; `command/exec` uses the server config.
+    let mut sandboxed = args.clone();
+    sandboxed.extend([
+        "-c".to_string(),
+        "sandbox_mode=\"workspace-write\"".to_string(),
+    ]);
+    let exec = |env: serde_json::Value| {
+        let (codex, args, home, cwd, command) = (
+            codex.clone(),
+            sandboxed.clone(),
+            home.clone(),
+            s.cwd.clone(),
+            command.clone(),
+        );
+        tokio::task::spawn_blocking(move || codex_exec(&codex, &args, &home, &cwd, &command, env))
+    };
+
+    // The socket: the sandbox blocks the connect, so chat-run cannot use it in a Codex run.
+    let blocked = exec(serde_json::json!({ "CHAT_RUN_SOCKET": server.path().to_string_lossy() }))
+        .await
+        .unwrap();
+    let stdout = blocked["result"]["stdout"].as_str().unwrap_or_default();
+    assert!(stdout.contains("sandbox.blocked"), "{blocked}");
+
+    // The request folder: the same command answers through files.
+    let run = exec(serde_json::json!({ "CHAT_RUN_DIR": spool.path().to_string_lossy() }));
+    let ev = tokio::time::timeout(Duration::from_secs(30), rx.recv())
+        .await
+        .expect("chat-run did not reach the daemon")
+        .unwrap();
+    let RunEvent::Output { output_id, op, .. } = ev else {
+        panic!("not an output event: {ev:?}");
+    };
+    assert_eq!(op, "interaction.resolve");
+    assert!(outputs.resolve(daemon::proto::RunOutputResult {
+        run_id: "r1".into(),
+        output_id,
+        ok: true,
+        result: Some(serde_json::json!({ "resolved": true })),
+        error: None,
+    }));
+    let done = run.await.unwrap();
+    assert_eq!(done["result"]["exitCode"], 0, "{done}");
+    assert!(
+        done["result"]["stdout"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("resolved"),
+        "{done}"
+    );
+    let left: Vec<_> = std::fs::read_dir(spool.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(left, [std::ffi::OsString::from(".gitignore")]);
+    // Network stays closed for the run's commands: a TCP connect to this test fails.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let probe = format!(
+        "import socket\ntry:\n socket.create_connection(('127.0.0.1', {port}), 5)\n print('open')\nexcept OSError as e:\n print('closed', e)"
+    );
+    let net = tokio::task::spawn_blocking({
+        let (codex, args, home, cwd) = (
+            codex.clone(),
+            sandboxed.clone(),
+            home.clone(),
+            s.cwd.clone(),
+        );
+        move || {
+            let cmd = vec!["python3".to_string(), "-c".to_string(), probe];
+            codex_exec(&codex, &args, &home, &cwd, &cmd, serde_json::json!({}))
+        }
+    })
+    .await
+    .unwrap();
+    let out = net["result"]["stdout"].as_str().unwrap_or_default();
+    assert!(out.starts_with("closed"), "{net}");
+}
+
+/// The `chat-run` note goes only to a Codex run whose sandbox lets `chat-run` work, and the
+/// daemon never adds a sandbox or network override to the user's Codex args.
+#[test]
+fn codex_gets_the_chat_run_note_only_when_it_can_work() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut s = spec(tmp.path(), "codex", "codex", &[], "q");
+    s.note = Some("n".into());
+    assert!(runtime::codex::chat_run_works(&s));
+    assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+    s.cfg.sandbox = Some("danger-full-access".into());
+    assert!(runtime::codex::chat_run_works(&s));
+    assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+    s.cfg.sandbox = Some("read-only".into());
+    assert!(!runtime::codex::chat_run_works(&s));
+    assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+    s.cfg.sandbox = None;
+    s.note = None;
+    assert_eq!(runtime::codex::app_server_args(&s).unwrap(), ["app-server"]);
+    // A user's own network setting stays as the user wrote it.
+    s.note = Some("n".into());
+    s.cfg.args = vec![
+        "-c".into(),
+        "sandbox_workspace_write.network_access=false".into(),
+    ];
+    let args = runtime::codex::app_server_args(&s).unwrap();
+    assert_eq!(
+        args,
+        [
+            "app-server",
+            "-c",
+            "sandbox_workspace_write.network_access=false"
+        ]
+    );
 }

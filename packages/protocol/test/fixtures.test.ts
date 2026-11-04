@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
-import { schemas, type SchemaName } from "../src/index.ts";
+import { issueReason, schemas, type SchemaName } from "../src/index.ts";
 
 const root = join(import.meta.dir, "../../../protocol/fixtures");
 
-type Fixture = { kind: string; valid: boolean; value: unknown; normalized?: unknown };
+type Fixture = { kind: string; valid: boolean; reason?: string; value: unknown; normalized?: unknown };
 
 function walk(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
@@ -29,6 +29,11 @@ describe("fixtures", () => {
       const result = schema.safeParse(fixture.value);
       if (!fixture.valid) {
         expect(result.success).toBe(false);
+        // The server's reason: the first issue that names one (core/errors.ts schemaReason).
+        if (fixture.reason !== undefined && !result.success) {
+          const named = result.error.issues.map((i) => issueReason(i.message)).find((r) => r !== undefined);
+          expect(named).toBe(fixture.reason);
+        }
         return;
       }
       if (!result.success) throw result.error;

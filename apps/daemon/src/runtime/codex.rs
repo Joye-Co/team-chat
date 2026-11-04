@@ -390,6 +390,9 @@ async fn run(spec: RunSpec, emit: Emit, mut control: mpsc::UnboundedReceiver<Con
                                 if let Some(m) = spec.model.clone().or(spec.cfg.model.clone()) {
                                     params["model"] = json!(m);
                                 }
+                                if let Some(n) = spec.note.as_ref().filter(|_| chat_run_works(&spec)) {
+                                    params["developerInstructions"] = json!(n);
+                                }
                                 let _ = p.write_json(&json!({ "id": id, "method": "thread/start", "params": params })).await;
                             }
                             Pending::ThreadStart => {
@@ -541,6 +544,16 @@ pub fn thread_policy(spec: &RunSpec) -> (String, String) {
     )
 }
 
+/// Whether `chat-run` works from a command Codex runs in this run: the sandbox is
+/// `workspace-write` or `danger-full-access`, so the command can write the run's request folder
+/// in the working folder (the file transport of [`crate::chat_run`]; the sandbox blocks unix
+/// socket connects, and the daemon never opens the network for it). A `read-only` or unknown
+/// sandbox blocks it, so the run gets no `chat-run` note.
+pub fn chat_run_works(spec: &RunSpec) -> bool {
+    let (_, sandbox) = thread_policy(spec);
+    !spec.aside && matches!(sandbox.as_str(), "workspace-write" | "danger-full-access")
+}
+
 /// Config overrides of a side chat run: tools outside the sandbox (web search, apps, plugins,
 /// browser and computer use) are off.
 pub const ASIDE_CONFIG: &[&str] = &[
@@ -581,7 +594,8 @@ fn configured_mcp_servers(spec: &RunSpec) -> Result<Vec<(String, bool)>, String>
     Ok(names)
 }
 
-/// `codex app-server` arguments. A side chat run ignores the configured args (they could widen
+/// `codex app-server` arguments: the configured args as they are (the daemon adds no sandbox or
+/// network override, so a user's own network setting stays). A side chat run ignores the configured args (they could widen
 /// the sandbox) and turns off [`ASIDE_CONFIG`] and every configured MCP server: MCP tools run
 /// outside the sandbox. The sandbox (`thread_policy`) blocks writes and network for commands.
 ///

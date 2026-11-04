@@ -1,13 +1,13 @@
 // 1.1 fixtures: Card v2, card answers, side chat context, run fields, artifact events and
 // topic links. Called by gen-fixtures.ts. The machine frames of 1.1 are daemon golden lines
 // (apps/daemon/tests/fixtures/machine/*.jsonl), added by fixtures-bots.ts.
-import { cardV2ToV1, MAX_CARD_REV, MAX_CARD_V2_ACTIONS } from "../src/index.ts";
+import { cardV2ToV1, MAX_CARD_REV, MAX_CARD_V2_ACTIONS, MAX_CARD_V2_BLOCKS } from "../src/index.ts";
 import type { CardV2 } from "../src/index.ts";
 
 type Obj = Record<string, unknown>;
 export type V11Ctx = {
   ok: (path: string, kind: string, value: unknown, description?: string) => void;
-  bad: (path: string, kind: string, value: unknown, description: string) => void;
+  bad: (path: string, kind: string, value: unknown, description: string, reason?: string) => void;
   add: (path: string, f: { kind: string; valid: boolean; description?: string; value: unknown; normalized?: unknown }) => void;
   T0: number;
   ID: Record<string, string>;
@@ -103,19 +103,19 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   bad("entities/card2-v1.json", "CardV2", { ...working, v: 1 }, "v must be 2");
   bad("entities/card2-bad-intent.json", "CardV2", { ...working, intent: "question" }, "unknown intent");
   bad("entities/card2-missing-id.json", "CardV2", { ...working, blocks: [{ type: "text", text: "x" }] }, "blocks need an id");
-  bad("entities/card2-duplicate-block-ids.json", "CardV2", { ...working, blocks: [{ type: "divider", id: "a" }, { type: "group", id: "g", blocks: [{ type: "divider", id: "a" }] }] }, "block ids are unique, nested ones too");
+  bad("entities/card2-duplicate-block-ids.json", "CardV2", { ...working, blocks: [{ type: "divider", id: "a" }, { type: "group", id: "g", blocks: [{ type: "divider", id: "a" }] }] }, "block ids are unique, nested ones too", "card.limits");
   bad("entities/card2-nested-group.json", "CardV2", { ...working, blocks: [{ type: "group", id: "g", blocks: [{ type: "group", id: "h", blocks: [{ type: "divider", id: "d" }] }] }] }, "no group inside a group");
-  bad("entities/card2-decision-one-option.json", "CardV2", { ...working, blocks: [{ type: "decision", id: "d", options: [{ id: "a", label: "A" }] }] }, "a decision has 2..10 options");
+  bad("entities/card2-decision-one-option.json", "CardV2", { ...working, blocks: [{ type: "decision", id: "d", options: [{ id: "a", label: "A" }] }] }, "a decision has 2..10 options", "card.limits");
   bad("entities/card2-bad-input-kind.json", "CardV2", { ...working, blocks: [{ type: "input", id: "i", kind: "color", label: "颜色" }] }, "unknown input kind");
   bad("entities/card2-bad-chart-kind.json", "CardV2", { ...working, blocks: [{ type: "chart", id: "c", kind: "pie", series: [{ name: "a", values: [1] }] }] }, "unknown chart kind");
-  bad("entities/card2-link-without-target.json", "CardV2", { ...working, actions: [{ id: "a", label: "A", kind: "link" }] }, "a link action needs a target");
-  bad("entities/card2-submit-with-target.json", "CardV2", { ...working, actions: [{ id: "a", label: "A", target: { kind: "url", url: "https://example.com" } }] }, "only link actions have a target");
+  bad("entities/card2-link-without-target.json", "CardV2", { ...working, actions: [{ id: "a", label: "A", kind: "link" }] }, "a link action needs a target", "card.limits");
+  bad("entities/card2-submit-with-target.json", "CardV2", { ...working, actions: [{ id: "a", label: "A", target: { kind: "url", url: "https://example.com" } }] }, "only link actions have a target", "card.limits");
   bad("entities/card2-bad-ref-kind.json", "CardV2", { ...working, blocks: [{ type: "ref", id: "r", label: "x", target: { kind: "issue", url: "https://example.com" } }] }, "unknown ref kind");
-  bad("entities/card2-ask-from-empty.json", "CardV2", { ...ask, ask: { from: [] } }, "ask.from needs a member");
-  bad("entities/card2-too-many-actions.json", "CardV2", { ...working, actions: Array.from({ length: MAX_CARD_V2_ACTIONS + 1 }, (_, i) => ({ id: `a${i}`, label: "x" })) }, "limit: 11 actions");
-  bad("entities/card2-too-many-blocks.json", "CardV2", { ...working, blocks: Array.from({ length: 51 }, (_, i) => ({ type: "divider", id: `d${i}` })) }, "limit: 51 blocks");
+  bad("entities/card2-ask-from-empty.json", "CardV2", { ...ask, ask: { from: [] } }, "ask.from needs a member", "card.limits");
+  bad("entities/card2-too-many-actions.json", "CardV2", { ...working, actions: Array.from({ length: MAX_CARD_V2_ACTIONS + 1 }, (_, i) => ({ id: `a${i}`, label: "x" })) }, "limit: 11 actions", "card.limits");
+  bad("entities/card2-too-many-blocks.json", "CardV2", { ...working, blocks: Array.from({ length: MAX_CARD_V2_BLOCKS + 1 }, (_, i) => ({ type: "divider", id: `d${i}` })) }, "limit: 81 blocks", "card.limits");
   bad("entities/card2-too-big.json", "CardV2", { ...working, blocks: Array.from({ length: 9 }, (_, i) => ({ type: "code", id: `c${i}`, text: "x".repeat(8000) })) }, "card exceeds 64 KiB");
-  bad("entities/card2-unknown-block.json", "CardV2", { ...working, blocks: [{ type: "map", id: "m" }] }, "the server rejects unknown block types");
+  bad("entities/card2-unknown-block.json", "CardV2", { ...working, blocks: [{ type: "map", id: "m" }] }, "the server rejects unknown block types", "card.unknown_block");
 
   // The v1 card the server derives (docs/protocol.md, "Cards v2"); old readers see this.
   ok("entities/card2-ask-as-v1.json", "Card", cardV2ToV1(ask), "cardV2ToV1 of card2-ask: no v1 actions, the card has inputs");
@@ -211,7 +211,7 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   bad("http/resume-run-request-note-too-long.json", "ResumeRunRequest", { note: "x".repeat(2001) }, "note over 2000 characters");
 
   // -------------------------------------------------------------------------
-  // 产出: version runId and declared events, artifact.event, artifact.evented
+  // 产出: version runId and declared events, artifact.event (page events are transient: no stored event)
   // -------------------------------------------------------------------------
   const version = {
     artifactId: X.art,
@@ -229,7 +229,6 @@ export function addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic }: V
   ok("client/artifact.event-minimal.json", "ClientFrame", { t: "artifact.event", rid: "r99", groupId: ID.general, artifactId: X.art, version: 2, name: "submit" });
   bad("client/artifact.event-too-big.json", "ClientFrame", { t: "artifact.event", rid: "r100", groupId: ID.general, artifactId: X.art, version: 2, name: "pick", payload: "x".repeat(16_385) }, "payload exceeds 16 KiB");
   bad("client/artifact.event-name-too-long.json", "ClientFrame", { t: "artifact.event", rid: "r101", groupId: ID.general, artifactId: X.art, version: 2, name: "x".repeat(129) }, "name is 1..128");
-  ok("events/artifact.evented.json", "Event", { ...base, seq: 45, actorId: ID.alice, type: "artifact.evented", data: { artifactId: X.art, version: 2, name: "pick", payload: { option: "B" } } });
 
   // -------------------------------------------------------------------------
   // Topic links

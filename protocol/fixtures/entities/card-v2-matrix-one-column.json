@@ -1,0 +1,34 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "matrix has 2..5 columns",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "m",
+        "type": "matrix",
+        "label": "选",
+        "rows": [
+          {
+            "id": "a",
+            "label": "A"
+          }
+        ],
+        "columns": [
+          {
+            "id": "x",
+            "label": "X"
+          }
+        ],
+        "fallbackText": "选"
+      }
+    ]
+  }
+}

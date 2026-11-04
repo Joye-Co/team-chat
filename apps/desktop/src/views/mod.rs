@@ -9,6 +9,9 @@ pub mod composer;
 pub mod connection_banner;
 pub mod files;
 pub mod login;
+// --- v11/media ---
+pub mod media;
+// --- end v11/media ---
 pub mod nav;
 pub mod process;
 pub mod search;
@@ -27,6 +30,8 @@ pub mod group_page;
 pub mod live;
 pub mod members_page;
 pub mod rail;
+// --- inc-base: 引用提问 entry point (inc-refs implements it).
+pub mod refs;
 pub mod shell;
 pub mod side_chat;
 pub mod topic_page;

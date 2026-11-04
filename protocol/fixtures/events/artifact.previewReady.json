@@ -1,0 +1,47 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 65,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0BOT000000000000000AC",
+    "type": "artifact.previewReady",
+    "data": {
+      "artifactId": "01JC0ART00000000000000OCT3",
+      "version": 1,
+      "media": {
+        "kind": "video",
+        "mime": "video/mp4",
+        "bytes": 48000000,
+        "width": 1920,
+        "height": 1080,
+        "duration": 312.5,
+        "posterFileId": "01JC0FIL0000000000000INDEX",
+        "frames": [
+          {
+            "t": 0,
+            "fileId": "01JC0FIL0000000000000INDEX"
+          },
+          {
+            "t": 60,
+            "fileId": "01JC0FIL0000000000000INDEX",
+            "label": "登录"
+          }
+        ],
+        "chapters": [
+          {
+            "t": 0,
+            "title": "开头"
+          },
+          {
+            "t": 120,
+            "title": "演示"
+          }
+        ],
+        "transcriptFileId": "01JC0FIL0000000000000INDEX",
+        "preview": "ready"
+      }
+    }
+  }
+}

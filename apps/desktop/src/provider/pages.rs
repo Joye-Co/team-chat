@@ -1,13 +1,14 @@
 //! The 群, 成员 and 产出 pages on the chat-core cache (pages track):
-//! 群里的决定 derived from answered asks marked `record`, 页面里的回应 from
-//! `artifact.evented`, page events declared by bot-made versions and
-//! forwarded as `artifact.event`, and 重试 for a stuck run.
+//! 群里的决定 derived from answered asks marked `record`, 页面里的回应 from the
+//! local page event log (page events are transient, never stored in the group log),
+//! page events declared by bot-made versions and forwarded as `artifact.event`, and
+//! 重试 for a stuck run.
 
 use std::{collections::HashMap, sync::Mutex};
 
 use chat_core::{
     DecisionRow,
-    proto::{CardV2, CardV2Block, GroupDecision},
+    proto::{ArtifactEventKind, ArtifactEventTransient, CardV2, CardV2Block, GroupDecision},
 };
 
 use super::CoreProvider;
@@ -61,6 +62,57 @@ fn choice(card: &CardV2, row: &DecisionRow) -> String {
 #[derive(Default)]
 pub(super) struct DecisionsCache {
     inner: Mutex<HashMap<String, DecisionsEntry>>,
+}
+
+/// Page events most kept per 产出 in the local log.
+const PAGE_EVENTS_KEPT: usize = 200;
+
+/// One page event seen by this window: one I sent, or one of my 产出 versions got
+/// (transient `artifact.event`). Lives only while the app runs.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct PageEvent {
+    pub actor_id: String,
+    pub version: u32,
+    pub name: String,
+    pub payload: Option<serde_json::Value>,
+    pub at: i64,
+}
+
+/// The local page event log, per 产出 id, oldest first (R5: page events are transient).
+#[derive(Default)]
+pub(super) struct PageEventLog {
+    inner: Mutex<HashMap<String, Vec<PageEvent>>>,
+}
+
+impl PageEventLog {
+    pub(super) fn record(&self, artifact_id: &str, event: PageEvent) {
+        let mut map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let list = map.entry(artifact_id.to_string()).or_default();
+        list.push(event);
+        if list.len() > PAGE_EVENTS_KEPT {
+            let extra = list.len() - PAGE_EVENTS_KEPT;
+            list.drain(..extra);
+        }
+    }
+
+    /// A transient page event of one of my 产出 versions.
+    pub(super) fn record_transient(&self, t: &ArtifactEventTransient) {
+        self.record(
+            &t.artifact_id,
+            PageEvent {
+                actor_id: t.actor_id.clone(),
+                version: t.version,
+                name: t.name.clone(),
+                payload: t.payload.clone(),
+                at: t.at.min(i64::MAX as u64) as i64,
+            },
+        );
+    }
+
+    pub(super) fn events(&self, artifact_id: &str) -> Vec<PageEvent> {
+        let map = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        map.get(artifact_id).cloned().unwrap_or_default()
+    }
 }
 
 #[derive(Default)]
@@ -221,11 +273,24 @@ impl CoreProvider {
         payload: Option<serde_json::Value>,
     ) {
         let Some(a) = self.account() else { return };
-        if let Err(e) = a
-            .client
-            .send_artifact_event(artifact_id, version, name, payload)
-        {
-            tracing::warn!(error = %e, "产出 page event dropped");
+        match a.client.send_artifact_event(
+            artifact_id,
+            version,
+            name,
+            ArtifactEventKind::Emit,
+            payload.clone(),
+        ) {
+            Ok(_) => self.shared.page_events.record(
+                artifact_id,
+                PageEvent {
+                    actor_id: a.me.id.clone(),
+                    version,
+                    name: name.to_string(),
+                    payload,
+                    at: crate::selftest::clock::now_ms(),
+                },
+            ),
+            Err(e) => tracing::warn!(error = %e, "产出 page event dropped"),
         }
     }
 
@@ -242,9 +307,9 @@ impl CoreProvider {
                 .and_then(|d| d.label.clone())
                 .unwrap_or_else(|| name.to_string())
         };
-        a.client
-            .artifact_events(artifact_id)
-            .unwrap_or_default()
+        self.shared
+            .page_events
+            .events(artifact_id)
             .into_iter()
             .map(|e| {
                 let who = self.member(&e.actor_id).map(|m| m.name).unwrap_or_default();
@@ -269,7 +334,7 @@ impl CoreProvider {
                 ArtifactResponse {
                     member_id: e.actor_id,
                     text,
-                    at: Some(e.at.min(i64::MAX as u64) as i64),
+                    at: Some(e.at),
                     topic: None,
                 }
             })

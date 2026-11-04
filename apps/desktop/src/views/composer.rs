@@ -36,7 +36,7 @@ use crate::{
     app::{Changes, Services},
     copy::{composer as c, fill},
     data::{
-        Change, DraftKey, Member, MemberId, MessageId, NewFile, PendingFile, SendRequest,
+        Change, DraftKey, DraftRef, Member, MemberId, MessageId, NewFile, PendingFile, SendRequest,
         StartTopicRequest,
     },
     theme::{self, Type as _, space},
@@ -126,6 +126,8 @@ pub struct ComposerView {
     picked: Vec<MemberId>,
     quote: Option<QuoteChip>,
     files: Vec<PendingFile>,
+    /// inc-refs: the reference chips of the draft (引用提问, REFS §A4).
+    refs: Vec<DraftRef>,
     mention: Option<MentionPopup>,
     editing: Option<EditTarget>,
     typing: model::TypingThrottle,
@@ -161,6 +163,7 @@ impl ComposerView {
                 .submit_on_enter(true)
                 .placeholder(c::PLACEHOLDER)
         });
+        let refs_hub = crate::views::refs::hub(cx);
         let subscriptions = vec![
             cx.subscribe_in(&input, window, |this, _, event: &InputEvent, window, cx| {
                 if let InputEvent::Change = event {
@@ -173,6 +176,18 @@ impl ComposerView {
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
                 this.on_changes(changes, cx);
             }),
+            // --- inc-refs: a chip was added to a draft; this composer had focus.
+            cx.subscribe_in(
+                &refs_hub,
+                window,
+                |this, _, event: &crate::views::refs::RefsEvent, window, cx| {
+                    this.on_refs_event(event, window, cx);
+                },
+            ),
+            cx.on_focus_in(&input.focus_handle(cx), window, |_, _, cx| {
+                crate::views::refs::note_focus(false, cx);
+            }),
+            // --- end inc-refs
         ];
         let mut this = Self {
             services,
@@ -182,6 +197,7 @@ impl ComposerView {
             picked: Vec::new(),
             quote: None,
             files: Vec::new(),
+            refs: Vec::new(),
             mention: None,
             editing: None,
             typing: model::TypingThrottle::default(),
@@ -297,8 +313,104 @@ impl ComposerView {
         self.set_text(&draft.body, window, cx);
         self.refresh_extras(cx);
         self.update_placeholder(window, cx);
+        self.take_refs_focus(window, cx);
         cx.notify();
     }
+
+    // --- inc-refs: 引用提问 chips (REFS §A4) ---
+
+    /// A chip was added to a draft: reload this draft's text when it is the one (`@name ` may
+    /// lead it now) and take the focus.
+    fn on_refs_event(
+        &mut self,
+        event: &crate::views::refs::RefsEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let crate::views::refs::RefsEvent::Added(key) = event else {
+            return;
+        };
+        if self.key.as_ref() != Some(key) || self.editing.is_some() {
+            return;
+        }
+        let draft = self.services.provider.draft(key);
+        if draft.body != self.text(cx) {
+            self.picked = draft.mentions;
+            self.set_text(&draft.body, window, cx);
+        }
+        self.refresh_extras(cx);
+        self.take_refs_focus(window, cx);
+    }
+
+    /// Focuses the field when 引用提问 asked for this draft's composer.
+    fn take_refs_focus(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let hub = crate::views::refs::hub(cx);
+        if self.key.is_some() && hub.read(cx).focus == self.key {
+            hub.update(cx, |h, _| h.focus = None);
+            let len = self.text(cx).len();
+            self.input.update(cx, |state, cx| {
+                state.focus(window, cx);
+                state.set_selected_range(len..len, cx);
+            });
+        }
+    }
+
+    fn remove_ref(&mut self, index: usize, cx: &mut Context<Self>) {
+        if let Some(key) = &self.key {
+            self.services.provider.remove_draft_ref(key, index);
+        }
+        if index < self.refs.len() {
+            self.refs.remove(index);
+        }
+        cx.notify();
+    }
+
+    /// Backspace at the start of an empty field removes the last chip.
+    fn on_refs_key(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let k = &event.keystroke;
+        if k.key != "backspace"
+            || k.modifiers.modified()
+            || self.refs.is_empty()
+            || self.editing.is_some()
+            || self.composing(window, cx)
+            || !self.text(cx).is_empty()
+        {
+            return;
+        }
+        cx.stop_propagation();
+        self.remove_ref(self.refs.len() - 1, cx);
+    }
+
+    fn render_refs(&self, cx: &mut Context<Self>) -> Vec<gpui::AnyElement> {
+        use crate::views::refs::chips;
+        let provider = self.services.provider.clone();
+        self.refs
+            .iter()
+            .enumerate()
+            .map(|(i, r)| {
+                let open = r.clone();
+                let this = cx.entity().downgrade();
+                chips::composer_chip(
+                    ElementId::Name(format!("ref-chip-{i}").into()),
+                    r,
+                    chips::updated(r, &provider),
+                    chips::flashing(r, cx),
+                    move |_, cx| chips::open_source(&open, cx),
+                    move |_, cx| {
+                        let _ = this.update(cx, |this, cx| this.remove_ref(i, cx));
+                    },
+                    cx,
+                )
+            })
+            .collect()
+    }
+
+    // --- end inc-refs ---
 
     fn update_placeholder(&self, window: &mut Window, cx: &mut Context<Self>) {
         let placeholder = self.placeholder();
@@ -351,6 +463,7 @@ impl ComposerView {
         let Some(key) = self.key.clone() else {
             self.quote = None;
             self.files.clear();
+            self.refs.clear();
             return;
         };
         let draft = self.services.provider.draft(&key);
@@ -362,6 +475,7 @@ impl ComposerView {
                 .collect();
         }
         self.files = draft.files;
+        self.refs = draft.refs;
         self.quote = draft.quote_of.map(|id| self.quote_chip(&key, id));
         cx.notify();
     }
@@ -614,6 +728,10 @@ impl ComposerView {
         } else if self.quote.is_some() {
             cx.stop_propagation();
             self.remove_quote(cx);
+        } else if !self.refs.is_empty() {
+            // inc-refs: then the newest chip.
+            cx.stop_propagation();
+            self.remove_ref(self.refs.len() - 1, cx);
         }
     }
 
@@ -755,7 +873,7 @@ impl ComposerView {
             self.cancel_edit(window, cx);
             return;
         }
-        if body.is_empty() && self.files.is_empty() {
+        if body.is_empty() && self.files.is_empty() && self.refs.is_empty() {
             return;
         }
         let members = provider.members();
@@ -765,11 +883,14 @@ impl ComposerView {
         let title =
             model::topic_title(&body).or_else(|| self.files.first().map(|f| f.name.clone()));
         let quote_of = self.quote.as_ref().map(|q| q.message_id.clone());
+        // inc-refs: the chips go out as `blockRefs`.
+        let refs: Vec<_> = self.refs.iter().map(|r| r.input.clone()).collect();
 
         // Clear first: opening the new topic below saves the old draft.
         self.picked.clear();
         self.quote = None;
         self.files.clear();
+        self.refs.clear();
         self.rejected.clear();
         self.mention = None;
         self.set_text("", window, cx);
@@ -777,7 +898,7 @@ impl ComposerView {
         match key.topic_id.clone() {
             Some(topic_id) => {
                 self.typing.reset(&key.group_id, &topic_id);
-                provider.send_with_files(
+                provider.send_with_refs(
                     SendRequest {
                         group_id: key.group_id.clone(),
                         topic_id,
@@ -787,6 +908,7 @@ impl ComposerView {
                     },
                     &key,
                     files,
+                    refs,
                 );
                 provider.clear_draft(&key);
             }
@@ -1147,7 +1269,13 @@ impl Render for ComposerView {
         } else {
             self.files.clone()
         };
-        let has_chips = quote.is_some() || !files.is_empty();
+        // inc-refs: the reference chips sit with the quote and the files.
+        let ref_chips = if editing {
+            Vec::new()
+        } else {
+            self.render_refs(cx)
+        };
+        let has_chips = quote.is_some() || !files.is_empty() || !ref_chips.is_empty();
 
         let mut chips = div().flex().flex_wrap().gap(space::S6);
         if let Some(q) = quote {
@@ -1159,6 +1287,7 @@ impl Render for ComposerView {
                 cx,
             ));
         }
+        chips = chips.children(ref_chips);
         for file in files {
             let id = file.id.clone();
             chips = chips.child(self.render_chip(
@@ -1218,6 +1347,7 @@ impl Render for ComposerView {
                 .capture_action(cx.listener(Self::on_escape))
                 .capture_action(cx.listener(Self::on_paste))
                 .capture_key_down(cx.listener(Self::on_format_key))
+                .capture_key_down(cx.listener(Self::on_refs_key))
                 .child(editor),
         )
         .focused(focused && enabled)

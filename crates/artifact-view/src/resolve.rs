@@ -87,12 +87,27 @@ pub fn origin_host(artifact_id: &str, version: u32) -> Result<String, Error> {
 /// The Content-Security-Policy for every response of an origin.
 pub fn csp(host: &str) -> String {
     let me = format!("'self' {SCHEME}://{host}");
+    if is_diagram_host(host) {
+        // The diagram renderer (REFS §B6): its own scripts only, no inline script.
+        return format!(
+            "default-src 'none'; script-src {me}; style-src 'unsafe-inline'; img-src data:; \
+             connect-src 'none'; frame-src 'none'; child-src 'none'; worker-src 'none'; \
+             object-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+        );
+    }
     format!(
         "default-src 'none'; script-src {me} 'unsafe-inline'; style-src {me} 'unsafe-inline'; \
          img-src {me} data:; font-src {me} data:; media-src {me} data:; connect-src 'none'; \
          frame-src 'none'; child-src 'none'; worker-src 'none'; object-src 'none'; \
          manifest-src 'none'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
     )
+}
+
+/// The reserved origin of the diagram renderer (`teamchat-diagram-v<n>`).
+pub fn is_diagram_host(host: &str) -> bool {
+    host.strip_prefix(crate::diagram::ARTIFACT_ID)
+        .and_then(|r| r.strip_prefix("-v"))
+        .is_some_and(|v| !v.is_empty() && v.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// The WKContentRuleList source: blocks every network and file load.
@@ -445,6 +460,18 @@ fn read_span(path: &Path, a: u64, b: u64) -> std::io::Result<Arc<[u8]>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagram_origin_has_the_strict_csp() {
+        assert!(is_diagram_host("teamchat-diagram-v1"));
+        assert!(!is_diagram_host("teamchat-diagram-vx"));
+        assert!(!is_diagram_host("a1-v1"));
+        let c = csp("teamchat-diagram-v1");
+        assert!(c.contains("script-src 'self' artifact://teamchat-diagram-v1;"));
+        assert!(!c.contains("script-src 'self' artifact://teamchat-diagram-v1 'unsafe-inline'"));
+        assert!(c.contains("connect-src 'none'"));
+        assert!(csp("a1-v1").contains("'unsafe-inline'"));
+    }
 
     #[test]
     fn hosts_are_injective_and_lowercase() {

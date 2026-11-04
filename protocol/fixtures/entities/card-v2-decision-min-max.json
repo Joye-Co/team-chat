@@ -1,0 +1,37 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "minSelect > maxSelect",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "c",
+        "type": "decision",
+        "multiple": true,
+        "minSelect": 3,
+        "maxSelect": 2,
+        "options": [
+          {
+            "id": "a",
+            "label": "A"
+          },
+          {
+            "id": "b",
+            "label": "B"
+          },
+          {
+            "id": "c",
+            "label": "C"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "kind": "ServerFrame",
+  "valid": true,
+  "description": "R8: the reason, no new ErrorCode",
+  "value": {
+    "t": "ack",
+    "rid": "r104",
+    "ok": false,
+    "error": {
+      "code": "conflict",
+      "message": "the ask was answered",
+      "reason": "card.already_answered"
+    }
+  }
+}

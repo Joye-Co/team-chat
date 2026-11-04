@@ -182,6 +182,21 @@ impl HttpClient {
     }
 
     /// A 产出 with all versions, newest first.
+    /// `GET /v1/artifacts/:id/versions/:v/data` (1.1): the latest data snapshot of a version.
+    pub async fn artifact_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> ApiResult<crate::proto::ArtifactDataResponse> {
+        self.call::<(), _>(
+            Method::GET,
+            &format!("/v1/artifacts/{}/versions/{version}/data", enc(artifact_id)),
+            None,
+            true,
+        )
+        .await
+    }
+
     pub async fn artifact(&self, artifact_id: &str) -> ApiResult<ArtifactResponse> {
         self.call::<(), _>(
             Method::GET,
@@ -200,6 +215,30 @@ impl HttpClient {
         self.call(Method::POST, "/v1/artifacts", Some(req), true)
             .await
     }
+
+    // --- inc-host track ---
+    /// `PUT /v1/artifacts/:id/versions/:v/media` (1.1): stores `artifact.previewReady` with
+    /// the version's media metadata (the creator, or a member while the preview is not
+    /// ready).
+    pub async fn put_artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        media: &crate::proto::MediaInfo,
+    ) -> ApiResult<serde_json::Value> {
+        media.validate().map_err(invalid)?;
+        self.call(
+            Method::PUT,
+            &format!(
+                "/v1/artifacts/{}/versions/{version}/media",
+                enc(artifact_id)
+            ),
+            Some(&serde_json::json!({ "media": media })),
+            true,
+        )
+        .await
+    }
+    // --- end inc-host track ---
 
     pub async fn add_artifact_version(
         &self,

@@ -6,6 +6,10 @@
 // the run log and the uploaded raw session. Then 停止: a second run hangs in the fake CLI, a member
 // stops it through the client API (the chat-core `cancel_run` example), and the run must end as
 // cancelled with the fake CLI stopped by the daemon's run.cancel, one bot note and the topic open.
+// The first run also calls `chat-run card patch` (the fake CLI's word "chatrun"): the run log
+// must hold the `output` event with the token in its body redacted, and the socket must be gone
+// after the run. A server without `chat-run` support makes the command end with
+// "server too old" after 15 s; the report records which answer came.
 //
 // Usage (from the repo root): bun apps/daemon/e2e/local-e2e.ts [--port 8793] [--keep]
 // Against a deployed env (no wrangler; the owner token comes from a file, and the run makes its
@@ -217,7 +221,7 @@ async function runDaemonCheck(
   ws.send(JSON.stringify({ t: "hello", protocol: 1, client: { name: "e2e", version: "0" } }));
   await until("welcome", () => events.find((e) => e.frame?.t === "welcome"));
   ws.send(
-    JSON.stringify({ t: "send", rid: "r1", groupId, clientMsgId: crypto.randomUUID(), body: "@dev 请总结一下 slow", mentions: [bot.member.id] }),
+    JSON.stringify({ t: "send", rid: "r1", groupId, clientMsgId: crypto.randomUUID(), body: "@dev 请总结一下 slow chatrun", mentions: [bot.member.id] }),
   );
   const ack = await until("send ack", () => events.find((e) => e.frame?.rid === "r1"));
   if (!ack.frame.ok) throw new Error("send failed");
@@ -243,6 +247,22 @@ async function runDaemonCheck(
   step("no progress message; done card posted; topic done");
 
   const log = await call("GET", `/v1/runs/${runId}/events`, { token: alice.token });
+  // chat-run: the output event is in the run log, redacted; the socket is gone.
+  const output = log.entries.find((e: any) => e.t === "run.event" && e.event.type === "output");
+  if (output?.event.op !== "card.patch") throw new Error("no chat-run output event in the run log");
+  const outputBody = JSON.stringify(output.event.body);
+  if (outputBody.includes("tm_fakefakefakefakefakefake01") || !outputBody.includes("<redacted>")) throw new Error("output body not redacted");
+  const runDir = join(work, "runs", runId);
+  const chatRun = JSON.parse(readFileSync(join(runDir, "work", "chatrun-1.json"), "utf8"));
+  if (!chatRun.socket || existsSync(chatRun.socket)) throw new Error("chat-run socket missing in the run or left after it");
+  if (chatRun.mode !== "0o600") throw new Error(`chat-run socket mode ${chatRun.mode}`);
+  const chatRunAnswer = JSON.parse(chatRun.out || "null");
+  // An old server answers with a reason ("server too old"); a 1.1 server runs the patch through
+  // the group room, which refuses the fake message id "M" as not_found.
+  const typed = chatRunAnswer?.error?.reason || chatRunAnswer?.error?.code === "not_found";
+  if (chatRun.code !== 0 && !typed) throw new Error(`chat-run failed without a reason: ${chatRun.err}`);
+  report.chatRun = { exitCode: chatRun.code, answer: chatRunAnswer };
+  step(`chat-run output in the run log, redacted; chat-run exit ${chatRun.code}`);
   const session = await until("raw session uploaded", async () => {
     const res = await fetch(`${BASE}/v1/runs/${runId}/session`, { headers: { authorization: `Bearer ${owner}` } });
     return res.ok ? new Uint8Array(await res.arrayBuffer()) : undefined;
@@ -266,7 +286,7 @@ async function runDaemonCheck(
     runLogTypes: log.entries.map((e: any) => (e.t === "run.event" ? e.event.type : e.t)),
     sessionGzipBytes: session.byteLength,
     sessionIsGzip: session[0] === 0x1f && session[1] === 0x8b,
-    done: Boolean(done),
+    doneCard: result.cardV2?.intent === "done",
   });
   if (!report.sessionIsGzip) throw new Error("session is not gzip");
   step("run log and raw session checked");

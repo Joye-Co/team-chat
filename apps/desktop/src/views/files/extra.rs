@@ -58,11 +58,26 @@ impl MessageExtra for AttachmentsExtra {
                 ElementId::Name(SharedString::from(format!("att-{row_key}-{index}-{part}")))
             };
             if !file.is_uploaded() {
+                let key = upload_key(&message.client_msg_id, index);
                 let state = ctx
                     .provider
-                    .file_transfer(&upload_key(&message.client_msg_id, index))
+                    .file_transfer(&key)
                     .unwrap_or(TransferState::Queued);
-                files = files.child(upload_row(file, state, id, cx));
+                // inc-host: media files show the MEDIA §08 states with the real progress:
+                // 正在上传 n%, then 正在生成预览 while the sender makes the preview.
+                match media_state(file, &state, ctx.provider.upload_generating(&key)) {
+                    Some((lead, status)) => {
+                        files = files.child(crate::views::media::states::row(
+                            id("state"),
+                            lead,
+                            file.name.clone(),
+                            &status,
+                            None,
+                            cx,
+                        ));
+                    }
+                    None => files = files.child(upload_row(file, state, id, cx)),
+                }
                 n_files += 1;
             } else if file.is_image() && file.size <= THUMB_SOURCE_MAX_BYTES {
                 images = images.child(image_preview(message, file, ctx.provider, id, cx));
@@ -472,3 +487,91 @@ pub fn file_row_in(
     })
     .into_any_element()
 }
+
+// --- inc-host track ---
+/// The MEDIA §08 state of an uploading video, audio or PDF file; `None` for other files
+/// and for a failed upload (the file row says why).
+fn media_state(
+    file: &FileAttachment,
+    state: &TransferState,
+    generating: bool,
+) -> Option<(
+    crate::views::media::states::Lead,
+    crate::views::media::states::Status,
+)> {
+    use crate::views::media::{
+        MediaKind, file_kind,
+        states::{Lead, Status},
+    };
+    let kind = file_kind(&file.name, &file.mime);
+    if !matches!(kind, MediaKind::Video | MediaKind::Audio | MediaKind::Pdf)
+        || matches!(state, TransferState::Failed(_))
+    {
+        return None;
+    }
+    let lead = if kind == MediaKind::Video {
+        Lead::Blank
+    } else {
+        Lead::Icon(kind.icon())
+    };
+    let status = match state {
+        _ if generating => Status::Generating { duration: None },
+        TransferState::Running { done, total } => Status::Uploading {
+            done: *done,
+            total: *total,
+        },
+        _ => Status::Uploading {
+            done: 0,
+            total: file.size,
+        },
+    };
+    Some((lead, status))
+}
+
+#[cfg(test)]
+mod media_state_tests {
+    use super::*;
+    use crate::views::media::states::Status;
+
+    fn f(name: &str, mime: &str) -> FileAttachment {
+        FileAttachment {
+            name: name.into(),
+            mime: mime.into(),
+            size: 100,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn uploads_of_media_follow_the_real_progress() {
+        let v = f("录屏.mov", "video/quicktime");
+        let running = TransferState::Running {
+            done: 62,
+            total: 100,
+        };
+        assert!(matches!(
+            media_state(&v, &running, false),
+            Some((
+                _,
+                Status::Uploading {
+                    done: 62,
+                    total: 100
+                }
+            ))
+        ));
+        assert!(matches!(
+            media_state(&v, &running, true),
+            Some((_, Status::Generating { .. }))
+        ));
+        assert!(
+            media_state(
+                &v,
+                &TransferState::Failed(crate::data::FileError::Other),
+                false
+            )
+            .is_none()
+        );
+        assert!(media_state(&f("a.txt", "text/plain"), &running, false).is_none());
+    }
+}
+// --- end inc-host track ---

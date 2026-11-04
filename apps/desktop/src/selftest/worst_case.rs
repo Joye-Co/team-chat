@@ -447,6 +447,46 @@ impl ChatProvider for WorstCase {
         self.inner.subscribe()
     }
 
+    // --- inc-refs: references pass through; their labels are the worst case (long Chinese
+    // labels, cut at 120) and a body that no longer starts with its quote lines.
+    fn refs_supported(&self) -> bool {
+        self.inner.refs_supported()
+    }
+    fn add_draft_ref(&self, key: &DraftKey, r: DraftRef) -> AddRef {
+        self.inner.add_draft_ref(key, r)
+    }
+    fn remove_draft_ref(&self, key: &DraftKey, index: usize) {
+        self.inner.remove_draft_ref(key, index)
+    }
+    fn message_block_refs(&self, message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        self.inner
+            .message_block_refs(message)
+            .into_iter()
+            .enumerate()
+            .map(|(i, mut r)| {
+                if r.deleted.is_none() && i % 2 == 0 {
+                    r.source.label = crate::views::refs::label::build(
+                        "第四季度各渠道新增群和留存的完整月报（含去重说明）",
+                        Some("按渠道和来源拆开的明细表"),
+                        Some("小红书 · 品牌合作 · 新增群（去重后，含邀请回流） 14"),
+                    )
+                    .text;
+                }
+                r
+            })
+            .collect()
+    }
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+        refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        self.inner.send_with_refs(request, key, files, refs)
+    }
+    // --- end inc-refs
+
     // Everything else goes to the fake provider, so cards, runs, files,
     // drafts, search and machines are on screen under --worst-case too;
     // the values a view renders are rewritten as above.
@@ -586,6 +626,69 @@ impl ChatProvider for WorstCase {
             .send_artifact_event(artifact_id, version, name, payload)
     }
     // --- end r2-trust ---
+    // --- inc-host track: the 产出 page host and media ---
+    fn page_bridge(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::page_host::PageBridge> {
+        self.inner.page_bridge(artifact_id, version)
+    }
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        kind: crate::data::page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, crate::data::page_host::PageSendError> {
+        self.inner
+            .send_page_event(artifact_id, version, name, kind, payload)
+    }
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        self.inner.fetch_page_data(artifact_id, version)
+    }
+    fn file_poster(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<std::path::PathBuf> {
+        self.inner.file_poster(group_id, topic_id, file)
+    }
+    fn artifact_poster(&self, artifact_id: &str, version: u32) -> Option<std::path::PathBuf> {
+        self.inner.artifact_poster(artifact_id, version)
+    }
+    fn page_signals(&self) -> Option<UnboundedReceiver<page_host::PageSignal>> {
+        self.inner.page_signals()
+    }
+    fn artifact_responses(&self, artifact_id: &str) -> Vec<pages::ArtifactResponse> {
+        self.inner.artifact_responses(artifact_id)
+    }
+    fn file_media(&self, file: &FileAttachment) -> Option<chat_core::proto::MediaInfo> {
+        self.inner.file_media(file)
+    }
+    fn artifact_media(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<chat_core::proto::MediaInfo> {
+        self.inner.artifact_media(artifact_id, version)
+    }
+    fn upload_generating(&self, key: &str) -> bool {
+        self.inner.upload_generating(key)
+    }
+    fn media_duration(&self, file: &FileAttachment) -> Option<u64> {
+        self.inner.media_duration(file)
+    }
+    fn artifact_preview(&self, artifact_id: &str, version: u32) -> Option<v2::ArtifactPreview> {
+        self.inner.artifact_preview(artifact_id, version)
+    }
+    // --- end inc-host track ---
     fn create_artifact(&self, request: NewArtifactRequest) -> Reply<CreatedArtifact> {
         self.inner.create_artifact(request)
     }
@@ -811,6 +914,41 @@ impl ChatProvider for WorstCase {
         self.inner
             .withdraw_card_v2_answer(group_id, topic_id, message_id)
     }
+    // Card v2.1 events: my events, their acks and the pending, retry and drop states, so
+    // the worst-case shots show the interaction states with worst-case names.
+    fn send_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        self.inner
+            .send_card_event(group_id, topic_id, message_id, request)
+    }
+    fn card_v2_events(&self, group_id: &str, message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        self.inner.card_v2_events(group_id, message_id)
+    }
+    fn drop_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        self.inner
+            .drop_card_event(group_id, topic_id, message_id, client_event_id)
+    }
+    fn retry_card_event(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) -> bool {
+        self.inner
+            .retry_card_event(group_id, topic_id, message_id, client_event_id)
+    }
     // --- end cards v2 track ---
 }
 
@@ -932,5 +1070,27 @@ impl ChatProvider for Empty {
     }
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {
         self.inner.send_diagnostics(description)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The worst-case shots show the Card v2.1 interaction states: my events reach the
+    /// cards through the wrapper (they fell back to the trait's empty default before).
+    #[test]
+    fn worst_case_forwards_my_card_events() {
+        let inner = crate::fake::v2::V2Samples::new();
+        let id = crate::views::cards::v21::samples::PEND_WAIT;
+        let group = crate::fake::v2::GROWTH;
+        let mine = inner.card_v2_events(group, id);
+        assert!(!mine.is_empty(), "the sample waits on an event");
+        let worst = WorstCase::new(inner);
+        let seen = worst.card_v2_events(group, id);
+        assert_eq!(
+            seen.iter().map(|e| &e.client_event_id).collect::<Vec<_>>(),
+            mine.iter().map(|e| &e.client_event_id).collect::<Vec<_>>()
+        );
     }
 }

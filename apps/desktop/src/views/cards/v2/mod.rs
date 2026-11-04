@@ -20,9 +20,9 @@
 //! `samples.rs`, `gallery.rs` and `scenes.rs` (the cards-v2 screenshot
 //! scenes).
 
-mod blocks;
+pub(crate) mod blocks;
 mod chart;
-mod confirm;
+pub(crate) mod confirm;
 pub mod form;
 pub mod gallery;
 mod line;
@@ -59,6 +59,11 @@ use crate::{
 
 #[allow(unused_imports)]
 pub use line::{notification_text, plan_row};
+// --- inc-cards21 ---
+pub(crate) use chart::{
+    chart as chart_el, plot_left as chart_plot_left, y_from_top as chart_y_from_top,
+};
+// --- end inc-cards21 ---
 
 /// Where a card is drawn.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -136,7 +141,7 @@ impl CardEnv {
             })
     }
 
-    fn now(&self) -> Millis {
+    pub(crate) fn now(&self) -> Millis {
         self.now
             .unwrap_or_else(|| crate::selftest::clock::utc_now().timestamp_millis())
     }
@@ -215,9 +220,43 @@ pub fn render(
         let f = form.read(cx);
         (f.rev, f.editing)
     };
-    if form_rev < card.rev && editing.is_none() {
-        form.update(cx, |f, _| f.reset(&card));
+    // --- inc-cards21: 2.1 keeps local values across revs (INTERACT §4.4) ---
+    let is21 = super::v21::is_21(&card);
+    let prev = env.preset.as_ref().and_then(|p| p.prev.clone());
+    let kept: Vec<String> = env
+        .preset
+        .as_ref()
+        .map(|p| p.drafts_kept.iter().map(|s| s.to_string()).collect())
+        .unwrap_or_default();
+    let ui = window.use_keyed_state(SharedString::from(format!("{key}-ui")), cx, |_, _| {
+        let mut u = super::v21::CardUi::new(prev);
+        u.drafts_kept = kept.into_iter().collect();
+        u
+    });
+    let seen = ui.read(cx).seen.clone();
+    if is21 {
+        ui.update(cx, |u, _| u.observe(&card, msg.cause.as_ref()));
     }
+    if form_rev < card.rev && editing.is_none() {
+        match seen.filter(|_| is21) {
+            Some(old) => {
+                let kept = form.update(cx, |f, cx| f.rebase(&old, &card, cx));
+                let f = form.read(cx);
+                let holds: Vec<String> = ui
+                    .read(cx)
+                    .drafts_kept
+                    .iter()
+                    .filter(|id| f.holds_text(id))
+                    .cloned()
+                    .collect();
+                ui.update(cx, |u, _| {
+                    u.keep_drafts(kept, &card, |id| holds.iter().any(|h| h == id))
+                });
+            }
+            None => form.update(cx, |f, _| f.reset(&card)),
+        }
+    }
+    // --- end inc-cards21 ---
     let local_rev = form.read(cx).editing;
     let state = state::derive(
         &card,
@@ -227,6 +266,11 @@ pub fn render(
         &viewer,
         env.now(),
     );
+    // --- inc-cards21 ---
+    let state = super::v21::band::adjust(&card, state, &answers, &viewer, env.now());
+    let open = msg.card_state.as_ref().map(|s| s.open_ask().is_some());
+    let surface_live = super::v21::band::surface_live(&card, &state, &answers, &viewer, open);
+    // --- end inc-cards21 ---
     let values = form.read(cx).values(cx);
     let author = env
         .provider
@@ -245,6 +289,8 @@ pub fn render(
         author,
         mode,
         key,
+        ui,
+        surface_live,
     };
     record(&ctx);
     Some(match mode {
@@ -270,6 +316,12 @@ pub(crate) struct Ctx<'a> {
     pub mode: CardMode,
     /// Element id prefix, unique per card and mode.
     pub key: String,
+    // --- inc-cards21 ---
+    /// Local UI state of the 2.1 blocks.
+    pub ui: Entity<super::v21::CardUi>,
+    /// The decision surface of a non-blocking ask is live for the viewer.
+    pub surface_live: bool,
+    // --- end inc-cards21 ---
 }
 
 impl Ctx<'_> {
@@ -300,7 +352,7 @@ impl Ctx<'_> {
 
     /// The input blocks are live for the viewer.
     pub fn live(&self) -> bool {
-        self.state.live()
+        self.state.live() || self.surface_live
     }
 
     /// True when the card is a quick choice: one decision with two short
@@ -435,6 +487,35 @@ impl Answerer {
     /// Sends the answer with `action` now. A cancel sends no values.
     pub fn send(&self, action: &CardV2Action, cx: &mut App) {
         let values = self.form.read(cx).values(cx);
+        // --- inc-cards21: a 2.1 answer is `card.event action.press` with its inputs ---
+        if super::v21::is_21(&self.card) {
+            let inputs = matches!(
+                action.kind(),
+                CardActionKind::Submit | CardActionKind::Reject
+            )
+            .then(|| super::v21::form21::to_inputs(&self.card, &values, Some(action)))
+            .flatten();
+            self.provider.send_card_event(
+                &self.group_id,
+                &self.topic_id,
+                &self.message_id,
+                crate::data::cards_v2::CardEventRequest {
+                    rev: self.card.rev,
+                    action_id: Some(action.id.clone()),
+                    event: "action.press".into(),
+                    inputs,
+                    ..Default::default()
+                },
+            );
+            self.form.update(cx, |f, cx| {
+                if f.editing.is_some() {
+                    f.editing = None;
+                    cx.notify();
+                }
+            });
+            return;
+        }
+        // --- end inc-cards21 ---
         let submit = action.kind() == CardActionKind::Submit;
         let request = CardV2AnswerRequest {
             rev: self.card.rev,
@@ -467,6 +548,7 @@ impl Answerer {
             kind: None,
             target: None,
             confirm: None,
+            inputs: None,
         });
         self.send(&action, cx);
     }
@@ -524,6 +606,22 @@ impl Answerer {
                 nav.set_right_pane(RightPane::Live(run), cx);
             }
         });
+    }
+
+    /// v11/pb-cards: scrolls the card's 话题 to message `id` and highlights it.
+    pub fn open_message(&self, id: &str, window: &mut Window, cx: &mut App) {
+        let Some(nav) = self.nav(window, cx) else {
+            return;
+        };
+        let seq = self
+            .provider
+            .messages(&self.group_id, &self.topic_id, 400)
+            .messages
+            .iter()
+            .find(|m| m.id == id)
+            .map_or(0, |m| m.created_seq);
+        let (g, t, id) = (self.group_id.clone(), self.topic_id.clone(), id.to_string());
+        nav.update(cx, |nav, cx| nav.open_message(g, t, id, seq, cx));
     }
 
     pub fn open(&self, target: &RefTarget, window: &mut Window, cx: &mut App) {
@@ -674,7 +772,7 @@ fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
 }
 
 /// The label and the detail of the strip.
-fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
+pub(crate) fn strip_words(ctx: &Ctx, cx: &App) -> (String, String) {
     let author = ctx.author.as_str();
     let at = |a: &CardV2Answer| crate::views::shell::clock(a.at);
     let label_of = |a: &CardV2Answer| {
@@ -1010,9 +1108,58 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
 /// in progress a 2 pt live bar along the bottom edge.
 pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let k = theme::colors(cx);
-    let t = tone(ctx.state, &k)?;
-    let (label, detail) = strip_words(ctx, cx);
-    let action = strip_action(ctx, cx);
+    // --- inc-cards21: my live event waits, 2.1 words, the deadline ---
+    // inc-integrate: a page event of an embed in this card waits too (the page host).
+    // v11/pb2-cards: the band says the stage (INTERACT §4.4) in its own tone: blue with the
+    // spinner while the author has it, grey once no answer came, red 失败 when the step
+    // was not sent.
+    use super::v21::band::PendTone;
+    let waiting = super::v21::band::pending(ctx)
+        .map(|p| (p.label, p.detail, p.tone))
+        .or_else(|| {
+            super::v21::band::page_pending(ctx, cx).map(|(l, tone)| (l, String::new(), tone))
+        });
+    // v11/r3-cards: a rev a member's event caused (Interact.dc.html 02 step 3).
+    let updated = waiting
+        .is_none()
+        .then(|| super::v21::band::updated(ctx))
+        .flatten();
+    let t = match waiting.as_ref().map(|w| w.2) {
+        _ if updated.is_some() => Tone {
+            mark: k.ink_2,
+            ink: k.ink,
+            fill: mix(k.live, k.sunken, m::UPDATED_FILL),
+            edge: k.line,
+        },
+        Some(PendTone::Live) => Tone {
+            mark: k.live,
+            ink: k.live_ink,
+            fill: mix(k.live, k.bg, m::LIVE_FILL),
+            edge: mix(k.live, k.bg, m::LIVE_EDGE),
+        },
+        Some(PendTone::Quiet) => Tone {
+            mark: k.ink_2,
+            ink: k.ink_2,
+            fill: k.sunken,
+            edge: k.line,
+        },
+        Some(PendTone::Bad) => tone(&CardState::Failed { answer: None }, &k)?,
+        None => tone(ctx.state, &k)?,
+    };
+    let (label, detail) = match (&waiting, &updated) {
+        (Some((l, d, _)), _) => (l.clone(), d.clone()),
+        (None, Some((l, d))) => (l.clone(), d.clone()),
+        (None, None) => super::v21::band::words(ctx, strip_words(ctx, cx)),
+    };
+    let right = (waiting.is_none() && updated.is_none())
+        .then(|| super::v21::band::right(ctx))
+        .flatten();
+    let action = if waiting.is_some() || updated.is_some() {
+        None
+    } else {
+        strip_action(ctx, cx)
+    };
+    // --- end inc-cards21 ---
     let bar = match ctx.state {
         CardState::Executing { progress, .. } if !progress.waiting => progress.fraction(),
         _ => None,
@@ -1034,7 +1181,19 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .flex()
             .items_center()
             .gap(space::S8)
-            .child(strip_icon(ctx.state, &t, ctx, cx))
+            .child(match waiting.as_ref().map(|w| w.2) {
+                _ if updated.is_some() => {
+                    ui::icon(Lucide::RotateCw, px(16.), t.mark).into_any_element()
+                }
+                Some(PendTone::Live) => ui::motion::spinner().color(t.mark).into_any_element(),
+                Some(PendTone::Quiet) => {
+                    ui::icon(Lucide::CircleAlert, px(16.), t.mark).into_any_element()
+                }
+                Some(PendTone::Bad) => {
+                    ui::icon(Lucide::CircleX, px(16.), t.mark).into_any_element()
+                }
+                None => strip_icon(ctx.state, &t, ctx, cx),
+            })
             .child(
                 div()
                     .flex_shrink(0.)
@@ -1054,6 +1213,16 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                         .one_line()
                         .text_color(k.ink_2)
                         .child(detail),
+                )
+            })
+            .when_some(right, |el, r| {
+                el.child(
+                    div()
+                        .ml_auto()
+                        .flex_none()
+                        .one_line()
+                        .text_color(t.ink)
+                        .child(r),
                 )
             })
             .children(action)
@@ -1173,9 +1342,8 @@ fn header(ctx: &Ctx, cx: &App) -> AnyElement {
                 .ml_auto()
                 .flex_none()
                 .mono()
-                .child(crate::views::shell::clock(
-                    ctx.msg.edited_at.unwrap_or(ctx.msg.created_at),
-                )),
+                // When the message was sent: a new rev changes the card, not its time.
+                .child(crate::views::shell::clock(ctx.msg.created_at)),
         )
         .into_any_element()
 }
@@ -1189,6 +1357,25 @@ fn title(ctx: &Ctx, cx: &App) -> AnyElement {
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(k.ink)
         .child(ctx.card.title.clone())
+        // --- inc-cards21: the 2.1 summary line under the title ---
+        .when_some(
+            ctx.card
+                .summary
+                .clone()
+                .filter(|_| super::v21::is_21(ctx.card))
+                .filter(|_| !super::v21::band::summary_in_band(ctx)),
+            |el, s| {
+                el.child(
+                    div()
+                        .mt(space::S4)
+                        .text_size(px(14.))
+                        .line_height(px(22.))
+                        .font_weight(FontWeight::NORMAL)
+                        .text_color(k.ink_2)
+                        .child(s),
+                )
+            },
+        )
         .into_any_element()
 }
 
@@ -1197,8 +1384,33 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     let waits = matches!(ctx.state, CardState::Pending);
     let strip = strip(ctx, cx);
     let header = header(ctx, cx);
+    // --- inc-integrate: 就这张卡提问 on the header (the whole card, `blockId` `card`) ---
+    let header = match (ctx.mode, ctx.msg.message_id.is_empty()) {
+        (CardMode::Topic | CardMode::Desk, false) => {
+            let target = crate::views::refs::parts::whole(&ctx.card.title).target(
+                crate::views::refs::RefSource::Message {
+                    group_id: ctx.msg.group_id.clone(),
+                    topic_id: ctx.msg.topic_id.clone(),
+                    message_id: ctx.msg.message_id.clone(),
+                },
+                &ctx.card.title,
+                "card",
+                None,
+                Some(ctx.card.rev as u64),
+            );
+            crate::views::refs::affordance::whole_card(div().child(header), Some(target), cx)
+        }
+        _ => header,
+    };
+    // --- end inc-integrate ---
     let title = title(ctx, cx);
-    let body = blocks::body(ctx, window, cx);
+    // --- inc-cards21 ---
+    let body = if super::v21::is_21(ctx.card) {
+        super::v21::body(ctx, window, cx)
+    } else {
+        blocks::body(ctx, window, cx)
+    };
+    // --- end inc-cards21 ---
     let footer = footer(ctx, window, cx);
     let muted = ctx.state.muted();
     let card = frame(waits, cx)
@@ -1326,6 +1538,11 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
         .collect();
     let a = ctx.answerer();
     let mut items: Vec<AnyElement> = Vec::new();
+    // --- inc-cards21: a non-blocking ask inside a report, and 2.1 footers ---
+    if let Some(f) = super::v21::leaves::footer(ctx, window, cx) {
+        return f;
+    }
+    // --- end inc-cards21 ---
 
     let link_buttons = |items: &mut Vec<AnyElement>, cx: &App| {
         for (i, l) in links.iter().enumerate() {
@@ -1507,6 +1724,13 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     disabled_button(ctx.id("submit"), submit.label.clone(), cx).into_any_element()
                 });
                 link_buttons(&mut items, cx);
+                // --- inc-cards21: the ask's promise at the right ---
+                if super::v21::is_21(ctx.card)
+                    && let Some(p) = ctx.card.ask.as_ref().and_then(|a| a.promise.clone())
+                {
+                    items.push(note(p, false, cx));
+                }
+                // --- end inc-cards21 ---
                 return Some(footer_bar(items, cx));
             }
             // An approval: the card's buttons, one primary.

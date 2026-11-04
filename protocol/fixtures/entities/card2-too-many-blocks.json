@@ -1,7 +1,8 @@
 {
   "kind": "CardV2",
   "valid": false,
-  "description": "limit: 51 blocks",
+  "description": "limit: 81 blocks",
+  "reason": "card.limits",
   "value": {
     "v": 2,
     "rev": 1,
@@ -212,6 +213,126 @@
       {
         "type": "divider",
         "id": "d50"
+      },
+      {
+        "type": "divider",
+        "id": "d51"
+      },
+      {
+        "type": "divider",
+        "id": "d52"
+      },
+      {
+        "type": "divider",
+        "id": "d53"
+      },
+      {
+        "type": "divider",
+        "id": "d54"
+      },
+      {
+        "type": "divider",
+        "id": "d55"
+      },
+      {
+        "type": "divider",
+        "id": "d56"
+      },
+      {
+        "type": "divider",
+        "id": "d57"
+      },
+      {
+        "type": "divider",
+        "id": "d58"
+      },
+      {
+        "type": "divider",
+        "id": "d59"
+      },
+      {
+        "type": "divider",
+        "id": "d60"
+      },
+      {
+        "type": "divider",
+        "id": "d61"
+      },
+      {
+        "type": "divider",
+        "id": "d62"
+      },
+      {
+        "type": "divider",
+        "id": "d63"
+      },
+      {
+        "type": "divider",
+        "id": "d64"
+      },
+      {
+        "type": "divider",
+        "id": "d65"
+      },
+      {
+        "type": "divider",
+        "id": "d66"
+      },
+      {
+        "type": "divider",
+        "id": "d67"
+      },
+      {
+        "type": "divider",
+        "id": "d68"
+      },
+      {
+        "type": "divider",
+        "id": "d69"
+      },
+      {
+        "type": "divider",
+        "id": "d70"
+      },
+      {
+        "type": "divider",
+        "id": "d71"
+      },
+      {
+        "type": "divider",
+        "id": "d72"
+      },
+      {
+        "type": "divider",
+        "id": "d73"
+      },
+      {
+        "type": "divider",
+        "id": "d74"
+      },
+      {
+        "type": "divider",
+        "id": "d75"
+      },
+      {
+        "type": "divider",
+        "id": "d76"
+      },
+      {
+        "type": "divider",
+        "id": "d77"
+      },
+      {
+        "type": "divider",
+        "id": "d78"
+      },
+      {
+        "type": "divider",
+        "id": "d79"
+      },
+      {
+        "type": "divider",
+        "id": "d80"
       }
     ]
   }

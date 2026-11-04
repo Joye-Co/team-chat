@@ -5,9 +5,9 @@
 use super::rows::{self, json_err};
 use super::{ApplyOutcome, LogEntry, Store, StoreResult};
 use crate::proto::{
-    AnswerEdits, AnswerInputs, ArtifactEventedData, ArtifactVersion, BotRun, CardAnsweredData,
-    CardV2, CardV2Block, Event, EventData, Message, RefTarget, TopicContext, TopicLink,
-    TopicLinkedData,
+    AnswerEdits, AnswerInputs, ArtifactPreviewReadyData, ArtifactVersion, BotRun, CardAnsweredData,
+    CardRetractedData, CardV2, CardV2Block, Event, EventData, Message, RefTarget, TopicContext,
+    TopicLink, TopicLinkedData,
 };
 use rusqlite::{OptionalExtension, Transaction, params};
 
@@ -57,6 +57,25 @@ CREATE TABLE log_refetch (
 INSERT INTO log_refetch (group_id, upto) SELECT group_id, last_applied FROM sync_state WHERE last_applied > 0;
 "#;
 
+/// 1.1 step `v11-2`: answer ids and retracts of the interaction loop; page events are no
+/// longer stored (they are transient), so their table goes.
+pub(super) const MIGRATION_SQL_2: &str = r#"
+ALTER TABLE card_answers ADD COLUMN answer_id TEXT;
+ALTER TABLE card_answers ADD COLUMN ask_id TEXT;
+ALTER TABLE card_answers ADD COLUMN retracted_at INTEGER;
+CREATE INDEX card_answers_by_answer ON card_answers(message_id, answer_id);
+DROP TABLE IF EXISTS artifact_events;
+"#;
+
+/// 1.1 step `v11-3`: the event, block and value of a 2.1 answer (an immediate commit has a
+/// block and a value, no action and no inputs). A separate step, so caches that already ran
+/// `v11-2` get the columns too.
+pub(super) const MIGRATION_SQL_3: &str = r#"
+ALTER TABLE card_answers ADD COLUMN event TEXT;
+ALTER TABLE card_answers ADD COLUMN block_id TEXT;
+ALTER TABLE card_answers ADD COLUMN value TEXT;
+"#;
+
 /// One answer to a v2 card (`card.answered`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CardAnswerRow {
@@ -69,6 +88,16 @@ pub struct CardAnswerRow {
     pub inputs: Option<AnswerInputs>,
     pub edited_values: Option<AnswerEdits>,
     pub at: u64,
+    /// 2.1: the answer id and ask round (absent for 2.0 answers).
+    pub answer_id: Option<String>,
+    pub ask_id: Option<String>,
+    /// 2.1: when the answerer took it back (`card.retracted`).
+    pub retracted_at: Option<u64>,
+    /// 2.1: the event that answered (`choice.submit`, `action.press`, …).
+    pub event: Option<String>,
+    /// 2.1: the block of an immediate commit, and its value (`{value}`, `{values}`, …).
+    pub block_id: Option<String>,
+    pub value: Option<serde_json::Value>,
 }
 
 /// A group decision (群里的决定): an answer to a v2 card whose `ask.record` is true.
@@ -80,18 +109,6 @@ pub struct DecisionRow {
     /// The card as it is now (title = the question).
     pub card: CardV2,
     pub answer: CardAnswerRow,
-}
-
-/// One event an interactive 产出 page sent (`artifact.evented`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ArtifactEventRow {
-    pub seq: u64,
-    pub artifact_id: String,
-    pub version: u32,
-    pub actor_id: String,
-    pub name: String,
-    pub payload: Option<serde_json::Value>,
-    pub at: u64,
 }
 
 /// A group whose log the 1.1 cache recovery still has to re-read: `(after, upto]`.
@@ -116,8 +133,8 @@ pub(super) fn insert_card_answer(
     d: &CardAnsweredData,
 ) -> StoreResult<()> {
     tx.execute(
-        "INSERT OR IGNORE INTO card_answers (group_id, seq, message_id, rev, actor_id, action_id, inputs, edited_values, at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT OR IGNORE INTO card_answers (group_id, seq, message_id, rev, actor_id, action_id, inputs, edited_values, at, answer_id, ask_id, event, block_id, value)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             ev.group_id,
             ev.seq,
@@ -127,32 +144,46 @@ pub(super) fn insert_card_answer(
             d.action_id,
             json_opt(&d.inputs)?,
             json_opt(&d.edited_values)?,
-            ev.at
+            ev.at,
+            d.answer_id,
+            d.ask_id,
+            d.event,
+            d.block_id,
+            json_opt(&d.value)?
         ],
     )?;
     Ok(())
 }
 
-pub(super) fn insert_artifact_event(
+/// Marks a retracted answer (`card.retracted`).
+pub(super) fn retract_card_answer(
     tx: &Transaction<'_>,
     ev: &Event,
-    d: &ArtifactEventedData,
+    d: &CardRetractedData,
 ) -> StoreResult<()> {
     tx.execute(
-        "INSERT OR IGNORE INTO artifact_events (group_id, seq, artifact_id, version, actor_id, name, payload, at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
-        params![
-            ev.group_id,
-            ev.seq,
-            d.artifact_id,
-            d.version,
-            ev.actor_id,
-            d.name,
-            json_opt(&d.payload)?,
-            ev.at
-        ],
+        "UPDATE card_answers SET retracted_at = ?3 WHERE message_id = ?1 AND answer_id = ?2",
+        params![d.message_id, d.answer_id, ev.at],
     )?;
     Ok(())
+}
+
+/// Sets the media of a cached 产出 version (`artifact.previewReady`). Returns its topic.
+pub(super) fn set_version_media(
+    tx: &Transaction<'_>,
+    d: &ArtifactPreviewReadyData,
+) -> StoreResult<Option<String>> {
+    tx.execute(
+        "UPDATE artifact_versions SET raw = json_set(raw, '$.media', json(?3)) WHERE artifact_id = ?1 AND version = ?2",
+        params![d.artifact_id, d.version, serde_json::to_string(&d.media)?],
+    )?;
+    Ok(tx
+        .query_row(
+            "SELECT topic_id FROM artifacts WHERE id = ?1",
+            [&d.artifact_id],
+            |r| r.get(0),
+        )
+        .optional()?)
 }
 
 /// Keeps the newest state per (topic, kind, url). Unknown link kinds are skipped.
@@ -289,7 +320,17 @@ fn recover_one(tx: &Transaction<'_>, ev: &Event, out: &mut ApplyOutcome) -> Stor
                 out.message_topics.insert(t);
             }
         }
-        EventData::ArtifactEvented(d) => insert_artifact_event(tx, ev, d)?,
+        EventData::CardRetracted(d) => {
+            retract_card_answer(tx, ev, d)?;
+            if let Some(t) = topic_of_message(tx, &d.message_id)? {
+                out.message_topics.insert(t);
+            }
+        }
+        EventData::ArtifactPreviewReady(d) => {
+            if let Some(t) = set_version_media(tx, d)? {
+                out.artifact_topics.insert(t);
+            }
+        }
         EventData::TopicLinked(d) => {
             upsert_topic_link(tx, ev, d)?;
             out.topic_list_changed = true;
@@ -330,10 +371,16 @@ fn answer_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<CardAnswerRow> {
         inputs: parse_opt(r.get(6)?)?,
         edited_values: parse_opt(r.get(7)?)?,
         at: r.get(8)?,
+        answer_id: r.get(9)?,
+        ask_id: r.get(10)?,
+        retracted_at: r.get(11)?,
+        event: r.get(12)?,
+        block_id: r.get(13)?,
+        value: parse_opt(r.get(14)?)?,
     })
 }
 
-const ANSWER_COLS: &str = "a.group_id, a.seq, a.message_id, a.rev, a.actor_id, a.action_id, a.inputs, a.edited_values, a.at";
+const ANSWER_COLS: &str = "a.group_id, a.seq, a.message_id, a.rev, a.actor_id, a.action_id, a.inputs, a.edited_values, a.at, a.answer_id, a.ask_id, a.retracted_at, a.event, a.block_id, a.value";
 
 const ACTIVE_RUN: &str =
     "json_extract(raw, '$.status') IN ('created', 'running', 'waiting', 'blocked')";
@@ -360,14 +407,14 @@ impl Store {
             let mut st = c.prepare_cached(&format!(
                 "SELECT {ANSWER_COLS}, m.topic_id, m.raw FROM card_answers a
                  JOIN messages m ON m.id = a.message_id
-                 WHERE (?1 IS NULL OR a.group_id = ?1) AND m.deleted_at IS NULL
+                 WHERE (?1 IS NULL OR a.group_id = ?1) AND m.deleted_at IS NULL AND a.retracted_at IS NULL
                    AND json_extract(m.raw, '$.cardV2.ask.record') = 1
                  ORDER BY a.at DESC, a.seq DESC LIMIT ?2"
             ))?;
             let rows = st.query_map(params![group_id, limit as u64], |r| {
                 let answer = answer_from_row(r)?;
-                let topic_id: String = r.get(9)?;
-                let raw: String = r.get(10)?;
+                let topic_id: String = r.get(15)?;
+                let raw: String = r.get(16)?;
                 Ok((answer, topic_id, raw))
             })?;
             let mut out = Vec::new();
@@ -416,28 +463,6 @@ impl Store {
             )?;
             st.query_map([topic_id], |r| {
                 serde_json::from_str::<TopicLink>(&r.get::<_, String>(0)?).map_err(json_err)
-            })?
-            .collect()
-        })
-    }
-
-    /// Page events of a 产出, oldest first.
-    pub fn artifact_events(&self, artifact_id: &str) -> StoreResult<Vec<ArtifactEventRow>> {
-        self.with_reader(|c| {
-            let mut st = c.prepare_cached(
-                "SELECT seq, artifact_id, version, actor_id, name, payload, at FROM artifact_events
-                 WHERE artifact_id = ?1 ORDER BY seq",
-            )?;
-            st.query_map([artifact_id], |r| {
-                Ok(ArtifactEventRow {
-                    seq: r.get(0)?,
-                    artifact_id: r.get(1)?,
-                    version: r.get(2)?,
-                    actor_id: r.get(3)?,
-                    name: r.get(4)?,
-                    payload: parse_opt(r.get(5)?)?,
-                    at: r.get(6)?,
-                })
             })?
             .collect()
         })

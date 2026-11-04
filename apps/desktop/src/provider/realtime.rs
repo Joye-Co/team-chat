@@ -312,6 +312,15 @@ impl CoreProvider {
                 .drafts
                 .save_text(&key, d.body.clone(), d.mentions.clone());
             self.shared.drafts.set_quote(&key, d.quote_of.clone());
+            // inc-refs: the reference chips.
+            let refs = d
+                .refs
+                .iter()
+                .filter_map(|r| r.to_draft_ref())
+                .collect::<Vec<_>>();
+            if !refs.is_empty() {
+                self.shared.drafts.set_refs(&key, refs);
+            }
         }
         self.state().navigation = state.navigation.map(SavedNavigation::from);
     }

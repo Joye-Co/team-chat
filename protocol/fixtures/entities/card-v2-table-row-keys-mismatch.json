@@ -1,0 +1,34 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "one row key per row",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "t",
+        "type": "table",
+        "columns": [
+          "a"
+        ],
+        "rows": [
+          [
+            "1"
+          ],
+          [
+            "2"
+          ]
+        ],
+        "rowKeys": [
+          "only"
+        ]
+      }
+    ]
+  }
+}

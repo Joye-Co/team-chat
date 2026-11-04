@@ -1,0 +1,20 @@
+{
+  "kind": "CardState",
+  "valid": true,
+  "description": "a private poll: counts only",
+  "value": {
+    "ask": {
+      "id": "a1",
+      "status": "open",
+      "from": [
+        "01JBX0OWNER0000000000000AA"
+      ],
+      "blocking": false
+    },
+    "answers": [],
+    "tally": {
+      "A": 2,
+      "B": 1
+    }
+  }
+}

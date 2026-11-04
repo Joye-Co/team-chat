@@ -285,6 +285,19 @@ pub struct PostMessageRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub context: Option<crate::TopicContext>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cause_event_id: Option<String>,
+    /// 1.1: refs to parts.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub block_refs: Option<Vec<crate::BlockRefInput>>,
 }
 
 impl PostMessageRequest {
@@ -312,6 +325,8 @@ impl PostMessageRequest {
             card: self.card,
             card_v2: self.card_v2,
             context: self.context,
+            cause_event_id: self.cause_event_id,
+            block_refs: self.block_refs,
         })
     }
 }

@@ -394,3 +394,175 @@ fn the_group_page_placeholder_names_the_group_and_keeps_its_fixed_text() {
     let long = group_page_placeholder(&"二零二六年第四季度跨部门产品规划讨论群".repeat(2));
     assert!(long.ends_with("…里开个话题，或 @ 成员交代…"), "{long}");
 }
+
+// --- inc-refs: reference chips (REFS §A4, §A5) ---
+
+fn chip(n: usize) -> crate::data::DraftRef {
+    crate::data::DraftRef {
+        input: chat_core::proto::BlockRefInput {
+            message_id: Some("m-src".into()),
+            block_id: format!("v1:{n}"),
+            label: format!("新增群从哪来 · 第 {n} 处"),
+            ..Default::default()
+        },
+        group_id: GROUP.into(),
+        topic_id: TOPIC.into(),
+        lead_chars: 7,
+    }
+}
+
+#[gpui::test]
+fn chips_cap_at_five_backspace_and_esc_remove_and_send_carries_them(cx: &mut TestAppContext) {
+    use crate::data::AddRef;
+    let (h, cx) = open(cx, Some(TOPIC));
+    let key = DraftKey::topic(GROUP, TOPIC);
+    for n in 0..5 {
+        assert_eq!(h.provider.add_draft_ref(&key, chip(n)), AddRef::Added);
+    }
+    assert_eq!(h.provider.add_draft_ref(&key, chip(5)), AddRef::Full);
+    assert_eq!(
+        h.provider.add_draft_ref(&key, chip(2)),
+        AddRef::Duplicate(2)
+    );
+    cx.run_until_parked();
+    assert_eq!(h.view.update(cx, |this, _| this.refs.len()), 5);
+
+    // Backspace at the start of an empty field removes the last chip.
+    cx.simulate_keystrokes("backspace");
+    assert_eq!(h.provider.draft(&key).refs.len(), 4);
+    // With text, Backspace edits the text.
+    cx.simulate_input("ab");
+    cx.simulate_keystrokes("backspace");
+    assert_eq!(h.text(cx), "a");
+    assert_eq!(h.provider.draft(&key).refs.len(), 4);
+    cx.simulate_keystrokes("backspace");
+    // Esc: the quote first, then the newest chip.
+    let quoted = h.last(TOPIC);
+    h.provider.set_quote(&key, Some(quoted.id.clone()));
+    cx.run_until_parked();
+    cx.simulate_keystrokes("escape");
+    assert_eq!(h.provider.draft(&key).quote_of, None);
+    assert_eq!(h.provider.draft(&key).refs.len(), 4);
+    cx.simulate_keystrokes("escape");
+    let left: Vec<String> = h
+        .provider
+        .draft(&key)
+        .refs
+        .iter()
+        .map(|r| r.input.block_id.clone())
+        .collect();
+    assert_eq!(left, ["v1:0", "v1:1", "v1:2"]);
+
+    // Chips with an empty text send: the body is the quote lines only.
+    let before = h.count(TOPIC);
+    cx.simulate_keystrokes("enter");
+    assert_eq!(h.count(TOPIC), before + 1);
+    let sent = h.last(TOPIC);
+    let refs = h.provider.message_block_refs(&sent);
+    assert_eq!(refs.len(), 3);
+    assert_eq!(
+        sent.body,
+        "> ↳ 新增群从哪来 · 第 0 处\n> ↳ 新增群从哪来 · 第 1 处\n> ↳ 新增群从哪来 · 第 2 处"
+    );
+    assert_eq!(
+        crate::views::refs::strip_prefix(&sent.body, &refs),
+        Some("")
+    );
+    assert!(h.provider.draft(&key).refs.is_empty());
+    assert!(h.view.update(cx, |this, _| this.refs.is_empty()));
+}
+
+#[gpui::test]
+fn asking_about_a_part_adds_the_chip_and_mentions_the_author_bot(cx: &mut TestAppContext) {
+    use crate::fake::v2::{self as d, V2Samples, refs_samples};
+    cx.update(gpui_component::init);
+    let provider = V2Samples::with_refs();
+    let dyn_provider: Arc<dyn ChatProvider> = provider.clone();
+    let (view, cx) = cx.add_window_view(move |window, cx| {
+        let services = Services::new(dyn_provider, cx);
+        services.nav.update(cx, |nav, cx| {
+            nav.open_topic(d::GROWTH.into(), d::T_REPORT.into(), cx)
+        });
+        ComposerView::new(services, window, cx)
+    });
+    cx.run_until_parked();
+    let key = DraftKey::topic(d::GROWTH, d::T_REPORT);
+    let ask = |cx: &mut VisualTestContext| {
+        cx.update(|window, cx| {
+            crate::views::refs::ask_about(
+                refs_samples::bili_cell(),
+                crate::views::refs::RefIntent::Topic,
+                window,
+                cx,
+            )
+        });
+        cx.run_until_parked();
+    };
+    ask(cx);
+    let draft = provider.draft(&key);
+    assert_eq!(draft.refs.len(), 1);
+    assert_eq!(draft.refs[0].input.label, "新增群从哪来 · B 站 · 新增群 9");
+    assert_eq!(draft.body, "@Ledger ");
+    assert_eq!(draft.mentions, vec![d::LEDGER.to_string()]);
+    assert_eq!(view.update(cx, |this, cx| this.text(cx)), "@Ledger ");
+    assert_eq!(view.update(cx, |this, _| this.refs.len()), 1);
+    // The same part again flashes its chip; no second chip, no second mention.
+    ask(cx);
+    assert_eq!(provider.draft(&key).refs.len(), 1);
+    assert_eq!(provider.draft(&key).body, "@Ledger ");
+    // Send: Ledger is mentioned and the reference goes with the message.
+    cx.simulate_input("为什么比 9 月少了？");
+    cx.simulate_keystrokes("enter");
+    let window = provider.messages(d::GROWTH, d::T_REPORT, 50);
+    let sent = window.messages.last().unwrap();
+    let refs = provider.message_block_refs(sent);
+    assert_eq!(refs.len(), 1);
+    assert_eq!(refs[0].source_author_id.as_deref(), Some(d::LEDGER));
+    assert_eq!(
+        crate::views::refs::strip_prefix(&sent.body, &refs),
+        Some("@Ledger 为什么比 9 月少了？")
+    );
+}
+
+#[gpui::test]
+fn cmd_semicolon_takes_the_chips_into_the_side_chat(cx: &mut TestAppContext) {
+    use crate::fake::v2::{self as d, V2Samples, refs_samples};
+    cx.update(gpui_component::init);
+    let provider = V2Samples::with_refs();
+    let dyn_provider: Arc<dyn ChatProvider> = provider.clone();
+    let services = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let keep = services.clone();
+    let (_view, cx) = cx.add_window_view(move |window, cx| {
+        let s = Services::new(dyn_provider, cx);
+        s.nav.update(cx, |nav, cx| {
+            nav.open_topic(d::GROWTH.into(), d::T_REPORT.into(), cx)
+        });
+        *keep.borrow_mut() = Some(s.clone());
+        ComposerView::new(s, window, cx)
+    });
+    let services = services.borrow().clone().unwrap();
+    let key = DraftKey::topic(d::GROWTH, d::T_REPORT);
+    let chip = crate::data::DraftRef {
+        input: refs_samples::bili_cell().input(),
+        group_id: d::GROWTH.into(),
+        topic_id: d::T_REPORT.into(),
+        lead_chars: 0,
+    };
+    provider.add_draft_ref(&key, chip);
+    cx.update(|_, cx| crate::views::refs::carry_to_side_chat(&services, Some(d::LEDGER), cx));
+    cx.run_until_parked();
+    assert!(provider.draft(&key).refs.is_empty());
+    let side = (
+        d::GROWTH.to_string(),
+        d::T_REPORT.to_string(),
+        d::LEDGER.to_string(),
+    );
+    let moved = cx.update(|_, cx| {
+        crate::views::refs::hub(cx)
+            .read(cx)
+            .side_refs
+            .get(&side)
+            .map_or(0, Vec::len)
+    });
+    assert_eq!(moved, 1);
+}

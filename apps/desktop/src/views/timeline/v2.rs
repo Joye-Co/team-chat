@@ -732,6 +732,10 @@ impl TimelineView {
                         Some(ms) => format!("{} · {}", media_time(ms), size_text(file.size)),
                         None => size_text(file.size),
                     };
+                    // inc-host: the poster frame (the sender's, else made here).
+                    let poster = (file.mime.starts_with("video/"))
+                        .then(|| p.file_poster(&message.group_id, &message.topic_id, file))
+                        .flatten();
                     let thumb = if video {
                         div()
                             .flex_none()
@@ -740,6 +744,16 @@ impl TimelineView {
                             .h(px(44.))
                             .rounded(theme::radius::SM)
                             .bg(k.screen)
+                            .children(poster.map(|path| {
+                                gpui::StyledImage::object_fit(
+                                    gpui::img(path),
+                                    gpui::ObjectFit::Cover,
+                                )
+                                .absolute()
+                                .top_0()
+                                .left_0()
+                                .size_full()
+                            }))
                             // The screen is the card's own color in dark.
                             .when(theme::is_dark(cx), |el| {
                                 el.border_1().border_color(k.line_2)

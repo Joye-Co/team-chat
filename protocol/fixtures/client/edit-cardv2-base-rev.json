@@ -1,0 +1,189 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "a full replace checked against baseRev",
+  "value": {
+    "t": "edit",
+    "rid": "b51",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "body": "Ledger 发了 10 月数据月报：新增群 38，日活 2,340。请看一眼数据对不对。",
+    "cardV2": {
+      "v": 2,
+      "catalog": "tc.card/2.1",
+      "rev": 2,
+      "intent": "done",
+      "title": "10 月数据月报",
+      "summary": "新增群 38 个，比 9 月多 12%；日活 2,340。",
+      "fallback": "Ledger 发了 10 月数据月报：新增群 38，日活 2,340。请看一眼数据对不对。",
+      "data": {
+        "weeks": [
+          "10-06",
+          "10-13",
+          "10-20",
+          "10-27"
+        ]
+      },
+      "ask": {
+        "id": "verify",
+        "from": [
+          "requester"
+        ],
+        "blocking": false,
+        "promise": "你确认之前，我不会把月报发到全员群。"
+      },
+      "blocks": [
+        {
+          "id": "kpis",
+          "type": "row",
+          "children": [
+            "m_groups",
+            "m_dau",
+            "m_reply"
+          ]
+        },
+        {
+          "id": "m_groups",
+          "type": "metric",
+          "label": "新增群",
+          "value": 38,
+          "delta": 4,
+          "better": "up",
+          "note": "比 9 月"
+        },
+        {
+          "id": "m_dau",
+          "type": "metric",
+          "label": "日活",
+          "value": 2340,
+          "delta": 90,
+          "better": "up",
+          "note": "比 9 月"
+        },
+        {
+          "id": "m_reply",
+          "type": "metric",
+          "label": "平均回复",
+          "value": 1.2,
+          "unit": "秒",
+          "delta": -0.3,
+          "better": "down",
+          "tone": "good",
+          "note": "比 9 月"
+        },
+        {
+          "id": "main",
+          "type": "row",
+          "weights": [
+            2,
+            1
+          ],
+          "children": [
+            "trend",
+            "check_col"
+          ]
+        },
+        {
+          "id": "trend",
+          "type": "chart",
+          "kind": "line",
+          "label": "日活 · 近 4 周",
+          "emphasis": "high",
+          "x": [
+            "10-06",
+            "10-13",
+            "10-20",
+            "10-27"
+          ],
+          "series": [
+            {
+              "id": "oct",
+              "name": "10 月",
+              "values": [
+                2210,
+                2268,
+                2301,
+                2340
+              ]
+            },
+            {
+              "id": "sep",
+              "name": "9 月",
+              "values": [
+                2150,
+                2190,
+                2236,
+                2250
+              ]
+            }
+          ],
+          "summary": "10 月日活从 2,210 涨到 2,340，每周都比 9 月高。",
+          "events": [
+            "chart.select"
+          ]
+        },
+        {
+          "id": "check_col",
+          "type": "stack",
+          "children": [
+            "check",
+            "note"
+          ]
+        },
+        {
+          "id": "check",
+          "type": "decision",
+          "label": "这个数据对不对？",
+          "required": true,
+          "options": [
+            {
+              "id": "ok",
+              "label": "对"
+            },
+            {
+              "id": "wrong",
+              "label": "有问题"
+            }
+          ],
+          "deliver": "onSubmit",
+          "events": [
+            "choice.change"
+          ]
+        },
+        {
+          "id": "note",
+          "type": "input",
+          "kind": "textarea",
+          "label": "补充一句（可选）",
+          "required": false,
+          "maxLength": 300
+        },
+        {
+          "id": "full",
+          "type": "ref",
+          "emphasis": "low",
+          "label": "10 月数据月报 v3",
+          "target": {
+            "kind": "artifact",
+            "artifactId": "01JC0ART00000000000000OCT3",
+            "version": 3
+          }
+        }
+      ],
+      "actions": [
+        {
+          "id": "send",
+          "label": "发给 Ledger",
+          "style": "primary",
+          "kind": "submit",
+          "inputs": [
+            "check",
+            "note"
+          ]
+        }
+      ]
+    },
+    "baseRev": 1,
+    "causeEventId": "01JC0EV0000000000000000001"
+  }
+}

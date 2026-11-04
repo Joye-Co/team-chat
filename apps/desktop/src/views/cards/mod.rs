@@ -18,6 +18,9 @@ pub mod samples;
 pub mod selftest;
 // --- cards v2 track ---
 pub mod v2;
+// --- inc-cards21: Card v2.1 ---
+pub mod v21;
+// --- end inc-cards21 ---
 // --- end cards v2 track ---
 
 use std::{
@@ -162,6 +165,25 @@ pub(crate) fn is_ask(card: &Card) -> bool {
         })
 }
 
+// --- inc-refs ---
+/// 就这张卡提问: the whole card (`blockId` `card`, no part).
+fn card_target(card: &Arc<Card>, message: &Message) -> Option<crate::views::refs::PartTarget> {
+    (!message.id.is_empty()).then(|| {
+        crate::views::refs::parts::whole(&card.title).target(
+            crate::views::refs::RefSource::Message {
+                group_id: message.group_id.clone(),
+                topic_id: message.topic_id.clone(),
+                message_id: message.id.clone(),
+            },
+            &card.title,
+            "card",
+            None,
+            None,
+        )
+    })
+}
+// --- end inc-refs ---
+
 /// A stable element id inside a card: message id plus a part name.
 pub(crate) fn part_id(message: &Message, part: impl std::fmt::Display) -> String {
     format!("card-{}-{part}", message.id)
@@ -254,7 +276,11 @@ pub fn render_card(
                 .min_w(px(0.))
                 .flex()
                 .flex_col()
-                .child(header)
+                .child(crate::views::refs::affordance::whole_card(
+                    header,
+                    card_target(card, message),
+                    cx,
+                ))
                 .child(body)
                 .children(actions),
         )

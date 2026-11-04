@@ -1,0 +1,47 @@
+{
+  "kind": "Message",
+  "valid": true,
+  "description": "readers keep an unknown diagram syntax (shown as code)",
+  "value": {
+    "id": "01JBX0MSG000000000000000AE",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "authorId": "01JBX0BOT000000000000000AC",
+    "body": "图",
+    "mentions": [
+      "01JBX0ALICE0000000000000AB"
+    ],
+    "createdSeq": 41,
+    "createdAt": 1762128005000,
+    "kind": "card",
+    "card": {
+      "v": 1,
+      "title": "图",
+      "blocks": [
+        {
+          "type": "code",
+          "lang": "plantuml",
+          "text": "@startuml\n@enduml"
+        }
+      ]
+    },
+    "cardV2": {
+      "v": 2,
+      "catalog": "tc.card/2.1",
+      "rev": 1,
+      "intent": "info",
+      "title": "t",
+      "fallback": "f",
+      "blocks": [
+        {
+          "id": "d",
+          "type": "diagram",
+          "syntax": "plantuml",
+          "source": "@startuml\n@enduml",
+          "fallbackText": "图"
+        }
+      ]
+    }
+  }
+}

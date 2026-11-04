@@ -160,6 +160,8 @@ pub const CONTENT_GUTTER: Pixels = px(24.);
 pub const HAIRLINE: Pixels = px(0.5);
 /// Border width of controls, cards, fields and the composer.
 pub const BORDER: Pixels = px(1.);
+/// Height of the fade at the cut edge of an inline 产出 page (MEDIA §1 inline HTML).
+pub const EMBED_FADE: Pixels = px(48.);
 
 /// Spacing scale (§4.1): 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 32, 44. 10 and 14
 /// are for row and card insets only.
@@ -1526,6 +1528,22 @@ fn dark_colors() -> &'static Colors {
     }
 }
 
+// --- v11/inc-diagrams: diagrams render every theme id, not only the current one ---
+/// Whether Increase contrast is on.
+pub fn increase_contrast() -> bool {
+    INCREASE_CONTRAST.load(Ordering::Relaxed)
+}
+
+/// The colors of one mode and contrast setting, whatever the current mode is.
+pub fn colors_for(dark: bool, contrast: bool) -> Colors {
+    match (dark, contrast) {
+        (false, false) => build(false),
+        (true, false) => build(true),
+        (d, true) => high_contrast(build(d)),
+    }
+}
+// --- end v11/inc-diagrams ---
+
 /// The app's colors for the current mode.
 pub fn colors(cx: &App) -> Colors {
     if is_dark(cx) {
@@ -1664,8 +1682,12 @@ pub mod card_v2 {
     /// Reference rows and their glyph tile.
     pub const REF_ROW: Pixels = px(60.);
     pub const REF_TILE: Pixels = px(28.);
-    /// Table rows.
-    pub const TABLE_ROW: Pixels = px(40.);
+    /// Table rows (Cards.dc.html 06, Interact.dc.html 02: 32 pt).
+    pub const TABLE_ROW: Pixels = px(32.);
+    /// The least width of a number column; numbers sit right-aligned at the row end.
+    pub const TABLE_NUM_COL: Pixels = px(52.);
+    /// The bar in front of a percent cell, and its gap.
+    pub const TABLE_PCT_BAR: Pixels = px(48.);
     /// Diff lines and the line-number columns.
     pub const DIFF_LINE: Pixels = px(20.);
     pub const DIFF_NUMBER: Pixels = px(30.);
@@ -1683,6 +1705,8 @@ pub mod card_v2 {
     pub const OK_FILL: f32 = 0.09;
     pub const OK_EDGE: f32 = 0.22;
     pub const LIVE_FILL: f32 = 0.08;
+    /// v11/r3-cards: the band of a rev a member's event caused (live over `sunken`).
+    pub const UPDATED_FILL: f32 = 0.06;
     pub const LIVE_EDGE: f32 = 0.22;
     pub const QUIET_FILL: f32 = 0.09;
     pub const QUIET_EDGE: f32 = 0.16;
@@ -1874,3 +1898,72 @@ mod tests {
         }
     }
 }
+
+// --- inc-cards21: Card v2.1 sizes and timings (CardsCompose.dc.html, INTERACT §4.4, §6.4) ---
+pub mod card_v21 {
+    use std::time::Duration;
+
+    use gpui::{Pixels, px};
+
+    /// Rank rows, slot cells, poll rows.
+    pub const RANK_ROW: Pixels = px(40.);
+    pub const SLOT_CELL: Pixels = px(52.);
+    pub const POLL_ROW: Pixels = px(44.);
+    /// Rating stars and scale cells.
+    pub const STAR: Pixels = px(22.);
+    pub const SCALE_CELL: Pixels = px(32.);
+    /// Image choice and compare previews.
+    pub const IMAGE: Pixels = px(150.);
+    pub const PREVIEW: Pixels = px(120.);
+    /// Matrix option columns.
+    pub const MATRIX_COL: Pixels = px(72.);
+    /// v11/r3-cards: a pickable bar chart as rows (Interact.dc.html 02): row height, the
+    /// name column, the track height and radius, the value column, the row radius.
+    pub const BAR_ROW: Pixels = px(30.);
+    pub const BAR_NAME: Pixels = px(60.);
+    pub const BAR_TRACK: Pixels = px(10.);
+    pub const BAR_TRACK_RADIUS: Pixels = px(3.);
+    pub const BAR_VALUE: Pixels = px(22.);
+    pub const BAR_ROW_RADIUS: Pixels = px(7.);
+    /// Inline page height range (CARD21 §8).
+    pub const EMBED_MIN: f32 = 160.;
+    pub const EMBED_MAX: f32 = 480.;
+    pub const EMBED_DEFAULT: f32 = 320.;
+    /// The amber tint of the decision surface of a non-blocking ask, and the live tint of
+    /// a block a new rev changed.
+    pub const SURFACE_FILL: f32 = 0.07;
+    pub const CHANGE_FILL: f32 = 0.14;
+    /// v11/r3-cards: the tint a block the rev inserted keeps after its flash (Interact 02).
+    pub const INSERTED_FILL: f32 = 0.07;
+
+    /// Pending (INTERACT §4.4): nothing shows before this.
+    pub const PENDING_QUIET: Duration = Duration::from_millis(400);
+    /// Soft and hard waits by `expect.mode` (INTERACT §6.4).
+    pub const SOFT_LIVE: Duration = Duration::from_secs(8);
+    pub const HARD_LIVE: Duration = Duration::from_secs(45);
+    pub const SOFT_RUN: Duration = Duration::from_secs(20);
+    pub const HARD_RUN: Duration = Duration::from_secs(120);
+    pub const SOFT_STARTING: Duration = Duration::from_secs(45);
+    pub const HARD_STARTING: Duration = Duration::from_secs(180);
+    /// `expect.mode: offline` for a live event: the note shows this long.
+    pub const OFFLINE_NOTE: Duration = Duration::from_secs(4);
+    /// An `interaction.resolved` note shows this long under the block.
+    pub const RESOLVED_NOTE: Duration = Duration::from_secs(5);
+    /// Live debounce (INTERACT §3.2): text inputs and draft edits.
+    pub const DEBOUNCE_TEXT: Duration = Duration::from_millis(600);
+    pub const DEBOUNCE_DRAFT: Duration = Duration::from_millis(1000);
+    /// A changed block fades in and its tint fades out.
+    pub const CHANGE_IN: Duration = Duration::from_millis(200);
+    pub const CHANGE_FLASH: Duration = Duration::from_millis(1600);
+    /// 问这里 shows after the pointer rests this long (REFS §A3).
+    pub const HOVER_ASK: Duration = Duration::from_millis(300);
+    /// A part that was just added flashes `--sel`.
+    pub const PART_FLASH: Duration = Duration::from_millis(600);
+    // v11/pb-cards
+    /// The column tint under a chosen and a hovered chart point (drawn under the series).
+    pub const CHART_PICK_FILL: f32 = 0.06;
+    pub const CHART_HOVER_FILL: f32 = 0.035;
+    /// A block a new rev removed fades out over this.
+    pub const REMOVE_OUT: Duration = Duration::from_millis(240);
+}
+// --- end inc-cards21 ---

@@ -54,7 +54,7 @@ bot.onMention(async (ctx) => {
 });
 
 bot.onCardAnswer<{ choice: string }>(async (ctx) => {
-  await ctx.resolve(); // the card shows as answered: a higher rev and no buttons
+  await ctx.markAnswered(); // the card shows as answered: a higher rev and no buttons
   const target = { groupId: ctx.groupId, topicId: ctx.topicId };
   if (ctx.cancelled) {
     await bot.done(target, { title: "不做了", summary: "按你的意思,先不做。" });

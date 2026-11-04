@@ -1,0 +1,35 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "containers in a cycle",
+  "reason": "card.depth",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "x",
+        "type": "text",
+        "text": "x"
+      },
+      {
+        "id": "s1",
+        "type": "stack",
+        "children": [
+          "s2"
+        ]
+      },
+      {
+        "id": "s2",
+        "type": "stack",
+        "children": [
+          "s1"
+        ]
+      }
+    ]
+  }
+}

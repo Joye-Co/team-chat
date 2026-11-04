@@ -1,0 +1,8 @@
+{
+  "kind": "PutArtifactDataRequest",
+  "valid": false,
+  "description": "data is required",
+  "value": {
+    "baseDataRev": 1
+  }
+}

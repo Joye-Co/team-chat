@@ -1,0 +1,24 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "scale spans at most 11 steps",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "s",
+        "type": "scale",
+        "label": "分",
+        "min": 0,
+        "max": 11,
+        "fallbackText": "分"
+      }
+    ]
+  }
+}

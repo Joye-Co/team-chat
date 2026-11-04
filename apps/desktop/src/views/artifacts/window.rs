@@ -30,6 +30,8 @@ pub struct ArtifactWindows {
     open: HashMap<String, artifact_view::ArtifactWindow>,
     /// 产出 ids whose version is being fetched (cards show 正在打开…).
     opening: HashSet<String>,
+    /// inc-host: the window's own title (without the 已更新到 / 有 v{n} note).
+    titles: HashMap<String, String>,
 }
 
 impl Global for ArtifactWindows {}
@@ -116,6 +118,11 @@ pub fn open_artifact(
 /// default app. A file 产出 whose entry is a page (HTML, SVG, ...) also opens
 /// in the 产出 window: a browser would run it with network access.
 fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mut App) {
+    // --- v11/media: media the app can show opens in the 产出 viewer, not a system app ---
+    if !opens_in_window(&folder) && media_viewer(provider, &folder, cx) {
+        return;
+    }
+    // --- end v11/media ---
     if !opens_in_window(&folder) {
         let path = folder.dir.join(&folder.entry);
         if opens_unsafely(&folder.entry) {
@@ -127,23 +134,23 @@ fn show_folder(provider: &Arc<dyn ChatProvider>, folder: ArtifactFolder, cx: &mu
     }
     #[cfg(target_os = "macos")]
     {
-        use artifact_view::{Content, VersionSpec};
-        let spec = VersionSpec::new(folder.version, Content::Folder(folder.dir.clone()))
-            .with_entry(folder.entry.clone());
         let (title, items) = version_items(provider, &folder.artifact_id);
         let items: Vec<artifact_view::VersionItem> = items
             .into_iter()
             .map(|(version, label)| artifact_view::VersionItem { version, label })
             .collect();
-        // pages track: bridge capabilities by author (a bot's version that
-        // declares events may send them; nobody reads data). They follow the
-        // version shown, also in a window that is open already.
-        let caps = provider
-            .artifact(&folder.artifact_id)
-            .map(|d| {
-                crate::views::artifact_page::capabilities(provider.as_ref(), &d, folder.version)
-            })
-            .unwrap_or(artifact_view::Capabilities::NONE);
+        // inc-host: bridge capabilities by author (R10), declarations and live data.
+        // They follow the version shown, also in a window that is open already.
+        let (spec, caps) = super::host::version_spec(
+            provider.as_ref(),
+            &folder.artifact_id,
+            folder.version,
+            folder.dir.clone(),
+            folder.entry.clone(),
+        );
+        windows(cx)
+            .titles
+            .insert(folder.artifact_id.clone(), title.clone());
         if let Some(win) = windows(cx).open.get(&folder.artifact_id)
             && !win.is_closed()
         {
@@ -248,9 +255,13 @@ fn open_window_with(
         return;
     };
     let mut options = OpenOptions::new(title, artifact_id.clone(), spec);
-    // Only a bot's version that declares events may send them (pages track).
+    // Only a bot's version that declares events may send them (R10).
     options.capabilities = caps;
     options.versions = items;
+    if let Some(p) = &provider {
+        options.viewer = super::host::viewer(p.as_ref());
+        options.ref_menu = Some(super::host::ref_menu(cx));
+    }
     let (tx, mut rx) = futures::channel::mpsc::unbounded();
     let win = match ArtifactWindow::open(mtm, options, move |event| {
         let _ = tx.unbounded_send(event);
@@ -300,29 +311,146 @@ fn on_event(
             tracing::warn!(artifact_id, version, %reason, "产出 page failed to load");
             notify_error(ca::LOAD_FAILED.to_string(), cx);
         }
-        E::Emit {
-            version,
-            name,
-            payload,
-            user_action,
-        } => {
-            // pages track: a declared page event goes to the bot that made it,
-            // only after the viewer's input and paced.
-            if let Some(p) = provider {
-                crate::views::artifact_page::forward_page_event(
-                    p,
+        // inc-host: loads get the data; emits, asks and refs go to the page host.
+        e @ (E::Loaded { .. } | E::Emit { .. } | E::Ask { .. } | E::Ref { .. }) => {
+            if provider.is_some() {
+                super::host::on_page_event(
+                    super::host::PageRef::Window(artifact_id.to_string()),
                     artifact_id,
-                    version,
-                    &name,
-                    &payload,
-                    user_action,
+                    &e,
+                    None,
                     cx,
                 );
             }
         }
-        E::Loaded { .. } | E::FocusChanged { .. } => {}
+        E::FocusChanged { .. } => {}
     }
 }
+
+// --- inc-host track: the page host reaches the 产出 windows ---
+
+/// Gives the window of `artifact_id` a data snapshot when it shows `version`.
+pub(crate) fn push_to_window(
+    artifact_id: &str,
+    version: u32,
+    snap: &artifact_view::Snapshot,
+    cx: &mut App,
+) -> bool {
+    #[cfg(target_os = "macos")]
+    if let Some(win) = windows(cx).open.get(artifact_id)
+        && !win.is_closed()
+    {
+        return win.push_data(version, snap.clone());
+    }
+    let _ = (artifact_id, version, snap, cx);
+    false
+}
+
+/// Finishes an open `emit` / `ask` of the page in the window of `artifact_id`.
+pub(crate) fn finish_in_window(
+    artifact_id: &str,
+    version: u32,
+    reply_id: &serde_json::Value,
+    result: Result<serde_json::Value, artifact_view::Reject>,
+    cx: &mut App,
+) -> bool {
+    #[cfg(target_os = "macos")]
+    if let Some(win) = windows(cx).open.get(artifact_id)
+        && !win.is_closed()
+    {
+        return win.finish(version, reply_id, result);
+    }
+    let _ = (artifact_id, version, reply_id, result, cx);
+    false
+}
+
+/// A new version exists: a window that showed the latest (`before`) reloads in place and
+/// says 已更新到 v{n} in its title for 3 s; one on an older version says 有 v{n}.
+pub(crate) fn on_version_added(artifact_id: &str, before: u32, version: u32, cx: &mut App) {
+    #[cfg(target_os = "macos")]
+    {
+        use crate::copy::page_host as cp;
+        let Some(shown) = windows(cx)
+            .open
+            .get(artifact_id)
+            .filter(|w| !w.is_closed())
+            .map(|w| w.version())
+        else {
+            return;
+        };
+        let title = windows(cx)
+            .titles
+            .get(artifact_id)
+            .cloned()
+            .unwrap_or_default();
+        if shown == before {
+            if let Some(p) = super::host::provider(cx) {
+                reload_window(&p, artifact_id, version, cx);
+            }
+            let note = fill(cp::PAGE_UPDATED_TO, &[("n", &version.to_string())]);
+            if let Some(w) = windows(cx).open.get(artifact_id) {
+                w.set_title(&format!("{title} · {note}"));
+            }
+            let id = artifact_id.to_string();
+            cx.spawn(async move |cx: &mut AsyncApp| {
+                cx.background_executor()
+                    .timer(super::host::UPDATED_FOR)
+                    .await;
+                cx.update(|cx| {
+                    let t = windows(cx).titles.get(&id).cloned().unwrap_or_default();
+                    if let Some(w) = windows(cx).open.get(&id) {
+                        w.set_title(&t);
+                    }
+                });
+            })
+            .detach();
+        } else {
+            let note = fill(cp::PAGE_NEWER, &[("n", &version.to_string())]);
+            if let Some(w) = windows(cx).open.get(artifact_id) {
+                w.set_title(&format!("{title} · {note}"));
+            }
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (artifact_id, before, version, cx);
+}
+
+/// Loads `version` into the open window of `artifact_id` (reload in place).
+#[cfg(target_os = "macos")]
+fn reload_window(provider: &Arc<dyn ChatProvider>, artifact_id: &str, version: u32, cx: &mut App) {
+    let rx = provider.open_artifact_version(artifact_id, Some(version));
+    let provider = provider.clone();
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        if let Ok(Ok(folder)) = rx.await {
+            cx.update(|cx| {
+                let (title, items) = version_items(&provider, &folder.artifact_id);
+                let items: Vec<artifact_view::VersionItem> = items
+                    .into_iter()
+                    .map(|(version, label)| artifact_view::VersionItem { version, label })
+                    .collect();
+                let _ = title;
+                let (spec, caps) = super::host::version_spec(
+                    provider.as_ref(),
+                    &folder.artifact_id,
+                    folder.version,
+                    folder.dir.clone(),
+                    folder.entry.clone(),
+                );
+                if let Some(win) = windows(cx).open.get(&folder.artifact_id)
+                    && !win.is_closed()
+                {
+                    win.set_versions(&items);
+                    if let Err(e) = win.show_version(spec, caps) {
+                        tracing::warn!(error = %e, "cannot reload the version");
+                    }
+                }
+            });
+        }
+    })
+    .detach();
+}
+
+// --- end inc-host track ---
 
 /// Asks before a 产出 page opens a web link (also for pages embedded in the
 /// main window).
@@ -429,3 +557,29 @@ mod tests {
         assert!(!opens_in_window(&folder("report.pdf", false)));
     }
 }
+
+// --- v11/media ---
+/// Opens a non-page version in the 产出 viewer when it is media the app shows (Markdown,
+/// images, video, audio, PDF, code, tables). False leaves it to the system app.
+fn media_viewer(provider: &Arc<dyn ChatProvider>, folder: &ArtifactFolder, cx: &mut App) -> bool {
+    use crate::views::media::{self, MediaKind, store::MediaKey, viewer};
+    let kind = media::file_kind(&folder.entry, media::mime_for(&folder.entry));
+    if matches!(kind, MediaKind::File | MediaKind::Html) {
+        return false;
+    }
+    let key = MediaKey::new(folder.artifact_id.clone(), folder.version);
+    let title = provider
+        .artifact(&folder.artifact_id)
+        .map(|d| d.summary.title)
+        .unwrap_or_else(|| folder.entry.clone());
+    media::store::request_folder(&key, &title, folder.dir.clone(), folder.entry.clone(), cx);
+    viewer::open(
+        key,
+        title,
+        viewer::target_for(provider, &folder.artifact_id),
+        viewer::Opening::default(),
+        cx,
+    );
+    true
+}
+// --- end v11/media ---

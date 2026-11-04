@@ -1,0 +1,16 @@
+{
+  "kind": "MediaInfo",
+  "valid": true,
+  "value": {
+    "kind": "code",
+    "mime": "text/x-rust",
+    "bytes": 4200,
+    "lines": 180,
+    "language": "rust",
+    "focus": {
+      "fromLine": 10,
+      "toLine": 24
+    },
+    "preview": "pending"
+  }
+}

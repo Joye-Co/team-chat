@@ -14,7 +14,7 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::data::{Draft, DraftKey, SavedNavigation};
+use crate::data::{Draft, DraftKey, DraftRef, SavedNavigation};
 
 const FILE: &str = "ui-state.json";
 /// Most drafts kept; the rest are dropped (newest edits win in practice).
@@ -41,6 +41,33 @@ pub struct SavedDraft {
     pub mentions: Vec<String>,
     #[serde(default)]
     pub quote_of: Option<String>,
+    /// inc-refs (1.1.0): the reference chips (引用提问). Additive: absent in a 1.0.x file,
+    /// skipped when empty so a draft without chips writes the same bytes.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub refs: Vec<SavedRef>,
+}
+
+/// A saved reference chip ([`DraftRef`]).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SavedRef {
+    pub input: chat_core::proto::BlockRefInput,
+    pub group_id: String,
+    pub topic_id: String,
+    #[serde(default)]
+    pub lead_chars: usize,
+}
+
+impl SavedRef {
+    pub fn to_draft_ref(&self) -> Option<DraftRef> {
+        // A file edited by hand must not put an invalid ref into the next send.
+        self.input.validate().ok()?;
+        Some(DraftRef {
+            input: self.input.clone(),
+            group_id: self.group_id.clone(),
+            topic_id: self.topic_id.clone(),
+            lead_chars: self.lead_chars,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -89,7 +116,7 @@ impl From<SavedNav> for SavedNavigation {
 impl SavedDraft {
     /// The text part of a draft, or `None` when nothing worth keeping is left.
     pub fn from_draft(key: &DraftKey, draft: &Draft) -> Option<SavedDraft> {
-        if draft.body.trim().is_empty() && draft.quote_of.is_none() {
+        if draft.body.trim().is_empty() && draft.quote_of.is_none() && draft.refs.is_empty() {
             return None;
         }
         Some(SavedDraft {
@@ -98,6 +125,16 @@ impl SavedDraft {
             body: draft.body.chars().take(MAX_BODY_CHARS).collect(),
             mentions: draft.mentions.clone(),
             quote_of: draft.quote_of.clone(),
+            refs: draft
+                .refs
+                .iter()
+                .map(|r| SavedRef {
+                    input: r.input.clone(),
+                    group_id: r.group_id.clone(),
+                    topic_id: r.topic_id.clone(),
+                    lead_chars: r.lead_chars,
+                })
+                .collect(),
         })
     }
 
@@ -203,6 +240,7 @@ mod tests {
             mentions: vec!["m".into()],
             quote_of: Some("q".into()),
             files: Vec::new(),
+            refs: Vec::new(),
         };
         let saved = SavedDraft::from_draft(&key, &draft).unwrap();
         assert!(SavedDraft::from_draft(&DraftKey::new_topic("g"), &Draft::default()).is_none());
@@ -225,6 +263,61 @@ mod tests {
         assert_eq!(load(&dir), UiState::default());
         std::fs::remove_dir_all(&dir).unwrap();
     }
+
+    // --- inc-refs ---
+    #[test]
+    fn chips_survive_a_restart_and_old_files_still_read() {
+        let key = DraftKey::topic("g", "t");
+        let chip = DraftRef {
+            input: chat_core::proto::BlockRefInput {
+                message_id: Some("m-1".into()),
+                card_rev: Some(2),
+                block_id: "channels".into(),
+                part: Some(chat_core::proto::PartRef {
+                    kind: "cell".into(),
+                    keys: Some(
+                        [
+                            (
+                                "row".to_string(),
+                                chat_core::proto::PartKey::Key("bili".into()),
+                            ),
+                            ("col".to_string(), chat_core::proto::PartKey::Index(1)),
+                        ]
+                        .into(),
+                    ),
+                }),
+                label: "10 月数据月报 · 渠道表 · B 站 · 新增群 9".into(),
+                value: Some(serde_json::json!({"row": "B 站", "display": "9", "raw": 9})),
+                ..Default::default()
+            },
+            group_id: "g".into(),
+            topic_id: "t".into(),
+            lead_chars: 15,
+        };
+        let draft = Draft {
+            refs: vec![chip.clone()],
+            ..Draft::default()
+        };
+        // A draft with only a chip is kept.
+        let saved = SavedDraft::from_draft(&key, &draft).unwrap();
+        let bytes = serde_json::to_vec(&UiState::new(vec![saved], None)).unwrap();
+        let back: UiState = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(back.drafts[0].refs[0].to_draft_ref(), Some(chip));
+        // A 1.0.x draft has no refs field and reads with none; writing it adds none.
+        let old = br#"{"group_id":"g","topic_id":"t","body":"hi","mentions":[],"quote_of":null}"#;
+        let d: SavedDraft = serde_json::from_slice(old).unwrap();
+        assert!(d.refs.is_empty());
+        assert!(
+            !String::from_utf8(serde_json::to_vec(&d).unwrap())
+                .unwrap()
+                .contains("refs")
+        );
+        // An invalid saved ref is dropped.
+        let mut bad = back.drafts[0].refs[0].clone();
+        bad.input.block_id = "md:x".into();
+        assert_eq!(bad.to_draft_ref(), None);
+    }
+    // --- end inc-refs ---
 
     #[test]
     fn a_1_0_navigation_reads_and_writes_the_same_bytes() {

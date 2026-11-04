@@ -1,0 +1,46 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "a 2.1 group names its children by id",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "working",
+    "title": "本周进展",
+    "fallback": "开发 1 个做完、1 个在做。",
+    "blocks": [
+      {
+        "id": "dev",
+        "type": "group",
+        "title": "开发",
+        "summary": "1 个做完 · 1 个在做",
+        "collapsible": true,
+        "collapsed": false,
+        "children": [
+          "l1",
+          "pct"
+        ]
+      },
+      {
+        "id": "l1",
+        "type": "list",
+        "items": [
+          {
+            "text": "登录页",
+            "status": "done"
+          },
+          {
+            "text": "相册",
+            "status": "in_progress"
+          }
+        ]
+      },
+      {
+        "id": "pct",
+        "type": "progress",
+        "value": 0.5
+      }
+    ]
+  }
+}

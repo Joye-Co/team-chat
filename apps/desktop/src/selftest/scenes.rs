@@ -39,6 +39,13 @@ pub enum Start {
     /// (`provider::seeded`).
     Core,
     // --- end provider track ---
+    // --- inc-refs ---
+    /// The v2 sample team with the 引用提问 messages (`fake::v2::refs_samples`).
+    V2Refs,
+    /// The v2 sample team with Card v2 blocks that have parts in their 话题
+    /// (`fake::v2::refs_samples::with_card_parts`).
+    V2RefParts,
+    // --- end inc-refs ---
 }
 
 pub struct Scene {
@@ -517,11 +524,162 @@ pub const SCENES: &[Scene] = &[
         open: |s, c, cx| embed_preview::open(s, c, EmbedMode::Covered, cx),
     },
     // --- end web-embed ---
+    // --- v11/media: 产出 media previews (v11/media) ---
+    Scene {
+        name: "media-html",
+        about: "HTML 产出: live inline in a 话题 and in the 产出 pane with versions and events",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-html").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-markdown",
+        about: "Markdown 产出: native excerpt with chips, reader with a table of contents",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-images",
+        about: "Image set: grid of 4 with +n, lightbox with filmstrip",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-images").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-video",
+        about: "Video: poster, chapter ticks and frame strip; player with chapters and frames",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-video").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-audio",
+        about: "Audio: waveform player; big waveform, speakers, speeds and transcript",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-audio").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-pdf",
+        about: "PDF: page thumbnails; reader with page sidebar and zoom",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-pdf").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-code",
+        about: "Code and table inline: the pointed lines and the first rows; the whole code file",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-code").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-table",
+        about: "Table: the sortable table with a fixed header",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-table").expect("sample"),
+                cx,
+            )
+        },
+    },
+    Scene {
+        name: "media-states",
+        about: "Upload and preview states: uploading, generating, ready, failed, too large",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| {
+            media_preview::open(
+                s,
+                c,
+                MediaSample::from_name("media-states").expect("sample"),
+                cx,
+            )
+        },
+    },
+    // --- end v11/media ---
+    // --- v11/inc-diagrams: diagrams in a 话题 (Refs.dc.html §04, §06, §07) ---
+    Scene {
+        name: "diagram-inline",
+        about: "A sequence diagram, a flowchart and a gantt drawn inline in a 话题",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Inline, cx),
+    },
+    Scene {
+        name: "diagram-error",
+        about: "Each diagram error kind, a fifth fence that stays code and a streaming body",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Error, cx),
+    },
+    Scene {
+        name: "diagram-viewer",
+        about: "The diagram viewer zoomed to 250 %",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: |s, c, cx| crate::diagrams::preview::open(s, c, DiagramScene::Viewer, cx),
+    },
+    // --- end v11/inc-diagrams ---
 ];
 
 /// Every scene: the shared ones, then each v2 feature's slice, in order.
 pub fn all() -> Vec<&'static Scene> {
-    let slices: [&'static [Scene]; 13] = [
+    let slices: [&'static [Scene]; 16] = [
         SCENES,
         crate::views::desk::scenes::SCENES,
         crate::views::rail::scenes::SCENES,
@@ -539,6 +697,15 @@ pub fn all() -> Vec<&'static Scene> {
         // --- cards v2 track ---
         crate::views::cards::v2::scenes::SCENES,
         // --- end cards v2 track ---
+        // --- inc-cards21 ---
+        crate::views::cards::v21::scenes::SCENES,
+        // --- end inc-cards21 ---
+        // --- inc-host track ---
+        HOST_SCENES,
+        // --- end inc-host track ---
+        // --- inc-refs ---
+        crate::views::refs::scenes::SCENES,
+        // --- end inc-refs ---
     ];
     slices.into_iter().flatten().collect()
 }
@@ -574,6 +741,57 @@ const V2_SHARED: &[Scene] = &[
     // cards-v2: moved to the cards v2 track's slice (views/cards/v2/scenes.rs).
 ];
 
+// --- inc-host track: the 产出 page host ---
+
+use crate::views::artifacts::host_preview::{self, Mode as HostMode};
+
+const HOST_SCENES: &[Scene] = &[
+    Scene {
+        name: "artifact_live_data",
+        about: "产出 page inline in its 话题: Ledger pushes the B 站 numbers and the page redraws",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| host_preview::open(s, c, HostMode::LiveData, cx),
+    },
+    Scene {
+        name: "artifact_reloaded_v2",
+        about: "产出 page inline: a new version arrives and the page reloads in place (已更新到 v4)",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| host_preview::open(s, c, HostMode::Reloaded, cx),
+    },
+    Scene {
+        name: "artifact_ask_pending",
+        about: "产出 page inline: a real click on 数据有问题 sends one ask; the footer waits for Ledger",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: |s, c, cx| host_preview::open(s, c, HostMode::AskPending, cx),
+    },
+    Scene {
+        name: "artifact-embed-states",
+        about: "产出 embedded in a card: a page that did not open (页面没有打开 · 重试) and a 产出 that is not a web page",
+        start: Start::V2,
+        setup: |_, _| {},
+        open: crate::views::artifacts::state_scenes::open_embed_states,
+    },
+    Scene {
+        name: "artifact-ref-toast",
+        about: "就这里提问 on a page element: the chip goes into the 话题 composer and the toast says 已放进话题的输入框",
+        start: Start::V2Refs,
+        setup: crate::views::artifacts::state_scenes::ref_toast_setup,
+        open: crate::views::artifacts::state_scenes::open_ref_toast,
+    },
+];
+
+fn host_check(name: &str) -> bool {
+    matches!(
+        name,
+        "artifact_live_data" | "artifact_reloaded_v2" | "artifact_ask_pending"
+    )
+}
+
+// --- end inc-host track ---
+
 // --- web-embed: scenes that wait for native content and check their capture ---
 
 use crate::views::artifacts::embed_preview::{self, Mode as EmbedMode};
@@ -581,6 +799,29 @@ use crate::views::artifacts::embed_preview::{self, Mode as EmbedMode};
 /// For a scene whose window shows native content (a web page) that GPUI's frames do not
 /// cover: true once it is ready to capture.
 pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
+    // --- inc-host track ---
+    if host_check(name) {
+        return Some(host_preview::ready);
+    }
+    if name == "artifact-ref-toast" {
+        return Some(crate::views::artifacts::state_scenes::ref_toast_ready);
+    }
+    // --- end inc-host track ---
+    // --- v11/media ---
+    if let Some(check) = media_ready(name) {
+        return Some(check);
+    }
+    // --- end v11/media ---
+    // --- v11/inc-diagrams ---
+    if let Some(check) = diagram_ready(name) {
+        return Some(check);
+    }
+    // --- end v11/inc-diagrams ---
+    // --- inc-refs ---
+    if let Some(check) = crate::views::refs::scenes::ready(name) {
+        return Some(check);
+    }
+    // --- end inc-refs ---
     match name {
         "web-embed" => Some(|cx| embed_preview::ready(EmbedMode::Topic, cx)),
         "web-embed-scrolled" => Some(|cx| embed_preview::ready(EmbedMode::Scrolled, cx)),
@@ -600,6 +841,19 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
 
 /// For a scene that checks its own capture: runs after the PNG is written.
 pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+    // --- inc-host track ---
+    if host_check(name) {
+        return Some(host_preview::verify);
+    }
+    if name == "artifact-ref-toast" {
+        return Some(crate::views::artifacts::state_scenes::ref_toast_verify);
+    }
+    // --- end inc-host track ---
+    // --- v11/media ---
+    if let Some(check) = media_verify(name) {
+        return Some(check);
+    }
+    // --- end v11/media ---
     match name {
         "web-embed" => Some(|png, cx| embed_preview::verify(EmbedMode::Topic, png, cx)),
         "web-embed-scrolled" => Some(|png, cx| embed_preview::verify(EmbedMode::Scrolled, png, cx)),
@@ -614,6 +868,100 @@ pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Resu
 }
 
 // --- end web-embed ---
+
+// --- v11/inc-diagrams: diagram scenes wait until every diagram has an answer ---
+
+use crate::diagrams::preview::Scene as DiagramScene;
+
+fn diagram_ready(name: &str) -> Option<fn(&App) -> bool> {
+    match name {
+        "diagram-inline" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Inline, cx)),
+        "diagram-error" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Error, cx)),
+        "diagram-viewer" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx)),
+        _ => None,
+    }
+}
+
+// --- end v11/inc-diagrams ---
+
+// --- v11/media: media scenes wait until their samples are read and pages drew ---
+
+use crate::views::media::preview::{self as media_preview, Sample as MediaSample};
+
+fn media_ready(name: &str) -> Option<fn(&App) -> bool> {
+    match name {
+        "media-html" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-html").expect("sample"), cx)
+        }),
+        "media-markdown" => Some(|cx| {
+            media_preview::ready(
+                MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        }),
+        "media-images" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-images").expect("sample"), cx)
+        }),
+        "media-video" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-video").expect("sample"), cx)
+        }),
+        "media-audio" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-audio").expect("sample"), cx)
+        }),
+        "media-pdf" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-pdf").expect("sample"), cx)
+        }),
+        "media-code" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-code").expect("sample"), cx)
+        }),
+        "media-table" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-table").expect("sample"), cx)
+        }),
+        "media-states" => Some(|cx| {
+            media_preview::ready(MediaSample::from_name("media-states").expect("sample"), cx)
+        }),
+        _ => None,
+    }
+}
+
+#[allow(clippy::type_complexity)]
+fn media_verify(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+    match name {
+        "media-html" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-html").expect("sample"), cx)
+        }),
+        "media-markdown" => Some(|_, cx| {
+            media_preview::verify(
+                MediaSample::from_name("media-markdown").expect("sample"),
+                cx,
+            )
+        }),
+        "media-images" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-images").expect("sample"), cx)
+        }),
+        "media-video" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-video").expect("sample"), cx)
+        }),
+        "media-audio" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-audio").expect("sample"), cx)
+        }),
+        "media-pdf" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-pdf").expect("sample"), cx)
+        }),
+        "media-code" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-code").expect("sample"), cx)
+        }),
+        "media-table" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-table").expect("sample"), cx)
+        }),
+        "media-states" => Some(|_, cx| {
+            media_preview::verify(MediaSample::from_name("media-states").expect("sample"), cx)
+        }),
+        _ => None,
+    }
+}
+
+// --- end v11/media ---
 
 pub fn find(name: &str) -> Option<&'static Scene> {
     all().into_iter().find(|s| s.name == name)

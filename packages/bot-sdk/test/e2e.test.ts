@@ -3,18 +3,22 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { Card, Event, Message } from "@chat/protocol";
+import type { BlockRefInput, Card, CardV2, Event, Message, TransientEvent } from "@chat/protocol";
 import {
   approvalCard,
   type AsideContext,
+  blocks,
   Bot,
   type CardAnswerContext,
+  type CardEventContext,
   ChatError,
+  composeCard,
   decisionCard,
   draftCard,
   formCard,
   HttpClient,
   MemoryStateStore,
+  parts,
   type StreamWriter,
 } from "../src/index.ts";
 
@@ -59,6 +63,40 @@ async function routeExists(method: string, path: string): Promise<boolean> {
 const hasHttpSend = await routeExists("POST", `/v1/groups/${generalId}/messages`);
 const hasFiles = await routeExists("POST", "/v1/files");
 const hasAcceptance = await routeExists("PUT", "/v1/runs/none/acceptance");
+
+// Probe the 1.1 interaction loop: welcome.features, and which new frames have a handler (a
+// frame without one gets "unknown frame type"). The server tracks land these one by one; a
+// test whose server part is missing is skipped with the reason printed below.
+const probe = new Bot({ url: server.url, token: ownerToken, logLevel: "error", markRead: false });
+await probe.start();
+const features = probe.serverFeatures;
+async function frameHandled(frame: Record<string, unknown> & { t: string }): Promise<boolean> {
+  try {
+    await (probe as unknown as { request(f: Record<string, unknown>): Promise<unknown> }).request(frame);
+    return true;
+  } catch (err) {
+    return !(err instanceof ChatError && /unknown frame type/.test(err.message));
+  }
+}
+const NONE = "01JC0NONE00000000000000000";
+const handles = {
+  cardEvent: await frameHandled({ t: "card.event", groupId: generalId, messageId: NONE, rev: 1, clientEventId: "probe1", blockId: "x", event: "choice.change" }),
+  cardPatch: await frameHandled({ t: "card.patch", groupId: generalId, messageId: NONE, baseRev: 1, ops: [{ op: "remove", id: "x" }] }),
+  resolve: await frameHandled({ t: "interaction.resolve", groupId: generalId, eventId: NONE, result: "ignored" }),
+  artifactData: await frameHandled({ t: "artifact.data", groupId: generalId, artifactId: NONE, version: 1, data: {} }),
+  artifactReply: await frameHandled({ t: "artifact.reply", groupId: generalId, eventId: NONE, ok: true }),
+};
+await probe.stop();
+const hasInteract = features.includes("interact/1") && handles.cardEvent && handles.cardPatch;
+const hasAutoResolve = hasInteract && handles.resolve;
+const hasPageLoop = hasFiles && features.includes("interact/1") && handles.artifactData && handles.artifactReply;
+const hasRefs = features.includes("refs/1");
+const skipped: string[] = [];
+if (!hasInteract) skipped.push(`live card events and patches (welcome.features ${JSON.stringify(features)}, card.event ${handles.cardEvent}, card.patch ${handles.cardPatch})`);
+if (!hasAutoResolve) skipped.push(`automatic interaction.resolve (interaction.resolve handled: ${handles.resolve})`);
+if (!hasPageLoop) skipped.push(`page reply and data push (artifact.reply ${handles.artifactReply}, artifact.data ${handles.artifactData}, files ${hasFiles})`);
+if (!hasRefs) skipped.push("refs to parts (welcome.features has no refs/1, so blockRefs are not stored)");
+if (skipped.length > 0) console.warn(`bot-sdk e2e: this server lacks parts of 1.1; skipped: ${skipped.join("; ")}`);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -435,13 +473,13 @@ describe("bot sdk e2e", () => {
 describe("1.1 cards, side chats and page events", () => {
   const ownerId = () => human.me.id;
 
-  test("a decision ask: the answer reaches onCardAnswer with typed inputs, resolve edits the card", async () => {
+  test("a decision ask: the answer reaches onCardAnswer with typed inputs, markAnswered edits the card", async () => {
     const answers: CardAnswerContext<{ choice: string }>[] = [];
     const resolved: number[] = [];
     bot.onCardAnswer<{ choice: string }>(async (ctx) => {
       if (ctx.card?.title !== "发哪个版本") return;
       answers.push(ctx);
-      const m = await ctx.resolve({ intent: "info" });
+      const m = await ctx.markAnswered({ intent: "info" });
       resolved.push(m.cardV2?.rev ?? 0);
     });
     const card = decisionCard({ title: "发哪个版本", text: "选一个", options: ["1.4", "1.5"], from: [ownerId()], record: true });
@@ -471,11 +509,11 @@ describe("1.1 cards, side chats and page events", () => {
     if (upd.type !== "message.updated") throw new Error("unreachable");
     expect(upd.data.cardV2?.actions).toBeUndefined();
     expect(upd.data.cardV2?.intent).toBe("info");
-    // A second answer to the old rev is refused.
+    // A second answer to the old rev is refused: rev 2 has no submit action (INTERACT §3.7: not_found, card.block_gone).
     const again = await human
       .answerCard(generalId, { messageId: r.message.id, rev: 1, actionId: "submit", inputs: { choice: "o1" } })
       .then(() => null, (e) => e as ChatError);
-    expect(again?.code).toBe("conflict");
+    expect(again?.code).toBe("not_found");
   });
 
   test("an approval pressed by an old v1 client arrives as an answer", async () => {
@@ -572,7 +610,7 @@ describe("1.1 cards, side chats and page events", () => {
         expect(ctx.card?.title).toBe("重启后选");
         expect(ctx.action?.id).toBe("submit");
         expect(ctx.cancelled).toBe(false);
-        const m = await ctx.resolve({ intent: "info" });
+        const m = await ctx.markAnswered({ intent: "info" });
         resolved.push(m.cardV2?.rev ?? 0);
       }
     });
@@ -698,6 +736,255 @@ describe("1.1 cards, side chats and page events", () => {
   });
 });
 
+describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
+  const ownerId = () => human.me.id;
+  const auth = { authorization: `Bearer ${ownerToken}` };
+  let ledger: Bot;
+  let ledgerId = "";
+  let ledgerToken = "";
+  const ledgerState = join(server.dir, "ledger.state.json");
+  const transients: TransientEvent[] = [];
+  human.onTransient((e) => transients.push(e));
+
+  /** The 7.1 report (rev 1), asked of the human. */
+  function report(): CardV2 {
+    const card = JSON.parse(readFileSync(join(import.meta.dir, "../../../protocol/fixtures/entities/card-v2-report-compose.json"), "utf8")).value as CardV2;
+    return { ...card, ask: { ...(card.ask as NonNullable<CardV2["ask"]>), from: [ownerId()] } };
+  }
+  /** The human's side: a raw 1.1 frame (the desktop sends these). */
+  function frame(f: Record<string, unknown> & { t: string }): Promise<any> {
+    return (human as unknown as { request(f: Record<string, unknown>): Promise<unknown> }).request(f);
+  }
+  let n = 0;
+  const clientEventId = () => `01JC0CEV${String(++n).padStart(18, "0")}`;
+
+  beforeAll(async () => {
+    const made = await post("/v1/bots", { name: "Ledger", role: "test" }, auth);
+    ledgerId = made.member.id;
+    ledgerToken = made.token;
+    ledger = new Bot({ url: server.url, token: ledgerToken, stateFile: ledgerState, logLevel: "warn", markRead: false });
+    await ledger.start();
+    await waitFor("the human knows Ledger", () => human.members.some((m) => m.id === ledgerId));
+  });
+  afterAll(async () => {
+    await ledger.stop();
+  });
+
+  test.skipIf(!hasInteract)("7.1: choice.change reaches onCardEvent, the patch reaches the member as rev 2 with the cause", async () => {
+    const seen: CardEventContext[] = [];
+    ledger.onCardEvent(async (ctx) => {
+      if (ctx.card.title !== "10 月数据月报" || ctx.blockId !== "check") return;
+      seen.push(ctx);
+      if ((ctx.value as { value?: string }).value !== "wrong") return;
+      await ctx.patch((d) => {
+        d.insert(
+          blocks.group({
+            id: "drill",
+            title: "按渠道拆开 · 新增群",
+            collapsible: false,
+            children: [
+              blocks.table({
+                id: "by_channel",
+                columns: ["渠道", "新增群", "占比", "比 9 月"],
+                rows: [["小红书", "14", "37%", "+6"], ["群内邀请", "10", "26%", "+1"], ["B 站", "9", "24%", "−1"], ["抖音", "5", "13%", "−2"]],
+                rowKeys: ["xhs", "invite", "bili", "douyin"],
+                select: "multiple",
+                events: ["table.rowSelect"],
+              }),
+              blocks.input({ id: "what", kind: "textarea", label: "哪一项不对？后台看到的是多少？", required: false, maxLength: 300 }),
+            ],
+          }),
+          { after: "main" },
+        );
+        d.remove("note");
+        d.cardProps({ actions: [{ id: "send", label: "发给 Ledger", style: "primary", kind: "submit", inputs: ["check", "by_channel", "what"] }] });
+      });
+    });
+    const r = await ledger.postCardV2({ groupId: generalId }, report());
+    await waitFor("human sees the report", () => events.find((e) => e.type === "message.created" && e.data.message.id === r.message.id));
+    const ack = await frame({ t: "card.event", groupId: generalId, messageId: r.message.id, rev: 1, clientEventId: clientEventId(), blockId: "check", event: "choice.change", value: { value: "wrong" } });
+    expect(ack.stored).toBe(false);
+    expect(ack.expect.by).toBe(ledgerId);
+    const upd = await waitFor("rev 2", () =>
+      events.find((e) => e.type === "message.updated" && e.data.messageId === r.message.id && e.data.cardV2?.rev === 2),
+    );
+    if (upd.type !== "message.updated") throw new Error("unreachable");
+    expect(upd.data.cause?.eventId).toBe(ack.eventId);
+    expect(upd.data.cause?.actorId).toBe(ownerId());
+    expect(upd.data.cardV2?.blocks.some((b) => b.id === "by_channel")).toBe(true);
+    expect(upd.data.cardV2?.blocks.some((b) => b.id === "note")).toBe(false);
+    expect(seen[0]?.eventId).toBe(ack.eventId);
+    await waitFor("patched resolve", () => transients.find((e) => e.type === "interaction.resolved" && e.eventId === ack.eventId));
+  });
+
+  test.skipIf(!hasAutoResolve)("a live event the handler does not answer is resolved ignored", async () => {
+    const r = await ledger.postCardV2({ groupId: generalId }, { ...report(), title: "没人管的图" });
+    const ack = await frame({ t: "card.event", groupId: generalId, messageId: r.message.id, rev: 1, clientEventId: clientEventId(), blockId: "trend", event: "chart.select", value: { series: "oct", x: "10-13", y: 2268, index: 1 }, part: parts.point("oct", "10-13") });
+    const res = await waitFor("interaction.resolved", () =>
+      transients.find((e): e is Extract<TransientEvent, { type: "interaction.resolved" }> => e.type === "interaction.resolved" && e.eventId === ack.eventId),
+    );
+    expect(res.result).toBe("ignored");
+  });
+
+  test.skipIf(!hasInteract)("ctx.patch rebases after a concurrent edit", async () => {
+    const r = await ledger.postCardV2({ groupId: generalId }, { ...report(), title: "并发" });
+    const done: number[] = [];
+    ledger.onCardEvent(async (ctx) => {
+      if (ctx.card.title !== "并发") return;
+      // A full edit the SDK has not applied yet: the patch below starts from rev 1.
+      await ledger.edit(generalId, ctx.messageId, { body: "并发", cardV2: { ...ctx.card, rev: 2, summary: "改过一次" } });
+      const m = await ctx.patch([{ op: "set", id: "m_groups", props: { value: 40 } }]);
+      done.push(m.cardV2?.rev ?? 0);
+    });
+    await frame({ t: "card.event", groupId: generalId, messageId: r.message.id, rev: 1, clientEventId: clientEventId(), blockId: "check", event: "choice.change", value: { value: "ok" } });
+    await waitFor("patched after the edit", () => done.length === 1, 20_000);
+    expect(done[0]).toBe(3);
+    const last = await waitFor("rev 3", () =>
+      events.find((e) => e.type === "message.updated" && e.data.messageId === r.message.id && e.data.cardV2?.rev === 3),
+    );
+    if (last.type !== "message.updated") throw new Error("unreachable");
+    expect(last.data.cardV2?.summary).toBe("改过一次");
+  });
+
+  test("onCardAnswer gets an answer made while the bot was away, on catch-up, with the card", async () => {
+    const r = await ledger.postCardV2({ groupId: generalId }, { ...report(), title: "离线时回答" });
+    await waitFor("human sees it", () => events.find((e) => e.type === "message.created" && e.data.message.id === r.message.id));
+    await new Promise((res) => setTimeout(res, 700)); // the state file is saved after 500 ms
+    await ledger.stop();
+    const inputs = { check: { value: "wrong" }, note: { value: "后台是 7 个" } };
+    if (hasInteract) {
+      await frame({ t: "card.event", groupId: generalId, messageId: r.message.id, rev: 1, clientEventId: clientEventId(), actionId: "send", event: "action.press", inputs });
+    } else {
+      await human.answerCard(generalId, { messageId: r.message.id, rev: 1, actionId: "send", inputs: inputs as never });
+    }
+    ledger = new Bot({ url: server.url, token: ledgerToken, stateFile: ledgerState, logLevel: "warn", markRead: false });
+    const got: CardAnswerContext[] = [];
+    ledger.onCardAnswer((ctx) => {
+      if (ctx.messageId === r.message.id) got.push(ctx);
+    });
+    await ledger.start();
+    await waitFor("caught-up answer", () => got.length === 1, 20_000);
+    const a = got[0] as CardAnswerContext;
+    expect(a.catchUp).toBe(true);
+    expect(a.stored).toBe(true);
+    expect(a.card.title).toBe("离线时回答");
+    expect(a.actorId).toBe(ownerId());
+    expect(a.choice("check")).toBe("wrong");
+    expect(a.text("note")).toBe("后台是 7 个");
+  });
+
+  test.skipIf(!hasPageLoop)("onArtifactEvent: the reply reaches the asker, pushData reaches a second member", async () => {
+    const watcherMade = await post("/v1/bots", { name: "Watcher", role: "test" }, auth);
+    const watcher = new Bot({ url: server.url, token: watcherMade.token, logLevel: "warn", markRead: false });
+    const watched: TransientEvent[] = [];
+    watcher.onTransient((e) => watched.push(e));
+    await watcher.start();
+    try {
+      const t = await human.startTopic(generalId, { title: "看板 1.1", body: "做个页面" });
+      const v = await ledger.http.publishHtml({
+        groupId: generalId,
+        topicId: t.message.topicId,
+        title: "看板",
+        html: "<!doctype html><p>hi</p>",
+        events: [{ name: "filter.pick", kind: "ask" }],
+      });
+      ledger.onArtifactEvent(async (ctx) => {
+        if (ctx.artifactId !== v.artifact.id) return;
+        await ctx.pushData({ channel: ctx.payload });
+        await ctx.reply({ rows: 4 });
+      });
+      const ack = await frame({ t: "artifact.event", groupId: generalId, artifactId: v.artifact.id, version: v.version.version, clientEventId: clientEventId(), name: "filter.pick", kind: "ask", payload: "xhs" });
+      const reply = await waitFor("artifact.reply to the asker", () =>
+        transients.find((e): e is Extract<TransientEvent, { type: "artifact.reply" }> => e.type === "artifact.reply" && e.eventId === ack.eventId),
+      );
+      expect(reply.ok).toBe(true);
+      expect(reply.payload).toEqual({ rows: 4 });
+      const data = await waitFor("artifact.data to a second member", () =>
+        watched.find((e): e is Extract<TransientEvent, { type: "artifact.data" }> => e.type === "artifact.data" && e.artifactId === v.artifact.id),
+      );
+      expect(data.data).toEqual({ channel: "xhs" });
+      expect(data.cause).toBe(ack.eventId);
+      expect(watched.some((e) => e.type === "artifact.reply")).toBe(false);
+    } finally {
+      await watcher.stop();
+    }
+  });
+
+  test.skipIf(!hasPageLoop)("page emits: ctx.postMessage names the emit as cause and resolves it posted; an unanswered emit is resolved ignored", async () => {
+    const t = await human.startTopic(generalId, { title: "看板 emit", body: "做个页面" });
+    const v = await ledger.http.publishHtml({
+      groupId: generalId,
+      topicId: t.message.topicId,
+      title: "看板 emit",
+      html: "<!doctype html><p>hi</p>",
+      events: [
+        { name: "report.flag", kind: "emit" },
+        { name: "report.seen", kind: "emit" },
+      ],
+    });
+    const errors: unknown[] = [];
+    ledger.onError((e) => errors.push(e));
+    ledger.onArtifactEvent(async (ctx) => {
+      if (ctx.artifactId !== v.artifact.id || ctx.name !== "report.flag") return;
+      await ctx.postMessage("收到，我去看一下");
+    });
+    const emit = (name: string) =>
+      frame({ t: "artifact.event", groupId: generalId, artifactId: v.artifact.id, version: v.version.version, clientEventId: clientEventId(), name, kind: "emit", payload: null });
+    const resolvedOf = (eventId: string) =>
+      waitFor(`interaction.resolved for ${eventId}`, () =>
+        transients.find((e): e is Extract<TransientEvent, { type: "interaction.resolved" }> => e.type === "interaction.resolved" && e.eventId === eventId),
+      );
+    const flag = await emit("report.flag");
+    const posted = await waitFor("the post of the emit", () =>
+      events.find((e) => e.type === "message.created" && e.data.message.body === "收到，我去看一下" && e.data.message.topicId === t.message.topicId),
+    );
+    if (posted.type !== "message.created") throw new Error("unreachable");
+    expect(posted.data.message.cause?.eventId).toBe(flag.eventId);
+    expect((await resolvedOf(flag.eventId)).result).toBe("posted");
+    const seen = await emit("report.seen");
+    expect((await resolvedOf(seen.eventId)).result).toBe("ignored");
+    expect(errors).toHaveLength(0);
+  });
+
+  test.skipIf(!hasRefs)("REFS C3 1-4: a question about a cell and a node; ctx.refs, ctx.question, resolveRef current, then not current", async () => {
+    const card = composeCard({
+      intent: "info",
+      title: "10 月数据月报",
+      blocks: [
+        blocks.table({ id: "channels", title: "渠道表", columns: ["渠道", "新增群"], rows: [["小红书", "14"], ["B 站", "9"]], rowKeys: ["xhs", "bili"] }),
+        blocks.diagram({ id: "flow", source: "flowchart LR\n  a[收到消息] --> b{要回复吗}\n  b --> c[回复]" }),
+      ],
+    });
+    const posted = await ledger.postCardV2({ groupId: generalId }, card);
+    const asked: { refs: number; question: string; current: boolean[]; cell: unknown; node: unknown }[] = [];
+    ledger.onMention(async (ctx) => {
+      if (ctx.refs.length === 0) return;
+      const [cell, node] = await Promise.all(ctx.refs.map((x) => ctx.resolveRef(x)));
+      asked.push({ refs: ctx.refs.length, question: ctx.question, current: [cell?.current ?? false, node?.current ?? false], cell: cell?.part, node: node?.part });
+    });
+    const refs: BlockRefInput[] = [
+      { messageId: posted.message.id, cardRev: 1, blockId: "channels", part: parts.cell("bili", 1), label: "10 月数据月报 · 渠道表 · B 站 · 新增群 9", value: { row: "B 站", column: "新增群", display: "9", raw: 9 } },
+      { messageId: posted.message.id, cardRev: 1, blockId: "flow", part: parts.node("b"), label: "10 月数据月报 · 图 · 要回复吗", value: { node: "b", label: "要回复吗" } },
+    ];
+    const q = await human.send({ groupId: generalId, topicId: posted.message.topicId }, { body: "@Ledger 为什么比上月少了 1 个？", mentions: [ledgerId], blockRefs: refs });
+    expect(q.message.body).toBe(`> ↳ ${refs[0]?.label}\n> ↳ ${refs[1]?.label}\n\n@Ledger 为什么比上月少了 1 个？`);
+    expect(q.message.blockRefs?.map((x) => x.sourceAuthorId)).toEqual([ledgerId, ledgerId]);
+    await waitFor("ref question", () => asked.length === 1);
+    expect(asked[0]?.refs).toBe(2);
+    expect(asked[0]?.question).toBe("@Ledger 为什么比上月少了 1 个？");
+    expect(asked[0]?.cell).toEqual({ row: "B 站", column: "新增群", display: "9" });
+    expect(asked[0]?.node).toEqual({ node: "b", label: "要回复吗" });
+    expect(asked[0]?.current).toEqual([true, true]);
+    // A newer rev: the same refs are no longer current.
+    if (hasInteract) await ledger.patchCard(generalId, posted.message.id, [{ op: "set", id: "channels", props: { title: "渠道" } }]);
+    else await ledger.updateCardV2(generalId, posted.message.id, { ...card, rev: 2 });
+    await human.send({ groupId: generalId, topicId: posted.message.topicId }, { body: "@Ledger 再看一下", mentions: [ledgerId], blockRefs: refs });
+    await waitFor("second ref question", () => asked.length === 2);
+    expect(asked[1]?.current).toEqual([false, false]);
+    // The runner prompt's changedSince is checked in the server tests (buildPrompt).
+  });
+});
+
 describe("bot loops", () => {
   test("messages of other bots reach no handler unless allowBotAuthors is set", async () => {
     const auth = { authorization: `Bearer ${ownerToken}` };
@@ -736,4 +1023,6 @@ describe("bot loops", () => {
   });
 });
 
-console.error(`bot-sdk e2e: http send ${hasHttpSend ? "on" : "off"}, files ${hasFiles ? "on" : "off"}; log ${server.logFile}`);
+console.error(
+  `bot-sdk e2e: http send ${hasHttpSend ? "on" : "off"}, files ${hasFiles ? "on" : "off"}, interact ${hasInteract ? "on" : "off"}, refs ${hasRefs ? "on" : "off"}; log ${server.logFile}`,
+);

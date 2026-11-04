@@ -1,7 +1,7 @@
 // Extension points. Feature modules (server/src/<feature>/) call these at module load time;
 // server/src/features.ts imports every feature module so the registrations run in the Worker
 // and in both Durable Object classes (they share one module graph).
-import type { ClientFrame, Event, Member, Message } from "@chat/protocol";
+import type { ClientFrame, Event, Member, Message, TopicStatus } from "@chat/protocol";
 import type { z } from "zod";
 import type { AuthContext } from "./auth";
 import type { Env } from "./env";
@@ -138,6 +138,9 @@ export interface RoomContext {
   waitUntil(p: Promise<unknown>): void;
   /** Wakes the room's alarm handlers (`registerRoomAlarm`) at `at` or earlier. */
   wakeAt(at: number): void;
+  // cards2: card writes that read a message, await, then write it run one at a time per key.
+  /** Runs `fn` after every earlier `serial` call with the same key has settled. */
+  serial<T>(key: string, fn: () => Promise<T>): Promise<T>;
 }
 
 export type RoomRpcHandler = (room: RoomContext, actor: Actor | null, args: unknown) => Promise<unknown> | unknown;
@@ -195,6 +198,48 @@ export function registerEditExtension(ext: EditExtension): void {
   editExtensions.push(ext);
 }
 
+/**
+ * Message write hooks (1.1: Card v2 state, causes, refs). Unlike the extensions above they may
+ * change the body, run async checks before the write, and append events inside the write's
+ * transaction. Throw ApiError to reject the write.
+ */
+export interface MessageWriteResult {
+  /** Runs in the commit transaction after the message event is appended. */
+  inTx?(tx: RoomTx, message: Message): void;
+  /** Runs after the commit (transients). */
+  after?(message: Message): void;
+}
+export interface SendDraft {
+  body: string;
+  ext: Record<string, unknown> | undefined;
+}
+export interface EditDraft {
+  body: string;
+  /** Fields replaced in `messages.ext`, the Message and the `message.updated` data. */
+  changed: Record<string, unknown>;
+}
+export interface MessageWriteHook {
+  send?(
+    frame: Record<string, unknown>,
+    room: RoomContext,
+    actor: Actor,
+    draft: SendDraft,
+  ): Promise<MessageWriteResult | undefined> | MessageWriteResult | undefined;
+  edit?(
+    frame: Record<string, unknown>,
+    room: RoomContext,
+    actor: Actor,
+    current: Message,
+    draft: EditDraft,
+  ): Promise<MessageWriteResult | undefined> | MessageWriteResult | undefined;
+  /** In the delete transaction, after `message.deleted` is appended. */
+  remove?(room: RoomContext, tx: RoomTx, message: Message, actorId: string): void;
+}
+export const messageWriteHooks: MessageWriteHook[] = [];
+export function registerMessageWriteHook(h: MessageWriteHook): void {
+  messageWriteHooks.push(h);
+}
+
 export interface DecorateContext {
   groupId: string;
   groupKind: "group" | "dm" | null;
@@ -211,6 +256,33 @@ export type EventDecorator = (event: Event, memberId: string, c: DecorateContext
 export const eventDecorators: EventDecorator[] = [];
 export function registerEventDecorator(d: EventDecorator): void {
   eventDecorators.push(d);
+}
+
+// cards2: the topic status a `topic.update` stores while server-owned waits are open.
+/**
+ * Called in the `topic.update` transaction with the status and `waitingOn` the frame asks for
+ * (after defaults); returns what the topic gets. A feature that owns a wait (open blocking card
+ * asks) keeps the asked status as the one to come back to and returns the combined status.
+ */
+export type TopicStatusFilter = (sql: SqlStorage, topicId: string, next: { status: TopicStatus; waitingOn: string[] }) => { status: TopicStatus; waitingOn: string[] };
+export const topicStatusFilters: TopicStatusFilter[] = [];
+export function registerTopicStatusFilter(f: TopicStatusFilter): void {
+  topicStatusFilters.push(f);
+}
+
+// cards2: what one member may see of a stored event or a message (non-public polls and
+// anonymous questionnaires keep voters and their choices from other members).
+/** The event as `viewerId` gets it, live and in `fetch` pages (not in exports). */
+export type EventView = (event: Event, viewerId: string, sql: SqlStorage) => Event;
+export const eventViews: EventView[] = [];
+export function registerEventView(v: EventView): void {
+  eventViews.push(v);
+}
+/** The message as `viewerId` gets it in history and in write acks. */
+export type MessageView = (message: Message, viewerId: string, sql: SqlStorage) => Message;
+export const messageViews: MessageView[] = [];
+export function registerMessageView(v: MessageView): void {
+  messageViews.push(v);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,0 +1,30 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a group has blocks or children, even an empty blocks list",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "g",
+        "type": "group",
+        "title": "两",
+        "blocks": [],
+        "children": [
+          "a"
+        ]
+      },
+      {
+        "id": "a",
+        "type": "text",
+        "text": "a"
+      }
+    ]
+  }
+}

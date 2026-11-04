@@ -3,8 +3,10 @@
 (`codex app-server generate-ts`). A turn streams 4 deltas 0.2 s apart; turn/steer input is
 appended to the reply; a command approval is asked when the prompt says "approve". When the
 prompt says "late", the turn waits for a steer and then completes before it answers the steer
-with an error (a steer that arrives as the turn ends)."""
-import json, os, sys, threading, time
+with an error (a steer that arrives as the turn ends). When the prompt says "chatrun", the turn
+runs `chat-run resolve` from PATH and writes its exit code, output, `CHAT_RUN_DIR`,
+`CHAT_RUN_SOCKET` and the folder's mode and files to chatrun.json."""
+import json, os, subprocess, sys, threading, time
 
 assert sys.argv[1:2] == ["app-server"]
 lock = threading.Lock()
@@ -25,6 +27,13 @@ def run_turn(tid, text):
         ev.wait(10)
         dec = state["approval"]
         out({"method": "item/completed", "params": {"threadId": thread, "turnId": tid, "item": {"type": "commandExecution", "id": "c1", "command": "rm -rf build", "status": "completed" if dec == "accept" else "declined", "aggregatedOutput": "", "exitCode": 0 if dec == "accept" else None}}})
+    if "chatrun" in text:
+        d = os.environ.get("CHAT_RUN_DIR", "")
+        mode = oct(os.stat(d).st_mode & 0o777) if d and os.path.isdir(d) else "none"
+        r = subprocess.run(["chat-run", "resolve", "--event", "EV1", "--result", "ignored"], capture_output=True, text=True)
+        files = sorted(os.listdir(d)) if d and os.path.isdir(d) else []
+        open("chatrun.json", "w").write(json.dumps({"code": r.returncode, "out": r.stdout, "err": r.stderr, "dir": d,
+            "socket": os.environ.get("CHAT_RUN_SOCKET"), "mode": mode, "files": files}))
     mid = "m-" + tid
     reply = "codex: " + text
     late = "late" in text

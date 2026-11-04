@@ -1,0 +1,24 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "part only with chart.select and metric.press (V11-INC R3)",
+  "value": {
+    "t": "card.event",
+    "rid": "r101",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "rev": 1,
+    "clientEventId": "01JC0CEV000000000000000012",
+    "blockId": "act",
+    "event": "button.press",
+    "value": {
+      "id": "x"
+    },
+    "part": {
+      "kind": "cell",
+      "keys": {
+        "row": "bili"
+      }
+    }
+  }
+}

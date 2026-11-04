@@ -1,0 +1,27 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "a questionnaire answer holds every child",
+  "value": {
+    "t": "card.event",
+    "rid": "r101",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "rev": 1,
+    "clientEventId": "01JC0CEV000000000000000005",
+    "actionId": "submit",
+    "event": "action.press",
+    "inputs": {
+      "q1": {
+        "value": 4
+      },
+      "q2": {
+        "value": "other",
+        "other": "看情况"
+      },
+      "q3": {
+        "value": "很好"
+      }
+    }
+  }
+}

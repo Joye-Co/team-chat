@@ -28,6 +28,44 @@ then the app and the machine daemon.
   form, draft, plan, metric, chart, table, diff, evidence, refs) and states; answers travel as
   `card.answer` / `card.answered` to the card's author. The server derives a v1 `card` for 1.0.x
   clients.
+- Card v2.1 (`catalog: "tc.card/2.1"`, artboards CardsCompose and Interact): containers `stack`, `row`
+  (weights, folds to a stack under 560 pt), `group`, `compare`, `tabs` and `questionnaire` (depth ≤ 2, 80
+  blocks); the `decision` block gains `allowOther`, `minSelect` and `maxSelect`, and the new choice forms `rank`, `rating`, `scale`,
+  `confirm`, `imageChoice`, `matrix`, `slots` and `poll`; `buttons`, input `slider`, table row select, `diagram`
+  and `embed`. Every card has a status band (等你, 等{name}, 处理中, 完成, 失败, 已作废). Unknown blocks show a
+  box with their `fallbackText`; the derived v1 card covers every 2.1 type.
+- Interaction loop: one `card.event` frame for every pick, chart point, table row, input and button
+  (`card.answer` stays as its short form); the author answers with `card.patch` (`message.updated` with
+  `cause`), a new message, or `interaction.resolve`. The server owns `Message.cardState` (ask rounds, expiry,
+  retract, poll tally). The app shows a pending band (等 {name} 回应, {name} 还在处理, {name} 没有回应 with
+  重试 and 不等了), re-renders on a conflict with a toast. A rev with a `cause` gets the update band ({name} 更新了这张卡 · 刚刚 ·
+  按你点的「…」 for the person whose event caused it, 按 {name} 的选择 for others); changed and inserted top-level
+  blocks sit with no gap and a hairline between them; changed ones flash and settle on the card color, and
+  inserted ones keep a light tint and {name} 刚加的 until the next rev. A pickable single-series bar chart is drawn as rows that keep the chart label, the summary
+  and the pick chip (left out when that pick caused the rev). Two short single-select options sit side by side.
+  The card header shows the creation time; table number columns are right-aligned mono at the row end with
+  32 pt rows, and the table-row 问这里 follows the row name.
+  New transients go only to clients that send `hello.features` `interact/1`.
+- 产出 pages talk both ways: the bridge `window.teamchat` (`getData`, `onData`, `emit`, `ask`, `ref`); page events
+  travel as `artifact.event` to the version's author and are audited, not stored; the author pushes
+  `artifact.data` into open pages and answers with `artifact.reply`. Only versions made by a bot member may emit
+  or ask, and only declared events. An open page reloads in place on a new version. Inline pages start at the top and fade at the cut edge; the
+  footer keeps 页面里的操作会发给 {name} on one line (wrapping only before the name) and cuts the event labels
+  with an ellipsis and a tooltip.
+- Runner members get card and page events as `run.answer` / `run.interaction`, and post, patch and reply
+  through `chat-run` on the run's PATH.
+- 引用提问 (`refs/1`, artboard Refs): `PartRef` and `send.blockRefs` (≤ 5 per message) for a table cell or row, a
+  chart point, a metric, a step, a diff line, a screenshot, a diagram node or a page element; 问这里 on hover,
+  ⌥-click, a context menu and the keyboard; chips in the composer and on sent messages. 1.0.x clients get a text
+  prefix in the body; `buildPrompt` passes the refs to runner members.
+- Diagrams (`diagram/1`): Mermaid fences in Markdown and the `diagram` block, rendered on this computer with no
+  network, with the app's colors in light and dark; an expand viewer with zoom; node refs. Error states keep
+  the source and name the failed line or the node count; a too large diagram (over 150 nodes, 300 edges or 16 KiB
+  of source) has its own quiet state. The renderer window sends whole SVGs past the 16 KiB page payload limit.
+- Media 产出 (artboard Media): `MediaInfo` on `ArtifactVersion.media` and on file attachments, computed by the
+  sender, with `artifact.previewReady` as the fallback. Inline and full views for live HTML, Markdown, images,
+  video (poster, chapters, frames), audio (waveform, key points, transcript), PDF, code and CSV tables; upload
+  and preview states.
 - Runs: members acknowledge with a reaction, post no progress messages, and end with a done card
   with proof; `BotRun.usage` and `durationMs` are stored.
 - chat-core: a cache migration re-fetches group logs once, so events that 1.0.x skipped are read.

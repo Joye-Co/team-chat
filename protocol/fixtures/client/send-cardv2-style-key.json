@@ -1,0 +1,29 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "card.style_property: fontSize",
+  "value": {
+    "t": "send",
+    "rid": "b52",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "clientMsgId": "01JC0CMI000000000000000002",
+    "body": "x",
+    "cardV2": {
+      "v": 2,
+      "catalog": "tc.card/2.1",
+      "rev": 1,
+      "intent": "info",
+      "title": "t",
+      "fallback": "f",
+      "blocks": [
+        {
+          "id": "a",
+          "type": "metric",
+          "label": "x",
+          "value": 1,
+          "fontSize": 20
+        }
+      ]
+    }
+  }
+}

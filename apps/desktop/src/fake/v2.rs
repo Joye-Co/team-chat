@@ -20,6 +20,10 @@ use super::FakeProvider;
 // pages track: the sample data of the 群, 成员 and 产出 pages.
 #[path = "v2_pages.rs"]
 mod pages_samples;
+// --- inc-refs: the 引用提问 samples (Refs.dc.html §01, §03).
+#[path = "v2_refs.rs"]
+pub mod refs_samples;
+// --- end inc-refs
 use crate::data::{pages, v2::*, *};
 
 pub const ME: &str = "m-joye";
@@ -72,6 +76,10 @@ pub const RUN_WEEKLY: &str = "run-v2-weekly";
 pub const ART_RECONNECT: &str = "art-v2-reconnect-report";
 pub const ART_REPORT: &str = "art-v2-oct-report";
 pub const ART_V4: &str = "art-v2-v4-draft";
+/// Embedded in a card but its folder never opens (the 页面没有打开 · 重试 scene).
+pub const ART_EMBED_BROKEN: &str = "art-v2-embed-broken";
+/// Embedded in a card but a single file, not a web page (这个产出不是网页).
+pub const ART_EMBED_FILE: &str = "art-v2-embed-file";
 
 const MIN: i64 = 60_000;
 
@@ -177,6 +185,8 @@ pub struct V2Samples {
     // --- cards v2 track ---
     cards_v2: crate::views::cards::v2::samples::SampleCards,
     // --- end cards v2 track ---
+    // --- inc-refs
+    refs: super::refs::FakeRefs,
 }
 
 fn group(id: &str, kind: GroupKind, name: &str, members: &[&str], last: Millis) -> GroupSummary {
@@ -325,6 +335,7 @@ impl V2Samples {
             quiet: false,
             desk: Mutex::default(),
             cards_v2: Default::default(),
+            refs: Default::default(),
         })
     }
 
@@ -341,6 +352,7 @@ impl V2Samples {
             // --- cards v2 track ---
             cards_v2: Default::default(),
             // --- end cards v2 track ---
+            refs: Default::default(),
         })
     }
 
@@ -978,6 +990,16 @@ impl V2Samples {
 }
 
 impl ChatProvider for V2Samples {
+    // v11/pb2-cards: the preview images of the sample compare card.
+    fn card_image(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        file_id: &str,
+    ) -> Option<std::path::PathBuf> {
+        pages_samples::sample_image(file_id)
+    }
+
     fn session(&self) -> SessionState {
         match self.inner.session() {
             SessionState::SignedIn { server_url, .. } => SessionState::SignedIn {
@@ -1081,6 +1103,14 @@ impl ChatProvider for V2Samples {
                 note: None,
                 created_by: summary.created_by.clone(),
                 created_at: summary.updated_at - (summary.version - v) as i64 * 24 * 60 * MIN,
+                // --- v11/media ---
+                entry: "index.html".into(),
+                files: vec![ArtifactVersionFile {
+                    path: "index.html".into(),
+                    size: 18_400,
+                    mime: "text/html".into(),
+                }],
+                // --- end v11/media ---
             })
             .collect();
         Some(ArtifactDetail {
@@ -1809,11 +1839,109 @@ impl ChatProvider for V2Samples {
         sent_page_events::record(artifact_id, version, name, payload);
     }
     // --- end r2-trust ---
+    // --- inc-host track: the 产出 page host on the samples ---
+    fn page_bridge(
+        &self,
+        artifact_id: &str,
+        version: u32,
+    ) -> Option<crate::data::page_host::PageBridge> {
+        use crate::data::page_host::{PageEventDecl, PageEventKind};
+        let mut b = crate::data::page_host::default_bridge(self, artifact_id, version)?;
+        if artifact_id == ART_REPORT {
+            // 10 月数据月报: Ledger made it in a run; the page filters and asks.
+            b.runner = true;
+            b.events.extend([
+                PageEventDecl {
+                    name: "filter".into(),
+                    kind: PageEventKind::Emit,
+                    label: Some("按渠道看".into()),
+                },
+                PageEventDecl {
+                    name: "question".into(),
+                    kind: PageEventKind::Ask,
+                    label: Some("数据有问题".into()),
+                },
+            ]);
+        }
+        Some(b)
+    }
+    fn send_page_event(
+        &self,
+        artifact_id: &str,
+        version: u32,
+        name: &str,
+        _kind: crate::data::page_host::PageEventKind,
+        payload: Option<serde_json::Value>,
+    ) -> Result<String, crate::data::page_host::PageSendError> {
+        sent_page_events::record(artifact_id, version, name, payload);
+        Ok(format!("ce-{}", sent_page_events::snapshot().len()))
+    }
+    fn fetch_page_data(
+        &self,
+        artifact_id: &str,
+        _version: u32,
+    ) -> futures::channel::oneshot::Receiver<Option<(serde_json::Value, u64)>> {
+        let (tx, rx) = futures::channel::oneshot::channel();
+        let data = (artifact_id == ART_REPORT).then(|| {
+            (
+                serde_json::json!({
+                    "channel": "全部",
+                    "weeks": ["10-06", "10-13", "10-20", "10-27"],
+                    "values": [9, 8, 10, 11],
+                    "total": 38,
+                    "delta": "+4"
+                }),
+                1,
+            )
+        });
+        let _ = tx.send(data);
+        rx
+    }
+    fn file_poster(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        file: &FileAttachment,
+    ) -> Option<std::path::PathBuf> {
+        // The sample recording's poster: a frame of the bundled sample clip, made once.
+        static POSTER: std::sync::OnceLock<Option<std::path::PathBuf>> = std::sync::OnceLock::new();
+        if file.file_id != "f-v2-video" {
+            return None;
+        }
+        POSTER
+            .get_or_init(|| {
+                let clip = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("src/views/artifacts/preview/clip.mp4");
+                crate::views::media::poster::make(&clip, crate::views::media::MediaKind::Video)
+            })
+            .clone()
+    }
+    // --- end inc-host track ---
     fn open_artifact_version(
         &self,
         artifact_id: &str,
         version: Option<u32>,
     ) -> Reply<ArtifactFolder> {
+        // The embed states of a card: a folder that does not open, and a file.
+        if artifact_id == ART_EMBED_BROKEN {
+            return reply_err(FileError::Network);
+        }
+        if artifact_id == ART_EMBED_FILE {
+            let dir = std::env::temp_dir()
+                .join("team-chat-v2-samples")
+                .join(artifact_id);
+            let _ = std::fs::create_dir_all(&dir);
+            let _ = std::fs::write(dir.join("预算.csv"), "渠道,预算\n小红书,6000\n");
+            let (tx, rx) = futures::channel::oneshot::channel();
+            let _ = tx.send(Ok(ArtifactFolder {
+                artifact_id: artifact_id.into(),
+                version: version.unwrap_or(1),
+                dir,
+                entry: "预算.csv".into(),
+                is_page: false,
+            }));
+            return rx;
+        }
         let Some(detail) = self.artifact(artifact_id) else {
             return reply_err(FileError::NotFound);
         };
@@ -1887,6 +2015,34 @@ impl ChatProvider for V2Samples {
             self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
         }
     }
+    // --- inc-cards21: the interaction loop on the sample team ---
+    fn send_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        message_id: &str,
+        request: cards_v2::CardEventRequest,
+    ) -> Option<String> {
+        let now = crate::selftest::clock::now_ms();
+        let (group_id, topic_id, id) = self.cards_v2.send_event(message_id, ME, request, now)?;
+        self.emit(vec![Change::Messages { group_id, topic_id }, Change::Todo]);
+        Some(id)
+    }
+    fn card_v2_events(&self, _group_id: &str, message_id: &str) -> Vec<cards_v2::MyCardEvent> {
+        self.cards_v2.events(message_id)
+    }
+    fn drop_card_event(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        message_id: &str,
+        client_event_id: &str,
+    ) {
+        if let Some((group_id, topic_id)) = self.cards_v2.drop_event(message_id, client_event_id) {
+            self.emit(vec![Change::Messages { group_id, topic_id }]);
+        }
+    }
+    // --- end inc-cards21 ---
     fn withdraw_card_v2_answer(&self, group_id: &str, topic_id: &str, message_id: &str) {
         if super::v2_desk::card_v2(message_id).is_some() {
             self.desk
@@ -1907,6 +2063,46 @@ impl ChatProvider for V2Samples {
         }
     }
     // --- end cards v2 track ---
+
+    // --- inc-refs track ---
+
+    fn refs_supported(&self) -> bool {
+        true
+    }
+
+    fn add_draft_ref(&self, key: &DraftKey, r: DraftRef) -> AddRef {
+        let added = self.inner.add_draft_ref(key, r);
+        if added == AddRef::Added {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+        added
+    }
+
+    fn remove_draft_ref(&self, key: &DraftKey, index: usize) {
+        self.inner.remove_draft_ref(key, index);
+        self.emit(vec![Change::Draft { key: key.clone() }]);
+    }
+
+    fn clear_draft(&self, key: &DraftKey) {
+        self.inner.clear_draft(key);
+        self.emit(vec![Change::Draft { key: key.clone() }]);
+    }
+
+    fn message_block_refs(&self, message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        self.refs.of(message)
+    }
+
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        _key: &DraftKey,
+        _files: Vec<PendingFileId>,
+        refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        refs_samples::send(self, request, refs)
+    }
+
+    // --- end inc-refs track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

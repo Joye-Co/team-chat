@@ -7,11 +7,14 @@ import { addV1Fixtures } from "./fixtures-v1.ts";
 import { addBotsFixtures } from "./fixtures-bots.ts";
 import { addReactionsFixtures } from "./fixtures-reactions.ts";
 import { addV11Fixtures } from "./fixtures-v11.ts";
+import { addInteractFixtures } from "./fixtures-v11-interact.ts";
 
 type Fixture = {
   kind: string;
   valid: boolean;
   description?: string;
+  /** Invalid fixtures: the `ack.error.reason` both sides give (`card.limits`, …). */
+  reason?: string;
   value: unknown;
   /** Expected value after parse and serialize, when it differs from `value`. */
   normalized?: unknown;
@@ -25,8 +28,8 @@ const add = (path: string, f: Fixture) => {
 };
 const ok = (path: string, kind: string, value: unknown, description?: string) =>
   add(path, { kind, valid: true, ...(description ? { description } : {}), value });
-const bad = (path: string, kind: string, value: unknown, description: string) =>
-  add(path, { kind, valid: false, description, value });
+const bad = (path: string, kind: string, value: unknown, description: string, reason?: string) =>
+  add(path, { kind, valid: false, description, ...(reason ? { reason } : {}), value });
 
 // ---------------------------------------------------------------------------
 // Sample data
@@ -343,6 +346,7 @@ addV1Fixtures({ ok, bad, add, T0, ID, topic, message, generalSummary, dmSummary,
 addBotsFixtures({ ok, bad, T0, ID, base });
 addReactionsFixtures({ ok, bad, ID, base, message });
 addV11Fixtures({ ok, bad, add, T0, ID, base, message, topic });
+addInteractFixtures({ ok, bad, T0, ID, base, message });
 
 // ---------------------------------------------------------------------------
 

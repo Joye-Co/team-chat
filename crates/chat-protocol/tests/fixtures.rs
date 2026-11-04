@@ -56,7 +56,11 @@ check!(
     TopicLink,
     TopicContext,
     SetRunAcceptanceRequest,
-    ResumeRunRequest
+    ResumeRunRequest,
+    PartRef,
+    BlockRefInput,
+    BlockRef,
+    PutArtifactDataRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -161,6 +165,21 @@ const KINDS: &[(&str, RoundTrip)] = &[
         validated::<SetRunAcceptanceRequest>,
     ),
     ("ResumeRunRequest", validated::<ResumeRunRequest>),
+    // 1.1 interaction loop, refs, media
+    ("CardState", plain::<CardState>),
+    ("PartRef", validated::<PartRef>),
+    ("BlockRefInput", validated::<BlockRefInput>),
+    ("BlockRef", validated::<BlockRef>),
+    ("MediaInfo", plain::<MediaInfo>),
+    ("CardEventAck", plain::<CardEventAck>),
+    ("CardPatchAck", plain::<CardPatchAck>),
+    ("ArtifactEventAck", plain::<ArtifactEventAck>),
+    ("ArtifactDataAck", plain::<ArtifactDataAck>),
+    ("ArtifactDataResponse", plain::<ArtifactDataResponse>),
+    (
+        "PutArtifactDataRequest",
+        validated::<PutArtifactDataRequest>,
+    ),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -223,6 +242,18 @@ fn fixture_parity() {
             (false, Ok(out)) => failures.push(format!("{name}: invalid fixture parsed as {out}")),
             (false, Err(_)) => {}
         }
+        // Invalid cards name the same `ack.error.reason` as the server.
+        if let (false, Some(want)) = (valid, fixture.get("reason").and_then(Value::as_str)) {
+            let got = match kind {
+                "CardV2" => serde_json::from_value::<CardV2>(fixture["value"].clone())
+                    .map(|c| c.problem().map(|p| p.reason.to_string()))
+                    .unwrap_or_else(|e| Some(format!("serde: {e}"))),
+                _ => Some(format!("no reason check for kind {kind}")),
+            };
+            if got.as_deref() != Some(want) {
+                failures.push(format!("{name}: reason {got:?}, want {want}"));
+            }
+        }
     }
     assert!(
         failures.is_empty(),
@@ -259,15 +290,21 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
     assert_eq!(
         client,
         [
+            "artifact.data",
             "artifact.event",
+            "artifact.reply",
             "card.action",
             "card.answer",
+            "card.answer.retract",
+            "card.event",
+            "card.patch",
             "delete",
             "delta",
             "edit",
             "fetch",
             "hello",
             "history",
+            "interaction.resolve",
             "ping",
             "react",
             "read",
@@ -295,8 +332,8 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 16);
-    assert_eq!(valid("TransientEvent", "type").len(), 3);
+    assert_eq!(valid("Event", "type").len(), 17);
+    assert_eq!(valid("TransientEvent", "type").len(), 8);
 }
 
 #[test]
@@ -439,4 +476,63 @@ fn unknown_topic_link_kind_is_read_but_rejected() {
     };
     assert_eq!(d.link, TopicLink::Unknown);
     assert!(d.validate().is_err());
+}
+
+#[test]
+fn diagram_checks_match_the_shared_cases() {
+    let path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../protocol/checks/diagram-checks.json");
+    let file: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let cases = file["cases"].as_array().unwrap();
+    assert!(cases.len() > 10);
+    for c in cases {
+        let source = c["source"].as_str().unwrap();
+        let got = check_diagram_source(source);
+        let want = if c["ok"] == true {
+            DiagramCheck::Ok {
+                kind: DIAGRAM_KEYWORDS
+                    .iter()
+                    .find(|(_, k)| *k == c["type"].as_str().unwrap())
+                    .unwrap()
+                    .1,
+            }
+        } else {
+            DiagramCheck::Refused {
+                reason: c["reason"].as_str().unwrap().to_string(),
+            }
+        };
+        assert_eq!(got, want, "{}", source.chars().take(40).collect::<String>());
+    }
+}
+
+#[test]
+fn card_v2_write_rules_name_the_reason() {
+    let card: CardV2 = serde_json::from_str(
+        r#"{"v":2,"catalog":"tc.card/2.1","rev":1,"intent":"info","title":"t","fallback":"f",
+            "blocks":[{"id":"a","type":"text","text":"x","color":"red"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(card.style_key.as_deref(), Some("color"));
+    assert_eq!(card.problem().unwrap().reason, "card.style_property");
+    // Readers keep the card (the style key is dropped on write back).
+    let out = serde_json::to_value(&card).unwrap();
+    assert!(out["blocks"][0].get("color").is_none());
+    let two: CardV2 = serde_json::from_str(
+        r#"{"v":2,"rev":1,"intent":"info","title":"t","fallback":"f",
+            "blocks":[{"id":"s","type":"stack","children":["a"]},{"id":"a","type":"text","text":"x"}]}"#,
+    )
+    .unwrap();
+    assert_eq!(two.problem().unwrap().reason, "card.unknown_block");
+    let order: CardV2 = serde_json::from_str(
+        r#"{"v":2,"catalog":"tc.card/2.1","rev":1,"intent":"info","title":"t","fallback":"f",
+            "blocks":[{"id":"b","type":"text","text":"b"},{"id":"r","type":"row","children":["a","b"]},{"id":"a","type":"text","text":"a"}]}"#,
+    )
+    .unwrap();
+    assert!(order.problem().is_none());
+    let ids: Vec<_> = order
+        .reading_order()
+        .iter()
+        .filter_map(|b| b.id())
+        .collect();
+    assert_eq!(ids, ["r", "a", "b"]);
 }

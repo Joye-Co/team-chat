@@ -1,0 +1,46 @@
+{
+  "kind": "CardV2",
+  "valid": false,
+  "description": "a row has 2..3 children",
+  "reason": "card.limits",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 1,
+    "intent": "info",
+    "title": "t",
+    "fallback": "f",
+    "blocks": [
+      {
+        "id": "r",
+        "type": "row",
+        "children": [
+          "a",
+          "b",
+          "c",
+          "d"
+        ]
+      },
+      {
+        "id": "a",
+        "type": "text",
+        "text": "a"
+      },
+      {
+        "id": "b",
+        "type": "text",
+        "text": "b"
+      },
+      {
+        "id": "c",
+        "type": "text",
+        "text": "c"
+      },
+      {
+        "id": "d",
+        "type": "text",
+        "text": "d"
+      }
+    ]
+  }
+}

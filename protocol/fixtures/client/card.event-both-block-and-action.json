@@ -1,0 +1,16 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "exactly one of blockId and actionId",
+  "value": {
+    "t": "card.event",
+    "rid": "r101",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "rev": 1,
+    "clientEventId": "01JC0CEV000000000000000007",
+    "blockId": "check",
+    "actionId": "send",
+    "event": "action.press"
+  }
+}

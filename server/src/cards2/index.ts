@@ -1,152 +1,266 @@
-// Card v2 answers and 产出 page events (docs/protocol.md, "Cards v2" and "产出 events"). A
-// `card.answer` frame goes to the group room, which checks it against the stored card and
-// appends `card.answered`; an `artifact.event` frame appends `artifact.evented` when the
-// version declares the event. Routing answers and events to the bot's run is the bots
-// feature's job (its event writer and outbox).
+// Card v2.1 interaction loop (docs/protocol.md, "Interaction loop"): `card.event` and its short
+// forms (`card.answer`, `card.answer.retract`, and a v1 `card.action` on a v2 card),
+// `card.patch`, `interaction.resolve`; card state, causes and refs on send, edit and delete
+// (./hooks). 产出 page events (`artifact.event`) are the files feature's (server/src/files/bridge.ts).
 import {
-  type ArtifactEventDecl,
-  type CardAnswerFrame,
-  type CardV2,
-  type CardV2Block,
+  type CardPatchAck,
+  type Cause,
   type ClientFrameOf,
+  type Message,
+  type PatchOp,
 } from "@chat/protocol";
 import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
 import { TokenBucket } from "../core/ratelimit";
 import { type Actor, type RoomContext, registerFrameHandler, registerRoomRpc } from "../core/registry";
+import { ulid } from "../core/ids";
+import { type CardEventArgs, cardEvent, cardLock, loadCard, writeCardUpdate } from "./events";
+import { closeRetractWindow } from "./delivery";
+import { pageCauseOf, pageEventRow } from "../files/page-events";
+import { checkCause, resolved } from "./hooks";
+import { applyPatch } from "./patch";
+import { shownCause, viewMessage } from "./privacy";
+import { checkEmbeds, directory, isPick, recordRev, stateForWrite } from "./state";
+import { EVENT_KEEP_MS, eventRow, extOf, messageRow, pruneEvents } from "./store";
 
 import "./decisions";
 
-export const CARD_ANSWER_RPC = "cards.answer";
-export const ARTIFACT_EVENT_RPC = "artifacts.event";
+export {
+  type CardEventDelivery,
+  type CardEventHandler,
+  type RequesterResolver,
+  closeRetractWindow,
+  registerCardEventHandler,
+  registerRequesterResolver,
+} from "./delivery";
 
-/** At most one answer per member per message per this many ms. */
-const ANSWER_INTERVAL_MS = 1000;
-/** Page events: 5 per second per member, bursts of 10. */
-const PAGE_EVENT_RATE = { rate: 5, burst: 10 };
+export const CARD_EVENT_RPC = "cards.event";
+export const CARD_PRESS_RPC = "cards.press";
+export const CARD_PATCH_RPC = "cards.patch";
+export const CARD_RESOLVE_RPC = "cards.resolve";
+export const CARD_ANSWER_TAKEN_RPC = "cards.answerTaken";
 
-export type CardAnswerArgs = Pick<CardAnswerFrame, "messageId" | "rev" | "actionId" | "inputs" | "editedValues">;
-type MessageRow = { topic_id: string; kind: string | null; ext: string | null; deleted_at: number | null };
+/** Patches: bursts of 3 per message, then 1 per second. */
+const PATCH_RATE = { rate: 1, burst: 3 };
 
-const answeredAt = new Map<string, number>();
-const pageBuckets = new Map<string, TokenBucket>();
+/** Data of a stored `card.answered` event (2.0 fields and the 2.1 ones). */
+export type CardAnswerArgs = {
+  messageId: string;
+  rev: number;
+  actionId?: string;
+  inputs?: Record<string, unknown>;
+  editedValues?: Record<string, string>;
+  answerId?: string;
+  askId?: string;
+  eventId?: string;
+  event?: string;
+  blockId?: string;
+  value?: unknown;
+};
 
-function blockIds(blocks: CardV2Block[]): Set<string> {
-  const ids = new Set<string>();
-  for (const b of blocks) {
-    ids.add(b.id);
-    if (b.type === "group") for (const c of b.blocks) ids.add(c.id);
-  }
-  return ids;
-}
+const patchBuckets = new Map<string, TokenBucket>();
 
-function mayAnswer(card: CardV2, actor: Actor, topicCreator: string | null): boolean {
-  if (!card.ask) return true;
-  return card.ask.from.some((f) =>
-    f === "owners" ? actor.level === "owner" : f === "requester" ? actor.id === topicCreator : f === actor.id,
-  );
-}
-
-/** Checks an answer against the stored card and appends `card.answered`. Returns its seq. */
-export function answerCard(room: RoomContext, actor: Actor, a: CardAnswerArgs): { seq: number } {
-  const row = room.sql
-    .exec<MessageRow>("SELECT topic_id, kind, ext, deleted_at FROM messages WHERE id = ?", a.messageId)
-    .toArray()[0] as MessageRow | undefined;
-  if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found");
-  const card = row.ext ? (JSON.parse(row.ext) as { cardV2?: CardV2 }).cardV2 : undefined;
-  if (!card) throw new ApiError("not_found", "not a v2 card");
-  if (a.rev !== card.rev) throw new ApiError("conflict", "the card changed");
-  const action = (card.actions ?? []).find((x) => x.id === a.actionId && (x.kind ?? "submit") !== "link");
-  if (!action) throw new ApiError("not_found", "card action not found");
-  const ids = blockIds(card.blocks);
-  for (const k of [...Object.keys(a.inputs ?? {}), ...Object.keys(a.editedValues ?? {})]) {
-    if (!ids.has(k)) throw new ApiError("invalid", `no block ${k} in the card`);
-  }
-  if (card.ask) {
-    const topic = room.sql.exec<{ created_by: string }>("SELECT created_by FROM topics WHERE id = ?", row.topic_id).toArray()[0];
-    if (!mayAnswer(card, actor, topic?.created_by ?? null)) throw new ApiError("forbidden", "this ask is for other members");
-    if (card.ask.expiresAt !== undefined && Date.now() >= card.ask.expiresAt) throw new ApiError("conflict", "the ask expired");
-    const taken = room.sql
-      .exec(
-        "SELECT 1 FROM events WHERE message_id = ? AND type = 'card.answered' AND json_extract(data, '$.rev') = ? LIMIT 1",
-        a.messageId,
-        a.rev,
-      )
-      .toArray();
-    if (taken.length > 0) throw new ApiError("conflict", "the ask was answered");
-  }
-  const key = `${room.groupId}:${actor.id}:${a.messageId}`;
-  const now = Date.now();
-  const last = answeredAt.get(key);
-  if (last !== undefined && now - last < ANSWER_INTERVAL_MS) throw new ApiError("rate_limited", "one answer per second");
-  answeredAt.set(key, now);
-  if (answeredAt.size > 1000) for (const [k, t] of answeredAt) if (now - t >= ANSWER_INTERVAL_MS) answeredAt.delete(k);
-
-  const data: CardAnswerArgs = { messageId: a.messageId, rev: a.rev, actionId: a.actionId };
-  if (a.inputs !== undefined) data.inputs = a.inputs;
-  if (a.editedValues !== undefined) data.editedValues = a.editedValues;
-  const event = room.commit((tx) => {
-    const seq = tx.nextSeq();
-    room.sql.exec("UPDATE topics SET last_seq = ? WHERE id = ?", seq, row.topic_id);
-    return tx.append({ type: "card.answered", actorId: actor.id, topicId: row.topic_id, messageId: a.messageId, data });
-  });
-  return { seq: event.seq };
-}
-
-registerRoomRpc(CARD_ANSWER_RPC, (room, actor, args) => {
+function member(room: RoomContext, actor: Actor | null): Actor {
   if (!actor) throw new ApiError("internal", "actor required");
   if (!room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
-  return answerCard(room, actor, args as CardAnswerArgs);
+  return actor;
+}
+
+registerRoomRpc(CARD_EVENT_RPC, (room, actor, args) => cardEvent(room, member(room, actor), args as CardEventArgs));
+
+/**
+ * BotDesk: the card author's run took an answer (`input.accepted` of its `run.answer`), so the
+ * answerer can no longer retract it (INTERACT §3.6). `seq` is the `card.answered` event's seq.
+ */
+registerRoomRpc(CARD_ANSWER_TAKEN_RPC, (room, actor, args) => {
+  const a = member(room, actor);
+  // `close: false` only asks whether the answer was taken back (a run that has not taken it yet).
+  const { seq, close = true } = args as { seq: number; close?: boolean };
+  const ev = room.sql
+    .exec<{ data: string; message_id: string | null }>("SELECT data, message_id FROM events WHERE seq = ? AND type = 'card.answered'", seq)
+    .toArray()[0];
+  if (!ev?.message_id) throw new ApiError("not_found", "answer not found");
+  const author = room.sql.exec<{ author_id: string }>("SELECT author_id FROM messages WHERE id = ?", ev.message_id).toArray()[0];
+  if (author?.author_id !== a.id) throw new ApiError("forbidden", "only the card's author takes its answers");
+  const answerId = (JSON.parse(ev.data) as { answerId?: string }).answerId;
+  if (!answerId) return { ok: true, retracted: false };
+  const row = messageRow(room.sql, ev.message_id);
+  const retracted = (row ? extOf(row).cardState?.answers ?? [] : []).some((x) => x.answerId === answerId && x.retractedAt !== undefined);
+  if (close && !retracted) closeRetractWindow(room.sql, answerId);
+  return { ok: true, retracted };
+});
+
+/**
+ * A v1 `card.action` on a v2 card (1.0.x clients press the derived v1 buttons): a pick
+ * button answers its block with that value; another button is `action.press` without inputs.
+ */
+registerRoomRpc(CARD_PRESS_RPC, async (room, actor, args) => {
+  const a = member(room, actor);
+  const { messageId, actionId } = args as { messageId: string; actionId: string };
+  const dir = await directory(room);
+  const { ext, card } = await loadCard(room, messageId, dir);
+  const v1 = ext.card as { actions?: { id: string; value?: unknown }[] } | undefined;
+  const pick = v1?.actions?.find((x) => x.id === actionId)?.value;
+  if (isPick(pick)) {
+    const block = card.blocks.find((b) => b.id === pick.blockId);
+    if (!block) throw new ApiError("not_found", "block not found", "card.block_gone");
+    const value = { value: pick.value };
+    const commits = block.deliver === "immediate" || block.type === "compare" || block.type === "confirm";
+    if (commits) {
+      const event = block.type === "compare" ? "compare.pick" : block.type === "input" ? "input.submit" : "choice.submit";
+      return cardEvent(room, a, { messageId, rev: card.rev, blockId: block.id, event, value });
+    }
+    const submit = card.actions?.find((x) => (x.kind ?? "submit") === "submit" && x.inputs?.length === 1 && x.inputs[0] === block.id);
+    if (!submit) throw new ApiError("not_found", "card action not found", "card.block_gone");
+    return cardEvent(room, a, { messageId, rev: card.rev, actionId: submit.id, event: "action.press", inputs: { [block.id]: value } });
+  }
+  return cardEvent(room, a, { messageId, rev: card.rev, actionId, event: "action.press" });
+});
+
+registerRoomRpc(CARD_PATCH_RPC, async (room, actor, args): Promise<CardPatchAck> => {
+  const a = member(room, actor);
+  const f = args as { messageId: string; baseRev: number; ops: PatchOp[]; cause?: string; clientPatchId?: string };
+  // Under the message's lock: the state read before the awaits is the state the commit replaces.
+  const { ack, cause, rowId } = await room.serial(cardLock(f.messageId), () => patchLocked(room, a, f));
+  if (cause) resolved(room, cause, "patched", rowId);
+  return ack;
+});
+
+async function patchLocked(
+  room: RoomContext,
+  a: Actor,
+  f: { messageId: string; baseRev: number; ops: PatchOp[]; cause?: string; clientPatchId?: string },
+): Promise<{ ack: CardPatchAck; cause?: Cause; rowId: string }> {
+  const now = Date.now();
+  if (f.clientPatchId) {
+    const dup = room.sql
+      .exec<{ ack: string }>(
+        "SELECT ack FROM card_patches WHERE actor_id = ? AND message_id = ? AND client_patch_id = ? AND at >= ?",
+        a.id,
+        f.messageId,
+        f.clientPatchId,
+        now - EVENT_KEEP_MS,
+      )
+      .toArray()[0];
+    if (dup) return { ack: { ...(JSON.parse(dup.ack) as CardPatchAck), duplicate: true }, rowId: f.messageId };
+  }
+  const dir = await directory(room);
+  const { row, ext, card, state } = await loadCard(room, f.messageId, dir);
+  if (row.author_id !== a.id) throw new ApiError("forbidden", "only the author can patch a card");
+  if (f.baseRev !== card.rev) throw new ApiError("conflict", "the card has a newer rev", "card.stale_rev");
+  const cause = f.cause ? checkCause(room, f.cause, a.id, row.id) : undefined;
+  const next = applyPatch(card, f.ops);
+  checkEmbeds(room.sql, next);
+  const key = `${room.groupId}:${row.id}`;
+  let bucket = patchBuckets.get(key);
+  if (!bucket) {
+    bucket = new TokenBucket(PATCH_RATE.rate, PATCH_RATE.burst);
+    patchBuckets.set(key, bucket);
+    if (patchBuckets.size > 2000) patchBuckets.clear();
+  }
+  if (!bucket.take()) throw new ApiError("rate_limited", "too many patches for this card");
+  const nextState = await stateForWrite(room, dir, next, state, row.author_id, row.topic_id, now, row.id);
+  const shown = cause ? shownCause(room.sql, cause) : undefined;
+  if (shown) nextState.lastCause = shown;
+  let ack: CardPatchAck | undefined;
+  room.commit((tx) => {
+    writeCardUpdate(room, tx, row, ext, a.id, dir, { card: next, state: nextState, cardChanged: true, cause: shown, body: next.fallback || next.title, now });
+    recordRev(room.sql, row.id, next);
+    const m = room.sql.exec<Record<string, SqlStorageValue>>("SELECT * FROM messages WHERE id = ?", row.id).toArray()[0];
+    ack = { message: viewMessage(toMessage(room, m), a.id, room.sql), rev: next.rev };
+    if (f.clientPatchId) {
+      room.sql.exec(
+        "INSERT OR REPLACE INTO card_patches (actor_id, message_id, client_patch_id, at, ack) VALUES (?, ?, ?, ?, ?)",
+        a.id,
+        row.id,
+        f.clientPatchId,
+        now,
+        JSON.stringify(ack),
+      );
+    }
+    pruneEvents(room.sql, now);
+  });
+  return { ack: ack as CardPatchAck, cause, rowId: row.id };
+}
+
+function toMessage(room: RoomContext, r: Record<string, SqlStorageValue>): Message {
+  const m: Message = {
+    ...(r.ext ? (JSON.parse(r.ext as string) as Record<string, unknown>) : {}),
+    id: r.id as string,
+    clientMsgId: r.client_msg_id as string,
+    groupId: room.groupId,
+    topicId: r.topic_id as string,
+    authorId: r.author_id as string,
+    body: r.body as string,
+    mentions: JSON.parse(r.mentions as string) as string[],
+    createdSeq: r.created_seq as number,
+    createdAt: r.created_at as number,
+    editedAt: (r.edited_at as number | null) ?? null,
+    deletedAt: (r.deleted_at as number | null) ?? null,
+    kind: (r.kind as Message["kind"]) ?? "text",
+  };
+  if (r.streaming) m.streaming = true;
+  return m;
+}
+
+registerRoomRpc(CARD_RESOLVE_RPC, (room, actor, args) => {
+  const a = member(room, actor);
+  const f = args as { eventId: string; result: "ignored" | "failed"; note?: string };
+  const r = eventRow(room.sql, f.eventId);
+  // files area (review F2): a page event, resolved by the member that received it.
+  if (!r) {
+    const page = pageEventRow(room.sql, f.eventId);
+    if (!page) throw new ApiError("not_found", "event not found");
+    if (page.bot_id !== a.id) throw new ApiError("forbidden", "only the receiver resolves its events");
+    if (page.resolved) throw new ApiError("conflict", "the event was resolved");
+    resolved(room, pageCauseOf(page), f.result, undefined, f.note);
+    return undefined;
+  }
+  if (r.author_id !== a.id) throw new ApiError("forbidden", "only the card's author resolves its events");
+  if (r.resolved) throw new ApiError("conflict", "the event was resolved");
+  resolved(room, { eventId: r.event_id, actorId: r.actor_id, at: r.at, event: r.event }, f.result, r.message_id, f.note);
+  return undefined;
+});
+
+const rpc = async (frame: { groupId: string }, c: { env: Parameters<typeof roomStub>[0]; actor: Actor; requireMember(g: string): Promise<void> }, name: string, args: unknown) => {
+  await c.requireMember(frame.groupId);
+  return unwrap(await roomStub(c.env, frame.groupId).rpc(frame.groupId, name, c.actor, args));
+};
+
+registerFrameHandler<ClientFrameOf<"card.event">>("card.event", {
+  rate: "write",
+  handle(f, c) {
+    const { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part } = f;
+    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, clientEventId, blockId, actionId, event, value, inputs, part });
+  },
 });
 
 registerFrameHandler<ClientFrameOf<"card.answer">>("card.answer", {
   rate: "write",
-  async handle(frame, c) {
-    await c.requireMember(frame.groupId);
-    const { messageId, rev, actionId, inputs, editedValues } = frame;
-    unwrap(await roomStub(c.env, frame.groupId).rpc(frame.groupId, CARD_ANSWER_RPC, c.actor, { messageId, rev, actionId, inputs, editedValues }));
+  handle(f, c) {
+    const { messageId, rev, actionId, inputs, editedValues, clientEventId } = f;
+    return rpc(f, c, CARD_EVENT_RPC, { messageId, rev, actionId, inputs, editedValues, clientEventId, event: "action.press" });
   },
 });
 
-// ---------------------------------------------------------------------------
-// 产出 page events
-// ---------------------------------------------------------------------------
-
-type PageEventArgs = { artifactId: string; version: number; name: string; payload?: unknown };
-
-registerRoomRpc(ARTIFACT_EVENT_RPC, (room: RoomContext, actor, args) => {
-  if (!actor) throw new ApiError("internal", "actor required");
-  if (!room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
-  const a = args as PageEventArgs;
-  const art = room.sql.exec<{ topic_id: string }>("SELECT topic_id FROM artifacts WHERE id = ?", a.artifactId).toArray()[0];
-  const v = room.sql
-    .exec<{ events: string | null }>("SELECT events FROM artifact_versions WHERE artifact_id = ? AND version = ?", a.artifactId, a.version)
-    .toArray()[0];
-  if (!art || !v) throw new ApiError("not_found", "产出 version not found");
-  const declared = v.events ? (JSON.parse(v.events) as ArtifactEventDecl[]) : [];
-  if (!declared.some((d) => d.name === a.name)) throw new ApiError("forbidden", "the page does not declare this event");
-  const key = `${room.groupId}:${actor.id}`;
-  let bucket = pageBuckets.get(key);
-  if (!bucket) {
-    bucket = new TokenBucket(PAGE_EVENT_RATE.rate, PAGE_EVENT_RATE.burst);
-    pageBuckets.set(key, bucket);
-  }
-  if (!bucket.take()) throw new ApiError("rate_limited", "too many page events");
-  const data: PageEventArgs = { artifactId: a.artifactId, version: a.version, name: a.name };
-  if (a.payload !== undefined) data.payload = a.payload;
-  const event = room.commit((tx) => {
-    const seq = tx.nextSeq();
-    room.sql.exec("UPDATE topics SET last_seq = ? WHERE id = ?", seq, art.topic_id);
-    return tx.append({ type: "artifact.evented", actorId: actor.id, topicId: art.topic_id, data });
-  });
-  return { seq: event.seq };
+registerFrameHandler<ClientFrameOf<"card.answer.retract">>("card.answer.retract", {
+  rate: "write",
+  handle(f, c) {
+    return rpc(f, c, CARD_EVENT_RPC, { messageId: f.messageId, rev: 1, event: "answer.retract", value: { answerId: f.answerId } });
+  },
 });
 
-registerFrameHandler<ClientFrameOf<"artifact.event">>("artifact.event", {
+registerFrameHandler<ClientFrameOf<"card.patch">>("card.patch", {
   rate: "write",
-  async handle(frame, c) {
-    await c.requireMember(frame.groupId);
-    const { artifactId, version, name, payload } = frame;
-    unwrap(await roomStub(c.env, frame.groupId).rpc(frame.groupId, ARTIFACT_EVENT_RPC, c.actor, { artifactId, version, name, payload }));
+  handle(f, c) {
+    const { messageId, baseRev, ops, cause, clientPatchId } = f;
+    return rpc(f, c, CARD_PATCH_RPC, { messageId, baseRev, ops, cause, clientPatchId });
+  },
+});
+
+registerFrameHandler<ClientFrameOf<"interaction.resolve">>("interaction.resolve", {
+  rate: "write",
+  async handle(f, c) {
+    await rpc(f, c, CARD_RESOLVE_RPC, { eventId: f.eventId, result: f.result, note: f.note });
   },
 });

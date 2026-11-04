@@ -1,15 +1,23 @@
 // Bot: one WebSocket connection with reconnect, ordered event delivery per group, catch-up
-// after restarts from a cursor file, and handlers for mentions, followed topics and card
-// presses. Writes wait for the connection and are resent after a reconnect; `send` is
-// idempotent by clientMsgId, so a resend never posts twice.
+// after restarts from a cursor file, and handlers for mentions, followed topics, card presses
+// and (1.1) the interaction loop: live card events, answers, page events, patches. Writes wait
+// for the connection and are resent after a reconnect; `send` is idempotent by clientMsgId, so
+// a resend never posts twice.
 import { readFileSync, statSync } from "node:fs";
 import {
   AcceptanceItem,
   type ArtifactRef,
+  type ArtifactVersion,
+  type BlockRef,
+  type BlockRefInput,
   type BotRun,
   type Card,
   type CardV2,
+  type CardPatchAck,
+  type CardState,
   type CardV2Action,
+  CARD_CATALOGS,
+  CLIENT_FEATURES,
   ClientFrame,
   Event as EventSchema,
   type Event,
@@ -18,6 +26,8 @@ import {
   type GroupSummary,
   type Member,
   type Message,
+  type PartRef,
+  type PatchOp,
   PROTOCOL_VERSION,
   RunPlan,
   type RunPlanItem,
@@ -31,6 +41,8 @@ import {
 import { answeredCard, checkCardV2, type DoneCardOptions, doneCard, failedV1Card } from "./cards.ts";
 import { ChatError } from "./errors.ts";
 import { HttpClient, normalizeBaseUrl, type UploadInput } from "./http.ts";
+import { opsFit, opsOf, type PatchInput } from "./interact.ts";
+import { findBlock as findRefBlock, findPart, stripRefPrefix } from "./refs.ts";
 import { consoleLogger, type Logger, type LogLevel } from "./log.ts";
 import {
   type AsideRef,
@@ -110,6 +122,10 @@ export interface SendInput {
   cardV2?: CardV2;
   /** Side chat (1.1): the topic this DM topic is about. Only in a DM with a bot. */
   context?: TopicContext;
+  /** 2.1: the event (`eventId`) this message answers; the emitter's waiting state clears. */
+  causeEventId?: string;
+  /** 1.1: refs to parts (引用提问); the server writes their quote lines in front of the body. */
+  blockRefs?: BlockRefInput[];
   streaming?: boolean;
   /** Idempotency key. Made when absent; pass a stable one to make retries safe across restarts. */
   clientMsgId?: string;
@@ -121,6 +137,10 @@ export interface EditInput {
   card?: Card;
   /** Card v2 (1.1): replaces the card; `rev` must be higher than the stored one. */
   cardV2?: CardV2;
+  /** 2.1, with `cardV2`: the rev the edit is based on (`conflict`, reason `card.stale_rev`). */
+  baseRev?: number;
+  /** 2.1: the event this edit answers. */
+  causeEventId?: string;
   attachments?: FileRef[];
   artifactRefs?: ArtifactRef[];
 }
@@ -170,6 +190,23 @@ export interface MessageContext {
   setAcceptance(items: AcceptanceItem[]): Promise<BotRun>;
   /** Set when the message is in a side chat (单独问): the topic the side chat is about. */
   aside?: TopicContext;
+  /** 1.1 (引用提问): the parts the message asks about; [] when none. Labels and values are the sender's data. */
+  refs: BlockRef[];
+  /** The body without the quote lines the server wrote for `refs` (equals `body` without refs). */
+  question: string;
+  /** The source message or 产出 of a ref, and the block and part it names (see `Bot.resolveRef`). */
+  resolveRef(ref: BlockRef): Promise<ResolvedRef>;
+}
+
+/** What a ref points at now. `current` is false when the source changed after the send or is gone. */
+export interface ResolvedRef {
+  message?: Message;
+  artifact?: ArtifactVersion;
+  /** The block: a Card v2 or v1 block, the whole card (`card`), or a Markdown block `{kind, text, lang?}`. */
+  block?: unknown;
+  /** The part the ref's `part` names in the block (the block for an unknown kind). */
+  part?: unknown;
+  current: boolean;
 }
 
 /** A message in a side chat (单独问): a DM topic with this bot about another topic. */
@@ -192,35 +229,80 @@ export interface DoneResult {
 export type AnswerValue = string | number | boolean | null | AnswerValue[] | { [k: string]: AnswerValue };
 
 /**
- * An answer to one of my v2 cards (`card.answered`). `I` types `inputs` by block id, for
- * example `onCardAnswer<{ choice: string; when: string }>(...)`; the values come from the
- * client, so check them before you act on them.
+ * An interaction with one of my v2 cards (2.1): a live event (transient `card.event`, only
+ * while connected) or a stored answer (`card.answered`, also on catch-up). `value` and
+ * `inputs` come from the client: check them before you act on them.
  */
-export interface CardAnswerContext<I extends Record<string, unknown> = Record<string, AnswerValue>> {
+export interface CardEventContext {
   bot: Bot;
-  event: EventOf<"card.answered">;
   groupId: string;
   topicId: string;
   messageId: string;
-  /** The card revision the answer was made on. */
+  /** The event id; `patch`, `reply` and `postCard` name it as their cause. "" from a 1.0 server. */
+  eventId: string;
+  /** The rev the person saw. */
   rev: number;
+  /** The event name, for example `choice.change`, `chart.select`, `action.press`. */
+  name: string;
+  blockId?: string;
+  actionId?: string;
+  value: unknown;
+  /** Input values by block id (submit and reject actions). */
+  inputs: Record<string, unknown>;
+  /** The part the event targets (`chart.select`: point or bar; `metric.press`: metric). */
+  part?: PartRef;
+  /** Who acted (always a person). */
+  actorId: string;
+  /** True for a stored answer. */
+  stored: boolean;
+  answerId?: string;
+  askId?: string;
+  catchUp: boolean;
+  /** The newest rev of the card that the SDK knows. */
+  card: CardV2;
+  /** Server-owned state of the card (ask rounds, answers, tallies), when known. */
+  cardState?: CardState;
+  /** False when a newer event of the same block (or action) arrived: latest wins. */
+  isLatest(): boolean;
+  /**
+   * Changes the card in place: ops, or a function that records them on a draft of the newest
+   * rev. `baseRev` and `cause` are set for you. On `card.stale_rev` it rebases on the newest rev
+   * (at most 3 tries) when every op still targets an existing id, else it throws `conflict`.
+   * On `rate_limited` it queues and merges ops for the same message (at most 1 patch per second).
+   */
+  patch(ops: PatchInput): Promise<Message>;
+  /** Posts a message in the card's topic as the answer to this event. */
+  reply(input: string | SendInput): Promise<SendResult>;
+  /** Posts a new card in the card's topic as the answer to this event. */
+  postCard(card: CardV2, input?: Omit<SendInput, "card" | "cardV2">): Promise<SendResult>;
+  /**
+   * Answers the event without a change. A live-event handler that returns (or throws) without
+   * `patch`, `reply`, `postCard` or `resolve` makes the SDK send `ignored` (or `failed`) itself.
+   */
+  resolve(result: "ignored" | "failed", note?: string): Promise<void>;
+  updateTopic(change: TopicChange): Promise<Topic>;
+}
+
+/**
+ * An answer to one of my v2 cards (`card.answered`, stored, also on catch-up), with readers of
+ * the answer. `I` types `inputs` by block id, for example `onCardAnswer<{ choice: string }>`;
+ * the values come from the client, so check them before you act on them.
+ */
+export interface CardAnswerContext<I extends Record<string, unknown> = Record<string, AnswerValue>> extends Omit<CardEventContext, "inputs"> {
+  event: EventOf<"card.answered">;
+  /** The answered action ("" for the commit of an `immediate` block, which names `blockId`). */
   actionId: string;
-  /** Values of decision and input blocks, by block id. */
+  /** Values of input blocks, by block id. 2.1 clients send `{value}`, `{values}`, `{value, other}`, `{order}` or `{rows}`. */
   inputs: Partial<I>;
   /** Edited text of draft blocks, by block id. */
   editedValues: Record<string, string>;
-  /** Who answered. */
-  actorId: string;
-  catchUp: boolean;
-  /** The answered card, when this process saw it (sent or caught up). */
-  card?: CardV2;
-  /** The answered action of the card, when the card is known. */
+  /** The answered action of the card. */
   action?: CardV2Action;
-  /** The answer is a cancel (a `cancel` action, or the ids "cancel" and "deny" when the card is not known). */
+  /** The answer is a cancel or a reject (or the ids "cancel" and "deny" when the action is not in the card). */
   cancelled: boolean;
-  /** Chosen option ids of a decision block (default id "choice"); [] when none. */
+  /** Chosen option ids of a choice block (default id "choice"); [] when none. */
   choices(blockId?: string): string[];
-  /** The first chosen option id of a decision block (default id "choice"). */
+  /** The first chosen option id of a choice block (default id "choice"). */
   choice(blockId?: string): string | undefined;
   /** An input as text (numbers and booleans are turned into text). */
   text(blockId: string): string | undefined;
@@ -231,21 +313,28 @@ export interface CardAnswerContext<I extends Record<string, unknown> = Record<st
   /** The draft text (default id "draft"): the edited text, else the card's own text. */
   draft(blockId?: string): string | undefined;
   /**
-   * Edits the card to its answered form: a higher rev and no submit or cancel actions, plus
-   * `change`. Needs the card (`card`), or pass `base`.
+   * Edits the card to its answered form with a full replace: a higher rev and no submit or
+   * cancel actions, plus `change`.
    */
-  resolve(change?: Partial<Omit<CardV2, "v" | "rev">>, base?: CardV2): Promise<Message>;
-  reply(input: string | SendInput): Promise<SendResult>;
-  updateTopic(change: TopicChange): Promise<Topic>;
+  markAnswered(change?: Partial<Omit<CardV2, "v" | "rev">>, base?: CardV2): Promise<Message>;
+  /** Replaces the card with a newer rev (for example without its actions). */
+  updateCard(card: CardV2, body?: string): Promise<Message>;
 }
 
-/** A page event from one of my 产出 (`artifact.evented`). Never treat it as an approval. */
+/**
+ * A page event from one of my 产出 (transient `artifact.event`, only while connected). Never
+ * treat it as an approval. `payload` is untrusted data from the page.
+ */
 export interface ArtifactEventContext {
   bot: Bot;
-  event: EventOf<"artifact.evented">;
+  event: Extract<TransientEvent, { type: "artifact.event" }>;
   groupId: string;
-  /** The topic of the 产出, when this process knows it. */
-  topicId?: string;
+  /** The topic of the 产出. */
+  topicId: string;
+  /** The event id (page events are not stored). */
+  eventId: string;
+  /** `emit`, or `ask` (the page waits for a reply). */
+  kind: "emit" | "ask";
   artifactId: string;
   version: number;
   name: string;
@@ -253,8 +342,14 @@ export interface ArtifactEventContext {
   /** Who used the page. */
   actorId: string;
   catchUp: boolean;
-  /** Posts in the 产出's topic. Needs `topicId`. */
-  reply(input: string | SendInput): Promise<SendResult>;
+  /** Answers an `ask` (once; private to the asker). */
+  reply(payload: unknown): Promise<void>;
+  /** Declines an `ask` (once); the page's promise rejects with `declined`. */
+  decline(message: string): Promise<void>;
+  /** Replaces the version's data snapshot; every viewer's page gets it. `cause` is this event. */
+  pushData(data: unknown, opts?: { baseDataRev?: number }): Promise<{ dataRev: number }>;
+  /** Posts a message in the 产出's topic as the answer to this event. */
+  postMessage(input: string | SendInput): Promise<SendResult>;
 }
 
 export interface CardActionContext {
@@ -286,6 +381,8 @@ type Handler<C> = (ctx: C) => unknown | Promise<unknown>;
 
 interface Pending {
   rid: string;
+  /** Do not resend on `rate_limited` (patches queue and merge instead). */
+  noRateRetry?: boolean;
   frame: Record<string, unknown> & { t: string };
   resolve: (v: unknown) => void;
   reject: (e: unknown) => void;
@@ -321,6 +418,36 @@ interface TopicInfo {
   ownerId: string | null;
 }
 
+/** One `patch` call waiting in a message's patch lane. */
+interface PatchPart {
+  input: PatchInput;
+  cause?: string;
+  clientPatchId?: string;
+  /** Set by `patchCard({ baseRev })`: no rebase. */
+  baseRev?: number;
+  tries: number;
+  /** Set after a merged patch failed: this part goes in a frame of its own. */
+  alone?: boolean;
+  /**
+   * Set after a merged patch got `timeout` or `internal`: the server may have applied it, so the
+   * same frame (same clientPatchId) goes again; the server answers a repeat with `duplicate`.
+   */
+  frame?: Record<string, unknown> & { t: string };
+  /** How many times `frame` went again. */
+  resends?: number;
+  resolve: (m: Message) => void;
+  reject: (e: unknown) => void;
+}
+
+/** Patches of one message go one at a time; after `rate_limited` they wait and merge. */
+interface PatchLane {
+  groupId: string;
+  parts: PatchPart[];
+  running: boolean;
+  notBefore: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}
+
 const PING_MS = 30_000;
 const SILENCE_MS = 75_000;
 const OPEN_TIMEOUT_MS = 15_000;
@@ -330,8 +457,24 @@ const FETCH_LIMIT = 500;
 const SAVE_DEBOUNCE_MS = 500;
 const READ_DEBOUNCE_MS = 1500;
 
-/** v2 cards kept in memory for answers (`CardAnswerContext.card`). */
+/** v2 cards kept in memory for answers and patches (`CardEventContext.card`). */
 const MAX_CACHED_CARDS = 500;
+/** Messages kept in memory for `resolveRef`. */
+const MAX_CACHED_MESSAGES = 1000;
+/** History pages `findMessage` reads at most (100 messages each). */
+const MAX_HISTORY_PAGES = 20;
+/** Tries of a patch (the first and the rebases after `card.stale_rev`). */
+const MAX_PATCH_TRIES = 3;
+/** Ops of one `card.patch` frame. */
+const MAX_PATCH_OPS = 50;
+/** Wait between patches of one message after `rate_limited`. */
+const PATCH_INTERVAL_MS = 1000;
+/** How long a rebase waits for the newer rev to arrive before it reads the history. */
+const REBASE_WAIT_MS = 1500;
+/** The server takes a cause only from the last 30 minutes (INTERACT 4.1, `interact.bad_cause`). */
+const CAUSE_WINDOW_MS = 30 * 60_000;
+/** Older causes are left out a little early: clock skew and the time a write waits in a lane. */
+const CAUSE_MARGIN_MS = 2 * 60_000;
 
 function cutSummary(s: string): string {
   const cps = [...s];
@@ -349,7 +492,7 @@ function trimOldest(map: Record<string, unknown>, max: number): void {
 function findBlock(card: CardV2 | undefined, id: string): CardV2["blocks"][number] | undefined {
   for (const b of card?.blocks ?? []) {
     if (b.id === id) return b;
-    if (b.type === "group") for (const c of b.blocks) if (c.id === id) return c as CardV2["blocks"][number];
+    if (b.type === "group") for (const c of b.blocks ?? []) if (c.id === id) return c as CardV2["blocks"][number];
   }
   return undefined;
 }
@@ -404,6 +547,8 @@ export class Bot {
   private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
   private meMember: Member | null = null;
+  /** Server time minus local time (`welcome.serverTime`). */
+  private clockSkew = 0;
   private readonly memberMap = new Map<string, Member>();
   private readonly summaryMap = new Map<string, GroupSummary>();
 
@@ -412,9 +557,25 @@ export class Bot {
   private readonly cardHandlers: Handler<CardActionContext>[] = [];
   private readonly answerHandlers: Handler<CardAnswerContext>[] = [];
   private readonly artifactEventHandlers: Handler<ArtifactEventContext>[] = [];
+  private readonly cardEventHandlers: Handler<CardEventContext>[] = [];
   private readonly asideHandlers: Handler<AsideContext>[] = [];
   /** v2 cards of my messages that this process saw, newest last (at most MAX_CACHED_CARDS). */
   private readonly cardCache = new Map<string, CardV2>();
+  /** `cardState` of my card messages, by message id. */
+  private readonly cardStates = new Map<string, CardState>();
+  /** Waiters for a newer rev of a card (rebase). */
+  private readonly revWaiters = new Map<string, (() => void)[]>();
+  /** Messages this process saw (for `resolveRef`), newest last. */
+  private readonly messageCache = new Map<string, Message>();
+  /** Group of each topic this process saw. */
+  private readonly topicGroups = new Map<string, string>();
+  private readonly patchLanes = new Map<string, PatchLane>();
+  /** Latest-wins: the newest event number per message and block (or action). */
+  private readonly latestEvents = new Map<string, number>();
+  private eventSeq = 0;
+  /** Live card events run one at a time per message, in arrival order. */
+  private readonly liveChains = new Map<string, Promise<unknown>>();
+  private serverFeatureList: string[] = [];
   private readonly eventHandlers: Handler<EventContext>[] = [];
   private readonly transientHandlers: ((e: TransientEvent) => void)[] = [];
   private readonly connectionHandlers: ((up: boolean) => void)[] = [];
@@ -462,9 +623,23 @@ export class Bot {
     this.answerHandlers.push(h as unknown as Handler<CardAnswerContext>);
     return this;
   }
-  /** A page event from one of my 产出 (1.1): only names the version declared in `events`. */
+  /**
+   * A page event from one of my 产出 (1.1): only names the version declared in `events`. A
+   * handler that does not answer makes the SDK answer for it: an `emit` gets `ignored`
+   * (`failed` when it throws), an `ask` gets a decline.
+   */
   onArtifactEvent(h: Handler<ArtifactEventContext>): this {
     this.artifactEventHandlers.push(h);
+    return this;
+  }
+  /**
+   * A live event of one of my v2 cards (2.1, transient `card.event`): a pick, a chart point, a
+   * row selection, an inline button. It reaches only this handler (not `onEvent`) and only while
+   * connected. Respond with `ctx.patch`, `ctx.reply`, `ctx.postCard` or `ctx.resolve`; without
+   * one the SDK sends `ignored` (or `failed` when the handler throws).
+   */
+  onCardEvent(h: Handler<CardEventContext>): this {
+    this.cardEventHandlers.push(h);
     return this;
   }
   /**
@@ -555,6 +730,10 @@ export class Bot {
   get connected(): boolean {
     return this.ready;
   }
+  /** What the server supports (`welcome.features`, 1.1), for example "interact/1", "refs/1". */
+  get serverFeatures(): string[] {
+    return [...this.serverFeatureList];
+  }
   /** My member record (after the first welcome). */
   get me(): Member {
     if (!this.meMember) throw new ChatError("invalid", "not connected yet");
@@ -600,9 +779,12 @@ export class Bot {
     if (i.card) frame.card = i.card;
     if (i.cardV2) frame.cardV2 = i.cardV2;
     if (i.context) frame.context = i.context;
+    if (i.causeEventId) frame.causeEventId = i.causeEventId;
+    if (i.blockRefs?.length) frame.blockRefs = i.blockRefs;
     if (i.streaming) frame.streaming = true;
     const result = (await this.request(frame)) as SendResult;
     this.noteOwnMessage(result.message);
+    this.noteMessage(result.message);
     if (result.topic) this.follow(target.groupId, result.topic.id);
     else this.follow(target.groupId, result.message.topicId);
     return result;
@@ -641,18 +823,133 @@ export class Bot {
     return this.send(target, { ...input, cardV2: checked, ...(v1 ? { card: v1 } : {}), body: input.body ?? "" });
   }
 
-  /** Replaces one of my v2 cards. `card.rev` must be higher than the stored rev. */
-  async updateCardV2(groupId: string, messageId: string, card: CardV2, body?: string): Promise<Message> {
+  /**
+   * Replaces one of my v2 cards. `card.rev` must be higher than the stored rev. `baseRev`
+   * (2.1) makes the server check the rev the edit is based on; `causeEventId` names the event
+   * it answers. For small changes prefer `patchCard`.
+   */
+  async updateCardV2(
+    groupId: string,
+    messageId: string,
+    card: CardV2,
+    body?: string,
+    opts: { baseRev?: number; causeEventId?: string } = {},
+  ): Promise<Message> {
     const checked = checkCardV2(card);
     const v1 = failedV1Card(checked);
-    const r = await this.edit(groupId, messageId, { body: body ?? (checked.fallback || checked.title), cardV2: checked, ...(v1 ? { card: v1 } : {}) });
-    this.cacheCard(messageId, checked);
+    const r = await this.edit(groupId, messageId, {
+      body: body ?? (checked.fallback || checked.title),
+      cardV2: checked,
+      ...(v1 ? { card: v1 } : {}),
+      ...opts,
+    });
+    this.cacheCard(messageId, r.message.cardV2 ?? checked, r.message.cardState);
+    this.noteMessage(r.message);
     return r.message;
   }
 
   /** The v2 card of one of my messages, when this process saw it. */
   knownCard(messageId: string): CardV2 | undefined {
     return this.cardCache.get(messageId);
+  }
+
+  /**
+   * Changes one of my v2 cards in place (2.1, `card.patch`): ops, or a function that records
+   * them on a draft of the newest rev. Without `baseRev` the SDK uses the newest rev it knows
+   * and rebases on `card.stale_rev` (at most 3 tries) when every op still targets an existing
+   * id; with `baseRev` a stale rev throws `conflict`. On `rate_limited` patches of the same
+   * message wait and merge (at most 1 per second). `cause` is the event the patch answers.
+   */
+  patchCard(
+    groupId: string,
+    messageId: string,
+    ops: PatchInput,
+    opts: { baseRev?: number; cause?: string; clientPatchId?: string } = {},
+  ): Promise<Message> {
+    let lane = this.patchLanes.get(messageId);
+    if (!lane) {
+      lane = { groupId, parts: [], running: false, notBefore: 0, timer: null };
+      this.patchLanes.set(messageId, lane);
+    }
+    const l = lane;
+    return new Promise<Message>((resolve, reject) => {
+      l.parts.push({ input: ops, cause: opts.cause, clientPatchId: opts.clientPatchId, baseRev: opts.baseRev, tries: 0, resolve, reject });
+      this.kickLane(messageId, l);
+    });
+  }
+
+  /** Answers an event without changing anything (2.1, `interaction.resolve`); the note shows for 5 s. */
+  async resolveEvent(groupId: string, eventId: string, result: "ignored" | "failed", note?: string): Promise<void> {
+    const frame: Record<string, unknown> & { t: string } = { t: "interaction.resolve", groupId, eventId, result };
+    if (note) frame.note = [...note].slice(0, 120).join("");
+    await this.request(frame);
+  }
+
+  /**
+   * Replaces the data snapshot of one of my 产出 versions (1.1, `artifact.data`, <= 256 KiB).
+   * Every viewer's open page gets it. `baseDataRev` makes the server check the current rev.
+   */
+  async pushArtifactData(
+    groupId: string,
+    artifactId: string,
+    version: number,
+    data: unknown,
+    opts: { baseDataRev?: number; cause?: string; clientPushId?: string } = {},
+  ): Promise<{ dataRev: number }> {
+    const frame: Record<string, unknown> & { t: string } = {
+      t: "artifact.data",
+      groupId,
+      artifactId,
+      version,
+      data,
+      clientPushId: opts.clientPushId ?? crypto.randomUUID(),
+    };
+    if (opts.baseDataRev !== undefined) frame.baseDataRev = opts.baseDataRev;
+    if (opts.cause) frame.cause = opts.cause;
+    return (await this.request(frame)) as { dataRev: number };
+  }
+
+  /** Answers a page `ask` (1.1, `artifact.reply`): once, within 120 s, private to the asker. */
+  async replyArtifact(groupId: string, eventId: string, payload: unknown): Promise<void> {
+    const frame: Record<string, unknown> & { t: string } = { t: "artifact.reply", groupId, eventId, ok: true };
+    if (payload !== undefined) frame.payload = payload;
+    await this.request(frame);
+  }
+
+  /** Declines a page `ask`; the page's promise rejects with `declined` (or `failed`). */
+  async declineArtifact(groupId: string, eventId: string, message: string, code: "declined" | "failed" = "declined"): Promise<void> {
+    await this.request({ t: "artifact.reply", groupId, eventId, ok: false, error: { code, message: [...message].slice(0, 200).join("") } });
+  }
+
+  /**
+   * Reads what a ref (引用提问) points at: the source message (from this process's cache, else
+   * the topic history) or the 产出 version, the block and the part (docs/protocol.md "References
+   * to a part"). `current` is false when the source is gone, the card has a newer rev than the
+   * one the sender saw, or the block or part no longer exists. Markdown blocks (`md:<n>`) are
+   * counted best effort; the ref's `value` is always the sender's data.
+   */
+  async resolveRef(ref: BlockRef, groupId?: string): Promise<ResolvedRef> {
+    if (ref.artifact) {
+      const { artifactId, version } = ref.artifact;
+      let versions: ArtifactVersion[] = [];
+      try {
+        versions = (await this.http.getArtifact(artifactId)).versions;
+      } catch (err) {
+        if (!(err instanceof ChatError && (err.code === "not_found" || err.code === "forbidden"))) throw err;
+      }
+      const v = versions.find((x) => x.version === version);
+      return { artifact: v, block: v, part: v ? findPart(v, ref.part) : undefined, current: v !== undefined && ref.deleted !== true };
+    }
+    if (!ref.messageId) return { current: false };
+    const gid = groupId ?? this.topicGroups.get(ref.sourceTopicId);
+    const m = this.messageCache.get(ref.messageId) ?? (gid ? await this.findMessage(gid, ref.sourceTopicId, ref.messageId) : undefined);
+    if (!m) return { current: false };
+    if (m.deletedAt || ref.deleted) return { message: m, current: false };
+    const block = findRefBlock(m, ref.blockId, stripRefPrefix(m.body, m.blockRefs));
+    if (block === undefined) return { message: m, current: false };
+    const part = findPart(block, ref.part);
+    const newer = ref.cardRev !== undefined && m.cardV2 !== undefined && m.cardV2.rev > ref.cardRev;
+    return { message: m, block, part, current: !newer && (ref.part === undefined || part !== undefined) };
   }
 
   /** Answers a v2 card (bots may answer other members' asks when `ask.from` names them). */
@@ -736,6 +1033,8 @@ export class Bot {
     if (input.streaming !== undefined) frame.streaming = input.streaming;
     if (input.card) frame.card = input.card;
     if (input.cardV2) frame.cardV2 = input.cardV2;
+    if (input.baseRev !== undefined) frame.baseRev = input.baseRev;
+    if (input.causeEventId) frame.causeEventId = input.causeEventId;
     if (input.attachments) frame.attachments = input.attachments;
     if (input.artifactRefs) frame.artifactRefs = input.artifactRefs;
     return this.request(frame) as Promise<{ message: Message }>;
@@ -881,6 +1180,9 @@ export class Bot {
           protocol: PROTOCOL_VERSION,
           client: this.opts.client ?? { name: "bot-sdk", version: SDK_VERSION },
           cursors,
+          // 1.1: the interaction transients (card and page events) and refs to parts.
+          features: [...CLIENT_FEATURES],
+          supportedCatalogs: [...CARD_CATALOGS],
         },
         true,
       );
@@ -1022,7 +1324,7 @@ export class Bot {
   }
 
   /** A frame with a rid: waits for the connection, is resent after reconnects, resolves with the result. */
-  private request(frame: Record<string, unknown> & { t: string }): Promise<unknown> {
+  private request(frame: Record<string, unknown> & { t: string }, opts: { noRateRetry?: boolean } = {}): Promise<unknown> {
     if (this.fatal) return Promise.reject(this.fatal);
     if (this.stopped) return Promise.reject(new ChatError("closed", "bot is not started"));
     const rid = `r${++this.ridSeq}`;
@@ -1036,6 +1338,7 @@ export class Bot {
     return new Promise((resolve, reject) => {
       const p: Pending = {
         rid,
+        noRateRetry: opts.noRateRetry,
         frame: full,
         resolve,
         reject,
@@ -1063,8 +1366,8 @@ export class Bot {
     const p = this.pending.get(rid);
     if (!p) return;
     if (!ok) {
-      const e = value as { code: ChatError["code"]; message: string };
-      if (e.code === "rate_limited" && Date.now() + 1000 * p.attempts < p.deadline) {
+      const e = value as { code: ChatError["code"]; message: string; reason?: string };
+      if (e.code === "rate_limited" && !p.noRateRetry && Date.now() + 1000 * p.attempts < p.deadline) {
         p.sent = false;
         setTimeout(() => {
           if (this.pending.get(rid) === p) this.trySend(p);
@@ -1073,7 +1376,7 @@ export class Bot {
       }
       this.pending.delete(rid);
       clearTimeout(p.timer);
-      p.reject(new ChatError(e.code, e.message));
+      p.reject(new ChatError(e.code, e.message, undefined, typeof e.reason === "string" ? e.reason : undefined));
       return;
     }
     this.pending.delete(rid);
@@ -1088,11 +1391,13 @@ export class Bot {
   private onFrame(f: Record<string, unknown>): void {
     switch (f.t) {
       case "welcome":
-        return this.onWelcome(f as { me: Member; members: Member[]; groups: GroupSummary[] });
+        return this.onWelcome(f as { me: Member; members: Member[]; groups: GroupSummary[]; features?: string[]; serverTime?: number });
       case "event":
         return this.onEventFrame(f.event as RawEvent, false);
       case "transient": {
         const e = f.event as TransientEvent;
+        if (e && e.type === "artifact.event" && e.actorId !== this.meMember?.id) this.onArtifactEventTransient(e);
+        if (e && e.type === "card.event" && e.actorId !== this.meMember?.id) this.onCardEventTransient(e);
         for (const h of this.transientHandlers) {
           try {
             h(e);
@@ -1126,7 +1431,7 @@ export class Bot {
     }
   }
 
-  private onWelcome(f: { me: Member; members: Member[]; groups: GroupSummary[] }): void {
+  private onWelcome(f: { me: Member; members: Member[]; groups: GroupSummary[]; features?: string[]; serverTime?: number }): void {
     if (this.state.memberId && this.state.memberId !== f.me.id) {
       this.fail(new ChatError("invalid", "the state file belongs to another member; use one state file per bot"));
       return;
@@ -1136,6 +1441,8 @@ export class Bot {
       this.scheduleSave();
     }
     this.meMember = f.me;
+    if (typeof f.serverTime === "number" && Number.isFinite(f.serverTime)) this.clockSkew = f.serverTime - Date.now();
+    this.serverFeatureList = Array.isArray(f.features) ? f.features.filter((x) => typeof x === "string") : [];
     this.memberMap.clear();
     for (const m of f.members) this.memberMap.set(m.id, m);
     this.summaryMap.clear();
@@ -1277,6 +1584,7 @@ export class Bot {
         case "topic.created": {
           const t = event.data.topic;
           this.topics.set(t.id, { waitingOn: t.waitingOn ?? [], ownerId: t.ownerId ?? null });
+          this.topicGroups.set(t.id, event.groupId);
           if (t.contextOf) {
             this.noteAside(event.groupId, t.id, t.contextOf);
             this.follow(event.groupId, t.id);
@@ -1297,6 +1605,7 @@ export class Bot {
         }
         case "message.created": {
           const m = event.data.message;
+          this.noteMessage(m);
           if (m.authorId === me) {
             this.noteOwnMessage(m);
             this.follow(event.groupId, m.topicId);
@@ -1330,31 +1639,47 @@ export class Bot {
           break;
         case "message.updated": {
           const d = event.data;
-          if (event.actorId === me && d.cardV2) this.cacheCard(d.messageId, d.cardV2);
+          const old = this.messageCache.get(d.messageId);
+          if (old) {
+            const next: Record<string, unknown> = { ...old };
+            for (const [k, v] of Object.entries(d)) if (k !== "messageId" && v !== undefined) next[k] = v;
+            this.noteMessage(next as Message);
+          }
+          // My cards: every rev (patches, edits, and the server's own updates of cardState).
+          if (d.cardV2 && (event.actorId === me || this.state.cards[d.messageId] || this.cardCache.has(d.messageId))) {
+            this.cacheCard(d.messageId, d.cardV2, d.cardState);
+          } else if (d.cardState && this.cardCache.has(d.messageId)) this.cardStates.set(d.messageId, d.cardState);
+          break;
+        }
+        case "message.deleted": {
+          const old = this.messageCache.get(event.data.messageId);
+          if (old) this.noteMessage({ ...old, deletedAt: event.data.deletedAt });
           break;
         }
         case "card.answered": {
           const ref = this.state.cards[event.data.messageId];
           if (!ref || event.actorId === me) break;
-          // After a restart or a cache eviction, load the card before the handlers read it.
-          let loaded: Promise<void> | null = null;
-          for (const h of this.answerHandlers)
-            jobs.push(async () => {
-              await (loaded ??= this.loadCard(event.data.messageId, ref));
-              return h(this.answerContext(event, ref.topicId, catchUp));
-            });
+          const answer = this.trackEvent(event.data.messageId, event.data.blockId ?? event.data.actionId);
+          if (this.answerHandlers.length === 0) break;
+          jobs.push(async () => {
+            // After a restart or a cache eviction, load the card by its saved seq first.
+            await this.loadCard(event.data.messageId, ref);
+            const ctx = await this.answerContext(event, ref.topicId, catchUp, answer);
+            if (!ctx) return;
+            for (const h of this.answerHandlers) {
+              try {
+                await h(ctx);
+              } catch (err) {
+                this.emitError(err, `onCardAnswer for ${event.data.messageId}`);
+              }
+            }
+          });
           break;
         }
         case "artifact.created":
         case "artifact.versionAdded": {
           const { artifact, version } = event.data;
           if (version.createdBy === me || artifact.createdBy === me) this.noteArtifact(artifact.id, { groupId: artifact.groupId, topicId: artifact.topicId });
-          break;
-        }
-        case "artifact.evented": {
-          const ref = this.state.artifacts?.[event.data.artifactId];
-          if (!ref || event.actorId === me) break;
-          for (const h of this.artifactEventHandlers) jobs.push(() => h(this.artifactEventContext(event, ref, catchUp)));
           break;
         }
         case "card.actioned": {
@@ -1432,6 +1757,9 @@ export class Bot {
       done: (card) => this.done(target, card, withId({})),
       setAcceptance: (items) => this.setAcceptance(target, items),
       aside: this.asideOf(m.groupId, m.topicId),
+      refs: m.blockRefs ?? [],
+      question: stripRefPrefix(m.body, m.blockRefs),
+      resolveRef: (ref) => this.resolveRef(ref, m.groupId),
     };
   }
 
@@ -1463,89 +1791,347 @@ export class Bot {
     return out.slice(0, limit).reverse();
   }
 
-  private answerContext(event: EventOf<"card.answered">, topicId: string, catchUp: boolean): CardAnswerContext {
-    const { messageId, rev, actionId } = event.data;
-    const inputs = (event.data.inputs ?? {}) as Record<string, AnswerValue>;
-    const editedValues = event.data.editedValues ?? {};
-    const card = this.cardCache.get(messageId);
-    const action = card?.actions?.find((a) => a.id === actionId);
-    const cancelled = action ? action.kind === "cancel" : actionId === "cancel" || actionId === "deny";
-    const block = (id: string) => findBlock(card, id);
-    const choices = (id = "choice"): string[] => {
-      const v = inputs[id];
-      if (Array.isArray(v)) return v.filter((x): x is string => typeof x === "string");
-      return typeof v === "string" ? [v] : [];
-    };
+  /** Counts an event of a block (or action) for latest-wins; returns its number. */
+  private trackEvent(messageId: string, part: string | undefined): { key: string; n: number } {
+    const key = `${messageId}:${part ?? ""}`;
+    const n = ++this.eventSeq;
+    this.latestEvents.set(key, n);
+    if (this.latestEvents.size > 5000) {
+      const first = this.latestEvents.keys().next().value;
+      if (first !== undefined) this.latestEvents.delete(first);
+    }
+    return { key, n };
+  }
+
+  /** Whether the server still takes the event made at `at` (server time) as a cause. */
+  private causeFresh(at: number | undefined): boolean {
+    return at === undefined || Date.now() + this.clockSkew - at < CAUSE_WINDOW_MS - CAUSE_MARGIN_MS;
+  }
+
+  /**
+   * Runs a write with the cause the SDK added; when the server says `interact.bad_cause` (an
+   * older server, or clock skew), runs it again without one.
+   */
+  private async withCause<T>(cause: string | undefined, write: (cause: string | undefined) => Promise<T>): Promise<T> {
+    if (!cause) return write(undefined);
+    try {
+      return await write(cause);
+    } catch (err) {
+      if (!(err instanceof ChatError && err.reason === "interact.bad_cause")) throw err;
+      this.log.debug("cause not taken; sent without it", { cause });
+      return write(undefined);
+    }
+  }
+
+  /** The context of a live event or an answer; `responded` turns true when the handler answered. */
+  private cardEventContext(
+    src: {
+      groupId: string;
+      topicId: string;
+      messageId: string;
+      eventId: string;
+      rev: number;
+      name: string;
+      blockId?: string;
+      actionId?: string;
+      value: unknown;
+      inputs: Record<string, unknown>;
+      part?: PartRef;
+      actorId: string;
+      stored: boolean;
+      answerId?: string;
+      askId?: string;
+      catchUp: boolean;
+      /** When the server made the event (server time); a cause only within the window. */
+      at?: number;
+    },
+    card: CardV2,
+    latest: { key: string; n: number },
+  ): { ctx: CardEventContext; flags: { responded: boolean } } {
+    const flags = { responded: false };
+    const { groupId, topicId, messageId, eventId, at, ...rest } = src;
+    // An answer read on catch-up can be older than the server's cause window.
+    const cause = eventId && this.causeFresh(at) ? eventId : undefined;
     let n = 0;
-    const nextId = () => `bot:${event.groupId}:${event.seq}:${n++}`;
-    return {
+    const nextId = () => `bot:${messageId}:${eventId || latest.n}:${n++}`;
+    const answered = <T>(p: Promise<T>): Promise<T> =>
+      p.then((v) => {
+        flags.responded = true;
+        return v;
+      });
+    const ctx: CardEventContext = {
       bot: this,
-      event,
-      groupId: event.groupId,
+      ...rest,
+      groupId,
       topicId,
       messageId,
-      rev,
+      eventId,
+      card,
+      cardState: this.cardStates.get(messageId),
+      isLatest: () => this.latestEvents.get(latest.key) === latest.n,
+      patch: (ops) => answered(this.withCause(cause, (c) => this.patchCard(groupId, messageId, ops, c ? { cause: c } : {}))),
+      reply: (input) => {
+        const i = typeof input === "string" ? { body: input } : { ...input };
+        if (!i.clientMsgId) i.clientMsgId = nextId();
+        const auto = i.causeEventId ? undefined : cause;
+        return answered(this.withCause(auto, (c) => this.send({ groupId, topicId }, c ? { ...i, causeEventId: c } : i)));
+      },
+      postCard: (c, input = {}) => {
+        const i = { ...input };
+        if (!i.clientMsgId) i.clientMsgId = nextId();
+        const auto = i.causeEventId ? undefined : cause;
+        return answered(this.withCause(auto, (x) => this.postCardV2({ groupId, topicId }, c, x ? { ...i, causeEventId: x } : i)));
+      },
+      resolve: async (result, note) => {
+        if (!cause) return;
+        await answered(this.resolveEvent(groupId, cause, result, note));
+      },
+      updateTopic: (change) => this.updateTopic(groupId, topicId, change),
+    };
+    return { ctx, flags };
+  }
+
+  private async answerContext(
+    event: EventOf<"card.answered">,
+    topicId: string,
+    catchUp: boolean,
+    latest: { key: string; n: number },
+  ): Promise<CardAnswerContext | undefined> {
+    const d = event.data;
+    const { messageId, rev } = d;
+    let card: CardV2 | undefined;
+    try {
+      card = await this.ensureCard(event.groupId, topicId, messageId);
+    } catch (err) {
+      this.log.warn("could not read the answered card", { messageId, err: String(err) });
+    }
+    if (!card) {
+      this.emitError(new ChatError("not_found", `the answered card ${messageId} is not readable`), "onCardAnswer");
+      return undefined;
+    }
+    // 2.1: the commit of an immediate block has no action id (it names `blockId`).
+    const actionId = d.actionId ?? "";
+    const inputs = (d.inputs ?? {}) as Record<string, AnswerValue>;
+    const editedValues = d.editedValues ?? {};
+    const action = card.actions?.find((a) => a.id === actionId);
+    const cancelled = action ? action.kind === "cancel" || action.kind === "reject" : actionId === "cancel" || actionId === "deny";
+    // 2.1 input values are objects ({value}, {values}, {value, other}); 2.0 values are bare.
+    const raw = (id: string): unknown => {
+      const v = inputs[id];
+      return v && typeof v === "object" && !Array.isArray(v) && "value" in v ? (v as { value: unknown }).value : v;
+    };
+    const choices = (id = "choice"): string[] => {
+      const v = inputs[id];
+      const vs = v && typeof v === "object" && !Array.isArray(v) && "values" in v ? (v as { values: unknown }).values : raw(id);
+      if (Array.isArray(vs)) return vs.filter((x): x is string => typeof x === "string");
+      return typeof vs === "string" ? [vs] : [];
+    };
+    const { ctx: base } = this.cardEventContext(
+      {
+        groupId: event.groupId,
+        topicId,
+        messageId,
+        eventId: d.eventId ?? "",
+        rev,
+        name: d.event ?? "action.press",
+        blockId: d.blockId,
+        actionId: d.actionId,
+        value: d.value,
+        inputs,
+        actorId: event.actorId,
+        stored: true,
+        answerId: d.answerId,
+        askId: d.askId,
+        catchUp,
+        at: event.at,
+      },
+      card,
+      latest,
+    );
+    const answerCause = d.eventId && this.causeFresh(event.at) ? d.eventId : undefined;
+    const update = (c: CardV2, body?: string) =>
+      this.withCause(answerCause, (x) => this.updateCardV2(event.groupId, messageId, c, body, x ? { causeEventId: x } : {}));
+    return {
+      ...base,
+      event,
       actionId,
       inputs,
       editedValues,
-      actorId: event.actorId,
-      catchUp,
-      card,
       action,
       cancelled,
       choices,
       choice: (id) => choices(id)[0],
       text: (id) => {
-        const v = inputs[id];
+        const v = raw(id);
         return typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : undefined;
       },
       number: (id) => {
-        const v = inputs[id];
+        const v = raw(id);
         if (typeof v === "number") return Number.isFinite(v) ? v : undefined;
         if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) return Number(v);
         return undefined;
       },
-      bool: (id) => (typeof inputs[id] === "boolean" ? (inputs[id] as boolean) : undefined),
+      bool: (id) => {
+        const v = raw(id);
+        return typeof v === "boolean" ? v : undefined;
+      },
       draft: (id = "draft") => {
         if (typeof editedValues[id] === "string") return editedValues[id];
-        const b = block(id);
+        const v = raw(id);
+        if (typeof v === "string") return v;
+        const b = findBlock(this.cardCache.get(messageId) ?? card, id);
         return b?.type === "draft" ? b.text : undefined;
       },
-      resolve: async (change = {}, base) => {
-        const from = base ?? this.cardCache.get(messageId);
-        if (!from) throw new ChatError("invalid", "the answered card is not known; pass it as base");
-        return this.updateCardV2(event.groupId, messageId, answeredCard(from, change));
+      markAnswered: async (change = {}, from) => {
+        const c = from ?? this.cardCache.get(messageId) ?? card;
+        return update(answeredCard(c, change));
       },
-      reply: (input) => {
-        const i = typeof input === "string" ? { body: input } : { ...input };
-        if (!i.clientMsgId) i.clientMsgId = nextId();
-        return this.send({ groupId: event.groupId, topicId }, i);
-      },
-      updateTopic: (change) => this.updateTopic(event.groupId, topicId, change),
+      updateCard: (c, body) => update(c, body),
     };
   }
 
-  private artifactEventContext(event: EventOf<"artifact.evented">, ref: CardRef, catchUp: boolean): ArtifactEventContext {
-    const { artifactId, version, name, payload } = event.data;
+  // ---------------------------------------------------------------------------
+  // Live card events and page events (transient)
+  // ---------------------------------------------------------------------------
+
+  /** Runs `job` after the earlier live events of the same key; tracked for `stop()`. */
+  private chainLive(key: string, job: () => Promise<void>): void {
+    const prev = this.liveChains.get(key) ?? Promise.resolve();
+    const run = prev.then(job, job);
+    this.liveChains.set(key, run);
+    this.running.add(run);
+    void run.finally(() => {
+      this.running.delete(run);
+      if (this.liveChains.get(key) === run) this.liveChains.delete(key);
+    });
+  }
+
+  private onCardEventTransient(e: Extract<TransientEvent, { type: "card.event" }>): void {
+    const latest = this.trackEvent(e.messageId, e.blockId ?? e.actionId);
+    this.chainLive(`card:${e.messageId}`, async () => {
+      let card: CardV2 | undefined;
+      try {
+        card = await this.ensureCard(e.groupId, e.topicId, e.messageId);
+      } catch (err) {
+        this.log.warn("could not read the card of a live event", { messageId: e.messageId, err: String(err) });
+      }
+      if (!card) {
+        await this.resolveEvent(e.groupId, e.eventId, "failed").catch((err) => this.log.debug("resolve failed", { err: String(err) }));
+        return;
+      }
+      const { ctx, flags } = this.cardEventContext(
+        {
+          groupId: e.groupId,
+          topicId: e.topicId,
+          messageId: e.messageId,
+          eventId: e.eventId,
+          rev: e.rev,
+          name: e.event,
+          blockId: e.blockId,
+          actionId: e.actionId,
+          value: e.value,
+          inputs: (e.inputs ?? {}) as Record<string, unknown>,
+          part: e.part,
+          actorId: e.actorId,
+          stored: false,
+          catchUp: false,
+          at: e.at,
+        },
+        card,
+        latest,
+      );
+      let threw = false;
+      for (const h of this.cardEventHandlers) {
+        try {
+          await h(ctx);
+        } catch (err) {
+          threw = true;
+          this.emitError(err, `onCardEvent ${e.event} for ${e.messageId}`);
+        }
+      }
+      if (!flags.responded && !this.stopped) {
+        // The person never waits for nothing.
+        await this.resolveEvent(e.groupId, e.eventId, threw ? "failed" : "ignored").catch((err) =>
+          this.log.debug("auto resolve failed", { eventId: e.eventId, err: String(err) }),
+        );
+      }
+    });
+  }
+
+  private onArtifactEventTransient(e: Extract<TransientEvent, { type: "artifact.event" }>): void {
+    this.chainLive(`artifact:${e.artifactId}:${e.version}`, async () => {
+      const { ctx, flags } = this.artifactEventContext(e);
+      let threw = false;
+      for (const h of this.artifactEventHandlers) {
+        try {
+          await h(ctx);
+        } catch (err) {
+          threw = true;
+          this.emitError(err, "onArtifactEvent");
+        }
+      }
+      if (flags.responded || this.stopped) return;
+      const done =
+        e.kind === "ask"
+          ? this.declineArtifact(e.groupId, e.eventId, "", threw ? "failed" : "declined")
+          : this.resolveEvent(e.groupId, e.eventId, threw ? "failed" : "ignored");
+      await done.catch((err) => this.log.debug("auto answer of a page event failed", { eventId: e.eventId, err: String(err) }));
+    });
+  }
+
+  private artifactEventContext(event: Extract<TransientEvent, { type: "artifact.event" }>): {
+    ctx: ArtifactEventContext;
+    flags: { responded: boolean };
+  } {
+    const { artifactId, version, name, payload, eventId, kind, topicId, groupId } = event;
+    const flags = { responded: false, replied: false };
     let n = 0;
-    const nextId = () => `bot:${event.groupId}:${event.seq}:${n++}`;
-    return {
+    const nextId = () => `bot:${groupId}:${eventId}:${n++}`;
+    const once = () => {
+      if (kind !== "ask") throw new ChatError("invalid", "reply and decline answer an ask; this event is an emit");
+      if (flags.replied) throw new ChatError("conflict", "this ask is answered already");
+      flags.replied = true;
+    };
+    const ctx: ArtifactEventContext = {
       bot: this,
       event,
-      groupId: event.groupId,
-      topicId: ref.topicId,
+      groupId,
+      topicId,
+      eventId,
+      kind,
       artifactId,
       version,
       name,
       payload,
       actorId: event.actorId,
-      catchUp,
-      reply: (input) => {
+      catchUp: false,
+      reply: async (p) => {
+        once();
+        await this.replyArtifact(groupId, eventId, p);
+        flags.responded = true;
+      },
+      decline: async (message) => {
+        once();
+        await this.declineArtifact(groupId, eventId, message);
+        flags.responded = true;
+      },
+      pushData: async (data, opts = {}) => {
+        const r = await this.pushArtifactData(groupId, artifactId, version, data, { ...opts, cause: eventId });
+        // An ask still needs its reply; an emit is answered by the push.
+        if (kind === "emit") flags.responded = true;
+        return r;
+      },
+      postMessage: async (input) => {
         const i = typeof input === "string" ? { body: input } : { ...input };
         if (!i.clientMsgId) i.clientMsgId = nextId();
-        return this.send({ groupId: event.groupId, topicId: ref.topicId }, i);
+        // The page event is the cause (INTERACT 4.3); a server without page causes gets none.
+        const auto = i.causeEventId ? undefined : eventId;
+        const r = await this.withCause(auto, (c) => this.send({ groupId, topicId }, c ? { ...i, causeEventId: c } : i));
+        if (kind === "emit") flags.responded = true;
+        return r;
       },
     };
+    return { ctx, flags };
   }
 
   private cardContext(event: EventOf<"card.actioned">, topicId: string, catchUp: boolean): CardActionContext {
@@ -1596,7 +2182,7 @@ export class Bot {
         const r = await this.history(ref.groupId, ref.topicId, { beforeSeq: before, limit: ref.seq === undefined ? 100 : 1 });
         const m = r.messages.find((x) => x.id === messageId);
         if (m) {
-          if (m.cardV2) this.cacheCard(m.id, m.cardV2);
+          if (m.cardV2) this.cacheCard(m.id, m.cardV2, m.cardState);
           return;
         }
         if (!r.hasMore || r.messages.length === 0) return;
@@ -1607,14 +2193,229 @@ export class Bot {
     }
   }
 
-  private cacheCard(messageId: string, card: CardV2): void {
+  private cacheCard(messageId: string, card: CardV2, state?: CardState): void {
     const old = this.cardCache.get(messageId);
     if (old && old.rev > card.rev) return;
     this.cardCache.delete(messageId);
     this.cardCache.set(messageId, card);
+    if (state) this.cardStates.set(messageId, state);
     if (this.cardCache.size > MAX_CACHED_CARDS) {
       const first = this.cardCache.keys().next().value;
-      if (first !== undefined) this.cardCache.delete(first);
+      if (first !== undefined) {
+        this.cardCache.delete(first);
+        this.cardStates.delete(first);
+      }
+    }
+    if (!old || card.rev > old.rev) for (const w of this.revWaiters.get(messageId)?.splice(0) ?? []) w();
+  }
+
+  /** Remembers a message for `resolveRef` (newest last, at most MAX_CACHED_MESSAGES). */
+  private noteMessage(m: Message): void {
+    this.topicGroups.set(m.topicId, m.groupId);
+    this.messageCache.delete(m.id);
+    this.messageCache.set(m.id, m);
+    if (this.messageCache.size > MAX_CACHED_MESSAGES) {
+      const first = this.messageCache.keys().next().value;
+      if (first !== undefined) this.messageCache.delete(first);
+    }
+    if (m.cardV2 && this.cardCache.has(m.id)) this.cacheCard(m.id, m.cardV2, m.cardState);
+  }
+
+  /** Reads a message from the topic history, newest first (at most MAX_HISTORY_PAGES pages). */
+  private async findMessage(groupId: string, topicId: string, messageId: string): Promise<Message | undefined> {
+    let beforeSeq: number | undefined;
+    for (let page = 0; page < MAX_HISTORY_PAGES; page++) {
+      const r = await this.history(groupId, topicId, beforeSeq === undefined ? { limit: 100 } : { beforeSeq, limit: 100 });
+      const m = r.messages.find((x) => x.id === messageId);
+      if (m) {
+        this.noteMessage(m);
+        return m;
+      }
+      if (!r.hasMore || r.messages.length === 0) return undefined;
+      beforeSeq = Math.min(...r.messages.map((x) => x.createdSeq));
+    }
+    return undefined;
+  }
+
+  /** The newest known v2 card of a message: the cache, else the topic history. */
+  private async ensureCard(groupId: string, topicId: string, messageId: string): Promise<CardV2 | undefined> {
+    const known = this.cardCache.get(messageId);
+    if (known) return known;
+    const m = await this.findMessage(groupId, topicId, messageId);
+    if (m?.cardV2) this.cacheCard(messageId, m.cardV2, m.cardState);
+    return this.cardCache.get(messageId);
+  }
+
+  /** The newest card after a stale rev: waits a moment for its event, else reads the history. */
+  private async freshCard(groupId: string, messageId: string, staleRev: number): Promise<CardV2 | undefined> {
+    const newer = () => {
+      const c = this.cardCache.get(messageId);
+      return c && c.rev > staleRev ? c : undefined;
+    };
+    if (newer()) return newer();
+    await new Promise<void>((resolve) => {
+      const list = this.revWaiters.get(messageId) ?? [];
+      this.revWaiters.set(messageId, list);
+      const done = () => {
+        clearTimeout(t);
+        resolve();
+      };
+      const t = setTimeout(() => {
+        const i = list.indexOf(done);
+        if (i >= 0) list.splice(i, 1);
+        resolve();
+      }, REBASE_WAIT_MS);
+      list.push(done);
+    });
+    if (newer()) return newer();
+    const topicId = this.state.cards[messageId]?.topicId ?? this.messageCache.get(messageId)?.topicId;
+    if (!topicId) return undefined;
+    const m = await this.findMessage(groupId, topicId, messageId);
+    if (m?.cardV2) this.cacheCard(messageId, m.cardV2, m.cardState);
+    return newer();
+  }
+
+  /** Starts the next patch of a lane when it is free and not waiting after `rate_limited`. */
+  private kickLane(messageId: string, lane: PatchLane): void {
+    if (lane.running || lane.timer || lane.parts.length === 0) return;
+    const wait = lane.notBefore - Date.now();
+    if (wait > 0) {
+      lane.timer = setTimeout(() => {
+        lane.timer = null;
+        this.kickLane(messageId, lane);
+      }, wait);
+      return;
+    }
+    lane.running = true;
+    void this.runLane(messageId, lane).finally(() => {
+      lane.running = false;
+      if (lane.parts.length > 0) this.kickLane(messageId, lane);
+      else if (!lane.timer) this.patchLanes.delete(messageId);
+    });
+  }
+
+  /** Sends the queued parts of a lane as one patch (merged, at most MAX_PATCH_OPS ops). */
+  private async runLane(messageId: string, lane: PatchLane): Promise<void> {
+    const first = lane.parts[0];
+    if (!first) return;
+    let card = this.cardCache.get(messageId);
+    if (!card && first.baseRev === undefined) {
+      const topicId = this.state.cards[messageId]?.topicId ?? this.messageCache.get(messageId)?.topicId;
+      if (topicId) card = await this.ensureCard(lane.groupId, topicId, messageId).catch(() => undefined);
+    }
+    if (!card && first.baseRev === undefined) {
+      lane.parts.shift();
+      first.reject(new ChatError("invalid", `the card of ${messageId} is not known; pass baseRev`));
+      return;
+    }
+    // A merged frame whose outcome is not known goes again unchanged, with its parts.
+    if (first.frame) {
+      const resend = first.frame;
+      const batch = lane.parts.filter((p) => p.frame === resend);
+      lane.parts.splice(0, batch.length);
+      await this.sendPatch(messageId, lane, batch, resend);
+      return;
+    }
+    // Merge: parts without their own baseRev join the first one while the ops fit in one frame.
+    // A frame names one cause and the server resolves only that event, so a part with another
+    // cause waits for the next frame.
+    const batch: PatchPart[] = [];
+    const ops: PatchOp[] = [];
+    let cause: string | undefined;
+    for (const part of lane.parts) {
+      if (batch.length > 0 && (part.baseRev !== undefined || part.alone || first.alone)) break;
+      if (batch.length > 0 && part.cause && cause && part.cause !== cause) break;
+      let partOps: PatchOp[];
+      try {
+        partOps = card ? opsOf(card, part.input) : Array.isArray(part.input) ? part.input : [];
+      } catch (err) {
+        if (batch.length > 0) break;
+        lane.parts.shift();
+        part.reject(err);
+        return;
+      }
+      if (batch.length > 0 && ops.length + partOps.length > MAX_PATCH_OPS) break;
+      batch.push(part);
+      ops.push(...partOps);
+      cause ??= part.cause;
+    }
+    lane.parts.splice(0, batch.length);
+    const baseRev = first.baseRev ?? (card as CardV2).rev;
+    const frame: Record<string, unknown> & { t: string } = {
+      t: "card.patch",
+      groupId: lane.groupId,
+      messageId,
+      baseRev,
+      ops,
+      clientPatchId: batch.length === 1 && first.clientPatchId ? first.clientPatchId : crypto.randomUUID(),
+    };
+    if (cause) frame.cause = cause;
+    await this.sendPatch(messageId, lane, batch, frame);
+  }
+
+  /** Sends one patch frame for its parts and settles them, or puts them back in the lane. */
+  private async sendPatch(messageId: string, lane: PatchLane, batch: PatchPart[], frame: Record<string, unknown> & { t: string }): Promise<void> {
+    const first = batch[0] as PatchPart;
+    const baseRev = frame.baseRev as number;
+    try {
+      // A `duplicate` ack is the stored ack of the first try: the patch is applied, and the
+      // server resolved its cause then.
+      const r = (await this.request(frame, { noRateRetry: true })) as CardPatchAck;
+      if (r.message.cardV2) this.cacheCard(messageId, r.message.cardV2, r.message.cardState);
+      this.noteMessage(r.message);
+      for (const p of batch) p.resolve(r.message);
+    } catch (err) {
+      const e = err instanceof ChatError ? err : undefined;
+      if (e?.code === "rate_limited") {
+        // Nothing applied; a frame that goes again keeps its clientPatchId.
+        lane.notBefore = Date.now() + PATCH_INTERVAL_MS;
+        lane.parts.unshift(...batch);
+        return;
+      }
+      if (batch.length > 1 && (e?.code === "timeout" || e?.code === "internal")) {
+        // The ack is lost or the server failed after it may have committed: splitting now could
+        // apply ops (such as row appends) twice. Send the same frame again.
+        if ((first.resends ?? 0) < MAX_PATCH_TRIES) {
+          for (const p of batch) {
+            p.frame = frame;
+            p.resends = (p.resends ?? 0) + 1;
+          }
+          if (e.code === "internal") lane.notBefore = Date.now() + PATCH_INTERVAL_MS;
+          lane.parts.unshift(...batch);
+          return;
+        }
+        for (const p of batch) p.reject(err);
+        return;
+      }
+      // Any other answer says the frame was not applied: later frames are built again.
+      for (const p of batch) p.frame = undefined;
+      const stale = e?.code === "conflict" && (e.reason === "card.stale_rev" || /stale_rev/.test(e.message));
+      for (const p of batch) p.tries++;
+      if (stale && batch.every((p) => p.baseRev === undefined) && batch.every((p) => p.tries < MAX_PATCH_TRIES)) {
+        const fresh = await this.freshCard(lane.groupId, messageId, baseRev).catch(() => undefined);
+        let fits = false;
+        if (fresh) {
+          try {
+            fits = opsFit(fresh, batch.flatMap((p) => opsOf(fresh, p.input)));
+          } catch {
+            fits = false;
+          }
+        }
+        if (fits) {
+          lane.parts.unshift(...batch);
+          return;
+        }
+        const conflict = new ChatError("conflict", "the card changed and the patch no longer fits the newest rev", undefined, "card.stale_rev");
+        for (const p of batch) p.reject(conflict);
+        return;
+      }
+      if (batch.length > 1 && !stale) {
+        // One bad part must not fail the others: each one goes again on its own.
+        for (const p of batch) p.alone = true;
+        lane.parts.unshift(...batch);
+        return;
+      }
+      for (const p of batch) p.reject(err);
     }
   }
 

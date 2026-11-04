@@ -39,15 +39,14 @@ pub use client::{
     Notification, SearchRequest, SendFailure, SendRequest, TopicPatch, background,
 };
 pub use client_ext::{ArtifactFolder, CancelRun};
-pub use client_v11::{SideChatRequest, SideChatStarted};
+pub use client_v11::{CardEventRequest, CardEventSent, SideChatRequest, SideChatStarted};
 pub use files::{Phase, Progress, ProgressFn, UploadRequest, no_progress};
 pub use http::{ApiError, HttpClient};
 pub use runs::{ProcessItem, ProcessView, TerminalLine, terminal_lines};
 pub use search::SearchError;
 pub use store::{
-    ArtifactEventRow, ArtifactRow, CardActionRow, CardAnswerRow, DecisionRow, GroupRow, LogEntry,
-    Migration, OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow,
-    TopicRow,
+    ArtifactRow, CardActionRow, CardAnswerRow, DecisionRow, GroupRow, LogEntry, Migration,
+    OutboxItem, OutboxOp, OutboxState, PendingRead, Refetch, Store, TodoReason, TodoRow, TopicRow,
 };
 #[cfg(target_os = "macos")]
 pub use token::KeychainTokenStore;

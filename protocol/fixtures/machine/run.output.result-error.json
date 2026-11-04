@@ -1,0 +1,15 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "value": {
+    "t": "run.output.result",
+    "runId": "01JBX0RUN000000000000000AU",
+    "outputId": "o2",
+    "ok": false,
+    "error": {
+      "code": "conflict",
+      "reason": "card.stale_rev",
+      "message": "the card changed"
+    }
+  }
+}

@@ -29,10 +29,19 @@ use crate::{
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
     ui::{self, Lucide},
+    views::refs::{
+        affordance::Anchor,
+        cards::{self as ref_parts, BlockParts, CardParts, Pick},
+    },
 };
 
+/// The 引用提问 parts of block `b` (REFS §A2.2), where they show.
+pub(crate) fn block_parts(ctx: &Ctx, b: &CardV2Block, cx: &App) -> Option<BlockParts> {
+    CardParts::of(ctx, cx)?.block(b)
+}
+
 /// 13/20.
-fn small(el: Div) -> Div {
+pub(crate) fn small(el: Div) -> Div {
     el.text_size(px(13.)).line_height(px(20.))
 }
 
@@ -84,7 +93,17 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
             }
             CardV2Block::Metric { .. } => {
                 let j = run_end(&|x| matches!(x, CardV2Block::Metric { .. }));
-                (Some(metrics(&blocks[i..j], cx)), j, space::S12)
+                let parts = CardParts::of(ctx, cx);
+                (
+                    Some(metrics_with(
+                        &blocks[i..j],
+                        parts.as_ref(),
+                        Some(window),
+                        cx,
+                    )),
+                    j,
+                    space::S12,
+                )
             }
             CardV2Block::Evidence { .. } => {
                 let j = run_end(&|x| matches!(x, CardV2Block::Evidence { .. }));
@@ -145,11 +164,24 @@ pub(crate) fn body(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Vec<AnyEleme
                     }
                     _ => None,
                 };
-                (Some(plan(ctx, b, progress, cx)), i + 1, space::S12)
+                (
+                    Some(plan(ctx, b, progress, Some(window), cx)),
+                    i + 1,
+                    space::S12,
+                )
             }
             _ => (Some(block(ctx, b, i, window, cx)), i + 1, space::S12),
         };
         if let Some(el) = el {
+            // The keyboard part focus of the block (or the run drawn together), REFS §A3.
+            let el = match CardParts::of(ctx, cx) {
+                Some(cp) => {
+                    let run: Vec<BlockParts> =
+                        blocks[i..next].iter().filter_map(|b| cp.block(b)).collect();
+                    ref_parts::focus_run(&run, el, window, cx)
+                }
+                None => el,
+            };
             out.push(div().mt(gap).min_w(px(0.)).child(el).into_any_element());
         }
         prev = Some(b);
@@ -167,7 +199,13 @@ fn note_input_ix(blocks: &[&CardV2Block], id: Option<&str>) -> Option<usize> {
 }
 
 /// One block on its own.
-fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn block(
+    ctx: &Ctx,
+    b: &CardV2Block,
+    ix: usize,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let k = theme::colors(cx);
     match b {
         CardV2Block::Text { text, .. } => div()
@@ -177,13 +215,29 @@ fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut Ap
             .child(text.clone())
             .into_any_element(),
         CardV2Block::Fields { fields, .. } => fields_grid(fields, cx),
-        CardV2Block::Table { columns, rows, .. } => table(columns, rows, cx),
-        CardV2Block::List { items, .. } => list(items, cx),
+        CardV2Block::Table { columns, rows, .. } => {
+            // 引用提问: cells, rows and columns (REFS §A2.2, R4).
+            let refs = block_parts(ctx, b, cx).and_then(|p| p.table_refs());
+            table_with_refs(columns, rows, refs.as_ref(), Some(window), cx)
+        }
+        CardV2Block::List { items, .. } => {
+            list_with(items, block_parts(ctx, b, cx).as_ref(), Some(window), cx)
+        }
         CardV2Block::Progress { value, label, .. } => {
             progress_bar(value.as_f64().unwrap_or(0.), label.as_deref(), None, cx)
         }
         CardV2Block::Code { text, .. } => code(text, cx),
-        CardV2Block::Image { file_id, alt, .. } => image(ctx, file_id, alt.as_deref(), cx),
+        CardV2Block::Image { file_id, alt, .. } => {
+            let el = image(ctx, file_id, alt.as_deref(), cx);
+            ref_parts::wrap_opt(
+                block_parts(ctx, b, cx).as_ref(),
+                Pick::Image,
+                el,
+                Anchor::Corner,
+                Some(window),
+                cx,
+            )
+        }
         CardV2Block::Divider { .. } => div().h(px(1.)).bg(k.line).into_any_element(),
         CardV2Block::Link { label, target, .. } => link(ctx, label, target, ix, cx),
         CardV2Block::Decision {
@@ -191,6 +245,7 @@ fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut Ap
             options,
             multiple,
             default,
+            ..
         } => decision(
             ctx,
             id,
@@ -201,8 +256,10 @@ fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut Ap
         ),
         CardV2Block::Input { .. } => form_grid(ctx, &[b], window, cx),
         CardV2Block::Draft { .. } => draft_well(ctx, &[b], window, cx),
-        CardV2Block::Plan { .. } => plan(ctx, b, None, cx),
-        CardV2Block::Metric { .. } => metrics(&[b], cx),
+        CardV2Block::Plan { .. } => plan(ctx, b, None, Some(window), cx),
+        CardV2Block::Metric { .. } => {
+            metrics_with(&[b], CardParts::of(ctx, cx).as_ref(), Some(window), cx)
+        }
         CardV2Block::Chart {
             kind,
             label,
@@ -210,15 +267,24 @@ fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut Ap
             x,
             series,
             ..
-        } => super::chart::chart(
-            ctx.id(format!("chart-{ix}")),
-            *kind,
-            label.as_deref(),
-            unit.as_deref(),
-            x.as_deref().unwrap_or(&[]),
-            series,
-            cx,
-        ),
+        } => {
+            let el = super::chart::chart(
+                ctx.id(format!("chart-{ix}")),
+                *kind,
+                label.as_deref(),
+                unit.as_deref(),
+                x.as_deref().unwrap_or(&[]),
+                series,
+                cx,
+            );
+            // 引用提问: the points (bars) of the main series.
+            match block_parts(ctx, b, cx).and_then(|p| {
+                ref_parts::chart_overlay(&p, ref_parts::chart_plot_top(b), m::CHART, window, cx)
+            }) {
+                Some(overlay) => div().relative().child(el).child(overlay).into_any_element(),
+                None => el,
+            }
+        }
         CardV2Block::Diff {
             path,
             text,
@@ -228,10 +294,16 @@ fn block(ctx: &Ctx, b: &CardV2Block, ix: usize, window: &mut Window, cx: &mut Ap
         } => diff(path.as_deref(), text, *additions, *deletions, cx),
         CardV2Block::Evidence { .. } => evidence(ctx, &[b], window, cx),
         CardV2Block::Ref { .. } => refs(ctx, &[b], cx),
-        CardV2Block::Group { label, blocks, .. } => {
-            group(ctx, label.as_deref(), blocks, ix, window, cx)
-        }
-        CardV2Block::Unknown => div().into_any_element(),
+        CardV2Block::Group { label, blocks, .. } => group(
+            ctx,
+            label.as_deref(),
+            blocks.as_deref().unwrap_or(&[]),
+            ix,
+            window,
+            cx,
+        ),
+        // Unknown blocks and the 2.1 blocks (the 2.1 renderer draws those).
+        _ => div().into_any_element(),
     }
 }
 
@@ -268,12 +340,37 @@ fn fields_grid(fields: &[CardField], cx: &App) -> AnyElement {
 }
 
 /// A number-like cell: digits with an optional sign, `%`, `,` or `.`.
-fn numeric(s: &str) -> bool {
+pub(crate) fn numeric(s: &str) -> bool {
     let t = s.trim();
     !t.is_empty()
         && t.chars().any(|c| c.is_ascii_digit())
         && t.chars()
             .all(|c| c.is_ascii_digit() || "+-−.,%  ".contains(c))
+}
+
+/// The width of number column `ci`: its widest header (12 pt) or mono cell (13 pt), at
+/// least [`m::TABLE_NUM_COL`], so the header and every row line up at the right.
+pub(crate) fn num_col_width(columns: &[String], rows: &[Vec<String>], ci: usize) -> gpui::Pixels {
+    // One CJK character is about one em; a mono or Latin character about 0.62 em.
+    let est = |t: &str, size: f32| -> f32 {
+        t.chars()
+            .map(|c| if c.is_ascii() { 0.62 * size } else { size })
+            .sum()
+    };
+    let head = columns.get(ci).map_or(0., |h| est(h, 12.));
+    let cells = rows
+        .iter()
+        .filter_map(|r| r.get(ci))
+        .map(|v| {
+            let bar = if percent(v).is_some() {
+                f32::from(m::TABLE_PCT_BAR) + f32::from(space::S8)
+            } else {
+                0.
+            };
+            est(v, 13.) + bar
+        })
+        .fold(0f32, f32::max);
+    px(head.max(cells).ceil() + 2.).max(m::TABLE_NUM_COL)
 }
 
 fn percent(s: &str) -> Option<f32> {
@@ -282,7 +379,20 @@ fn percent(s: &str) -> Option<f32> {
         .and_then(|n| n.trim().parse::<f32>().ok())
 }
 
-fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
+pub(crate) fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
+    table_with_refs(columns, rows, None, None, cx)
+}
+
+/// [`table`] with the 引用提问 parts of its cells, rows and header (inc-integrate): the
+/// same look, plus the 问这里 slot at the end of each row.
+pub(crate) fn table_with_refs(
+    columns: &[String],
+    rows: &[Vec<String>],
+    refs: Option<&crate::views::refs::markdown::TableRefs>,
+    window: Option<&gpui::Window>,
+    cx: &App,
+) -> AnyElement {
+    let refs = refs.zip(window);
     let k = theme::colors(cx);
     let numeric_col: Vec<bool> = (0..columns.len())
         .map(|ci| {
@@ -292,11 +402,21 @@ fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
                     .all(|r| r.get(ci).is_none_or(|v| v.is_empty() || numeric(v)))
         })
         .collect();
+    let widths: Vec<Option<gpui::Pixels>> = numeric_col
+        .iter()
+        .enumerate()
+        .map(|(ci, n)| n.then(|| num_col_width(columns, rows, ci)))
+        .collect();
     let cell = |ci: usize, text: &str, head: bool, bold: bool| {
         let num = numeric_col.get(ci).copied().unwrap_or(false);
         let pct = (!head).then(|| percent(text)).flatten();
+        // Text columns share the width; number columns take what their numbers need.
+        let width = widths.get(ci).copied().flatten();
         div()
-            .flex_1()
+            .map(|el| match width {
+                Some(w) => el.flex_none().w(w),
+                None => el.flex_1(),
+            })
             .when(ci == 0, |el| el.flex_grow(1.).min_w(px(96.)))
             .min_w(px(0.))
             .flex()
@@ -306,7 +426,7 @@ fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
             .when_some(pct, |el, p| {
                 el.child(
                     div()
-                        .w(px(48.))
+                        .w(m::TABLE_PCT_BAR)
                         .h(px(3.))
                         .rounded(px(2.))
                         .bg(k.line_2)
@@ -339,42 +459,92 @@ fn table(columns: &[String], rows: &[Vec<String>], cx: &App) -> AnyElement {
                 .border_b_1()
                 .border_color(k.line)
                 .text_color(k.ink_3)
-                .children(
-                    columns
-                        .iter()
-                        .enumerate()
-                        .map(|(ci, col)| cell(ci, col, true, false)),
-                ),
+                .children(columns.iter().enumerate().map(|(ci, col)| {
+                    let mut el = cell(ci, col, true, false);
+                    if ci == 0
+                        && let Some((r, _)) = refs
+                    {
+                        // The first column grows: its width for 问这里 after a row's name.
+                        el = el.relative().child(r.measure(0.));
+                    }
+                    match refs {
+                        Some((r, w)) => r.header(el, ci, w, cx),
+                        None => el.into_any_element(),
+                    }
+                })),
         )
         .children(rows.iter().enumerate().map(|(ri, r)| {
             let total = ri == last && r.first().is_some_and(|x| x.trim() == c::TABLE_TOTAL);
-            div()
+            let line = div()
                 .flex()
                 .items_center()
                 .gap(space::S12)
                 .h(m::TABLE_ROW)
                 .when(ri < last, |el| el.border_b_1().border_color(k.line))
                 .when(total, |el| el.border_t_1().border_color(k.line_2))
-                .text_color(k.ink)
-                .children((0..columns.len()).map(|ci| {
-                    cell(
-                        ci,
-                        r.get(ci).map(String::as_str).unwrap_or(""),
-                        false,
-                        total,
-                    )
-                }))
+                .text_color(k.ink);
+            let line = match refs {
+                Some((rf, w)) => rf.row(line, ri, w, cx),
+                None => line,
+            };
+            // 问这里 after the row's name when the first column holds both (Refs.dc.html).
+            let beside = refs.is_some_and(|(rf, w)| {
+                !numeric_col.first().copied().unwrap_or(false)
+                    && rf.beside(r.first().map(String::as_str).unwrap_or(""), None, w)
+            });
+            line.children((0..columns.len()).map(|ci| {
+                let mut el = cell(
+                    ci,
+                    r.get(ci).map(String::as_str).unwrap_or(""),
+                    false,
+                    total,
+                );
+                if ci == 0 && beside {
+                    el = el.children(
+                        refs.and_then(|(rf, _)| rf.name_button(ri, f32::from(space::S8), cx)),
+                    );
+                }
+                match refs {
+                    Some((rf, w)) => rf.cell(el, ri, ci, w, cx),
+                    None => el.into_any_element(),
+                }
+            }))
+            // A name too long for 问这里 beside it gets it at the row end, over the row, so
+            // the number columns stay at the right edge (Interact.dc.html 02).
+            .when_some(refs.filter(|_| !beside), |el, (rf, _)| {
+                el.relative().child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .flex()
+                        .child(rf.row_end(ri, cx)),
+                )
+            })
         }))
         .into_any_element()
 }
 
-fn list(items: &[CardListItem], cx: &App) -> AnyElement {
+pub(crate) fn list(items: &[CardListItem], cx: &App) -> AnyElement {
+    list_with(items, None, None, cx)
+}
+
+/// [`list`] with the 引用提问 part of each item (REFS §A2.2 `item`).
+pub(crate) fn list_with(
+    items: &[CardListItem],
+    parts: Option<&BlockParts>,
+    window: Option<&Window>,
+    cx: &App,
+) -> AnyElement {
     let k = theme::colors(cx);
+    let parts = parts.zip(window);
     small(div())
         .flex()
         .flex_col()
         .gap(space::S4)
-        .children(items.iter().map(|it| {
+        .children(items.iter().enumerate().map(|(i, it)| {
+            let pick = Pick::Item(i);
             let (glyph, color, text) = match it.status {
                 Some(CardListStatus::Done) => (Some(Lucide::Check), k.ink_3, k.ink_2),
                 Some(CardListStatus::InProgress) => (None, k.live, k.ink),
@@ -382,11 +552,13 @@ fn list(items: &[CardListItem], cx: &App) -> AnyElement {
                 Some(CardListStatus::Skipped) => (Some(Lucide::Minus), k.ink_3, k.ink_3),
                 Some(CardListStatus::Todo) | None => (None, k.ink_3, k.ink_2),
             };
-            div()
+            let row = div()
+                .id(SharedString::from(format!("list-item-{i}")))
                 .flex()
                 .items_center()
                 .gap(space::S10)
                 .min_h(px(24.))
+                .when(parts.is_some(), |el| el.mx(-space::S4).px(space::S4))
                 .child(
                     div().flex_none().w(px(16.)).flex().justify_center().child(
                         match (glyph, it.status) {
@@ -408,9 +580,16 @@ fn list(items: &[CardListItem], cx: &App) -> AnyElement {
                     div()
                         .flex_1()
                         .min_w(px(0.))
-                        .text_color(text)
-                        .child(it.text.clone()),
-                )
+                        .flex()
+                        .items_center()
+                        .gap(space::S8)
+                        .child(div().min_w(px(0.)).text_color(text).child(it.text.clone()))
+                        .children(parts.and_then(|(p, _)| p.button(pick, cx))),
+                );
+            match parts {
+                Some((p, w)) => p.wrap_own(pick, row, w, cx),
+                None => row.into_any_element(),
+            }
         }))
         .into_any_element()
 }
@@ -484,13 +663,14 @@ fn code(text: &str, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> AnyElement {
+fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> gpui::Stateful<Div> {
     let k = theme::colors(cx);
     let path = ctx
         .env
         .provider
         .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file_id);
     div()
+        .id(ctx.id(format!("image-{file_id}")))
         .w(px(320.))
         .h(px(200.))
         .rounded(theme::radius::MD)
@@ -505,7 +685,6 @@ fn image(ctx: &Ctx, file_id: &str, alt: Option<&str>, cx: &App) -> AnyElement {
                     .child(meta(div()).text_color(k.ink_3).child(a.to_string()))
             }),
         })
-        .into_any_element()
 }
 
 fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> AnyElement {
@@ -543,7 +722,7 @@ fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> Any
 // ---------------------------------------------------------------------------
 // Decisions and the answer record
 
-fn key_tile(i: usize, cx: &App) -> Div {
+pub(crate) fn key_tile(i: usize, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
@@ -559,7 +738,7 @@ fn key_tile(i: usize, cx: &App) -> Div {
         .child(letter(i).to_string())
 }
 
-fn decision(
+pub(crate) fn decision(
     ctx: &Ctx,
     id: &str,
     options: &[DecisionOption],
@@ -677,7 +856,7 @@ fn decision(
 /// row with the drawn check, `你选了 B：…` (or `Joye 选了 B：…`), where it
 /// went, the time, and `撤回` while my answer is still on its way or
 /// `展开` for others.
-fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     let _ = window;
     let k = theme::colors(cx);
     let (actor, action, inputs, at, sending) = match ctx.state {
@@ -852,7 +1031,7 @@ fn answered_fields(
     fields_grid(&rows, cx)
 }
 
-fn quiet_button(id: SharedString, label: &str, cx: &App) -> gpui::Stateful<Div> {
+pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> gpui::Stateful<Div> {
     let k = theme::colors(cx);
     div()
         .id(id)
@@ -904,7 +1083,7 @@ pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>
 /// A field box: 36 pt (32 in the footer), radius 8, 1 pt `line-2`; `ink-3`
 /// while focused or when it is the first empty required field; `bad` when
 /// invalid.
-fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div {
+pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .h(height)
@@ -926,7 +1105,12 @@ fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div 
         .gap(space::S8)
 }
 
-fn line_input(field: &Field, disabled: bool, window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn line_input(
+    field: &Field,
+    disabled: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let k = theme::colors(cx);
     match field {
         Field::Line(s) => ui::placeholder_input(
@@ -984,7 +1168,12 @@ pub(crate) fn note_field(
         .into_any_element()
 }
 
-fn form_grid(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut App) -> AnyElement {
+pub(crate) fn form_grid(
+    ctx: &Ctx,
+    blocks: &[&CardV2Block],
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
     let k = theme::colors(cx);
     let problems = super::form::problems(ctx.card, &ctx.values);
     let first_missing = problems.iter().find_map(|p| match p {
@@ -1017,6 +1206,7 @@ fn form_grid(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut A
             options.as_deref().unwrap_or(&[]),
             invalid,
             lead,
+            None,
             window,
             cx,
         );
@@ -1048,7 +1238,7 @@ fn form_grid(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut A
 }
 
 #[allow(clippy::too_many_arguments)]
-fn input_control(
+pub(crate) fn input_control(
     ctx: &Ctx,
     id: &str,
     kind: InputKind,
@@ -1057,11 +1247,13 @@ fn input_control(
     options: &[InputOption],
     invalid: bool,
     lead: bool,
+    // v11/pb-cards: a 2.1 block's own say (an input outside the ask takes live events).
+    live: Option<bool>,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
     let k = theme::colors(cx);
-    let live = ctx.live();
+    let live = live.unwrap_or_else(|| ctx.live());
     match kind {
         InputKind::Select => {
             let chosen = ctx.form.read(cx).choice(id).first().cloned();
@@ -1223,7 +1415,11 @@ fn input_control(
                 )
                 .into_any_element()
         }
-        InputKind::Date | InputKind::Number | InputKind::Text | InputKind::Unknown => {
+        InputKind::Date
+        | InputKind::Number
+        | InputKind::Slider
+        | InputKind::Text
+        | InputKind::Unknown => {
             let ph = match kind {
                 InputKind::Date => Some(placeholder.unwrap_or(c::FORM_DATE_PLACEHOLDER)),
                 _ => placeholder,
@@ -1274,6 +1470,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                 label,
                 text,
                 editable,
+                ..
             } => Some((
                 id.as_str(),
                 label.as_deref(),
@@ -1490,9 +1687,12 @@ fn plan(
     ctx: &Ctx,
     b: &CardV2Block,
     progress: Option<(f64, Option<String>)>,
+    window: Option<&Window>,
     cx: &App,
 ) -> AnyElement {
     let k = theme::colors(cx);
+    // 引用提问: each step is a part (REFS §A2.2 `step`); 问这里 follows its text.
+    let parts = window.and_then(|w| block_parts(ctx, b, cx).map(|p| (p, w)));
     let CardV2Block::Plan { items, .. } = b else {
         return div().into_any_element();
     };
@@ -1510,6 +1710,8 @@ fn plan(
         .flex()
         .flex_col()
         .children(items.iter().enumerate().map(|(i, it)| {
+            let pick = Pick::Step(i);
+            let ask = parts.as_ref().and_then(|(p, _)| p.button(pick, cx));
             let current = it.state == RunPlanState::Current && !current_seen;
             if current {
                 current_seen = true;
@@ -1595,10 +1797,13 @@ fn plan(
                                     .text_color(k.ink_2)
                                     .child(fill(c::PLAN_WAITS_ON, &[("name", &waiting_on)])),
                             )
-                        }),
+                        })
+                        .children(ask.map(|a| div().flex_none().ml(space::S8).child(a))),
                 )
                 .children(right);
-            div()
+            let step = div()
+                .id(SharedString::from(format!("plan-step-{i}")))
+                .when(parts.is_some(), |el| el.mx(-space::S8).px(space::S8))
                 .when(current && bar.is_none(), |el| {
                     el.mx(-space::S8)
                         .px(space::S8)
@@ -1608,7 +1813,11 @@ fn plan(
                 .child(row)
                 .when_some(bar, |el, bar| {
                     el.child(div().pl(px(26.)).pb(space::S6).child(bar))
-                })
+                });
+            match &parts {
+                Some((p, w)) => p.wrap_own(pick, step, w, cx),
+                None => step.into_any_element(),
+            }
         }))
         .into_any_element()
 }
@@ -1616,7 +1825,7 @@ fn plan(
 // ---------------------------------------------------------------------------
 // Data
 
-fn fmt_number(n: f64) -> String {
+pub(crate) fn fmt_number(n: f64) -> String {
     if n.fract() == 0. && n.abs() < 1e15 {
         let s = format!("{}", n.abs() as i64);
         let mut out = String::new();
@@ -1634,12 +1843,23 @@ fn fmt_number(n: f64) -> String {
     }
 }
 
-fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
+pub(crate) fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
+    metrics_with(blocks, None, None, cx)
+}
+
+/// [`metrics`] with the 引用提问 part of each metric (REFS §A2.2 `metric`).
+pub(crate) fn metrics_with(
+    blocks: &[&CardV2Block],
+    parts: Option<&CardParts>,
+    window: Option<&Window>,
+    cx: &App,
+) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .flex()
         .gap(space::S16)
         .children(blocks.iter().take(4).map(|b| {
+            let bp = parts.filter(|_| window.is_some()).and_then(|p| p.block(b));
             let CardV2Block::Metric {
                 label,
                 value,
@@ -1650,7 +1870,7 @@ fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 ..
             } = b
             else {
-                return div();
+                return div().into_any_element();
             };
             let v = value.as_f64().unwrap_or(0.);
             let d = delta.as_ref().and_then(|d| d.as_f64());
@@ -1680,11 +1900,18 @@ fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
             if matches!(better, Some(MetricBetter::Down)) && d.is_some() {
                 tail.push(c::METRIC_LOWER_BETTER.to_string());
             }
-            div()
+            let el = div()
+                .id(SharedString::from(format!(
+                    "metric-{}",
+                    b.id().unwrap_or_default()
+                )))
                 .flex_1()
                 .min_w(px(0.))
                 .flex()
                 .flex_col()
+                .when(bp.is_some(), |el| {
+                    el.mx(-space::S8).px(space::S8).my(-space::S4).py(space::S4)
+                })
                 .child(
                     meta(div())
                         .one_line()
@@ -1737,7 +1964,8 @@ fn metrics(blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                                 )
                             }),
                     )
-                })
+                });
+            ref_parts::wrap_opt(bp.as_ref(), Pick::Metric, el, Anchor::Corner, window, cx)
         }))
         .into_any_element()
 }
@@ -1948,9 +2176,12 @@ pub(crate) fn proof_chip(
 }
 
 fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut App) -> AnyElement {
-    let _ = window;
     let k = theme::colors(cx);
-    let mut thumbs: Vec<(String, Option<String>, String)> = Vec::new();
+    // 引用提问: each proof is a part (REFS §A2.2 evidence `image` / `item`).
+    let parts = CardParts::of(ctx, cx);
+    let part = |b: &CardV2Block| parts.as_ref().and_then(|p| p.block(b));
+    let window: &Window = window;
+    let mut thumbs: Vec<(String, Option<String>, String, Option<BlockParts>)> = Vec::new();
     let mut lines: Vec<AnyElement> = Vec::new();
     let mut chips: Vec<AnyElement> = Vec::new();
     for (i, b) in blocks.iter().enumerate() {
@@ -1966,9 +2197,10 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
             continue;
         };
         if let Some(f) = file_id {
-            thumbs.push((f.clone(), detail.clone(), label.clone()));
+            thumbs.push((f.clone(), detail.clone(), label.clone(), part(b)));
             continue;
         }
+        let bp = part(b);
         let glyph = match state {
             Some(EvidenceState::Pass) => Some((Lucide::Check, k.ok)),
             Some(EvidenceState::Fail) => Some((Lucide::X, k.bad)),
@@ -1977,33 +2209,41 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         // A result with a sentence of detail reads as a line; a bare count
         // as a chip.
         if let Some(d) = detail.as_ref().filter(|d| d.chars().count() > 8) {
-            lines.push(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S2)
-                    .child(
-                        small(div())
-                            .flex()
-                            .items_center()
-                            .gap(space::S8)
-                            .text_color(k.ink)
-                            .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
-                            .child(label.clone()),
-                    )
-                    .child(meta(div()).text_color(k.ink_3).child(d.clone()))
-                    .into_any_element(),
-            );
+            let line = div()
+                .id(ctx.id(format!("proof-line-{i}")))
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(
+                    small(div())
+                        .flex()
+                        .items_center()
+                        .gap(space::S8)
+                        .text_color(k.ink)
+                        .when_some(glyph, |el, (g, c)| el.child(ui::icon(g, px(14.), c)))
+                        .child(label.clone()),
+                )
+                .child(meta(div()).text_color(k.ink_3).child(d.clone()));
+            lines.push(ref_parts::wrap_opt(
+                bp.as_ref(),
+                Pick::Evidence,
+                line,
+                Anchor::Corner,
+                Some(window),
+                cx,
+            ));
         } else {
             let text = match detail {
                 Some(d) => format!("{label} {d}"),
                 None => label.clone(),
             };
-            chips.push(proof_chip(
-                ctx.id(format!("proof-{i}")),
-                glyph,
-                text,
-                url.clone(),
+            let chip = proof_chip(ctx.id(format!("proof-{i}")), glyph, text, url.clone(), cx);
+            chips.push(ref_parts::wrap_opt(
+                bp.as_ref(),
+                Pick::Evidence,
+                div().id(ctx.id(format!("proof-part-{i}"))).child(chip),
+                Anchor::TopRight,
+                Some(window),
                 cx,
             ));
         }
@@ -2014,12 +2254,13 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         div()
             .flex()
             .gap(space::S8)
-            .children(thumbs.iter().take(shown).map(|(file, detail, label)| {
+            .children(thumbs.iter().take(shown).map(|(file, detail, label, bp)| {
                 let path = ctx
                     .env
                     .provider
                     .card_image(&ctx.msg.group_id, &ctx.msg.topic_id, file);
-                div()
+                let thumb = div()
+                    .id(ctx.id(format!("proof-shot-{file}")))
                     .flex_1()
                     .min_w(px(0.))
                     .h(m::THUMB)
@@ -2054,7 +2295,20 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                                     .one_line()
                                     .child(l.to_string())
                             })),
-                    })
+                    });
+                // The thumbnail clips, so the part wraps it: 问这里 sits inside its corner.
+                ref_parts::wrap_opt(
+                    bp.as_ref(),
+                    Pick::Evidence,
+                    div()
+                        .id(ctx.id(format!("proof-shot-part-{file}")))
+                        .flex_1()
+                        .min_w(px(0.))
+                        .child(thumb),
+                    Anchor::Corner,
+                    Some(window),
+                    cx,
+                )
             }))
             .when(more > 0, |el| {
                 el.child(

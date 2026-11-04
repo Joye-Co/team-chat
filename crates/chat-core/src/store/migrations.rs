@@ -163,6 +163,16 @@ ALTER TABLE members ADD COLUMN character TEXT;
         name: "v11-1",
         sql: super::v11::MIGRATION_SQL,
     },
+    // 1.1 interaction loop: answer ids, retracts; page events are no longer stored.
+    Migration {
+        name: "v11-2",
+        sql: super::v11::MIGRATION_SQL_2,
+    },
+    // 1.1: the event, block and value of a 2.1 answer.
+    Migration {
+        name: "v11-3",
+        sql: super::v11::MIGRATION_SQL_3,
+    },
 ];
 
 pub fn run(conn: &mut Connection, list: &[Migration]) -> rusqlite::Result<Vec<&'static str>> {

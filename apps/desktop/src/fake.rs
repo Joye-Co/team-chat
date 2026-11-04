@@ -19,6 +19,9 @@ mod settings;
 pub mod v2;
 // Desk track (1.1.0 首页).
 pub mod v2_desk;
+// --- inc-refs: what the server does with references.
+pub mod refs;
+// --- end inc-refs
 
 pub const ME: &str = "m-joye";
 /// The topic with 10,000 messages.
@@ -32,6 +35,8 @@ pub struct FakeProvider {
     subscribers: Mutex<Vec<UnboundedSender<Vec<Change>>>>,
     drafts: DraftStore,
     settings: Mutex<settings::FakeSettings>,
+    // --- inc-refs
+    refs: refs::FakeRefs,
 }
 
 struct State {
@@ -73,6 +78,7 @@ impl FakeProvider {
             subscribers: Mutex::new(Vec::new()),
             drafts: DraftStore::new(),
             settings: Mutex::new(settings::FakeSettings::new()),
+            refs: refs::FakeRefs::default(),
         });
         provider.seed_followed();
         provider
@@ -92,6 +98,7 @@ impl FakeProvider {
             subscribers: Mutex::new(Vec::new()),
             drafts: DraftStore::new(),
             settings: Mutex::new(settings::FakeSettings::new()),
+            refs: refs::FakeRefs::default(),
         });
         provider.seed_followed();
         provider
@@ -1206,6 +1213,14 @@ impl ChatProvider for FakeProvider {
             }
             None
         });
+        // inc-refs: references to the deleted message show 原消息已删除.
+        if topic.is_some() {
+            self.with(|s| {
+                let mut all: Vec<&mut Message> =
+                    s.messages.values_mut().flat_map(|l| l.iter_mut()).collect();
+                self.refs.source_deleted(message_id, &mut all);
+            });
+        }
         if let Some(topic_id) = topic {
             self.emit(vec![Change::Messages {
                 group_id: group_id.into(),
@@ -1698,6 +1713,60 @@ impl ChatProvider for FakeProvider {
             }]);
         }
     }
+
+    // --- inc-refs track ---
+
+    fn refs_supported(&self) -> bool {
+        true
+    }
+
+    fn add_draft_ref(&self, key: &DraftKey, r: DraftRef) -> AddRef {
+        let added = self.drafts.add_ref(key, r);
+        if added == AddRef::Added {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+        added
+    }
+
+    fn remove_draft_ref(&self, key: &DraftKey, index: usize) {
+        if self.drafts.remove_ref(key, index) {
+            self.emit(vec![Change::Draft { key: key.clone() }]);
+        }
+    }
+
+    fn message_block_refs(&self, message: &Message) -> Vec<chat_core::proto::BlockRef> {
+        self.refs.of(message)
+    }
+
+    fn send_with_refs(
+        &self,
+        request: SendRequest,
+        key: &DraftKey,
+        files: Vec<PendingFileId>,
+        refs: Vec<chat_core::proto::BlockRefInput>,
+    ) -> ClientMsgId {
+        if refs.is_empty() {
+            return self.send_with_files(request, key, files);
+        }
+        let stored = self.with(|s| {
+            let all: Vec<&Message> = s.messages.values().flat_map(|l| l.iter()).collect();
+            refs::FakeRefs::stored(&refs, &all, &request.topic_id)
+        });
+        let body = crate::views::refs::with_prefix(&request.body, &stored);
+        let (g, t) = (request.group_id.clone(), request.topic_id.clone());
+        let cid = self.send_with_files(SendRequest { body, ..request }, key, files);
+        let id = self.with(|s| {
+            s.messages
+                .get(&(g, t))
+                .and_then(|l| l.iter().rev().find(|m| m.client_msg_id == cid))
+                .map(|m| m.id.clone())
+        });
+        let key_id = id.filter(|i| !i.is_empty()).unwrap_or_else(|| cid.clone());
+        self.refs.keep(&key_id, stored, "");
+        cid
+    }
+
+    // --- end inc-refs track ---
 
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>> {
         let (tx, rx) = unbounded();

@@ -292,7 +292,8 @@ export function registerFileRoutes(): void {
     method: "POST",
     path: "/v1/artifacts",
     auth: "member",
-    bodyLimit: 256 * 1024,
+    // The first data snapshot may be 256 KiB on its own.
+    bodyLimit: 640 * 1024,
     async handler({ env, body, auth }) {
       const a = auth as AuthContext;
       const req = await body(CreateArtifactRequest);
@@ -315,10 +316,12 @@ export function registerFileRoutes(): void {
         note: req.note,
         events: req.events,
         runId: req.runId,
+        media: req.media,
+        data: req.data,
       });
       if (!r.ok) {
         await env.DB.prepare("DELETE FROM artifacts WHERE id = ?").bind(id).run();
-        throw new ApiError(r.error.code, r.error.message);
+        throw new ApiError(r.error.code, r.error.message, r.error.reason);
       }
       await auditStatement(env.DB, a, {
         action: "artifact.create",
@@ -333,7 +336,8 @@ export function registerFileRoutes(): void {
     method: "POST",
     path: "/v1/artifacts/:id/versions",
     auth: "member",
-    bodyLimit: 256 * 1024,
+    // The first data snapshot may be 256 KiB on its own.
+    bodyLimit: 640 * 1024,
     async handler({ env, params, body, auth }) {
       const a = auth as AuthContext;
       const groupId = await artifactGroup(env, params.id, a);
@@ -347,6 +351,8 @@ export function registerFileRoutes(): void {
           title: req.title,
           events: req.events,
           runId: req.runId,
+          media: req.media,
+          data: req.data,
         }),
       ) as ArtifactVersionResponse;
       await auditStatement(env.DB, a, {
