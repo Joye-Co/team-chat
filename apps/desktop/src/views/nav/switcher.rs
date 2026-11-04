@@ -24,7 +24,8 @@ use crate::{
     app::Services,
     copy::{fill, nav, search as search_copy},
     data::{
-        ChatProvider, GroupId, GroupKind, Member, MemberId, SearchHit, SearchQuery, Topic, TopicId,
+        ChatProvider, GroupId, GroupKind, Member, MemberId, SearchError, SearchHit, SearchQuery,
+        Topic, TopicId,
     },
     theme::Type as _,
     ui::{
@@ -32,13 +33,13 @@ use crate::{
         native::{
             NativeType as _, native_colors,
             overlays::{
-                SpotlightField, return_mark, spot, spotlight, spotlight_divider, spotlight_ink,
-                spotlight_row, spotlight_section, spotlight_symbol, weighted,
+                SpotlightField, spot, spotlight, spotlight_divider, spotlight_ink, spotlight_row,
+                spotlight_section, spotlight_symbol,
             },
         },
         sf_symbols::SymSize,
     },
-    views::{search::plain::plain_with_ranges, sidebar::topic_line, topic_list::list_time},
+    views::{search::plain::plain_with_ranges, sidebar::topic_line},
 };
 
 gpui::actions!(
@@ -60,6 +61,8 @@ const LIST_PAD_BOTTOM: Pixels = px(8.);
 /// How much of the next row shows above the bottom padding when more rows
 /// follow: with the padding, the 24 pt of the bottom fade.
 const PEEK: Pixels = px(16.);
+/// The widest an author name gets in a message hit.
+const AUTHOR_MAX: Pixels = px(140.);
 
 /// The switcher's keys (call once at start-up).
 pub fn bind_keys(cx: &mut App) {
@@ -273,28 +276,6 @@ fn split_match(label: &str, query: &str) -> Option<(String, String, String)> {
     Some((s(0..at), s(at..at + q.len()), s(at + q.len()..chars.len())))
 }
 
-/// `text` with the characters in `ranges` in Semibold (no highlight fill).
-fn marked(text: &str, ranges: &[std::ops::Range<usize>]) -> gpui::Div {
-    div()
-        .min_w(px(0.))
-        .overflow_hidden()
-        .whitespace_nowrap()
-        .text_ellipsis()
-        .child(weighted(text, ranges))
-}
-
-/// A label with the query's first match in Semibold.
-fn title_with_mark(label: &str, query: &str) -> gpui::Div {
-    match split_match(label, query) {
-        Some((pre, hit, _)) => {
-            let start = pre.chars().count();
-            let len = hit.chars().count();
-            marked(label, std::slice::from_ref(&(start..start + len)))
-        }
-        None => marked(label, &[]),
-    }
-}
-
 /// The leading symbol of a 话题 row (§6): needs you `amber`, live work a
 /// `blue` dot, done a `secondary` check, waiting a clock, otherwise `number`.
 pub fn topic_symbol(
@@ -360,6 +341,10 @@ pub struct Switcher {
     members: Rc<Vec<Member>>,
     scroll: ScrollHandle,
     search: Option<Task<()>>,
+    /// The message search is out (2.11 loading).
+    searching: bool,
+    /// The message search failed (2.11 error).
+    search_error: Option<SearchError>,
     /// Cmd+F: the 群 searched, with its name for the token.
     scope: Option<(GroupId, String)>,
     /// The last pointer position seen over the list. The pointer picks a
@@ -405,6 +390,8 @@ impl Switcher {
             members,
             scroll: ScrollHandle::new(),
             search: None,
+            searching: false,
+            search_error: None,
             scope: None,
             pointer: None,
             reveal: true,
@@ -464,7 +451,9 @@ impl Switcher {
         self.scroll.set_offset(gpui::point(px(0.), px(0.)));
         cx.notify();
         // Messages need the server: after a short pause, two or more characters.
-        self.search = (text.chars().count() >= 2).then(|| {
+        self.search_error = None;
+        self.searching = text.chars().count() >= 2;
+        self.search = self.searching.then(|| {
             let provider = self.services.provider.clone();
             cx.spawn(async move |this, cx| {
                 cx.background_executor()
@@ -475,16 +464,24 @@ impl Switcher {
                     group_id: scope.clone(),
                     limit: MAX_HITS as u32,
                 });
-                if let Ok(Ok(hits)) = reply.await {
-                    let _ = this.update(cx, |this, cx| {
-                        let same_scope = this.scope.as_ref().map(|(g, _)| g) == scope.as_ref();
-                        if this.text(cx) == text && same_scope {
+                let result = reply.await;
+                let _ = this.update(cx, |this, cx| {
+                    let same_scope = this.scope.as_ref().map(|(g, _)| g) == scope.as_ref();
+                    if this.text(cx) != text || !same_scope {
+                        return;
+                    }
+                    this.searching = false;
+                    match result {
+                        Ok(Ok(hits)) => {
                             this.hits = hits.into_iter().take(MAX_HITS).map(plain_hit).collect();
                             this.rebuild();
-                            cx.notify();
                         }
-                    });
-                }
+                        // A provider with no search shows no 消息 section.
+                        Ok(Err(SearchError::Unavailable)) | Err(_) => {}
+                        Ok(Err(e)) => this.search_error = Some(e),
+                    }
+                    cx.notify();
+                });
             })
         });
     }
@@ -564,16 +561,16 @@ impl Switcher {
         let (_, ink2) = spotlight_ink(active, cx);
         let me = self.services.me();
         let surface = if active { k.accent } else { k.sheet };
-        let lead = match (&e.target, &e.member, &e.topic) {
-            (Target::Topic(..), _, Some(t)) => {
-                topic_symbol(self.services.provider.as_ref(), me.as_deref(), t, ink2, cx)
-            }
-            (_, Some(m), _) => div().flex_none().size(spot::SLOT).child(
-                MemberAvatar::new(Some(m), spot::AVATAR)
-                    .presence(Some(m))
-                    .on(surface),
-            ),
-            _ => spotlight_symbol(Sym::Members, ink2),
+        // The leading slot names the kind (2.11): `#` for a 话题, the 群
+        // symbol, the avatar of a DM or member. The state goes to the
+        // StatusBadge at the right, never into a colored icon.
+        let lead = match (&e.target, &e.member) {
+            (Target::Topic(..), _) => palette::kind_icon(Sym::Topic, cx),
+            (_, Some(m)) => div()
+                .flex_none()
+                .size(spot::SLOT)
+                .child(MemberAvatar::new(Some(m), spot::AVATAR).on(surface)),
+            _ => palette::kind_icon(Sym::Members, cx),
         };
         let (label, untitled) = match &e.topic {
             Some(_) => {
@@ -586,15 +583,28 @@ impl Switcher {
             }
             None => (e.label.clone(), false),
         };
-        let detail = match (&self.scope, &e.target) {
-            (Some(_), Target::Topic(..)) => None,
-            _ => e.detail.clone(),
+        let ranges: Vec<std::ops::Range<usize>> = split_match(&label, query)
+            .map(|(pre, hit, _)| {
+                // `weighted` takes char indices.
+                let start = pre.chars().count();
+                start..start + hit.chars().count()
+            })
+            .into_iter()
+            .collect();
+        // A 群's member count never truncates; a 话题's 群 and a person's
+        // 岗位 give way before the title.
+        let (meta, count) = match (&self.scope, &e.target) {
+            (Some(_), Target::Topic(..)) => (None, None),
+            (_, Target::Group(_)) if e.member.is_none() => (None, e.detail.clone()),
+            _ => (e.detail.clone(), None),
         };
-        let time = e
-            .topic
-            .as_ref()
-            .map(|t| list_time(t.last_activity_at, crate::selftest::clock::local_now()))
-            .filter(|t| !t.is_empty());
+        let (time, status) = match &e.topic {
+            Some(t) => (
+                Some(palette::time_text(t.last_activity_at)),
+                palette::topic_status(self.services.provider.as_ref(), me.as_deref(), t),
+            ),
+            None => (None, None),
+        };
         spotlight_row(
             ElementId::NamedInteger("switcher-row".into(), ix as u64),
             active,
@@ -602,21 +612,18 @@ impl Switcher {
         )
         .child(lead)
         .child(
-            title_with_mark(&label, query)
-                .flex_shrink(1.)
-                .when(untitled, |el| el.text_color(ink2)),
+            palette::title(
+                ElementId::NamedInteger("switcher-title".into(), ix as u64),
+                &label,
+                &ranges,
+                active,
+            )
+            .when(untitled, |el| el.text_color(ink2)),
         )
-        .children(detail.map(|d| {
-            div()
-                .flex_shrink(2.)
-                .min_w(px(40.))
-                .text_color(ink2)
-                .one_line()
-                .child(d)
-        }))
+        .children(meta.map(|d| palette::meta(d, ink2)))
+        .children(count.map(|c| palette::count(c, ink2)))
         .child(div().flex_1())
-        .children(time.map(|t| div().flex_none().n_figures().text_color(ink2).child(t)))
-        .when(active, |el| el.child(return_mark(false, ink2)))
+        .child(palette::trailing(status, time, active, ink2))
         .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
             this.pointer_moved(ix, e.position, cx)
         }))
@@ -631,7 +638,6 @@ impl Switcher {
         let active = ix == self.active;
         let (ink, ink2) = spotlight_ink(active, cx);
         let author = self.members.iter().find(|m| m.id == h.author_id);
-        let time = list_time(h.created_at, crate::selftest::clock::local_now());
         spotlight_row(
             ElementId::NamedInteger("switcher-row".into(), ix as u64),
             active,
@@ -643,17 +649,28 @@ impl Switcher {
         .child(
             div()
                 .flex_none()
-                .max_w(px(140.))
+                .max_w(AUTHOR_MAX)
                 .n_headline()
                 .text_color(ink)
                 .one_line()
                 .child(author.map(|a| a.name.clone()).unwrap_or_default()),
         )
-        .child(marked(&h.snippet, &h.highlights).flex_1().text_color(ink2))
-        .when(!time.is_empty(), |el| {
-            el.child(div().flex_none().n_figures().text_color(ink2).child(time))
-        })
-        .when(active, |el| el.child(return_mark(false, ink2)))
+        .child(
+            palette::title(
+                ElementId::NamedInteger("switcher-hit".into(), ix as u64),
+                &h.snippet,
+                &h.highlights,
+                false,
+            )
+            .flex_1()
+            .text_color(ink2),
+        )
+        .child(palette::trailing(
+            None,
+            Some(palette::time_text(h.created_at)),
+            active,
+            ink2,
+        ))
         .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
             this.pointer_moved(ix, e.position, cx)
         }))
@@ -683,9 +700,14 @@ impl Render for Switcher {
                 ix += 1;
             }
         }
-        if !self.hits.is_empty() {
+        // 消息: the hits, else 3 skeleton rows while the server searches,
+        // else the failure with 重试 (2.11 states).
+        let failed = self.search_error.filter(|_| self.hits.is_empty());
+        if !self.hits.is_empty() || self.searching || failed.is_some() {
             children.push(Self::group_label(nav::SECTION_MESSAGES, cx).into_any_element());
             heights.push((spot::SECTION, false));
+        }
+        if !self.hits.is_empty() {
             let hits = self.hits.clone();
             for h in &hits {
                 if ix == self.active {
@@ -695,6 +717,23 @@ impl Render for Switcher {
                 heights.push((spot::ROW, true));
                 ix += 1;
             }
+        } else if self.searching {
+            for (el, h) in palette::loading_rows("switcher-loading", cx) {
+                children.push(el);
+                heights.push((h, true));
+            }
+        } else if let Some(e) = failed {
+            let title = if e == SearchError::Offline {
+                search_copy::SEARCH_OFFLINE
+            } else {
+                search_copy::SEARCH_FAILED
+            };
+            let retry = palette::state_button("switcher-retry", search_copy::SEARCH_RETRY, cx)
+                .on_click(cx.listener(|this, _, _, cx| this.requery(cx)))
+                .into_any_element();
+            let (el, h) = palette::error_row("switcher-failed", title, Some(retry), cx);
+            children.push(el);
+            heights.push((h, true));
         }
         if !self.rows.is_empty() && std::mem::take(&mut self.reveal) {
             let target = if active_child > 0 && !heights[active_child - 1].1 {
@@ -704,45 +743,64 @@ impl Render for Switcher {
             };
             self.scroll.scroll_to_item(target);
         }
-        let empty = self.rows.is_empty();
-        let max_rows =
-            (window.viewport_size().height * 0.6 - spot::FIELD - LIST_PAD_TOP - LIST_PAD_BOTTOM)
-                .max(spot::ROW * 3.);
-        let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
-        let list_h = if total > max_rows {
-            whole_rows_height(&heights, max_rows - PEEK) + PEEK
-        } else {
-            whole_rows_height(&heights, max_rows)
-        };
+        let has_query = !query.is_empty();
+        let list = !children.is_empty();
+        let no_match = !list && has_query;
+        // The panel is the field, the rows and the footer: 8.5 rows at most,
+        // so the half row sits above the footer, never at the panel edge.
+        let room = window.viewport_size().height * 0.6
+            - spot::FIELD
+            - palette::FOOTER
+            - palette::LIST_PAD * 2.;
+        let list_h = palette::list_height(&heights, room);
         // The 群 a search is scoped to (⌘F): a token before the text; click
-        // or ⌫ in an empty field removes it.
+        // or ⌫ in an empty field removes it. Its tooltip names the whole 群.
         let scope_token = self.scope.as_ref().map(|(_, name)| {
+            let full: gpui::SharedString =
+                fill(search_copy::SCOPE_IN_GROUP, &[("name", name)]).into();
             crate::ui::native::chip_button("switcher-scope", true, cx)
                 .gap(crate::ui::native::tokens::space::S4)
                 .max_w(crate::ui::native::tokens::size::CHIP_MAX)
                 .child(
                     div()
-                        .min_w(px(0.))
+                        .min_w(gpui::Pixels::ZERO)
                         .overflow_hidden()
                         .whitespace_nowrap()
                         .text_ellipsis()
-                        .child(fill(search_copy::SCOPE_IN_GROUP, &[("name", name)])),
+                        .child(full.clone()),
                 )
                 .child(
                     Sym::Close
                         .icon(SymSize::INLINE_SMALL)
                         .text_color(k.secondary),
                 )
-                .tooltip(search_copy::SCOPE_REMOVE)
+                .tooltip(full)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.set_scope(None, window, cx);
                     this.query.update(cx, |q, cx| q.focus(window, cx));
                 }))
         });
-        let has_query = !query.is_empty();
         let field = match scope_token {
             Some(t) => SpotlightField::new(&self.query).token(t),
             None => SpotlightField::new(&self.query),
+        };
+        // No match: search everywhere when scoped, else clear the query.
+        let no_match_action = if self.scope.is_some() {
+            palette::state_button("switcher-everywhere", search_copy::SCOPE_REMOVE, cx).on_click(
+                cx.listener(|this, _, window, cx| {
+                    this.set_scope(None, window, cx);
+                    this.query.update(cx, |q, cx| q.focus(window, cx));
+                }),
+            )
+        } else {
+            palette::state_button("switcher-clear", search_copy::NO_MATCH_CLEAR, cx).on_click(
+                cx.listener(|this, _, window, cx| {
+                    this.query.update(cx, |q, cx| {
+                        q.set_value("", window, cx);
+                        q.focus(window, cx);
+                    });
+                }),
+            )
         };
         div()
             .key_context(CONTEXT)
@@ -773,17 +831,16 @@ impl Render for Switcher {
             .flex_col()
             .text_color(k.label)
             .child(field)
-            .when(!empty || has_query, |el| el.child(spotlight_divider(cx)))
-            .when(!empty, |el| {
+            .when(list || has_query, |el| el.child(spotlight_divider(cx)))
+            .when(list, |el| {
                 el.child(
                     div()
                         .id("switcher-list")
                         .flex_none()
-                        .h(list_h + LIST_PAD_TOP + LIST_PAD_BOTTOM)
+                        .h(list_h + palette::LIST_PAD * 2.)
                         .overflow_y_scroll()
                         .track_scroll(&self.scroll)
-                        .pt(LIST_PAD_TOP)
-                        .pb(LIST_PAD_BOTTOM)
+                        .py(palette::LIST_PAD)
                         .flex()
                         .flex_col()
                         .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, _| {
@@ -794,17 +851,15 @@ impl Render for Switcher {
                         .children(children),
                 )
             })
-            .when(empty && has_query, |el| {
-                el.child(
-                    div()
-                        .h(crate::ui::native::tokens::height::LIST_ROW)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .n_body()
-                        .text_color(k.secondary)
-                        .child(nav::QUICK_SWITCH_EMPTY),
-                )
+            .when(no_match, |el| {
+                el.child(palette::no_match(
+                    &query,
+                    no_match_action.into_any_element(),
+                    cx,
+                ))
+            })
+            .when(list || has_query, |el| {
+                el.child(palette::footer(palette::basic_hints(cx), cx))
             })
     }
 }
@@ -817,6 +872,16 @@ pub fn open(services: Services, window: &mut Window, cx: &mut App) {
 /// Opens the switcher with `query` typed (the self-test uses it).
 pub fn open_with(services: Services, query: &str, window: &mut Window, cx: &mut App) {
     open_scoped(services, None, query, window, cx);
+}
+
+/// [`open_with`], returning the view (the palette state scenes).
+pub fn open_with_view(
+    services: Services,
+    query: &str,
+    window: &mut Window,
+    cx: &mut App,
+) -> Entity<Switcher> {
+    open_scoped(services, None, query, window, cx)
 }
 
 /// Opens the switcher scoped to `scope` (Cmd+F) with `query` typed. The
@@ -875,7 +940,321 @@ impl Switcher {
     pub fn scope(&self) -> Option<&GroupId> {
         self.scope.as_ref().map(|(g, _)| g)
     }
+
+    /// Holds the message search in its loading state, or shows it failed
+    /// with `error` (the self-test's palette state scenes).
+    pub fn hold_search(&mut self, error: Option<SearchError>, cx: &mut Context<Self>) {
+        self.search = None;
+        self.hits.clear();
+        self.rebuild();
+        self.searching = error.is_none();
+        self.search_error = error;
+        cx.notify();
+    }
 }
+
+// --- v14/t4 palette: the parts the switcher, search and ask share (COMPLETENESS 2.11) ---
+
+/// The command palette's row anatomy, footer, height and states, shared by
+/// the quick switcher (search included) and ⌘K 交代或搜索.
+pub mod palette {
+    use gpui::{
+        AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
+        Pixels, SharedString, StatefulInteractiveElement as _, Styled, div,
+        prelude::FluentBuilder as _,
+    };
+
+    use crate::{
+        copy::{fill, search as copy},
+        data::{ChatProvider, Millis, Topic},
+        ui::{
+            Sym,
+            native::{
+                BadgeState, KeyCap, NativeType as _, PushSize, PushStyle, StatusBadge,
+                native_colors,
+                overlays::{return_mark, spot, spotlight_symbol, weighted},
+                page::{AlertKind, compact_empty, page_alert},
+                push_button,
+                tokens::{height, space},
+            },
+        },
+        views::rail::model::{RowState, row_state},
+    };
+
+    /// The time column: 12 muted tabular, right-aligned, at one x in every row.
+    pub const TIME_SLOT: Pixels = space::S48;
+    /// The reserved ↩ column (shown on the selected row only).
+    pub const RETURN_SLOT: Pixels = height::COUNT;
+    /// The list's padding (list p 4).
+    pub const LIST_PAD: Pixels = space::S4;
+    /// The footer under the list.
+    pub const FOOTER: Pixels = height::FOOTER_ROW;
+    /// Rows a palette shows at most: 8 whole rows and half of the next, so
+    /// the cut row signals the scroll (never a row cut by the panel edge).
+    const VISIBLE_ROWS: f32 = 8.;
+    /// The part of the next row that shows under the whole ones.
+    const PEEK: Pixels = space::S16;
+
+    /// The leading slot of a row with no avatar: the neutral 16 kind icon
+    /// (topic `#`, 群, file); never a state color.
+    pub fn kind_icon(sym: Sym, cx: &App) -> gpui::Div {
+        spotlight_symbol(sym, native_colors(cx).secondary)
+    }
+
+    /// The title of a row: 14, truncating first at the end, 500 on the
+    /// selected row; the matched ranges in 600; the full value in a tooltip.
+    pub fn title(
+        id: impl Into<ElementId>,
+        text: &str,
+        ranges: &[std::ops::Range<usize>],
+        active: bool,
+    ) -> gpui::Stateful<gpui::Div> {
+        let tip: SharedString = text.to_string().into();
+        div()
+            .id(id)
+            .flex_shrink(1.)
+            .min_w(gpui::Pixels::ZERO)
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis()
+            .when(active, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+            .tooltip(move |window, cx| {
+                gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+            })
+            .child(weighted(text, ranges))
+    }
+
+    /// The 14 muted meta after the title: it takes only the room the title
+    /// leaves (no flex basis), so it gives way before the title.
+    pub fn meta(text: impl Into<SharedString>, ink2: Hsla) -> gpui::Div {
+        div()
+            .flex_basis(gpui::Pixels::ZERO)
+            .flex_grow(1000.)
+            .flex_shrink(1.)
+            .min_w(gpui::Pixels::ZERO)
+            .overflow_hidden()
+            .whitespace_nowrap()
+            .text_ellipsis()
+            .text_color(ink2)
+            .child(text.into())
+    }
+
+    /// A count after the title and meta (`13 位成员`): never truncated.
+    pub fn count(text: impl Into<SharedString>, ink2: Hsla) -> gpui::Div {
+        div()
+            .flex_none()
+            .whitespace_nowrap()
+            .n_figures()
+            .text_color(ink2)
+            .child(text.into())
+    }
+
+    /// The right cluster of every row, in fixed slots: the StatusBadge (if
+    /// any), the time column (kept empty for rows with no time) and the ↩
+    /// column (the mark only on the selected row).
+    pub fn trailing(
+        status: Option<AnyElement>,
+        time: Option<SharedString>,
+        active: bool,
+        ink2: Hsla,
+    ) -> gpui::Div {
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .children(status)
+            .child(
+                // At least the slot; a long date (2023/11/4) widens its own
+                // row only, the right edge stays at one x.
+                div()
+                    .flex_none()
+                    .min_w(TIME_SLOT)
+                    .flex()
+                    .justify_end()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(ink2)
+                    .whitespace_nowrap()
+                    .children(time),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .w(RETURN_SLOT)
+                    .flex()
+                    .justify_end()
+                    .when(active, |d| d.child(return_mark(false, ink2))),
+            )
+    }
+
+    /// The text of a time column: today's clock, else the day; "未知" for
+    /// a missing or zero time.
+    pub fn time_text(at: Millis) -> SharedString {
+        let text = if at <= 0 {
+            String::new()
+        } else {
+            crate::views::topic_list::list_time(at, crate::selftest::clock::local_now())
+        };
+        if text.is_empty() {
+            copy::TIME_UNKNOWN.into()
+        } else {
+            text.into()
+        }
+    }
+
+    /// The StatusBadge of a 话题 row (2.12), or none for a quiet one.
+    pub fn topic_status(
+        p: &dyn ChatProvider,
+        me: Option<&str>,
+        topic: &Topic,
+    ) -> Option<AnyElement> {
+        let (state, meta) = row_state(p, me, topic);
+        let (badge, text) = match state {
+            RowState::NeedsYou => (BadgeState::NeedsYou, copy::STATUS_NEEDS_YOU.to_string()),
+            RowState::Working(_) => (
+                BadgeState::Working,
+                match meta {
+                    Some(m) => fill(copy::STATUS_WORKING_STEP, &[("step", &m.text)]),
+                    None => copy::STATUS_WORKING.to_string(),
+                },
+            ),
+            RowState::Done => (BadgeState::Done, copy::STATUS_DONE.to_string()),
+            RowState::Waiting => (BadgeState::Queued, meta?.text),
+            RowState::Idle => return None,
+        };
+        Some(
+            StatusBadge::new(badge, text)
+                .max_w(STATUS_MAX)
+                .into_any_element(),
+        )
+    }
+
+    /// The widest a StatusBadge gets in a row.
+    pub const STATUS_MAX: Pixels = gpui::px(160.);
+
+    /// The list height: everything when it fits, else 8 whole rows (never
+    /// ending on a group label) and half of the next. `heights` are the
+    /// children's heights (`true` for a row); `room` caps it for a short
+    /// window.
+    pub fn list_height(heights: &[(Pixels, bool)], room: Pixels) -> Pixels {
+        let max = (spot::ROW * (VISIBLE_ROWS + 0.5)).min(room.max(spot::ROW * 3.));
+        let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
+        if total <= max {
+            total
+        } else {
+            super::whole_rows_height(heights, max - PEEK) + PEEK
+        }
+    }
+
+    /// One key hint of the footer: its Kbd caps, then the word.
+    pub fn hint(keys: &[&'static str], label: impl Into<SharedString>, cx: &App) -> gpui::Div {
+        let k = native_colors(cx);
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(space::S4)
+            .children(keys.iter().map(|key| KeyCap::new(*key)))
+            .child(
+                div()
+                    .pl(space::S2)
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .whitespace_nowrap()
+                    .child(label.into()),
+            )
+    }
+
+    /// The footer (2.11): h40, border-t, the key hints in 12 muted.
+    pub fn footer(hints: Vec<gpui::Div>, cx: &App) -> gpui::Div {
+        let k = native_colors(cx);
+        div()
+            .flex_none()
+            .h(FOOTER)
+            .px(space::S16)
+            .border_t_1()
+            .border_color(k.separator)
+            .flex()
+            .items_center()
+            .gap(space::S16)
+            .children(hints)
+    }
+
+    /// The hints every palette shows: ↑↓ 选择, ↩ 打开, esc 关闭.
+    pub fn basic_hints(cx: &App) -> Vec<gpui::Div> {
+        vec![
+            hint(&[copy::KEY_UP, copy::KEY_DOWN], copy::HINT_SELECT, cx),
+            hint(&[copy::KEY_RETURN], copy::HINT_OPEN, cx),
+            hint(&[copy::KEY_ESCAPE], copy::HINT_CLOSE, cx),
+        ]
+    }
+
+    /// No match (2.13 compact): a 16 icon, "没有找到“X”" and one action.
+    pub fn no_match(query: &str, action: AnyElement, cx: &App) -> gpui::Div {
+        div()
+            .flex_none()
+            .h(height::LIST_ROW)
+            .px(spot::INSET + space::S8)
+            .flex()
+            .items_center()
+            .child(div().flex_1().child(compact_empty(
+                Sym::Search,
+                fill(copy::NO_MATCH, &[("query", query)]),
+                Some(action),
+                cx,
+            )))
+    }
+
+    /// The action of a no-match state: outline sm.
+    pub fn state_button(
+        id: impl Into<ElementId>,
+        label: impl Into<SharedString>,
+        cx: &App,
+    ) -> gpui_component::button::Button {
+        push_button(id, label, PushStyle::Outline, PushSize::Small, cx)
+    }
+
+    /// Loading (2.14): 3 skeleton rows at the row height, in the row inset.
+    pub fn loading_rows(id: &str, cx: &App) -> Vec<(AnyElement, Pixels)> {
+        vec![(
+            div()
+                .flex_none()
+                .mx(spot::INSET)
+                .px(space::S8)
+                .child(crate::ui::native::page::skeleton_rows(
+                    id,
+                    crate::ui::native::page::SkeletonKind::Compact,
+                    3,
+                    cx,
+                ))
+                .into_any_element(),
+            spot::ROW * 3.,
+        )]
+    }
+
+    /// A failed load in the list (2.15): an Alert row with 重试.
+    pub fn error_row(
+        id: impl Into<ElementId>,
+        title: impl Into<SharedString>,
+        retry: Option<AnyElement>,
+        cx: &App,
+    ) -> (AnyElement, Pixels) {
+        (
+            div()
+                .flex_none()
+                .h(height::LIST_ROW)
+                .mx(spot::INSET)
+                .flex()
+                .items_center()
+                .child(page_alert(id, AlertKind::Error, title, None, retry, cx))
+                .into_any_element(),
+            height::LIST_ROW,
+        )
+    }
+}
+
+// --- end v14/t4 palette ---
 
 #[cfg(test)]
 mod tests {
