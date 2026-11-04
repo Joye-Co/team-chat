@@ -130,40 +130,31 @@ pub fn empty_page(leading: Pixels, active: bool, _window: &mut Window, cx: &App)
         // §2.13: the full Empty state (40 icon box, title 18, description,
         // primary sm and outline sm), centered in the page.
         .child(
-            div()
-                .id("empty-state")
-                .flex_1()
-                .min_h(px(0.))
-                .flex()
-                .child(
-                    crate::ui::native::Empty::new(crate::ui::Sym::Members, rail::EMPTY_NO_GROUPS_TITLE)
-                        .description(nav::NO_GROUPS_HINT)
-                        .action(
-                            push_button(
-                                "empty-new-group",
-                                nav::MENU_NEW_GROUP,
-                                PushStyle::Default,
-                                PushSize::Small,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(NewGroup), cx)
-                            }),
+            div().id("empty-state").flex_1().min_h(px(0.)).flex().child(
+                crate::ui::native::Empty::new(crate::ui::Sym::Members, rail::EMPTY_NO_GROUPS_TITLE)
+                    .description(nav::NO_GROUPS_HINT)
+                    .action(
+                        push_button(
+                            "empty-new-group",
+                            nav::MENU_NEW_GROUP,
+                            PushStyle::Default,
+                            PushSize::Small,
+                            cx,
                         )
-                        .action(
-                            push_button(
-                                "empty-start-dm",
-                                nav::MENU_START_DM,
-                                PushStyle::Outline,
-                                PushSize::Small,
-                                cx,
-                            )
-                            .on_click(|_, window, cx| {
-                                window.dispatch_action(Box::new(StartDm), cx)
-                            }),
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(NewGroup), cx)),
+                    )
+                    .action(
+                        push_button(
+                            "empty-start-dm",
+                            nav::MENU_START_DM,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
                         )
-                        .wide(),
-                ),
+                        .on_click(|_, window, cx| window.dispatch_action(Box::new(StartDm), cx)),
+                    )
+                    .wide(),
+            ),
         )
         .into_any_element()
 }

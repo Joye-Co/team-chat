@@ -74,9 +74,9 @@ impl Data {
             .into_iter()
             .filter_map(|id| p.member(id).map(|m| (id.to_string(), m)))
             .collect();
-        let state = topic
-            .as_ref()
-            .map(|x| crate::views::topic_page::topic_state(p.as_ref(), services.me().as_deref(), x));
+        let state = topic.as_ref().map(|x| {
+            crate::views::topic_page::topic_state(p.as_ref(), services.me().as_deref(), x)
+        });
         Self {
             state,
             group_id: g.to_string(),

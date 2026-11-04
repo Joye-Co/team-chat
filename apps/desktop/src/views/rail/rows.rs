@@ -13,7 +13,10 @@ use gpui::{
 use gpui_component::menu::ContextMenuExt as _;
 
 use super::{RailView, modes::TopicItem};
-use crate::ui::native::{BadgeState, SidebarRow, SidebarSection, sidebar::{RightColumn, SidebarMedia}};
+use crate::ui::native::{
+    BadgeState, SidebarRow, SidebarSection,
+    sidebar::{RightColumn, SidebarMedia},
+};
 
 /// A row's click handler.
 pub(super) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -77,15 +80,17 @@ impl RailView {
             .unread(unread);
         let badge = || RightColumn::Status(line.badge, line.short.clone().into());
         let urgent = matches!(line.badge, BadgeState::NeedsYou | BadgeState::Failed);
-        row = row.media_kind(SidebarMedia::None).right(if urgent && !line.short.is_empty() {
-            badge()
-        } else if unread {
-            RightColumn::Count(topic.unread as u32)
-        } else if !line.short.is_empty() {
-            badge()
-        } else {
-            RightColumn::None
-        });
+        row = row
+            .media_kind(SidebarMedia::None)
+            .right(if urgent && !line.short.is_empty() {
+                badge()
+            } else if unread {
+                RightColumn::Count(topic.unread as u32)
+            } else if !line.short.is_empty() {
+                badge()
+            } else {
+                RightColumn::None
+            });
         let _ = cx;
         let row = row.on_click(move |_, _, cx| {
             let (g, t) = (g.clone(), t.clone());

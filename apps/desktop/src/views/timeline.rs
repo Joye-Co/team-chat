@@ -769,7 +769,10 @@ impl Render for TimelineView {
                 .pr(v2::SIDE)
                 .pt(space::S24)
                 .pb(space::S8)
-                .child(ui::native::skeleton_rows(ui::native::SkeletonKind::Message, 2))
+                .child(ui::native::skeleton_rows(
+                    ui::native::SkeletonKind::Message,
+                    2,
+                ))
         });
         // §2.2: content scrolls under the header band with no fade. When
         // there is more below (the jump pill shows), the list's bottom edge

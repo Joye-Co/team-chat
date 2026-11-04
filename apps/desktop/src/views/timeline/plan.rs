@@ -11,8 +11,7 @@
 
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, IntoElement, ParentElement, SharedString, Styled,
-    div,
-    prelude::FluentBuilder as _, px,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use super::{TimelineView, model, v2::GUTTER};
@@ -23,9 +22,7 @@ use crate::{
     theme::{Type as _, space},
     ui::{
         self, Sym,
-        native::{
-            NativeType as _, PushSize, PushStyle, disabled_push, native_colors, push_button,
-        },
+        native::{NativeType as _, PushSize, PushStyle, disabled_push, native_colors, push_button},
     },
     views::topic_page::working_runs,
 };
@@ -388,10 +385,18 @@ impl TimelineView {
             let id = run.id.clone();
             crate::ui::native::icon_button_bare(
                 ElementId::Name(format!("plan-toggle-{}", run.id).into()),
-                if open { Sym::ChevronUp } else { Sym::ChevronDown },
+                if open {
+                    Sym::ChevronUp
+                } else {
+                    Sym::ChevronDown
+                },
                 crate::ui::native::IconSize::Small,
             )
-            .named(if open { c::PLAN_COLLAPSE } else { c::PLAN_EXPAND })
+            .named(if open {
+                c::PLAN_COLLAPSE
+            } else {
+                c::PLAN_EXPAND
+            })
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 if !this.plan_collapsed.remove(&id) {
                     this.plan_collapsed.insert(id.clone());
@@ -407,7 +412,10 @@ impl TimelineView {
             (BadgeState::NeedsYou, c::STATE_YOU_SHORT.to_string())
         } else {
             match &progress_of {
-                Some((step, total, _)) => (BadgeState::Working, format!("{} {step}/{total}", c::STATE_WORKING_SHORT)),
+                Some((step, total, _)) => (
+                    BadgeState::Working,
+                    format!("{} {step}/{total}", c::STATE_WORKING_SHORT),
+                ),
                 None => (BadgeState::Working, c::STATE_WORKING_SHORT.to_string()),
             }
         };
@@ -427,7 +435,11 @@ impl TimelineView {
                     .n_headline()
                     .text_color(n.label),
             )
-            .child(div().flex_none().child(StatusBadge::new(badge_state, badge_text)))
+            .child(
+                div()
+                    .flex_none()
+                    .child(StatusBadge::new(badge_state, badge_text)),
+            )
             .children(toggle);
 
         // D12: the one Progress, and the count beside it.
@@ -441,7 +453,11 @@ impl TimelineView {
                 .flex()
                 .items_center()
                 .gap(space::S12)
-                .child(div().flex_1().child(progress(done as f32 / (*total).max(1) as f32, cx)))
+                .child(
+                    div()
+                        .flex_1()
+                        .child(progress(done as f32 / (*total).max(1) as f32, cx)),
+                )
                 .child(
                     div()
                         .flex_none()
@@ -465,15 +481,15 @@ impl TimelineView {
                 // §2.12: the step at work spins; never a free colored dot.
                 let mark: AnyElement = match s.state {
                     _ if at_work && held => {
-                        ui::sym(Sym::Pause, ui::SymSize::INLINE_SMALL, n.secondary).into_any_element()
+                        ui::sym(Sym::Pause, ui::SymSize::INLINE_SMALL, n.secondary)
+                            .into_any_element()
                     }
                     PlanState::Waiting => state_mark(BadgeState::NeedsYou, &n)
                         .unwrap_or_else(|| div().into_any_element()),
                     PlanState::Current => state_mark(BadgeState::Working, &n)
                         .unwrap_or_else(|| div().into_any_element()),
-                    PlanState::Done => {
-                        ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, n.secondary).into_any_element()
-                    }
+                    PlanState::Done => ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, n.secondary)
+                        .into_any_element(),
                     PlanState::Pending => {
                         ui::sym(Sym::Todo, ui::SymSize::INLINE_SMALL, n.tertiary).into_any_element()
                     }
@@ -523,7 +539,17 @@ impl TimelineView {
         let doing_now = (!held)
             .then(|| self.doing_now(&run.id))
             .flatten()
-            .or_else(|| held.then(|| fill(l::LIVE_PLAN_HELD, &[("name", &bot.as_ref().map(|m| m.name.clone()).unwrap_or_default())])));
+            .or_else(|| {
+                held.then(|| {
+                    fill(
+                        l::LIVE_PLAN_HELD,
+                        &[(
+                            "name",
+                            &bot.as_ref().map(|m| m.name.clone()).unwrap_or_default(),
+                        )],
+                    )
+                })
+            });
 
         // Footer: the time used and the start, then 查看 and 停止….
         let view = {
@@ -576,7 +602,10 @@ impl TimelineView {
                     .children(run.started_at.map(|at| {
                         fill(
                             t::PLAN_FOOTER,
-                            &[("used", &span_text(USED, now - at)), ("time", &model::clock(at))],
+                            &[
+                                ("used", &span_text(USED, now - at)),
+                                ("time", &model::clock(at)),
+                            ],
                         )
                     })),
             )

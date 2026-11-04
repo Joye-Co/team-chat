@@ -526,12 +526,10 @@ mod text_tests;
 /// Arabic and their presentation forms): the paragraph's direction under
 /// `dir="auto"` (F15).
 pub fn starts_rtl(text: &str) -> bool {
-    text.chars()
-        .find(|c| c.is_alphabetic())
-        .is_some_and(|c| {
-            matches!(c as u32,
+    text.chars().find(|c| c.is_alphabetic()).is_some_and(|c| {
+        matches!(c as u32,
                 0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
-        })
+    })
 }
 
 #[cfg(test)]

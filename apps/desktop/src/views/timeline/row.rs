@@ -980,7 +980,11 @@ impl TimelineView {
             PushSize::Small,
             cx,
         )
-        .icon(ui::sym(Sym::Mention, ui::SymSize::INLINE, theme::colors(cx).ink))
+        .icon(ui::sym(
+            Sym::Mention,
+            ui::SymSize::INLINE,
+            theme::colors(cx).ink,
+        ))
         .on_click(|_, window, cx| {
             window.dispatch_action(Box::new(crate::app::MentionInComposer), cx)
         });
@@ -994,7 +998,11 @@ impl TimelineView {
                 PushSize::Small,
                 cx,
             )
-            .icon(ui::sym(Sym::Invite, ui::SymSize::INLINE, theme::colors(cx).ink))
+            .icon(ui::sym(
+                Sym::Invite,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
             .on_click(move |_, window, cx| {
                 let name = services
                     .provider
@@ -1018,19 +1026,25 @@ impl TimelineView {
             crate::app::RightPane::TopicRail
         );
         let nav = self.services.nav.clone();
-        let info = (!rail_open).then(|| push_button(
-            "start-topic-info",
-            t::START_TOPIC_INFO,
-            PushStyle::Outline,
-            PushSize::Small,
-            cx,
-        )
-        .icon(ui::sym(Sym::Inspector, ui::SymSize::INLINE, theme::colors(cx).ink))
-        .on_click(move |_, _, cx| {
-            nav.update(cx, |nav, cx| {
-                nav.set_right_pane(crate::app::RightPane::TopicRail, cx)
+        let info = (!rail_open).then(|| {
+            push_button(
+                "start-topic-info",
+                t::START_TOPIC_INFO,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .icon(ui::sym(
+                Sym::Inspector,
+                ui::SymSize::INLINE,
+                theme::colors(cx).ink,
+            ))
+            .on_click(move |_, _, cx| {
+                nav.update(cx, |nav, cx| {
+                    nav.set_right_pane(crate::app::RightPane::TopicRail, cx)
+                })
             })
-        }));
+        });
         div()
             .pt(space::S4)
             .flex()

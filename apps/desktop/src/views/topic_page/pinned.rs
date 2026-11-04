@@ -203,12 +203,16 @@ impl TopicPage {
                     alert = alert.description(when);
                 }
                 if withdraw {
-                    alert = alert.action(sm("pinned-withdraw", c::WITHDRAW, PushStyle::Outline, cx).on_click(
-                        cx.listener({
-                            let (g, t) = (g.clone(), t.clone());
-                            move |this, _: &ClickEvent, _, cx| this.withdraw(g.clone(), t.clone(), cx)
-                        }),
-                    ));
+                    alert = alert.action(
+                        sm("pinned-withdraw", c::WITHDRAW, PushStyle::Outline, cx).on_click(
+                            cx.listener({
+                                let (g, t) = (g.clone(), t.clone());
+                                move |this, _: &ClickEvent, _, cx| {
+                                    this.withdraw(g.clone(), t.clone(), cx)
+                                }
+                            }),
+                        ),
+                    );
                 }
                 alert.into_any_element()
             }
@@ -235,7 +239,13 @@ impl TopicPage {
                 ),
             )
             .action(
-                sm("pinned-request", c::REQUEST_CHANGES_MORE, PushStyle::Outline, cx).on_click(
+                sm(
+                    "pinned-request",
+                    c::REQUEST_CHANGES_MORE,
+                    PushStyle::Outline,
+                    cx,
+                )
+                .on_click(
                     cx.listener(|this, _: &ClickEvent, window, cx| {
                         this.request_changes(window, cx)
                     }),

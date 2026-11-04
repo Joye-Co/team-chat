@@ -256,8 +256,7 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
             TopicStatus::WaitingReview => cm::STATUS_WAITING_REVIEW_ME,
             _ => cm::STATUS_WAITING_ANSWER_ME,
         };
-        return StateLine::plain(text.to_string(), BadgeState::NeedsYou)
-            .short(c::STATE_YOU_SHORT);
+        return StateLine::plain(text.to_string(), BadgeState::NeedsYou).short(c::STATE_YOU_SHORT);
     }
     let runs = p.runs(g, t);
     if let Some(run) = lead_run(&runs, topic.owner_id.as_deref()) {

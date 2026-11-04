@@ -241,7 +241,8 @@ impl TimelineView {
             .gap(space::S6)
             .child(name)
             .children(role.map(|role| {
-                crate::ui::truncate::TruncText::new(role.trim().to_string()).id("sender-role")
+                crate::ui::truncate::TruncText::new(role.trim().to_string())
+                    .id("sender-role")
                     .flex_shrink(1000.)
                     .min_w(px(0.))
                     .n_subheadline()

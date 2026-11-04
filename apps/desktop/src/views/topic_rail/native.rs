@@ -10,9 +10,7 @@ use gpui::{
     ParentElement, SharedString, StatefulInteractiveElement as _, Styled, div, px,
 };
 
-use super::{
-    Data, TopicRail, media_time, money_text, preview_thumbnail, step_minutes,
-};
+use super::{Data, TopicRail, media_time, money_text, preview_thumbnail, step_minutes};
 use crate::{
     app::RightPane,
     copy::{fill, topic_rail as c},
@@ -185,14 +183,20 @@ impl TopicRail {
                     .min_w(px(24.))
                     .flex_shrink(1.)
                     .text_color(k.label)
-                    .child(crate::ui::truncate::TruncText::new(name).id(SharedString::from(format!("rail-person-{id}")))),
+                    .child(
+                        crate::ui::truncate::TruncText::new(name)
+                            .id(SharedString::from(format!("rail-person-{id}"))),
+                    ),
             )
             .children(role.map(|r| {
                 div()
                     .min_w(px(0.))
                     .flex_shrink(1000.)
                     .text_color(k.secondary)
-                    .child(crate::ui::truncate::TruncText::new(r).id(SharedString::from(format!("rail-role-{id}"))))
+                    .child(
+                        crate::ui::truncate::TruncText::new(r)
+                            .id(SharedString::from(format!("rail-role-{id}"))),
+                    )
             }))
             .children(tail)
             .into_any_element()
@@ -385,26 +389,24 @@ impl TopicRail {
                     .child(fill(c::INSPECTOR_FILES, &[("n", &ch.files.to_string())])),
             );
         if ch.checks_total > 0 {
-            section = section.row(
-                div().pt(space::S6).child(label_value(
-                    c::INSPECTOR_CHECKS,
-                    StatusBadge::new(
-                        if checks_ok {
-                            BadgeState::Done
-                        } else {
-                            BadgeState::Failed
-                        },
-                        fill(
-                            c::INSPECTOR_CHECKS_VALUE,
-                            &[
-                                ("passed", &ch.checks_passed.to_string()),
-                                ("total", &ch.checks_total.to_string()),
-                            ],
-                        ),
+            section = section.row(div().pt(space::S6).child(label_value(
+                c::INSPECTOR_CHECKS,
+                StatusBadge::new(
+                    if checks_ok {
+                        BadgeState::Done
+                    } else {
+                        BadgeState::Failed
+                    },
+                    fill(
+                        c::INSPECTOR_CHECKS_VALUE,
+                        &[
+                            ("passed", &ch.checks_passed.to_string()),
+                            ("total", &ch.checks_total.to_string()),
+                        ],
                     ),
-                    cx,
-                )),
-            );
+                ),
+                cx,
+            )));
         }
         section = section.row(label_value(c::INSPECTOR_STATE, state, cx));
         Some(section.into_any_element())
@@ -609,7 +611,11 @@ impl TopicRail {
                                     } else {
                                         BadgeState::Offline
                                     },
-                                    if busy { c::MACHINE_BUSY } else { c::MACHINE_IDLE },
+                                    if busy {
+                                        c::MACHINE_BUSY
+                                    } else {
+                                        c::MACHINE_IDLE
+                                    },
                                 ))),
                         )
                         .child(detail(line, cx)),
@@ -640,9 +646,11 @@ impl TopicRail {
                 cost.duration_ms as i64,
             ),
         };
-        let mut section = self
-            .section(COST, c::TOPIC_RAIL_COST, cx)
-            .row(label_value(c::INSPECTOR_TIME, used, cx));
+        let mut section = self.section(COST, c::TOPIC_RAIL_COST, cx).row(label_value(
+            c::INSPECTOR_TIME,
+            used,
+            cx,
+        ));
         if let Some(cents) = cost.cost_cents {
             section = section.row(label_value(
                 c::INSPECTOR_COST,
@@ -661,9 +669,8 @@ impl TopicRail {
 /// day, or `10-31 22:10 – 11-01 01:05` across days (never `今天 11-01–11-01`).
 fn when_range(a: crate::data::Millis, b: crate::data::Millis) -> String {
     use chrono::{Local, TimeZone as _};
-    let local = |at| {
-        crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single())
-    };
+    let local =
+        |at| crate::views::shell::known(at).and_then(|at| Local.timestamp_millis_opt(at).single());
     let (Some(start), Some(end)) = (local(a), local(b)) else {
         return crate::copy::common::TIME_UNKNOWN.to_string();
     };

@@ -662,7 +662,9 @@ impl TimelineView {
                 .t_meta()
                 .line_height(px(20.))
                 .text_color(colors.text_3)
-                .child(crate::ui::truncate::TruncText::new(SharedString::from(text)).id("typing-line")),
+                .child(
+                    crate::ui::truncate::TruncText::new(SharedString::from(text)).id("typing-line"),
+                ),
         )
     }
 }
