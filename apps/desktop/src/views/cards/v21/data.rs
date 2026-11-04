@@ -3,6 +3,7 @@
 //! R3 `part {kind: point|bar}`); a metric that can be pressed (`metric.press`).
 //! Without events they draw exactly like 2.0.
 
+use crate::ui::native::FocusRow as _;
 use gpui::{
     AnyElement, App, InteractiveElement as _, IntoElement, ParentElement,
     StatefulInteractiveElement as _, Styled, div, prelude::FluentBuilder as _, px,
@@ -188,7 +189,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             .when(on, |el| el.bg(k.sunken))
             .text_color(k.ink)
             .when(can_pick, |el| {
-                el.on_click(move |_, _, cx| {
+                el.focus_row(on, cx).on_click(move |_, _, cx| {
                     form.update(cx, |f, cx| {
                         let mut cur = f.choice(&block).to_vec();
                         if multiple {

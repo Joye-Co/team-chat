@@ -6,6 +6,7 @@
 //! Controls are live only for the viewer the ask names (or who may send the block's
 //! events); everyone else sees the same options read-only (CARD21 §5).
 
+use crate::ui::native::FocusRow as _;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -769,10 +770,11 @@ pub fn rating(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .when(live, |el| {
-                    el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
-                        target.after(&block, cx);
-                    })
+                    el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                        .on_click(move |_, _, cx| {
+                            form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
+                            target.after(&block, cx);
+                        })
                 })
                 .child(ui::icon(
                     if on { Sym::StarFill } else { Sym::Star },
@@ -830,6 +832,11 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .border_1()
             .border_color(if on { nk.primary } else { nk.separator })
             .bg(if on { nk.primary } else { nk.content })
+            // A tab stop with ← → (E3); the hover below keeps its border step.
+            // `selected: true` leaves the hover to this cell (one hover style).
+            .when(live, |el| {
+                el.focus_row_with(true, crate::ui::native::Arrows::Grid, cx)
+            })
             .when(live && !on, |el| {
                 let hover = theme::card_v2::alpha(nk.fill, 0.5);
                 let edge = theme::card_v2::alpha(nk.label, 0.5);
@@ -1010,10 +1017,11 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex_col()
                 .gap(space::S6)
                 .when(live, |el| {
-                    el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                        target.after(&block, cx);
-                    })
+                    el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                        .on_click(move |_, _, cx| {
+                            form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                            target.after(&block, cx);
+                        })
                 })
                 .child(
                     div()
@@ -1121,12 +1129,13 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .items_center()
                     .justify_center()
                     .when(live, |el| {
-                        el.on_click(move |_, _, cx| {
-                            let mut rows = cur.clone();
-                            rows.insert(row_id.clone(), col_id.clone());
-                            form.update(cx, |f, cx| f.set_value21(&block, Val::Rows(rows), cx));
-                            target.after(&block, cx);
-                        })
+                        el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                            .on_click(move |_, _, cx| {
+                                let mut rows = cur.clone();
+                                rows.insert(row_id.clone(), col_id.clone());
+                                form.update(cx, |f, cx| f.set_value21(&block, Val::Rows(rows), cx));
+                                target.after(&block, cx);
+                            })
                     })
                     .child(
                         crate::ui::native::NativeRadio::new(
@@ -1258,10 +1267,11 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .flex_col()
             .justify_center()
             .when(live, |el| {
-                el.on_click(move |_, _, cx| {
-                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                    target.after(&block, cx);
-                })
+                el.focus_row_with(on, crate::ui::native::Arrows::Grid, cx)
+                    .on_click(move |_, _, cx| {
+                        form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                        target.after(&block, cx);
+                    })
             })
             .child(
                 b20::small(div())
@@ -1421,10 +1431,11 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex_col()
                 .gap(space::S4)
                 .when(can, |el| {
-                    el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
-                        target.after(&block, cx);
-                    })
+                    el.focus_row_with(on, crate::ui::native::Arrows::Vertical, cx)
+                        .on_click(move |_, _, cx| {
+                            form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
+                            target.after(&block, cx);
+                        })
                 })
                 .child(
                     div()

@@ -17,6 +17,7 @@ use gpui_component::{
 use serde_json::Value;
 
 use super::{Ctx, choice_text, form::Field, meta, option_label, state::CardState};
+use crate::ui::native::FocusRow as _;
 use crate::{
     copy::{cards_v2 as c, fill},
     data::{
@@ -841,6 +842,13 @@ pub(crate) fn choice_row(
         .border_1()
         .border_color(if picked { n.label } else { n.separator })
         .when(picked, |el| el.bg(n.selection))
+        // A tab stop with Enter / Space and ↑ ↓, and the focus ring apart
+        // from the picked fill (E3, R1 FocusRow); the hover below keeps its
+        // border step.
+        // `selected: true` leaves the hover to this row (one hover style).
+        .when(enabled, |el| {
+            el.focus_row_with(true, ui::native::Arrows::Vertical, cx)
+        })
         .when(enabled && !picked, |el| {
             el.hover(move |s| s.bg(hover).border_color(hover_edge))
         })
@@ -2817,7 +2825,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .min_h(px(44.))
                 .py(space::S8)
                 .when(!gone, |el| {
-                    el
+                    el.focus_row(false, cx)
                         .on_click(move |_, window, cx| a.open(&t, window, cx))
                 })
                 // One 24 media column for every kind, so every name starts

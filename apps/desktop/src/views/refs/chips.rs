@@ -1,6 +1,7 @@
 //! Reference chips: the composer's chip row (REFS §A4) and the read-only references above a
 //! sent message's body (§A6, Refs.dc.html §01 and §03).
 
+use crate::ui::native::FocusRow as _;
 use std::{rc::Rc, sync::Arc};
 
 use chat_core::proto::BlockRef;
@@ -151,6 +152,9 @@ pub fn composer_chip(
         .line_height(px(18.))
         .text_color(k.ink_3)
         .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
+        // The chip body is a tab stop (Enter goes back to the part); × is its
+        // own button (E3).
+        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
         .on_click(move |_, window, cx| on_open(window, cx))
         .child(
             div()
@@ -292,8 +296,12 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
         .h(px(22.))
         .t_meta()
         .text_color(k.ink_3)
+        // A sent ref is a tab stop (Enter opens the part) with the row focus
+        // ring (E3); its hover stays a text step.
         .when(!deleted, |d| {
-            d.hover(|s| s.text_color(k.ink_2))
+            // `selected: true` leaves the hover to the text step here.
+            d.focus_row(true, cx)
+                .hover(|s| s.text_color(k.ink_2))
                 .on_click(move |_, _, cx| open_source(&draft, cx))
         })
         .child(
