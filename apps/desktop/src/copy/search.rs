@@ -28,6 +28,8 @@ crate::copy! {
     NO_MATCH_CLEAR = "清空搜索",
     SEARCH_FAILED = "没能搜索消息",
     SEARCH_OFFLINE = "连上以后才能搜索消息",
+    SEARCH_FAILED_DESC = "服务器没有回应，请稍后重试",
+    SEARCH_OFFLINE_DESC = "检查网络，连上以后重试",
     SEARCH_RETRY = "重试",
     // Status words of a palette row (2.12).
     STATUS_NEEDS_YOU = "等你",

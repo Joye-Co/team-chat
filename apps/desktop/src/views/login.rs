@@ -20,7 +20,6 @@ use crate::{
     app::{Changes, Services},
     copy::{common, login as l, overlays as o},
     data::{Change, Credential, LoginError, LoginRequest, SessionState},
-    theme::Type as _,
     ui::{
         self, Sym,
         native::{
@@ -462,17 +461,18 @@ impl Render for LoginView {
         // Under the field: the error, or on the code step the custom
         // server, quietly. The slot keeps its height, so nothing moves.
         let under: Option<gpui::AnyElement> = match error {
+            // A field error (owner decision v15): neutral 12 text after a
+            // 16 destructive icon, as in every sheet footer.
             Some(e) => Some(
-                div()
+                crate::ui::native::sheet::sheet_status_error(error_text(e), cx)
                     .id("login-error")
-                    .n_subheadline()
-                    .text_color(k.red)
-                    .one_line()
-                    .child(error_text(e))
+                    .w_full()
                     .into_any_element(),
             ),
             None => (!server_step && custom).then(|| {
                 div()
+                    .w_full()
+                    .min_w_0()
                     .flex()
                     .items_center()
                     .gap(space::S4)
@@ -483,7 +483,14 @@ impl Render for LoginView {
                             .icon(SymSize::INLINE_SMALL)
                             .text_color(k.secondary),
                     )
-                    .child(div().min_w_0().one_line().child(host))
+                    // A long host is cut in the middle (both ends name it),
+                    // with the full host in a tooltip (2.21).
+                    .child(
+                        crate::ui::truncate::TruncText::new(host)
+                            .id("login-host")
+                            .middle()
+                            .flex_1(),
+                    )
                     .into_any_element()
             }),
         };
@@ -554,6 +561,8 @@ impl Render for LoginView {
                     .child(
                         div()
                             .h(crate::ui::native::tokens::text::META.1)
+                            .w_full()
+                            .min_w_0()
                             .flex()
                             .items_center()
                             .children(under),

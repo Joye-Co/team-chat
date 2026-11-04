@@ -91,6 +91,7 @@ pub fn install(services: Services, status_item: bool, cx: &mut App) {
         KeyBinding::new("cmd-9", OpenGroup9, None),
     ]);
     switcher::bind_keys(cx);
+    dialogs::bind_keys(cx);
     crate::views::ask::bind_keys(cx);
     // v12/overlays: ⌘Return in the 新话题 sheet.
     new_topic::bind_keys(cx);

@@ -4,9 +4,8 @@
 //! settings of this Mac ([`super::prefs`]).
 
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, Render, SharedString, Size,
-    StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, IntoElement, ParentElement,
+    Pixels, Render, SharedString, Size, Styled, Subscription, Window, div,
     prelude::FluentBuilder as _, px,
 };
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
@@ -25,6 +24,14 @@ const TILE: (Pixels, Pixels) = (px(68.), px(44.));
 const TILE_RADIUS: Pixels = crate::ui::native::tokens::radius::ITEM;
 /// The space between a tile and the ring of the chosen one.
 const RING: Pixels = crate::ui::native::tokens::space::S2;
+/// The button around a tile and its name: the picture, its ring space and
+/// 2 px ring, the gap, the 20 name line, and p 4 on every side.
+fn tile_box() -> (Pixels, Pixels) {
+    use crate::ui::native::tokens::{space, text};
+    // Ring space and the 2 px ring on both sides, then p 4 on both sides.
+    let around = RING * 2. + space::S4 + space::S8;
+    (TILE.0 + around, TILE.1 + around + space::S8 + text::UI.1)
+}
 
 pub struct AppearancePage {
     size: Entity<SliderState>,
@@ -73,17 +80,28 @@ impl AppearancePage {
             gpui::rgb(0x262626),
             gpui::rgb(0x525252),
         );
-        let half = |(content, sidebar, line): (gpui::Rgba, gpui::Rgba, gpui::Rgba)| {
+        // Every fill that meets the tile's edge takes the tile's inner
+        // radius: gpui does not clip children to a rounded parent (C1-01).
+        let inner = TILE_RADIUS - crate::ui::native::tokens::layout::BORDER;
+        let half = |(content, sidebar, line): (gpui::Rgba, gpui::Rgba, gpui::Rgba),
+                    left: bool,
+                    right: bool| {
+            // Equal halves: the bars must not size them (min width 0).
             div()
                 .flex_1()
+                .min_w_0()
+                .overflow_hidden()
                 .h_full()
                 .bg(content)
+                .when(left, |d| d.rounded_l(inner))
+                .when(right, |d| d.rounded_r(inner))
                 .flex()
                 .child(
                     div()
                         .w(px(20.))
                         .h_full()
                         .bg(sidebar)
+                        .when(left, |d| d.rounded_l(inner))
                         .p(px(4.))
                         .flex()
                         .flex_col()
@@ -94,6 +112,7 @@ impl AppearancePage {
                 .child(
                     div()
                         .flex_1()
+                        .min_w_0()
                         .p(px(5.))
                         .flex()
                         .flex_col()
@@ -104,9 +123,11 @@ impl AppearancePage {
         };
         let row = div().size_full().flex();
         match choice {
-            ThemeChoice::Light => row.child(half(light)),
-            ThemeChoice::Dark => row.child(half(dark)),
-            ThemeChoice::System => row.child(half(light)).child(half(dark)),
+            ThemeChoice::Light => row.child(half(light, true, true)),
+            ThemeChoice::Dark => row.child(half(dark, true, true)),
+            ThemeChoice::System => row
+                .child(half(light, true, false))
+                .child(half(dark, false, true)),
         }
         .into_any_element()
     }
@@ -127,54 +148,62 @@ impl Render for AppearancePage {
                     ThemeChoice::Dark => s::THEME_DARK,
                     ThemeChoice::System => s::THEME_AUTO,
                 };
-                div()
-                    .id(SharedString::from(format!(
-                        "appearance-theme-{}",
-                        choice.slug()
-                    )))
-                    .flex()
-                    .flex_col()
-                    .items_center()
-                    .gap(space::S8)
-                    .cursor_pointer()
-                    .child(
-                        // The chosen tile: a 2 px foreground ring (2.17
-                        // selected = foreground border).
-                        div()
-                            .p(RING)
-                            .rounded(TILE_RADIUS + RING * 2.)
-                            .border_2()
-                            .border_color(if on {
-                                k.label
-                            } else {
-                                gpui::transparent_black()
-                            })
-                            .child(
-                                div()
-                                    .w(TILE.0)
-                                    .h(TILE.1)
-                                    .rounded(TILE_RADIUS)
-                                    .overflow_hidden()
-                                    .border_1()
-                                    .border_color(k.separator)
-                                    .child(Self::picture(choice)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .n_body()
-                            .when(on, |d| d.font_weight(gpui::FontWeight::MEDIUM))
-                            .text_color(if on { k.label } else { k.secondary })
-                            .child(title),
-                    )
-                    .on_click(move |_, window, cx| {
-                        theme::set_theme_choice(choice);
-                        if saving {
-                            layout::save_theme(choice);
-                        }
-                        theme::apply_theme_choice(window, cx);
-                    })
-                    .into_any_element()
+                // A ghost button: a Tab stop with the focus ring, Space and
+                // Return choose, muted on hover (E3, C1-05).
+                crate::ui::native::row_button(
+                    SharedString::from(format!("appearance-theme-{}", choice.slug())),
+                    cx,
+                )
+                .w(tile_box().0)
+                .h(tile_box().1)
+                .p(space::S4)
+                .accessibility_label(title)
+                .child(
+                    div()
+                        .w_full()
+                        .flex()
+                        .flex_col()
+                        .items_center()
+                        .gap(space::S8)
+                        .child(
+                            // The chosen tile: a 2 px foreground ring (2.17
+                            // selected = foreground border).
+                            div()
+                                .p(RING)
+                                .rounded(TILE_RADIUS + RING * 2.)
+                                .border_2()
+                                .border_color(if on {
+                                    k.label
+                                } else {
+                                    gpui::transparent_black()
+                                })
+                                .child(
+                                    div()
+                                        .w(TILE.0)
+                                        .h(TILE.1)
+                                        .rounded(TILE_RADIUS)
+                                        .overflow_hidden()
+                                        .border_1()
+                                        .border_color(k.separator)
+                                        .child(Self::picture(choice)),
+                                ),
+                        )
+                        .child(
+                            div()
+                                .n_body()
+                                .when(on, |d| d.font_weight(gpui::FontWeight::MEDIUM))
+                                .text_color(if on { k.label } else { k.secondary })
+                                .child(title),
+                        ),
+                )
+                .on_click(move |_, window, cx| {
+                    theme::set_theme_choice(choice);
+                    if saving {
+                        layout::save_theme(choice);
+                    }
+                    theme::apply_theme_choice(window, cx);
+                })
+                .into_any_element()
             })
             .collect();
         let size = prefs::get().message_size;
