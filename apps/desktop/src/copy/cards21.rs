@@ -236,7 +236,6 @@ crate::copy! {
     EMBED_FAILED = "页面没有打开",
     EMBED_NOT_PAGE = "这个产出不是网页",
     // v11/pb-cards: the step of a working band (CARD21 §2).
-    BAND_STEP = "{n}/{total}",
     // v11/pb-cards: the notes scene.
     I_NOTES_OFFLINE = "成员不在线",
     I_NOTES_BUSY = "这一块不能操作",

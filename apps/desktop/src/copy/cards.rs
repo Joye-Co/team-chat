@@ -12,7 +12,7 @@ crate::copy! {
     TABLE_MORE = "展开其余 {n} 行",
     TABLE_LESS = "收起",
     LIST_TODO = "未开始",
-    LIST_IN_PROGRESS = "进行中",
+    LIST_IN_PROGRESS = "在做",
     LIST_DONE = "完成",
     LIST_FAILED = "失败",
     LIST_SKIPPED = "跳过",

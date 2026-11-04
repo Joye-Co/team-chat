@@ -51,8 +51,6 @@ const STEPS: &[(&str, Steps)] = &[
     ("state-card-tooltip", hover(900., 530., 1200)),
     // --- end t5-cards ---
     // --- v15/r5-cards ---
-    ("state-hover-sidebar", hover(120., 294., 200)),
-    ("state-focus-sidebar", keys(&["shift-tab"])),
     ("state-focus-page-list", keys(&["tab"])),
     ("state-focus-card-option", keys(&["tab"])),
     ("state-focus-picker", keys(&["tab"])),

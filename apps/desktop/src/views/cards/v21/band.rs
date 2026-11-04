@@ -319,26 +319,30 @@ pub fn words(ctx: &Ctx, base: (String, String)) -> (String, String) {
         } => (c::BAND_FAILED.into(), c::SEND_FAILED_NET.into()),
         CardState::SendFailed { .. } | CardState::Failed { .. } => (c::BAND_FAILED.into(), detail),
         CardState::Done { .. } => (c::BAND_DONE.into(), detail),
+        // One count rule (§2.12): the badge says 在做 done/total, like the bar
+        // under it; the detail says what the current step does.
         CardState::Executing { progress, .. } if !progress.waiting => {
-            (c::BAND_WORKING.into(), working_detail(progress))
+            let label = if progress.total > 0 {
+                fill(
+                    crate::copy::cards_v2::STRIP_WORKING_COUNT,
+                    &[
+                        ("n", &progress.done.to_string()),
+                        ("total", &progress.total.to_string()),
+                    ],
+                )
+            } else {
+                c::BAND_WORKING.into()
+            };
+            (label, working_detail(progress))
         }
         _ => base,
     }
 }
 
-/// The detail of a blue 处理中 band: the step `k/n` and what the step does.
+/// The detail of a working band: what the current step does (the count is
+/// in the badge).
 pub(crate) fn working_detail(p: &crate::views::cards::v2::state::Progress) -> String {
-    let mut parts = Vec::new();
-    if let Some(step) = p.step {
-        parts.push(fill(
-            c::BAND_STEP,
-            &[("n", &step.to_string()), ("total", &p.total.to_string())],
-        ));
-    }
-    if let Some(cur) = &p.current {
-        parts.push(cur.clone());
-    }
-    parts.join(" · ")
+    p.current.clone().unwrap_or_default()
 }
 
 fn poll_total(ctx: &Ctx) -> usize {
@@ -579,7 +583,7 @@ mod tests {
     use crate::views::cards::v2::state::Progress;
 
     #[test]
-    fn a_working_band_says_the_step_and_what_it_does() {
+    fn a_working_band_says_what_the_step_does_and_counts_in_the_badge() {
         let p = Progress {
             done: 0,
             total: 3,
@@ -587,7 +591,8 @@ mod tests {
             current: Some("Ledger 在补夹夹增长的数".into()),
             waiting: false,
         };
-        assert_eq!(working_detail(&p), "1/3 · Ledger 在补夹夹增长的数");
+        // The count is in the badge (在做 done/total), never a second count here.
+        assert_eq!(working_detail(&p), "Ledger 在补夹夹增长的数");
         let bare = Progress {
             step: None,
             current: None,

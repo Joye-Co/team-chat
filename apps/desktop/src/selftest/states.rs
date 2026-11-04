@@ -200,21 +200,7 @@ pub const SCENES: &[Scene] = &[
         },
     },
     // --- end t5-cards ---
-    // --- v15/r5-cards: hover and keyboard focus on rows (E2, E3) ---
-    Scene {
-        name: "state-hover-sidebar",
-        about: "main with the pointer on a sidebar row: the row hover (muted 50 %)",
-        start: Start::SignedIn,
-        setup: open_first_topic,
-        open: open_main,
-    },
-    Scene {
-        name: "state-focus-sidebar",
-        about: "main after Tab moves the keyboard focus into the sidebar: the focus ring on a row, apart from the selected row",
-        start: Start::SignedIn,
-        setup: open_first_topic,
-        open: open_main,
-    },
+    // --- v15/r5-cards: keyboard focus on list rows, card options and the picker (E3); the sidebar scenes are r1-kit's ---
     Scene {
         name: "state-focus-page-list",
         about: "group-v2 after Tab reaches the 话题 list: the focus ring on a list row",

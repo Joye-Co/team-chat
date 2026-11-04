@@ -107,9 +107,11 @@ pub fn fit(lead: &str, part: &str, max: f32) -> (String, String) {
 }
 
 /// The chip's text: quiet lead, strong part, cut to 320 pt minus the glyph and ×.
+/// [`width`] counts at 12 pt and the chip draws at 14, so the room is scaled; the
+/// lead then fits by itself and its "…" sits right before the part (no gap).
 fn chip_text(r: &DraftRef) -> (String, String) {
     let (lead, part) = label::split(&r.input.label, r.lead_chars);
-    fit(lead, part, 320.0 - 48.0)
+    fit(lead, part, (320.0 - 48.0) * 12.0 / 14.0)
 }
 
 /// One composer chip: `--sunken`, 12 pt, glyph, label on one line, `已更新` when the source
@@ -163,6 +165,8 @@ pub fn composer_chip(
                 .when(!lead.trim().is_empty(), |d| {
                     // The lead gives way to the part; its own ellipsis marks the cut, so
                     // no second "…" leaves a gap before the part.
+                    // `fit` already cut the lead to its room and ended it with "…";
+                    // the box keeps the text's own width, so the part follows it.
                     d.child(
                         div()
                             .min_w_0()
@@ -170,13 +174,7 @@ pub fn composer_chip(
                             .overflow_hidden()
                             .whitespace_nowrap()
                             .text_ellipsis()
-                            .child(
-                                lead.trim_end()
-                                    .trim_end_matches('…')
-                                    .trim_end_matches('·')
-                                    .trim_end()
-                                    .to_string(),
-                            ),
+                            .child(lead.trim_end().trim_end_matches('·').trim_end().to_string()),
                     )
                 })
                 // The part stays whole (`fit` already cut it); the lead gives way.
