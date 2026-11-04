@@ -616,9 +616,9 @@ impl RootView {
                 // Groups too: the first 群 replaces the welcome (§8.5).
                 // v12/fx-shell: Connection too: the toolbar subtitle says
                 // 连接已断开 · n 秒后重连 while it is down.
-                if changes.any(|c| {
-                    matches!(c, Change::Session | Change::Groups | Change::Connection)
-                }) {
+                if changes
+                    .any(|c| matches!(c, Change::Session | Change::Groups | Change::Connection))
+                {
                     cx.notify();
                 }
             }),

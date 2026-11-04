@@ -1,0 +1,17 @@
+{
+  "kind": "ClientFrame",
+  "valid": false,
+  "description": "fromAside names the answer message",
+  "value": {
+    "t": "send",
+    "rid": "r201",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "topicId": "01JBX0TOPIC0000000000000AD",
+    "clientMsgId": "01JBX0CMID00000000000000AG",
+    "body": "x",
+    "fromAside": {
+      "groupId": "01JBX0DM00000000000000000B",
+      "topicId": "01JC0SIDE00000000000000AS1"
+    }
+  }
+}

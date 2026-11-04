@@ -1,0 +1,32 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "an answered ask the author is carrying out",
+  "value": {
+    "v": 2,
+    "catalog": "tc.card/2.1",
+    "rev": 2,
+    "intent": "ask",
+    "title": "发版",
+    "fallback": "发版",
+    "blocks": [
+      {
+        "id": "t",
+        "type": "text",
+        "text": "发版失败：签名过期。"
+      }
+    ],
+    "status": "executing",
+    "ask": {
+      "from": [
+        "01JBX0OWNER0000000000000AA"
+      ]
+    },
+    "actions": [
+      {
+        "id": "ok",
+        "label": "好"
+      }
+    ]
+  }
+}

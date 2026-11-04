@@ -39,6 +39,7 @@ check!(
     Card,
     CreateFileRequest,
     CreateArtifactRequest,
+    MachineCreateArtifactRequest,
     AddArtifactVersionRequest,
     UpdateMemberRequest,
     UpdateGroupPrefsRequest,
@@ -64,7 +65,11 @@ check!(
     NotifySettings,
     UpdateNotifySettingsRequest,
     ApprovalPolicy,
-    UpdateApprovalPolicyRequest
+    UpdateApprovalPolicyRequest,
+    RecordDecisionRequest,
+    PutArtifactMediaRequest,
+    FileRef,
+    PutDeskNoteRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -109,14 +114,23 @@ const KINDS: &[(&str, RoundTrip)] = &[
     // V1 extensions
     ("TopicState", plain::<TopicState>),
     ("Card", validated::<Card>),
-    ("FileRef", plain::<FileRef>),
+    ("FileRef", validated::<FileRef>),
     ("FileMeta", plain::<FileMeta>),
     ("CreateFileRequest", validated::<CreateFileRequest>),
     ("CreateFileResponse", plain::<CreateFileResponse>),
     ("FileResponse", plain::<FileResponse>),
+    ("UploadPartResponse", plain::<UploadPartResponse>),
+    ("ArtifactEventsResponse", plain::<ArtifactEventsResponse>),
+    ("PutDeskNoteRequest", validated::<PutDeskNoteRequest>),
+    ("PutDeskNoteResponse", plain::<PutDeskNoteResponse>),
+    ("DeskNotesResponse", plain::<DeskNotesResponse>),
     ("Artifact", plain::<Artifact>),
     ("ArtifactVersion", plain::<ArtifactVersion>),
     ("CreateArtifactRequest", validated::<CreateArtifactRequest>),
+    (
+        "MachineCreateArtifactRequest",
+        validated::<MachineCreateArtifactRequest>,
+    ),
     (
         "AddArtifactVersionRequest",
         validated::<AddArtifactVersionRequest>,
@@ -197,6 +211,18 @@ const KINDS: &[(&str, RoundTrip)] = &[
     ),
     ("Device", plain::<Device>),
     ("DevicesResponse", plain::<DevicesResponse>),
+    // 1.1 gap fixes
+    ("RecordedDecision", plain::<RecordedDecision>),
+    ("RecordDecisionRequest", validated::<RecordDecisionRequest>),
+    ("RecordDecisionResponse", plain::<RecordDecisionResponse>),
+    (
+        "PutArtifactMediaRequest",
+        validated::<PutArtifactMediaRequest>,
+    ),
+    (
+        "PutArtifactMediaResponse",
+        plain::<PutArtifactMediaResponse>,
+    ),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -349,7 +375,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
             "welcome"
         ]
     );
-    assert_eq!(valid("Event", "type").len(), 17);
+    assert_eq!(valid("Event", "type").len(), 19);
     assert_eq!(valid("TransientEvent", "type").len(), 9);
 }
 
@@ -461,6 +487,19 @@ fn card_v2_readers_are_lenient() {
     ));
     assert_eq!(card.actions()[0].kind(), CardActionKind::Unknown);
     assert!(card.validate().is_err());
+
+    // A future block type keeps its type and fallbackText (CARD21 §6), also through a round trip.
+    let future: CardV2 = serde_json::from_str(
+        r#"{"v":2,"catalog":"tc.card/2.9","rev":1,"intent":"info","title":"t","fallback":"",
+          "blocks":[{"type":"text","id":"a","text":"x"},{"type":"timeline","id":"tl","fallbackText":"三月上线，四月推广","events":[1]}]}"#,
+    )
+    .unwrap();
+    assert_eq!(future.blocks[1], CardV2Block::Unknown);
+    assert_eq!(future.unknown_fallback(1), Some("三月上线，四月推广"));
+    assert_eq!(future.unknown_fallback(0), None);
+    let back: CardV2 = serde_json::from_value(serde_json::to_value(&future).unwrap()).unwrap();
+    assert_eq!(back.unknown_fallback(1), Some("三月上线，四月推广"));
+    assert_eq!(back.unknown[&1].type_name, "timeline");
 
     // A cardV2 that does not parse at all is dropped; the message and its v1 card stay.
     let m: Message = serde_json::from_str(

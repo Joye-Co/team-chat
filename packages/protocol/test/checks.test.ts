@@ -14,3 +14,9 @@ test("diagram source checks match protocol/checks/diagram-checks.json", () => {
     expect({ source: c.source.slice(0, 40), got: checkDiagramSource(c.source) as unknown }).toEqual({ source: c.source.slice(0, 40), got: want });
   }
 });
+
+test("normalizeGroupText collapses Unicode White_Space like Rust split_whitespace", async () => {
+  const { normalizeGroupText } = await import("../src/index.ts");
+  // Same vector as crates/chat-protocol/src/members.rs.
+  expect(normalizeGroupText("﻿前端\u0085　小组  \t")).toBe("﻿前端 小组");
+});

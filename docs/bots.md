@@ -90,7 +90,9 @@ await bot.start();
 - **Follow rules**: the bot follows a topic it created, posted in, was mentioned in, was added
   to `waitingOn` of, or became owner of, as the server does. `bot.setFollow(...)` changes it.
 - **Writes** wait for the connection and are resent after a reconnect (`send` is idempotent
-  by `clientMsgId`). Rate-limited writes are retried. A request fails with `timeout` after
+  by `clientMsgId`). Writes are paced on the client at 18 per second with bursts of 18
+  (`writeRate`; the server allows about 20 per member), so a burst of 50 sends lands in order.
+  Rate-limited writes are retried after the server's `retryAfterMs`. A request fails with `timeout` after
   `requestTimeoutMs` (60 s). Frames are checked against the protocol schemas before sending.
 - **Streaming**: `send` with `streaming: true`, `delta` frames batched every 100 ms, and a final
   `edit` with the full body and `streaming: false`. After a reconnect the writer sends the full
@@ -195,7 +197,10 @@ bot.onCardAnswer<{ choice: string; count: number }>(async (ctx) => {
 });
 ```
 
-The values come from the client: check them. `ctx.card` is the newest rev the SDK knows (after a
+The values come from the client: check them. On a private card (a non-public poll, an
+anonymous questionnaire) `ctx.anonymous` is true and `ctx.actorId` is `"anonymous"`
+(`ANONYMOUS_ACTOR`), not a member id: do not mention it or put it in `from` or `waitingOn`. A run
+such an answer starts has no `requestedBy` in the SDK's events. `ctx.card` is the newest rev the SDK knows (after a
 restart it reads the card from the topic history). The helpers read 2.0 values (`"o2"`) and 2.1
 values (`{value}`, `{values}`, `{value, other}`). The server takes only the first answer of an
 ask round and only from members that `ask.from` names.
@@ -205,7 +210,10 @@ their DM with the bot, in a topic whose `contextOf` names the source topic and t
 read up to. `onAside` gets these messages, @ or not (without an `onAside` handler they go to
 `onMention`). `ctx.aside` is the context and `ctx.source()` reads the source topic up to
 `uptoSeq`, oldest first. Answer with `ctx.reply`: it stays in the DM. Never post into the source
-topic from a side chat; the member does that with the suggestion button.
+topic from a side chat; the member does that with the suggestion button. A side chat opened before the bot's
+cursor (a first start that skipped history, or state of an older SDK) is found too: the SDK reads
+each DM group once from its start for side chat topics (`asideScan` in the state file), without
+running handlers, before it handles that group's newer events.
 
 **Page events.** A bot's 产出 page may send events back when its version declares them:
 `http.publishHtml({ ..., events: [{ name: "filter.pick", kind: "ask" }, { name: "report.flag" }] })`

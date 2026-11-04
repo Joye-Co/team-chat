@@ -1,0 +1,37 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "1.1: role approve marks the action that merges",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "ask",
+    "title": "合并 PR #61？",
+    "fallback": "Forge 改完了重连补发，请审一下。",
+    "ask": {
+      "from": [
+        "requester"
+      ]
+    },
+    "blocks": [
+      {
+        "type": "text",
+        "id": "why",
+        "text": "补发 3 条，没有重复。"
+      }
+    ],
+    "actions": [
+      {
+        "id": "merge",
+        "label": "合并",
+        "style": "primary",
+        "role": "approve"
+      },
+      {
+        "id": "changes",
+        "label": "要改",
+        "kind": "reject"
+      }
+    ]
+  }
+}

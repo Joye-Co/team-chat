@@ -611,11 +611,7 @@ fn render_image(
             .px(space::S12)
             .t_meta()
             .text_color(colors.text_3)
-            .child(ui::icon(
-                Sym::Image,
-                theme::icon::EMPTY,
-                colors.text_3,
-            ))
+            .child(ui::icon(Sym::Image, theme::icon::EMPTY, colors.text_3))
             .child(text)
     };
     match ctx

@@ -90,7 +90,9 @@ curl -sS "$HOOK_URL" \
    Content type = `application/json`, Secret = `secret`, SSL verification on.
 3. Choose "Let me select individual events": Pull requests, Pull request reviews, Issues, and for
    CI either Check suites or Workflow runs (both work; with both, a GitHub Actions run shows as
-   two lines on the card).
+   two lines on the card). Do not select Check runs: `check_suite` and `workflow_run` are the CI
+   sources, each check run is already in its suite, and the adapter ignores `check_run`
+   deliveries (no CI line).
 4. Map GitHub logins to members, so reviewers and authors can be put in `waitingOn` and as the
    topic owner:
 
@@ -117,7 +119,8 @@ dropped (`ping` too).
   title and owner stay as they are.
 - **One status card per PR**, posted once and then edited: state (opened, draft, ready for review,
   review requested, approved, changes requested, merged, closed), reviewers and the CI results of
-  the current head commit (`check_suite` and `workflow_run` with action `completed`). New commits
+  the current head commit (`check_suite` and `workflow_run` with action `completed`;
+  `check_run` is not subscribed and is ignored). New commits
   (`synchronize`) clear the CI lines; results for an older commit are ignored. If someone deletes
   the card, the next event posts a new one in the same topic.
 - **Topic status follows the PR**. The adapter sends a change only when the computed value

@@ -739,6 +739,87 @@ impl LivePane {
         )
     }
 
+    /// The file, link and 产出 a criterion's proof points at; each opens it.
+    fn evidence_chips(
+        &self,
+        run: &BotRunSummary,
+        index: usize,
+        item: &AcceptanceItem,
+        cx: &App,
+    ) -> Vec<AnyElement> {
+        let k = theme::colors(cx);
+        let chip = |id: String, icon: Sym, label: String| {
+            div()
+                .id(SharedString::from(id))
+                .flex_none()
+                .max_w(px(160.))
+                .flex()
+                .items_center()
+                .gap(space::S4)
+                .px(space::S6)
+                .rounded(theme::radius::SM)
+                .bg(k.sunken)
+                .hover(|d| d.text_color(k.ink))
+                .child(ui::icon(icon, theme::icon::CHIP, k.ink_3))
+                .child(div().min_w_0().one_line().child(label))
+        };
+        let mut out = Vec::new();
+        if let Some(file) = item.evidence_file.clone() {
+            let provider = self.services.provider.clone();
+            let (g, t) = (run.group_id.clone(), run.topic_id.clone());
+            out.push(
+                chip(
+                    format!("live-evidence-file-{index}"),
+                    Sym::Attach,
+                    file.name.clone(),
+                )
+                .on_click(move |_, _, cx| {
+                    crate::views::files::open_file(
+                        &provider,
+                        &g,
+                        &t,
+                        &file,
+                        crate::views::files::OpenAction::Open,
+                        cx,
+                    )
+                })
+                .into_any_element(),
+            );
+        }
+        if let Some(url) = item.evidence_url.clone() {
+            out.push(
+                chip(
+                    format!("live-evidence-url-{index}"),
+                    Sym::OpenExternal,
+                    c::LIVE_EVIDENCE_LINK.to_string(),
+                )
+                .on_click(move |_, _, cx| cx.open_url(&url))
+                .into_any_element(),
+            );
+        }
+        if let Some((id, version, title)) = item.evidence_artifact.clone() {
+            let nav = self.services.nav.clone();
+            let label = if title.is_empty() {
+                c::LIVE_EVIDENCE_ARTIFACT.to_string()
+            } else {
+                title
+            };
+            out.push(
+                chip(
+                    format!("live-evidence-artifact-{index}"),
+                    Sym::Document,
+                    label,
+                )
+                .on_click(move |_, _, cx| {
+                    let id = id.clone();
+                    nav.update(cx, |nav, cx| nav.open_artifact(id, Some(version), cx))
+                })
+                .into_any_element(),
+            );
+        }
+        out
+    }
+
     fn acceptance(
         &self,
         run: &BotRunSummary,
@@ -810,6 +891,7 @@ impl LivePane {
                                 .clone()
                                 .map(|e| div().min_w_0().one_line().child(e)),
                         )
+                        .children(self.evidence_chips(run, i, item, cx))
                         .child(status),
                 )
         });
@@ -1404,6 +1486,7 @@ impl Render for LivePane {
             self.replay = None;
         }
         let bot = member_name(&self.services, &run.bot_id);
+        crate::selftest::drawn::mark("live", format!("{bot} {}", run.id));
         let me = self.services.me();
         let held = screen.paused_by.is_some();
         let held_by_me = held && screen.paused_by == me;

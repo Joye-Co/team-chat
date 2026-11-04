@@ -1,0 +1,8 @@
+{
+  "kind": "UploadPartResponse",
+  "valid": true,
+  "value": {
+    "part": 2,
+    "size": 52428800
+  }
+}

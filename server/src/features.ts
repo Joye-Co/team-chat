@@ -10,3 +10,4 @@ import "./reactions";
 import "./cards2";
 import "./sidechat";
 import "./settings";
+import "./desknote";

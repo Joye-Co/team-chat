@@ -1,0 +1,9 @@
+{
+  "kind": "ErrorBody",
+  "valid": true,
+  "value": {
+    "code": "rate_limited",
+    "message": "too many frames",
+    "retryAfterMs": 50
+  }
+}

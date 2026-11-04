@@ -1,0 +1,7 @@
+{
+  "kind": "PutDeskNoteResponse",
+  "valid": true,
+  "value": {
+    "seq": 73
+  }
+}

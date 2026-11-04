@@ -15,6 +15,11 @@ use serde_json::Value;
 
 /// Max bytes of one file upload: 100 MB (decimal), the Workers request body limit.
 pub const MAX_FILE_BYTES: u64 = 100_000_000;
+/// Max bytes of one file (1.1): a file over [`MAX_FILE_BYTES`] uploads in parts. Equal to
+/// `MEDIA_MAX_BYTES`; a larger file is refused at `POST /v1/files`, before any upload.
+pub const MAX_UPLOAD_BYTES: u64 = 2_000_000_000;
+/// Bytes of each part of a multipart upload but the last (50 MiB).
+pub const UPLOAD_PART_BYTES: u64 = 52_428_800;
 /// Max bytes of an avatar image.
 pub const MAX_AVATAR_BYTES: u64 = 1_048_576;
 pub const MAX_ARTIFACT_FILES: usize = 500;
@@ -92,6 +97,7 @@ impl FileMeta {
             height: self.height,
             sha256: self.sha256.clone(),
             media: None,
+            source: None,
         }
     }
 }
@@ -132,8 +138,8 @@ impl CreateFileRequest {
             check_id("topicId", t)?;
         }
         check_chars("name", &self.name, 1, MAX_FILE_NAME_CHARS)?;
-        if self.size > MAX_FILE_BYTES {
-            return fail("size", format!("at most {MAX_FILE_BYTES} bytes"));
+        if self.size > MAX_UPLOAD_BYTES {
+            return fail("size", format!("at most {MAX_UPLOAD_BYTES} bytes"));
         }
         check_mime("mime", &self.mime)?;
         check_sha256("sha256", &self.sha256)?;
@@ -146,8 +152,44 @@ impl CreateFileRequest {
 #[serde(rename_all = "camelCase")]
 pub struct CreateFileResponse {
     pub file: FileMeta,
-    /// Absolute URL for `PUT` of the raw content (same bearer token).
+    /// Absolute URL for `PUT` of the raw content (same bearer token). Files over
+    /// [`MAX_FILE_BYTES`] use `multipart`.
     pub upload_url: String,
+    /// 1.1: set when the file is over [`MAX_FILE_BYTES`].
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub multipart: Option<MultipartUpload>,
+}
+
+/// 1.1: how a file over [`MAX_FILE_BYTES`] uploads. `PUT <partUrl>/<n>` sends part n
+/// (1..=parts) of exactly `partBytes` bytes (the last one the rest); then `POST <completeUrl>`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultipartUpload {
+    pub part_bytes: u64,
+    pub parts: u32,
+    /// Absolute URL; append `/<n>`.
+    pub part_url: String,
+    pub complete_url: String,
+}
+
+impl MultipartUpload {
+    /// Bytes of part `n` (1-based) of a file of `size` bytes.
+    pub fn part_size(&self, size: u64, n: u32) -> u64 {
+        self.part_bytes
+            .min(size.saturating_sub(u64::from(n.saturating_sub(1)) * self.part_bytes))
+    }
+}
+
+/// `PUT /v1/files/:id/parts/:n` (1.1)
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UploadPartResponse {
+    pub part: u32,
+    pub size: u64,
 }
 
 /// `PUT /v1/files/:id/content` and `GET /v1/files/:id`
@@ -245,6 +287,13 @@ pub struct ArtifactVersion {
         skip_serializing_if = "Option::is_none"
     )]
     pub data_rev: Option<u64>,
+    /// 1.1: the author's preview card text and figures.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl ArtifactVersion {
@@ -383,6 +432,70 @@ fn check_version_extras(media: Option<&MediaInfo>, data: Option<&Value>) -> Vali
     Ok(())
 }
 
+/// 1.1: one figure of a 产出 preview card (`38 人`, `+12`).
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactMetric {
+    pub label: String,
+    pub value: String,
+    /// A change beside the value, as text.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub delta: Option<String>,
+}
+
+pub const MAX_ARTIFACT_METRICS: usize = 6;
+
+/// 1.1: what the author says a version shows, for preview cards. Readers use it before
+/// anything they scrape from the HTML.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactPreview {
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub title: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub summary: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub metrics: Option<Vec<ArtifactMetric>>,
+}
+
+fn check_preview(p: Option<&ArtifactPreview>) -> Validation {
+    let Some(p) = p else { return Ok(()) };
+    if let Some(t) = &p.title {
+        check_chars("preview.title", t, 1, 200)?;
+    }
+    if let Some(t) = &p.summary {
+        check_chars("preview.summary", t, 1, 500)?;
+    }
+    let metrics = p.metrics.as_deref().unwrap_or_default();
+    if metrics.len() > MAX_ARTIFACT_METRICS {
+        return fail("preview.metrics", "at most 6 figures");
+    }
+    for m in metrics {
+        check_chars("preview.metrics.label", &m.label, 1, 40)?;
+        check_chars("preview.metrics.value", &m.value, 1, 40)?;
+        if let Some(d) = &m.delta {
+            check_chars("preview.metrics.delta", d, 1, 40)?;
+        }
+    }
+    Ok(())
+}
+
 /// A file of a new version: an uploaded (`ready`) file of the same group, at a path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -457,6 +570,13 @@ pub struct CreateArtifactRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub run_id: Option<String>,
+    /// 1.1: the author's preview card text and figures.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl CreateArtifactRequest {
@@ -467,6 +587,7 @@ impl CreateArtifactRequest {
         check_version_input(&self.entry, &self.files, self.note.as_deref())?;
         check_events(self.events.as_deref())?;
         check_version_extras(self.media.as_ref(), self.data.as_ref())?;
+        check_preview(self.preview.as_ref())?;
         self.run_id
             .as_deref()
             .map_or(Ok(()), |r| check_id("runId", r))
@@ -517,6 +638,13 @@ pub struct AddArtifactVersionRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub run_id: Option<String>,
+    /// 1.1: the author's preview card text and figures.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub preview: Option<ArtifactPreview>,
 }
 
 impl AddArtifactVersionRequest {
@@ -524,10 +652,55 @@ impl AddArtifactVersionRequest {
         check_version_input(&self.entry, &self.files, self.note.as_deref())?;
         check_events(self.events.as_deref())?;
         check_version_extras(self.media.as_ref(), self.data.as_ref())?;
+        check_preview(self.preview.as_ref())?;
         if let Some(r) = &self.run_id {
             check_id("runId", r)?;
         }
         self.title.as_deref().map_or(Ok(()), check_title)
+    }
+}
+
+/// `POST /v1/machine/runs/:id/artifacts` (1.1, `chat-run artifact create`): a 产出 of the run's
+/// runner member in the run's topic; the run gives the group, topic and run id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MachineCreateArtifactRequest {
+    pub title: String,
+    pub kind: ArtifactKind,
+    pub entry: String,
+    pub files: Vec<VersionFileInput>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub note: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub events: Option<Vec<ArtifactEventDecl>>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub media: Option<MediaInfo>,
+    #[serde(
+        default,
+        deserialize_with = "any_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub data: Option<Value>,
+}
+
+impl MachineCreateArtifactRequest {
+    pub fn validate(&self) -> Validation {
+        check_chars("title", &self.title, 1, MAX_TITLE_CHARS)?;
+        check_version_input(&self.entry, &self.files, self.note.as_deref())?;
+        check_events(self.events.as_deref())?;
+        check_version_extras(self.media.as_ref(), self.data.as_ref())
     }
 }
 
@@ -690,6 +863,13 @@ pub enum ArtifactReplyCode {
 pub struct ArtifactReplyError {
     pub code: ArtifactReplyCode,
     pub message: String,
+    /// 1.1: why, as a short id (`run.ended`: no run of the member answers the page).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub reason: Option<String>,
 }
 
 /// `{ t: "artifact.reply" }` (1.1): the bot answers a page `ask` (private to the asker).
@@ -733,6 +913,9 @@ impl ArtifactReplyFrame {
                 return fail("error.code", "declined or failed");
             }
             check_chars("error.message", &e.message, 0, 200)?;
+            if let Some(r) = &e.reason {
+                check_chars("error.reason", r, 1, 64)?;
+            }
         }
         if self
             .payload
@@ -810,6 +993,44 @@ pub struct ArtifactReplyTransient {
     pub error: Option<ArtifactReplyError>,
 }
 
+/// 1.1: a stored page event of a 产出 (页面里的回应), as `GET /v1/artifacts/:id/events` lists it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactPageEvent {
+    pub event_id: String,
+    pub artifact_id: String,
+    pub version: u32,
+    pub name: String,
+    pub kind: ArtifactEventKind,
+    /// Missing on events stored before 1.1 kept payloads.
+    #[serde(
+        default,
+        deserialize_with = "any_value",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub payload: Option<Value>,
+    pub actor_id: String,
+    pub at: Millis,
+    /// The version's bot answered the ask.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub replied: Option<bool>,
+}
+
+/// `GET /v1/artifacts/:id/events?before=<eventId>&limit=` (1.1): newest first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArtifactEventsResponse {
+    pub events: Vec<ArtifactPageEvent>,
+    pub has_more: bool,
+}
+
+/// Most events one `GET /v1/artifacts/:id/events` returns.
+pub const MAX_ARTIFACT_EVENTS_PAGE: u32 = 200;
+
 /// `GET /v1/artifacts/:id/versions/:v/data` (group members).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -849,4 +1070,25 @@ impl PutArtifactDataRequest {
             .as_deref()
             .map_or(Ok(()), |c| check_id("cause", c))
     }
+}
+
+/// `PUT /v1/artifacts/:id/versions/:v/media` (the version's creator): the media of a version
+/// with its preview, sent after the upload. Stored as `artifact.previewReady`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutArtifactMediaRequest {
+    pub media: MediaInfo,
+}
+
+impl PutArtifactMediaRequest {
+    pub fn validate(&self) -> Validation {
+        check_version_extras(Some(&self.media), None)
+    }
+}
+
+/// Answer of `PUT /v1/artifacts/:id/versions/:v/media`: the version with the new media.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PutArtifactMediaResponse {
+    pub version: ArtifactVersion,
 }

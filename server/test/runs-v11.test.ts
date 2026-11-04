@@ -6,7 +6,8 @@ import { MachineDownFrame } from "@chat/protocol";
 import { afterAll, describe, expect, it } from "vitest";
 import { STALL_MS, TEXT } from "../src/bots/dispatch";
 import type { BotsEnv } from "../src/bots/env";
-import { ACK_EMOJI, doneCard, prRefs, testCounts } from "../src/bots/proof";
+import { ACK_EMOJI } from "@chat/protocol";
+import { doneCard, prRefs, testCounts } from "../src/bots/proof";
 import { BASE, Client, type TestMember, api, clientMsgId, createGroup, createMember, protocolViolations, waitUntil } from "./helpers";
 
 const benv = env as unknown as BotsEnv;
@@ -143,6 +144,9 @@ describe("done card rules", () => {
     expect(testCounts(" 485 pass\n 0 fail")).toEqual({ passed: 485, failed: 0 });
     expect(testCounts("Tests  33 passed (33)")).toEqual({ passed: 33, failed: 0 });
     expect(testCounts("all good")).toBeNull();
+    expect(testCounts("Tests  12 passed | 1 failed | 2 skipped (15)")).toEqual({ passed: 12, failed: 1, skipped: 2 });
+    const card = doneCard({ runId: "r", result: "做完了\n12 passed, 1 failed", prs: [], artifacts: [], acceptance: [] });
+    expect(card?.blocks).toContainEqual(expect.objectContaining({ type: "evidence", id: "tests", state: "fail", tests: { passed: 12, failed: 1 } }));
     expect(prRefs("see https://github.com/a/b/pull/7 and https://github.com/a/b/pull/7, https://github.com/c/d/pull/9")).toEqual([
       { url: "https://github.com/a/b/pull/7", repo: "a/b", number: 7 },
       { url: "https://github.com/c/d/pull/9", repo: "c/d", number: 9 },
@@ -158,6 +162,30 @@ describe("done card rules", () => {
 });
 
 describe("1.1 runs", () => {
+  it("tell a CLI on a machine that reads acceptance blocks how to write them", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["acceptance"]);
+    const { c } = await Client.connect(w.human.token);
+    const sent = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev ship it", mentions: [w.bot.id] });
+    const assign = await d.next((f) => f.t === "run.assign" && f.topicId === sent.message.topicId);
+    expect(assign.prompt).toContain("```acceptance");
+    expect(assign.prompt).toContain("At most 20 items");
+    d.send({ t: "run.accept", runId: assign.runId });
+    // What the daemon parses from the CLI's block becomes the run's 验收标准.
+    const items = [{ text: "Tests pass", state: "pass", evidence: { text: "cargo test: 42 passed" } }];
+    d.event(assign.runId, { type: "acceptance", items });
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === assign.runId && e.data.run.acceptance);
+    expect((await api(`/v1/runs/${assign.runId}`, { token: w.human.token })).body.acceptance).toEqual(items);
+    // A daemon without the feature does not get the rule.
+    const old = await Daemon.connect(w.machineToken, []);
+    d.close();
+    const sent2 = await c.ok({ t: "send", groupId: w.gid, clientMsgId: clientMsgId(), body: "@dev again", mentions: [w.bot.id] });
+    const assign2 = await old.next((f) => f.t === "run.assign" && f.topicId === sent2.message.topicId);
+    expect(assign2.prompt).not.toContain("```acceptance");
+    c.close();
+    old.close();
+  });
+
   it("take acceptance criteria from the run event and from the run's bot, and show them with 产出 in the done card", async () => {
     const w = await world();
     const d = await Daemon.connect(w.machineToken, ["acceptance"]);
@@ -287,6 +315,162 @@ describe("1.1 runs", () => {
     expect(stopped.body.status).toBe("cancelled");
     expect(stopped.body.pausedBy).toBeUndefined();
     expect((await pause(w.human)).status).toBe(409);
+    c.close();
+    d.close();
+  });
+
+  it("clear pausedBy when the daemon reports the CLI going on by itself", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["pause"]);
+    const { c } = await Client.connect(w.human.token);
+    const { runId } = await startRun(w, c, d);
+    const paused = await api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} });
+    expect(paused.body).toMatchObject({ pausedBy: w.human.id });
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    // The daemon restarted the CLI: it goes on without a resume from the server.
+    const seq = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, seq);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && !e.data.run.pausedBy && e.data.run.updatedAt > paused.body.updatedAt);
+    const got = await api(`/v1/runs/${runId}`, { token: w.human.token });
+    expect(got.status).toBe(200);
+    expect(got.body.pausedBy).toBeUndefined();
+    // It can be taken over again.
+    expect((await api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} })).status).toBe(200);
+    c.close();
+    d.close();
+  });
+
+  it("keep a newer pause when the paused: false of an earlier resume arrives late (SB-16)", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["pause"]);
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await startRun(w, c, d);
+    const pause = () => api(`/v1/runs/${runId}/pause`, { token: w.human.token, body: {} });
+    const resume = () => api(`/v1/runs/${runId}/resume`, { token: w.human.token, body: {} });
+    expect((await pause()).status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    expect((await resume()).status).toBe(200);
+    await d.next((f) => f.t === "run.resume");
+    // A second pause before the daemon reports the first resume.
+    const again = await pause();
+    expect(again.status).toBe(200);
+    await d.next((f) => f.t === "run.pause");
+    // The daemon's answer to the resume arrives now, then its answer to the new pause.
+    const late = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, late);
+    const got = await api(`/v1/runs/${runId}`, { token: w.human.token });
+    expect(got.body.pausedBy).toBe(w.human.id);
+    const seq = d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    await d.acked(runId, seq);
+    // Still paused: no stall, and the requester can hand it back.
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state) => {
+      state.storage.sql.exec("UPDATE runs SET last_event_at = ? WHERE id = ?", Date.now() - STALL_MS - 1000, runId);
+    });
+    await runInDurableObject(deskOf(w.bot.id), (o) => (o as unknown as { alarm(): Promise<void> }).alarm());
+    expect(botMessages(c, topicId, w.bot.id).some((m) => m.body === TEXT.stalled)).toBe(false);
+    const back = await resume();
+    expect(back.status, JSON.stringify(back.body)).toBe(200);
+    expect(back.body.pausedBy).toBeUndefined();
+    // After the daemon took every pause, a paused: false clears pausedBy again.
+    expect((await pause()).status).toBe(200);
+    d.event(runId, { type: "paused", paused: true, by: w.human.id });
+    const on = d.event(runId, { type: "paused", paused: false });
+    await d.acked(runId, on);
+    expect((await api(`/v1/runs/${runId}`, { token: w.human.token })).body.pausedBy).toBeUndefined();
+    c.close();
+    d.close();
+  });
+
+  it("retry an ended run with the same request, for the requester or an owner, audited", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, []);
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await startRun(w, c, d);
+    const retry = (m: TestMember, id = runId) => api(`/v1/runs/${id}/retry`, { token: m.token, body: {} });
+    // Not while it runs.
+    expect((await retry(w.human)).status).toBe(409);
+    const seq = d.done(runId, { status: "failed", error: "tests failed" });
+    await d.acked(runId, seq);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === runId && e.data.run.status === "failed");
+    expect((await retry(w.other)).status).toBe(403);
+    expect((await retry(w.bot)).status).toBe(403);
+    const again = await retry(w.human);
+    expect(again.status, JSON.stringify(again.body)).toBe(200);
+    expect(again.body).toMatchObject({ retryOf: runId, topicId, requestedBy: w.human.id });
+    expect(again.body.id).not.toBe(runId);
+    const assign = await d.next((f) => f.t === "run.assign" && f.runId === again.body.id);
+    expect(assign.prompt).toContain("@dev ship it");
+    const got = await api(`/v1/runs/${again.body.id}`, { token: w.human.token });
+    expect(got.body.retryOf).toBe(runId);
+    // One active run per topic: no second retry while the first one runs.
+    expect((await retry(w.owner)).status).toBe(409);
+    const audits = await audited("run.retry", runId);
+    expect(audits.results.map((r) => r.actor_id)).toEqual([w.human.id]);
+    // An owner retries too, once the retry ended.
+    d.send({ t: "run.accept", runId: again.body.id });
+    const seq2 = d.done(again.body.id, { status: "failed", error: "again" });
+    await d.acked(again.body.id, seq2);
+    await c.waitEvent((e) => e.type === "run.updated" && e.data.run.id === again.body.id && e.data.run.status === "failed");
+    // A run made before requests were kept: the request is read from its message.
+    await runInDurableObject(deskOf(w.bot.id), async (_o, state) => {
+      state.storage.sql.exec("DELETE FROM meta WHERE key = ?", `request:${runId}`);
+    });
+    const third = await retry(w.owner, runId);
+    expect(third.status, JSON.stringify(third.body)).toBe(200);
+    expect(third.body).toMatchObject({ retryOf: runId, requestedBy: w.human.id });
+    const assign3 = await d.next((f) => f.t === "run.assign" && f.runId === third.body.id);
+    expect(assign3.prompt).toContain("@dev ship it");
+    c.close();
+    d.close();
+  });
+
+  it("let a run's daemon upload files and make 产出 as the runner member, shown as proof in the done card", async () => {
+    const w = await world();
+    const d = await Daemon.connect(w.machineToken, ["output"]);
+    const { c } = await Client.connect(w.human.token);
+    const { topicId, runId } = await startRun(w, c, d);
+    const page = new TextEncoder().encode("<!doctype html><p>看板</p>");
+    const sha = async (b: Uint8Array) => [...new Uint8Array(await crypto.subtle.digest("SHA-256", b))].map((x) => x.toString(16).padStart(2, "0")).join("");
+    const put = (token: string, bytes: Uint8Array, hash: string, id = runId) =>
+      SELF.fetch(`${BASE}/v1/machine/runs/${id}/files`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${token}`, "content-type": "text/html", "content-length": String(bytes.length), "x-file-name": encodeURIComponent("首页.html"), "x-file-sha256": hash },
+        body: bytes,
+      });
+    const post = (path: string, body: unknown, token = w.machineToken) =>
+      SELF.fetch(`${BASE}/v1/machine/runs/${runId}${path}`, { method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body) });
+
+    // A wrong hash stores nothing; another machine cannot write for this run.
+    expect((await put(w.machineToken, page, "0".repeat(64))).status).toBe(400);
+    const other = await api("/v1/machines", { token: w.owner.token, body: { name: "other", labels: ["x"] } });
+    expect((await put(other.body.token, page, await sha(page))).status).toBe(404);
+    const up = await put(w.machineToken, page, await sha(page));
+    expect(up.status).toBe(200);
+    const file = (await up.json()) as any;
+    expect(file).toMatchObject({ name: "首页.html", status: "ready", createdBy: w.bot.id, topicId, groupId: w.gid, mime: "text/html" });
+
+    const made = await post("/artifacts", { title: "看板", kind: "html", entry: "index.html", files: [{ path: "index.html", fileId: file.id }] });
+    expect(made.status, await made.clone().text()).toBe(200);
+    const art = (await made.json()) as any;
+    expect(art.artifact).toMatchObject({ topicId, createdBy: w.bot.id });
+    expect(art.version).toMatchObject({ version: 1, runId });
+    const v2 = await post(`/artifacts/${art.artifact.id}/versions`, { entry: "index.html", files: [{ path: "index.html", fileId: file.id }], note: "第二版" });
+    expect(v2.status, await v2.clone().text()).toBe(200);
+    expect(((await v2.json()) as any).version).toMatchObject({ version: 2, runId });
+    // The writes are the member's, through the machine.
+    const audit = await env.DB.prepare("SELECT actor_id, credential_id FROM audit WHERE action = 'artifact.create' AND target = ?").bind(art.artifact.id).first<any>();
+    expect(audit).toMatchObject({ actor_id: w.bot.id });
+    expect(audit.credential_id).toMatch(/^machine:/);
+
+    const seq = d.done(runId, { status: "succeeded", resultText: "看板做好了。" });
+    await d.acked(runId, seq);
+    const card = await waitUntil(() => botMessages(c, topicId, w.bot.id).find((m) => m.cardV2), 5000, "done card");
+    expect(card.cardV2.blocks).toContainEqual({ type: "ref", id: "artifact-1", label: "看板（第 2 版）", target: { kind: "artifact", artifactId: art.artifact.id, version: 2 } });
+    // An ended run writes nothing more.
+    const late = await put(w.machineToken, page, await sha(page));
+    expect(late.status).toBe(409);
+    expect(((await late.json()) as any).error.reason).toBe("run.ended");
     c.close();
     d.close();
   });

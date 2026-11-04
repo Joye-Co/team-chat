@@ -1,0 +1,28 @@
+{
+  "kind": "MachineDownFrame",
+  "valid": true,
+  "description": "a vote of a counts-only poll: no voter, no value, the tally",
+  "value": {
+    "t": "run.answer",
+    "runId": "01JBX0RUN000000000000000AU",
+    "inputId": "in-9",
+    "source": {
+      "kind": "card",
+      "messageId": "01JBX0MSG000000000000000AE",
+      "askId": "where",
+      "answerId": "01JC0AN0000000000000000002",
+      "rev": 1
+    },
+    "blockId": "where",
+    "event": "choice.submit",
+    "actor": {
+      "id": "anonymous",
+      "name": "anonymous"
+    },
+    "eventId": "01JC0EV0000000000000000003",
+    "tally": {
+      "a": 2,
+      "b": 1
+    }
+  }
+}

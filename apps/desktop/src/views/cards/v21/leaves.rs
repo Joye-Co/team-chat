@@ -332,11 +332,10 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
         if live && !dimmed {
             let (form, block, option) = (ctx.form.clone(), id.clone(), oid.clone());
             let node_ptr = PickTarget::of(node);
-            row = row
-                .on_click(move |_, _, cx| {
-                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                    node_ptr.after(&block, cx);
-                });
+            row = row.on_click(move |_, _, cx| {
+                form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                node_ptr.after(&block, cx);
+            });
         }
         col = col.child(row);
         if on && oid == form21::OTHER {
@@ -618,11 +617,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     })
                 })
                 .child(ui::icon(
-                    if up {
-                        Sym::ChevronUp
-                    } else {
-                        Sym::ChevronDown
-                    },
+                    if up { Sym::ChevronUp } else { Sym::ChevronDown },
                     px(14.),
                     if can { k.ink_2 } else { k.ink_3 },
                 ))
@@ -737,10 +732,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let changed = order != initial;
     let mut out = div().flex().flex_col().gap(space::S8).child(col);
     if live {
-        let mut line = div()
-            .flex()
-            .items_center()
-            .gap(space::S8);
+        let mut line = div().flex().items_center().gap(space::S8);
         if changed {
             let (form, block, initial, target) = (
                 ctx.form.clone(),
@@ -890,9 +882,9 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .text_color(if on { nk.on_accent } else { nk.label })
             .when(live, |el| {
                 el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
-                        target.after(&block, cx);
-                    })
+                    form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
+                    target.after(&block, cx);
+                })
             })
             .child(n.to_string())
     }));
@@ -1083,9 +1075,11 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                             )
                         }),
                 )
-                .child(
-                    b20::option_title(&o.label, o.recommended.unwrap_or(false), cx),
-                )
+                .child(b20::option_title(
+                    &o.label,
+                    o.recommended.unwrap_or(false),
+                    cx,
+                ))
         }));
     framed(node, b, grid.into_any_element(), cx)
 }
@@ -1299,9 +1293,9 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .justify_center()
             .when(live, |el| {
                 el.on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                        target.after(&block, cx);
-                    })
+                    form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
+                    target.after(&block, cx);
+                })
             })
             .child(
                 b20::small(div())
@@ -1444,15 +1438,14 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .w(px(16.))
                 .flex()
                 .justify_center()
-                .when(on, |el| el.child(Sym::Check.inline().text_color(n_ink.label)))
+                .when(on, |el| {
+                    el.child(Sym::Check.inline().text_color(n_ink.label))
+                })
                 .into_any_element()
         } else {
-            crate::ui::native::NativeRadio::new(
-                eid(node, format!("poll-{id}-{}-c", o.id)),
-                on,
-            )
-            .disabled(!can)
-            .into_any_element()
+            crate::ui::native::NativeRadio::new(eid(node, format!("poll-{id}-{}-c", o.id)), on)
+                .disabled(!can)
+                .into_any_element()
         };
         col = col.child(
             div()
@@ -1594,7 +1587,11 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
         let rec = o.recommended.unwrap_or(false);
         let pick = b20::option_button(
             eid(node, format!("cmp-{id}-{}", o.id)),
-            if on { c::COMPARE_CHOSEN } else { c::COMPARE_CHOOSE },
+            if on {
+                c::COMPARE_CHOSEN
+            } else {
+                c::COMPARE_CHOOSE
+            },
             rec,
             on,
             live,
@@ -1618,7 +1615,9 @@ pub fn compare(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) 
                         .flex()
                         .flex_col()
                         .gap(space::S6)
-                        .child(b20::option_title(&o.label, rec, cx).font_weight(FontWeight::SEMIBOLD))
+                        .child(
+                            b20::option_title(&o.label, rec, cx).font_weight(FontWeight::SEMIBOLD),
+                        )
                         .children(lines(&o.pros, "+", k.ok_ink))
                         .children(lines(&o.cons, "−", k.ink_3))
                         .children(kids)
@@ -2060,6 +2059,22 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
     let declared: Vec<String> = b.base().map(|x| x.events().to_vec()).unwrap_or_default();
     let state = folder(ctx, artifact_id, *version, cx);
     let shown = embed_body(&state, detail.is_some());
+    // A 产出 that is not a web page is framed as a file: its kind, no sandbox and no page
+    // actions (CARD21 §3 embed).
+    let file = match (&state, shown) {
+        (Some(Ok(f)), EmbedBody::NotPage) => {
+            use crate::views::media;
+            Some(media::file_kind(&f.entry, media::mime_for(&f.entry)))
+        }
+        _ => None,
+    };
+    crate::selftest::drawn::mark(
+        "embed-frame",
+        format!(
+            "{id}:{}",
+            file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+        ),
+    );
     let body: AnyElement = match (state, shown) {
         (Some(Ok(f)), EmbedBody::Page) => {
             // inc-integrate: the 产出 page host owns the bridge (capabilities by author,
@@ -2173,7 +2188,11 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 .bg(k.raised)
                 .border_b_1()
                 .border_color(k.line)
-                .child(ui::icon(Sym::Document, px(14.), k.ink_3))
+                .child(ui::icon(
+                    file.map_or(Sym::Document, crate::views::media::MediaKind::icon),
+                    px(14.),
+                    k.ink_3,
+                ))
                 .child(
                     b20::small(div())
                         .min_w(px(0.))
@@ -2189,26 +2208,27 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .text_color(k.ink_3)
                         .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
                 )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(k.ink_3)
-                        .child(format!("· {}", c::EMBED_KIND)),
-                )
-                .child(
-                    div()
-                        .ml_auto()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .text_color(k.ink_3)
-                        .child(ui::icon(Sym::Shield, px(12.), k.ink_3))
-                        .child(c::EMBED_SANDBOX),
-                )
+                .child(div().flex_none().text_color(k.ink_3).child(format!(
+                    "· {}",
+                    file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+                )))
+                .when(file.is_none(), |el| {
+                    el.child(
+                        div()
+                            .ml_auto()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(space::S4)
+                            .text_color(k.ink_3)
+                            .child(ui::icon(Sym::Shield, px(12.), k.ink_3))
+                            .child(c::EMBED_SANDBOX),
+                    )
+                })
                 .child(
                     div()
                         .id(eid(node, format!("embed-open-{id}")))
+                        .when(file.is_some(), |el| el.ml_auto())
                         .flex_none()
                         .size(px(24.))
                         .rounded(px(6.))
@@ -2221,30 +2241,81 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 ),
         )
         .child(body)
-        .child(
-            meta(div())
-                .h(px(32.))
-                .px(space::S12)
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .bg(k.raised)
-                .border_t_1()
-                .border_color(k.line)
-                .text_color(k.ink_3)
-                .child(ui::icon(Sym::ArrowRight, px(12.), k.ink_3))
-                .child(fill(c::EMBED_FOOT, &[("name", &ctx.author)]))
-                .child(div().ml_auto().child(c::EMBED_NO_APPROVE)),
-        )
+        .when(file.is_none(), |el| {
+            el.child(
+                meta(div())
+                    .h(px(32.))
+                    .px(space::S12)
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .bg(k.raised)
+                    .border_t_1()
+                    .border_color(k.line)
+                    .text_color(k.ink_3)
+                    .child(ui::icon(Sym::ArrowRight, px(12.), k.ink_3))
+                    .child(fill(c::EMBED_FOOT, &[("name", &ctx.author)]))
+                    .child(div().ml_auto().child(c::EMBED_NO_APPROVE)),
+            )
+        })
         .into_any_element()
+}
+
+/// Sends my answer that did not get there again (CARD21 §2: the red 失败 band with 重试):
+/// with the same `clientEventId` when the outbox still has it, else as a new event.
+pub fn resend_answer(ctx: &Ctx) -> impl Fn() + 'static {
+    let provider = ctx.env.provider.clone();
+    let (g, tp, msg) = (
+        ctx.msg.group_id.clone(),
+        ctx.msg.topic_id.clone(),
+        ctx.msg.message_id.clone(),
+    );
+    let rev = ctx.card.rev;
+    let pending = provider.card_v2_pending(&g, &msg);
+    let last = provider
+        .card_v2_events(&g, &msg)
+        .into_iter()
+        .rev()
+        .find(|e| e.durable && !e.dropped);
+    move || {
+        crate::selftest::drawn::mark("card-resend", msg.clone());
+        if let Some(e) = &last
+            && provider.retry_card_event(&g, &tp, &msg, &e.client_event_id)
+        {
+            return;
+        }
+        let request = match (&last, &pending) {
+            (Some(e), _) => e.request.clone(),
+            (None, Some(p)) => {
+                let value = p.inputs.as_ref().and_then(|i| i.get(&p.action_id)).cloned();
+                crate::data::cards_v2::CardEventRequest {
+                    rev,
+                    block_id: Some(p.action_id.clone()),
+                    event: "choice.submit".into(),
+                    value,
+                    ..Default::default()
+                }
+            }
+            _ => return,
+        };
+        provider.send_card_event(&g, &tp, &msg, request);
+    }
 }
 
 // ---------------------------------------------------------------------------
 // A block this version does not know (CARD21 §6)
 
-pub fn unknown(node: &Node, cx: &mut App) -> AnyElement {
+pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
     let k = theme::colors(cx);
+    // CARD21 §6: the block's own fallbackText, when the sender gave one.
+    let fallback = ctx
+        .card
+        .blocks
+        .iter()
+        .position(|x| std::ptr::eq(x, b))
+        .and_then(|i| ctx.card.unknown_fallback(i))
+        .map(str::to_string);
     div()
         .p(space::S12)
         .rounded(theme::radius::MD)
@@ -2257,23 +2328,31 @@ pub fn unknown(node: &Node, cx: &mut App) -> AnyElement {
                 .child(ui::icon(Sym::Info, px(14.), k.ink_3)),
         )
         .child(
-            div().flex().flex_col().gap(space::S4).min_w(px(0.)).child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap(space::S8)
-                    .child(
-                        b20::small(div())
-                            .font_weight(theme::MEDIUM_WEIGHT)
-                            .text_color(k.ink)
-                            .child(c::UNKNOWN_BLOCK),
-                    )
-                    .child(meta(div()).mono().text_color(k.ink_3).child(format!(
-                        "{} · {}",
-                        ctx.card.catalog(),
-                        c::UNKNOWN_KIND
-                    ))),
-            ),
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S4)
+                .min_w(px(0.))
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap(space::S8)
+                        .child(
+                            b20::small(div())
+                                .font_weight(theme::MEDIUM_WEIGHT)
+                                .text_color(k.ink)
+                                .child(c::UNKNOWN_BLOCK),
+                        )
+                        .child(meta(div()).mono().text_color(k.ink_3).child(format!(
+                            "{} · {}",
+                            ctx.card.catalog(),
+                            c::UNKNOWN_KIND
+                        ))),
+                )
+                .when_some(fallback, |el, t| {
+                    el.child(b20::small(div()).text_color(k.ink_2).child(t))
+                }),
         )
         .into_any_element()
 }
@@ -2300,7 +2379,11 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         return None;
     }
     let k = theme::colors(cx);
-    let bar = |items: Vec<AnyElement>| crate::views::cards::v2::card_footer(cx).children(items).into_any_element();
+    let bar = |items: Vec<AnyElement>| {
+        crate::views::cards::v2::card_footer(cx)
+            .children(items)
+            .into_any_element()
+    };
     let note = |t: String| {
         meta(div())
             .ml_auto()
@@ -2329,19 +2412,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
     }
     // My answer did not get there: 重试 with the same answer, and it goes again by itself.
     if let CardState::SendFailed { .. } = ctx.state {
-        let provider = ctx.env.provider.clone();
-        let (g, tp, msg) = (
-            ctx.msg.group_id.clone(),
-            ctx.msg.topic_id.clone(),
-            ctx.msg.message_id.clone(),
-        );
-        let rev = ctx.card.rev;
-        let pending = provider.card_v2_pending(&g, &msg);
-        let last = provider
-            .card_v2_events(&g, &msg)
-            .into_iter()
-            .rev()
-            .find(|e| e.durable && !e.dropped);
+        let resend = resend_answer(ctx);
         return Some(Some(bar(vec![
             button(
                 ctx.id("retry21"),
@@ -2350,29 +2421,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
                 cx,
             )
             .icon(ui::icon(Sym::Refresh, px(14.), k.ink))
-            .on_click(move |_, _, _| {
-                // The same `clientEventId` when the outbox still has it; else again.
-                if let Some(e) = &last
-                    && provider.retry_card_event(&g, &tp, &msg, &e.client_event_id)
-                {
-                    return;
-                }
-                let request = match (&last, &pending) {
-                    (Some(e), _) => e.request.clone(),
-                    (None, Some(p)) => {
-                        let value = p.inputs.as_ref().and_then(|i| i.get(&p.action_id)).cloned();
-                        crate::data::cards_v2::CardEventRequest {
-                            rev,
-                            block_id: Some(p.action_id.clone()),
-                            event: "choice.submit".into(),
-                            value,
-                            ..Default::default()
-                        }
-                    }
-                    _ => return,
-                };
-                provider.send_card_event(&g, &tp, &msg, request);
-            })
+            .on_click(move |_, _, _| resend())
             .into_any_element(),
             note(c::SEND_AUTO.into()),
         ])));

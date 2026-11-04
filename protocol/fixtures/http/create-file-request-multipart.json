@@ -1,0 +1,12 @@
+{
+  "kind": "CreateFileRequest",
+  "valid": true,
+  "description": "1.1: over 100 MB, up to 2 GB",
+  "value": {
+    "groupId": "01JBX0GENERAL000000000000A",
+    "name": "录屏.mov",
+    "size": 150000000,
+    "mime": "video/quicktime",
+    "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  }
+}

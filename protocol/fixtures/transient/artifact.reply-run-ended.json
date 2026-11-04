@@ -1,0 +1,15 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "artifact.reply",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "eventId": "01JC0EV0000000000000000023",
+    "ok": false,
+    "error": {
+      "code": "declined",
+      "message": "no run of this member is open",
+      "reason": "run.ended"
+    }
+  }
+}

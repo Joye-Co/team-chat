@@ -10,7 +10,7 @@ use gpui::{
 use crate::{
     fake::v2,
     theme::{self, StateTone, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, JobTag, Sym, MemberAvatar, Ring, RowSurface},
+    ui::{self, ButtonKind, ButtonSize, JobTag, MemberAvatar, Ring, RowSurface, Sym},
 };
 
 fn section(title: &'static str, cx: &App) -> gpui::Div {

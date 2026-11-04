@@ -98,6 +98,7 @@ impl PartTarget {
             part: self.part.clone(),
             label: label::cut(&self.label, label::LABEL_MAX),
             value: self.value.clone().map(value::cap),
+            source_group_id: None,
         }
     }
 

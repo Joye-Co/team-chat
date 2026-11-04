@@ -90,18 +90,50 @@ impl UpdateGroupPrefsRequest {
     }
 }
 
-/// `PATCH /v1/groups/:id`: renames a group (not a DM). The server trims the name and
-/// collapses runs of whitespace to one space before it checks the length. Response:
-/// `GroupSummary`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Max code points of a group's purpose line (1.1).
+pub const MAX_GROUP_PURPOSE_CHARS: usize = 200;
+
+/// Trims and collapses every run of whitespace (`char::is_whitespace`, Unicode White_Space) to
+/// one space, as the server stores group names and purposes (TS `normalizeGroupText`).
+pub fn normalize_group_text(raw: &str) -> String {
+    raw.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// `PATCH /v1/groups/:id`: renames a group (not a DM) and/or sets its purpose line (1.1). The
+/// server normalizes both with [`normalize_group_text`], then checks the name (1..64) and the
+/// purpose (0..200; empty clears it). At least one of them. Response: `GroupSummary`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateGroupRequest {
-    pub name: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub name: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub purpose: Option<String>,
 }
 
 impl UpdateGroupRequest {
     pub fn validate(&self) -> Validation {
-        check_name("name", &self.name)
+        if let Some(n) = &self.name {
+            check_name("name", n)?;
+        }
+        if let Some(p) = &self.purpose {
+            check_chars("purpose", p, 0, 4 * MAX_GROUP_PURPOSE_CHARS)?;
+        }
+        if self.name.is_none() && self.purpose.is_none() {
+            return Err(crate::limits::ValidationError {
+                field: "name",
+                message: "name or purpose is required".into(),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -117,4 +149,18 @@ pub enum NotifyReason {
     Result,
     /// A new message where my notify level is `all`.
     Message,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Same vector as packages/protocol/test/checks.test.ts (`normalizeGroupText`).
+    #[test]
+    fn group_text_uses_unicode_white_space() {
+        assert_eq!(
+            normalize_group_text("\u{feff}前端\u{85}\u{3000}小组\u{2028} \t"),
+            "\u{feff}前端 小组"
+        );
+    }
 }

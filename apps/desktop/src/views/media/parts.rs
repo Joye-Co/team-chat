@@ -18,7 +18,7 @@ use crate::{
     copy::media as cm,
     data::{DraftKey, NewFile},
     theme::{self, Type as _, radius, space},
-    ui::{self, Sym, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
 };
 
 /// The frame of an inline preview (NATIVE.md §9.2): the card container,
@@ -37,7 +37,11 @@ pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
         .flex()
         .items_center()
         .gap(space::S8)
-        .child(ui::icon(icon, px(16.), crate::ui::native::native_colors(cx).secondary))
+        .child(ui::icon(
+            icon,
+            px(16.),
+            crate::ui::native::native_colors(cx).secondary,
+        ))
         .child(
             div()
                 .t_small()
@@ -60,7 +64,11 @@ pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
         .flex()
         .items_center()
         .gap(space::S8)
-        .child(ui::icon(icon, px(16.), crate::ui::native::native_colors(cx).secondary))
+        .child(ui::icon(
+            icon,
+            px(16.),
+            crate::ui::native::native_colors(cx).secondary,
+        ))
         .child(
             div()
                 .t_card_title()

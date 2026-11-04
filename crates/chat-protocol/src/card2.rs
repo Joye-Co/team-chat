@@ -17,7 +17,7 @@ use crate::bots::{RunPlanItem, check_plan};
 use crate::card::{CardField, CardListItem, LinkTarget, check_action_id, check_web_url};
 use crate::entities::{Message, Millis};
 use crate::limits::{Validation, ValidationError, check_chars, check_id};
-use crate::message::ArtifactRef;
+use crate::message::{ArtifactRef, check_sha256};
 use crate::serde_util::{any_value, non_null, nullable};
 
 pub const CARD_V2_VERSION: u32 = 2;
@@ -173,6 +173,48 @@ pub enum CardIntent {
     #[default]
     Info,
     /// A value this version does not know; render as `info`.
+    #[serde(other)]
+    Unknown,
+}
+
+/// 1.1: test counts of an evidence line, from the run's output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceTests {
+    pub passed: u64,
+    pub failed: u64,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub skipped: Option<u64>,
+}
+
+/// 1.1: a screen recording (录屏): a video file of the group, its length and a poster frame.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceRecording {
+    pub file_id: String,
+    pub duration_ms: u64,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub poster_file_id: Option<String>,
+}
+
+/// 1.1: what the author's work on the card is doing now (set by the author; absent: the band
+/// follows `intent`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CardWorkStatus {
+    /// 蓝 处理中: the author carries out the answer.
+    Executing,
+    /// 红 失败: the author's work on the card failed.
+    Failed,
+    /// A value this version does not know; ignore it.
     #[serde(other)]
     Unknown,
 }
@@ -1165,6 +1207,20 @@ pub enum CardV2Block {
             skip_serializing_if = "Option::is_none"
         )]
         artifact: Option<ArtifactRef>,
+        /// 1.1: test counts from the run's output (read these, not the label).
+        #[serde(
+            default,
+            deserialize_with = "non_null",
+            skip_serializing_if = "Option::is_none"
+        )]
+        tests: Option<EvidenceTests>,
+        /// 1.1: a screen recording (录屏 tile).
+        #[serde(
+            default,
+            deserialize_with = "non_null",
+            skip_serializing_if = "Option::is_none"
+        )]
+        recording: Option<EvidenceRecording>,
     },
     Ref {
         id: String,
@@ -1783,8 +1839,11 @@ impl CardV2Block {
         }
     }
 
+    /// 2.1 leaves, and the 2.1 containers that ask (compare, questionnaire).
     fn needs_fallback(&self) -> bool {
-        self.is_21() && !self.is_container()
+        self.is_21()
+            && (!self.is_container()
+                || matches!(self, Self::Compare { .. } | Self::Questionnaire { .. }))
     }
 }
 
@@ -1866,9 +1925,25 @@ pub struct CardV2Action {
         skip_serializing_if = "Option::is_none"
     )]
     pub inputs: Option<Vec<String>>,
+    /// 1.1: what the action means to readers, as open text (1..32). Known: `"approve"`, the
+    /// action of a review ask that approves the change (merge). Unknown roles mean nothing.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub role: Option<String>,
 }
 
+/// The [`CardV2Action::role`] of the action that approves a reviewed change.
+pub const ACTION_ROLE_APPROVE: &str = "approve";
+
 impl CardV2Action {
+    /// `role == "approve"`.
+    pub fn is_approve(&self) -> bool {
+        self.role.as_deref() == Some(ACTION_ROLE_APPROVE)
+    }
+
     pub fn kind(&self) -> CardActionKind {
         self.kind.unwrap_or_default()
     }
@@ -1891,6 +1966,13 @@ pub struct CardV2 {
     /// 1 at first; every edit has a higher rev. Answers name the rev they answer.
     pub rev: u32,
     pub intent: CardIntent,
+    /// 1.1: the author's work state; `None` = follow `intent`.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub status: Option<CardWorkStatus>,
     pub title: String,
     /// 2.1: one plain sentence under the title.
     #[serde(
@@ -1924,11 +2006,47 @@ pub struct CardV2 {
     /// The first style key the raw JSON had (never on the wire).
     #[serde(skip)]
     pub style_key: Option<String>,
+    /// Blocks of a type this version does not know ([`CardV2Block::Unknown`]), by index in
+    /// `blocks`: what the raw JSON said about them. Serializing writes them back in place.
+    #[serde(skip)]
+    pub unknown: BTreeMap<usize, UnknownBlock>,
+}
+
+/// What a reader keeps of a block whose type it does not know (CARD21 §6): its type, id and
+/// `fallbackText`, so it can show the fallback box.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownBlock {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_text: Option<String>,
+}
+
+impl CardV2 {
+    /// The `fallbackText` of the unknown block at `index` of `blocks`, if it had one.
+    pub fn unknown_fallback(&self, index: usize) -> Option<&str> {
+        self.unknown.get(&index)?.fallback_text.as_deref()
+    }
 }
 
 impl Serialize for CardV2 {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        CardV2::serialize(self, s)
+        if self.unknown.is_empty() {
+            return CardV2::serialize(self, s);
+        }
+        let mut v = CardV2::serialize(self, serde_json::value::Serializer)
+            .map_err(serde::ser::Error::custom)?;
+        if let Some(blocks) = v.get_mut("blocks").and_then(Value::as_array_mut) {
+            for (i, u) in &self.unknown {
+                if let Some(slot) = blocks.get_mut(*i) {
+                    *slot = serde_json::to_value(u).map_err(serde::ser::Error::custom)?;
+                }
+            }
+        }
+        v.serialize(s)
     }
 }
 
@@ -1936,8 +2054,30 @@ impl<'de> Deserialize<'de> for CardV2 {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let raw = Value::deserialize(d)?;
         let style_key = card_style_key(&raw);
+        let raw_blocks = raw.get("blocks").and_then(Value::as_array).cloned();
         let mut card = CardV2::deserialize(raw).map_err(serde::de::Error::custom)?;
         card.style_key = style_key;
+        for (i, b) in card.blocks.iter().enumerate() {
+            if *b != CardV2Block::Unknown {
+                continue;
+            }
+            let Some(r) = raw_blocks.as_ref().and_then(|x| x.get(i)) else {
+                continue;
+            };
+            let text = |k: &str, max: usize| {
+                r.get(k)
+                    .and_then(Value::as_str)
+                    .map(|t| t.chars().take(max).collect::<String>())
+            };
+            card.unknown.insert(
+                i,
+                UnknownBlock {
+                    type_name: text("type", 64).unwrap_or_default(),
+                    id: text("id", 64),
+                    fallback_text: text("fallbackText", 300),
+                },
+            );
+        }
         Ok(card)
     }
 }
@@ -2175,6 +2315,9 @@ impl CardV2 {
         if self.intent == CardIntent::Unknown {
             return fail("cardV2.intent", "unknown intent");
         }
+        if self.status == Some(CardWorkStatus::Unknown) {
+            return fail("cardV2.status", "executing or failed");
+        }
         if let Some(c) = &self.catalog {
             check_chars("cardV2.catalog", c, 1, 32)?;
         }
@@ -2250,6 +2393,9 @@ impl CardV2 {
                 if let Some(b) = &c.body {
                     check_chars("cardV2.actions.confirm.body", b, 0, 1000)?;
                 }
+            }
+            if let Some(r) = &a.role {
+                check_chars("cardV2.actions.role", r, 1, 32)?;
             }
             if let Some(i) = &a.inputs {
                 if i.len() > MAX_CARD_V2_INPUT_BLOCKS {
@@ -2942,8 +3088,15 @@ impl CardV2Block {
                 file_id,
                 url,
                 artifact,
+                recording,
                 ..
             } => {
+                if let Some(r) = recording {
+                    check_id("cardV2.blocks.recording.fileId", &r.file_id)?;
+                    if let Some(p) = &r.poster_file_id {
+                        check_id("cardV2.blocks.recording.posterFileId", p)?;
+                    }
+                }
                 check_chars("cardV2.blocks.label", label, 1, 200)?;
                 if *state == Some(EvidenceState::Unknown) {
                     return fail("cardV2.blocks.state", "unknown state");
@@ -3456,6 +3609,13 @@ pub struct CardAnswerFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub client_event_id: Option<String>,
+    /// 1.1: sha256 (hex) of the draft text the answer approves ([`draft_content_text`]).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_hash: Option<String>,
 }
 
 /// Checks answer fields: ids, rev, block-id keys and the 64 KiB total.
@@ -3493,6 +3653,9 @@ impl CardAnswerFrame {
         check_id("messageId", &self.message_id)?;
         if let Some(c) = &self.client_event_id {
             check_client_event_id("clientEventId", c)?;
+        }
+        if let Some(h) = &self.content_hash {
+            check_sha256("contentHash", h)?;
         }
         check_answer(
             self.rev,
@@ -3566,6 +3729,13 @@ pub struct CardEventFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub part: Option<PartRef>,
+    /// 1.1: sha256 (hex) of the draft text the answer approves ([`draft_content_text`]).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub content_hash: Option<String>,
 }
 
 /// The event name of a retract.
@@ -3621,6 +3791,9 @@ impl CardEventFrame {
             .is_some_and(|v| json_bytes(v) > MAX_CARD_EVENT_INPUTS_BYTES)
         {
             return fail("inputs", "inputs exceed 16 KiB");
+        }
+        if let Some(h) = &self.content_hash {
+            check_sha256("contentHash", h)?;
         }
         if let Some(p) = &self.part {
             if !part_allowed(&self.event, &p.kind) {
@@ -3715,6 +3888,13 @@ pub struct CardProps {
         skip_serializing_if = "Option::is_none"
     )]
     pub intent: Option<CardIntent>,
+    /// 1.1: `Some(None)` (`null`) clears it.
+    #[serde(
+        default,
+        deserialize_with = "nullable",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub status: Option<Option<CardWorkStatus>>,
     #[serde(
         default,
         deserialize_with = "non_null",
@@ -3845,6 +4025,9 @@ impl PatchOp {
                 opt_chars("ops.props.fallback", &props.fallback, 4000)?;
                 if props.intent == Some(CardIntent::Unknown) {
                     return fail("ops.props.intent", "unknown intent");
+                }
+                if props.status == Some(Some(CardWorkStatus::Unknown)) {
+                    return fail("ops.props.status", "executing or failed");
                 }
                 if props
                     .actions
@@ -4206,6 +4389,38 @@ pub struct CardState {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_cause: Option<Cause>,
+    /// 1.1, private cards: live answers of the current ask round, for viewers who do not get
+    /// the answers (an anonymous questionnaire, a private poll).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub answer_count: Option<u32>,
+}
+
+/// The text a draft `contentHash` covers: the draft blocks an answer submits (`ids`), in card
+/// order, each with its edited text when edited, joined with U+0000. `None` without drafts.
+pub fn draft_content_text(
+    card: &CardV2,
+    ids: &BTreeSet<String>,
+    edited: Option<&AnswerEdits>,
+) -> Option<String> {
+    let mut texts: Vec<&str> = Vec::new();
+    for b in card.all_blocks() {
+        if let CardV2Block::Draft { id, text, .. } = b {
+            if !ids.contains(id) {
+                continue;
+            }
+            texts.push(
+                edited
+                    .and_then(|e| e.get(id))
+                    .map(String::as_str)
+                    .unwrap_or(text.as_str()),
+            );
+        }
+    }
+    (!texts.is_empty()).then(|| texts.join("\u{0}"))
 }
 
 impl CardState {
@@ -4330,4 +4545,69 @@ pub struct GroupDecision {
 pub struct DecisionsResponse {
     pub decisions: Vec<GroupDecision>,
     pub has_more: bool,
+    /// 1.1: decisions recorded by hand with seq < beforeSeq, newest first (at most `limit`).
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub recorded: Option<Vec<RecordedDecision>>,
+}
+
+/// Max characters of a decision recorded by hand (记一条).
+pub const MAX_RECORDED_DECISION_CHARS: usize = 1000;
+
+/// 1.1: a decision a member recorded by hand (记一条, `POST /v1/groups/:id/decisions`), stored
+/// as `decision.recorded` in the group log.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordedDecision {
+    pub id: String,
+    /// Seq of the `decision.recorded` event.
+    pub seq: crate::entities::Seq,
+    /// The 话题 it was recorded in; `None` (null) for the group.
+    pub topic_id: Option<String>,
+    pub text: String,
+    pub recorded_by: String,
+    pub recorded_at: Millis,
+}
+
+/// Body of `POST /v1/groups/:id/decisions`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordDecisionRequest {
+    pub text: String,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub topic_id: Option<String>,
+}
+
+impl RecordDecisionRequest {
+    pub fn validate(&self) -> Validation {
+        check_chars("text", &self.text, 0, MAX_RECORDED_DECISION_CHARS)?;
+        if self.text.trim().is_empty() {
+            return fail("text", "text is required");
+        }
+        if let Some(t) = &self.topic_id {
+            check_id("topicId", t)?;
+        }
+        Ok(())
+    }
+}
+
+/// Answer of `POST /v1/groups/:id/decisions`.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecordDecisionResponse {
+    pub decision: RecordedDecision,
+}
+
+/// Data of the stored `decision.recorded` event.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionRecordedData {
+    pub decision: RecordedDecision,
 }

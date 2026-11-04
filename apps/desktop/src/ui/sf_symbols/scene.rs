@@ -40,14 +40,24 @@ pub fn ready(_cx: &App) -> bool {
 /// Writes the gate report next to the capture (`verify_check`).
 pub fn verify(png: &std::path::Path, cx: &mut App) -> Result<(), String> {
     gates::write(png, cx)?;
-    let switches = gates::SWITCHES.lock().map(|s| s.clone()).unwrap_or_default();
-    match switches.iter().find(|s| s.missing > 0 || s.drawn == 0 || !s.new_ink) {
+    let switches = gates::SWITCHES
+        .lock()
+        .map(|s| s.clone())
+        .unwrap_or_default();
+    match switches
+        .iter()
+        .find(|s| s.missing > 0 || s.drawn == 0 || !s.new_ink)
+    {
         Some(bad) => Err(format!("theme switch drew a blank or old symbol: {bad:?}")),
         None => Ok(()),
     }
 }
 
-fn open(_services: Services, content: Size<Pixels>, cx: &mut App) -> Result<AnyWindowHandle, String> {
+fn open(
+    _services: Services,
+    content: Size<Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     // Cold numbers first: nothing in this process has drawn a symbol yet.
     gates::cold();
     DONE.store(false, Ordering::SeqCst);
@@ -67,7 +77,9 @@ enum Phase {
     #[default]
     Settling,
     /// The theme was switched; the next render is the first frame after it.
-    Switched { back: bool },
+    Switched {
+        back: bool,
+    },
     Done,
 }
 
@@ -116,7 +128,14 @@ impl Compare {
         window.on_next_frame({
             let entity = cx.entity();
             move |window, cx| {
-                theme::set_mode(if dark { ThemeMode::Dark } else { ThemeMode::Light }, cx);
+                theme::set_mode(
+                    if dark {
+                        ThemeMode::Dark
+                    } else {
+                        ThemeMode::Light
+                    },
+                    cx,
+                );
                 // Only the switch frame counts.
                 take_stats();
                 entity.update(cx, |this, _| this.phase = Phase::Switched { back });
@@ -204,13 +223,7 @@ impl Render for Compare {
                     .child(div().t_title().child(dev::SF_TITLE))
                     .child(div().t_meta().text_color(k.ink_3).child(summary)),
             )
-            .child(
-                div()
-                    .flex()
-                    .gap(px(24.))
-                    .px(px(24.))
-                    .children(columns),
-            );
+            .child(div().flex().gap(px(24.)).px(px(24.)).children(columns));
         self.after_render(window, cx);
         root
     }
@@ -420,7 +433,13 @@ fn grid(set: Set, k: &theme::Colors, window: &Window) -> impl IntoElement {
                     .child(set.glyph(sf, slot, k.ink_2, window)),
             )
     };
-    let small = [Sf::Check, Sf::Close, Sf::ChevronDown, Sf::ChevronRight, Sf::Plus];
+    let small = [
+        Sf::Check,
+        Sf::Close,
+        Sf::ChevronDown,
+        Sf::ChevronRight,
+        Sf::Plus,
+    ];
     div()
         .flex()
         .flex_col()

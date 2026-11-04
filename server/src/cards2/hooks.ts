@@ -48,7 +48,7 @@ registerMessageWriteHook({
     if (cause) ext.cause = shownCause(room.sql, cause);
     let refs: BlockRef[] | undefined;
     if (f.blockRefs && f.blockRefs.length > 0) {
-      refs = resolveRefs(room, f.blockRefs);
+      refs = await resolveRefs(room, actor, f.blockRefs);
       draft.body = withPrefix(refs, draft.body);
       checkBodyLength(draft.body);
       ext.blockRefs = refs;

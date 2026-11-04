@@ -51,7 +51,6 @@ use gpui::{
 
 use super::icons::{self, Lucide};
 
-
 pub use raster::Mask;
 
 /// The weight of a symbol (`NSFontWeight`).
@@ -285,7 +284,11 @@ mod tests {
                     .unwrap_or_else(|| panic!("{} draws", s.name()));
                 assert_eq!(m.side, (16. * scale) as u32);
                 let (ex, ey) = m.center_error();
-                assert!(ex.abs() <= 0.5 && ey.abs() <= 0.5, "{} at {scale}x: {ex} {ey}", s.name());
+                assert!(
+                    ex.abs() <= 0.5 && ey.abs() <= 0.5,
+                    "{} at {scale}x: {ex} {ey}",
+                    s.name()
+                );
                 let (x0, y0, x1, y1) = m.ink;
                 assert!(x1 - x0 <= m.side && y1 - y0 <= m.side, "{} fits", s.name());
             }
@@ -295,9 +298,18 @@ mod tests {
     #[test]
     fn a_color_keeps_the_mask_and_changes_the_ink() {
         let m = raster::draw("bell", 13., Weight::Regular, 16., 2.).expect("bell");
-        let red = m.colored(Rgba { r: 1., g: 0., b: 0., a: 0.5 });
+        let red = m.colored(Rgba {
+            r: 1.,
+            g: 0.,
+            b: 0.,
+            a: 0.5,
+        });
         let bytes = red.as_bytes(0).expect("one frame");
-        let i = m.alpha.iter().position(|&a| a == 255).expect("a solid pixel");
+        let i = m
+            .alpha
+            .iter()
+            .position(|&a| a == 255)
+            .expect("a solid pixel");
         // Straight BGRA: blue, green, red, alpha.
         assert_eq!(&bytes[i * 4..i * 4 + 4], &[0, 0, 255, 128]);
         assert!(raster::draw("no.such.symbol.tc", 13., Weight::Regular, 16., 2.).is_none());

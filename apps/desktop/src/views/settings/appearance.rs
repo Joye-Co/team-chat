@@ -5,8 +5,9 @@
 
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, InteractiveElement as _,
-    IntoElement, ParentElement, Pixels, Render, SharedString, Size, StatefulInteractiveElement as _,
-    Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    IntoElement, ParentElement, Pixels, Render, SharedString, Size,
+    StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::slider::{Slider, SliderEvent, SliderState};
 
@@ -61,8 +62,16 @@ impl AppearancePage {
     /// tile shows the other theme too, so its swatches do not follow the
     /// current one (§4 `content` and `sidebar` of each mode).
     fn picture(choice: ThemeChoice) -> AnyElement {
-        let light = (gpui::rgb(0xFFFFFF), gpui::rgb(0xE9E9EB), gpui::rgb(0xC9C9CE));
-        let dark = (gpui::rgb(0x1E1E1E), gpui::rgb(0x2E2E31), gpui::rgb(0x4A4A4E));
+        let light = (
+            gpui::rgb(0xFFFFFF),
+            gpui::rgb(0xE9E9EB),
+            gpui::rgb(0xC9C9CE),
+        );
+        let dark = (
+            gpui::rgb(0x1E1E1E),
+            gpui::rgb(0x2E2E31),
+            gpui::rgb(0x4A4A4E),
+        );
         let half = |(content, sidebar, line): (gpui::Rgba, gpui::Rgba, gpui::Rgba)| {
             div()
                 .flex_1()
@@ -117,7 +126,10 @@ impl Render for AppearancePage {
                     ThemeChoice::System => s::THEME_AUTO,
                 };
                 div()
-                    .id(SharedString::from(format!("appearance-theme-{}", choice.slug())))
+                    .id(SharedString::from(format!(
+                        "appearance-theme-{}",
+                        choice.slug()
+                    )))
                     .flex()
                     .flex_col()
                     .items_center()

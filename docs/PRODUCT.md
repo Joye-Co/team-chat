@@ -203,7 +203,9 @@ V1 is not an MVP. The team works in it every day, stably. Done when all of these
    No lost or duplicated messages across reconnects, sleep and network changes.
 2. **Performance** (same region): p95 delivery under 300 ms; a 10,000-message topic opens in
    under 100 ms from the cache and scrolls at 60 fps; cold start to usable under 1 s; catch-up
-   after a day offline under 2 s; search under 300 ms.
+   after a day offline under 2 s; search under 300 ms. `scripts/staging-smoke.ts` measures
+   delivery, search, catch-up, reconnects, mention notifications and the 100 MB upload; the
+   rest is not measured yet (see docs/RUNBOOK.md, Quality smoke).
 3. **Bots**: external bots join with a bot token and the TypeScript bot SDK. Runner-backed bots
    run coding CLIs (Codex, Claude Code) through the machine daemon on the Mac mini: they
    acknowledge once, stream progress, post results, take follow-ups in the topic, and stalls are

@@ -3,8 +3,7 @@
 
 use gpui::{
     AnyElement, AnyView, App, AppContext as _, Entity, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    ParentElement, Pixels, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use super::{PageView, TitleBarSpec, title_bar};
@@ -103,9 +102,16 @@ impl Pages {
             // A page that draws its own header (首页 with an empty spec, or the
             // 群, 成员 and 产出 pages) gets no toolbar row from here.
             .when(toolbar, |el| {
-                el.child(div().absolute().top_0().left_0().right_0().child(
-                    title_bar::render(&spec, open, leading, active, services, window, cx),
-                ))
+                el.child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .right_0()
+                        .child(title_bar::render(
+                            &spec, open, leading, active, services, window, cx,
+                        )),
+                )
             })
             .into_any_element()
     }

@@ -162,11 +162,11 @@ impl EmbedPreview {
                             .flex()
                             .items_baseline()
                             .gap(space::S6)
-                            .child(
-                                div().n_headline().text_color(n.label).child(SharedString::from(
+                            .child(div().n_headline().text_color(n.label).child(
+                                SharedString::from(
                                     member.map(|m| m.name.clone()).unwrap_or_default(),
-                                )),
-                            )
+                                ),
+                            ))
                             .child(
                                 div()
                                     .n_subheadline()
@@ -249,7 +249,12 @@ impl Render for EmbedPreview {
             .bg(k.content)
             .text_color(k.text_1)
             .child(topic_column)
-            .child(div().w(px(1.)).h_full().bg(crate::ui::native::native_colors(cx).separator))
+            .child(
+                div()
+                    .w(px(1.))
+                    .h_full()
+                    .bg(crate::ui::native::native_colors(cx).separator),
+            )
             .child(pane_column);
         if self.cover
             && let Some(b) = embed(INLINE_ID, cx).and_then(|e| e.read(cx).bounds())

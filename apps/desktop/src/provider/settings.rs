@@ -168,7 +168,7 @@ pub(super) fn install_command(server_url: &str, machine: &proto::Machine, token:
 
 impl CoreProvider {
     /// Runs `work` on the client's runtime and answers on the returned [`AdminReply`].
-    fn request<T, F>(&self, work: impl FnOnce(Arc<Client>, String) -> F) -> AdminReply<T>
+    pub(super) fn request<T, F>(&self, work: impl FnOnce(Arc<Client>, String) -> F) -> AdminReply<T>
     where
         T: Send + 'static,
         F: Future<Output = Result<T, AdminError>> + Send + 'static,

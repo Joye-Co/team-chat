@@ -24,8 +24,8 @@ use crate::{
     theme::{self, ChipKind, Type as _, size, space},
     ui::{
         self, BadgeKind, ButtonKind, ButtonSize, ButtonSpec as _, ChipStyle, ComposerShell,
-        CountBadge, FieldKind, GroupGlyph, Kbd, Sym, MemberAvatar, RoleTag, RowSurface,
-        SectionHeader, StatusChip, TextField,
+        CountBadge, FieldKind, GroupGlyph, Kbd, MemberAvatar, RoleTag, RowSurface, SectionHeader,
+        StatusChip, Sym, TextField,
     },
 };
 
@@ -790,24 +790,11 @@ impl Render for Gallery {
         let menu = ui::menu_surface(cx)
             .w(px(220.))
             .child(ui::menu_row("m-1", Some(Sym::Edit), "编辑", false, cx))
-            .child(ui::menu_row(
-                "m-2",
-                Some(Sym::Copy),
-                "复制链接",
-                true,
-                cx,
-            ))
-            .child(ui::menu_row(
-                "m-3",
-                Some(Sym::Watch),
-                "标为未读",
-                false,
-                cx,
-            ))
+            .child(ui::menu_row("m-2", Some(Sym::Copy), "复制链接", true, cx))
+            .child(ui::menu_row("m-3", Some(Sym::Watch), "标为未读", false, cx))
             .child(ui::menu_separator(cx))
             .child(
-                ui::menu_row("m-4", Some(Sym::Delete), "删除", false, cx)
-                    .text_color(k.danger_text),
+                ui::menu_row("m-4", Some(Sym::Delete), "删除", false, cx).text_color(k.danger_text),
             );
         let mention = ui::mention_surface(cx)
             .child(

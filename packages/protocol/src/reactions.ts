@@ -6,6 +6,8 @@ import { eventBase, Id, Rid } from "./common.ts";
 export const MAX_REACTIONS = 50;
 /** One emoji (with its modifiers and joiners), in Unicode code points. */
 export const MAX_EMOJI_CHARS = 16;
+/** The reaction a bot member (SDK `ack()` and runner runs) puts on a message it took on. */
+export const ACK_EMOJI = "👀";
 
 /** One emoji: 1..16 code points, no whitespace. */
 export const Emoji = z

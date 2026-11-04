@@ -1,0 +1,25 @@
+{
+  "kind": "CreateFileResponse",
+  "valid": true,
+  "value": {
+    "file": {
+      "id": "01JC0FIL00000000000000BIG1",
+      "groupId": "01JBX0GENERAL000000000000A",
+      "topicId": null,
+      "name": "录屏.mov",
+      "size": 150000000,
+      "mime": "video/quicktime",
+      "sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "status": "pending",
+      "createdBy": "01JBX0ALICE0000000000000AB",
+      "createdAt": 1762128000000
+    },
+    "uploadUrl": "https://chat-api-e2e.example.workers.dev/v1/files/01JC0FIL00000000000000BIG1/content",
+    "multipart": {
+      "partBytes": 52428800,
+      "parts": 3,
+      "partUrl": "https://chat-api-e2e.example.workers.dev/v1/files/01JC0FIL00000000000000BIG1/parts",
+      "completeUrl": "https://chat-api-e2e.example.workers.dev/v1/files/01JC0FIL00000000000000BIG1/complete"
+    }
+  }
+}

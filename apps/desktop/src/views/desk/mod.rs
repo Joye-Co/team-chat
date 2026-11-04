@@ -245,7 +245,16 @@ impl Render for DeskPage {
             .iter()
             .filter(|a| !list::is_answered(a, self))
             .count();
-        let quiet = snap.asks.is_empty() && snap.done.is_empty() && snap.runs.is_empty();
+        crate::selftest::drawn::mark(
+            "desk",
+            format!(
+                "asks={} done={} runs={}",
+                snap.asks.len(),
+                snap.done.len(),
+                snap.runs.len()
+            ),
+        );
+        let quiet = snap.asks.is_empty() && snap.done.is_empty();
         let side_has_data = !snap.runs.is_empty() || !snap.queue.is_empty();
         let show_side = side_has_data && !self.side_hidden;
 
@@ -321,9 +330,12 @@ impl Render for DeskPage {
                     Some(n.to_string()),
                     cx,
                 ))
-                .children(snap.runs.iter().enumerate().map(|(i, r)| {
-                    list::run_row(i, r, i + 1 == n, &snap, &self.services, cx)
-                }));
+                .children(
+                    snap.runs
+                        .iter()
+                        .enumerate()
+                        .map(|(i, r)| list::run_row(i, r, i + 1 == n, &snap, &self.services, cx)),
+                );
         }
         if !snap.done.is_empty() {
             let n = snap.done.len();
@@ -333,9 +345,12 @@ impl Render for DeskPage {
                     Some(c::DESK_TODAY.to_string()),
                     cx,
                 ))
-                .children(snap.done.iter().enumerate().map(|(i, d)| {
-                    list::done_row(i, d, i + 1 == n, &snap, &self.services, cx)
-                }));
+                .children(
+                    snap.done
+                        .iter()
+                        .enumerate()
+                        .map(|(i, d)| list::done_row(i, d, i + 1 == n, &snap, &self.services, cx)),
+                );
         }
         if quiet {
             body = body.child(

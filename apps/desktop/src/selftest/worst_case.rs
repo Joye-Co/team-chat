@@ -873,9 +873,16 @@ impl ChatProvider for WorstCase {
         }
         thread
     }
-    fn send_side_chat(&self, group_id: &str, topic_id: &str, member_id: &str, body: String) {
+    fn send_side_chat(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        member_id: &str,
+        body: String,
+        refs: Vec<crate::data::DraftRef>,
+    ) {
         self.inner
-            .send_side_chat(group_id, topic_id, member_id, body)
+            .send_side_chat(group_id, topic_id, member_id, body, refs)
     }
     fn post_side_chat_suggestion(&self, g: &str, t: &str, m: &str, id: &str) {
         self.inner.post_side_chat_suggestion(g, t, m, id)

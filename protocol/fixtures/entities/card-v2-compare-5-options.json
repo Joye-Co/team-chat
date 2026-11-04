@@ -14,6 +14,7 @@
       {
         "id": "c",
         "type": "compare",
+        "fallbackText": "比较",
         "options": [
           {
             "id": "o0",

@@ -13,17 +13,22 @@ const events = [
   { seq: 2, type: "message.created", actorId: "u", at: 1, topicId: T, messageId: M, data: { message: { id: M, groupId: A, topicId: T, body: `see ${A}`, attachments: [{ fileId: F }] } } },
 ].map((e) => JSON.stringify(e)).join("\n");
 
-test("a copy maps the group, topic and message ids, keeps file ids and text", () => {
-  const map = copyIdMap(A, B, [events]);
+test("a copy maps the group, topic, message and file ids and keeps text", () => {
+  const kinds = { topics: new Set<string>(), files: new Set<string>(), artifacts: new Set<string>() };
+  const map = copyIdMap(A, B, [events], kinds);
   expect(map.get(A)).toBe(B);
-  expect(map.has(F)).toBe(false);
+  // Files get new ids: the copy gets its own D1 rows and R2 objects (copy-files).
+  const f2 = map.get(F) as string;
+  expect(f2).toBe(copiedId(B, F));
+  expect([...kinds.files]).toEqual([F]);
+  expect([...kinds.topics]).toEqual([T]);
   const out = events.split("\n").map((l) => remapValue(JSON.parse(l), map)) as any[];
   const t2 = out[0].data.topic.id;
   const m2 = out[1].data.message.id;
   expect(t2).not.toBe(T);
   expect(m2).not.toBe(M);
   expect(out[0]).toMatchObject({ topicId: t2, data: { topic: { groupId: B, rootMessageId: m2 } } });
-  expect(out[1]).toMatchObject({ topicId: t2, messageId: m2, data: { message: { groupId: B, topicId: t2, attachments: [{ fileId: F }] } } });
+  expect(out[1]).toMatchObject({ topicId: t2, messageId: m2, data: { message: { groupId: B, topicId: t2, attachments: [{ fileId: f2 }] } } });
   // Only whole values are ids; text that mentions an id stays as written.
   expect(out[1].data.message.body).toBe(`see ${A}`);
 });

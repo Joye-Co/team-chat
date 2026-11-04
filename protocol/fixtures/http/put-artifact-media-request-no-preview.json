@@ -1,0 +1,12 @@
+{
+  "kind": "PutArtifactMediaRequest",
+  "valid": false,
+  "description": "preview is required",
+  "value": {
+    "media": {
+      "kind": "video",
+      "mime": "video/mp4",
+      "bytes": 1
+    }
+  }
+}

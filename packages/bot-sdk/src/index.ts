@@ -1,7 +1,9 @@
 // TypeScript SDK for external bots (Bun and Node 22+). See docs/bots.md.
 export {
   ACK_EMOJI,
+  ANONYMOUS_ACTOR,
   Bot,
+  DEFAULT_WRITE_RATE,
   SDK_VERSION,
   type AnswerValue,
   type ArtifactEventContext,
@@ -19,6 +21,7 @@ export {
   type Target,
   type TopicChange,
   type WebSocketCtor,
+  withoutAnonymousRequester,
 } from "./bot.ts";
 export {
   type ApprovalCardOptions,

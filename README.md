@@ -89,7 +89,10 @@ the workspace version (Cargo), builds and checks the DMG (`scripts/build-dmg.sh`
 DMG, the daemon and their `.sha256` files, and uploads the DMG to the server
 (`PUT /v1/admin/releases/<version>`), which offers it as the in-app update and on invite
 download links. Write the notes in Chinese in `docs/releases/<version>.md` and add a
-`CHANGELOG.md` entry. After a release, deploy the server so `/v1/health` shows the version.
+`CHANGELOG.md` entry headed `## <version> (unreleased)`; `release.sh` writes the date and stops
+when `scripts/release-check.sh <version>` finds a draft note or a version mismatch. After a
+release, deploy the server so `/v1/health` shows the version (`scripts/release-check.sh <version>
+--env production` checks it). `scripts/test-release-scripts.sh` tests these guards offline.
 
 **Signing.** `build-dmg.sh` signs the app, the bundled daemon and the DMG with rcodesign
 (`cargo install apple-codesign --locked`) and the self-signed certificate in

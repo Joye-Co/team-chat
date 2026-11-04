@@ -2,16 +2,27 @@
 // `ask.record` is true at the answered rev, except on private cards. The event writer keeps the question and the choice
 // when the answer is stored, because the card's author usually edits the card afterwards (a
 // later rev without `ask`). The inputs stay in the event, so a delete scrubs them in one place.
-import { type CardV2, type CardV2Block, DecisionsResponse, type GroupDecision, MAX_DECISIONS_PAGE } from "@chat/protocol";
+import {
+  type CardV2,
+  type CardV2Block,
+  DecisionsResponse,
+  type GroupDecision,
+  MAX_DECISIONS_PAGE,
+  RecordDecisionRequest,
+  type RecordDecisionResponse,
+  type RecordedDecision,
+} from "@chat/protocol";
 import { z } from "zod";
 import { isGroupMember } from "../core/db";
 import { roomStub } from "../core/env";
 import { ApiError, unwrap } from "../core/errors";
+import { ulid } from "../core/ids";
 import { type ArchivedEvent, registerEventWriter, registerRoomMigration, registerRoomRpc, registerRoute } from "../core/registry";
 import type { CardAnswerArgs } from "./index";
 import { hidesCause } from "./privacy";
 
 export const DECISIONS_RPC = "cards.decisions";
+export const RECORD_DECISION_RPC = "cards.recordDecision";
 const DEFAULT_PAGE = 50;
 
 registerRoomMigration({
@@ -81,7 +92,15 @@ export function storedCard(sql: SqlStorage, messageId: string): { card: CardV2; 
 registerEventWriter((event: ArchivedEvent, sql) => {
   if (event.type !== "card.answered") return;
   const d = event.data as CardAnswerArgs;
-  const stored = storedCard(sql, d.messageId);
+  recordAnswerDecision(sql, event, storedCard(sql, d.messageId));
+});
+
+/**
+ * Stores the group decision of a `card.answered` event, given the card at the answered rev
+ * (the live writer passes the stored card; the backfill the card from the log).
+ */
+export function recordAnswerDecision(sql: SqlStorage, event: ArchivedEvent, stored: { card: CardV2; topicId: string } | undefined): void {
+  const d = event.data as CardAnswerArgs;
   if (!stored || stored.card.rev !== d.rev || stored.card.ask?.record !== true) return;
   // A private card (a non-public poll, an anonymous questionnaire) records no group decision:
   // a decision names who answered (cards2/privacy).
@@ -105,13 +124,58 @@ registerEventWriter((event: ArchivedEvent, sql) => {
     event.actorId,
     event.at,
   );
-});
+}
 
 // A deleted card message keeps no decision rows (live deletes and imports).
 registerEventWriter((event: ArchivedEvent, sql) => {
   if (event.type !== "message.deleted") return;
   const messageId = (event.data as { messageId?: string }).messageId ?? event.messageId;
   if (messageId) sql.exec("DELETE FROM card_decisions WHERE message_id = ?", messageId);
+});
+
+// 记一条: decisions recorded by hand, one `decision.recorded` event each (live and imports).
+registerRoomMigration({
+  name: "cards2-7",
+  up: `
+    CREATE TABLE recorded_decisions (
+      seq INTEGER PRIMARY KEY,
+      id TEXT NOT NULL,
+      topic_id TEXT,
+      text TEXT NOT NULL,
+      recorded_by TEXT NOT NULL,
+      recorded_at INTEGER NOT NULL
+    );
+  `,
+});
+
+registerEventWriter((event: ArchivedEvent, sql) => {
+  if (event.type !== "decision.recorded") return;
+  const d = (event.data as { decision?: RecordedDecision }).decision;
+  if (!d) return;
+  sql.exec(
+    "INSERT OR IGNORE INTO recorded_decisions (seq, id, topic_id, text, recorded_by, recorded_at) VALUES (?, ?, ?, ?, ?, ?)",
+    event.seq,
+    d.id,
+    d.topicId,
+    d.text,
+    d.recordedBy,
+    d.recordedAt,
+  );
+});
+
+registerRoomRpc(RECORD_DECISION_RPC, (room, actor, args): RecordDecisionResponse => {
+  if (!actor || !room.isMember(actor.id)) throw new ApiError("forbidden", "not a member of this group");
+  const { text, topicId } = args as { text: string; topicId?: string };
+  if (topicId !== undefined && room.sql.exec("SELECT 1 FROM topics WHERE id = ?", topicId).toArray().length === 0) {
+    throw new ApiError("not_found", "topic not found");
+  }
+  const now = Date.now();
+  const decision = room.commit((tx): RecordedDecision => {
+    const d: RecordedDecision = { id: ulid(now), seq: tx.nextSeq(), topicId: topicId ?? null, text: text.trim(), recordedBy: actor.id, recordedAt: now };
+    tx.append({ type: "decision.recorded", actorId: actor.id, topicId: topicId ?? null, data: { decision: d } });
+    return d;
+  });
+  return { decision };
 });
 
 type DecisionRow = {
@@ -160,7 +224,17 @@ registerRoomRpc(DECISIONS_RPC, (room, actor, args): DecisionsResponse => {
     if (d.editedValues !== undefined) out.editedValues = d.editedValues;
     return out;
   });
-  return { decisions, hasMore: rows.length > limit };
+  const recordedRows = room.sql
+    .exec<{ seq: number; id: string; topic_id: string | null; text: string; recorded_by: string; recorded_at: number }>(
+      "SELECT * FROM recorded_decisions WHERE seq < ? ORDER BY seq DESC LIMIT ?",
+      beforeSeq ?? Number.MAX_SAFE_INTEGER,
+      limit + 1,
+    )
+    .toArray();
+  const recorded = recordedRows.slice(0, limit).map(
+    (r): RecordedDecision => ({ id: r.id, seq: r.seq, topicId: r.topic_id, text: r.text, recordedBy: r.recorded_by, recordedAt: r.recorded_at }),
+  );
+  return { decisions, hasMore: rows.length > limit || recordedRows.length > limit, recorded };
 });
 
 const Query = z.object({
@@ -179,5 +253,18 @@ registerRoute({
     if (!(await isGroupMember(env.DB, params.id, a.memberId))) throw new ApiError("not_found", "group not found");
     const actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };
     return unwrap(await roomStub(env, params.id).rpc(params.id, DECISIONS_RPC, actor, q.data)) as DecisionsResponse;
+  },
+});
+
+registerRoute({
+  method: "POST",
+  path: "/v1/groups/:id/decisions",
+  auth: "member",
+  async handler({ env, params, body, auth }) {
+    const a = auth as NonNullable<typeof auth>;
+    const req = await body(RecordDecisionRequest);
+    if (!(await isGroupMember(env.DB, params.id, a.memberId))) throw new ApiError("not_found", "group not found");
+    const actor = { id: a.memberId, level: a.member.level, kind: a.member.kind, tokenId: a.tokenId };
+    return unwrap(await roomStub(env, params.id).rpc(params.id, RECORD_DECISION_RPC, actor, req)) as RecordDecisionResponse;
   },
 });

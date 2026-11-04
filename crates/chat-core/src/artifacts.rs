@@ -137,6 +137,7 @@ pub async fn create_version(
                 .clone()
                 .ok_or_else(|| ApiError::Invalid("a new 产出 needs a title".into()))?;
             http.create_artifact(&CreateArtifactRequest {
+                preview: None,
                 group_id: req.group_id.clone(),
                 topic_id: req.topic_id.clone(),
                 title,
@@ -155,6 +156,7 @@ pub async fn create_version(
             http.add_artifact_version(
                 id,
                 &AddArtifactVersionRequest {
+                    preview: None,
                     entry: req.entry.clone(),
                     files: inputs,
                     note: req.note.clone(),

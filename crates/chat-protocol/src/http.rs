@@ -298,6 +298,13 @@ pub struct PostMessageRequest {
         skip_serializing_if = "Option::is_none"
     )]
     pub block_refs: Option<Vec<crate::BlockRefInput>>,
+    /// 1.1: posts a side chat answer to its source topic.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub from_aside: Option<crate::AsideOrigin>,
 }
 
 impl PostMessageRequest {
@@ -327,6 +334,7 @@ impl PostMessageRequest {
             context: self.context,
             cause_event_id: self.cause_event_id,
             block_refs: self.block_refs,
+            from_aside: self.from_aside,
         })
     }
 }

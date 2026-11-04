@@ -227,6 +227,11 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
                   }
                 },
                 "required": [
@@ -975,6 +980,29 @@
                                   "bytes",
                                   "preview"
                                 ]
+                              },
+                              "source": {
+                                "type": "object",
+                                "properties": {
+                                  "artifactId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                  },
+                                  "version": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "t": {
+                                    "type": "number",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "artifactId",
+                                  "version",
+                                  "t"
+                                ]
                               }
                             },
                             "required": [
@@ -1411,6 +1439,13 @@
                                 "done",
                                 "working",
                                 "info"
+                              ]
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": [
+                                "executing",
+                                "failed"
                               ]
                             },
                             "title": {
@@ -2885,6 +2920,21 @@
                                                 "waiting",
                                                 "pending"
                                               ]
+                                            },
+                                            "startedAt": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "endedAt": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "estimateMs": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
                                             }
                                           },
                                           "required": [
@@ -3357,6 +3407,52 @@
                                         "required": [
                                           "artifactId",
                                           "version"
+                                        ]
+                                      },
+                                      "tests": {
+                                        "type": "object",
+                                        "properties": {
+                                          "passed": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "failed": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "skipped": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          }
+                                        },
+                                        "required": [
+                                          "passed",
+                                          "failed"
+                                        ]
+                                      },
+                                      "recording": {
+                                        "type": "object",
+                                        "properties": {
+                                          "fileId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "durationMs": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "posterFileId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "fileId",
+                                          "durationMs"
                                         ]
                                       }
                                     },
@@ -6377,6 +6473,21 @@
                                                           "waiting",
                                                           "pending"
                                                         ]
+                                                      },
+                                                      "startedAt": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "endedAt": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "estimateMs": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
                                                       }
                                                     },
                                                     "required": [
@@ -6849,6 +6960,52 @@
                                                   "required": [
                                                     "artifactId",
                                                     "version"
+                                                  ]
+                                                },
+                                                "tests": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "passed": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "failed": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "skipped": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "passed",
+                                                    "failed"
+                                                  ]
+                                                },
+                                                "recording": {
+                                                  "type": "object",
+                                                  "properties": {
+                                                    "fileId": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    },
+                                                    "durationMs": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "posterFileId": {
+                                                      "type": "string",
+                                                      "minLength": 1
+                                                    }
+                                                  },
+                                                  "required": [
+                                                    "fileId",
+                                                    "durationMs"
                                                   ]
                                                 }
                                               },
@@ -9205,6 +9362,11 @@
                                       "maxLength": 64,
                                       "pattern": "^[A-Za-z0-9_.:-]+$"
                                     }
+                                  },
+                                  "role": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 32
                                   }
                                 },
                                 "required": [
@@ -9462,6 +9624,11 @@
                                 "at",
                                 "event"
                               ]
+                            },
+                            "answerCount": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
                             }
                           },
                           "required": [
@@ -9535,6 +9702,10 @@
                                   "artifactId",
                                   "version"
                                 ]
+                              },
+                              "sourceGroupId": {
+                                "type": "string",
+                                "minLength": 1
                               },
                               "cardRev": {
                                 "type": "integer",
@@ -9628,6 +9799,28 @@
                               "memberIds"
                             ]
                           }
+                        },
+                        "fromAside": {
+                          "type": "object",
+                          "properties": {
+                            "groupId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "topicId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "messageId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": [
+                            "groupId",
+                            "topicId",
+                            "messageId"
+                          ]
                         }
                       },
                       "required": [
@@ -9935,6 +10128,29 @@
                               "mime",
                               "bytes",
                               "preview"
+                            ]
+                          },
+                          "source": {
+                            "type": "object",
+                            "properties": {
+                              "artifactId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "version": {
+                                "type": "integer",
+                                "exclusiveMinimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "t": {
+                                "type": "number",
+                                "minimum": 0
+                              }
+                            },
+                            "required": [
+                              "artifactId",
+                              "version",
+                              "t"
                             ]
                           }
                         },
@@ -10372,6 +10588,13 @@
                             "done",
                             "working",
                             "info"
+                          ]
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "executing",
+                            "failed"
                           ]
                         },
                         "title": {
@@ -11846,6 +12069,21 @@
                                             "waiting",
                                             "pending"
                                           ]
+                                        },
+                                        "startedAt": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "endedAt": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "estimateMs": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
                                         }
                                       },
                                       "required": [
@@ -12318,6 +12556,52 @@
                                     "required": [
                                       "artifactId",
                                       "version"
+                                    ]
+                                  },
+                                  "tests": {
+                                    "type": "object",
+                                    "properties": {
+                                      "passed": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 9007199254740991
+                                      },
+                                      "failed": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 9007199254740991
+                                      },
+                                      "skipped": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 9007199254740991
+                                      }
+                                    },
+                                    "required": [
+                                      "passed",
+                                      "failed"
+                                    ]
+                                  },
+                                  "recording": {
+                                    "type": "object",
+                                    "properties": {
+                                      "fileId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      },
+                                      "durationMs": {
+                                        "type": "integer",
+                                        "minimum": 0,
+                                        "maximum": 9007199254740991
+                                      },
+                                      "posterFileId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                      }
+                                    },
+                                    "required": [
+                                      "fileId",
+                                      "durationMs"
                                     ]
                                   }
                                 },
@@ -15338,6 +15622,21 @@
                                                       "waiting",
                                                       "pending"
                                                     ]
+                                                  },
+                                                  "startedAt": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "endedAt": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "estimateMs": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
                                                   }
                                                 },
                                                 "required": [
@@ -15810,6 +16109,52 @@
                                               "required": [
                                                 "artifactId",
                                                 "version"
+                                              ]
+                                            },
+                                            "tests": {
+                                              "type": "object",
+                                              "properties": {
+                                                "passed": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "failed": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "skipped": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                }
+                                              },
+                                              "required": [
+                                                "passed",
+                                                "failed"
+                                              ]
+                                            },
+                                            "recording": {
+                                              "type": "object",
+                                              "properties": {
+                                                "fileId": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                },
+                                                "durationMs": {
+                                                  "type": "integer",
+                                                  "minimum": 0,
+                                                  "maximum": 9007199254740991
+                                                },
+                                                "posterFileId": {
+                                                  "type": "string",
+                                                  "minLength": 1
+                                                }
+                                              },
+                                              "required": [
+                                                "fileId",
+                                                "durationMs"
                                               ]
                                             }
                                           },
@@ -18166,6 +18511,11 @@
                                   "maxLength": 64,
                                   "pattern": "^[A-Za-z0-9_.:-]+$"
                                 }
+                              },
+                              "role": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 32
                               }
                             },
                             "required": [
@@ -18423,6 +18773,11 @@
                             "at",
                             "event"
                           ]
+                        },
+                        "answerCount": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
                         }
                       },
                       "required": [
@@ -18496,6 +18851,10 @@
                               "artifactId",
                               "version"
                             ]
+                          },
+                          "sourceGroupId": {
+                            "type": "string",
+                            "minLength": 1
                           },
                           "cardRev": {
                             "type": "integer",
@@ -18666,6 +19025,10 @@
                   "properties": {
                     "name": {
                       "type": "string"
+                    },
+                    "purpose": {
+                      "type": "string",
+                      "maxLength": 200
                     }
                   },
                   "required": [
@@ -19221,6 +19584,49 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "preview": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "summary": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "metrics": {
+                              "maxItems": 6,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "delta": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
                         }
                       },
                       "required": [
@@ -19636,6 +20042,49 @@
                           "type": "integer",
                           "minimum": 0,
                           "maximum": 9007199254740991
+                        },
+                        "preview": {
+                          "type": "object",
+                          "properties": {
+                            "title": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 200
+                            },
+                            "summary": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 500
+                            },
+                            "metrics": {
+                              "maxItems": 6,
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "label": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "value": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  },
+                                  "delta": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 40
+                                  }
+                                },
+                                "required": [
+                                  "label",
+                                  "value"
+                                ]
+                              }
+                            }
+                          }
                         }
                       },
                       "required": [
@@ -19773,6 +20222,21 @@
                                   "waiting",
                                   "pending"
                                 ]
+                              },
+                              "startedAt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "endedAt": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "estimateMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
                               }
                             },
                             "required": [
@@ -19883,6 +20347,20 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 32
+                        },
+                        "retryOf": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "queuedAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "queuePosition": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
                         }
                       },
                       "required": [
@@ -20034,6 +20512,10 @@
                         "maxLength": 32768
                       }
                     },
+                    "contentHash": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    },
                     "answerId": {
                       "type": "string",
                       "minLength": 1
@@ -20179,6 +20661,24 @@
                               "type": "integer",
                               "minimum": 0,
                               "maximum": 9007199254740991
+                            },
+                            "merge": {
+                              "type": "object",
+                              "properties": {
+                                "queuedAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "error": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200
+                                }
+                              },
+                              "required": [
+                                "queuedAt"
+                              ]
                             }
                           },
                           "required": [
@@ -20509,6 +21009,143 @@
                     "artifactId",
                     "version",
                     "media"
+                  ]
+                }
+              },
+              "required": [
+                "seq",
+                "groupId",
+                "at",
+                "actorId",
+                "type",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "const": "decision.recorded"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "decision": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "seq": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "topicId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "text": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1000
+                        },
+                        "recordedBy": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "recordedAt": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "seq",
+                        "topicId",
+                        "text",
+                        "recordedBy",
+                        "recordedAt"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "decision"
+                  ]
+                }
+              },
+              "required": [
+                "seq",
+                "groupId",
+                "at",
+                "actorId",
+                "type",
+                "data"
+              ]
+            },
+            {
+              "type": "object",
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "groupId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "at": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "actorId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "type": {
+                  "type": "string",
+                  "const": "desk.noted"
+                },
+                "data": {
+                  "type": "object",
+                  "properties": {
+                    "text": {
+                      "type": "string",
+                      "maxLength": 560
+                    }
+                  },
+                  "required": [
+                    "text"
                   ]
                 }
               },
@@ -20943,6 +21580,11 @@
                     "message": {
                       "type": "string",
                       "maxLength": 200
+                    },
+                    "reason": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
                     }
                   },
                   "required": [
@@ -21118,6 +21760,11 @@
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 64
+                },
+                "retryAfterMs": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
                 }
               },
               "required": [
@@ -21781,6 +22428,29 @@
                                     "bytes",
                                     "preview"
                                   ]
+                                },
+                                "source": {
+                                  "type": "object",
+                                  "properties": {
+                                    "artifactId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "version": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "t": {
+                                      "type": "number",
+                                      "minimum": 0
+                                    }
+                                  },
+                                  "required": [
+                                    "artifactId",
+                                    "version",
+                                    "t"
+                                  ]
                                 }
                               },
                               "required": [
@@ -22217,6 +22887,13 @@
                                   "done",
                                   "working",
                                   "info"
+                                ]
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "executing",
+                                  "failed"
                                 ]
                               },
                               "title": {
@@ -23691,6 +24368,21 @@
                                                   "waiting",
                                                   "pending"
                                                 ]
+                                              },
+                                              "startedAt": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "endedAt": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
+                                              },
+                                              "estimateMs": {
+                                                "type": "integer",
+                                                "minimum": 0,
+                                                "maximum": 9007199254740991
                                               }
                                             },
                                             "required": [
@@ -24163,6 +24855,52 @@
                                           "required": [
                                             "artifactId",
                                             "version"
+                                          ]
+                                        },
+                                        "tests": {
+                                          "type": "object",
+                                          "properties": {
+                                            "passed": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "failed": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "skipped": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            }
+                                          },
+                                          "required": [
+                                            "passed",
+                                            "failed"
+                                          ]
+                                        },
+                                        "recording": {
+                                          "type": "object",
+                                          "properties": {
+                                            "fileId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            },
+                                            "durationMs": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "posterFileId": {
+                                              "type": "string",
+                                              "minLength": 1
+                                            }
+                                          },
+                                          "required": [
+                                            "fileId",
+                                            "durationMs"
                                           ]
                                         }
                                       },
@@ -27183,6 +27921,21 @@
                                                             "waiting",
                                                             "pending"
                                                           ]
+                                                        },
+                                                        "startedAt": {
+                                                          "type": "integer",
+                                                          "minimum": 0,
+                                                          "maximum": 9007199254740991
+                                                        },
+                                                        "endedAt": {
+                                                          "type": "integer",
+                                                          "minimum": 0,
+                                                          "maximum": 9007199254740991
+                                                        },
+                                                        "estimateMs": {
+                                                          "type": "integer",
+                                                          "minimum": 0,
+                                                          "maximum": 9007199254740991
                                                         }
                                                       },
                                                       "required": [
@@ -27655,6 +28408,52 @@
                                                     "required": [
                                                       "artifactId",
                                                       "version"
+                                                    ]
+                                                  },
+                                                  "tests": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "passed": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "failed": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "skipped": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "passed",
+                                                      "failed"
+                                                    ]
+                                                  },
+                                                  "recording": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                      "fileId": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      },
+                                                      "durationMs": {
+                                                        "type": "integer",
+                                                        "minimum": 0,
+                                                        "maximum": 9007199254740991
+                                                      },
+                                                      "posterFileId": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                      }
+                                                    },
+                                                    "required": [
+                                                      "fileId",
+                                                      "durationMs"
                                                     ]
                                                   }
                                                 },
@@ -30011,6 +30810,11 @@
                                         "maxLength": 64,
                                         "pattern": "^[A-Za-z0-9_.:-]+$"
                                       }
+                                    },
+                                    "role": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 32
                                     }
                                   },
                                   "required": [
@@ -30268,6 +31072,11 @@
                                   "at",
                                   "event"
                                 ]
+                              },
+                              "answerCount": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
                               }
                             },
                             "required": [
@@ -30341,6 +31150,10 @@
                                     "artifactId",
                                     "version"
                                   ]
+                                },
+                                "sourceGroupId": {
+                                  "type": "string",
+                                  "minLength": 1
                                 },
                                 "cardRev": {
                                   "type": "integer",
@@ -30434,6 +31247,28 @@
                                 "memberIds"
                               ]
                             }
+                          },
+                          "fromAside": {
+                            "type": "object",
+                            "properties": {
+                              "groupId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "topicId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "messageId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "groupId",
+                              "topicId",
+                              "messageId"
+                            ]
                           }
                         },
                         "required": [
@@ -30741,6 +31576,29 @@
                                 "mime",
                                 "bytes",
                                 "preview"
+                              ]
+                            },
+                            "source": {
+                              "type": "object",
+                              "properties": {
+                                "artifactId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "version": {
+                                  "type": "integer",
+                                  "exclusiveMinimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "t": {
+                                  "type": "number",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "artifactId",
+                                "version",
+                                "t"
                               ]
                             }
                           },
@@ -31178,6 +32036,13 @@
                               "done",
                               "working",
                               "info"
+                            ]
+                          },
+                          "status": {
+                            "type": "string",
+                            "enum": [
+                              "executing",
+                              "failed"
                             ]
                           },
                           "title": {
@@ -32652,6 +33517,21 @@
                                               "waiting",
                                               "pending"
                                             ]
+                                          },
+                                          "startedAt": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "endedAt": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "estimateMs": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
                                           }
                                         },
                                         "required": [
@@ -33124,6 +34004,52 @@
                                       "required": [
                                         "artifactId",
                                         "version"
+                                      ]
+                                    },
+                                    "tests": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "failed": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "skipped": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed"
+                                      ]
+                                    },
+                                    "recording": {
+                                      "type": "object",
+                                      "properties": {
+                                        "fileId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "durationMs": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "posterFileId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "fileId",
+                                        "durationMs"
                                       ]
                                     }
                                   },
@@ -36144,6 +37070,21 @@
                                                         "waiting",
                                                         "pending"
                                                       ]
+                                                    },
+                                                    "startedAt": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "endedAt": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
+                                                    },
+                                                    "estimateMs": {
+                                                      "type": "integer",
+                                                      "minimum": 0,
+                                                      "maximum": 9007199254740991
                                                     }
                                                   },
                                                   "required": [
@@ -36616,6 +37557,52 @@
                                                 "required": [
                                                   "artifactId",
                                                   "version"
+                                                ]
+                                              },
+                                              "tests": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "passed": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "failed": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "skipped": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  }
+                                                },
+                                                "required": [
+                                                  "passed",
+                                                  "failed"
+                                                ]
+                                              },
+                                              "recording": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "fileId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  },
+                                                  "durationMs": {
+                                                    "type": "integer",
+                                                    "minimum": 0,
+                                                    "maximum": 9007199254740991
+                                                  },
+                                                  "posterFileId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                  }
+                                                },
+                                                "required": [
+                                                  "fileId",
+                                                  "durationMs"
                                                 ]
                                               }
                                             },
@@ -38972,6 +39959,11 @@
                                     "maxLength": 64,
                                     "pattern": "^[A-Za-z0-9_.:-]+$"
                                   }
+                                },
+                                "role": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 32
                                 }
                               },
                               "required": [
@@ -39229,6 +40221,11 @@
                               "at",
                               "event"
                             ]
+                          },
+                          "answerCount": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "required": [
@@ -39302,6 +40299,10 @@
                                 "artifactId",
                                 "version"
                               ]
+                            },
+                            "sourceGroupId": {
+                              "type": "string",
+                              "minLength": 1
                             },
                             "cardRev": {
                               "type": "integer",
@@ -39472,6 +40473,10 @@
                     "properties": {
                       "name": {
                         "type": "string"
+                      },
+                      "purpose": {
+                        "type": "string",
+                        "maxLength": 200
                       }
                     },
                     "required": [
@@ -40027,6 +41032,49 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "preview": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "summary": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "metrics": {
+                                "maxItems": 6,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "delta": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ]
+                                }
+                              }
+                            }
                           }
                         },
                         "required": [
@@ -40442,6 +41490,49 @@
                             "type": "integer",
                             "minimum": 0,
                             "maximum": 9007199254740991
+                          },
+                          "preview": {
+                            "type": "object",
+                            "properties": {
+                              "title": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200
+                              },
+                              "summary": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 500
+                              },
+                              "metrics": {
+                                "maxItems": 6,
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "label": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "value": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    },
+                                    "delta": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 40
+                                    }
+                                  },
+                                  "required": [
+                                    "label",
+                                    "value"
+                                  ]
+                                }
+                              }
+                            }
                           }
                         },
                         "required": [
@@ -40579,6 +41670,21 @@
                                     "waiting",
                                     "pending"
                                   ]
+                                },
+                                "startedAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "endedAt": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "estimateMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
                                 }
                               },
                               "required": [
@@ -40689,6 +41795,20 @@
                             "type": "string",
                             "minLength": 1,
                             "maxLength": 32
+                          },
+                          "retryOf": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "queuedAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "queuePosition": {
+                            "type": "integer",
+                            "exclusiveMinimum": 0,
+                            "maximum": 9007199254740991
                           }
                         },
                         "required": [
@@ -40840,6 +41960,10 @@
                           "maxLength": 32768
                         }
                       },
+                      "contentHash": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
                       "answerId": {
                         "type": "string",
                         "minLength": 1
@@ -40985,6 +42109,24 @@
                                 "type": "integer",
                                 "minimum": 0,
                                 "maximum": 9007199254740991
+                              },
+                              "merge": {
+                                "type": "object",
+                                "properties": {
+                                  "queuedAt": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "error": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 200
+                                  }
+                                },
+                                "required": [
+                                  "queuedAt"
+                                ]
                               }
                             },
                             "required": [
@@ -41315,6 +42457,143 @@
                       "artifactId",
                       "version",
                       "media"
+                    ]
+                  }
+                },
+                "required": [
+                  "seq",
+                  "groupId",
+                  "at",
+                  "actorId",
+                  "type",
+                  "data"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "decision.recorded"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "decision": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "seq": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "topicId": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "text": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1000
+                          },
+                          "recordedBy": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "recordedAt": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "seq",
+                          "topicId",
+                          "text",
+                          "recordedBy",
+                          "recordedAt"
+                        ]
+                      }
+                    },
+                    "required": [
+                      "decision"
+                    ]
+                  }
+                },
+                "required": [
+                  "seq",
+                  "groupId",
+                  "at",
+                  "actorId",
+                  "type",
+                  "data"
+                ]
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "seq": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "actorId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "type": {
+                    "type": "string",
+                    "const": "desk.noted"
+                  },
+                  "data": {
+                    "type": "object",
+                    "properties": {
+                      "text": {
+                        "type": "string",
+                        "maxLength": 560
+                      }
+                    },
+                    "required": [
+                      "text"
                     ]
                   }
                 },
@@ -41705,6 +42984,29 @@
                         "mime",
                         "bytes",
                         "preview"
+                      ]
+                    },
+                    "source": {
+                      "type": "object",
+                      "properties": {
+                        "artifactId": {
+                          "type": "string",
+                          "minLength": 1
+                        },
+                        "version": {
+                          "type": "integer",
+                          "exclusiveMinimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        "t": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "artifactId",
+                        "version",
+                        "t"
                       ]
                     }
                   },
@@ -42142,6 +43444,13 @@
                       "done",
                       "working",
                       "info"
+                    ]
+                  },
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "executing",
+                      "failed"
                     ]
                   },
                   "title": {
@@ -43616,6 +44925,21 @@
                                       "waiting",
                                       "pending"
                                     ]
+                                  },
+                                  "startedAt": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "endedAt": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  "estimateMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
                                   }
                                 },
                                 "required": [
@@ -44088,6 +45412,52 @@
                               "required": [
                                 "artifactId",
                                 "version"
+                              ]
+                            },
+                            "tests": {
+                              "type": "object",
+                              "properties": {
+                                "passed": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "failed": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "skipped": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "passed",
+                                "failed"
+                              ]
+                            },
+                            "recording": {
+                              "type": "object",
+                              "properties": {
+                                "fileId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "durationMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "posterFileId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "fileId",
+                                "durationMs"
                               ]
                             }
                           },
@@ -47108,6 +48478,21 @@
                                                 "waiting",
                                                 "pending"
                                               ]
+                                            },
+                                            "startedAt": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "endedAt": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
+                                            },
+                                            "estimateMs": {
+                                              "type": "integer",
+                                              "minimum": 0,
+                                              "maximum": 9007199254740991
                                             }
                                           },
                                           "required": [
@@ -47580,6 +48965,52 @@
                                         "required": [
                                           "artifactId",
                                           "version"
+                                        ]
+                                      },
+                                      "tests": {
+                                        "type": "object",
+                                        "properties": {
+                                          "passed": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "failed": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "skipped": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          }
+                                        },
+                                        "required": [
+                                          "passed",
+                                          "failed"
+                                        ]
+                                      },
+                                      "recording": {
+                                        "type": "object",
+                                        "properties": {
+                                          "fileId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          },
+                                          "durationMs": {
+                                            "type": "integer",
+                                            "minimum": 0,
+                                            "maximum": 9007199254740991
+                                          },
+                                          "posterFileId": {
+                                            "type": "string",
+                                            "minLength": 1
+                                          }
+                                        },
+                                        "required": [
+                                          "fileId",
+                                          "durationMs"
                                         ]
                                       }
                                     },
@@ -49936,6 +51367,11 @@
                             "maxLength": 64,
                             "pattern": "^[A-Za-z0-9_.:-]+$"
                           }
+                        },
+                        "role": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 32
                         }
                       },
                       "required": [
@@ -50193,6 +51629,11 @@
                       "at",
                       "event"
                     ]
+                  },
+                  "answerCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                   }
                 },
                 "required": [
@@ -50266,6 +51707,10 @@
                         "artifactId",
                         "version"
                       ]
+                    },
+                    "sourceGroupId": {
+                      "type": "string",
+                      "minLength": 1
                     },
                     "cardRev": {
                       "type": "integer",
@@ -50359,6 +51804,28 @@
                     "memberIds"
                   ]
                 }
+              },
+              "fromAside": {
+                "type": "object",
+                "properties": {
+                  "groupId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "topicId": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "messageId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": [
+                  "groupId",
+                  "topicId",
+                  "messageId"
+                ]
               }
             },
             "required": [
@@ -50521,6 +51988,11 @@
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
+                  },
+                  "purpose": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
                   }
                 },
                 "required": [
@@ -50652,6 +52124,11 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 64
+            },
+            "retryAfterMs": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": [

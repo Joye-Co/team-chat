@@ -1,0 +1,34 @@
+{
+  "kind": "ArtifactVersion",
+  "valid": true,
+  "value": {
+    "artifactId": "01JC0ART00000000000000OCT3",
+    "version": 3,
+    "entry": "index.html",
+    "files": [
+      {
+        "path": "index.html",
+        "fileId": "01JC0FIL0000000000000INDEX",
+        "size": 12000,
+        "mime": "text/html"
+      }
+    ],
+    "createdBy": "01JBX0BOT000000000000000AC",
+    "createdAt": 1762128000000,
+    "preview": {
+      "title": "报名看板",
+      "summary": "这周报名 38 人，B 站最多。",
+      "metrics": [
+        {
+          "label": "报名",
+          "value": "38 人",
+          "delta": "+12"
+        },
+        {
+          "label": "B 站",
+          "value": "9"
+        }
+      ]
+    }
+  }
+}

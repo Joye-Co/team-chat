@@ -112,7 +112,7 @@ describe("PATCH /v1/groups/:id", () => {
     const { c } = await Client.connect(a.token);
     expect((await rename(gid, a.token, { name: "新名" })).status).toBe(200);
     // Simulate a lost D1 write after the room appended the event.
-    await env.DB.prepare("UPDATE groups SET name = '旧名' WHERE id = ?").bind(gid).run();
+    await env.DB.prepare("UPDATE groups SET name = '旧名', update_seq = 0 WHERE id = ?").bind(gid).run();
     const retry = await rename(gid, a.token, { name: "新名" });
     expect(retry.body.group.name).toBe("新名");
     const row = await env.DB.prepare("SELECT name FROM groups WHERE id = ?").bind(gid).first<{ name: string }>();

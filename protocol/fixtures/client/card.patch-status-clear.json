@@ -1,0 +1,20 @@
+{
+  "kind": "ClientFrame",
+  "valid": true,
+  "description": "null clears the status",
+  "value": {
+    "t": "card.patch",
+    "rid": "r205",
+    "groupId": "01JBX0GENERAL000000000000A",
+    "messageId": "01JBX0MSG000000000000000AE",
+    "baseRev": 3,
+    "ops": [
+      {
+        "op": "card",
+        "props": {
+          "status": null
+        }
+      }
+    ]
+  }
+}

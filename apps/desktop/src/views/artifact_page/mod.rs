@@ -36,7 +36,7 @@ use crate::{
     data::{ArtifactDetail, ArtifactFolder, FileError, Millis, TopicStatus},
     theme::{self, Type as _, space},
     ui::{
-        self, Sym, MemberAvatar, Ring,
+        self, MemberAvatar, Ring, Sym,
         web_embed::{WebEmbed, WebEmbedSpec},
     },
     views::{
@@ -51,7 +51,10 @@ use crate::{
 
 /// The version folders a view has asked for, by `(产出, version)`.
 #[derive(Clone, Default)]
-pub struct Folders(Rc<RefCell<HashMap<(String, u32), Option<Result<ArtifactFolder, FileError>>>>>);
+pub struct Folders(Rc<RefCell<HashMap<(String, u32), FolderAsk>>>);
+
+/// One asked folder: `None` while it loads.
+type FolderAsk = Option<Result<ArtifactFolder, FileError>>;
 
 impl Folders {
     /// The folder of a version, asking the provider once; the view is
@@ -96,6 +99,9 @@ use crate::views::artifacts::host::{self, PageRef};
 /// A waiting emit: its page and payload, and the page's request when it waits.
 type PendingEvent = (PageRef, serde_json::Value, Option<serde_json::Value>);
 
+/// The page and request id of an emit that waits.
+type QueuedRequest = (PageRef, serde_json::Value);
+
 thread_local! {
     /// Page events by `(产出, version)`, paced for every page of the app.
     static PAGE_EVENTS: RefCell<EventLimiter<(String, u32), PendingEvent>> =
@@ -103,7 +109,7 @@ thread_local! {
     /// When the next send of waiting page events runs.
     static FLUSH_AT: Cell<Option<Instant>> = const { Cell::new(None) };
     /// The page request of the emit that waits per `(产出, version, name)`.
-    static QUEUED: RefCell<HashMap<(String, u32, String), (PageRef, serde_json::Value)>> =
+    static QUEUED: RefCell<HashMap<(String, u32, String), QueuedRequest>> =
         RefCell::new(HashMap::new());
 }
 
@@ -1070,7 +1076,11 @@ impl ArtifactPage {
         let view_item = |grid: bool, cx: &mut Context<Self>| {
             let on = self.grid == grid;
             sym_toolbar_item(
-                if grid { "artifacts-view-grid" } else { "artifacts-view-list" },
+                if grid {
+                    "artifacts-view-grid"
+                } else {
+                    "artifacts-view-list"
+                },
                 if grid { Sym::Grid } else { Sym::List },
                 if grid {
                     c::ARTIFACTS_VIEW_GRID
@@ -1102,14 +1112,16 @@ impl ArtifactPage {
             move |mut menu, _, _| {
                 for s in ListSort::ALL {
                     let this = this.clone();
-                    menu = menu.item(PopupMenuItem::new(s.label()).checked(s == current).on_click(
-                        move |_, _, cx| {
-                            let _ = this.update(cx, |v, cx| {
-                                v.sort = s;
-                                cx.notify();
-                            });
-                        },
-                    ));
+                    menu = menu.item(
+                        PopupMenuItem::new(s.label())
+                            .checked(s == current)
+                            .on_click(move |_, _, cx| {
+                                let _ = this.update(cx, |v, cx| {
+                                    v.sort = s;
+                                    cx.notify();
+                                });
+                            }),
+                    );
                 }
                 menu
             }
@@ -1382,6 +1394,10 @@ impl Render for ArtifactPage {
         let shown = version
             .filter(|v| detail.versions.iter().any(|x| x.version == *v))
             .unwrap_or(detail.summary.version);
+        crate::selftest::drawn::mark(
+            "artifact-page",
+            format!("{} v{shown}", detail.summary.title),
+        );
         let header = self.header(&detail, shown, window, cx);
         let frame = self.frame(&detail, shown, window, cx);
         let aside = self.aside_open.then(|| self.story(&detail, shown, cx));
@@ -1507,7 +1523,11 @@ fn thumbnail(
         ),
         None => well.child(
             kind_sym(a.kind)
-                .icon(crate::ui::sf_symbols::SymSize::new(32., 40., crate::ui::sf_symbols::Weight::Light))
+                .icon(crate::ui::sf_symbols::SymSize::new(
+                    32.,
+                    40.,
+                    crate::ui::sf_symbols::Weight::Light,
+                ))
                 .text_color(n.tertiary),
         ),
     };

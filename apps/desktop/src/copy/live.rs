@@ -42,6 +42,8 @@ crate::copy! {
     LIVE_CHECKING = "检查中",
     LIVE_MET = "达标",
     LIVE_NOT_MET = "没达标",
+    LIVE_EVIDENCE_LINK = "链接",
+    LIVE_EVIDENCE_ARTIFACT = "产出",
     LIVE_UNCHECKED = "没检查",
     LIVE_PLAN = "计划",
     LIVE_PLAN_TOOK = "{n} 分钟",

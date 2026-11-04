@@ -7,8 +7,7 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, ElementId, InteractiveElement as _, IntoElement, ParentElement,
-    SharedString, StatefulInteractiveElement as _, Styled, Window, div,
-    px,
+    SharedString, StatefulInteractiveElement as _, Styled, Window, div, px,
 };
 
 use gpui_component::menu::ContextMenuExt as _;
@@ -46,7 +45,11 @@ pub(super) enum SlotStyle {
 impl RailView {
     /// A sidebar row with the window's inactive look when the shell asks
     /// for it.
-    pub(super) fn row(&self, id: impl Into<ElementId>, title: impl Into<SharedString>) -> SidebarRow {
+    pub(super) fn row(
+        &self,
+        id: impl Into<ElementId>,
+        title: impl Into<SharedString>,
+    ) -> SidebarRow {
         let row = SidebarRow::new(id, title);
         if self.show_inactive {
             row.inactive(true)
