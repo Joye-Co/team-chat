@@ -375,3 +375,38 @@ describe("github payload parsing", () => {
   });
 });
 
+
+describe("GitHub merge state (1.1, GAPS SF-5)", () => {
+  const links = async (c: Client, gid: string) =>
+    (await events(c, gid)).filter((e) => e.type === "topic.linked").map((e) => e.data.link);
+
+  it("store a queued merge on the PR link, set its error when GitHub dequeues it, and drop it once merged", async () => {
+    const { hook, secret, gid, c } = await setup("github");
+    const post = async (action: string, o: Record<string, unknown> = {}, extra: Record<string, unknown> = {}) => {
+      const r = await postGithub(hook.id, secret, "pull_request", pullRequestEvent(action, { number: 12, ...o }, extra));
+      expect(r.status, JSON.stringify(r.body)).toBe(200);
+    };
+    await post("opened");
+    expect((await links(c, gid)).at(-1).merge).toBeUndefined();
+    const t0 = Date.now();
+    await post("enqueued");
+    const queued = (await links(c, gid)).at(-1);
+    expect(queued.merge.queuedAt).toBeGreaterThanOrEqual(t0);
+    expect(queued.merge.error).toBeUndefined();
+    // A merge failure: the topic leaves 合并中 (the link says why).
+    await post("dequeued", {}, { reason: "MERGE_CONFLICT" });
+    const failed = (await links(c, gid)).at(-1);
+    expect(failed.merge).toEqual({ queuedAt: queued.merge.queuedAt, error: "merge conflict" });
+    // Auto-merge again, then merged: no queued merge on a merged PR.
+    await post("auto_merge_enabled");
+    expect((await links(c, gid)).at(-1).merge.error).toBeUndefined();
+    await post("auto_merge_disabled", {}, { reason: "Base branch was modified" });
+    expect((await links(c, gid)).at(-1).merge.error).toBe("Base branch was modified");
+    await post("enqueued");
+    await post("closed", { state: "closed", merged: true });
+    const merged = (await links(c, gid)).at(-1);
+    expect(merged).toMatchObject({ state: "merged" });
+    expect(merged.merge).toBeUndefined();
+    c.close();
+  });
+});

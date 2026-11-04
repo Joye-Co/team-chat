@@ -1,0 +1,32 @@
+{
+  "kind": "Event",
+  "valid": true,
+  "value": {
+    "seq": 72,
+    "groupId": "01JBX0GENERAL000000000000A",
+    "at": 1762128005000,
+    "actorId": "01JBX0BOT000000000000000AC",
+    "type": "topic.linked",
+    "data": {
+      "topicId": "01JBX0TOPIC0000000000000AD",
+      "link": {
+        "kind": "pr",
+        "repo": "Joye-Co/team-chat",
+        "number": 61,
+        "url": "https://github.com/Joye-Co/team-chat/pull/61",
+        "title": "fix: resend after reconnect",
+        "state": "open",
+        "checks": [
+          {
+            "name": "CI",
+            "conclusion": "success"
+          }
+        ],
+        "merge": {
+          "queuedAt": 1762128000000,
+          "error": "checks failed"
+        }
+      }
+    }
+  }
+}

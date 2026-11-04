@@ -910,6 +910,7 @@ mod tests {
     #[test]
     fn a_pr_link_gives_the_changes_and_their_state() {
         let pr = proto::PrLink {
+            merge: None,
             repo: "a/b".into(),
             number: 61,
             url: "https://github.com/a/b/pull/61".into(),

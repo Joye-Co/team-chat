@@ -129,6 +129,7 @@ pub fn seeded(root: &Path, now: u64) -> Arc<CoreProvider> {
         "durationMs": 41 * min, "resultMessageId": "01SEEDDONE"
     }));
     let pr = proto::TopicLink::Pr(proto::PrLink {
+        merge: None,
         repo: "acme/chat".into(),
         number: 61,
         url: "https://github.com/acme/chat/pull/61".into(),

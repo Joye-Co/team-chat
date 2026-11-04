@@ -899,7 +899,11 @@ RefTarget =
   | { kind: "url", url }                          // http or https, <= 2048
 CardV2Action = { id, label /* 1..40 */, style?: "primary" | "default" | "danger",
                  kind?: "submit" | "cancel" | "link" /* absent = submit */,
-                 target?: RefTarget /* exactly for link */, confirm?: { title /* 1..200 */, body? /* <= 1000 */ } }
+                 target?: RefTarget /* exactly for link */, confirm?: { title /* 1..200 */, body? /* <= 1000 */ },
+                 role?: string /* 1.1, 1..32, open text */ }
+// role "approve" (ACTION_ROLE_APPROVE): the action of a review ask that approves the change
+// (merge). Clients show 合并中 after that answer only while the PR link's `merge` has no
+// `error`; they never guess the approve action from its id or label. Unknown roles mean nothing.
 
 Message += { cardV2?: CardV2 }
 { t: "send", ..., cardV2?: CardV2 }            // makes a card message
@@ -1133,7 +1137,8 @@ Module: `links.ts` / `links.rs`.
 TopicLink = { kind: "pr", repo /* owner/name */, number, url, title /* <= 500 */,
               state /* plain text: open | draft | merged | closed */,
               checks: { name /* 1..200 */, conclusion /* 1..32, "pending" while it runs */ }[] /* <= 100 */,
-              additions?, deletions?, changedFiles? }
+              additions?, deletions?, changedFiles?,
+              merge?: { queuedAt, error? /* 1..200 */ } /* 1.1 */ }
 topic.linked (stored event) data: { topicId, link: TopicLink }   // actorId = the integration's bot
 ```
 
@@ -1143,6 +1148,11 @@ Rules:
   (`Topic: <id>` in its body) whenever its state, checks or size change. A link with the same
   `kind` and `url` replaces the older one; clients keep the newest per key.
 - Readers skip a `kind` they do not know (Rust `TopicLink::Unknown`).
+- 1.1 `merge`: the pull request waits to merge. GitHub `pull_request` actions `enqueued` (merge
+  queue) and `auto_merge_enabled` set `{ queuedAt }`; `dequeued` and `auto_merge_disabled` keep
+  `queuedAt` and set `error` (GitHub's `reason` as plain text, `MERGE_CONFLICT` → `merge
+  conflict`, else "merge stopped"). A merged or closed pull request has no `merge`. Clients show
+  合并中 only while `merge` is set without `error` and `state` is `open`.
 
 ## Client cache recovery
 

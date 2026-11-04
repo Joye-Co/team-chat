@@ -682,8 +682,15 @@ export const CardV2Action = z.object({
   confirm: z.object({ title: Short(200), body: Text(1000).optional() }).optional(),
   /** 2.1, `submit` and `reject`: the input blocks whose values go in `inputs`. */
   inputs: z.array(BlockId).max(MAX_CARD_V2_INPUT_BLOCKS, LIMIT).optional(),
+  /**
+   * 1.1: what the action means to readers, as open text. Known: `ACTION_ROLE_APPROVE`, the
+   * action of a review ask that approves the change (merge). Unknown roles mean nothing.
+   */
+  role: z.string().min(1).max(32, LIMIT).optional(),
 });
 export type CardV2Action = z.infer<typeof CardV2Action>;
+/** `CardV2Action.role` of the action that approves a reviewed change (合并中 follows it). */
+export const ACTION_ROLE_APPROVE = "approve";
 
 /** The card as readers see it: shapes only, no write rules. */
 export const CardV2Shape = z.object({

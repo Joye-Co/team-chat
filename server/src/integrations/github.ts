@@ -28,7 +28,13 @@ const PullRequest = z.object({
   changed_files: z.int().nonnegative().optional(),
 });
 
-const PullRequestEvent = z.object({ action: z.string(), pull_request: PullRequest, repository: Repo });
+const PullRequestEvent = z.object({
+  action: z.string(),
+  pull_request: PullRequest,
+  repository: Repo,
+  /** `dequeued` and `auto_merge_disabled`: why, e.g. "MERGE_CONFLICT" or a sentence. */
+  reason: z.string().nullable().optional(),
+});
 const ReviewEvent = z.object({
   action: z.string(),
   review: z.object({ user: User.nullable().optional(), state: z.string() }),
@@ -107,7 +113,7 @@ export interface PrSize {
 
 /** A GitHub delivery reduced to what the adapter acts on. */
 export type GhEvent =
-  | { type: "pr"; repo: string; number: number; action: string; pr: PrInfo; review?: { login: string; state: string } }
+  | { type: "pr"; repo: string; number: number; action: string; pr: PrInfo; review?: { login: string; state: string }; reason?: string }
   | {
       type: "issue";
       repo: string;
@@ -137,7 +143,25 @@ const PR_ACTIONS = new Set([
   "review_request_removed",
   "synchronize",
   "closed",
+  // 1.1: merge queue and auto-merge (PrLink.merge, 合并中).
+  "enqueued",
+  "dequeued",
+  "auto_merge_enabled",
+  "auto_merge_disabled",
 ]);
+
+/** Starts a queued merge. */
+const MERGE_START = new Set(["enqueued", "auto_merge_enabled"]);
+/** Stops a queued merge without merging (unless the PR is merged). */
+const MERGE_STOP = new Set(["dequeued", "auto_merge_disabled"]);
+
+/** GitHub's dequeue reason as plain text: "MERGE_CONFLICT" -> "merge conflict". */
+export function mergeError(reason: string | undefined): string {
+  const text = (reason ?? "").trim();
+  if (!text) return "merge stopped";
+  const plain = /^[A-Z0-9_]+$/.test(text) ? text.toLowerCase().replace(/_/g, " ") : text;
+  return cut(plain, 200);
+}
 
 function prInfo(p: z.infer<typeof PullRequest>): PrInfo {
   return {
@@ -175,7 +199,14 @@ export function normalize(eventName: string, payload: unknown): GhEvent | null {
     case "pull_request": {
       if (typeof action !== "string" || !PR_ACTIONS.has(action)) return null;
       const e = parse(PullRequestEvent, payload);
-      return { type: "pr", repo: e.repository.full_name, number: e.pull_request.number, action, pr: prInfo(e.pull_request) };
+      return {
+        type: "pr",
+        repo: e.repository.full_name,
+        number: e.pull_request.number,
+        action,
+        pr: prInfo(e.pull_request),
+        ...(e.reason ? { reason: e.reason } : {}),
+      };
     }
     case "pull_request_review": {
       if (action !== "submitted" && action !== "dismissed") return null;
@@ -290,6 +321,8 @@ export interface PrState {
   checks: Record<string, CheckResult>;
   /** The latest known size of the change. */
   size?: PrSize;
+  /** 1.1: a queued merge (merge queue or auto-merge); `error` once it stopped without merging. */
+  merge?: { queuedAt: number; error?: string };
 }
 
 export interface IssueState {
@@ -341,15 +374,19 @@ function fromPr(prev: PrState | null, repo: string, number: number, pr: PrInfo):
     reviews: { ...(prev?.reviews ?? {}) },
     checks: sameHead ? { ...(prev?.checks ?? {}) } : {},
     ...((pr.size ?? prev?.size) ? { size: pr.size ?? prev?.size } : {}),
+    ...(prev?.merge && pr.state === "open" ? { merge: prev.merge } : {}),
   };
 }
 
 /** Applies a PR or issue event; CI events use `applyCi`. */
-export function applyEvent(prev: GhState | null, e: Exclude<GhEvent, { type: "ci" }>): GhState {
+export function applyEvent(prev: GhState | null, e: Exclude<GhEvent, { type: "ci" }>, now = Date.now()): GhState {
   if (e.type === "issue") {
     return { kind: "issue", repo: e.repo, number: e.number, ...e.issue };
   }
   const s = fromPr(prev?.kind === "pr" ? prev : null, e.repo, e.number, e.pr);
+  // A merged or closed PR has no queued merge (fromPr drops it); a new head commit keeps it.
+  if (s.state === "open" && MERGE_START.has(e.action)) s.merge = { queuedAt: now };
+  if (s.state === "open" && MERGE_STOP.has(e.action)) s.merge = { queuedAt: s.merge?.queuedAt ?? now, error: mergeError(e.reason) };
   if (e.review) {
     const login = e.review.login.toLowerCase();
     if (e.review.state === "dismissed") delete s.reviews[login];
@@ -546,6 +583,7 @@ export function topicLink(s: GhState): TopicLink | null {
     state: s.state === "open" && s.draft ? "draft" : s.state,
     checks,
     ...(s.size ?? {}),
+    ...(s.merge ? { merge: s.merge } : {}),
   };
   const parsed = TopicLink.safeParse(link);
   return parsed.success ? parsed.data : null;

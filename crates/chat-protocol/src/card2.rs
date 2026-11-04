@@ -1924,9 +1924,25 @@ pub struct CardV2Action {
         skip_serializing_if = "Option::is_none"
     )]
     pub inputs: Option<Vec<String>>,
+    /// 1.1: what the action means to readers, as open text (1..32). Known: `"approve"`, the
+    /// action of a review ask that approves the change (merge). Unknown roles mean nothing.
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub role: Option<String>,
 }
 
+/// The [`CardV2Action::role`] of the action that approves a reviewed change.
+pub const ACTION_ROLE_APPROVE: &str = "approve";
+
 impl CardV2Action {
+    /// `role == "approve"`.
+    pub fn is_approve(&self) -> bool {
+        self.role.as_deref() == Some(ACTION_ROLE_APPROVE)
+    }
+
     pub fn kind(&self) -> CardActionKind {
         self.kind.unwrap_or_default()
     }
@@ -2375,6 +2391,9 @@ impl CardV2 {
                 if let Some(b) = &c.body {
                     check_chars("cardV2.actions.confirm.body", b, 0, 1000)?;
                 }
+            }
+            if let Some(r) = &a.role {
+                check_chars("cardV2.actions.role", r, 1, 32)?;
             }
             if let Some(i) = &a.inputs {
                 if i.len() > MAX_CARD_V2_INPUT_BLOCKS {

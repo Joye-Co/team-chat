@@ -542,6 +542,7 @@ impl Answerer {
         self.form
             .update(cx, |f, cx| f.choose(block, option, false, cx));
         let action = submit_action(&self.card).cloned().unwrap_or(CardV2Action {
+            role: None,
             id: "submit".into(),
             label: String::new(),
             style: None,

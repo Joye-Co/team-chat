@@ -55,6 +55,28 @@ export function addFilesFixtures({ ok, bad, T0, ID, base, message }: InteractCtx
   ok("http/post-message-from-aside.json", "PostMessageRequest", { topicId: ID.topic, clientMsgId: ID.cmid, body: "建议：重连后按 seq 补发。", fromAside });
   ok("entities/message-from-aside.json", "Message", { ...message, fromAside });
 
+  // SF-5: the approve action of a review ask, and a PR's queued merge.
+  const review = {
+    v: 2,
+    rev: 1,
+    intent: "ask",
+    title: "合并 PR #61？",
+    fallback: "Forge 改完了重连补发，请审一下。",
+    ask: { from: ["requester"] },
+    blocks: [{ type: "text", id: "why", text: "补发 3 条，没有重复。" }],
+    actions: [
+      { id: "merge", label: "合并", style: "primary", role: "approve" },
+      { id: "changes", label: "要改", kind: "reject" },
+    ],
+  };
+  ok("entities/card-v2-review-approve-role.json", "CardV2", review, "1.1: role approve marks the action that merges");
+  ok("entities/card-v2-action-unknown-role.json", "CardV2", { ...review, actions: [{ id: "merge", label: "合并", role: "ship-it-later" }] }, "roles are open text; unknown ones mean nothing");
+  bad("entities/card-v2-action-role-too-long.json", "CardV2", { ...review, actions: [{ id: "merge", label: "合并", role: "x".repeat(33) }] }, "a role is at most 32 characters", "card.limits");
+  const prLink = { kind: "pr", repo: "Joye-Co/team-chat", number: 61, url: "https://github.com/Joye-Co/team-chat/pull/61", title: "fix: resend after reconnect", state: "open", checks: [{ name: "CI", conclusion: "success" }] };
+  ok("entities/topic-link-pr-merge-queued.json", "TopicLink", { ...prLink, merge: { queuedAt: T0 } });
+  ok("entities/topic-link-pr-merge-failed.json", "TopicLink", { ...prLink, merge: { queuedAt: T0, error: "merge conflict" } });
+  ok("events/topic.linked-merge-failed.json", "Event", { ...base, seq: 72, actorId: ID.bot, type: "topic.linked", data: { topicId: ID.topic, link: { ...prLink, merge: { queuedAt: T0, error: "checks failed" } } } });
+
   // SF-7: a table is at most 200 MB.
   const table = { kind: "table", mime: "text/csv", bytes: 120_000, rows: 124, cols: 6, preview: "ready" };
   const createCsv = { groupId: ID.general, topicId: ID.topic, title: "报名表", kind: "file", entry: "a.csv", files: [{ path: "a.csv", fileId: FILE }], media: table };
