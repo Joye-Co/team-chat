@@ -37,6 +37,7 @@ crate::copy! {
     DATE_OLDER = "{y}年{m}月{d}日",
     STARTED_LINE = "{starter} 发起 · {owner} 负责",
     STARTED_LINE_NO_OWNER = "{starter} 发起",
+    STARTED_IN = "{starter} 在 {group} 发起",
     BOT_WORKING = "正在工作",
     MORE_WORKING = "另外 {n} 位成员在工作",
     VIEW_PROCESS = "查看过程",

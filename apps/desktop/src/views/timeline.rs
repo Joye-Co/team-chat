@@ -204,7 +204,16 @@ impl TimelineView {
     pub fn set_v2(&mut self, v2: bool, cx: &mut Context<Self>) {
         if self.v2 != v2 {
             self.v2 = v2;
+            // Rows change height: measure again, but keep the place (a
+            // search hit opened before the page switched style).
+            let following = self.list.is_following_tail();
+            let top = self.list.logical_scroll_top();
             self.list.reset(self.messages.len());
+            if following {
+                self.list.set_follow_mode(FollowMode::Tail);
+            } else {
+                self.list.scroll_to(top);
+            }
             cx.notify();
         }
     }
@@ -239,7 +248,10 @@ impl TimelineView {
                 cx.notify();
             }),
         ];
-        let list = ListState::new(0, ListAlignment::Bottom, px(800.));
+        // Top-aligned and following the tail: a long 话题 opens at its
+        // newest message, a short one reads from its start block at the top
+        // (no blank band above it).
+        let list = ListState::new(0, ListAlignment::Top, px(800.));
         list.set_follow_mode(FollowMode::Tail);
         let visible_end: Rc<Cell<usize>> = Rc::default();
         let end = visible_end.clone();

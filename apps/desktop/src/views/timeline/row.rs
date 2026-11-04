@@ -75,9 +75,13 @@ impl TimelineView {
             item = item.pt(if start { space::S16 } else { space::S10 });
         }
         if v2 {
-            // The v2 page has no start block: the first row is the date.
+            // The thread-start block opens a 话题 whose first message is
+            // loaded; the date of the first message follows it.
+            if start && let Some(topic) = self.topic.clone() {
+                item = item.child(self.render_start_v2(&topic, cx));
+            }
             if start || new_day {
-                item = item.child(super::v2::date_divider(message.created_at, start, cx));
+                item = item.child(super::v2::date_divider(message.created_at, false, cx));
             }
         } else {
             if start && let Some(topic) = self.topic.clone() {
@@ -794,6 +798,90 @@ impl TimelineView {
             .provider
             .react(&message.group_id, &message.topic_id, &message.id, emoji, on);
         cx.notify();
+    }
+
+    /// The thread-start block of the v2 page (COMPLETENESS §2.17): a 40 pt
+    /// symbol box, the 话题 title and `Joye 在 开发 发起 · 今天 09:12`. It
+    /// sits at the top of the list, so a short 话题 reads from the top.
+    fn render_start_v2(&self, topic: &Topic, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::native::{NativeType as _, native_colors};
+        let n = native_colors(cx);
+        let starter = self
+            .members
+            .iter()
+            .find(|m| m.id == topic.created_by)
+            .map(|m| m.name.clone())
+            .unwrap_or_default();
+        let group = self
+            .services
+            .provider
+            .groups()
+            .into_iter()
+            .find(|g| g.id == topic.group_id);
+        let who = match group {
+            Some(g) if g.dm_peer.is_none() && !g.name.is_empty() => fill(
+                t::STARTED_IN,
+                &[
+                    ("starter", &crate::copy::isolate(&starter)),
+                    ("group", &crate::copy::isolate(&g.name)),
+                ],
+            ),
+            _ => fill(
+                t::STARTED_LINE_NO_OWNER,
+                &[("starter", &crate::copy::isolate(&starter))],
+            ),
+        };
+        let when = model::local_day(topic.created_at).map(|day| {
+            format!(
+                "{} {}",
+                model::day_label(day, crate::selftest::clock::local_now().date_naive()),
+                model::clock(topic.created_at)
+            )
+        });
+        let (title, untitled) = crate::views::sidebar::topic_display_title(&topic.title);
+        div()
+            .mx(ROW_INSET)
+            .pb(space::S8)
+            .flex()
+            .flex_col()
+            .gap(space::S12)
+            .child(
+                div()
+                    .size(px(40.))
+                    .rounded(theme::radius::FIELD)
+                    .bg(n.fill)
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(ui::sym(Sym::Topic, ui::SymSize::TOOLBAR, n.secondary)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(
+                        div()
+                            .n_title2()
+                            .text_color(if untitled { n.secondary } else { n.label })
+                            .line_clamp(2)
+                            .child(title),
+                    )
+                    .child(
+                        div()
+                            .min_w(px(0.))
+                            .flex()
+                            .n_body()
+                            .text_color(n.secondary)
+                            .child(div().min_w(px(0.)).one_line().child(who))
+                            .children(
+                                when.map(|w| {
+                                    div().flex_none().n_figures().child(format!(" · {w}"))
+                                }),
+                            ),
+                    ),
+            )
+            .into_any_element()
     }
 
     /// The topic start block (§8.1): the responsible member at 48 pt, the
