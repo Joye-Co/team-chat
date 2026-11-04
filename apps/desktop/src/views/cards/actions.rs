@@ -217,9 +217,7 @@ fn option_row(
         .bg(if chosen { k.choice_bg } else { k.opt_bg })
         .when(chosen, |el| el.border_1().border_color(k.accent))
         .when(!blocked, |el| {
-            el.cursor_pointer()
-                .hover(|s| s.bg(k.opt_hover))
-                .active(|s| s.bg(k.pressed))
+            el
                 // A tab stop with the row focus ring (§7.1); Enter or Space
                 // answers.
                 .tab_index(0)

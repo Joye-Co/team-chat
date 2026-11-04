@@ -1038,7 +1038,6 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .text_size(px(12.))
             .font_weight(theme::MEDIUM_WEIGHT)
             .text_color(k.ink_2)
-            .cursor_pointer()
             .hover(|s| s.bg(k.hover))
             .child(label.to_string())
     };
@@ -1273,7 +1272,6 @@ fn header(ctx: &Ctx, cx: &App) -> AnyElement {
                 .id(ctx.id(key))
                 .min_w(px(0.))
                 .one_line()
-                .cursor_pointer()
                 .hover(|s| s.text_color(k.ink))
                 .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
                 .child(text)
@@ -1791,7 +1789,6 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                         .h(m::BUTTON)
                         .px(space::S6)
                         .rounded(theme::radius::MD)
-                        .cursor_pointer()
                         .hover(|s| s.bg(k.hover))
                         .text_size(px(13.))
                         .text_color(k.ink_2)

@@ -104,7 +104,6 @@ impl MessageExtra for ArtifactRefsExtra {
                     .bg(k.content)
                     .hover(|s| s.border_color(k.border_strong))
                     .active(|s| s.bg(k.hover))
-                    .cursor_pointer()
                     .flex()
                     .items_center()
                     .gap(space::S12)

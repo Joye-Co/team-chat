@@ -166,7 +166,6 @@ impl TimelineView {
                 .mx(-space::S4)
                 .h(px(24.))
                 .rounded(theme::radius::SM)
-                .cursor_pointer()
                 .hover(|el| el.bg(colors.hover))
                 .active(|el| el.bg(colors.pressed))
                 .child(ui::icon(Sym::Members, theme::icon::CHIP, colors.text_3))

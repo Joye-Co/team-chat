@@ -6,6 +6,8 @@ use gpui::{
     prelude::FluentBuilder as _, px,
 };
 
+use gpui_component::menu::ContextMenuExt as _;
+
 use super::{RailView, model::RowState, modes::TopicItem};
 use crate::{
     data::Member,
@@ -138,6 +140,10 @@ impl RailView {
         .on_click(move |_, _, cx| {
             let (g, t) = (g.clone(), t.clone());
             nav.update(cx, |nav, cx| nav.open_topic(g, t, cx))
+        })
+        .context_menu({
+            let (services, topic) = (self.services.clone(), topic.clone());
+            move |menu, window, cx| super::menus::topic(menu, &services, &topic, window, cx)
         })
         .into_any_element()
     }

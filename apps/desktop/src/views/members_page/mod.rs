@@ -15,7 +15,7 @@ use gpui::{
 };
 use gpui_component::{
     Disableable as _,
-    menu::{DropdownMenu as _, PopupMenuItem},
+    menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem},
 };
 
 use crate::{
@@ -58,6 +58,10 @@ enum Bucket {
 
 pub struct MembersPage {
     services: Services,
+    // --- v12/behavior ---
+    /// The list's key focus: ↑/↓ move the selection, Return opens it.
+    focus: gpui::FocusHandle,
+    // --- end v12/behavior ---
     filter: Filter,
     aside_open: bool,
     retried: HashSet<String>,
@@ -79,6 +83,7 @@ impl MembersPage {
         Self {
             _subscriptions: watch(&services, cx),
             services,
+            focus: cx.focus_handle(),
             filter: Filter::All,
             aside_open: true,
             retried: HashSet::new(),
@@ -182,7 +187,6 @@ impl MembersPage {
                 .h(px(28.))
                 .px(space::S10)
                 .rounded(px(7.))
-                .cursor_pointer()
                 .t_small()
                 .when(on, |el| el.bg(k.sel).medium().text_color(k.ink))
                 .when(!on, |el| el.text_color(k.ink_2).hover(|s| s.bg(k.hover)))
@@ -474,9 +478,7 @@ impl MembersPage {
             .h(px(48.))
             .px(space::S10)
             .rounded(px(9.))
-            .cursor_pointer()
             .when(is_selected, |el| el.bg(k.sel))
-            .when(!is_selected, |el| el.hover(|s| s.bg(k.hover)))
             .child(
                 MemberAvatar::new(Some(m), px(28.))
                     .ring(ring)
@@ -539,6 +541,10 @@ impl MembersPage {
             .on_click(move |_, _, cx| {
                 let id = id.clone();
                 nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
+            })
+            .context_menu({
+                let (services, member, run) = (self.services.clone(), m.clone(), e.run.clone());
+                move |menu, _, _| member_menu(menu, &services, &member, run.as_ref())
             });
         ui::motion::rise(
             SharedString::from(format!("member-row-{}", m.id)),
@@ -583,7 +589,6 @@ impl MembersPage {
             .child(
                 div()
                     .id("members-crumb")
-                    .cursor_pointer()
                     .t_bar_title()
                     .font_weight(gpui::FontWeight::NORMAL)
                     .text_color(k.ink_3)
@@ -822,8 +827,6 @@ impl MembersPage {
                 .block()
                 .px(space::S16)
                 .py(space::S14)
-                .cursor_pointer()
-                .hover(|s| s.bg(k.hover))
                 .child(
                     div()
                         .flex()
@@ -915,7 +918,6 @@ impl MembersPage {
                 .border_color(k.line)
                 .bg(k.raised)
                 .t_small()
-                .cursor_pointer()
                 .child(ui::JobTag::new(c::MEMBERS_QUEUED))
                 .child(
                     div()
@@ -1208,8 +1210,6 @@ impl MembersPage {
                 .h(px(48.))
                 .px(space::S10)
                 .rounded(px(9.))
-                .cursor_pointer()
-                .hover(|s| s.bg(k.hover))
                 .child(lead)
                 .child(
                     div()
@@ -1414,7 +1414,6 @@ impl MembersPage {
                                 el.child(div().flex_1()).child(
                                     div()
                                         .id("member-computer-link")
-                                        .cursor_pointer()
                                         .font_weight(gpui::FontWeight::NORMAL)
                                         .text_color(k.ink_2)
                                         .child(fill(c::MEMBERS_SEE_COMPUTER, &[("name", &name)]))
@@ -1569,8 +1568,6 @@ impl MembersPage {
                     .p(space::S6)
                     .m(-space::S6)
                     .rounded(theme::radius::MD)
-                    .cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
                     .child(
                         div()
                             .mt(px(1.))
@@ -1711,8 +1708,193 @@ impl Render for MembersPage {
             .size_full()
             .flex()
             .bg(k.bg)
-            .child(list)
+            .track_focus(&self.focus)
+            .key_context(KEY_CONTEXT)
+            .on_action(
+                cx.listener(|this, _: &SelectPrevious, _, cx| this.move_selection(false, cx)),
+            )
+            .on_action(cx.listener(|this, _: &SelectNext, _, cx| this.move_selection(true, cx)))
+            .on_action(cx.listener(|this, _: &OpenSelected, _, cx| this.move_selection_by(0, cx)))
+            // A click in the list makes it take the arrow keys (§10).
+            .child(
+                div()
+                    .flex_none()
+                    .h_full()
+                    .on_mouse_down(
+                        gpui::MouseButton::Left,
+                        cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)),
+                    )
+                    .child(list),
+            )
             .child(detail)
             .children(aside)
     }
 }
+
+// --- v12/behavior ---
+gpui::actions!(members_page, [SelectPrevious, SelectNext, OpenSelected]);
+
+/// The key context of the 成员 page.
+const KEY_CONTEXT: &str = "MembersPage";
+
+/// ↑/↓ move the selection in the member list, Return opens the selected
+/// member (call once at start-up).
+pub fn bind_keys(cx: &mut App) {
+    cx.bind_keys([
+        gpui::KeyBinding::new("up", SelectPrevious, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("down", SelectNext, Some(KEY_CONTEXT)),
+        gpui::KeyBinding::new("enter", OpenSelected, Some(KEY_CONTEXT)),
+    ]);
+}
+
+impl MembersPage {
+    /// The members the list shows, in its order.
+    fn visible_ids(&self) -> Vec<String> {
+        let filter = self.filter;
+        self.entries()
+            .into_iter()
+            .filter(|e| match filter {
+                Filter::All => true,
+                Filter::Working => e.bucket == Bucket::Working,
+                Filter::Waiting => e.bucket == Bucket::Waiting,
+            })
+            .map(|e| e.member.id)
+            .collect()
+    }
+
+    fn move_selection(&mut self, down: bool, cx: &mut Context<Self>) {
+        self.move_selection_by(if down { 1 } else { -1 }, cx)
+    }
+
+    /// Selects the member `step` rows from the selected one (the first or
+    /// last row when none is selected), as a click on the row does.
+    fn move_selection_by(&mut self, step: isize, cx: &mut Context<Self>) {
+        let ids = self.visible_ids();
+        let Some(last) = ids.len().checked_sub(1) else {
+            return;
+        };
+        let current = self
+            .selected(cx)
+            .and_then(|id| ids.iter().position(|x| *x == id));
+        let next = match current {
+            Some(ix) => ix.saturating_add_signed(step).min(last),
+            None if step < 0 => last,
+            None => 0,
+        };
+        let id = ids[next].clone();
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.open_members(Some(id), cx));
+    }
+}
+
+/// The context menu of a member row: the commands of the member's detail
+/// (交代给…, 单独问, 看电脑, 产出, 暂停). No shortcuts show here (§7.3).
+fn member_menu(
+    menu: PopupMenu,
+    services: &Services,
+    m: &Member,
+    run: Option<&BotRunSummary>,
+) -> PopupMenu {
+    if !m.is_bot() {
+        let nav = services.nav.clone();
+        return menu.item(
+            PopupMenuItem::new(c::MEMBERS_OUTPUTS_BUTTON)
+                .on_click(move |_, _, cx| nav.update(cx, |n, cx| n.open_artifacts(cx))),
+        );
+    }
+    let nav = services.nav.clone();
+    let mut menu = menu.item(
+        PopupMenuItem::new(fill(c::MEMBERS_HAND_OVER, &[("name", &m.name)])).on_click(
+            |_, window, cx| window.dispatch_action(Box::new(crate::views::nav::QuickSwitch), cx),
+        ),
+    );
+    if let Some(r) = run.cloned() {
+        let (side, live) = (nav.clone(), nav.clone());
+        let (r1, r2, member) = (r.clone(), r.clone(), m.id.clone());
+        menu = menu
+            .item(
+                PopupMenuItem::new(c::MEMBERS_SIDE_CHAT).on_click(move |_, _, cx| {
+                    let (r, member) = (r1.clone(), member.clone());
+                    side.update(cx, |nav, cx| {
+                        nav.open_topic(r.group_id, r.topic_id, cx);
+                        nav.set_right_pane(RightPane::SideChat(member), cx);
+                    })
+                }),
+            )
+            .item(
+                PopupMenuItem::new(fill(c::MEMBERS_SEE_COMPUTER, &[("name", &m.name)])).on_click(
+                    move |_, _, cx| {
+                        let r = r2.clone();
+                        live.update(cx, |nav, cx| {
+                            nav.open_topic(r.group_id, r.topic_id, cx);
+                            nav.set_right_pane(RightPane::Live(r.id), cx);
+                        })
+                    },
+                ),
+            );
+    }
+    let outputs = nav.clone();
+    menu = menu.item(
+        PopupMenuItem::new(c::MEMBERS_OUTPUTS_BUTTON)
+            .on_click(move |_, _, cx| outputs.update(cx, |n, cx| n.open_artifacts(cx))),
+    );
+    match run.cloned() {
+        Some(r) => {
+            let services = services.clone();
+            menu.separator().item(
+                PopupMenuItem::new(c::MEMBERS_PAUSE).on_click(move |_, _, _| {
+                    let _ = services
+                        .provider
+                        .take_over_run(&r.group_id, &r.topic_id, &r.id);
+                }),
+            )
+        }
+        None => menu,
+    }
+}
+// --- end v12/behavior ---
+
+// --- v12/behavior ---
+#[cfg(test)]
+mod behavior_tests {
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{data::ChatProvider, fake::v2::V2Samples};
+
+    /// With the list focused, ↓ selects the next member in the list's
+    /// order and shows it, ↑ goes back, Return keeps it (NATIVE.md §10).
+    #[gpui::test]
+    fn arrow_keys_move_the_member_selection(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            bind_keys(cx);
+        });
+        let provider: Arc<dyn ChatProvider> = V2Samples::new();
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let services = Services::new(provider, cx);
+            MembersPage::new(services, cx)
+        });
+        cx.run_until_parked();
+        let ids = view.update(cx, |this, _| this.visible_ids());
+        assert!(ids.len() >= 2, "the samples have members");
+        let selected = |view: &gpui::Entity<MembersPage>, cx: &mut gpui::VisualTestContext| {
+            view.update(cx, |this, cx| this.selected(cx))
+        };
+        view.update_in(cx, |this, window, cx| window.focus(&this.focus, cx));
+        cx.simulate_keystrokes("down");
+        cx.run_until_parked();
+        assert_eq!(selected(&view, cx), Some(ids[0].clone()));
+        cx.simulate_keystrokes("down");
+        cx.run_until_parked();
+        assert_eq!(selected(&view, cx), Some(ids[1].clone()));
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        assert_eq!(selected(&view, cx), Some(ids[1].clone()));
+        cx.simulate_keystrokes("up");
+        cx.run_until_parked();
+        assert_eq!(selected(&view, cx), Some(ids[0].clone()));
+    }
+}
+// --- end v12/behavior ---

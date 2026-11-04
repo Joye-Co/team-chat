@@ -115,6 +115,9 @@ crate::copy! {
     MENU_VIEW = "显示",
     MENU_SIDE_PANEL = "话题详情",
     MENU_FULL_SCREEN = "切换全屏幕",
+    // --- v12/behavior ---
+    MENU_SIDEBAR = "侧栏",
+    // --- end v12/behavior ---
     // menu bar item
     STATUS_ITEM_UNREAD = "{n} 条未读",
     STATUS_ITEM_MENTIONS = "{n} 条@你的消息",

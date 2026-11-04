@@ -142,7 +142,6 @@ pub fn composer_chip(
         .border_color(k.line)
         .t_meta()
         .text_color(k.ink_3)
-        .cursor_pointer()
         .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
         .on_click(move |_, window, cx| on_open(window, cx))
         .child(
@@ -285,8 +284,7 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
         .t_meta()
         .text_color(k.ink_3)
         .when(!deleted, |d| {
-            d.cursor_pointer()
-                .hover(|s| s.text_color(k.ink_2))
+            d.hover(|s| s.text_color(k.ink_2))
                 .on_click(move |_, _, cx| open_source(&draft, cx))
         })
         .child(

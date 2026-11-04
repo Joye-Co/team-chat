@@ -570,7 +570,6 @@ pub fn render(
             .flex()
             .items_center()
             .justify_center()
-            .cursor_pointer()
             .when(active, |el| el.bg(k.sel))
             .when(!active, |el| el.hover(|s| s.bg(k.hover)))
             .child(ui::sym(

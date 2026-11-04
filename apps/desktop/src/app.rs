@@ -590,8 +590,15 @@ impl RootView {
         let composer = cx.new(|cx| ComposerView::new(services.clone(), window, cx));
         let pages = Pages::new(&services, timeline.clone(), composer.clone(), cx);
         let panes = Panes::new(&services, window, cx);
+        let rail = cx.new(|cx| RailView::new(services.clone(), cx));
+        // --- v12/behavior ---
+        let mut subscriptions = subscriptions;
+        subscriptions.extend(crate::views::nav::menus::watch_menu_state(
+            &services, &rail, cx,
+        ));
+        // --- end v12/behavior ---
         Self {
-            rail: cx.new(|cx| RailView::new(services.clone(), cx)),
+            rail,
             sidebar: cx.new(|cx| Sidebar::new(services.clone(), cx)),
             timeline,
             composer,
@@ -618,6 +625,13 @@ impl RootView {
         &self.sidebar
     }
 
+    // --- v12/behavior ---
+    /// The left rail (the screenshot scenes right-click its rows).
+    pub fn rail(&self) -> &Entity<RailView> {
+        &self.rail
+    }
+    // --- end v12/behavior ---
+
     pub fn timeline(&self) -> &Entity<TimelineView> {
         &self.timeline
     }
@@ -641,11 +655,9 @@ impl Render for RootView {
             window.on_next_frame(hook);
         }
         let k = theme::colors(cx);
-        let root = div()
-            .id("root")
-            .size_full()
-            .bg(k.bg)
-            .text_color(k.ink)
+        let root = div().id("root").size_full().bg(k.bg).text_color(k.ink);
+        // v12/behavior: the 显示 commands of the rail and the toolbar panes.
+        let root = crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
             .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
                 // v2: ⌘⌥I toggles the topic rail.
                 this.services
@@ -808,7 +820,8 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
-        KeyBinding::new("cmd-shift-s", ToggleSidebar, None),
+        // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).
+        KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
         KeyBinding::new("cmd-n", NewTopic, None),
         KeyBinding::new("cmd-;", ToggleSideChat, None),
         KeyBinding::new("cmd-alt-r", ToggleTopicRail, None),
@@ -824,5 +837,9 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
     crate::views::topic_list::bind_keys(cx);
+    // --- v12/behavior ---
+    crate::views::rail::bind_keys(cx);
+    crate::views::members_page::bind_keys(cx);
+    // --- end v12/behavior ---
     crate::ui::motion::watch_reduce_motion(cx);
 }

@@ -11,7 +11,11 @@ use gpui::{
     SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
     prelude::FluentBuilder as _, px, relative,
 };
-use gpui_component::{Disableable as _, tooltip::Tooltip};
+use gpui_component::{
+    Disableable as _,
+    menu::{ContextMenuExt as _, PopupMenuItem},
+    tooltip::Tooltip,
+};
 
 use super::{
     AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text, open_file,
@@ -178,7 +182,6 @@ fn image_preview(
         .flex()
         .items_center()
         .justify_center()
-        .cursor_pointer()
         .child(inner)
         .when_some(progress, |el, p| el.child(track(p, cx)))
         .tooltip(move |window, cx| Tooltip::new(f::OPEN_IMAGE).build(window, cx))
@@ -268,7 +271,6 @@ fn row_frame(
             .mx(-space::S8)
             .px(space::S8)
             .rounded(theme::radius::MD)
-            .hover(|s| s.bg(k.hover))
     } else {
         row.w_full()
             .max_w(FILE_ROW_W)
@@ -482,8 +484,31 @@ pub fn file_row_in(
     )
     .id(id("frame"))
     .when(!running, |el| {
-        el.cursor_pointer()
-            .on_click(move |_, _, cx| open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx))
+        el.on_click(move |_, _, cx| open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx))
+    })
+    // v12/behavior: the row's buttons as a context menu (§7.3).
+    .context_menu({
+        let provider = provider.clone();
+        let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
+        move |menu, _, _| {
+            let item = |label: &'static str, what: OpenAction| {
+                let (provider, g, t, file) = (provider.clone(), g.clone(), t.clone(), file.clone());
+                PopupMenuItem::new(label)
+                    .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
+            };
+            if running {
+                let (provider, file) = (provider.clone(), file.clone());
+                menu.item(
+                    PopupMenuItem::new(f::CANCEL_DOWNLOAD)
+                        .on_click(move |_, _, _| provider.cancel_download(&file)),
+                )
+            } else if failed {
+                menu.item(item(f::RETRY, OpenAction::Open))
+            } else {
+                menu.item(item(f::OPEN, OpenAction::Open))
+                    .item(item(f::REVEAL, OpenAction::RevealInFinder))
+            }
+        }
     })
     .into_any_element()
 }

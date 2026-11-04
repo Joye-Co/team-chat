@@ -279,7 +279,6 @@ fn label_action(
         .gap(px(2.))
         .t_meta()
         .text_color(k.ink_2)
-        .cursor_pointer()
         .hover(|s| s.bg(k.hover))
         .child(label.into())
 }
@@ -721,7 +720,6 @@ impl TopicRail {
                 .rounded(theme::radius::MD)
                 .bg(k.sunken)
                 .overflow_hidden()
-                .cursor_pointer()
                 .child(preview_thumbnail(&preview, cx))
                 .on_click(cx.listener({
                     let pane = pane.clone();
@@ -891,7 +889,6 @@ impl TopicRail {
                 .gap(space::S6)
                 .t_small()
                 .text_color(k.ink)
-                .cursor_pointer()
                 .hover(|s| s.bg(k.hover))
                 .child(ui::icon(Sym::Computer, px(14.), k.ink_2))
                 .child(fill(c::SEE_MACHINE, &[("name", &who)]))

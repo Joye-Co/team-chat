@@ -709,7 +709,6 @@ fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> Any
         .flex()
         .items_center()
         .gap(space::S4)
-        .cursor_pointer()
         .text_color(k.ink)
         .font_weight(theme::MEDIUM_WEIGHT)
         .hover(|s| s.text_color(k.ink_2))
@@ -773,8 +772,7 @@ pub(crate) fn decision(
             .text_color(k.ink)
             .when(!quick, |el| el.w_full())
             .when(live && !sending, |el| {
-                el.cursor_pointer()
-                    .hover(|s| s.border_color(k.ink_3))
+                el.hover(|s| s.border_color(k.ink_3))
                     .on_click(move |_, _, cx| {
                         if quick {
                             a.pick(&block, &option, cx);
@@ -1043,7 +1041,6 @@ pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> gpui::Sta
         .items_center()
         .text_size(px(13.))
         .text_color(k.ink_2)
-        .cursor_pointer()
         .hover(|s| s.bg(k.hover))
         .child(label.to_string())
 }
@@ -1370,13 +1367,13 @@ pub(crate) fn input_control(
                                         ))
                                     })
                                     .when(live, |el| {
-                                        el.cursor_pointer()
-                                            .hover(|s| s.border_color(k.ink_3))
-                                            .on_click(move |_, _, cx| {
+                                        el.hover(|s| s.border_color(k.ink_3)).on_click(
+                                            move |_, _, cx| {
                                                 form.update(cx, |f, cx| {
                                                     f.choose(&block, &oid, true, cx)
                                                 })
-                                            })
+                                            },
+                                        )
                                     })
                             }
                         })
@@ -2669,8 +2666,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .min_h(m::REF_ROW)
                 .py(space::S8)
                 .when(!gone, |el| {
-                    el.cursor_pointer()
-                        .hover(|s| s.bg(k.hover))
+                    el
                         .on_click(move |_, window, cx| a.open(&t, window, cx))
                 })
                 .child(lead)

@@ -28,7 +28,7 @@ use gpui::{
     Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription, Window,
     div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem};
 
 use crate::{
     app::{Place, Services},
@@ -319,10 +319,8 @@ impl ArtifactPage {
             .px(space::S6)
             .ml(-space::S6)
             .rounded(px(7.))
-            .cursor_pointer()
             .t_small()
             .text_color(k.ink_3)
-            .hover(|s| s.bg(k.hover))
             .child(group)
             .child("/")
             .on_click(move |_, _, cx| {
@@ -718,8 +716,6 @@ impl ArtifactPage {
                 .flex()
                 .items_center()
                 .gap(space::S10)
-                .cursor_pointer()
-                .hover(|s| s.bg(k.hover))
                 .child(
                     div()
                         .flex_none()
@@ -808,11 +804,9 @@ impl ArtifactPage {
                         .h(px(36.))
                         .px(space::S6)
                         .rounded(theme::radius::MD)
-                        .cursor_pointer()
                         .t_small()
                         .text_color(if on { k.ink } else { k.ink_2 })
                         .when(on, |el| el.bg(k.sel))
-                        .when(!on, |el| el.hover(|s| s.bg(k.hover)))
                         .child(
                             div()
                                 .flex_none()
@@ -879,9 +873,7 @@ impl ArtifactPage {
                             .px(space::S6)
                             .py(space::S4)
                             .rounded(theme::radius::MD)
-                            .cursor_pointer()
                             .text_color(k.ink_2)
-                            .hover(|s| s.bg(k.hover))
                             .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
                             .on_click(move |_, _, cx| {
                                 let (g, t) = (g.clone(), t.clone());
@@ -934,8 +926,6 @@ impl ArtifactPage {
                     .rounded(theme::radius::MD)
                     .flex()
                     .gap(space::S10)
-                    .cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
                     .child(
                         div()
                             .mt(px(2.))
@@ -987,8 +977,6 @@ impl ArtifactPage {
                     .h(px(32.))
                     .px(space::S6)
                     .rounded(theme::radius::MD)
-                    .cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
                     .t_small()
                     .text_color(k.ink)
                     .child(ui::icon(Sym::List, px(14.), k.ink_3))
@@ -1091,8 +1079,6 @@ impl ArtifactPage {
                     .p(space::S8)
                     .mx(-space::S8)
                     .rounded(px(10.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
                     .child(kit::artifact_thumb(
                         &self.services,
                         &a,
@@ -1146,6 +1132,10 @@ impl ArtifactPage {
                     .on_click(move |_, _, cx| {
                         let id = id.clone();
                         nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
+                    })
+                    .context_menu({
+                        let (services, a) = (self.services.clone(), a.clone());
+                        move |menu, _, _| artifact_menu(menu, &services, &a)
                     });
             ui::motion::rise(SharedString::from(format!("artifact-row-{i}")), i, row, cx)
         });
@@ -1224,3 +1214,37 @@ impl Render for ArtifactPage {
             .into_any_element()
     }
 }
+
+// --- v12/behavior ---
+/// The context menu of a 产出 row: 打开, 在新窗口打开 and 分享 (it copies
+/// the line the 分享 button copies), as on the 产出's own page (§7.3).
+fn artifact_menu(
+    menu: PopupMenu,
+    services: &Services,
+    a: &crate::data::ArtifactSummary,
+) -> PopupMenu {
+    let (nav, id) = (services.nav.clone(), a.id.clone());
+    let (provider, window_id) = (services.provider.clone(), a.id.clone());
+    let share_text = fill(
+        c::ARTIFACT_SHARE_TEXT,
+        &[("title", &a.title), ("v", &a.version.to_string())],
+    );
+    menu.item(
+        PopupMenuItem::new(c::ARTIFACT_OPEN).on_click(move |_, _, cx| {
+            let id = id.clone();
+            nav.update(cx, |nav, cx| nav.open_artifact(id, None, cx))
+        }),
+    )
+    .item(
+        PopupMenuItem::new(c::ARTIFACT_OPEN_WINDOW).on_click(move |_, _, cx| {
+            crate::views::artifacts::window::open_artifact(&provider, &window_id, None, cx)
+        }),
+    )
+    .separator()
+    .item(
+        PopupMenuItem::new(c::ARTIFACT_SHARE).on_click(move |_, _, cx| {
+            cx.write_to_clipboard(ClipboardItem::new_string(share_text.clone()))
+        }),
+    )
+}
+// --- end v12/behavior ---

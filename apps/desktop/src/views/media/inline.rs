@@ -241,7 +241,6 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .gap(space::S4)
-        .cursor_pointer()
         .hover(|st| st.text_color(k.text_1))
         .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
         .child(cm::EXPAND)
@@ -347,7 +346,6 @@ fn markdown_card(
         .child(
             footer(cx)
                 .id(ElementId::Name(format!("{}-more", spec.id).into()))
-                .cursor_pointer()
                 .hover(|st| st.text_color(k.text_1))
                 .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
                 .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
@@ -398,7 +396,6 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
                 .rounded(radius::MD)
                 .overflow_hidden()
                 .bg(k.code_bg)
-                .cursor_pointer()
                 .child(
                     img(first.path.clone())
                         .size_full()
@@ -421,7 +418,6 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
                     .rounded(radius::MD)
                     .overflow_hidden()
                     .bg(k.code_bg)
-                    .cursor_pointer()
                     .child(
                         img(p.path.clone())
                             .size_full()
@@ -465,7 +461,6 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
                         .id(ElementId::Name(format!("{}-save", spec.id).into()))
                         .t_meta()
                         .text_color(k.text_2)
-                        .cursor_pointer()
                         .hover(|s| s.text_color(k.text_1))
                         .child(cm::IMG_SAVE_ALL)
                         .on_click(move |_, _, cx| {
@@ -539,7 +534,6 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
         .rounded(px(10.))
         .overflow_hidden()
         .bg(s.bg)
-        .cursor_pointer()
         .when_some(v.poster.clone(), |el, p| {
             el.child(
                 img(p)
@@ -604,7 +598,6 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                         .border_color(k.border)
                         .group_hover(group.clone(), |st| st.border_color(k.text_1))
                         .bg(s.bg)
-                        .cursor_pointer()
                         .child(img(f.path.clone()).size_full().object_fit(ObjectFit::Cover))
                         .on_click(move |_, _, cx| open(&go, Opening::frame(i), cx)),
                 )
@@ -625,7 +618,6 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                         .items_center()
                         .gap(space::S4)
                         .whitespace_nowrap()
-                        .cursor_pointer()
                         .child(ui::icon(Sym::Send, px(12.), k.content))
                         .child(
                             div()
@@ -781,7 +773,6 @@ fn audio(
                         .border_color(k.border)
                         .flex()
                         .items_center()
-                        .cursor_pointer()
                         .hover(|s| s.bg(k.hover))
                         .child(mono(SPEEDS[speed].1, k.text_2))
                         .on_click(move |_, _, cx| {
@@ -837,7 +828,6 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         .id(ElementId::Name(format!("{}-pdf", spec.id).into()))
         .w(px(PDF_W))
         .max_w_full()
-        .cursor_pointer()
         .hover(|st| st.border_color(k.border_strong))
         .child(thumbs)
         .child(
@@ -1039,7 +1029,6 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                 .flex()
                 .items_center()
                 .gap(space::S4)
-                .cursor_pointer()
                 .t_meta()
                 .text_color(k.text_2)
                 .hover(|st| st.text_color(k.text_1))

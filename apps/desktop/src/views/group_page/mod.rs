@@ -166,8 +166,6 @@ impl GroupPage {
             .pl(space::S4)
             .pr(space::S8)
             .rounded(px(7.))
-            .cursor_pointer()
-            .hover(|s| s.bg(k.hover))
             .child(kit::avatar_stack(&self.services, &member_ids, cx))
             .child(div().type_role(META).text_color(k.ink_2).child(fill(
                 c::GROUP_PAGE_MEMBERS,
@@ -294,7 +292,6 @@ impl GroupPage {
             .map(|r| r.id.clone());
         let card = ui::card(cx)
             .id(SharedString::from(format!("group-topic-{}", t.id)))
-            .cursor_pointer()
             .px(space::S16)
             .py(space::S14)
             .flex()
@@ -682,8 +679,6 @@ impl GroupPage {
                     .px(space::S12)
                     .mx(-space::S12)
                     .rounded(px(10.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
                     .child(
                         div()
                             .flex_none()
@@ -878,8 +873,6 @@ impl GroupPage {
                     .p(space::S6)
                     .mx(-space::S6)
                     .rounded(px(9.))
-                    .cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
                     .child(kit::artifact_thumb(
                         &self.services,
                         &a,

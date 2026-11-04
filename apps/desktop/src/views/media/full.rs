@@ -241,8 +241,6 @@ fn html(
                 .py(space::S6)
                 .rounded(radius::MD)
                 .when(v.version == shown, |el| el.bg(k.selected))
-                .hover(|s| s.bg(k.hover))
-                .cursor_pointer()
                 .flex()
                 .flex_col()
                 .gap(space::S2)
@@ -398,8 +396,6 @@ fn markdown_view(
                 .one_line()
                 .text_color(if i == selected { k.text_1 } else { k.text_2 })
                 .when(i == selected, |el| el.bg(k.selected).medium())
-                .hover(|s| s.bg(k.hover))
-                .cursor_pointer()
                 .child(h.clone())
                 .on_click(move |_, _, cx| {
                     handle.scroll_to_top_of_item(i + offset);
@@ -586,7 +582,6 @@ fn lightbox(
                     gpui::transparent_black()
                 })
                 .opacity(if i == ix { 1. } else { 0.7 })
-                .cursor_pointer()
                 .child(img(p.path.clone()).size_full().object_fit(ObjectFit::Cover))
                 .on_click(move |_, _, cx| {
                     pick.update(cx, |s, cx| {
@@ -823,8 +818,6 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                     .items_center()
                     .gap(space::S12)
                     .when(current_chapter == Some(i), |el| el.bg(k.selected))
-                    .hover(|s| s.bg(k.hover))
-                    .cursor_pointer()
                     .child(mono(super::time_text(c.t), k.text_3).w(px(36.)))
                     .child(
                         div()
@@ -864,7 +857,6 @@ fn video(spec: &FullSpec, v: &store::Video, state: &Entity<MediaState>, cx: &App
                     gpui::transparent_black()
                 })
                 .bg(s.bg)
-                .cursor_pointer()
                 .child(img(f.path.clone()).size_full().object_fit(ObjectFit::Cover))
                 .on_click(move |_, _, cx| {
                     seek_player(&go, t, cx);
@@ -1061,7 +1053,6 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .h_full()
                 .flex()
                 .items_center()
-                .cursor_pointer()
                 .child(div().w_full().h(px((v * 64.).max(2.))).rounded(px(1.)).bg(
                     if frac <= played {
                         k.text_1
@@ -1136,7 +1127,6 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .rounded(radius::SM)
                 .flex()
                 .items_center()
-                .cursor_pointer()
                 .when(i == speed, |el| el.bg(k.content).shadow_xs())
                 .child(mono(*label, if i == speed { k.text_1 } else { k.text_2 }))
                 .on_click(move |_, _, cx| set.update(cx, |s, cx| s.set_speed(i, cx))),
@@ -1158,8 +1148,6 @@ fn audio(spec: &FullSpec, a: &store::Audio, state: &Entity<MediaState>, cx: &App
                 .flex()
                 .gap(space::S12)
                 .when(current == Some(i), |el| el.bg(k.selected))
-                .hover(|s| s.bg(k.hover))
-                .cursor_pointer()
                 .child(mono(super::clock_text(c.t), k.text_3).w(px(40.)).pt(px(2.)))
                 .child(
                     div()
@@ -1380,7 +1368,6 @@ fn pdf(spec: &FullSpec, p: &store::Pdf, state: &Entity<MediaState>, cx: &App) ->
                 .flex_col()
                 .items_center()
                 .gap(space::S4)
-                .cursor_pointer()
                 .child(
                     div()
                         .w(px(w + 4.))
@@ -1654,8 +1641,6 @@ fn table(spec: &FullSpec, t: &text::Table, state: &Entity<MediaState>, cx: &App)
                 .items_center()
                 .gap(space::S2)
                 .when(numeric, |el| el.justify_end())
-                .cursor_pointer()
-                .hover(|s| s.bg(k.hover))
                 .t_meta_medium()
                 .text_color(k.text_2)
                 .child(div().one_line().child(h.clone()))

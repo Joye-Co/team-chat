@@ -348,7 +348,6 @@ pub fn decision(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App)
             let (form, block, option) = (ctx.form.clone(), id.clone(), oid.clone());
             let node_ptr = PickTarget::of(node);
             row = row
-                .cursor_pointer()
                 .hover(|s| s.border_color(k.ink_3))
                 .on_click(move |_, _, cx| {
                     form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
@@ -629,14 +628,12 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .when(can, |el| {
-                    el.cursor_pointer()
-                        .hover(|s| s.bg(k.hover))
-                        .on_click(move |_, _, cx| {
-                            let mut o = o.clone();
-                            let to = if up { i - 1 } else { i + 1 };
-                            move_item(&mut o, &item, to);
-                            set(o, cx);
-                        })
+                    el.hover(|s| s.bg(k.hover)).on_click(move |_, _, cx| {
+                        let mut o = o.clone();
+                        let to = if up { i - 1 } else { i + 1 };
+                        move_item(&mut o, &item, to);
+                        set(o, cx);
+                    })
                 })
                 .child(ui::icon(
                     if up {
@@ -845,7 +842,7 @@ pub fn rating(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .items_center()
                 .justify_center()
                 .when(live, |el| {
-                    el.cursor_pointer().on_click(move |_, _, cx| {
+                    el.on_click(move |_, _, cx| {
                         form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
                         target.after(&block, cx);
                     })
@@ -912,8 +909,7 @@ pub fn scale(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .text_color(k.ink)
             .when(on, |el| el.font_weight(FontWeight::SEMIBOLD))
             .when(live, |el| {
-                el.cursor_pointer()
-                    .hover(|s| s.border_color(k.ink_3))
+                el.hover(|s| s.border_color(k.ink_3))
                     .on_click(move |_, _, cx| {
                         form.update(cx, |f, cx| f.set_value21(&block, Val::Num(n as f64), cx));
                         target.after(&block, cx);
@@ -1087,8 +1083,7 @@ pub fn image_choice(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .flex_col()
                 .gap(space::S8)
                 .when(live, |el| {
-                    el.cursor_pointer()
-                        .hover(|s| s.border_color(k.ink_3))
+                    el.hover(|s| s.border_color(k.ink_3))
                         .on_click(move |_, _, cx| {
                             form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
                             target.after(&block, cx);
@@ -1212,7 +1207,7 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .items_center()
                     .justify_center()
                     .when(live, |el| {
-                        el.cursor_pointer().on_click(move |_, _, cx| {
+                        el.on_click(move |_, _, cx| {
                             let mut rows = cur.clone();
                             rows.insert(row_id.clone(), col_id.clone());
                             form.update(cx, |f, cx| f.set_value21(&block, Val::Rows(rows), cx));
@@ -1336,8 +1331,7 @@ pub fn slots(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
             .flex_col()
             .justify_center()
             .when(live, |el| {
-                el.cursor_pointer()
-                    .hover(|s| s.border_color(k.ink_3))
+                el.hover(|s| s.border_color(k.ink_3))
                     .on_click(move |_, _, cx| {
                         form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
                         target.after(&block, cx);
@@ -1486,8 +1480,7 @@ pub fn poll(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .border_color(if on { k.ink } else { k.line_2 })
                 .bg(k.bg)
                 .when(can, |el| {
-                    el.cursor_pointer()
-                        .hover(|s| s.border_color(k.ink_3))
+                    el.hover(|s| s.border_color(k.ink_3))
                         .on_click(move |_, _, cx| {
                             form.update(cx, |f, cx| f.choose(&block, &option, false, cx));
                             target.after(&block, cx);
@@ -2303,7 +2296,6 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .flex()
                         .items_center()
                         .justify_center()
-                        .cursor_pointer()
                         .hover(|s| s.bg(k.hover))
                         .on_click(move |_, window, cx| a.open(&target, window, cx))
                         .child(ui::icon(Sym::OpenExternal, px(14.), k.ink_2)),

@@ -160,7 +160,6 @@ fn artifact_card(
         .rounded(px(9.))
         .bg(k.bg)
         .shadow(k.lift())
-        .cursor_pointer()
         .child(page_thumb(cx))
         .child(
             div()
@@ -295,8 +294,6 @@ pub fn render(
         .p(space::S12)
         .mx(px(-12.))
         .rounded(px(10.))
-        .cursor_pointer()
-        .hover(|s| s.bg(k.hover))
         .child(
             div()
                 .flex_none()
