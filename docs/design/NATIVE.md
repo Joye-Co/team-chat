@@ -237,7 +237,7 @@ shape. The text inside every control is Body 13 pt unless noted.
 | Done | `checkmark.circle.fill` in `green` (rows: `checkmark` in `secondary`) |
 | Problem | `exclamationmark.triangle.fill` in `red` |
 | Waiting on someone | `clock` in `secondary` |
-| Computer (team machine) | `desktopcomputer`; laptop `laptopcomputer`; Mac mini `macmini` |
+| Computer (team machine) | `desktopcomputer`; laptop `laptopcomputer`; Mac mini `macmini`; Linux server `server.rack` |
 | Phone (a signed-in device) | `iphone` |
 | Cloud runner | `cloud` |
 | Settings tabs | 通用 `gearshape`, 账号 `person.crop.circle`, 通知 `bell`, 成员 `person.2`, 机器 `macmini`, 外观 `paintpalette`, 快捷键 `command` |

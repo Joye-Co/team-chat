@@ -2,6 +2,7 @@
 //! the leading edge, glass capsule groups of 36 pt items at the trailing
 //! edge. The row is transparent over the content; no hairline under it.
 
+use crate::ui::truncate::TruncText;
 use gpui::{
     AnyElement, App, Hsla, IntoElement, ParentElement, RenderOnce, SharedString, Styled, Window,
     div, prelude::FluentBuilder as _, px,
@@ -142,15 +143,7 @@ impl RenderOnce for ToolbarRow {
                     .min_w(px(0.))
                     .flex()
                     .flex_col()
-                    .child(
-                        div()
-                            .n_title3()
-                            .text_color(title_ink)
-                            .overflow_hidden()
-                            .whitespace_nowrap()
-                            .text_ellipsis()
-                            .child(self.title),
-                    )
+                    .child(TruncText::new(self.title).n_title3().text_color(title_ink))
                     .when_some(self.subtitle, |d, sub| {
                         d.child(
                             div()
@@ -160,16 +153,7 @@ impl RenderOnce for ToolbarRow {
                                 .when_some(self.state, |d, (sf, color)| {
                                     d.child(symbol(sf, icon::SM, Weight::Regular, color, window))
                                 })
-                                .child(
-                                    div()
-                                        .min_w(px(0.))
-                                        .n_subheadline()
-                                        .text_color(k.secondary)
-                                        .overflow_hidden()
-                                        .whitespace_nowrap()
-                                        .text_ellipsis()
-                                        .child(sub),
-                                ),
+                                .child(TruncText::new(sub).n_subheadline().text_color(k.secondary)),
                         )
                     }),
             )

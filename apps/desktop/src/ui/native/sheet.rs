@@ -44,11 +44,18 @@ impl SheetWidth {
     }
 }
 
-/// How a sheet enters: sliding down from under the toolbar while it fades
-/// in; a sheet opened from the keyboard still slides (a sheet is not a
-/// frequent interaction), unless Reduce Motion is on (gpui-component shows
-/// the end state then).
+/// How a sheet enters from a click: sliding down from under the toolbar
+/// while it fades in (160 ms, out curve), unless Reduce Motion is on
+/// (gpui-component shows the end state then). A sheet opened from the
+/// keyboard many times a day (⌘N 新话题) opens at once: see
+/// [`native_sheet_keyboard`] (T1-13, review-animations 9).
 pub const SHEET_ENTRANCE: DialogEntrance = DialogEntrance::FadeSlide;
+
+/// [`native_sheet`] for a sheet opened by a keyboard shortcut: no motion,
+/// in and out.
+pub fn native_sheet_keyboard(dialog: Dialog, width: SheetWidth, cx: &App) -> Dialog {
+    native_sheet(dialog, width, cx).entrance(DialogEntrance::None)
+}
 
 /// Configures a gpui-component dialog as a native sheet (§7.1). Lay out
 /// its content with [`SheetLayout`]; it has no close button (Escape and
@@ -83,6 +90,7 @@ pub struct SheetLayout {
     body: Vec<AnyElement>,
     buttons: Vec<Button>,
     leading_button: Option<Button>,
+    status: Option<AnyElement>,
 }
 
 impl SheetLayout {
@@ -93,6 +101,7 @@ impl SheetLayout {
             body: Vec::new(),
             buttons: Vec::new(),
             leading_button: None,
+            status: None,
         }
     }
 
@@ -109,6 +118,14 @@ impl SheetLayout {
     /// The trailing buttons in order: `取消` first, the default last.
     pub fn buttons(mut self, buttons: impl IntoIterator<Item = Button>) -> Self {
         self.buttons.extend(buttons);
+        self
+    }
+
+    /// The footer's left slot (§2.9): a count ("已选 2 位", 12 muted) or an
+    /// error line, beside the buttons, so the sheet height does not change.
+    /// Build an error line with [`sheet_status_error`].
+    pub fn status(mut self, el: impl IntoElement) -> Self {
+        self.status = Some(el.into_any_element());
         self
     }
 
@@ -138,15 +155,19 @@ impl RenderOnce for SheetLayout {
                         d.child(div().n_body().text_color(k.secondary).child(t))
                     }),
             )
-            .child(
-                div()
-                    .px(metrics::SHEET_PAD)
-                    .pt(space::S16)
-                    .flex()
-                    .flex_col()
-                    .gap(space::S12)
-                    .children(self.body),
-            )
+            // T1-13: an empty body adds no band; the footer sits 24 under
+            // the header.
+            .when(!self.body.is_empty(), |d| {
+                d.child(
+                    div()
+                        .px(metrics::SHEET_PAD)
+                        .pt(space::S16)
+                        .flex()
+                        .flex_col()
+                        .gap(space::S12)
+                        .children(self.body),
+                )
+            })
             .child(
                 div()
                     .px(metrics::SHEET_BUTTON_EDGE)
@@ -156,10 +177,36 @@ impl RenderOnce for SheetLayout {
                     .items_center()
                     .gap(metrics::SHEET_BUTTON_GAP)
                     .children(self.leading_button)
+                    .children(self.status.map(|el| {
+                        div()
+                            .min_w(px(0.))
+                            .n_footnote()
+                            .text_color(k.secondary)
+                            .child(el)
+                    }))
                     .child(div().flex_1())
                     .children(self.buttons),
             )
     }
+}
+
+/// The error line of a sheet footer (§2.9, owner decision v14): a 16
+/// destructive icon and the message in neutral 12 text.
+pub fn sheet_status_error(text: impl Into<SharedString>, cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .min_w(px(0.))
+        .flex()
+        .items_center()
+        .gap(space::S6)
+        .n_footnote()
+        .text_color(k.label)
+        .child(crate::ui::icons::icon(
+            crate::ui::icons::Sym::Failed,
+            super::tokens::icon::MD,
+            k.red,
+        ))
+        .child(crate::ui::truncate::TruncText::new(text))
 }
 
 /// A sheet surface drawn in place (the gallery, and a sheet a view lays out
