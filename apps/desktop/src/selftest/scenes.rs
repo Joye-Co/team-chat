@@ -338,6 +338,13 @@ pub const SCENES: &[Scene] = &[
         open: crate::views::nav::selftest::scenes::new_group,
     },
     Scene {
+        name: "new-group-keyboard",
+        about: "The new-群 sheet from the keyboard: the member list focused, a row highlighted and checked",
+        start: Start::SignedIn,
+        setup: open_first_topic,
+        open: crate::views::nav::selftest::scenes::new_group_keyboard,
+    },
+    Scene {
         name: "new-group-error",
         about: "The new-群 sheet with a name over 64 characters: field and label destructive, the reason under the list",
         start: Start::SignedIn,
