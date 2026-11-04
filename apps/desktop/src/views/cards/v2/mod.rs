@@ -1565,14 +1565,14 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     let a = a.clone();
                     button(
                         ctx.id("submit"),
-                        submit.label.clone(),
+                        shown_label(ctx.card, &submit),
                         ButtonKind::Primary,
                         cx,
                     )
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
                     .into_any_element()
                 } else {
-                    disabled_button(ctx.id("submit"), submit.label.clone(), cx).into_any_element()
+                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx).into_any_element()
                 });
                 for x in answers
                     .iter()
@@ -1582,7 +1582,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     items.push(
                         button(
                             ctx.id(format!("act-{}", x.id)),
-                            x.label.clone(),
+                            shown_label(ctx.card, x),
                             ButtonKind::Ghost,
                             cx,
                         )
@@ -1647,7 +1647,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                 items.push(
                     button(
                         ctx.id("draft-ok"),
-                        submit.label.clone(),
+                        shown_label(ctx.card, &submit),
                         ButtonKind::Primary,
                         cx,
                     )
@@ -1672,7 +1672,7 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     items.push(
                         button(
                             ctx.id(format!("act-{}", x.id)),
-                            x.label.clone(),
+                            shown_label(ctx.card, x),
                             ButtonKind::Ghost,
                             cx,
                         )
@@ -1704,14 +1704,14 @@ fn footer(ctx: &Ctx, window: &mut Window, cx: &mut App) -> Option<AnyElement> {
                     let a = a.clone();
                     button(
                         ctx.id("submit"),
-                        submit.label.clone(),
+                        shown_label(ctx.card, &submit),
                         ButtonKind::Primary,
                         cx,
                     )
                     .on_click(move |_, window, cx| a.press(&submit, window, cx))
                     .into_any_element()
                 } else {
-                    disabled_button(ctx.id("submit"), submit.label.clone(), cx).into_any_element()
+                    disabled_button(ctx.id("submit"), shown_label(ctx.card, &submit), cx).into_any_element()
                 });
                 link_buttons(&mut items, cx);
                 // --- inc-cards21: the ask's promise at the right ---
@@ -1958,3 +1958,23 @@ pub(crate) fn state_name(s: &CardState) -> &'static str {
         CardState::Info => "info",
     }
 }
+
+// --- v13/ux-pages ---
+/// The title of an answer button: it ends with `…` when pressing it opens
+/// the confirm sheet first (NATIVE.md §5.2, R26), as `press`
+/// decides.
+fn shown_label(card: &CardV2, action: &CardV2Action) -> String {
+    let kind = action.kind();
+    let irreversible = card.ask.as_ref().and_then(|a| a.irreversible.as_ref()).is_some();
+    let guarded = kind == CardActionKind::Submit
+        && action.style.unwrap_or_default() != CardV2ActionStyle::Default
+        || submit_action(card).is_some_and(|s| s.id == action.id);
+    let asks_first = matches!(kind, CardActionKind::Submit | CardActionKind::Reject)
+        && (kind == CardActionKind::Submit && guarded && irreversible || action.confirm.is_some());
+    if asks_first {
+        crate::copy::fill(crate::copy::desk::DESK_ACTION_MORE, &[("label", &action.label)])
+    } else {
+        action.label.clone()
+    }
+}
+// --- end v13/ux-pages ---
