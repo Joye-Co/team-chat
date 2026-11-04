@@ -1342,9 +1342,8 @@ fn header(ctx: &Ctx, cx: &App) -> AnyElement {
                 .ml_auto()
                 .flex_none()
                 .mono()
-                .child(crate::views::shell::clock(
-                    ctx.msg.edited_at.unwrap_or(ctx.msg.created_at),
-                )),
+                // When the message was sent: a new rev changes the card, not its time.
+                .child(crate::views::shell::clock(ctx.msg.created_at)),
         )
         .into_any_element()
 }
