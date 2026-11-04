@@ -408,3 +408,62 @@ mod tests {
         }
     }
 }
+
+/// Marks every match of `query` in a message body (a search hit): the
+/// words in bold and underlined (`<b><u>…</u></b>`). Code (fenced blocks
+/// and inline code) and link targets are left as they are, so the marks
+/// never show as literal tags.
+pub fn mark_query(source: &str, query: &str) -> String {
+    let query = query.trim();
+    if query.is_empty() || query.contains(['<', '>', '`', '[', ']', '(', ')']) {
+        return source.to_string();
+    }
+    let mut out = String::with_capacity(source.len() + 16);
+    let mut fenced = false;
+    for line in source.split_inclusive('\n') {
+        if line.trim_start().starts_with("```") || line.trim_start().starts_with("~~~") {
+            fenced = !fenced;
+            out.push_str(line);
+            continue;
+        }
+        if fenced {
+            out.push_str(line);
+            continue;
+        }
+        // Outside code: the parts between backticks alternate text / code.
+        for (i, part) in line.split('`').enumerate() {
+            if i > 0 {
+                out.push('`');
+            }
+            if i % 2 == 1 {
+                out.push_str(part);
+            } else {
+                out.push_str(&mark_text(part, query));
+            }
+        }
+    }
+    out
+}
+
+/// [`mark_query`] on a run of text with no code: a match inside a word
+/// that carries a link (`http…`, `](`) stays unmarked.
+fn mark_text(text: &str, query: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find(query) {
+        let (before, after) = rest.split_at(at);
+        out.push_str(before);
+        let word_start = out.rfind(|c: char| c.is_whitespace()).map_or(0, |i| i + 1);
+        let word = &out[word_start..];
+        if word.contains("http") || word.contains("](") {
+            out.push_str(query);
+        } else {
+            out.push_str("<b><u>");
+            out.push_str(query);
+            out.push_str("</u></b>");
+        }
+        rest = &after[query.len()..];
+    }
+    out.push_str(rest);
+    out
+}

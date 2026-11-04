@@ -6,7 +6,10 @@ use std::time::{Duration, Instant};
 use gpui::{Context, FollowMode, ListOffset, px};
 
 use super::{PAGE, TimelineView, model};
-use crate::{app::FocusRequest, theme::motion};
+use crate::{
+    app::{FocusRequest, SearchContext},
+    theme::motion,
+};
 
 /// How long the opened message stays fully highlighted (§7.5: a 2 s
 /// `me-bg` fill that fades out).
@@ -32,6 +35,11 @@ pub(super) struct FocusState {
     highlight: Option<(String, u64)>,
     /// Strength of the highlight fill, 1 until it fades to 0.
     highlight_alpha: f32,
+    /// The search that opened the 话题 at a hit: the search bar shows it.
+    pub(super) search: Option<SearchContext>,
+    /// The revealed row still to place under the top edge, once the list
+    /// has laid it out (its key, and the frames left to try).
+    place: Option<(String, u8)>,
 }
 
 impl FocusState {
@@ -39,8 +47,15 @@ impl FocusState {
         self.target = None;
         self.grows = 0;
         self.highlight = None;
+        self.search = None;
+        self.place = None;
     }
 }
+
+/// The room above a revealed hit: it never sits cut under the top edge.
+const PLACE_GAP: gpui::Pixels = crate::theme::space::S24;
+/// Frames to wait for the list to lay out the revealed row.
+const PLACE_TRIES: u8 = 8;
 
 impl TimelineView {
     /// A new request from navigation, if it is for the open topic.
@@ -62,6 +77,7 @@ impl TimelineView {
             return;
         }
         self.focus.serial = request.serial;
+        self.focus.search = request.search;
         self.focus.target = Some((request.message_id, request.seq));
         self.focus.grows = 0;
         self.continue_focus(cx);
@@ -127,9 +143,19 @@ impl TimelineView {
         self.focus.highlight_alpha = 1.;
         self.list.set_follow_mode(FollowMode::Normal);
         self.list.scroll_to(ListOffset {
-            item_ix: ix.saturating_sub(1),
+            item_ix: ix,
             offset_in_item: px(0.),
         });
+        // Then, once laid out, move it down so it sits under the top edge
+        // with room above it (`place_revealed`).
+        self.focus.place = Some((
+            self.focus
+                .highlight
+                .clone()
+                .map(|h| h.0)
+                .unwrap_or_default(),
+            PLACE_TRIES,
+        ));
         cx.spawn(async move |this, cx| {
             cx.background_executor().timer(HIGHLIGHT).await;
             let ease = motion::out_fn();
@@ -160,6 +186,67 @@ impl TimelineView {
             }
         })
         .detach();
+    }
+}
+
+impl TimelineView {
+    /// Places a revealed hit [`PLACE_GAP`] under the top of the list once
+    /// the list has laid it out. Call from `render`.
+    pub(super) fn place_revealed(&mut self, cx: &mut Context<Self>) {
+        let Some((key, tries)) = self.focus.place.take() else {
+            return;
+        };
+        let Some(ix) = self.row_index(&key) else {
+            return;
+        };
+        let viewport = self.list.viewport_bounds();
+        match self.list.bounds_for_item(ix) {
+            Some(row) if viewport.size.height > gpui::Pixels::ZERO => {
+                let delta = row.top() - (viewport.top() + PLACE_GAP);
+                self.list.scroll_by(delta);
+                cx.notify();
+            }
+            _ if tries > 0 => {
+                self.focus.place = Some((key, tries - 1));
+                cx.notify();
+            }
+            _ => {}
+        }
+    }
+
+    /// The query of the search bar when `message_id` is the hit it shows.
+    pub(super) fn search_query_for(&self, message_id: &str) -> Option<String> {
+        let search = self.focus.search.as_ref()?;
+        let (hit, _) = search.hits.get(search.index)?;
+        (hit == message_id && !message_id.is_empty()).then(|| search.query.clone())
+    }
+
+    /// Steps to another hit of the search (`older`: further up).
+    pub(super) fn step_search(&mut self, older: bool, cx: &mut Context<Self>) {
+        let (Some(mut search), Some((g, t))) = (self.focus.search.clone(), self.open.clone())
+        else {
+            return;
+        };
+        let next = if older {
+            search.index + 1
+        } else {
+            search.index.wrapping_sub(1)
+        };
+        if next >= search.hits.len() {
+            return;
+        }
+        search.index = next;
+        self.services
+            .nav
+            .update(cx, |nav, cx| nav.open_search_hit(g, t, search, cx));
+    }
+
+    /// Closes the search bar and goes back to the newest message.
+    pub(super) fn close_search(&mut self, cx: &mut Context<Self>) {
+        self.focus.search = None;
+        self.focus.highlight = None;
+        self.jump_to_latest();
+        cx.notify();
     }
 }
 

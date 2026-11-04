@@ -19,6 +19,8 @@ crate::copy! {
     STATE_ONLINE = "online",
     STATE_RECONNECTING = "reconnecting (attempt {attempt}, retry in {ms} ms)",
     // process view (bot runs)
+    RUN_PANEL_TITLE = "Run details",
+    RUN_PANEL_COPY = "Copy run details",
     RUN_ID = "run id: {id}",
     RUN_BOT = "bot: {id}",
     RUN_MACHINE = "machine: {id}",

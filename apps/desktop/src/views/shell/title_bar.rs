@@ -181,10 +181,12 @@ fn tone_symbol(tone: StateTone, paused: bool) -> Option<Sym> {
 
 /// The subtitle of `spec`: `群 · state words · detail · subtitle`, the
 /// parts that are there, in that order. The end goes first when the line
-/// is cut, so the step is cut before the state words.
+/// is cut, so the step is cut before the state words. The state color is
+/// only on the leading symbol; the words stay `secondary` (D3: no colored
+/// text runs).
 pub fn subtitle(spec: &TitleBarSpec, k: &NativeColors) -> Option<Subtitle> {
     let mut text = String::new();
-    let mut state = None;
+    let state = None;
     let mut symbol = None;
     let push = |part: &str, text: &mut String| -> Range<usize> {
         if !text.is_empty() {
@@ -198,10 +200,9 @@ pub fn subtitle(spec: &TitleBarSpec, k: &NativeColors) -> Option<Subtitle> {
         push(crumb, &mut text);
     }
     if let Some((words, tone)) = spec.state.as_ref().filter(|(w, _)| !w.is_empty()) {
-        let range = push(words, &mut text);
+        push(words, &mut text);
         // A paused run is quiet: its symbol says so.
         let color = (!spec.state_paused).then(|| tone_color(*tone, k)).flatten();
-        state = color.map(|c| (range, c));
         symbol = tone_symbol(*tone, spec.state_paused).map(|s| (s, color.unwrap_or(k.secondary)));
     }
     if let Some(detail) = spec.state_detail.as_deref().filter(|d| !d.is_empty()) {
@@ -458,15 +459,14 @@ mod tests {
     }
 
     #[test]
-    fn the_group_leads_the_subtitle_and_the_state_has_its_color() {
+    fn the_group_leads_the_subtitle_and_only_the_symbol_has_the_state_color() {
         let k = NativeColors::dark();
         let s = subtitle(&live(), &k).expect("a subtitle");
         assert_eq!(s.text, "开发 · Forge 在做 3/5 · 跑一万条消息的压测");
-        let (range, color) = s.state.clone().expect("state words");
-        assert_eq!(&s.text[range], "Forge 在做 3/5");
-        assert_eq!(color, k.blue);
+        // D3: the words stay `secondary`; the color is on the symbol.
+        assert!(s.state.is_none());
         assert_eq!(s.symbol, Some((Sym::Live, k.blue)));
-        // Needs you: the amber symbol and amber words; no breadcrumb slash.
+        // Needs you: the amber symbol; no breadcrumb slash.
         let you = TitleBarSpec {
             state: Some(("等你审 PR #61".into(), StateTone::You)),
             state_detail: None,

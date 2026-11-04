@@ -29,7 +29,7 @@ pub mod pages;
 pub mod panes;
 pub mod title_bar;
 
-use gpui::{AnyElement, App, Div, ParentElement, Pixels, Render, Styled, div};
+use gpui::{App, Div, ParentElement, Pixels, Render, Styled, div};
 
 pub use title_bar::{TitleBarSpec, TitleButton, TitleButtonKind, TitleStyle};
 
@@ -94,37 +94,6 @@ pub fn section_label(label: &str, count: Option<usize>, cx: &App) -> Div {
         .text_color(k.ink_3)
         .child(label.to_string())
         .children(count.map(|n| div().t_mono().child(n.to_string())))
-}
-
-/// One quiet row of a stub list: a leading element, a line and an optional
-/// trailing mono meta. Rises in on first paint (index `ix`).
-pub fn stub_row(
-    id: impl Into<gpui::ElementId>,
-    ix: usize,
-    lead: AnyElement,
-    text: String,
-    meta: Option<String>,
-    cx: &App,
-) -> AnyElement {
-    let k = theme::colors(cx);
-    let row = div()
-        .flex()
-        .items_center()
-        .gap(space::S8)
-        .h(theme::RAIL_ROW)
-        .px(space::S10)
-        .child(div().flex_none().w(theme::RAIL_SLOT).child(lead))
-        .child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .one_line()
-                .t_small()
-                .text_color(k.ink)
-                .child(text),
-        )
-        .children(meta.map(|m| div().flex_none().t_mono().text_color(k.ink_3).child(m)));
-    ui::motion::rise(id, ix, row, cx)
 }
 
 /// A wall-clock time as the v2 screens print it in mono: `09:42` today,

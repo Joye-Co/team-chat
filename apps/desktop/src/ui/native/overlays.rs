@@ -400,6 +400,45 @@ pub fn sym_toolbar_item(
         .child(sym.icon(SymSize::TOOLBAR).text_color(k.label))
 }
 
+/// A toolbar item that turns a view on and off (开发者视图): while on, the
+/// symbol sits in the 28 pt `selection` pill, like the inspector toggle
+/// (§5.1 Toggled). The name is the tooltip and what VoiceOver reads.
+pub fn sym_toolbar_toggle(
+    id: impl Into<ElementId>,
+    sym: Sym,
+    name: impl Into<gpui::SharedString>,
+    on: bool,
+    cx: &App,
+) -> gpui_component::button::Button {
+    use gpui_component::button::{Button, ButtonVariants as _};
+    let k = native_colors(cx);
+    let name = name.into();
+    let glyph = sym
+        .icon(SymSize::TOOLBAR)
+        .text_color(if on { k.accent_text } else { k.label });
+    Button::new(id)
+        .custom(super::borderless_variant(cx))
+        .with_size(metrics::TOOLBAR_ITEM)
+        .size(metrics::TOOLBAR_ITEM)
+        .p_0()
+        .rounded(metrics::TOOLBAR_ITEM / 2.)
+        .accessibility_label(name.clone())
+        .tooltip(name)
+        .child(if on {
+            div()
+                .size(metrics::TOOLBAR_PILL)
+                .rounded_full()
+                .bg(k.selection)
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(glyph)
+                .into_any_element()
+        } else {
+            glyph.into_any_element()
+        })
+}
+
 /// A bar on `fill`, radius 12 (§9.2 decision bar): the state symbol, a
 /// Headline title and a `secondary` line, push buttons at the trailing edge.
 pub fn decision_bar(cx: &App) -> gpui::Div {

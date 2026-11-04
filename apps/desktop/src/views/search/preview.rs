@@ -24,27 +24,50 @@ pub fn open_dialog(
     Ok(handle)
 }
 
-/// Opens the long topic at a message 5,000 messages up, as Enter on a hit does.
+/// Opens the long topic at a message 5,000 messages up, as Enter on a hit
+/// does: the second of seven hits of [`FAR_QUERY`] in that 话题.
 pub fn open_far_hit(services: &Services, cx: &mut App) {
     let window = services.provider.messages(
         fake::LONG_TOPIC_GROUP,
         fake::LONG_TOPIC,
         fake::LONG_TOPIC_MESSAGES,
     );
-    let Some(target) = window
-        .messages
-        .get(window.messages.len().saturating_sub(5_000))
-    else {
+    let len = window.messages.len();
+    // Seven hits of the query around the message 5,000 up, newest first;
+    // the second newest is the one opened.
+    let found: Vec<usize> = (0..len)
+        .filter(|&i| window.messages[i].body.contains(FAR_QUERY))
+        .collect();
+    let Some(at) = found.iter().position(|&i| i + 5_000 >= len) else {
         return;
     };
-    let (id, seq) = (target.id.clone(), target.created_seq);
+    let hits: Vec<(String, u64)> = found[at.saturating_sub(5)..(at + 2).min(found.len())]
+        .iter()
+        .rev()
+        .map(|&i| {
+            (
+                window.messages[i].id.clone(),
+                window.messages[i].created_seq,
+            )
+        })
+        .collect();
+    if hits.len() < 2 {
+        return;
+    }
+    let search = crate::app::SearchContext {
+        query: FAR_QUERY.into(),
+        hits,
+        index: 1,
+    };
     services.nav.update(cx, |nav, cx| {
-        nav.open_message(
+        nav.open_search_hit(
             fake::LONG_TOPIC_GROUP.into(),
             fake::LONG_TOPIC.into(),
-            id,
-            seq,
+            search,
             cx,
         )
     });
 }
+
+/// The query of the `search-hit` scene.
+pub const FAR_QUERY: &str = "压测";

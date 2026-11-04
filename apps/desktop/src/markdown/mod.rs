@@ -25,7 +25,7 @@ use gpui_component::{
 
 pub use source::MentionTarget;
 // --- inc-refs: the Markdown block counter (REFS §A2.1) ---
-pub use source::{MdBlock, top_level_blocks};
+pub use source::{MdBlock, mark_query, top_level_blocks};
 // --- end inc-refs ---
 use source::{
     AFTER_MARK, EDITED_SCHEME, MENTION_ME_SCHEME, MENTION_SCHEME, append_edited_mark,
@@ -468,6 +468,22 @@ impl MarkdownPlugin for MentionPlugin {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_search_hit_marks_its_words_outside_code() {
+        assert_eq!(
+            super::mark_query("压测消息：`压测` 和压测", "压测"),
+            "<b><u>压测</u></b>消息：`压测` 和<b><u>压测</u></b>"
+        );
+        assert_eq!(
+            super::mark_query("```\n压测\n```\n", "压测"),
+            "```\n压测\n```\n"
+        );
+        assert_eq!(
+            super::mark_query("see https://x/压测", "压测"),
+            "see https://x/压测"
+        );
+    }
+
     use super::safe_link;
 
     #[test]
