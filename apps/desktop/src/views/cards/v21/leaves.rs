@@ -599,7 +599,7 @@ pub fn rank(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .min_w(px(0.))
                     .one_line()
                     .when(is_focus, |el| el.font_weight(theme::MEDIUM_WEIGHT))
-                    .child(item.label.clone()),
+                    .child(crate::ui::truncate::TruncText::new(item.label.clone())),
             )
             .when_some(item.meta.clone(), |el, mt| {
                 el.child(meta(div()).flex_none().text_color(k.ink_3).child(mt))
@@ -1091,7 +1091,7 @@ pub fn matrix(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                     .min_w(px(0.))
                     .one_line()
                     .text_color(k.ink)
-                    .child(r.label.clone()),
+                    .child(crate::ui::truncate::TruncText::new(r.label.clone())),
             );
         for col in columns {
             let on = set.get(&r.id) == Some(&col.id);
@@ -1763,7 +1763,7 @@ pub fn input(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App) ->
                     .w(m::FORM_LABEL)
                     .one_line()
                     .text_color(k.ink)
-                    .child(label.clone()),
+                    .child(crate::ui::truncate::TruncText::new(label.clone())),
             )
             .child(
                 div()

@@ -1237,7 +1237,10 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .flex()
             .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
             .child(
+                // `群 · 话题` cuts in the middle: the 群 and the end of the
+                // 话题 (a file name's extension) both stay (§2.21).
                 ui::truncate::TruncText::new(text)
+                    .middle()
                     .id(ctx.id("path-text"))
                     .n_subheadline()
                     .text_color(n.secondary),

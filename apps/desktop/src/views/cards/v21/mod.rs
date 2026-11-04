@@ -749,7 +749,7 @@ fn group(
                     .min_w(px(0.))
                     .one_line()
                     .text_color(k.ink_3)
-                    .child(s),
+                    .child(crate::ui::truncate::TruncText::new(s)),
             )
         })
         .when_some(summary.clone().filter(|_| closed), |el, s| {
@@ -759,7 +759,7 @@ fn group(
                     .min_w(px(0.))
                     .one_line()
                     .text_color(k.ink_2)
-                    .child(s),
+                    .child(crate::ui::truncate::TruncText::new(s)),
             )
         });
     let mut col = div().flex().flex_col().min_w(px(0.)).child(head);

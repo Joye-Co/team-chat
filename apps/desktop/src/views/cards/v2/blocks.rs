@@ -1881,13 +1881,12 @@ fn plan(
                                 .font_weight(weight),
                         )
                         .when(it.state == RunPlanState::Waiting, |el| {
-                            el.child(
-                                div()
-                                    .min_w(px(0.))
-                                    .one_line()
-                                    .text_color(k.ink_2)
-                                    .child(fill(c::PLAN_WAITS_ON, &[("name", &waiting_on)])),
-                            )
+                            el.child(div().min_w(px(0.)).one_line().text_color(k.ink_2).child(
+                                crate::ui::truncate::TruncText::new(fill(
+                                    c::PLAN_WAITS_ON,
+                                    &[("name", &waiting_on)],
+                                )),
+                            ))
                         })
                         .children(ask.map(|a| div().flex_none().ml(space::S8).child(a))),
                 )
@@ -2133,7 +2132,7 @@ fn diff(
                     .items_center()
                     .text_color(k.ink_3)
                     .one_line()
-                    .child(raw.to_string())
+                    .child(crate::ui::truncate::TruncText::new(raw.to_string()))
                     .into_any_element(),
             );
             continue;
@@ -2236,7 +2235,10 @@ fn diff(
                         .min_w(px(0.))
                         .one_line()
                         .text_color(k.ink)
-                        .child(path.unwrap_or("").to_string()),
+                        .child(
+                            crate::ui::truncate::TruncText::new(path.unwrap_or("").to_string())
+                                .middle(),
+                        ),
                 )
                 // Counts in muted text; the +/− glyph carries the meaning (§1.3).
                 .child(div().text_color(k.ink_3).child(format!("+{adds}")))
@@ -2405,7 +2407,7 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                                     .border_b_1()
                                     .border_color(k.line)
                                     .one_line()
-                                    .child(label.clone()),
+                                    .child(crate::ui::truncate::TruncText::new(label.clone())),
                             )
                             .children(detail.iter().flat_map(|d| d.lines()).take(2).map(|l| {
                                 div()
@@ -2413,7 +2415,7 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
                                     .line_height(crate::ui::native::tokens::text::META.1)
                                     .text_color(k.ink_3)
                                     .one_line()
-                                    .child(l.to_string())
+                                    .child(crate::ui::truncate::TruncText::new(l.to_string()))
                             })),
                     });
                 // The thumbnail clips, so the part wraps it: 问这里 sits inside its corner.

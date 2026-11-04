@@ -457,7 +457,7 @@ pub(crate) fn chart(
                             .flex()
                             .justify_center()
                             .one_line()
-                            .child(l.clone())
+                            .child(crate::ui::truncate::TruncText::new(l.clone()))
                     })),
             )
         })
