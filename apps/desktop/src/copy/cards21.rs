@@ -6,7 +6,7 @@ crate::copy! {
     BAND_YOU = "等你",
     BAND_WAITING_ON = "等 {name}",
     BAND_WAITING_MANY = "等 {n} 位成员",
-    BAND_WORKING = "处理中",
+    BAND_WORKING = "在做",
     BAND_DONE = "完成",
     BAND_FAILED = "失败",
     BAND_VOID = "已作废",

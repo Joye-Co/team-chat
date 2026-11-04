@@ -33,7 +33,7 @@ pub mod state;
 use std::sync::Arc;
 
 use gpui::{
-    AnyElement, App, Entity, FontWeight, Hsla, InteractiveElement as _, IntoElement, ParentElement,
+    AnyElement, App, Entity, FontWeight, InteractiveElement as _, IntoElement, ParentElement,
     SharedString, StatefulInteractiveElement as _, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
@@ -54,7 +54,10 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, space},
-    ui::{self, PushStyle, Sym, native::NativeType as _},
+    ui::{
+        self, PushStyle, Sym,
+        native::{BadgeState, NativeType as _},
+    },
 };
 
 #[allow(unused_imports)]
@@ -652,30 +655,17 @@ impl Answerer {
 // ---------------------------------------------------------------------------
 // The full card
 
-/// Tone of a state: its symbol color and the color of its word (NATIVE.md
-/// §4: the state color for the four states, `secondary` otherwise).
-struct Tone {
-    mark: Hsla,
-    ink: Hsla,
-}
-
-fn tone(state: &CardState, cx: &App) -> Option<Tone> {
-    let n = ui::native::native_colors(cx);
-    let same = |c: Hsla| Tone { mark: c, ink: c };
+/// The StatusBadge state of a card state (§2.12: one mapping everywhere; the
+/// color sits on the 12 icon only, the words stay foreground).
+fn badge_state(state: &CardState) -> Option<BadgeState> {
     Some(match state {
-        CardState::Pending => same(n.amber),
-        CardState::Answered { .. } | CardState::Done { .. } => same(n.green),
-        CardState::Executing { progress, .. } if progress.waiting => Tone {
-            mark: n.secondary,
-            ink: n.label,
-        },
-        CardState::Executing { .. } => same(n.blue),
-        CardState::Failed { .. } | CardState::SendFailed { .. } => same(n.red),
-        CardState::WaitingOn | CardState::Sending { .. } => Tone {
-            mark: n.secondary,
-            ink: n.label,
-        },
-        CardState::Expired | CardState::Superseded => same(n.secondary),
+        CardState::Pending => BadgeState::NeedsYou,
+        CardState::Answered { .. } | CardState::Done { .. } => BadgeState::Done,
+        CardState::Executing { progress, .. } if progress.waiting => BadgeState::Queued,
+        CardState::Executing { .. } | CardState::Sending { .. } => BadgeState::Working,
+        CardState::Failed { .. } | CardState::SendFailed { .. } => BadgeState::Failed,
+        CardState::WaitingOn => BadgeState::Queued,
+        CardState::Expired | CardState::Superseded => BadgeState::Deactivated,
         CardState::Info => return None,
     })
 }
@@ -691,49 +681,6 @@ pub(crate) fn frame(_waits: bool, cx: &App) -> gpui::Div {
 pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
     el.text_size(crate::ui::native::tokens::text::META.0)
         .line_height(px(18.))
-}
-
-fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
-    let glyph = |name: Sym| ui::icon(name, px(16.), t.mark).into_any_element();
-    match state {
-        CardState::Pending => glyph(Sym::NeedsYou),
-        CardState::WaitingOn => glyph(Sym::Waiting),
-        CardState::Executing { progress, .. } if progress.waiting => glyph(Sym::Waiting),
-        CardState::Sending { .. } => ui::motion::spinner().color(t.mark).into_any_element(),
-        CardState::Answered { answer }
-        | CardState::Done {
-            answer: Some(answer),
-        } => ui::motion::check_mark(
-            ctx.id("strip-check"),
-            ui::icon(Sym::Done, px(16.), t.mark),
-            px(16.),
-            ui::motion::just_answered(answer.at),
-            cx,
-        ),
-        CardState::Done { answer: None } => ui::motion::check_mark(
-            ctx.id("strip-check"),
-            ui::icon(Sym::Done, px(16.), t.mark),
-            px(16.),
-            false,
-            cx,
-        ),
-        CardState::Executing { .. } => div()
-            .flex_none()
-            .size(px(16.))
-            .flex()
-            .items_center()
-            .justify_center()
-            .child(ui::motion::breathe(
-                ctx.id("strip-dot"),
-                div().size(px(6.)).rounded_full().bg(t.mark),
-                cx,
-            ))
-            .into_any_element(),
-        CardState::Failed { .. } | CardState::SendFailed { .. } => glyph(Sym::Failed),
-        CardState::Expired => glyph(Sym::Waiting),
-        CardState::Superseded => glyph(Sym::Stopped),
-        CardState::Info => div().into_any_element(),
-    }
 }
 
 /// The label and the detail of the strip.
@@ -1070,27 +1017,44 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     }
 }
 
-/// The state of a card as header parts: the symbol, the word and its ink,
+/// The state of a card as header parts: the StatusBadge state and words,
 /// the detail, a right note, an action and the progress of work.
 pub(crate) struct StripParts {
-    pub mark: AnyElement,
+    /// The badge (`None`: a rev a member's event caused, drawn with the
+    /// refresh icon).
+    pub state: Option<BadgeState>,
     pub label: String,
-    pub ink: Hsla,
     pub detail: String,
     pub right: Option<String>,
     pub action: Option<AnyElement>,
     pub bar: Option<f32>,
+    /// `3/5` under the bar of work in progress.
+    pub steps: Option<(usize, usize)>,
+}
+
+impl StripParts {
+    /// The StatusBadge of the state (§2.12), its label cut at half a card.
+    pub(crate) fn badge(&self, cx: &App) -> AnyElement {
+        let n = ui::native::native_colors(cx);
+        match self.state {
+            Some(state) => ui::native::StatusBadge::new(state, self.label.clone())
+                .max_w(m::MAX_WIDTH / 2.)
+                .into_any_element(),
+            None => ui::native::Badge::new(self.label.clone())
+                .icon(Sym::Refresh, n.secondary)
+                .max_w(m::MAX_WIDTH / 2.)
+                .into_any_element(),
+        }
+    }
 }
 
 /// The state parts of the card's header, or `None` for a card without a
 /// state (info).
 pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
-    let n = ui::native::native_colors(cx);
     // --- inc-cards21: my live event waits, 2.1 words, the deadline ---
     // inc-integrate: a page event of an embed in this card waits too (the page host).
-    // v11/pb2-cards: the state says the stage (INTERACT §4.4) in its own tone: blue with
-    // the spinner while the author has it, grey once no answer came, red 失败 when the
-    // step was not sent.
+    // v11/pb2-cards: the state says the stage (INTERACT §4.4): working with the spinner
+    // while the author has it, queued once no answer came, 失败 when the step was not sent.
     use super::v21::band::PendTone;
     let waiting = super::v21::band::pending(ctx)
         .map(|p| (p.label, p.detail, p.tone))
@@ -1102,21 +1066,12 @@ pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
         .is_none()
         .then(|| super::v21::band::updated(ctx))
         .flatten();
-    let t = match waiting.as_ref().map(|w| w.2) {
-        _ if updated.is_some() => Tone {
-            mark: n.secondary,
-            ink: n.label,
-        },
-        Some(PendTone::Live) => Tone {
-            mark: n.blue,
-            ink: n.blue,
-        },
-        Some(PendTone::Quiet) => Tone {
-            mark: n.secondary,
-            ink: n.label,
-        },
-        Some(PendTone::Bad) => tone(&CardState::Failed { answer: None }, cx)?,
-        None => tone(ctx.state, cx)?,
+    let state = match waiting.as_ref().map(|w| w.2) {
+        _ if updated.is_some() => None,
+        Some(PendTone::Live) => Some(BadgeState::Working),
+        Some(PendTone::Quiet) => Some(BadgeState::Queued),
+        Some(PendTone::Bad) => Some(BadgeState::Failed),
+        None => Some(badge_state(ctx.state)?),
     };
     let (label, detail) = match (&waiting, &updated) {
         (Some((l, d, _)), _) => (l.clone(), d.clone()),
@@ -1132,31 +1087,64 @@ pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
         strip_action(ctx, cx)
     };
     // --- end inc-cards21 ---
-    let bar = match ctx.state {
-        CardState::Executing { progress, .. } if !progress.waiting => progress.fraction(),
-        _ => None,
-    };
-    let glyph = |sym: Sym| ui::icon(sym, px(16.), t.mark).into_any_element();
-    let mark = match waiting.as_ref().map(|w| w.2) {
-        _ if updated.is_some() => glyph(Sym::Refresh),
-        Some(PendTone::Live) => ui::motion::spinner().color(t.mark).into_any_element(),
-        Some(PendTone::Quiet) => glyph(Sym::Alert),
-        Some(PendTone::Bad) => glyph(Sym::Failed),
-        None => strip_icon(ctx.state, &t, ctx, cx),
+    let (bar, steps) = match ctx.state {
+        CardState::Executing { progress, .. } if !progress.waiting => (
+            progress.fraction(),
+            (progress.total > 0).then_some((progress.done, progress.total)),
+        ),
+        _ => (None, None),
     };
     Some(StripParts {
-        mark,
+        state,
         label,
-        ink: t.ink,
         detail,
         right,
         action,
         bar,
+        steps,
     })
 }
 
-/// The state line on its own (the one-line overview): symbol, word,
-/// detail, right note and action, then the 4 pt bar of work in progress.
+/// The Progress of work (D12) with `3/5` in 12 muted tabular figures.
+fn work_progress(f: f32, steps: Option<(usize, usize)>, cx: &App) -> AnyElement {
+    let n = ui::native::native_colors(cx);
+    div()
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .child(
+            div()
+                .flex_1()
+                .child(ui::native::progress(f.clamp(0.02, 1.), cx)),
+        )
+        .when_some(steps, |el, (done, total)| {
+            el.child(
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .child(format!("{done}/{total}")),
+            )
+        })
+        .into_any_element()
+}
+
+/// The muted detail after the badge: one line, cut at the end.
+fn detail_text(detail: String, cx: &App) -> AnyElement {
+    let n = ui::native::native_colors(cx);
+    div()
+        .flex_1()
+        .min_w(px(0.))
+        .one_line()
+        .n_subheadline()
+        .text_color(n.secondary)
+        .child(detail)
+        .into_any_element()
+}
+
+/// The state line on its own (the one-line overview): badge, detail, right
+/// note and action, then the Progress of work.
 pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     let n = ui::native::native_colors(cx);
     let p = strip_parts(ctx, cx)?;
@@ -1170,35 +1158,22 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
                     .flex()
                     .items_center()
                     .gap(space::S8)
-                    .child(
-                        ui::native::cards::state_words(
-                            p.mark,
-                            p.label,
-                            p.ink,
-                            Some(p.detail.into()),
-                            cx,
-                        )
-                        .flex_1(),
-                    )
+                    .child(p.badge(cx))
+                    .child(detail_text(p.detail.clone(), cx))
+                    .children(p.action)
                     .when_some(p.right, |el, r| {
                         el.child(
                             div()
                                 .flex_none()
                                 .one_line()
                                 .n_subheadline()
+                                .n_figures()
                                 .text_color(n.secondary)
                                 .child(r),
                         )
-                    })
-                    .children(p.action),
+                    }),
             )
-            .when_some(p.bar, |el, f| {
-                el.child(ui::native::determinate_bar(
-                    f.clamp(0.02, 1.),
-                    Some(n.blue),
-                    cx,
-                ))
-            })
+            .when_some(p.bar, |el, f| el.child(work_progress(f, p.steps, cx)))
             .into_any_element(),
     )
 }
@@ -1252,17 +1227,21 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
             .child(text)
     });
-    let (state, right, action, bar) = match parts {
-        Some(p) => (
-            Some(
-                ui::native::cards::state_words(p.mark, p.label, p.ink, Some(p.detail.into()), cx)
-                    .flex_1(),
-            ),
-            p.right,
-            p.action,
-            p.bar,
-        ),
-        None => (None, None, None, None),
+    // Header slots (§2.4): StatusBadge, the muted detail, the action, then
+    // one time column at the far right. On the 首页 the time is when the
+    // message was sent; a deadline or a failure time joins the detail there.
+    let time = (!in_topic).then(|| crate::views::shell::clock(ctx.msg.created_at));
+    let (badge, detail, right, action, bar, steps) = match parts {
+        Some(p) => {
+            let badge = p.badge(cx);
+            let (detail, right) = match (p.right, &time) {
+                (Some(r), Some(_)) if p.detail.trim().is_empty() => (r, None),
+                (Some(r), Some(_)) => (format!("{} · {r}", p.detail), None),
+                (r, _) => (p.detail, r),
+            };
+            (Some(badge), detail, right, p.action, p.bar, p.steps)
+        }
+        None => (None, String::new(), None, None, None, None),
     };
     let row = div()
         .flex()
@@ -1277,42 +1256,27 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .child(
                 div()
                     .flex_shrink(0.)
-                    .max_w(px(180.))
+                    .max_w(m::MAX_WIDTH / 4.)
                     .one_line()
                     .n_headline()
                     .text_color(n.label)
                     .child(ctx.author.clone()),
             )
         })
-        .map(|el| match state {
-            Some(s) => el.child(s),
-            None => el.child(div().flex_1()),
-        })
-        .when_some(right, |el, r| {
-            el.child(
-                div()
-                    .flex_none()
-                    .one_line()
-                    .n_subheadline()
-                    .n_figures()
-                    .text_color(n.secondary)
-                    .child(r),
-            )
-        })
+        .children(badge)
+        .child(detail_text(detail, cx))
         .children(action)
-        .when(!in_topic, |el| {
-            el.child(
-                div()
-                    .flex_none()
-                    .n_subheadline()
-                    .n_figures()
-                    .text_color(n.secondary)
-                    // When the message was sent: a new rev changes the card, not its time.
-                    .child(crate::views::shell::clock(ctx.msg.created_at)),
-            )
-        });
-    // The card changed while I answered: an inline state line in the header, in the place
-    // that changed (NATIVE.md §7.4), never a toast.
+        .children(right.or(time).map(|t| {
+            div()
+                .flex_none()
+                .one_line()
+                .n_subheadline()
+                .n_figures()
+                .text_color(n.secondary)
+                .child(t)
+        }));
+    // The card changed while I answered: the header says so in place; the
+    // Toast that offers 看新版 comes from the interact layer.
     let conflict = super::v21::interact::conflicted(ctx).then(|| {
         div()
             .pt(space::S4)
@@ -1333,11 +1297,7 @@ fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .children(path)
             .children(conflict)
             .when_some(bar, |el, f| {
-                el.child(div().pt(space::S8).child(ui::native::determinate_bar(
-                    f.clamp(0.02, 1.),
-                    Some(n.blue),
-                    cx,
-                )))
+                el.child(div().pt(space::S8).child(work_progress(f, steps, cx)))
             })
             .into_any_element(),
     )
@@ -1349,7 +1309,10 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
         .when(has_header, |el| el.mt(ui::native::cards::card::STACK))
         .n_title3()
         .text_color(n.label)
-        .child(ctx.card.title.clone())
+        // A title is one line of text: line breaks and runs of spaces collapse
+        // (break-ui), and it wraps at most to 2 lines.
+        .line_clamp(2)
+        .child(one_line_text(&ctx.card.title))
         // --- inc-cards21: the 2.1 summary line under the title ---
         .when_some(
             ctx.card
@@ -1369,6 +1332,11 @@ fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
             },
         )
         .into_any_element()
+}
+
+/// `text` with every run of whitespace (line breaks included) as one space.
+pub(crate) fn one_line_text(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The whole card: header (member, state), title, blocks, footer, in one
@@ -1413,7 +1381,8 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     let card = frame(false, cx)
         .flex()
         .flex_col()
-        .when(ctx.mode == CardMode::Desk, |el| el.max_w(m::MAX_WIDTH))
+        // One in-thread width (§2.4): min(640, the text column), in every mode.
+        .max_w(m::MAX_WIDTH)
         .child(
             div()
                 .pt(inset)
@@ -1462,17 +1431,18 @@ pub(crate) fn button(
         PushStyle::Destructive => PushStyle::Destructive,
         _ => PushStyle::Outline,
     };
-    ui::native::push_button(id, label, style, PushSize::Regular, cx).flex_none()
+    // In-card controls are sm h28 (§1.8 card footers, F51).
+    ui::native::push_button(id, label, style, PushSize::Small, cx).flex_none()
 }
 
-/// A disabled primary: `tertiary` text on `fill` (never `accent` at
-/// reduced opacity).
+/// A disabled primary: the primary at 50% (§1.8, D11), so it never looks
+/// like the outline Cancel.
 pub(crate) fn disabled_button(
     id: SharedString,
     label: impl Into<SharedString>,
     cx: &App,
 ) -> Button {
-    ui::native::disabled_push(button(id, label, PushStyle::Outline, cx), true, cx)
+    ui::native::disabled_push(button(id, label, PushStyle::Default, cx), true, cx)
 }
 
 fn style_kind(action: &CardV2Action, first_default_used: &mut bool) -> PushStyle {

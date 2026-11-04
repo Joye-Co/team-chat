@@ -32,7 +32,7 @@ pub(crate) fn overview(ctx: &Ctx, cx: &App) -> AnyElement {
                 .text_color(n.label)
                 .one_line()
                 .when(ctx.state.muted(), |el| el.opacity(m::MUTED))
-                .child(ctx.card.title.clone()),
+                .child(super::one_line_text(&ctx.card.title)),
         )
         .into_any_element()
 }

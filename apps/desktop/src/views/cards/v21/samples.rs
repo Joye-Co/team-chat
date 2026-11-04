@@ -301,9 +301,11 @@ fn bars_rev1_with(labeled: bool) -> Value {
             "Ledger：10 月新增群 38 个，小红书最多（14 个）。",
         ),
         json!({
+            // The description sits above the chart, so a block's 重试 / 不等了 come
+            // after it (§2.4 footer order, F50).
             "blocks": [
-                bars_block(labeled),
-                { "id": "hint", "type": "text", "text": "点一个渠道，Ledger 会拆开给你看。" }
+                { "id": "hint", "type": "text", "text": "点一个渠道，Ledger 会拆开给你看。" },
+                bars_block(labeled)
             ]
         }),
     )

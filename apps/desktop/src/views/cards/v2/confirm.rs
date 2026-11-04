@@ -97,7 +97,7 @@ pub(crate) fn sheet(
         } else {
             nk::PushStyle::Default
         },
-        nk::PushSize::Large,
+        nk::PushSize::Regular,
         cx,
     );
     let ok = nk::disabled_push(ok, !ready, cx);
@@ -109,7 +109,7 @@ pub(crate) fn sheet(
         SharedString::from(format!("{id}-cancel")),
         common::CANCEL,
         nk::PushStyle::Outline,
-        nk::PushSize::Large,
+        nk::PushSize::Regular,
         cx,
     );
     let cancel = match on_cancel {
