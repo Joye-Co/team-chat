@@ -34,6 +34,22 @@ pub const SCENES: &[Scene] = &[
         },
         open: open_main,
     },
+    // --- v13/ux-pages ---
+    Scene {
+        name: "desk-loading",
+        about: "首页 before the first sync: KPI and list skeletons, the right pane skeletons",
+        start: Start::V2Unsynced,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: open_main,
+    },
+    Scene {
+        name: "desk-failed",
+        about: "首页 with nothing cached while the server cannot be reached: the Alert with 重试",
+        start: Start::V2Unreachable,
+        setup: |s, cx| s.nav.update(cx, |nav, cx| nav.open_desk(cx)),
+        open: open_main,
+    },
+    // --- end v13/ux-pages ---
     Scene {
         name: "desk-empty",
         about: "首页 on a quiet day: nothing waits on me, nothing runs, nothing done yet",

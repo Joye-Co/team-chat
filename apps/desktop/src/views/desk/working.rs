@@ -1,13 +1,15 @@
-//! The 首页 inspector (NATIVE.md §2, §9.3, §9.4): 正在做 as inspector rows,
-//! one block per run (member, 话题, the step in progress and a 4 pt plan
-//! bar in `blue`), then 排队. No terminal tiles.
+//! The 首页 right pane (COMPLETENESS.md §2.5, §2.18): only what the main
+//! list does not show. 排队 (what starts later, with its time) and 在哪干活
+//! (the team computers the running work uses). 正在做 is in the main list
+//! only, so no item shows twice on the screen.
 
 use gpui::{
-    AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement, SharedString,
+    AnyElement, Context, InteractiveElement as _, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement as _, Styled, div, px,
 };
 
-use super::{DeskPage, model::RunCard, model::Snapshot};
+use super::{DeskPage, model::Snapshot};
+use crate::ui::native::tokens::space as tsp;
 use crate::{
     app::{RightPane, Services},
     copy::{desk as c, fill},
@@ -15,9 +17,10 @@ use crate::{
     ui::{
         MemberAvatar,
         native::{
-            InspectorSection, NativeType as _, determinate_bar, inspector_column, metrics,
-            native_colors,
+            InspectorSection, NativeType as _, inspector_column, metrics, native_colors,
+            page::{self, SkeletonKind},
         },
+        sf_symbols::Sym,
     },
     views::{group_page::rows::line, shell::clock},
 };
@@ -35,110 +38,169 @@ pub fn elapsed(since: Millis) -> Option<String> {
     })
 }
 
-pub fn render(snap: &Snapshot, services: &Services, cx: &mut Context<DeskPage>) -> AnyElement {
-    let mut col = inspector_column(cx)
-        .id("desk-inspector")
-        .overflow_y_scroll()
-        // The first header sits under the toolbar row.
-        .pt(metrics::TOOLBAR_ROW - px(12.))
-        .pb(px(16.));
-    if !snap.runs.is_empty() {
-        let mut sec = InspectorSection::new("desk-ins-working", c::DESK_WORKING);
-        for (i, r) in snap.runs.iter().enumerate() {
-            sec = sec.row(run_block(i, r, snap, services, cx));
-        }
-        col = col.child(sec);
-    }
-    if !snap.queue.is_empty() {
-        let k = native_colors(cx);
-        let mut sec = InspectorSection::new("desk-ins-queue", c::DESK_QUEUE);
-        for q in &snap.queue {
-            let member = snap.member(&q.member_id);
-            sec = sec.row(
-                div()
-                    .h(metrics::INSPECTOR_ROW)
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .n_body()
-                    .child(MemberAvatar::new(member.as_ref(), px(16.)))
-                    .child(
-                        line(format!("{} {}", snap.name(&q.member_id), q.title))
-                            .flex_1()
-                            .text_color(k.label),
-                    )
-                    .children(q.at.map(|at| {
-                        div()
-                            .flex_none()
-                            .n_subheadline()
-                            .n_figures()
-                            .text_color(k.secondary)
-                            .child(clock(at))
-                    })),
-            );
-        }
-        col = col.child(sec);
-    }
-    col.into_any_element()
-}
-
-fn run_block(i: usize, r: &RunCard, snap: &Snapshot, services: &Services, cx: &App) -> AnyElement {
+/// The pane: a header band (`今天`) on the toolbar row, then 排队 and
+/// 在哪干活, each with a compact empty when it has nothing. `loading` draws
+/// skeleton rows in both sections.
+pub fn render(
+    snap: &Snapshot,
+    loading: bool,
+    services: &Services,
+    cx: &mut Context<DeskPage>,
+) -> AnyElement {
     let k = native_colors(cx);
-    let member = snap.member(&r.run.bot_id);
-    let (n, m) = r.step();
-    let step = r.current_text();
-    let since = r.step_started.and_then(elapsed);
-    let detail = match (step, since) {
-        (Some(s), Some(t)) => Some(format!("{s} · {t}")),
-        (s, t) => s.or(t),
-    };
-    let nav = services.nav.clone();
-    let (g, t, id) = (
-        r.run.group_id.clone(),
-        r.run.topic_id.clone(),
-        r.run.id.clone(),
-    );
-    div()
-        .id(SharedString::from(format!("desk-run-{i}")))
-        .py(px(6.))
+    let header = div()
+        .flex_none()
+        .h(metrics::TOOLBAR_ROW)
+        .px(metrics::INSPECTOR_PAD)
+        .border_b_1()
+        .border_color(k.separator)
         .flex()
         .flex_col()
-        .gap(px(2.))
+        .justify_center()
         .child(
             div()
-                .h(px(20.))
+                .n_title3()
+                .font_weight(gpui::FontWeight::MEDIUM)
+                .text_color(k.label)
+                .child(c::DESK_RAIL_TITLE),
+        )
+        .child(
+            div()
+                .n_subheadline()
+                .text_color(k.secondary)
+                .child(c::DESK_RAIL_LINE),
+        );
+    let mut col = inspector_column(cx).child(header);
+    let mut body = div()
+        .id("desk-inspector")
+        .flex_1()
+        .min_h(px(0.))
+        .overflow_y_scroll()
+        .pt(tsp::S4)
+        .pb(tsp::S24)
+        .flex()
+        .flex_col();
+
+    // 排队.
+    let mut queue = InspectorSection::new("desk-ins-queue", c::DESK_QUEUE);
+    if loading {
+        queue = queue.row(page::skeleton_rows(
+            "desk-q-sk",
+            SkeletonKind::Compact,
+            3,
+            cx,
+        ));
+    } else if snap.queue.is_empty() {
+        queue = queue.row(page::compact_empty(
+            Sym::Waiting,
+            c::DESK_QUEUE_EMPTY,
+            None,
+            cx,
+        ));
+    }
+    for (i, q) in snap.queue.iter().enumerate() {
+        let member = snap.member(&q.member_id);
+        let full = format!("{} {}", snap.name(&q.member_id), q.title);
+        queue = queue.row(
+            div()
+                .id(SharedString::from(format!("desk-queue-{i}")))
+                .h(tsp::S32)
                 .flex()
                 .items_center()
-                .gap(px(8.))
+                .gap(tsp::S8)
                 .n_body()
-                .child(MemberAvatar::new(member.as_ref(), px(16.)))
-                .child(
+                .child(MemberAvatar::new(member.as_ref(), tsp::S16))
+                .child(line(full.clone()).flex_1().text_color(k.label))
+                .children(q.at.map(|at| {
                     div()
                         .flex_none()
-                        .text_color(k.label)
-                        .child(snap.name(&r.run.bot_id)),
-                )
-                .child(line(r.topic_title.clone()).flex_1().text_color(k.label))
-                .child(
-                    div()
-                        .flex_none()
+                        .n_subheadline()
                         .n_figures()
                         .text_color(k.secondary)
-                        .child(format!("{n}/{m}")),
+                        .child(clock(at))
+                }))
+                .tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(full.clone()).build(window, cx)
+                }),
+        );
+    }
+    body = body.child(queue);
+
+    // 在哪干活: the computers of the running work, with who uses them.
+    let mut machines: Vec<(String, Vec<String>, (String, String, String))> = Vec::new();
+    for r in &snap.runs {
+        let Some(name) = r.run.machine_name.clone() else {
+            continue;
+        };
+        let who = snap.name(&r.run.bot_id);
+        match machines.iter_mut().find(|(n, ..)| *n == name) {
+            Some((_, names, _)) => {
+                if !names.contains(&who) {
+                    names.push(who)
+                }
+            }
+            None => machines.push((
+                name,
+                vec![who],
+                (
+                    r.run.group_id.clone(),
+                    r.run.topic_id.clone(),
+                    r.run.id.clone(),
                 ),
-        )
-        .children(detail.map(|d| line(d).pl(px(24.)).n_subheadline().text_color(k.secondary)))
-        .child(div().pl(px(24.)).pt(px(4.)).child(determinate_bar(
-            if m == 0 { 0. } else { n as f32 / m as f32 },
-            Some(k.blue),
+            )),
+        }
+    }
+    let mut where_ = InspectorSection::new("desk-ins-where", c::DESK_WHERE);
+    if loading {
+        where_ = where_.row(page::skeleton_rows(
+            "desk-m-sk",
+            SkeletonKind::Compact,
+            2,
             cx,
-        )))
-        .on_click(move |_, _, cx| {
-            let (g, t, id) = (g.clone(), t.clone(), id.clone());
-            nav.update(cx, |nav, cx| {
-                nav.open_topic(g, t, cx);
-                nav.set_right_pane(RightPane::Live(id), cx);
-            })
-        })
-        .into_any_element()
+        ));
+    } else if machines.is_empty() {
+        where_ = where_.row(page::compact_empty(
+            Sym::Computer,
+            c::DESK_WHERE_EMPTY,
+            None,
+            cx,
+        ));
+    }
+    for (i, (name, names, (g, t, run))) in machines.into_iter().enumerate() {
+        let glyph = if name.to_lowercase().contains("mini") {
+            Sym::MacMini
+        } else {
+            Sym::Computer
+        };
+        let users = fill(c::DESK_MACHINE_USERS, &[("names", &names.join("、"))]);
+        let nav = services.nav.clone();
+        where_ = where_.row(
+            div()
+                .id(SharedString::from(format!("desk-machine-{i}")))
+                .py(tsp::S6)
+                .flex()
+                .items_center()
+                .gap(tsp::S8)
+                .child(page::row_icon(glyph, k.secondary))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .flex()
+                        .flex_col()
+                        .child(line(name).n_body().text_color(k.label))
+                        .child(line(users).n_subheadline().text_color(k.secondary)),
+                )
+                .on_click(move |_, _, cx| {
+                    let (g, t, run) = (g.clone(), t.clone(), run.clone());
+                    nav.update(cx, |nav, cx| {
+                        nav.open_topic(g, t, cx);
+                        nav.set_right_pane(RightPane::Live(run), cx);
+                    })
+                }),
+        );
+    }
+    body = body.child(where_);
+    col = col.child(body);
+    col.into_any_element()
 }
