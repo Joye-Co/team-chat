@@ -184,9 +184,10 @@ pub fn state_words_parts(
                 .flex()
                 .items_center()
                 .child(
+                    // With a name, the name cuts first; alone, the words
+                    // cut at the card edge.
                     TruncText::new(lead)
-                        .flex_shrink_0()
-                        .when(name.is_some(), |t| t.max_w(px(160.)))
+                        .when(name.is_some(), |t| t.flex_shrink_0().max_w(px(160.)))
                         .tip(whole.clone()),
                 )
                 .when_some(name, |d, n| {
