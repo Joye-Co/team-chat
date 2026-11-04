@@ -143,9 +143,6 @@ pub fn mail_row(
         .px(ROW_PAD)
         .rounded(metrics::LIST_ROW_RADIUS)
         .when_some(ink.fill, |d, f| d.bg(f))
-        .when(ink.fill.is_none(), |d| {
-            d.hover(|s| s.bg(k.fill.opacity(0.5)))
-        })
         .flex()
         .items_center()
         .gap(ROW_GAP)

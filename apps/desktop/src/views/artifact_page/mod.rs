@@ -866,7 +866,6 @@ impl ArtifactPage {
                     .gap(tsp::S8)
                     .n_body()
                     .when(on, |el| el.bg(k.fill).font_weight(gpui::FontWeight::MEDIUM))
-                    .when(!on, |el| el.hover(|s| s.bg(k.fill.opacity(0.5))))
                     .child(
                         div()
                             .flex_none()
@@ -1415,7 +1414,6 @@ impl ArtifactPage {
                             .min_w_0()
                             .overflow_hidden()
                             .cursor_pointer()
-                            .hover(|s| s.border_color(n.secondary))
                             .child(thumbnail(&self.services, a, cx))
                             .child(
                                 div()

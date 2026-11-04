@@ -257,7 +257,6 @@ fn html(spec: &InlineSpec, media: &Arc<Media>, cx: &App) -> AnyElement {
         .flex()
         .items_center()
         .gap(space::S4)
-        .hover(|st| st.text_color(k.text_1))
         .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
         .child(cm::EXPAND)
         .on_click(move |_, _, cx| open(&s, Opening::default(), cx));
@@ -367,8 +366,7 @@ fn markdown_card(
         .child(
             footer(cx)
                 .id(ElementId::Name(format!("{}-more", spec.id).into()))
-        .focus_row(false, cx)
-                .hover(|st| st.text_color(k.text_1))
+                .focus_row(false, cx)
                 .child(ui::icon(Sym::ChevronDown, px(14.), k.text_3))
                 .child(fill(cm::MD_EXPAND, &[("m", &minutes.to_string())]))
                 .child(div().flex_1())
@@ -413,7 +411,7 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
         div().h(px(SINGLE_H)).flex().items_end().child(
             div()
                 .id(ElementId::Name(format!("{}-img", spec.id).into()))
-        .focus_row(false, cx)
+                .focus_row(false, cx)
                 .w(px(w))
                 .h(px(h))
                 .rounded(radius::MD)
@@ -435,7 +433,7 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
             row = row.child(
                 div()
                     .id(ElementId::Name(format!("{}-img-{i}", spec.id).into()))
-        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                    .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                     .relative()
                     .w(px(111.))
                     .h_full()
@@ -483,10 +481,9 @@ fn images(spec: &InlineSpec, pics: &[store::Pic], cx: &App) -> AnyElement {
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-save", spec.id).into()))
-        .focus_row(false, cx)
+                        .focus_row(false, cx)
                         .t_meta()
                         .text_color(k.text_2)
-                        .hover(|s| s.text_color(k.text_1))
                         .child(cm::IMG_SAVE_ALL)
                         .on_click(move |_, _, cx| {
                             let refs: Vec<&std::path::Path> =
@@ -638,7 +635,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-frame-{i}", spec.id).into()))
-        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                         .w(px(75.))
                         .h(px(42.))
                         .rounded(radius::MARK)
@@ -654,7 +651,7 @@ fn video(spec: &InlineSpec, media: &Arc<Media>, v: &store::Video, cx: &App) -> A
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-send-{i}", spec.id).into()))
-        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
+                        .focus_row_with(false, crate::ui::native::Arrows::Grid, cx)
                         .invisible()
                         .group_hover(group, |st| st.visible())
                         .absolute()
@@ -820,14 +817,13 @@ fn audio(
                 .child(
                     div()
                         .id(ElementId::Name(format!("{}-speed", spec.id).into()))
-        .focus_row(false, cx)
+                        .focus_row(false, cx)
                         // A borderless text button (NATIVE.md §5.1).
                         .h(px(22.))
                         .px(space::S6)
                         .rounded(radius::SM)
                         .flex()
                         .items_center()
-                        .hover(|s| s.bg(crate::ui::native::native_colors(cx).fill_hover))
                         .child(mono(SPEEDS[speed].1, k.text_2))
                         .on_click(move |_, _, cx| {
                             speed_state
@@ -883,7 +879,6 @@ fn pdf(spec: &InlineSpec, media: &Arc<Media>, p: &store::Pdf, cx: &App) -> AnyEl
         .focus_row(false, cx)
         .w(px(PDF_W))
         .max_w_full()
-        .hover(|st| st.border_color(k.border_strong))
         .child(thumbs)
         .child(
             div()
@@ -1086,7 +1081,7 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
         .child(
             div()
                 .id(ElementId::Name(format!("{}-all", spec.id).into()))
-        .focus_row(false, cx)
+                .focus_row(false, cx)
                 .h(crate::ui::native::tokens::height::TABLE_ROW_COMPACT)
                 .px(space::S16)
                 .flex()
@@ -1094,7 +1089,6 @@ fn table(spec: &InlineSpec, media: &Arc<Media>, t: &text::Table, cx: &App) -> An
                 .gap(space::S4)
                 .t_meta()
                 .text_color(k.text_2)
-                .hover(|st| st.text_color(k.text_1))
                 .child(fill(
                     cm::TABLE_SHOW_ALL,
                     &[("n", &group_digits(t.total_rows as u64))],
