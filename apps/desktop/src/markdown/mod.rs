@@ -521,3 +521,26 @@ mod tests {
 
 #[cfg(test)]
 mod text_tests;
+
+/// Whether the first strong letter of `text` is right to left (Hebrew,
+/// Arabic and their presentation forms): the paragraph's direction under
+/// `dir="auto"` (F15).
+pub fn starts_rtl(text: &str) -> bool {
+    text.chars()
+        .find(|c| c.is_alphabetic())
+        .is_some_and(|c| {
+            matches!(c as u32,
+                0x0590..=0x08FF | 0xFB1D..=0xFDFF | 0xFE70..=0xFEFF)
+        })
+}
+
+#[cfg(test)]
+mod rtl_tests {
+    #[test]
+    fn the_first_strong_letter_sets_the_direction() {
+        assert!(super::starts_rtl("مرحبا بالعالم 123"));
+        assert!(super::starts_rtl("12 שלום"));
+        assert!(!super::starts_rtl("你好 مرحبا"));
+        assert!(!super::starts_rtl("hello"));
+    }
+}

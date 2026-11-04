@@ -15,7 +15,7 @@
 use gpui::{
     AnyElement, App, Hsla, InteractiveElement as _, IntoElement, MouseButton, ParentElement,
     Pixels, SharedString, StatefulInteractiveElement as _, Styled, StyledText, TextLayout, Window,
-    div, px,
+    div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -309,11 +309,16 @@ fn heading_with(
         Some((el, layout)) => (Some(el), Some(layout)),
         None => (None, None),
     };
+    // T2-15: the title's 24 line puts 4.5 of air over its ink and none
+    // under the badge; 4 of bottom padding centers the two-line ink in the
+    // 52 band (5.5 above, 5.5 below).
+    let two_lines = sub_el.is_some();
     let el = div()
         .flex_1()
         .min_w(px(0.))
         .flex()
         .flex_col()
+        .when(two_lines, |d| d.pb(space::S4))
         .child(title)
         .children(sub_el)
         .into_any_element();

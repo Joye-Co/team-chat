@@ -330,7 +330,14 @@ impl TimelineView {
                 refs_body.as_ref(),
             );
             mark_inline = inline;
-            Some(view.w_full().text_color(colors.text_1).into_any_element())
+            // F15 dir auto: a body whose first strong letter is right to
+            // left (Arabic, Hebrew) aligns to the right.
+            let view = view.w_full().text_color(colors.text_1);
+            Some(if crate::markdown::starts_rtl(&message.body) {
+                view.text_right().into_any_element()
+            } else {
+                view.into_any_element()
+            })
         };
         // Sending (§7.5, §12): after 400 ms the body dims to 60 % with a
         // 14 pt spinner after it, for at least 500 ms. A normal ack is
@@ -1005,8 +1012,13 @@ impl TimelineView {
                 )
             })
         });
+        // A5: no 话题信息 while the inspector already shows.
+        let rail_open = matches!(
+            self.services.nav.read(cx).visible_pane(),
+            crate::app::RightPane::TopicRail
+        );
         let nav = self.services.nav.clone();
-        let info = push_button(
+        let info = (!rail_open).then(|| push_button(
             "start-topic-info",
             t::START_TOPIC_INFO,
             PushStyle::Outline,
@@ -1018,7 +1030,7 @@ impl TimelineView {
             nav.update(cx, |nav, cx| {
                 nav.set_right_pane(crate::app::RightPane::TopicRail, cx)
             })
-        });
+        }));
         div()
             .pt(space::S4)
             .flex()
@@ -1026,7 +1038,7 @@ impl TimelineView {
             .gap(space::S8)
             .child(assign)
             .children(add)
-            .child(info)
+            .children(info)
             .into_any_element()
     }
 

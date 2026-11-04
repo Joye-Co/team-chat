@@ -16,6 +16,7 @@ use gpui::{
 };
 
 use super::{TimelineView, model, v2::GUTTER};
+use crate::ui::controls::NamedButton as _;
 use crate::{
     copy::{fill, live as l, process as pr, timeline as t, topic_rail as c},
     data::{BotRunSummary, Millis, PlanState},
@@ -390,7 +391,7 @@ impl TimelineView {
                 if open { Sym::ChevronUp } else { Sym::ChevronDown },
                 crate::ui::native::IconSize::Small,
             )
-            .tooltip(if open { c::PLAN_COLLAPSE } else { c::PLAN_EXPAND })
+            .named(if open { c::PLAN_COLLAPSE } else { c::PLAN_EXPAND })
             .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                 if !this.plan_collapsed.remove(&id) {
                     this.plan_collapsed.insert(id.clone());
