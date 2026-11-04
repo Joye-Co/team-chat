@@ -10,9 +10,23 @@ use super::{Phase, Updater, UpdaterGlobal};
 use crate::{app::Services, selftest::scenes::open_main};
 use chat_core::proto::UpdateInfo;
 
+/// One patch past the running version, so the scene never offers a
+/// downgrade (R28: it offered 0.2.0 while Settings showed 1.0.1).
+fn next_version() -> String {
+    let current = env!("CARGO_PKG_VERSION");
+    let mut parts: Vec<u64> = current
+        .split(['.', '-'])
+        .take(3)
+        .map(|p| p.parse().unwrap_or(0))
+        .collect();
+    parts.resize(3, 0);
+    parts[2] += 1;
+    format!("{}.{}.{}", parts[0], parts[1], parts[2])
+}
+
 fn sample() -> UpdateInfo {
     UpdateInfo {
-        version: "0.2.0".into(),
+        version: next_version(),
         notes: String::new(),
         size: 48_000_000,
         sha256: "0".repeat(64),
@@ -123,4 +137,13 @@ pub fn open_up_to_date(
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
     open_settings_with(Phase::UpToDate, services, cx)
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_preview_offers_a_newer_version() {
+        let next = super::next_version();
+        assert!(super::super::version::is_newer(&next, env!("CARGO_PKG_VERSION")));
+    }
 }
