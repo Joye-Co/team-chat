@@ -1138,6 +1138,13 @@
                 "info"
               ]
             },
+            "status": {
+              "type": "string",
+              "enum": [
+                "executing",
+                "failed"
+              ]
+            },
             "title": {
               "type": "string",
               "minLength": 1,
@@ -10367,6 +10374,13 @@
                     "done",
                     "working",
                     "info"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "executing",
+                    "failed"
                   ]
                 },
                 "title": {
@@ -24590,6 +24604,13 @@
                 "info"
               ]
             },
+            "status": {
+              "type": "string",
+              "enum": [
+                "executing",
+                "failed"
+              ]
+            },
             "title": {
               "type": "string",
               "minLength": 1,
@@ -38312,6 +38333,13 @@
             "info"
           ]
         },
+        "status": {
+          "type": "string",
+          "enum": [
+            "executing",
+            "failed"
+          ]
+        },
         "title": {
           "type": "string",
           "minLength": 1,
@@ -48414,6 +48442,13 @@
                     "done",
                     "working",
                     "info"
+                  ]
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "executing",
+                    "failed"
                   ]
                 },
                 "title": {

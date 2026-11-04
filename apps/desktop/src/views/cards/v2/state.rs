@@ -10,8 +10,8 @@
 use crate::data::{
     CardPressError, Millis,
     cards_v2::{
-        CardIntent, CardV2, CardV2Answer, CardV2Block, CardV2Pending, CardV2SendPhase,
-        EvidenceState, RunPlanState,
+        CardIntent, CardWorkStatus, CardV2, CardV2Answer, CardV2Block, CardV2Pending,
+        CardV2SendPhase, EvidenceState, RunPlanState,
     },
 };
 
@@ -193,6 +193,17 @@ pub fn derive(
         }
     }
     let prior = latest_answer(answers).cloned();
+    // The author's work state wins over the intent (CARD21 §2: 处理中, the red 失败 band).
+    match card.status {
+        Some(CardWorkStatus::Failed) => return CardState::Failed { answer: prior },
+        Some(CardWorkStatus::Executing) => {
+            return CardState::Executing {
+                answer: prior,
+                progress: progress(card),
+            };
+        }
+        _ => {}
+    }
     match card.intent {
         CardIntent::Ask => {
             if let Some(a) = answer_for(answers, card.rev) {
@@ -224,6 +235,29 @@ mod tests {
 
     fn card(v: serde_json::Value) -> CardV2 {
         serde_json::from_value(v).expect("card parses")
+    }
+
+    #[test]
+    fn the_author_status_sets_the_band() {
+        let viewer = Viewer::default();
+        let done = |status: &str| {
+            card(serde_json::json!({
+                "v": 2, "rev": 2, "intent": "done", "title": "发版", "fallback": "",
+                "status": status, "blocks": []
+            }))
+        };
+        assert!(matches!(
+            derive(&done("failed"), &[], None, None, &viewer, 0),
+            CardState::Failed { .. }
+        ));
+        assert!(matches!(
+            derive(&done("executing"), &[], None, None, &viewer, 0),
+            CardState::Executing { .. }
+        ));
+        assert!(matches!(
+            derive(&done("later"), &[], None, None, &viewer, 0),
+            CardState::Done { .. }
+        ));
     }
 
     fn ask(rev: u32) -> CardV2 {

@@ -388,7 +388,7 @@ export abstract class DeskInteract extends DeskTakeover {
       const parsed = schema.safeParse(raw);
       if (!parsed.success) {
         const issue = parsed.error.issues[0];
-        throw new ApiError("invalid", `invalid output: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim(), schemaReason(raw, issue?.message));
+        throw new ApiError("invalid", `invalid output: ${issue?.path.join(".") || "(root)"} ${issue?.message ?? ""}`.trim(), schemaReason(raw, issue?.message, issue?.path));
       }
       const frame = parsed.data as Record<string, unknown> & { t: string };
       const c = this.outputContext();

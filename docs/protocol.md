@@ -827,6 +827,7 @@ CardV2 = {
   v: 2
   rev: number                       // 1..4294967295; every edit sends a higher rev
   intent: "ask" | "done" | "working" | "info"
+  status?: "executing" | "failed"   // 1.1: the author's work state (蓝 处理中, 红 失败); absent = follow intent
   title: string                     // 1..200
   fallback: string                  // <= 4000, plain text: old clients, notifications, search
   ask?: {
@@ -1235,7 +1236,7 @@ decision names `answeredBy`). `ask.record` stays valid on a private card.
 ```ts
 { t: "card.patch", rid, groupId, messageId, baseRev, ops: PatchOp[] /* 1..50 */, cause?: eventId, clientPatchId? }
 PatchOp = { op: "set", id, props } | { op: "replace", id, block } | { op: "insert", block, parent?, after? | before? | index? }
-        | { op: "remove", id } | { op: "data", path, value? } | { op: "card", props: { title?, summary?, intent?, fallback?, ask?: CardAsk | null, actions? } }
+        | { op: "remove", id } | { op: "data", path, value? } | { op: "card", props: { title?, summary?, intent?, status?: "executing" | "failed" | null, fallback?, ask?: CardAsk | null, actions? } }
 ack.result = CardPatchAck { message, rev, duplicate? }
 send += { causeEventId?, blockRefs? }      edit += { baseRev?, causeEventId? }
 { t: "interaction.resolve", rid, groupId, eventId, result: "ignored" | "failed", note? /* <= 120 */ }

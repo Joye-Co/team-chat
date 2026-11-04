@@ -121,10 +121,10 @@ function mayEmit(b: Block | undefined, state: CardState, actor: Actor, surface: 
 /** The card, its state (made when an older card has none) and the message row. */
 export async function loadCard(room: RoomContext, messageId: string, dir: Directory) {
   const row = messageRow(room.sql, messageId);
-  if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found");
+  if (!row || row.deleted_at !== null || row.kind !== "card") throw new ApiError("not_found", "card message not found", "card.block_gone");
   const ext = extOf(row);
   const card = ext.cardV2;
-  if (!card) throw new ApiError("not_found", "not a v2 card");
+  if (!card) throw new ApiError("not_found", "not a v2 card", "card.block_gone");
   const state = ext.cardState ?? (await stateForWrite(room, dir, card, undefined, row.author_id, row.topic_id, row.created_at, row.id));
   return { row, ext, card, state };
 }

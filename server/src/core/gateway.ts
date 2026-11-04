@@ -325,7 +325,7 @@ export class MemberGateway extends DurableObject<Env> {
       const issue = result.error.issues.find((i) => schemaReason({}, i.message)) ?? result.error.issues[0];
       const where = issue?.path.join(".") || "(root)";
       const message = `invalid frame: ${where} ${issue?.message ?? ""}`.trim();
-      const reason = schemaReason(obj, issue?.message);
+      const reason = schemaReason(obj, issue?.message, issue?.path);
       if (reason === "card.limits" && /exceeds 64 KiB/.test(issue?.message ?? "")) {
         return { ok: false, rid, error: { code: "too_large", message: "card exceeds 64 KiB" } };
       }

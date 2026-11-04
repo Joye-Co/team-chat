@@ -184,3 +184,40 @@ describe("记一条 (PC-8)", () => {
     ca.close();
   });
 });
+
+describe("member card status (PC-9)", () => {
+  it("lets the author mark a card executing, failed and clear it by patch", async () => {
+    const w = await world();
+    const [ca, cbot] = await Promise.all([w.connect(w.alice), w.connect(w.bot)]);
+    const card = base({ intent: "done", title: "发版", blocks: [{ id: "t", type: "text", text: "开始发版。" }] });
+    const m = (await send(cbot, w.gid, { ...card, status: "executing" } as CardV2)).result.message;
+    expect(m.cardV2.status).toBe("executing");
+    const p = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 1, ops: [{ op: "card", props: { status: "failed" } }] });
+    expect(p, JSON.stringify(p)).toMatchObject({ ok: true });
+    expect(p.result.message.cardV2.status).toBe("failed");
+    const u = await ca.waitEvent((e) => e.type === "message.updated" && e.data.messageId === m.id && e.data.cardV2?.status === "failed");
+    expect(u.data.cardV2.rev).toBe(2);
+    const c = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 2, ops: [{ op: "card", props: { status: null } }] });
+    expect(c, JSON.stringify(c)).toMatchObject({ ok: true });
+    expect(c.result.message.cardV2.status).toBeUndefined();
+    expect(await ca.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 3, ops: [{ op: "card", props: { status: "failed" } }] })).toMatchObject({ ok: false, error: { code: "forbidden" } });
+    const bad = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 3, ops: [{ op: "card", props: { status: "paused" } }] });
+    expect(bad).toMatchObject({ ok: false, error: { code: "invalid" } });
+    for (const x of [ca, cbot]) x.close();
+  });
+});
+
+describe("error reasons (PC-12)", () => {
+  it("names card.limits for a bad card shape and card.block_gone for a patch on a missing card", async () => {
+    const w = await world();
+    const cbot = await w.connect(w.bot);
+    const bad = await send(cbot, w.gid, { ...base({}), intent: "maybe" } as unknown as CardV2);
+    expect(bad, JSON.stringify(bad)).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    const m = (await send(cbot, w.gid, base({ blocks: [{ id: "t", type: "text", text: "x" }] }))).result.message;
+    const op = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: m.id, baseRev: 1, ops: [{ op: "card", props: { intent: "maybe" } }] });
+    expect(op, JSON.stringify(op)).toMatchObject({ ok: false, error: { code: "invalid", reason: "card.limits" } });
+    const gone = await cbot.request({ t: "card.patch", groupId: w.gid, messageId: "01JBX0MSG000000000000000ZZ", baseRev: 1, ops: [{ op: "remove", id: "t" }] });
+    expect(gone, JSON.stringify(gone)).toMatchObject({ ok: false, error: { code: "not_found", reason: "card.block_gone" } });
+    cbot.close();
+  });
+});

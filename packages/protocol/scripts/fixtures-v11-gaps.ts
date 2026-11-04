@@ -25,4 +25,12 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
   ok("http/record-decision-response.json", "RecordDecisionResponse", { decision: recorded });
   ok("http/decisions-response-recorded.json", "DecisionsResponse", { decisions: [], hasMore: false, recorded: [recorded] }, "decisions with the ones recorded by hand");
   ok("events/decision.recorded.json", "Event", { seq: 412, groupId: G, at: T0, actorId: JOYE, type: "decision.recorded", data: { decision: recorded } });
+
+  // PC-9: the author's work state on the card (红 失败, 蓝 处理中).
+  const done = { v: 2, catalog: "tc.card/2.1", rev: 2, intent: "done", title: "发版", fallback: "发版", blocks: [{ id: "t", type: "text", text: "发版失败：签名过期。" }] };
+  ok("entities/card-v2-status-failed.json", "CardV2", { ...done, status: "failed" }, "the author marked the card failed");
+  ok("entities/card-v2-status-executing.json", "CardV2", { ...done, intent: "ask", status: "executing", ask: { from: [JOYE] }, actions: [{ id: "ok", label: "好" }] }, "an answered ask the author is carrying out");
+  bad("entities/card-v2-status-unknown.json", "CardV2", { ...done, status: "paused" }, "status is executing or failed");
+  ok("client/card.patch-status.json", "ClientFrame", { t: "card.patch", rid: "r204", groupId: G, messageId: M, baseRev: 2, ops: [{ op: "card", props: { status: "failed" } }] });
+  ok("client/card.patch-status-clear.json", "ClientFrame", { t: "card.patch", rid: "r205", groupId: G, messageId: M, baseRev: 3, ops: [{ op: "card", props: { status: null } }] }, "null clears the status");
 }

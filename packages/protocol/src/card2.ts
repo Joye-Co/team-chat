@@ -105,6 +105,13 @@ export const BlockId = ActionId;
 
 export const CardIntent = z.enum(["ask", "done", "working", "info"]);
 export type CardIntent = z.infer<typeof CardIntent>;
+/**
+ * 1.1: what the author's work on the card is doing now, set by the author (send, edit or a
+ * `card` patch; null clears it): `executing` (蓝 处理中) or `failed` (红 失败). Absent: the band
+ * follows `intent`.
+ */
+export const CardWorkStatus = z.enum(["executing", "failed"]);
+export type CardWorkStatus = z.infer<typeof CardWorkStatus>;
 
 // ---------------------------------------------------------------------------
 // Parts (引用提问 and part events)
@@ -662,6 +669,8 @@ export const CardV2Shape = z.object({
   /** 1 at first; every edit sends a higher rev. Answers name the rev they answer. */
   rev: CardRev,
   intent: CardIntent,
+  /** 1.1: the author's work state (`CardWorkStatus`); absent = follow `intent`. */
+  status: CardWorkStatus.optional(),
   title: Short(200),
   /** 2.1: one plain sentence under the title. */
   summary: Text(280).optional(),
@@ -1151,6 +1160,8 @@ export const PatchOp = z.discriminatedUnion("op", [
       title: Short(200).optional(),
       summary: Text(280).optional(),
       intent: CardIntent.optional(),
+      /** 1.1: null clears it. */
+      status: CardWorkStatus.nullable().optional(),
       fallback: Text(4000).optional(),
       /** null closes the open ask. */
       ask: CardAsk.nullable().optional(),
