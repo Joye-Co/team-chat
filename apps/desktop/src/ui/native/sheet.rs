@@ -44,11 +44,18 @@ impl SheetWidth {
     }
 }
 
-/// How a sheet enters: sliding down from under the toolbar while it fades
-/// in; a sheet opened from the keyboard still slides (a sheet is not a
-/// frequent interaction), unless Reduce Motion is on (gpui-component shows
-/// the end state then).
+/// How a sheet enters from a click: sliding down from under the toolbar
+/// while it fades in (160 ms, out curve), unless Reduce Motion is on
+/// (gpui-component shows the end state then). A sheet opened from the
+/// keyboard many times a day (⌘N 新话题) opens at once: see
+/// [`native_sheet_keyboard`] (T1-13, review-animations 9).
 pub const SHEET_ENTRANCE: DialogEntrance = DialogEntrance::FadeSlide;
+
+/// [`native_sheet`] for a sheet opened by a keyboard shortcut: no motion,
+/// in and out.
+pub fn native_sheet_keyboard(dialog: Dialog, width: SheetWidth, cx: &App) -> Dialog {
+    native_sheet(dialog, width, cx).entrance(DialogEntrance::None)
+}
 
 /// Configures a gpui-component dialog as a native sheet (§7.1). Lay out
 /// its content with [`SheetLayout`]; it has no close button (Escape and
