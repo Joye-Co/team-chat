@@ -216,6 +216,7 @@ fn run(options: Options) -> i32 {
         .run(move |cx: &mut App| {
             gpui_kit::init(cx);
             crate::render_text_like_the_mockups(cx);
+            crate::ui::icons::prewarm();
             // No Dock icon and never an activation: the person who uses
             // this Mac keeps the focus. The windows draw as inactive
             // windows (grey traffic lights).

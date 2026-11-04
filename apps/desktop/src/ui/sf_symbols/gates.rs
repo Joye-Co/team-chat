@@ -183,7 +183,7 @@ fn lucide_masks(side: u32, cx: &App) -> Vec<Vec<u8>> {
     Sf::ALL[..40]
         .iter()
         .map(|s| {
-            let path = s.lucide().path();
+            let path = format!("{}{}", crate::ui::icons::LUCIDE_PREFIX, s.lucide().path());
             let bytes = gpui::AssetSource::load(&crate::ui::AppAssets, &path)
                 .ok()
                 .flatten()

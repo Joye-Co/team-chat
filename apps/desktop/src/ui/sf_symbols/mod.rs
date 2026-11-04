@@ -1,10 +1,15 @@
-//! SF Symbols spike (POLISH-SPEC §7.3, §10.2): the system's symbols drawn by
-//! AppKit into a bitmap at the window's scale and shown with GPUI `img()`.
+//! SF Symbols, the app's only icon system (NATIVE.md rule 2, §6).
 //!
-//! The app's icons stay Lucide ([`super::icons`]); this module only exists so
-//! the integration can compare the two sets and read the gate numbers
-//! (`sf-symbols` scene, `sf-symbols-gates.json`). Nothing outside the scene
-//! uses it.
+//! - [`Sym`] names a concept and its symbol; [`SymSize`] holds the §6 sizes
+//!   and weights. Views draw them through [`super::icons`] (`Sym::Home.sidebar()`,
+//!   `icons::sym`, `icons::icon`).
+//! - [`asset`] serves each symbol as an `sf/…` asset path, so GPUI's `svg()`
+//!   (and every gpui-component `Icon`) draws and tints it; it also answers
+//!   gpui-component's own Lucide paths with SF Symbols, and prewarms all
+//!   concepts on a background thread at launch.
+//! - [`Sf`], [`symbol`] and [`scene`] are the comparison scene (`sf-symbols`):
+//!   Lucide next to the `img()` path below and the app's path, with the gate
+//!   numbers (`sf-symbols-gates.json`).
 //!
 //! How a symbol is drawn:
 //! 1. AppKit draws the symbol (point size, weight, medium scale) once per
@@ -24,9 +29,13 @@
 //! License: SF Symbols are drawn by the system at run time and never exported
 //! or bundled.
 
+pub mod asset;
 pub mod gates;
 mod raster;
 pub mod scene;
+pub mod sym;
+
+pub use sym::{Sym, SymSize};
 
 use std::{
     cell::RefCell,
@@ -42,6 +51,7 @@ use gpui::{
 
 use super::icons::{self, Lucide};
 
+
 pub use raster::Mask;
 
 /// The weight of a symbol (`NSFontWeight`).
@@ -54,21 +64,26 @@ pub enum Weight {
 }
 
 macro_rules! symbols {
-    ($($variant:ident = $sf:literal, $lucide:ident;)*) => {
-        /// The icons of the app's chrome, with their SF Symbol and the Lucide
-        /// icon they would replace.
+    ($($variant:ident = $sym:ident, $lucide:ident;)*) => {
+        /// The 40 icons of the comparison scene, with their concept and the
+        /// Lucide icon the app drew before.
         #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
         pub enum Sf { $($variant),* }
 
         impl Sf {
             pub const ALL: &'static [Sf] = &[$(Sf::$variant),*];
 
-            /// The system symbol name.
-            pub fn name(self) -> &'static str {
-                match self { $(Sf::$variant => $sf),* }
+            /// The concept.
+            pub fn sym(self) -> Sym {
+                match self { $(Sf::$variant => Sym::$sym),* }
             }
 
-            /// The Lucide icon the app draws today.
+            /// The system symbol name.
+            pub fn name(self) -> &'static str {
+                self.sym().name()
+            }
+
+            /// The Lucide icon the app drew before.
             pub fn lucide(self) -> Lucide {
                 match self { $(Sf::$variant => Lucide::$lucide),* }
             }
@@ -77,51 +92,51 @@ macro_rules! symbols {
 }
 
 symbols! {
-    // Title bar and right group (§5).
-    Search = "magnifyingglass", Search;
-    NewTopic = "square.and.pencil", SquarePen;
-    SideChat = "bubble.left", MessageCircle;
-    Outputs = "square.3.layers.3d", Layers;
-    Computer = "display", Monitor;
-    Changes = "arrow.triangle.pull", GitPullRequest;
-    PaneRight = "sidebar.right", PanelRight;
-    More = "ellipsis", Ellipsis;
-    // Rail destinations and rows (§2.3).
-    Desk = "house", House;
-    Group = "number", Hash;
-    Members = "person.2", Users;
-    Settings = "gearshape", Settings;
-    // Settings sections (§7.1 map, §8.2).
-    Bell = "bell", Bell;
-    Machines = "server.rack", Server;
-    Appearance = "paintpalette", Palette;
-    Shortcuts = "keyboard", Keyboard;
-    Privacy = "hand.raised", Hand;
-    About = "info.circle", Info;
-    // Chevrons, checks and marks (§7.1 sizes 10–12).
-    Check = "checkmark", Check;
-    Close = "xmark", X;
-    ChevronDown = "chevron.down", ChevronDown;
-    ChevronRight = "chevron.right", ChevronRight;
-    ChevronLeft = "chevron.left", ChevronLeft;
-    Popup = "chevron.up.chevron.down", ChevronsUpDown;
-    Plus = "plus", Plus;
+    // Toolbar (§5.1, §6).
+    Search = Search, Search;
+    NewTopic = Compose, SquarePen;
+    SideChat = AskAside, MessageCircle;
+    Outputs = Outputs, Layers;
+    Computer = Computer, Monitor;
+    Changes = PullRequest, GitPullRequest;
+    PaneRight = Inspector, PanelRight;
+    More = More, Ellipsis;
+    // Sidebar destinations and rows (§9.1).
+    Desk = Home, House;
+    Group = Topic, Hash;
+    Members = Members, Users;
+    Settings = General, Settings;
+    // Settings tabs (§8).
+    Bell = Bell, Bell;
+    Machines = MacMini, Server;
+    Appearance = Appearance, Palette;
+    Shortcuts = Shortcuts, Keyboard;
+    Privacy = Privacy, Hand;
+    About = Info, Info;
+    // Chevrons, checks and marks.
+    Check = Check, Check;
+    Close = Close, X;
+    ChevronDown = ChevronDown, ChevronDown;
+    ChevronRight = ChevronRight, ChevronRight;
+    ChevronLeft = ChevronLeft, ChevronLeft;
+    Popup = PopUp, ChevronsUpDown;
+    Plus = Plus, Plus;
     // States and rows of cards and panes.
-    Done = "checkmark.circle", CircleCheck;
-    Alert = "exclamationmark.circle", CircleAlert;
-    Failed = "xmark.circle", CircleX;
-    Running = "smallcircle.filled.circle", CircleDot;
-    Clock = "clock", Clock;
-    Document = "doc.text", FileText;
-    Copy = "doc.on.doc", Copy;
-    Open = "arrow.up.right.square", ExternalLink;
-    Image = "photo", Image;
-    Play = "play", Play;
-    Lock = "lock", Lock;
-    Eye = "eye", Eye;
-    Invite = "person.badge.plus", UserPlus;
-    Download = "square.and.arrow.down", Download;
-    Options = "slider.horizontal.3", SlidersHorizontal;
+    Done = Done, CircleCheck;
+    Alert = NeedsYou, CircleAlert;
+    Failed = Failed, CircleX;
+    Running = Live, CircleDot;
+    Clock = Waiting, Clock;
+    Document = Document, FileText;
+    Copy = Copy, Copy;
+    Open = OpenExternal, ExternalLink;
+    Image = Image, Image;
+    Play = Play, Play;
+    Lock = Lock, Lock;
+    Eye = Watch, Eye;
+    Invite = Invite, UserPlus;
+    Download = Download, Download;
+    Options = Options, SlidersHorizontal;
 }
 
 /// The point size AppKit draws a symbol at for a slot: 13 pt in a 16 pt
@@ -189,7 +204,8 @@ pub fn mask(sf: Sf, slot: f32, weight: Weight, scale: f32) -> Option<Arc<Mask>> 
         return m;
     }
     let started = Instant::now();
-    let m = raster::draw(sf.name(), point_for_slot(slot), weight, slot, scale).map(Arc::new);
+    let point = point_for_slot(slot) * sf.sym().factor();
+    let m = raster::draw(sf.name(), point, weight, slot, scale).map(Arc::new);
     CACHE.with(|c| {
         let mut c = c.borrow_mut();
         c.stats.masks += 1;
@@ -252,7 +268,7 @@ pub fn symbol(sf: Sf, slot: Pixels, weight: Weight, color: Hsla, window: &Window
             .size(slot)
             .flex_none()
             .into_any_element(),
-        None => icons::icon(sf.lucide(), slot, color).into_any_element(),
+        None => icons::lucide_raw(sf.lucide(), slot, color).into_any_element(),
     }
 }
 
