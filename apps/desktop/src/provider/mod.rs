@@ -815,6 +815,11 @@ impl CoreProvider {
                 out.push(Change::Runs { group_id, topic_id });
             }
             ClientUpdate::GroupEvent(ev) => {
+                // 记一条 on any device: the 群 page fetches its decisions again.
+                if let chat_core::proto::EventData::DecisionRecorded(_) = &ev.data {
+                    self.forget_decisions(&ev.group_id);
+                    out.push(Change::Groups);
+                }
                 // --- cards v2 track ---
                 if let chat_core::proto::EventData::CardAnswered(d) = &ev.data
                     && let Some(a) = self.account()
@@ -2020,8 +2025,15 @@ impl ChatProvider for CoreProvider {
         self.side_chat_inner(group_id, topic_id, member_id)
     }
 
-    fn send_side_chat(&self, group_id: &str, topic_id: &str, member_id: &str, body: String) {
-        self.send_side_chat_inner(group_id, topic_id, member_id, body)
+    fn send_side_chat(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        member_id: &str,
+        body: String,
+        refs: Vec<crate::data::DraftRef>,
+    ) {
+        self.send_side_chat_inner(group_id, topic_id, member_id, body, refs)
     }
 
     fn post_side_chat_suggestion(

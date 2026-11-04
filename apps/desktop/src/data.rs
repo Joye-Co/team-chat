@@ -1812,9 +1812,18 @@ pub trait ChatProvider: Send + Sync + 'static {
             messages: Vec::new(),
         }
     }
-    /// Asks `member_id` privately about a 话题 (it reads the 话题 up to now).
+    /// Asks `member_id` privately about a 话题 (it reads the 话题 up to now). `refs` are the
+    /// chips of the question (parts of the 话题's 群); their quote lines go before `body`.
     /// Emits `Change::Messages` for the 话题 when the aside changes.
-    fn send_side_chat(&self, _group_id: &str, _topic_id: &str, _member_id: &str, _body: String) {}
+    fn send_side_chat(
+        &self,
+        _group_id: &str,
+        _topic_id: &str,
+        _member_id: &str,
+        _body: String,
+        _refs: Vec<DraftRef>,
+    ) {
+    }
     /// Posts the suggestion of an aside answer into the 话题 (only on press).
     fn post_side_chat_suggestion(
         &self,

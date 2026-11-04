@@ -428,11 +428,28 @@ impl CoreProvider {
                 if known.contains(item.id.as_str()) {
                     continue;
                 }
-                if let chat_core::store::OutboxOp::Send { body, .. } = &item.op {
+                if let chat_core::store::OutboxOp::Send {
+                    body, block_refs, ..
+                } = &item.op
+                {
+                    // The quote lines the server writes for the chips (as the posted message shows).
+                    let body = match block_refs.as_deref() {
+                        Some(r) if !r.is_empty() => {
+                            let p = chat_core::proto::block_ref_prefix(
+                                r.iter().map(|x| x.label.as_str()),
+                            );
+                            if body.is_empty() {
+                                p
+                            } else {
+                                format!("{p}\n\n{body}")
+                            }
+                        }
+                        _ => body.clone(),
+                    };
                     thread.messages.push(SideChatMessage {
                         id: item.id.clone(),
                         author_id: me.clone(),
-                        body: body.clone(),
+                        body,
                         at: item.created_at as Millis,
                         refs: Vec::new(),
                         sources: Vec::new(),
@@ -451,14 +468,25 @@ impl CoreProvider {
         topic_id: &str,
         member_id: &str,
         body: String,
+        refs: Vec<crate::data::DraftRef>,
     ) {
         let body = body.trim().to_string();
         let Some(a) = self.account() else {
             return;
         };
-        if body.is_empty() {
+        if body.is_empty() && refs.is_empty() {
             return;
         }
+        // The chips point into the 话题's 群 from the member's DM (`sourceGroupId`).
+        let shown = crate::views::refs::side_chat_body(&body, &refs);
+        let block_refs: Vec<_> = refs
+            .into_iter()
+            .map(|r| chat_core::proto::BlockRefInput {
+                source_group_id: Some(r.group_id),
+                ..r.input
+            })
+            .collect();
+        let block_refs = (!block_refs.is_empty()).then_some(block_refs);
         let source = self.resolve_topic(topic_id);
         let upto = self.latest_seq(&source);
         let change = vec![Change::Messages {
@@ -466,7 +494,10 @@ impl CoreProvider {
             topic_id: topic_id.to_string(),
         }];
         if let Some(side) = self.side_topic(group_id, &source, member_id) {
-            if let Err(e) = a.client.reply_in_side_chat(&side, &body, Some(upto)) {
+            if let Err(e) = a
+                .client
+                .reply_in_side_chat(&side, &body, Some(upto), block_refs)
+            {
                 tracing::warn!(error = %e, "cannot reply in a side chat");
             }
             self.emit(change);
@@ -481,8 +512,9 @@ impl CoreProvider {
                 topic_id: source,
                 upto_seq: upto,
             },
-            body: body.clone(),
+            body,
             title: None,
+            block_refs,
         });
         let this = self.clone();
         let at = now_ms();
@@ -498,7 +530,7 @@ impl CoreProvider {
                         .pending
                         .entry(key)
                         .or_default()
-                        .push((started.client_msg_id, body, at));
+                        .push((started.client_msg_id, shown, at));
                 }
                 Err(e) => tracing::warn!(error = %e, "cannot start a side chat"),
             }

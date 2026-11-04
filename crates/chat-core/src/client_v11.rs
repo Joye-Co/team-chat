@@ -50,6 +50,9 @@ pub struct SideChatRequest {
     pub body: String,
     /// Title of the side chat topic; `None` uses the first line.
     pub title: Option<String>,
+    /// Parts of the source group the question points at (单独问 with chips). Each ref names the
+    /// source group in `source_group_id`; the server writes their quote lines before the body.
+    pub block_refs: Option<Vec<crate::proto::BlockRefInput>>,
 }
 
 /// A side chat that was queued: the DM it lives in and the `clientMsgId` of its first message.
@@ -463,10 +466,14 @@ impl Client {
             if bot.kind != MemberKind::Bot {
                 return Err(ClientError::Invalid("side chats are with bots"));
             }
-            if req.body.trim().is_empty() || req.body.chars().count() > crate::proto::MAX_BODY_CHARS
+            let has_refs = req.block_refs.as_ref().is_some_and(|r| !r.is_empty());
+            if (req.body.trim().is_empty() && !has_refs)
+                || req.body.chars().count() > crate::proto::MAX_BODY_CHARS
             {
                 return Err(ClientError::Invalid("bad body"));
             }
+            crate::proto::check_block_refs(req.block_refs.as_deref().filter(|r| !r.is_empty()))
+                .map_err(|_| ClientError::Invalid("bad block refs"))?;
             req.context
                 .validate()
                 .map_err(|_| ClientError::Invalid("bad context"))?;
@@ -502,7 +509,7 @@ impl Client {
                     card_v2: None,
                     context: Some(req.context),
                     cause_event_id: None,
-                    block_refs: None,
+                    block_refs: req.block_refs.filter(|r| !r.is_empty()),
                     after_root: None,
                 },
             )?;
@@ -514,12 +521,14 @@ impl Client {
     }
 
     /// A follow-up in a side chat topic. `upto_seq`, when set, lets the bot read the source
-    /// topic up to that seq now (`send.context` with the topic's own `contextOf`).
+    /// topic up to that seq now (`send.context` with the topic's own `contextOf`). `block_refs`
+    /// are parts of the source group the follow-up points at (see [`SideChatRequest`]).
     pub fn reply_in_side_chat(
         &self,
         side_topic_id: &str,
         body: &str,
         upto_seq: Option<u64>,
+        block_refs: Option<Vec<crate::proto::BlockRefInput>>,
     ) -> Result<String, ClientError> {
         let row = self
             .store()
@@ -535,6 +544,7 @@ impl Client {
             topic_id: Some(side_topic_id.into()),
             body: body.into(),
             context,
+            block_refs: block_refs.filter(|r| !r.is_empty()),
             ..Default::default()
         })
     }

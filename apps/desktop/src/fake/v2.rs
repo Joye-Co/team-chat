@@ -1440,7 +1440,16 @@ impl ChatProvider for V2Samples {
             },
         }
     }
-    fn send_side_chat(&self, group_id: &str, topic_id: &str, _member_id: &str, body: String) {
+    fn send_side_chat(
+        &self,
+        group_id: &str,
+        topic_id: &str,
+        _member_id: &str,
+        body: String,
+        refs: Vec<crate::data::DraftRef>,
+    ) {
+        // The server writes the chips' quote lines before the body; the fake does the same.
+        let body = crate::views::refs::side_chat_body(body.trim(), &refs);
         self.with(|d| {
             let n = d.side_chat.len() + 1;
             d.side_chat.push(SideChatMessage {

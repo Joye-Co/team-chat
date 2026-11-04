@@ -195,6 +195,20 @@ fn server_text(d: &GroupDecision) -> String {
 }
 
 impl CoreProvider {
+    /// Drops the fetched server list of a 群's decisions: the next read fetches it again
+    /// (after 记一条 here, or a `decision.recorded` from another device).
+    pub(super) fn forget_decisions(&self, group_id: &str) {
+        let mut map = self
+            .shared
+            .decisions
+            .inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(entry) = map.groups.get_mut(group_id) {
+            entry.list = None;
+        }
+    }
+
     pub(super) fn group_decisions_inner(&self, group_id: &str) -> Vec<Decision> {
         let local = self.local_decisions(group_id);
         let Some(a) = self.account() else {
@@ -299,17 +313,7 @@ impl CoreProvider {
                 .await
                 .map_err(|_| AdminError::Other)?
                 .map_err(|e| super::settings::admin_error(&e))?;
-            {
-                let mut map = this
-                    .shared
-                    .decisions
-                    .inner
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
-                if let Some(entry) = map.get_mut(&group) {
-                    entry.list = None;
-                }
-            }
+            this.forget_decisions(&group);
             this.emit(vec![Change::Groups]);
             Ok(())
         })

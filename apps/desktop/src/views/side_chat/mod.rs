@@ -119,8 +119,8 @@ impl SideChat {
         let Some((g, t, m)) = self.target(cx) else {
             return;
         };
-        // inc-refs: the chips travel as quote lines in front of the question (a side chat
-        // lives in the member's DM, where `blockRefs` to the 话题 are not accepted).
+        // inc-refs: the chips travel as `blockRefs` that name the 话题's 群 (`sourceGroupId`);
+        // the server writes their quote lines in front of the question.
         let key = (g.clone(), t.clone(), m.clone());
         let has_refs = crate::views::refs::hub(cx)
             .read(cx)
@@ -131,8 +131,9 @@ impl SideChat {
             return;
         }
         let refs = crate::views::refs::hub(cx).update(cx, |h, cx| h.take_side(&key, cx));
-        let body = crate::views::refs::side_chat_body(&body, &refs);
-        self.services.provider.send_side_chat(&g, &t, &m, body);
+        self.services
+            .provider
+            .send_side_chat(&g, &t, &m, body, refs);
         self.input.update(cx, |s, cx| s.set_value("", window, cx));
         self.scroll.scroll_to_bottom();
     }
