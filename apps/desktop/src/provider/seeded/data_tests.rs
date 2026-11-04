@@ -377,3 +377,61 @@ fn page_aggregates_with_500_topics_stay_within_the_frame_budget() {
         "a frame of page aggregates took {frame_ms:.2} ms (budget {BUDGET_MS} ms)"
     );
 }
+
+#[test]
+fn done_card_checks_acceptance_proof_and_video_length_come_from_the_protocol() {
+    use crate::data::v2::Proof;
+    let mut s = Seeded::new("proof");
+    let now = s.now;
+    // The PR of the done card reports three passing checks.
+    let proof = s.p.message_proof(GROUP, "01SEEDDONE");
+    assert!(
+        proof.contains(&Proof::Checks {
+            passed: 3,
+            total: 3
+        }),
+        "{proof:?}"
+    );
+
+    // A recording in the 话题, with the length its sender reported.
+    let video = proto::Message {
+        attachments: Some(vec![from(json!({
+            "fileId": "01SEEDVIDEO", "name": "录屏.mp4", "size": 1000, "mime": "video/mp4",
+            "sha256": "a".repeat(64),
+            "media": { "kind": "video", "mime": "video/mp4", "bytes": 1000, "duration": 42.5, "preview": "ready" }
+        }))]),
+        ..message("01SEEDVMSG", TOPIC, FORGE, 0, now - 3 * MIN, "录屏")
+    };
+    s.apply(vec![
+        message_event(video),
+        run_event(json!({
+            "id": "01SEEDACC", "botId": FORGE, "groupId": GROUP, "topicId": TOPIC,
+            "status": "running", "createdAt": now - 2 * MIN, "updatedAt": now - MIN,
+            "acceptance": [
+                { "text": "重连后没有重复", "state": "pass",
+                  "evidence": { "text": "0 条重复", "fileId": "01SEEDVIDEO" } },
+                { "text": "报告写好了", "state": "pass",
+                  "evidence": { "artifact": { "artifactId": ARTIFACT, "version": 2 } } },
+                { "text": "CI 通过", "state": "pending",
+                  "evidence": { "url": "https://github.com/acme/chat/pull/61/checks" } }
+            ]
+        })),
+    ]);
+    let items = s.p.acceptance_criteria("01SEEDACC");
+    assert_eq!(items.len(), 3);
+    assert_eq!(items[0].evidence.as_deref(), Some("0 条重复"));
+    let file = items[0].evidence_file.clone().expect("the file chip");
+    assert_eq!(file.name, "录屏.mp4");
+    assert_eq!(
+        items[1].evidence_artifact,
+        Some((ARTIFACT.to_string(), 2, "重连测试报告".to_string()))
+    );
+    assert_eq!(
+        items[2].evidence_url.as_deref(),
+        Some("https://github.com/acme/chat/pull/61/checks")
+    );
+
+    // The timeline converts the message; the length is the sender's, before any download.
+    let _ = s.p.messages(GROUP, TOPIC, 50);
+    assert_eq!(s.p.media_duration(&file), Some(42_500));
+}

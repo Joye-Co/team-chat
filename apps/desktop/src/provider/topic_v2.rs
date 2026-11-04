@@ -943,10 +943,23 @@ impl CoreProvider {
             .map(thumb_of)
     }
 
-    /// The length of a video or audio file that is on disk.
+    /// The length of a video or audio file: the sender's `media.duration`, else read from
+    /// the file once it is on disk.
     pub(super) fn media_duration_inner(&self, file: &FileAttachment) -> Option<u64> {
         let media = file.mime.starts_with("video/") || file.mime.starts_with("audio/");
-        if !media || file.sha256.is_empty() {
+        if !media {
+            return None;
+        }
+        let reported = self
+            .file_media_inner(file)
+            .and_then(|m| m.duration)
+            .and_then(|d| d.as_f64())
+            .filter(|s| s.is_finite() && *s > 0.)
+            .map(|s| (s * 1000.).round() as u64);
+        if reported.is_some() {
+            return reported;
+        }
+        if file.sha256.is_empty() {
             return None;
         }
         let generation = self.topic_v2_generation();

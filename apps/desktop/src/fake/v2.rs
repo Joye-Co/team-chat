@@ -1497,16 +1497,17 @@ impl ChatProvider for V2Samples {
                 text: "一万条消息滚动不卡".into(),
                 met: Some(true),
                 evidence: Some("现在 57 fps".into()),
+                ..Default::default()
             },
             AcceptanceItem {
                 text: "内存不涨".into(),
                 met: Some(true),
                 evidence: Some("现在 212 MB".into()),
+                ..Default::default()
             },
             AcceptanceItem {
                 text: "跳到第 8,000 条后位置不跳".into(),
-                met: None,
-                evidence: None,
+                ..Default::default()
             },
         ]
     }

@@ -702,17 +702,51 @@ impl CoreProvider {
         let Some(run) = a.client.store().run(run_id).ok().flatten() else {
             return Vec::new();
         };
-        run.acceptance
-            .unwrap_or_default()
+        use crate::data::ChatProvider as _;
+        let items = run.acceptance.unwrap_or_default();
+        // Files of the 话题, read once when an item points at one.
+        let wants_files = items
+            .iter()
+            .any(|i| i.evidence.as_ref().is_some_and(|e| e.file_id.is_some()));
+        let files = if wants_files {
+            self.topic_files(&run.group_id, &run.topic_id)
+        } else {
+            Vec::new()
+        };
+        items
             .into_iter()
-            .map(|i| AcceptanceItem {
-                text: i.text,
-                met: match i.state {
-                    AcceptanceState::Pass => Some(true),
-                    AcceptanceState::Fail => Some(false),
-                    _ => None,
-                },
-                evidence: i.evidence.and_then(|e| e.text),
+            .map(|i| {
+                let evidence = i.evidence.unwrap_or_default();
+                let evidence_file = evidence.file_id.as_ref().and_then(|id| {
+                    files
+                        .iter()
+                        .find(|f| &f.file.file_id == id)
+                        .map(|f| f.file.clone())
+                });
+                let evidence_artifact = evidence.artifact.as_ref().map(|r| {
+                    let title = a
+                        .client
+                        .artifact(&r.artifact_id)
+                        .ok()
+                        .flatten()
+                        .map(|row| row.artifact.title)
+                        .unwrap_or_default();
+                    (r.artifact_id.clone(), r.version, title)
+                });
+                AcceptanceItem {
+                    text: i.text,
+                    met: match i.state {
+                        AcceptanceState::Pass => Some(true),
+                        AcceptanceState::Fail => Some(false),
+                        _ => None,
+                    },
+                    evidence: evidence.text,
+                    evidence_file,
+                    evidence_url: evidence
+                        .url
+                        .filter(|u| u.starts_with("https://") || u.starts_with("http://")),
+                    evidence_artifact,
+                }
             })
             .collect()
     }

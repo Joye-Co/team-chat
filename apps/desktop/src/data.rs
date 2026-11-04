@@ -2030,10 +2030,35 @@ pub trait ChatProvider: Send + Sync + 'static {
             return glance;
         }
         let ask = self.pinned_ask(group_id, topic_id);
-        let card = ask
-            .as_ref()
-            .and_then(|a| a.message_id.as_deref())
-            .and_then(|m| self.card(group_id, m));
+        let message_id = ask.as_ref().and_then(|a| a.message_id.clone());
+        // A v2 ask: the options of its first decision block.
+        let v2_options: Option<Vec<pages::ChoiceOption>> = message_id
+            .as_deref()
+            .and_then(|m| self.card_v2(group_id, m))
+            .and_then(|c| {
+                c.card.all_blocks().into_iter().find_map(|b| match b {
+                    cards_v2::CardV2Block::Decision { options, .. } => Some(
+                        options
+                            .iter()
+                            .take(2)
+                            .enumerate()
+                            .map(|(i, o)| pages::ChoiceOption {
+                                key: ((b'A' + i as u8) as char).to_string(),
+                                label: o.label.clone(),
+                                sketch: None,
+                            })
+                            .collect(),
+                    ),
+                    _ => None,
+                })
+            });
+        if let (Some(ask), Some(options)) = (ask.as_ref(), v2_options) {
+            if options.len() == 2 && ask.kind == v2::AskKind::Choice {
+                glance.preview = Some(pages::TopicPreview::Choice { options });
+            }
+            return glance;
+        }
+        let card = message_id.as_deref().and_then(|m| self.card(group_id, m));
         if let (Some(ask), Some(card)) = (ask, card) {
             let options: Vec<pages::ChoiceOption> = card
                 .actions
