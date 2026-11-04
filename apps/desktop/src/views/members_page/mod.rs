@@ -314,14 +314,14 @@ impl MembersPage {
             .leading_inset(rows::toolbar_leading(&self.services, cx))
             .group(filter)
             .group(rows::toolbar_capsule(add, cx));
-        if load == PageLoad::Ready {
-            row = row.subtitle(fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]));
-        }
-        let toolbar = div()
-            .flex_none()
-            .border_b_1()
-            .border_color(k.separator)
-            .child(row);
+        // The subtitle slot stays in every state, so the title never moves.
+        row = row.subtitle(match load {
+            PageLoad::Ready => fill(c::MEMBERS_COUNT, &[("n", &entries.len().to_string())]),
+            PageLoad::Loading => crate::copy::desk::DESK_SUBTITLE_SYNCING.to_string(),
+            PageLoad::Failed => crate::copy::desk::DESK_SUBTITLE_OFFLINE.to_string(),
+        });
+        // ToolbarRow draws the one 1 px line at y 52 itself (§2.2).
+        let toolbar = div().flex_none().child(row);
 
         let shown = |b: Bucket| match self.filter {
             Filter::All => true,
@@ -333,7 +333,7 @@ impl MembersPage {
         let mut list = div()
             .id("members-list")
             .flex_1()
-            .min_h(px(0.))
+            .min_h_0()
             .overflow_y_scroll()
             .pb(tsp::S12)
             .flex()
@@ -360,15 +360,14 @@ impl MembersPage {
                 Bucket::People => c::MEMBERS_SECTION_PEOPLE,
             };
             // Section style (§3): 11 pt semibold `secondary`, like a sidebar.
+            // GroupLabel (§2.3): 12 medium muted, h32.
             list = list.child(
                 div()
                     .flex_none()
-                    .h(px(28.))
-                    .mt(tsp::S6)
+                    .h(tsp::S32)
                     .px(rows::LEADING)
                     .flex()
-                    .items_end()
-                    .pb(tsp::S4)
+                    .items_center()
                     .n_section()
                     .text_color(k.secondary)
                     .child(label),
@@ -386,16 +385,20 @@ impl MembersPage {
                 ));
             }
         }
-        if load != PageLoad::Ready {
+        if load == PageLoad::Failed {
+            // The failure shows in the detail (it takes the content's
+            // place); nothing pulses here.
+            list = div().id("members-list").flex_1().min_h_0();
+        } else if load != PageLoad::Ready {
+            // The list's own shape (§2.14): unframed member rows.
             list = div()
                 .id("members-list")
                 .flex_1()
-                .min_h(px(0.))
-                .p(tsp::S8)
+                .min_h_0()
                 .child(page::skeleton_rows(
                     "members-sk",
-                    page::SkeletonKind::Row,
-                    6,
+                    page::SkeletonKind::MemberRow,
+                    8,
                     cx,
                 ));
         } else if !any {
@@ -423,6 +426,10 @@ impl MembersPage {
                 cx,
             ));
         }
+        if load == PageLoad::Failed {
+            // The failure takes the whole page (§2.15); only the toolbar row stays.
+            return toolbar.w_full().into_any_element();
+        }
         div()
             .flex_none()
             .w(LIST_WIDTH)
@@ -447,7 +454,6 @@ impl MembersPage {
         last: bool,
         cx: &App,
     ) -> AnyElement {
-        let k = native_colors(cx);
         let p = &self.services.provider;
         let m = &e.member;
         let is_selected = selected == Some(m.id.as_str());
@@ -455,12 +461,10 @@ impl MembersPage {
         // inverted row.
         let _ = (focused, active);
         let ink = RowInk::new(CompactRow::selection_ink(is_selected, false, false, cx), cx);
-        let on_accent = ink.fill == Some(k.accent);
         let mut parts: Vec<String> = m.role.clone().into_iter().collect();
         if me == Some(m.id.as_str()) {
             parts.push(c::MEMBERS_YOU_WORD.to_string());
         }
-        let _ = on_accent;
         // The state is a StatusBadge on the title line (§2.12), never
         // colored text.
         let mut badge: Option<AnyElement> = None;
@@ -508,7 +512,13 @@ impl MembersPage {
         }
         parts.retain(|p| !p.trim().is_empty());
         let mark = badge;
-        let second = rows::line(parts.join(" · ")).into_any_element();
+        let meta = parts.join(" · ");
+        let tip = if meta.is_empty() {
+            m.name.clone()
+        } else {
+            format!("{} · {meta}", m.name)
+        };
+        let second = rows::line(meta).into_any_element();
         let nav = self.services.nav.clone();
         let id = m.id.clone();
         mail_row(
@@ -523,6 +533,10 @@ impl MembersPage {
             ink,
             cx,
         )
+        // The full name and line, also when the row cuts them (§2.21).
+        .tooltip(move |window, cx| {
+            gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+        })
         .on_click(move |_, _, cx| {
             let id = id.clone();
             nav.update(cx, |nav, cx| nav.open_members(Some(id), cx))
@@ -700,7 +714,7 @@ impl MembersPage {
             .child(
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .flex()
                     .flex_col()
                     .gap(tsp::S4)
@@ -857,6 +871,8 @@ impl MembersPage {
             None,
             cx,
         )
+        // Cards side by side share one height (§2.4 grid).
+        .flex_1()
         .into_any_element()
     }
 
@@ -881,23 +897,21 @@ impl MembersPage {
                 ("pages", &e.extras.pages_this_week.to_string()),
             ],
         );
-        // No run reported a cost: `–`, never a wrong ¥0.
+        // 成本 and its weekly limit. The limit is in US cents
+        // (`weeklyBudgetCents`); a cost is shown in the currency it was
+        // reported in and never converted. Only a cost in US dollars is
+        // measured against the limit (`$132.00 / 上限 $300.00` with a
+        // Progress); a cost in another currency and the limit show as two
+        // separate values with no ratio bar. No run reported a cost: `–`,
+        // never a wrong $0.
         let currency = e.stats.cost_currency;
         let cost = e.stats.cost_cents_this_week;
-        // The limit is in US cents (`weeklyBudgetCents`); a cost in another currency is
-        // never measured against it.
         let budget = e.extras.budget_cents.filter(|b| *b > 0);
-        let pct = cost
-            .zip(budget)
-            .filter(|_| currency == Currency::Usd)
-            .map(|(c, b)| (c as f32 / b as f32).clamp(0., 1.));
-        let limit_note = match budget {
-            Some(b) => fill(c::MEMBERS_LIMIT, &[("v", &money(b, Currency::Usd))]),
-            None => c::MEMBERS_NO_LIMIT.to_string(),
-        };
         let cost_text = cost
             .map(|c| money(c, currency))
             .unwrap_or_else(|| c::MEMBERS_NO_COST.to_string());
+        let limit_text = budget.map(|b| money(b, Currency::Usd));
+        let same = currency == Currency::Usd;
         let strip = div()
             .flex()
             .gap(tsp::S16)
@@ -913,20 +927,55 @@ impl MembersPage {
                 outputs.to_string(),
                 Some(kinds.into()),
                 cx,
-            ))
-            .child(div().flex_none().w(px(1.)).bg(k.separator))
-            .child(page::stat(
-                c::MEMBERS_COST,
-                cost_text,
-                Some(limit_note.into()),
-                cx,
             ));
+        let mut money_rows = div().flex().flex_col();
+        let mut bar = None;
+        match (cost, limit_text) {
+            (Some(c), Some(limit)) if same => {
+                money_rows = money_rows.child(page::desc_row(
+                    c::MEMBERS_COST,
+                    fill(
+                        c::MEMBERS_COST_OF,
+                        &[("cost", &cost_text), ("limit", &limit)],
+                    ),
+                    cx,
+                ));
+                let b = budget.unwrap_or(1).max(1);
+                bar = Some(page::progress(
+                    "member-cost",
+                    (c as f32 / b as f32).clamp(0., 1.),
+                    cx,
+                ));
+            }
+            (_, Some(limit)) => {
+                money_rows = money_rows
+                    .child(page::desc_row(c::MEMBERS_COST, cost_text, cx))
+                    .child(page::desc_row(c::MEMBERS_PLAN_LIMIT, limit, cx));
+            }
+            (_, None) => {
+                money_rows = money_rows
+                    .child(page::desc_row(c::MEMBERS_COST, cost_text, cx))
+                    .child(page::desc_row(
+                        c::MEMBERS_PLAN_LIMIT,
+                        div().text_color(k.secondary).child(c::MEMBERS_NO_LIMIT),
+                        cx,
+                    ));
+            }
+        }
         let body = div()
             .flex()
             .flex_col()
             .gap(tsp::S16)
             .child(strip)
-            .children(pct.map(|p| page::progress("member-cost", p, cx)));
+            .child(div().h(px(1.)).bg(k.separator))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(tsp::S8)
+                    .child(money_rows)
+                    .children(bar),
+            );
         page::titled_card(
             "member-week",
             c::MEMBERS_THIS_WEEK,
@@ -936,6 +985,8 @@ impl MembersPage {
             None,
             cx,
         )
+        // Cards side by side share one height (§2.4 grid).
+        .flex_1()
         .into_any_element()
     }
 
@@ -1026,7 +1077,7 @@ impl MembersPage {
                         None => page::status_badge(Status::Done, c::MEMBERS_DELIVERED, cx),
                     };
                     let name = div()
-                        .min_w(px(0.))
+                        .min_w_0()
                         .flex()
                         .items_center()
                         .gap(tsp::S8)
@@ -1076,6 +1127,8 @@ impl MembersPage {
             None,
             cx,
         )
+        // Cards side by side share one height (§2.4 grid).
+        .flex_1()
         .into_any_element()
     }
 
@@ -1184,6 +1237,8 @@ impl MembersPage {
             None,
             cx,
         )
+        // Cards side by side share one height (§2.4 grid).
+        .flex_1()
         .into_any_element()
     }
 
@@ -1342,6 +1397,8 @@ impl MembersPage {
             None,
             cx,
         )
+        // Cards side by side share one height (§2.4 grid).
+        .flex_1()
         .into_any_element()
     }
 
@@ -1416,6 +1473,8 @@ impl MembersPage {
             None,
             cx,
         )
+        // Cards side by side share one height (§2.4 grid).
+        .flex_1()
         .into_any_element()
     }
 
@@ -1528,6 +1587,8 @@ impl MembersPage {
             None,
             cx,
         )
+        // Cards side by side share one height (§2.4 grid).
+        .flex_1()
         .into_any_element()
     }
 
@@ -1545,25 +1606,33 @@ impl MembersPage {
                 .children(b.map(|b| div().flex_1().min_w(CARD_MIN).flex().flex_col().child(b)))
         };
         let now = self.now_section(e, cx);
-        let week = e.member.is_bot().then(|| self.week_section(e, cx));
-        let problems = self.problems(e, cx);
-        let workplace = self.workplace(e, window, cx);
-        if self.approvals.is_none() && e.member.is_bot() {
-            self.load_approvals(cx);
-        }
-        let approvals = self.approvals(e, cx);
-        let tools = self.tools(e, cx);
         let deliveries = self.deliveries(e, cx);
         let plan = self.plan(e, cx);
         let decisions = self.decisions(e, cx);
-        div()
+        let body = div()
             .w_full()
             .flex()
             .flex_col()
             .gap(page::m::GUTTER)
             .child(self.identity(e, cx))
-            .child(div().h(px(1.)).bg(k.separator))
-            .child(pair(now, week))
+            .child(div().h(px(1.)).bg(k.separator));
+        // §2.18: a person shows the sections that fit a person; runs,
+        // approvals, tools and the computer belong to an AI member.
+        if !e.member.is_bot() {
+            return body
+                .child(pair(now, Some(plan)))
+                .child(deliveries)
+                .child(decisions);
+        }
+        let week = self.week_section(e, cx);
+        let problems = self.problems(e, cx);
+        let workplace = self.workplace(e, window, cx);
+        if self.approvals.is_none() {
+            self.load_approvals(cx);
+        }
+        let approvals = self.approvals(e, cx);
+        let tools = self.tools(e, cx);
+        body.child(pair(now, Some(week)))
             .child(deliveries)
             .child(pair(problems, Some(workplace)))
             .child(pair(approvals, Some(tools)))
@@ -1602,6 +1671,7 @@ impl MembersPage {
                 3,
                 cx,
             ))
+            .child(page::skeleton_cards(2, cx))
     }
 }
 
@@ -1632,24 +1702,19 @@ impl Render for MembersPage {
             div()
                 .id("member-detail")
                 .flex_1()
-                .min_h(px(0.))
+                .min_h_0()
                 .overflow_y_scroll()
                 .px(page::m::EDGE)
                 .pt(page::m::GUTTER)
                 .pb(page::m::GUTTER)
                 .child(body)
         };
-        let toolbar_band = |toolbar: AnyElement| {
-            div()
-                .flex_none()
-                .border_b_1()
-                .border_color(k.separator)
-                .child(toolbar)
-        };
+        // ToolbarRow draws the one 1 px line at y 52 itself (§2.2).
+        let toolbar_band = |toolbar: AnyElement| div().flex_none().child(toolbar);
         let detail = match (load, entry) {
             (PageLoad::Ready, None) => div()
                 .flex_1()
-                .min_w(px(0.))
+                .min_w_0()
                 .h_full()
                 .flex()
                 .flex_col()
@@ -1667,7 +1732,7 @@ impl Render for MembersPage {
                 let body = self.detail_body(e, window, cx);
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
@@ -1676,14 +1741,25 @@ impl Render for MembersPage {
                     .into_any_element()
             }
             (load, _) => {
-                let mut body = div().flex().flex_col().gap(page::m::GUTTER);
-                if load == PageLoad::Failed {
-                    body = body.child(page::load_failed("members", &self.services, cx));
-                }
-                body = body.child(self.detail_skeleton(cx));
+                // Failed: the failure takes the content's place (§2.15);
+                // loading: the detail's shapes.
+                let body = if load == PageLoad::Failed {
+                    div()
+                        .w_full()
+                        .min_h_full()
+                        .flex()
+                        .flex_col()
+                        .child(rows::failed_region("members", &self.services, cx))
+                } else {
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(page::m::GUTTER)
+                        .child(self.detail_skeleton(cx))
+                };
                 div()
                     .flex_1()
-                    .min_w(px(0.))
+                    .min_w_0()
                     .h_full()
                     .flex()
                     .flex_col()
@@ -1692,6 +1768,26 @@ impl Render for MembersPage {
                     .into_any_element()
             }
         };
+        if load == PageLoad::Failed {
+            return div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .bg(k.content)
+                .child(list)
+                .child(
+                    div()
+                        .flex_1()
+                        .min_h_0()
+                        .px(page::m::EDGE)
+                        .pt(page::m::GUTTER)
+                        .pb(page::m::GUTTER)
+                        .flex()
+                        .flex_col()
+                        .child(rows::failed_region("members", &self.services, cx)),
+                )
+                .into_any_element();
+        }
         div()
             .size_full()
             .flex()
@@ -1714,6 +1810,7 @@ impl Render for MembersPage {
                     .child(list),
             )
             .child(detail)
+            .into_any_element()
     }
 }
 

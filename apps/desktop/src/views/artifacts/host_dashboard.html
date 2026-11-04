@@ -1,34 +1,39 @@
 <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
 <style>
-:root{color-scheme:light dark;--ink:#111113;--ink2:#5B5B66;--ink3:#8A8A94;--line:#E6E6EA;--sunk:#F4F4F6;--bar:#4A4A52;--dim:#B4B4BC;--blue:#2F6FED;--card:#fff}
-@media (prefers-color-scheme:dark){:root{--ink:#F1F1F3;--ink2:#B4B4BC;--ink3:#7A7A84;--line:#2C2C32;--sunk:#1E1E23;--bar:#C9C9D1;--dim:#55555E;--blue:#6E9BFF;--card:#17171A}}
+:root{color-scheme:light dark;--ink:var(--tc-fg,#0A0A0A);--ink2:var(--tc-muted,#737373);--ink3:var(--tc-muted,#737373);--line:var(--tc-border,#E5E5E5);--sunk:var(--tc-fill,#F5F5F5);--bar:var(--tc-primary,#171717);--card:transparent}
+@media (prefers-color-scheme:dark){:root{--ink:var(--tc-fg,#FAFAFA);--ink2:var(--tc-muted,#A1A1A1);--ink3:var(--tc-muted,#A1A1A1);--line:var(--tc-border,#2E2E2E);--sunk:var(--tc-fill,#262626);--bar:var(--tc-primary,#E5E5E5)}}
 *{box-sizing:border-box}
-body{margin:0;padding:18px 20px;font:13px/1.5 -apple-system,"PingFang SC",sans-serif;color:var(--ink);background:var(--card)}
+body{margin:0;padding:16px;font:14px/22px -apple-system,"PingFang SC",sans-serif;color:var(--ink);background:var(--card)}
 header{display:flex;align-items:flex-start;justify-content:space-between}
 h2{margin:0;font-size:16px;font-weight:600}
 .sub{margin:2px 0 0;color:var(--ink3);font-size:12px}
-button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;height:30px;padding:0 12px;cursor:default}
-.seg{display:inline-flex;gap:2px;margin:14px 0 10px;padding:3px;background:var(--sunk);border-radius:9px}
+button{font:inherit;font-size:14px;color:inherit;background:var(--card);border:1px solid var(--line);border-radius:8px;height:28px;padding:0 12px;cursor:default}
+.seg{display:inline-flex;gap:2px;margin:16px 0 12px;padding:3px;background:var(--sunk);border-radius:8px}
 .seg button{border:0;height:26px;background:transparent;color:var(--ink2);padding:0 12px}
-.seg button.on{background:var(--card);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.seg button.on{background:var(--tc-bg,#fff);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .sum{display:flex;align-items:baseline;gap:8px;font-size:12px}
 .sum b{font-weight:600}.sum span{color:var(--ink3)}
-#state{margin-left:auto;color:var(--ink3)}#state.wait{color:var(--blue)}
+#state{margin-left:auto;color:var(--ink3)}
 .bars{display:flex;align-items:flex-end;justify-content:space-around;height:118px;margin-top:6px;border-bottom:1px solid var(--line)}
 .col{display:flex;flex-direction:column;align-items:center;justify-content:flex-end;width:20%;height:100%}
-.col i{display:block;width:38px;background:var(--bar);border-radius:3px 3px 0 0;transition:height .2s}
+.col i{display:block;width:38px;background:var(--bar);border-radius:4px 4px 0 0;transition:height .2s}
 .col em{font-style:normal;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink2);margin-bottom:4px}
-.dim .col i{background:var(--dim)}
-.wk{display:flex;justify-content:space-around;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--ink3);margin-top:4px}
-#qa{display:none;margin:2px 0 12px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--sunk)}
-#qa .q{margin-left:auto;width:fit-content;max-width:80%;padding:6px 10px;border-radius:9px;background:var(--line)}
-#qa .a{margin-top:8px;color:var(--ink2)}
+.dim .col i{background:color-mix(in srgb,var(--bar) 20%,transparent)}
+.wk{display:flex;justify-content:space-around;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--ink3);margin-top:4px}
+#qa{display:none;min-height:120px;margin:0 0 12px;padding:12px 16px;border:1px solid var(--line);border-radius:10px}
+#qa .row{display:flex;gap:12px;align-items:baseline}
+#qa .row+.row{margin-top:12px}
+#qa .who{flex:none;width:48px;font-size:12px;color:var(--ink3)}
+#qa .q,#qa .a{flex:1;min-width:0}
+#qa .a.wait{height:14px;margin-top:4px;border-radius:8px;background:var(--sunk);animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.5}}
+@media (prefers-reduced-motion:reduce){#qa .a.wait{animation:none}}
 .asking .sum,.asking .bars,.asking .wk{display:none}
 </style></head><body>
 <header><div><h2>10 月新增群 · 按周</h2><p class="sub">夹夹 · Ledger · 截至 10-31<!--v--></p></div>
 <button type="button" id="ask">数据有问题</button></header>
 <div class="seg" id="seg"><button class="on" data-ch="全部">全部</button><button data-ch="小红书">小红书</button><button data-ch="群内邀请">群内邀请</button><button data-ch="B 站">B 站</button><button data-ch="抖音">抖音</button><!--ch--></div>
-<div id="qa"><div class="q" id="q"></div><div class="a" id="a"></div></div>
+<div id="qa"><div class="row"><span class="who">你问</span><div class="q" id="q"></div></div><div class="row"><span class="who">Ledger</span><div class="a" id="a"></div></div></div>
 <div class="sum"><b id="ttl">全部 · 每周新增群</b><span id="tot"></span><span id="state"></span></div>
 <div class="bars" id="bars"></div><div class="wk" id="wk"></div>
 <script>
@@ -60,7 +65,7 @@ button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--
     [].forEach.call(el('seg').children, function(x){x.className = x === b ? 'on' : ''});
     el('bars').className = 'bars dim';
     el('state').className = 'wait';
-    el('state').textContent = '● 等 Ledger 推新数据';
+    el('state').textContent = '等 Ledger 推新数据';
     tc.emit('filter', {channel: b.dataset.ch}).catch(function(e){document.body.dataset.emit = e.code});
   });
   el('ask').addEventListener('click', function(){
@@ -69,11 +74,14 @@ button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--
     document.body.classList.add('asking');
     el('qa').style.display = 'block';
     el('q').textContent = q;
-    el('a').textContent = 'Ledger 在查建群记录…';
+    // While Ledger checks: a skeleton line in the answer's place (§2.14).
+    el('a').textContent = '';
+    el('a').className = 'a wait';
     tc.ask('question', {text: q, channel: 'B 站', week: '10-06'}).then(function(r){
+      el('a').className = 'a';
       el('a').textContent = (r && r.text) || '';
       document.body.dataset.ask = 'answered';
-    }, function(e){ el('a').textContent = ''; document.body.dataset.ask = e.code; });
+    }, function(e){ el('a').className = 'a'; el('a').textContent = ''; document.body.dataset.ask = e.code; });
   });
   // A page may not ask on its own: this one is refused (not_allowed).
   tc.ask('question', {text: 'auto'}).catch(function(e){document.body.dataset.scripted = e.code});

@@ -68,4 +68,19 @@ crate::copy! {
     ARTIFACT_RESPONSES_FAILED = "没能读到页面里的回应",
     ARTIFACT_RESPONSES_RETRY = "重试",
     // --- end v13/wire ---
+    // --- v14/t3-pages: the 产出 inspector (COMPLETENESS.md §2.5) ---
+    ARTIFACT_INFO = "产出信息",
+    ARTIFACT_INFO_LINE = "来龙去脉、版本和页面能做的",
+    ARTIFACT_CLOSE_INFO = "关闭产出信息",
+    ARTIFACT_NO_TITLE = "（无标题）",
+    ARTIFACT_NOBODY = "没有记录",
+    ARTIFACT_PAGE_CAN = "这一页",
+    ARTIFACT_DECISIONS_EMPTY = "没有用到群里的决定",
+    ARTIFACT_CITED_EMPTY = "还没有话题引用它",
+    ARTIFACT_RESPONSES_NONE = "这一页不收回应",
+    ARTIFACT_OLD_VERSION_TITLE = "你在看 v{v}，不是最新版",
+    ARTIFACT_IN_PANE = "在右侧打开",
+    ARTIFACT_STATUS_DONE = "完成",
+    ARTIFACT_STATUS_ACTIVE = "在做",
+    // --- end v14/t3-pages ---
 }

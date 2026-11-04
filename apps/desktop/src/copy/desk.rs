@@ -94,4 +94,21 @@ crate::copy! {
     DESK_WHERE_EMPTY = "现在没有电脑在干活",
     DESK_MACHINE_USERS = "{names} 在用",
     // --- end v13/ux-pages ---
+    // --- v14/t3-pages ---
+    DESK_STATUS_DONE = "完成",
+    DESK_JUST_HANDLED = "刚处理",
+    DESK_SUBTITLE_SYNCING = "正在同步…",
+    DESK_SUBTITLE_OFFLINE = "未连接",
+    DESK_RAIL_LINE_WEEK = "这周的进度、排队的事和在用的电脑",
+    DESK_WEEK = "这周",
+    DESK_WEEK_DONE = "完成的话题",
+    DESK_WEEK_OUTPUTS = "产出",
+    DESK_WEEK_COST = "花费",
+    DESK_WEEK_NO_COST = "还没有花费",
+    DESK_WEEK_COUNT = "{n} 个",
+    DESK_RECENT_OUTPUTS = "最近的产出",
+    DESK_RECENT_OUTPUTS_EMPTY = "这周还没有产出",
+    DESK_OUTPUT_META = "v{v} · {name}",
+    DESK_RAIL_OFFLINE = "连上后显示",
+    // --- end v14/t3-pages ---
 }
