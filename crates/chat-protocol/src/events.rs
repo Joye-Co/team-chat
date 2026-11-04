@@ -9,8 +9,7 @@ use crate::bots::RunUpdatedData;
 use crate::card::Card;
 use crate::card2::{
     CardAnsweredData, CardEventTransient, CardRetractedData, CardState, CardV2, Cause,
-    DecisionRecordedData,
-    InteractionResolvedTransient, lenient_card_v2,
+    DecisionRecordedData, InteractionResolvedTransient, lenient_card_v2,
 };
 use crate::entities::{Message, Millis, Seq, Topic, TopicStatus};
 use crate::files::{

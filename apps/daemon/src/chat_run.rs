@@ -775,12 +775,16 @@ pub fn request(args: &[String]) -> Result<(&'static str, Value), String> {
         ["artifact", "create"] => (
             crate::chat_run_files::ARTIFACT_CREATE,
             &args[2..],
-            &["title", "dir", "file", "entry", "kind", "note", "events", "media", "data"],
+            &[
+                "title", "dir", "file", "entry", "kind", "note", "events", "media", "data",
+            ],
         ),
         ["artifact", "version"] => (
             crate::chat_run_files::ARTIFACT_VERSION,
             &args[2..],
-            &["artifact", "dir", "file", "entry", "title", "note", "events", "media", "data"],
+            &[
+                "artifact", "dir", "file", "entry", "title", "note", "events", "media", "data",
+            ],
         ),
         _ => return Err("unknown command".into()),
     };

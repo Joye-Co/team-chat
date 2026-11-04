@@ -48,16 +48,26 @@ fn err(code: &str, reason: Option<&str>, message: impl Into<String>) -> Value {
 
 /// A path inside the run's working folder, resolved (symbolic links included).
 fn inside(root: &Path, path: &str) -> Result<PathBuf, Value> {
-    let root = std::fs::canonicalize(root)
-        .map_err(|e| err("unavailable", None, format!("the working folder is gone: {e}")))?;
+    let root = std::fs::canonicalize(root).map_err(|e| {
+        err(
+            "unavailable",
+            None,
+            format!("the working folder is gone: {e}"),
+        )
+    })?;
     let p = Path::new(path);
     let p = if p.is_absolute() {
         p.to_path_buf()
     } else {
         root.join(p)
     };
-    let real = std::fs::canonicalize(&p)
-        .map_err(|e| err("not_found", None, format!("cannot read {}: {e}", p.display())))?;
+    let real = std::fs::canonicalize(&p).map_err(|e| {
+        err(
+            "not_found",
+            None,
+            format!("cannot read {}: {e}", p.display()),
+        )
+    })?;
     if !real.starts_with(&root) {
         return Err(err(
             "forbidden",
@@ -74,7 +84,11 @@ fn inside(root: &Path, path: &str) -> Result<PathBuf, Value> {
 
 /// The type of a file from its name; the server guesses again for `application/octet-stream`.
 pub fn mime_of(name: &str) -> &'static str {
-    let ext = name.rsplit('.').next().unwrap_or_default().to_ascii_lowercase();
+    let ext = name
+        .rsplit('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase();
     match ext.as_str() {
         "html" | "htm" => "text/html",
         "css" => "text/css",
@@ -145,10 +159,19 @@ async fn answer(res: Result<reqwest::Response, reqwest::Error>) -> Value {
 }
 
 /// Uploads one file of the working folder; returns the server's `FileMeta` (or the error answer).
-async fn upload(local: &Local, path: &Path, name: &str, mime: Option<&str>) -> Result<Value, Value> {
+async fn upload(
+    local: &Local,
+    path: &Path,
+    name: &str,
+    mime: Option<&str>,
+) -> Result<Value, Value> {
     let meta = std::fs::metadata(path).map_err(|e| err("not_found", None, e.to_string()))?;
     if !meta.is_file() {
-        return Err(err("invalid", None, format!("{} is not a file", path.display())));
+        return Err(err(
+            "invalid",
+            None,
+            format!("{} is not a file", path.display()),
+        ));
     }
     if meta.len() > MAX_FILE_BYTES {
         return Err(err("too_large", None, format!("{name} is over 100 MB")));
@@ -203,7 +226,9 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(),
         if name.starts_with('.') {
             continue;
         }
-        let ft = e.file_type().map_err(|e| err("failed", None, e.to_string()))?;
+        let ft = e
+            .file_type()
+            .map_err(|e| err("failed", None, e.to_string()))?;
         if ft.is_dir() {
             walk(&e.path(), root, out)?;
         } else if ft.is_file() {
@@ -219,7 +244,11 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) -> Result<(),
                 .unwrap_or(name);
             out.push((rel, e.path()));
             if out.len() > MAX_FILES {
-                return Err(err("too_large", None, format!("more than {MAX_FILES} files")));
+                return Err(err(
+                    "too_large",
+                    None,
+                    format!("more than {MAX_FILES} files"),
+                ));
             }
         }
     }
@@ -267,7 +296,9 @@ async fn version_files(local: &Local, body: &Value) -> Result<(Vec<Value>, Optio
 async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Value, Value> {
     let (files, entry) = version_files(local, body).await?;
     let mut out = serde_json::Map::new();
-    for k in ["title", "kind", "entry", "files", "note", "events", "media", "data"] {
+    for k in [
+        "title", "kind", "entry", "files", "note", "events", "media", "data",
+    ] {
         if !body[k].is_null() {
             out.insert(k.to_string(), body[k].clone());
         }
@@ -290,7 +321,11 @@ async fn artifact_body(local: &Local, body: &Value, create: bool) -> Result<Valu
         return Err(err("invalid", None, "give --dir or --file"));
     }
     if !out.contains_key("entry") {
-        return Err(err("invalid", None, "--entry is required for a folder without index.html"));
+        return Err(err(
+            "invalid",
+            None,
+            "--entry is required for a folder without index.html",
+        ));
     }
     Ok(Value::Object(out))
 }
@@ -307,11 +342,14 @@ pub async fn handle(op: &str, body: &Value, local: &Local) -> Value {
                 Ok(p) => p,
                 Err(e) => return e,
             };
-            let name = body["name"].as_str().map(str::to_string).unwrap_or_else(|| {
-                real.file_name()
-                    .map(|n| n.to_string_lossy().to_string())
-                    .unwrap_or_else(|| "file".into())
-            });
+            let name = body["name"]
+                .as_str()
+                .map(str::to_string)
+                .unwrap_or_else(|| {
+                    real.file_name()
+                        .map(|n| n.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "file".into())
+                });
             match upload(local, &real, &name, body["mime"].as_str()).await {
                 Ok(meta) => json!({ "ok": true, "result": { "file": meta } }),
                 Err(e) => e,
@@ -322,9 +360,10 @@ pub async fn handle(op: &str, body: &Value, local: &Local) -> Value {
             let path = if create {
                 format!("/v1/machine/runs/{run}/artifacts")
             } else {
-                let Some(id) = body["artifactId"].as_str().filter(|s| {
-                    !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric())
-                }) else {
+                let Some(id) = body["artifactId"]
+                    .as_str()
+                    .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric()))
+                else {
                     return err("invalid", None, "artifactId is required");
                 };
                 format!("/v1/machine/runs/{run}/artifacts/{id}/versions")

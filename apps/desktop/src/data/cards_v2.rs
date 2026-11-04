@@ -11,10 +11,9 @@ use std::sync::Arc;
 
 pub use chat_core::proto::{
     ASK_FROM_OWNERS, ASK_FROM_REQUESTER, AnswerEdits, AnswerInputs, AskIrreversible,
-    CardActionKind, CardIntent, CardWorkStatus, CardV2, CardV2Action, CardV2ActionStyle, CardV2Block,
-    ChartKind,
-    ChartSeries, DecisionOption, EvidenceState, InputKind, InputOption, MetricBetter, RefTarget,
-    RunPlanItem, RunPlanState,
+    CardActionKind, CardIntent, CardV2, CardV2Action, CardV2ActionStyle, CardV2Block,
+    CardWorkStatus, ChartKind, ChartSeries, DecisionOption, EvidenceState, InputKind, InputOption,
+    MetricBetter, RefTarget, RunPlanItem, RunPlanState,
 };
 // --- inc-cards21: Card v2.1 (containers, choice variants, the interaction loop) ---
 #[allow(unused_imports)]

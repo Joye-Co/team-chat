@@ -1155,7 +1155,8 @@ async fn stored_answers_are_queued_while_offline() {
         { "id": "q1", "type": "input", "kind": "text", "label": "一" },
         { "id": "q2", "type": "input", "kind": "text", "label": "二" }
     ]);
-    let compare = json!([{ "id": "cmp", "type": "compare", "options": opts, "fallbackText": "A / B" }]);
+    let compare =
+        json!([{ "id": "cmp", "type": "compare", "options": opts, "fallbackText": "A / B" }]);
     let poll = json!([{ "id": "vote", "type": "poll", "label": "投", "voters": "group", "closesAt": 9_999, "options": opts, "fallbackText": "投" }]);
     let confirm = json!([{ "id": "go", "type": "confirm", "label": "发布？", "yes": "发", "no": "不发", "fallbackText": "发布？" }]);
     client

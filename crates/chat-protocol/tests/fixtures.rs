@@ -202,7 +202,10 @@ const KINDS: &[(&str, RoundTrip)] = &[
         "PutArtifactMediaRequest",
         validated::<PutArtifactMediaRequest>,
     ),
-    ("PutArtifactMediaResponse", plain::<PutArtifactMediaResponse>),
+    (
+        "PutArtifactMediaResponse",
+        plain::<PutArtifactMediaResponse>,
+    ),
 ];
 
 fn fixtures_root() -> PathBuf {

@@ -527,7 +527,10 @@ impl CoreProvider {
                     this.emit(change);
                     let _ = tx.send(Ok(()));
                 }
-                Err(chat_core::ClientError::Api(chat_core::ApiError::Server { status: 404, .. })) => {
+                Err(chat_core::ClientError::Api(chat_core::ApiError::Server {
+                    status: 404,
+                    ..
+                })) => {
                     // An older server: ask in the 话题 instead.
                     let name = this.member(&member).map(|m| m.name).unwrap_or_default();
                     this.send(SendRequest {

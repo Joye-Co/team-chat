@@ -121,11 +121,17 @@ async fn handle_put(mut s: TcpStream, puts: Arc<Mutex<Vec<Put>>>) {
     });
     // chat-run files and 产出 (machine routes) answer JSON; a session upload answers nothing.
     let n = puts.lock().unwrap().len();
-    let last = puts.lock().unwrap().last().map(|p| p.path.clone()).unwrap_or_default();
+    let last = puts
+        .lock()
+        .unwrap()
+        .last()
+        .map(|p| p.path.clone())
+        .unwrap_or_default();
     let body = if last.ends_with("/files") {
         format!(r#"{{"id":"F{n}","status":"ready"}}"#)
     } else if last.contains("/artifacts") {
-        r#"{"artifact":{"id":"A1"},"version":{"artifactId":"A1","version":1,"runId":"a1"}}"#.to_string()
+        r#"{"artifact":{"id":"A1"},"version":{"artifactId":"A1","version":1,"runId":"a1"}}"#
+            .to_string()
     } else {
         String::new()
     };
@@ -1225,7 +1231,10 @@ async fn chat_run_artifact_create_uploads_the_folder_and_makes_the_artifact() {
     let out: serde_json::Value = serde_json::from_str(report["out"].as_str().unwrap()).unwrap();
     assert_eq!(out["artifact"]["id"], "A1");
     let puts = m.puts.lock().unwrap().clone();
-    let files: Vec<&Put> = puts.iter().filter(|p| p.path == "/v1/machine/runs/a1/files").collect();
+    let files: Vec<&Put> = puts
+        .iter()
+        .filter(|p| p.path == "/v1/machine/runs/a1/files")
+        .collect();
     assert_eq!(files.len(), 2);
     for p in &files {
         assert_eq!(p.headers["authorization"], format!("Bearer {TOKEN}"));
@@ -1236,9 +1245,15 @@ async fn chat_run_artifact_create_uploads_the_folder_and_makes_the_artifact() {
         .unwrap();
     assert_eq!(page.headers["content-type"], "text/html");
     let text = String::from_utf8_lossy(&page.body);
-    assert!(!text.contains("tm_fakefake") && text.contains("<redacted>"), "{text}");
+    assert!(
+        !text.contains("tm_fakefake") && text.contains("<redacted>"),
+        "{text}"
+    );
     use sha2::Digest;
-    let sha: String = sha2::Sha256::digest(&page.body).iter().map(|b| format!("{b:02x}")).collect();
+    let sha: String = sha2::Sha256::digest(&page.body)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
     assert_eq!(page.headers["x-file-sha256"], sha);
     let made = puts
         .iter()
@@ -1248,9 +1263,19 @@ async fn chat_run_artifact_create_uploads_the_folder_and_makes_the_artifact() {
     assert_eq!(body["title"], "看板");
     assert_eq!(body["kind"], "html");
     assert_eq!(body["entry"], "index.html");
-    let paths: Vec<&str> = body["files"].as_array().unwrap().iter().map(|f| f["path"].as_str().unwrap()).collect();
+    let paths: Vec<&str> = body["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|f| f["path"].as_str().unwrap())
+        .collect();
     assert_eq!(paths, ["app.js", "index.html"]);
-    assert!(body["files"][0]["fileId"].as_str().unwrap().starts_with('F'));
+    assert!(
+        body["files"][0]["fileId"]
+            .as_str()
+            .unwrap()
+            .starts_with('F')
+    );
     stop_tx.send(()).unwrap();
     tokio::time::timeout(Duration::from_secs(20), daemon)
         .await

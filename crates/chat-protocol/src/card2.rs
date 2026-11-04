@@ -1842,7 +1842,8 @@ impl CardV2Block {
     /// 2.1 leaves, and the 2.1 containers that ask (compare, questionnaire).
     fn needs_fallback(&self) -> bool {
         self.is_21()
-            && (!self.is_container() || matches!(self, Self::Compare { .. } | Self::Questionnaire { .. }))
+            && (!self.is_container()
+                || matches!(self, Self::Compare { .. } | Self::Questionnaire { .. }))
     }
 }
 
@@ -2036,7 +2037,8 @@ impl Serialize for CardV2 {
         if self.unknown.is_empty() {
             return CardV2::serialize(self, s);
         }
-        let mut v = CardV2::serialize(self, serde_json::value::Serializer).map_err(serde::ser::Error::custom)?;
+        let mut v = CardV2::serialize(self, serde_json::value::Serializer)
+            .map_err(serde::ser::Error::custom)?;
         if let Some(blocks) = v.get_mut("blocks").and_then(Value::as_array_mut) {
             for (i, u) in &self.unknown {
                 if let Some(slot) = blocks.get_mut(*i) {

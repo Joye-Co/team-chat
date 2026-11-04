@@ -10,8 +10,8 @@
 use crate::data::{
     CardPressError, Millis,
     cards_v2::{
-        CardIntent, CardWorkStatus, CardV2, CardV2Answer, CardV2Block, CardV2Pending,
-        CardV2SendPhase, EvidenceState, RunPlanState,
+        CardIntent, CardV2, CardV2Answer, CardV2Block, CardV2Pending, CardV2SendPhase,
+        CardWorkStatus, EvidenceState, RunPlanState,
     },
 };
 

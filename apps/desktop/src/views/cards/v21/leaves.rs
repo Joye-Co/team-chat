@@ -2418,26 +2418,31 @@ pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
                 .child(ui::icon(Lucide::Info, px(14.), k.ink_3)),
         )
         .child(
-            div().flex().flex_col().gap(space::S4).min_w(px(0.)).child(
-                div()
-                    .flex()
-                    .items_baseline()
-                    .gap(space::S8)
-                    .child(
-                        b20::small(div())
-                            .font_weight(theme::MEDIUM_WEIGHT)
-                            .text_color(k.ink)
-                            .child(c::UNKNOWN_BLOCK),
-                    )
-                    .child(meta(div()).mono().text_color(k.ink_3).child(format!(
-                        "{} · {}",
-                        ctx.card.catalog(),
-                        c::UNKNOWN_KIND
-                    ))),
-            )
-            .when_some(fallback, |el, t| {
-                el.child(b20::small(div()).text_color(k.ink_2).child(t))
-            }),
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S4)
+                .min_w(px(0.))
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap(space::S8)
+                        .child(
+                            b20::small(div())
+                                .font_weight(theme::MEDIUM_WEIGHT)
+                                .text_color(k.ink)
+                                .child(c::UNKNOWN_BLOCK),
+                        )
+                        .child(meta(div()).mono().text_color(k.ink_3).child(format!(
+                            "{} · {}",
+                            ctx.card.catalog(),
+                            c::UNKNOWN_KIND
+                        ))),
+                )
+                .when_some(fallback, |el, t| {
+                    el.child(b20::small(div()).text_color(k.ink_2).child(t))
+                }),
         )
         .into_any_element()
 }

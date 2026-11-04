@@ -72,15 +72,12 @@ pub fn of_card(card: &CardV2, links: &[TopicLink]) -> Vec<Proof> {
             }),
             // 1.1: the counts the server parsed from the run's output; older cards only
             // have the label.
-            CardV2Block::Evidence {
-                tests: Some(t), ..
-            } => out.push(Proof::Tests {
+            CardV2Block::Evidence { tests: Some(t), .. } => out.push(Proof::Tests {
                 passed: t.passed.min(u32::MAX as u64) as u32,
                 failed: t.failed.min(u32::MAX as u64) as u32,
             }),
             CardV2Block::Evidence {
-                recording: Some(r),
-                ..
+                recording: Some(r), ..
             } => out.push(Proof::Recording {
                 duration_ms: r.duration_ms,
             }),
@@ -232,7 +229,9 @@ mod tests {
                     passed: 12,
                     failed: 1
                 },
-                Proof::Recording { duration_ms: 42_000 },
+                Proof::Recording {
+                    duration_ms: 42_000
+                },
             ]
         );
     }

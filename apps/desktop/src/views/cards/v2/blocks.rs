@@ -2740,7 +2740,10 @@ mod tests {
         let mut it = RunPlanItem::new("读代码", RunPlanState::Current);
         assert_eq!(plan_time(&it, 0), None);
         it.started_at = Some(1_000);
-        assert_eq!(plan_time(&it, 1_000 + 5 * 60_000).as_deref(), Some("已 5 分钟"));
+        assert_eq!(
+            plan_time(&it, 1_000 + 5 * 60_000).as_deref(),
+            Some("已 5 分钟")
+        );
         it.estimate_ms = Some(20 * 60_000);
         assert_eq!(
             plan_time(&it, 1_000 + 5 * 60_000).as_deref(),
