@@ -296,6 +296,10 @@ export interface GatewayContext {
   /** Sends a frame to every ready socket of this member. */
   broadcast(frame: unknown): void;
   online(): boolean;
+  /** The member this gateway belongs to (null before its first socket or RPC binds it). */
+  memberId: string | null;
+  /** Wakes the gateway's alarm handlers (`registerGatewayAlarm`) at `at` or earlier. */
+  wakeAt(at: number): void;
 }
 export type GatewayRpcHandler = (gw: GatewayContext, args: unknown) => Promise<unknown> | unknown;
 export const gatewayRpcHandlers = new Map<string, GatewayRpcHandler>();
@@ -306,6 +310,24 @@ export function registerGatewayRpc(name: string, h: GatewayRpcHandler): void {
 export const gatewayMigrations: MigrationStep[] = [];
 export function registerGatewayMigration(step: MigrationStep): void {
   gatewayMigrations.push(step);
+}
+
+/**
+ * Changes a frame on its way to this member's sockets (`deliver` from rooms and the Worker), for
+ * example the `notify` field of an event under the member's settings. Synchronous; return the
+ * frame (changed or not). Errors are logged and the frame goes out unchanged.
+ */
+export type GatewayFrameFilter = (gw: GatewayContext, frame: Record<string, unknown>) => Record<string, unknown>;
+export const gatewayFrameFilters: GatewayFrameFilter[] = [];
+export function registerGatewayFrameFilter(f: GatewayFrameFilter): void {
+  gatewayFrameFilters.push(f);
+}
+
+/** Runs when the gateway's alarm fires (set with `GatewayContext.wakeAt`). Errors are logged. */
+export type GatewayAlarmHandler = (gw: GatewayContext) => Promise<void> | void;
+export const gatewayAlarmHandlers: GatewayAlarmHandler[] = [];
+export function registerGatewayAlarm(h: GatewayAlarmHandler): void {
+  gatewayAlarmHandlers.push(h);
 }
 
 // ---------------------------------------------------------------------------

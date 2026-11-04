@@ -1291,3 +1291,96 @@ of `flowchart graph sequenceDiagram stateDiagram stateDiagram-v2 classDiagram er
 timeline`; no front matter and none of `%%{ click href callback call javascript: <script
 <iframe <foreignObject` (any case). The derived v1 card shows the source as a `mermaid` code
 block.
+
+# Settings
+
+Additive, as in 1.1. Module: `settings.ts` / `settings.rs`; server feature `server/src/settings/`.
+The settings window (设置: panes 账号, 通知, 成员) reads and writes these; clients keep only
+sound, badge and window choices locally. Per-group levels (按群设置) stay
+`PATCH /v1/groups/:id/prefs` (see Notifications).
+
+## Notification settings
+
+```ts
+ClockTime = "HH:MM"                     // 24 h, in the member's timeZone
+NotifyEvent = "waiting" | "mention" | "result" | "blocked"
+  // 需要我拍板的事, 有人 @我, 我交代的事做完了, 成员卡住或出错; open: Rust reads unknown as Unknown
+NotifySettings = {
+  events: Record<NotifyEvent, boolean>  // 提醒我; default all true
+  digestAt: ClockTime | null            // 每日摘要; default null (off)
+  quietHours: { enabled, start: ClockTime, end: ClockTime }
+                                        // 勿扰; default off, 22:00–08:00
+  timeZone: string                      // IANA name, default "Asia/Shanghai"
+  updatedAt: number                     // 0 = never changed
+}
+UpdateNotifySettingsRequest = { events?: Partial<…>, digestAt?: ClockTime | null,
+                                quietHours?: Partial<…>, timeZone? }
+{ t: "event", event, notify?, notifyEvent?: NotifyEvent }
+{ type: "digest", at, since, counts: Record<NotifyEvent, number>,
+  items: { groupId, topicId, event: NotifyEvent }[] /* <= 20, newest first */ }   // transient
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/me/notify-settings` | member, own | | `NotifySettings` |
+| `PATCH /v1/me/notify-settings` | member, own | `UpdateNotifySettingsRequest` | `NotifySettings`; an unknown `timeZone` is `invalid`; audited as `settings.notify` (names of the changed fields only) |
+
+Rules:
+
+- The settings live in the member's gateway, which delivers every event frame to the member
+  and applies them there, for every connection (old clients too). The room's decision of
+  "Notifications" stays the first step and its `notify` values do not change; the room adds
+  `notifyEvent` for `mention`, `waiting` and `result`, and one new case with reason `message`
+  (so 1.0.x and 1.1 clients show a plain notification): `blocked` when a topic I follow gets
+  status `blocked` (not muted, level not `none`, not my own change).
+- The gateway removes `notify` and `notifyEvent` when the event's switch is off and inside quiet
+  hours. A `notify` without `notifyEvent` follows only quiet hours. Quiet hours that cross
+  midnight work; equal start and end mean none. The event itself is always delivered.
+- Digest: with `digestAt` set, the gateway logs each switched-on `notifyEvent` (also those quiet
+  hours held back) and at `digestAt` local time sends one `digest` transient to the
+  connections whose hello has feature `settings/1`. When no connection is open, nothing is sent
+  and the next digest covers the time since the last one sent. The log keeps 7 days.
+
+## Approval rules for AI members
+
+```ts
+ApprovalActions = { mergeMain, deployProd, prodConfig, deleteData, externalPublish: boolean }
+  // 合并到 main, 发布到生产, 改生产环境配置, 删除数据或文件, 对外发布（社媒、邮件）; default all true
+ApprovalPolicy = { askBefore: ApprovalActions,
+                   maxSpendCny: number | null,   // 单次花费超过, whole yuan 1..1000000; null = 不限; default 50
+                   approver: "owners" | "requester", // who approves; default "requester"; open: Rust reads unknown as Unknown
+                   updatedAt: number }           // 0 = never changed
+UpdateApprovalPolicyRequest = { askBefore?: Partial<ApprovalActions>, maxSpendCny?: number | null, approver? }
+```
+
+| Method and path | Who | Body | Response |
+| --- | --- | --- | --- |
+| `GET /v1/settings/approvals` | member | | `ApprovalPolicy` (the team's rules, 默认规则) |
+| `PATCH /v1/settings/approvals` | owner | `UpdateApprovalPolicyRequest` | `ApprovalPolicy`; audited as `settings.approvals` |
+
+Rules:
+
+- D1 `approval_policies` (migration 0007) holds one row, scope `*`. Other scopes are reserved.
+- BotDesk honors it for every AI member: a runner run's prompt gets one "Team rule" paragraph
+  that lists the checked actions and the spend limit and tells the CLI to ask in the topic and
+  wait. With `approver: "owners"`, only owners answer the run's approvals (card or 同意/拒绝),
+  and the approval card mentions and waits on the active human owners in the group instead of
+  the requester. With `"requester"` the released rule stays: the requester or an owner.
+- The server cannot tell which action an approval is for, so `approver` is one value for all
+  actions.
+
+## Devices
+
+```ts
+Device = { id /* token record id, never the token */, name /* deviceName at sign in, <= 128 */,
+           createdAt, lastUsedAt: number | null, current: boolean }
+DevicesResponse = { devices: Device[] }   // newest use first, at most 100
+```
+
+| Method and path | Who | Response |
+| --- | --- | --- |
+| `GET /v1/me/devices` | member | `DevicesResponse`: my live tokens; `current` = this request's token |
+| `DELETE /v1/me/devices/:id` | member, own tokens only | `{ revoked }`; revokes the token and closes its sockets (audited as `token.revoke`); another member's, a revoked or an unknown id is `not_found` |
+
+`lastUsedAt` is updated at most once a minute per token. The name is what the client sent at
+sign in; clients pick the device symbol from it.

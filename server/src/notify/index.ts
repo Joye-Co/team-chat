@@ -29,7 +29,7 @@ import {
   setPrefs,
   topicState,
 } from "../core/topicstate";
-import { NOTIFY_EVENT_TYPES, decideNotify, eventTopicId } from "./rules";
+import { NOTIFY_EVENT_TYPES, decideNotifyEvent, eventTopicId } from "./rules";
 import "./members";
 import "./messages";
 
@@ -41,7 +41,7 @@ registerEventDecorator((event, memberId, c) => {
   if (event.actorId === memberId || !NOTIFY_EVENT_TYPES.has(event.type)) return undefined;
   const prefs = getPrefs(c.sql, memberId, c.groupKind);
   const topicId = eventTopicId(event as Event);
-  const reason = decideNotify({
+  return decideNotifyEvent({
     event: event as Event,
     memberId,
     muted: prefs.muted,
@@ -49,7 +49,6 @@ registerEventDecorator((event, memberId, c) => {
     following: topicId ? isFollowing(c.sql, memberId, topicId) : false,
     waitingAdded: (c.hints?.waitingAdded as string[] | undefined) ?? [],
   });
-  return reason ? { notify: reason } : undefined;
 });
 
 // ---------------------------------------------------------------------------

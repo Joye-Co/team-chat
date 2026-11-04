@@ -60,7 +60,11 @@ check!(
     PartRef,
     BlockRefInput,
     BlockRef,
-    PutArtifactDataRequest
+    PutArtifactDataRequest,
+    NotifySettings,
+    UpdateNotifySettingsRequest,
+    ApprovalPolicy,
+    UpdateApprovalPolicyRequest
 );
 
 fn validated<T: DeserializeOwned + Serialize + Check>(v: &Value) -> Result<Value, String> {
@@ -180,6 +184,19 @@ const KINDS: &[(&str, RoundTrip)] = &[
         "PutArtifactDataRequest",
         validated::<PutArtifactDataRequest>,
     ),
+    // Settings
+    ("NotifySettings", validated::<NotifySettings>),
+    (
+        "UpdateNotifySettingsRequest",
+        validated::<UpdateNotifySettingsRequest>,
+    ),
+    ("ApprovalPolicy", validated::<ApprovalPolicy>),
+    (
+        "UpdateApprovalPolicyRequest",
+        validated::<UpdateApprovalPolicyRequest>,
+    ),
+    ("Device", plain::<Device>),
+    ("DevicesResponse", plain::<DevicesResponse>),
 ];
 
 fn fixtures_root() -> PathBuf {
@@ -333,7 +350,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
         ]
     );
     assert_eq!(valid("Event", "type").len(), 17);
-    assert_eq!(valid("TransientEvent", "type").len(), 8);
+    assert_eq!(valid("TransientEvent", "type").len(), 9);
 }
 
 #[test]

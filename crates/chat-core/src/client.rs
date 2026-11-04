@@ -192,6 +192,8 @@ pub enum ClientUpdate {
     /// Notifications). Sent only for events the server marked, never for my own
     /// events or a muted group. The UI may skip it while the topic is open and focused.
     Notify(Box<Notification>),
+    /// Settings transient: the daily digest (每日摘要), counted by event since the last one.
+    Digest(Box<crate::proto::DigestTransient>),
     /// The 产出 of a topic changed (event or HTTP answer). Re-read `artifacts(topic)`.
     ArtifactsChanged {
         group_id: String,
@@ -248,6 +250,9 @@ pub enum ClientUpdate {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Notification {
     pub reason: NotifyReason,
+    /// Settings: which switchable event it is (需要我拍板, 成员卡住或出错, ...); `None` from
+    /// older servers and for plain messages.
+    pub event: Option<crate::proto::NotifyEvent>,
     pub group_id: String,
     pub topic_id: Option<String>,
     pub message_id: Option<String>,

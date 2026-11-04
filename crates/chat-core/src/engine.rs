@@ -521,7 +521,13 @@ impl Session {
             protocol: PROTOCOL_VERSION,
             client: self.client.clone(),
             cursors: Some(cursors),
-            features: Some(CLIENT_FEATURES.iter().map(|f| f.to_string()).collect()),
+            features: Some(
+                CLIENT_FEATURES
+                    .iter()
+                    .chain([&crate::proto::FEATURE_SETTINGS])
+                    .map(|f| f.to_string())
+                    .collect(),
+            ),
             supported_catalogs: Some(CARD_CATALOGS.iter().map(|c| c.to_string()).collect()),
         }));
         let mut tick = tokio::time::interval(TICK);
@@ -1069,7 +1075,9 @@ impl Session {
                         .insert(entry.seq(), entry);
                     self.drain(&gid);
                     // After the drain, so the cache knows the topic when the event applied.
-                    if let Some(n) = note.and_then(|(r, e)| notify_update(&self.shared, r, &e)) {
+                    if let Some(n) =
+                        note.and_then(|((r, ev), e)| notify_update(&self.shared, r, ev, &e))
+                    {
                         self.shared.emit(n);
                     }
                 }
@@ -1656,6 +1664,8 @@ impl Session {
             TransientEvent::ArtifactReply(e) => {
                 self.shared.emit(ClientUpdate::ArtifactReply(Box::new(e)))
             }
+            // settings-backend: the daily digest (feature "settings/1").
+            TransientEvent::Digest(d) => self.shared.emit(ClientUpdate::Digest(Box::new(d))),
         }
     }
 
@@ -1827,7 +1837,11 @@ impl Session {
 
 pub(crate) enum Incoming {
     Frame(ServerFrame),
-    Event(LogEntry, Option<NotifyReason>),
+    /// The event, its notify reason and (settings) its switchable `notifyEvent`.
+    Event(
+        LogEntry,
+        Option<(NotifyReason, Option<crate::proto::NotifyEvent>)>,
+    ),
     Page {
         rid: String,
         group_id: String,
@@ -1850,6 +1864,12 @@ pub(crate) fn parse_incoming(text: &str) -> Result<Incoming, String> {
                 serde_json::from_value(serde_json::Value::String(n.into()))
                     .unwrap_or(NotifyReason::Message)
             });
+            // settings: an unknown event reads as `Unknown`.
+            let notify_event = v.get("notifyEvent").and_then(|n| n.as_str()).map(|n| {
+                serde_json::from_value(serde_json::Value::String(n.into()))
+                    .unwrap_or(crate::proto::NotifyEvent::Unknown)
+            });
+            let notify = notify.map(|r| (r, notify_event));
             let ev = v
                 .get_mut("event")
                 .map(serde_json::Value::take)
@@ -1940,7 +1960,12 @@ fn fail_search(shared: &Shared, rid: String) {
 /// Builds the notification for a server-marked event, or `None` for my own event or a
 /// non-mention in a muted group (the server should not mark those; this guards stale
 /// decisions). A muted group still notifies mentions (docs/protocol.md, Notifications).
-fn notify_update(shared: &Shared, reason: NotifyReason, entry: &LogEntry) -> Option<ClientUpdate> {
+fn notify_update(
+    shared: &Shared,
+    reason: NotifyReason,
+    event: Option<crate::proto::NotifyEvent>,
+    entry: &LogEntry,
+) -> Option<ClientUpdate> {
     use crate::proto::EventData;
     let LogEntry::Known(e) = entry else {
         return None;
@@ -1978,6 +2003,7 @@ fn notify_update(shared: &Shared, reason: NotifyReason, entry: &LogEntry) -> Opt
     Some(ClientUpdate::Notify(Box::new(
         crate::client::Notification {
             reason,
+            event,
             group_id: e.group_id.clone(),
             topic_id,
             message_id,

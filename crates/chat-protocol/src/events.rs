@@ -279,6 +279,9 @@ pub enum TransientEvent {
     ArtifactData(ArtifactDataTransient),
     #[serde(rename = "artifact.reply")]
     ArtifactReply(ArtifactReplyTransient),
+    // Settings: sent only to connections whose hello has feature "settings/1".
+    #[serde(rename = "digest")]
+    Digest(crate::settings::DigestTransient),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

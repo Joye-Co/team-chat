@@ -35,6 +35,7 @@ pub mod reactions;
 pub mod reads;
 pub mod search;
 mod serde_util;
+pub mod settings;
 pub mod topic;
 pub mod updates;
 
@@ -61,6 +62,7 @@ pub use reactions::*;
 pub use reads::*;
 pub use search::*;
 pub use serde_util::{ProtocolV1, True};
+pub use settings::*;
 pub use topic::*;
 pub use updates::*;
 

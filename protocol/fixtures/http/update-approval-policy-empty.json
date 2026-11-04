@@ -1,0 +1,6 @@
+{
+  "kind": "UpdateApprovalPolicyRequest",
+  "valid": true,
+  "description": "no change",
+  "value": {}
+}

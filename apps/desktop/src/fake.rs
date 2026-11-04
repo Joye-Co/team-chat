@@ -22,6 +22,9 @@ pub mod v2_desk;
 // --- inc-refs: what the server does with references.
 pub mod refs;
 // --- end inc-refs
+// --- settings-backend track
+mod settings_backend;
+// --- end settings-backend track
 
 pub const ME: &str = "m-joye";
 /// The topic with 10,000 messages.
@@ -37,6 +40,8 @@ pub struct FakeProvider {
     settings: Mutex<settings::FakeSettings>,
     // --- inc-refs
     refs: refs::FakeRefs,
+    // --- settings-backend track
+    settings_backend: Mutex<settings_backend::FakeSettingsBackend>,
 }
 
 struct State {
@@ -79,6 +84,8 @@ impl FakeProvider {
             drafts: DraftStore::new(),
             settings: Mutex::new(settings::FakeSettings::new()),
             refs: refs::FakeRefs::default(),
+            // settings-backend track
+            settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
         });
         provider.seed_followed();
         provider
@@ -99,6 +106,8 @@ impl FakeProvider {
             drafts: DraftStore::new(),
             settings: Mutex::new(settings::FakeSettings::new()),
             refs: refs::FakeRefs::default(),
+            // settings-backend track
+            settings_backend: Mutex::new(settings_backend::FakeSettingsBackend::new(now_ms())),
         });
         provider.seed_followed();
         provider
@@ -1645,6 +1654,27 @@ impl ChatProvider for FakeProvider {
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {
         self.machines_fake()
     }
+
+    // --- settings-backend track ---
+    fn notify_preferences(&self) -> AdminReply<NotifyPreferences> {
+        self.notify_preferences_fake()
+    }
+    fn set_notify_preferences(&self, prefs: NotifyPreferences) -> AdminReply<NotifyPreferences> {
+        self.set_notify_preferences_fake(prefs)
+    }
+    fn approval_defaults(&self) -> AdminReply<ApprovalDefaults> {
+        self.approval_defaults_fake()
+    }
+    fn set_approval_defaults(&self, defaults: ApprovalDefaults) -> AdminReply<ApprovalDefaults> {
+        self.set_approval_defaults_fake(defaults)
+    }
+    fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
+        self.devices_fake()
+    }
+    fn sign_out_device(&self, device_id: &str) -> AdminReply<()> {
+        self.sign_out_device_fake(device_id)
+    }
+    // --- end settings-backend track ---
 
     fn create_machine(&self, name: String, labels: Vec<String>) -> AdminReply<MachineCreated> {
         self.create_machine_fake(name, labels)

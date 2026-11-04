@@ -1,0 +1,11 @@
+{
+  "kind": "TransientEvent",
+  "valid": false,
+  "description": "missing counts",
+  "value": {
+    "type": "digest",
+    "at": 1762128000000,
+    "since": 1762128000000,
+    "items": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "kind": "Device",
+  "valid": false,
+  "description": "missing current",
+  "value": {
+    "id": "01JBX0TOKEN0000000000000AH",
+    "name": "x",
+    "createdAt": 1762128000000,
+    "lastUsedAt": null
+  }
+}
