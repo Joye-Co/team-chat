@@ -13,15 +13,13 @@ use gpui::{
 use gpui_component::menu::ContextMenuExt as _;
 
 use super::{RailView, modes::TopicItem};
-use crate::ui::native::{BadgeState, SidebarRow, SidebarSection, StatusBadge};
+use crate::ui::native::{BadgeState, SidebarRow, SidebarSection, sidebar::{RightColumn, SidebarMedia}};
 
 /// A row's click handler.
 pub(super) type ClickHandler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 /// The 16 pt member avatar of a sidebar row (§9.1).
 pub(super) const ROW_AVATAR: gpui::Pixels = px(16.);
-/// The widest right-column badge of a 话题 row: the title keeps the rest.
-const BADGE_MAX: gpui::Pixels = px(96.);
 /// The indent of a 话题 under its member (mode C).
 pub(super) const NESTED_PAD: gpui::Pixels = px(18.);
 /// The room the disclosure chevron of a section header takes at its
@@ -77,21 +75,17 @@ impl RailView {
             )
             .selected(*selected)
             .unread(unread);
-        let badge = || {
-            StatusBadge::new(line.badge, line.short.clone())
-                .dense()
-                .max_w(BADGE_MAX)
-        };
+        let badge = || RightColumn::Status(line.badge, line.short.clone().into());
         let urgent = matches!(line.badge, BadgeState::NeedsYou | BadgeState::Failed);
-        row = if urgent && !line.short.is_empty() {
-            row.trailing_element(badge())
+        row = row.media_kind(SidebarMedia::None).right(if urgent && !line.short.is_empty() {
+            badge()
         } else if unread {
-            row.count(topic.unread as u32)
+            RightColumn::Count(topic.unread as u32)
         } else if !line.short.is_empty() {
-            row.trailing_element(badge())
+            badge()
         } else {
-            row
-        };
+            RightColumn::None
+        });
         let _ = cx;
         let row = row.on_click(move |_, _, cx| {
             let (g, t) = (g.clone(), t.clone());

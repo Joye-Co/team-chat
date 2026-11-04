@@ -126,7 +126,7 @@ impl TopicRail {
                     .pt(space::S4)
                     .n_body()
                     .text_color(k.secondary)
-                    .child(ui::truncate::truncating("rail-state-detail", step)),
+                    .child(crate::ui::truncate::TruncText::new(step).id("rail-state-detail")),
             );
         }
         section.into_any_element()
@@ -185,20 +185,14 @@ impl TopicRail {
                     .min_w(px(24.))
                     .flex_shrink(1.)
                     .text_color(k.label)
-                    .child(ui::truncate::truncating(
-                        SharedString::from(format!("rail-person-{id}")),
-                        name,
-                    )),
+                    .child(crate::ui::truncate::TruncText::new(name).id(SharedString::from(format!("rail-person-{id}")))),
             )
             .children(role.map(|r| {
                 div()
                     .min_w(px(0.))
                     .flex_shrink(1000.)
                     .text_color(k.secondary)
-                    .child(ui::truncate::truncating(
-                        SharedString::from(format!("rail-role-{id}")),
-                        r,
-                    ))
+                    .child(crate::ui::truncate::TruncText::new(r).id(SharedString::from(format!("rail-role-{id}"))))
             }))
             .children(tail)
             .into_any_element()
@@ -359,7 +353,7 @@ impl TopicRail {
         // §2.12: every state value is a StatusBadge, never plain or colored
         // text.
         let (state_kind, state_text) = match ch.state {
-            ChangeState::Merging => (BadgeState::Working, c::CHANGES_MERGING),
+            ChangeState::Merging => (BadgeState::Merging, c::CHANGES_MERGING),
             ChangeState::Merged => (BadgeState::Done, c::CHANGES_MERGED),
             ChangeState::Closed => (BadgeState::Offline, c::CHANGES_CLOSED),
             _ => (BadgeState::Queued, c::CHANGES_OPEN),

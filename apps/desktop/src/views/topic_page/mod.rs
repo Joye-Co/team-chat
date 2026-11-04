@@ -167,7 +167,7 @@ pub fn run_state(
         return StateLine {
             text: fill(c::STATE_PAUSED, &[("name", name)]),
             tone: StateTone::Quiet,
-            badge: BadgeState::Queued,
+            badge: BadgeState::Paused,
             short: c::STATE_PAUSED_SHORT.to_string(),
             detail: Some(detail),
             paused: true,
@@ -225,7 +225,7 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
         if ch.state == crate::data::v2::ChangeState::Merging {
             return StateLine::plain(
                 fill(c::STATE_MERGING, &[("name", &owner)]),
-                BadgeState::Working,
+                BadgeState::Merging,
             )
             .short(c::STATE_MERGING_SHORT);
         }

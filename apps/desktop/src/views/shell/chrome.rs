@@ -54,7 +54,7 @@ pub fn inspector_frame(width: Pixels, cx: &App) -> gpui::Div {
         .flex_none()
         .relative()
         .overflow_hidden()
-        .bg(k.content)
+        .bg(crate::ui::native::inspector::pane_fill(cx))
         .border_l_1()
         .border_color(k.separator)
 }

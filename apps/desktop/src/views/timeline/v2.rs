@@ -53,7 +53,7 @@ pub const LEADING: Pixels = crate::ui::native::tokens::space::S24;
 // --- end v12/fx-topic ---
 /// The one in-thread width (§2.4, §2.17, F19): message bodies, cards,
 /// attachments, plan cards and embeds are min(640, text column).
-pub const TEXT_MAX: Pixels = px(640.);
+pub const TEXT_MAX: Pixels = crate::ui::native::tokens::layout::IN_THREAD;
 
 /// The date divider label: `11 月 3 日 周一`.
 pub fn date_label(at: crate::data::Millis) -> String {
@@ -241,7 +241,7 @@ impl TimelineView {
             .gap(space::S6)
             .child(name)
             .children(role.map(|role| {
-                ui::truncating("sender-role", role.trim().to_string())
+                crate::ui::truncate::TruncText::new(role.trim().to_string()).id("sender-role")
                     .flex_shrink(1000.)
                     .min_w(px(0.))
                     .n_subheadline()
