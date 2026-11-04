@@ -31,7 +31,7 @@ crate::copy! {
     MUTED = "已静音",
     LEAVE_GROUP = "离开群…",
     LEAVE_CONFIRM_TITLE = "离开「{name}」？",
-    LEAVE_CONFIRM_BODY = "离开后你不会再收到这个群的消息。要回来，需要群里的成员重新邀请你。",
+    LEAVE_CONFIRM_BODY = "离开后不再收到这个群的消息。\n要回来，需要成员重新邀请你。",
     LEAVE_OK = "离开",
     // new group dialog
     GROUP_NAME_LABEL = "群名称",
@@ -40,8 +40,8 @@ crate::copy! {
     GROUP_NAME_TOO_LONG = "群名称最多 {n} 个字",
     PICK_MEMBERS = "选择成员",
     MEMBER_FILTER_PLACEHOLDER = "搜索成员",
-    SELECTED_COUNT = "已选 {n} 位成员",
-    NO_MEMBERS_MATCH = "没有找到这位成员",
+    SELECTED_COUNT = "已选 {n} 位",
+    NO_MEMBERS_MATCH = "没有匹配的成员",
     CREATE = "创建",
     ADD = "添加",
     // rename group dialog

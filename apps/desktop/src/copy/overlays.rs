@@ -20,7 +20,7 @@ crate::copy! {
     RENAME_GROUP_EXPLANATION = "群里的成员都会看到新名称。",
     RENAME_TOPIC_EXPLANATION = "话题里的成员都会看到新标题。",
     TOPIC_TITLE = "标题",
-    SEARCH_MEMBERS = "搜索",
+    SEARCH_MEMBERS = "搜索成员",
     // --- v12/overlays: alerts ---
     STOP_TITLE = "停止 {name} 的工作？",
     STOP_MESSAGE = "{name} 会停在现在这一步，已经做好的部分会留下。",

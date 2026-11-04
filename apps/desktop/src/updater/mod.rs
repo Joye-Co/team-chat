@@ -113,6 +113,8 @@ pub struct Updater {
     found: Option<UpdateInfo>,
     last_attempt: Option<(Instant, bool)>,
     postponed: Option<(String, Instant)>,
+    /// The running download, so 取消下载 can stop it.
+    download: Option<tokio::task::AbortHandle>,
 }
 
 struct UpdaterGlobal(Entity<Updater>);
@@ -218,6 +220,7 @@ pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity
         found: None,
         last_attempt: None,
         postponed: None,
+        download: None,
     });
     cx.set_global(UpdaterGlobal(updater.clone()));
     cx.on_action(|_: &UpdateCommand, cx| on_update_command(cx));
@@ -426,6 +429,7 @@ impl Updater {
             let _ = tx.unbounded_send((p.done, p.total));
         });
         let job = client.download_update(info.clone(), &dest, progress);
+        self.download = Some(job.abort_handle());
         cx.spawn(async move |this, cx| {
             while let Some((done, total)) = rx.next().await {
                 let alive = this
@@ -444,41 +448,65 @@ impl Updater {
         .detach();
         cx.spawn(async move |this, cx| {
             let result = job.await;
-            let _ = this.update(cx, |u, cx| match result {
-                Ok(Ok(path)) => {
-                    remove_other_dmgs(&path);
-                    // The user chooses when the app restarts.
-                    u.set_phase(Phase::Ready { info, dmg: path }, cx)
-                }
-                Ok(Err(e)) => {
-                    tracing::warn!(error = %e, "update download failed");
-                    let failure = match e {
-                        chat_core::ClientError::Api(chat_core::ApiError::Checksum) => {
-                            Failure::Checksum
-                        }
-                        _ => Failure::Download,
-                    };
-                    u.set_phase(
-                        Phase::Failed {
-                            info: Some(info),
-                            failure,
-                        },
-                        cx,
-                    );
-                }
-                Err(e) => {
-                    tracing::warn!(error = %e, "update download task failed");
-                    u.set_phase(
-                        Phase::Failed {
-                            info: Some(info),
-                            failure: Failure::Download,
-                        },
-                        cx,
-                    );
-                }
+            let _ = this.update(cx, |u, cx| {
+                u.download = None;
+                u.finish_download(info, result, cx)
             });
         })
         .detach();
+    }
+
+    /// "取消下载": stops the download and offers the update again.
+    pub fn cancel_download(&mut self, cx: &mut Context<Self>) {
+        if let Phase::Downloading { info, .. } = &self.phase {
+            let info = info.clone();
+            if let Some(job) = self.download.take() {
+                job.abort();
+            }
+            self.set_phase(Phase::Available(info), cx);
+        }
+    }
+
+    fn finish_download(
+        &mut self,
+        info: UpdateInfo,
+        result: Result<Result<PathBuf, chat_core::ClientError>, tokio::task::JoinError>,
+        cx: &mut Context<Self>,
+    ) {
+        let u = self;
+        match result {
+            Ok(Ok(path)) => {
+                remove_other_dmgs(&path);
+                // The user chooses when the app restarts.
+                u.set_phase(Phase::Ready { info, dmg: path }, cx)
+            }
+            Ok(Err(e)) => {
+                tracing::warn!(error = %e, "update download failed");
+                let failure = match e {
+                    chat_core::ClientError::Api(chat_core::ApiError::Checksum) => Failure::Checksum,
+                    _ => Failure::Download,
+                };
+                u.set_phase(
+                    Phase::Failed {
+                        info: Some(info),
+                        failure,
+                    },
+                    cx,
+                );
+            }
+            // 取消下载 already put the update back.
+            Err(e) if e.is_cancelled() => {}
+            Err(e) => {
+                tracing::warn!(error = %e, "update download task failed");
+                u.set_phase(
+                    Phase::Failed {
+                        info: Some(info),
+                        failure: Failure::Download,
+                    },
+                    cx,
+                );
+            }
+        }
     }
 
     /// "重启安装": installs a downloaded update (after pending sends) and

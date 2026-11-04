@@ -19,103 +19,376 @@ use crate::{
     app::{Place, Services},
     copy::{common, fill, nav, overlays as o},
     data::{AdminError, CreateGroupRequest, GroupId, Member, MemberId},
-    theme::Type as _,
     ui::{
-        self,
+        self, Sym,
         native::{
             AlertLayout, NativeCheckbox, NativeTextField, NativeType as _, PushStyle, SearchField,
             SheetLayout, SheetWidth, alert_button, disabled_push, metrics, native_colors,
-            native_sheet,
-            overlays::{app_icon, sheet_list, sheet_list_row},
-            sheet_buttons,
+            native_sheet, overlays::app_icon, sheet_buttons,
         },
     },
 };
 
-// --- v12/fx-overlays: the one form pattern of every sheet ---
+// --- v14/t4: the one form pattern of every sheet (COMPLETENESS 2.8, D8) ---
 
-/// The label column of a sheet form: fits 第一条消息 (five characters).
-pub const FORM_LABEL: gpui::Pixels = px(72.);
+/// The label column of a sheet form (2.8): 112 in every sheet, so fields
+/// start at one x in new-topic, rename and new-group.
+pub const FORM_LABEL: gpui::Pixels = metrics::LABEL_COLUMN;
 /// The gap between a label and its control.
-pub const FORM_GAP: gpui::Pixels = px(8.);
-/// The space between the rows of a sheet form.
-pub const FORM_ROW_GAP: gpui::Pixels = px(12.);
+pub const FORM_GAP: gpui::Pixels = metrics::LABEL_GAP;
 
-/// The width a control takes in the form of a `width` sheet: from the
-/// control column to the sheet's trailing inset.
+/// The width a control takes in a row of a `width` sheet's form: from the
+/// control column to the group's trailing inset.
 pub fn form_field_width(width: SheetWidth) -> gpui::Pixels {
-    width.px() - metrics::SHEET_PAD * 2. - FORM_LABEL - FORM_GAP
+    width.px()
+        - metrics::SHEET_PAD * 2.
+        - crate::ui::native::tokens::layout::BORDER * 2.
+        - metrics::FORM_ROW_INSET * 2.
+        - FORM_LABEL
+        - FORM_GAP
 }
 
-/// A sheet form (the Messages Name and Photo sheet): right-aligned labels
-/// in one column, standalone controls on the sheet background, no group
-/// fill under them.
-pub fn sheet_form() -> gpui::Div {
-    div().w_full().flex().flex_col().gap(FORM_ROW_GAP)
+/// A sheet form (2.8 GroupBox): one group, radius 10, a 1 px border, the
+/// group fill; its rows are separated by 1 px lines inset to the label x.
+pub fn sheet_form() -> SheetForm {
+    SheetForm::default()
 }
 
-/// One row of a [`sheet_form`]: the label right-aligned in the label column,
-/// the control after it, centred on the control's first line.
+/// The group of a [`sheet_form`]; children are its rows.
+#[derive(IntoElement, Default)]
+pub struct SheetForm {
+    rows: Vec<gpui::AnyElement>,
+}
+
+impl ParentElement for SheetForm {
+    fn extend(&mut self, elements: impl IntoIterator<Item = gpui::AnyElement>) {
+        self.rows.extend(elements);
+    }
+}
+
+impl gpui::RenderOnce for SheetForm {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        let k = native_colors(cx);
+        let n = self.rows.len();
+        let mut group = div()
+            .w_full()
+            .rounded(metrics::GROUP_RADIUS)
+            .border_1()
+            .border_color(k.separator)
+            .bg(k.group)
+            .flex()
+            .flex_col();
+        for (ix, row) in self.rows.into_iter().enumerate() {
+            group = group.child(row);
+            if ix + 1 < n {
+                group = group.child(
+                    div()
+                        .ml(metrics::FORM_ROW_INSET)
+                        .h(crate::ui::native::tokens::layout::HAIRLINE)
+                        .bg(k.separator),
+                );
+            }
+        }
+        group
+    }
+}
+
+/// One row of a [`sheet_form`] (2.8 FormRow, h44): the label (14
+/// foreground) in the 112 column at x + 16, the control after it.
 pub fn sheet_form_row(
     label: impl Into<gpui::SharedString>,
     control: impl IntoElement,
     cx: &App,
 ) -> gpui::Div {
-    form_row(label.into(), control.into_any_element(), false, cx)
+    form_row(label.into(), control.into_any_element(), false, false, cx)
 }
 
-/// A row whose control is taller than one line (a multi-line field, a
-/// grid): the label sits on the control's first line.
+/// A [`sheet_form_row`] whose field is invalid: the label turns
+/// destructive (the field draws its own destructive border and ring).
+pub fn sheet_form_row_invalid(
+    label: impl Into<gpui::SharedString>,
+    control: impl IntoElement,
+    invalid: bool,
+    cx: &App,
+) -> gpui::Div {
+    form_row(label.into(), control.into_any_element(), false, invalid, cx)
+}
+
+/// A full-width row (a textarea, a list, a grid): the label at the same x
+/// on its own line, the control under it across the row.
 pub fn sheet_form_row_top(
     label: impl Into<gpui::SharedString>,
     control: impl IntoElement,
     cx: &App,
 ) -> gpui::Div {
-    form_row(label.into(), control.into_any_element(), true, cx)
+    form_row(label.into(), control.into_any_element(), true, false, cx)
 }
 
 fn form_row(
     label: gpui::SharedString,
     control: gpui::AnyElement,
     top: bool,
+    invalid: bool,
     cx: &App,
 ) -> gpui::Div {
     let k = native_colors(cx);
+    let label = div()
+        .flex_none()
+        .n_body()
+        .text_color(if invalid { k.red } else { k.label })
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .child(label);
+    if top {
+        return div()
+            .w_full()
+            .px(metrics::FORM_ROW_INSET)
+            .py(crate::ui::native::tokens::space::S12)
+            .flex()
+            .flex_col()
+            .gap(crate::ui::native::tokens::space::S8)
+            .child(label)
+            .child(
+                div()
+                    .w_full()
+                    .min_w(gpui::Pixels::ZERO)
+                    .flex()
+                    .child(control),
+            );
+    }
     div()
         .w_full()
+        .min_h(metrics::FORM_ROW)
+        .px(metrics::FORM_ROW_INSET)
+        .py(crate::ui::native::tokens::space::S6)
         .flex()
+        .items_center()
         .gap(FORM_GAP)
-        .map(|d| {
-            if top {
-                d.items_start()
-            } else {
-                d.items_center()
-            }
-        })
+        .child(label.w(FORM_LABEL))
         .child(
             div()
-                .flex_none()
-                .w(FORM_LABEL)
-                .min_h(metrics::FIELD)
+                .flex_1()
+                .min_w(gpui::Pixels::ZERO)
                 .flex()
-                .items_center()
-                .justify_end()
-                .n_body()
-                .text_color(k.label)
-                .child(label),
+                .child(control),
         )
-        .child(div().flex_1().min_w(px(0.)).flex().child(control))
 }
 
-/// The one quiet footnote of a sheet form (a field problem, a hint):
-/// Subheadline in `secondary`, on the control column. Never red.
+/// A dependent row of a [`sheet_form`] (2.8): a 12 muted hint for the row
+/// above it, from the control column.
 pub fn sheet_footnote(text: impl Into<gpui::SharedString>, cx: &App) -> gpui::Div {
+    dependent_row(text.into(), cx)
+}
+
+/// Field errors go to the sheet footer's status slot; this row is a hint.
+fn dependent_row(text: gpui::SharedString, cx: &App) -> gpui::Div {
+    let k = native_colors(cx);
     div()
         .w_full()
-        .pl(FORM_LABEL + FORM_GAP)
+        .px(metrics::FORM_ROW_INSET)
+        .py(crate::ui::native::tokens::space::S8)
+        .pl(metrics::FORM_ROW_INSET + FORM_LABEL + FORM_GAP)
         .n_subheadline()
-        .text_color(native_colors(cx).secondary)
-        .child(text.into())
+        .text_color(k.secondary)
+        .child(text)
+}
+
+/// How a [`MemberPicker`] chooses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PickMode {
+    /// A checkbox on every row (new 群, add members).
+    Many,
+    /// One row, marked with a check on a muted row (start a DM).
+    One,
+}
+
+/// The rows of a member picker (2.9): h40.
+const PICK_ROW: gpui::Pixels = crate::ui::native::tokens::height::TABLE_ROW_COMPACT;
+/// Rows a picker shows: 7.5, so the cut row says the list scrolls.
+const PICK_VISIBLE: f32 = 7.5;
+
+/// The one member picker (2.9) of 新建群, 添加成员 and 发起私聊: a search
+/// field across the content column, 12 below it a list box (radius 10,
+/// border) of h40 rows that shows 7.5 rows and a scrollbar, then one 12
+/// the sheet footer shows the count or the error (2.9).
+#[derive(IntoElement)]
+pub struct MemberPicker {
+    id: &'static str,
+    filter: Entity<InputState>,
+    scroll: gpui::ScrollHandle,
+    rows: Vec<gpui::AnyElement>,
+    empty: gpui::SharedString,
+}
+
+impl MemberPicker {
+    pub fn new(
+        id: &'static str,
+        filter: &Entity<InputState>,
+        scroll: &gpui::ScrollHandle,
+        rows: Vec<gpui::AnyElement>,
+        empty: impl Into<gpui::SharedString>,
+    ) -> Self {
+        Self {
+            id,
+            filter: filter.clone(),
+            scroll: scroll.clone(),
+            rows,
+            empty: empty.into(),
+        }
+    }
+
+    /// One row: the checkbox (many) or the trailing check (one), the 24
+    /// avatar (a green dot only when the person is online), the name (14
+    /// medium, it keeps its room) and the 岗位 (14 muted, it truncates
+    /// first). The full name is the tooltip.
+    pub fn row(
+        id: gpui::SharedString,
+        m: &Member,
+        mode: PickMode,
+        chosen: bool,
+        cx: &App,
+    ) -> gpui::Stateful<gpui::Div> {
+        use crate::ui::native::tokens::{icon, radius, space};
+        let k = native_colors(cx);
+        let surface = if chosen && mode == PickMode::One {
+            k.selection
+        } else {
+            k.content
+        };
+        let name: gpui::SharedString = m.name.clone().into();
+        let tip = name.clone();
+        div()
+            .id(id.clone())
+            .flex_none()
+            .h(PICK_ROW)
+            .px(space::S8)
+            .rounded(radius::ITEM)
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .map(|d| {
+                if chosen && mode == PickMode::One {
+                    d.bg(k.selection)
+                } else {
+                    d.hover(|s| s.bg(k.fill.opacity(0.5)))
+                }
+            })
+            .when(mode == PickMode::Many, |d| {
+                d.child(NativeCheckbox::new(
+                    gpui::SharedString::from(format!("{id}-check")),
+                    chosen,
+                ))
+            })
+            .child(
+                div().flex_none().child(
+                    ui::MemberAvatar::new(Some(m), crate::ui::native::tokens::avatar::SM)
+                        .when(!m.is_bot(), |a| a.presence(Some(m)))
+                        .on(surface),
+                ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(gpui::Pixels::ZERO)
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(
+                        div()
+                            .id(gpui::SharedString::from(format!("{id}-name")))
+                            .flex_none()
+                            .max_w(gpui::relative(1.))
+                            .n_headline()
+                            .text_color(k.label)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .tooltip(move |window, cx| {
+                                gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                            })
+                            .child(name),
+                    )
+                    .children(m.role.clone().filter(|r| !r.trim().is_empty()).map(|r| {
+                        div()
+                            .flex_1()
+                            .min_w(gpui::Pixels::ZERO)
+                            .n_body()
+                            .text_color(k.secondary)
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(r)
+                    })),
+            )
+            .when(mode == PickMode::One && chosen, |d| {
+                d.child(div().flex_none().child(crate::ui::icons::icon(
+                    Sym::Check,
+                    icon::MD,
+                    k.label,
+                )))
+            })
+    }
+}
+
+impl gpui::RenderOnce for MemberPicker {
+    fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
+        use crate::ui::native::tokens::{layout, space};
+        let k = native_colors(cx);
+        let empty = self.rows.is_empty();
+        let list_h = PICK_ROW * PICK_VISIBLE + space::S4 * 2. + layout::BORDER * 2.;
+        div()
+            .w_full()
+            .flex()
+            .flex_col()
+            .gap(space::S12)
+            .child(SearchField::new(
+                gpui::SharedString::from(format!("{}-filter", self.id)),
+                &self.filter,
+            ))
+            .child(
+                div()
+                    .relative()
+                    .flex_none()
+                    .w_full()
+                    .h(list_h)
+                    .rounded(metrics::GROUP_RADIUS)
+                    .bg(k.content)
+                    .border_1()
+                    .border_color(k.separator)
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .id(gpui::SharedString::from(format!("{}-members", self.id)))
+                            .size_full()
+                            .p(space::S4)
+                            .overflow_y_scroll()
+                            .track_scroll(&self.scroll)
+                            .flex()
+                            .flex_col()
+                            .children(self.rows)
+                            .when(empty, |el| {
+                                el.child(div().px(space::S8).py(space::S8).child(
+                                    crate::ui::native::page::compact_empty(
+                                        Sym::Search,
+                                        self.empty.clone(),
+                                        None,
+                                        cx,
+                                    ),
+                                ))
+                            }),
+                    )
+                    .child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .right_0()
+                            .bottom_0()
+                            .w(space::S12)
+                            .child(gpui_component::scroll::Scrollbar::vertical(&self.scroll)),
+                    ),
+            )
+    }
 }
 
 /// Configures a dialog as a window-modal alert (§7.2): the Tahoe alert,
@@ -136,8 +409,8 @@ pub fn window_alert(
         .bg(k.sheet)
         .border_color(k.glass_edge)
         .rounded(metrics::SHEET_RADIUS)
-        .p(px(0.))
-        .gap(px(0.))
+        .p(gpui::Pixels::ZERO)
+        .gap(gpui::Pixels::ZERO)
 }
 
 /// A blocking error (§7.4): an alert with the app icon, the title, the
@@ -181,7 +454,7 @@ pub fn error_alert(
     });
 }
 
-// --- end v12/fx-overlays ---
+// --- end v14/t4 sheet form ---
 
 /// Members I can add to a group or DM: everyone but me and deactivated members.
 pub fn pickable_members(members: &[Member], me: Option<&str>) -> Vec<Member> {
@@ -240,6 +513,8 @@ pub struct NewGroupForm {
     scroll: gpui::ScrollHandle,
     /// The sheet title of 添加成员 (with the 群 name).
     title: gpui::SharedString,
+    /// The server's last refusal, shown under the list until the next edit.
+    refusal: Option<AdminError>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -273,7 +548,10 @@ impl NewGroupForm {
                 window,
                 |this, _, event: &InputEvent, window, cx| match event {
                     InputEvent::PressEnter { .. } => this.submit(window, cx),
-                    InputEvent::Change => cx.notify(),
+                    InputEvent::Change => {
+                        this.refusal = None;
+                        cx.notify()
+                    }
                     _ => {}
                 },
             ),
@@ -298,6 +576,7 @@ impl NewGroupForm {
             selected: Vec::new(),
             scroll: gpui::ScrollHandle::new(),
             title: gpui::SharedString::default(),
+            refusal: None,
             _subscriptions: subscriptions,
         }
     }
@@ -307,6 +586,7 @@ impl NewGroupForm {
         if on {
             self.selected.push(id.to_string());
         }
+        self.refusal = None;
         cx.notify();
     }
 
@@ -351,27 +631,32 @@ impl NewGroupForm {
                 match result {
                     Ok(()) => window.close_dialog(cx),
                     Err(e) => {
-                        let title = if this.mode == FormMode::NewGroup {
+                        if this.mode == FormMode::NewGroup {
                             super::clear_pending(cx);
-                            o::NEW_GROUP_REFUSED
-                        } else {
-                            o::ADD_MEMBERS_REFUSED
-                        };
-                        // A refusal blocks: an alert over the sheet, which
-                        // stays open so the user can try again.
-                        error_alert(
-                            title,
-                            crate::views::settings::widgets::error_text(e),
-                            |_, _| {},
-                            window,
-                            cx,
-                        );
+                        }
+                        // A refusal shows under the list; the sheet stays
+                        // open so the user can try again.
+                        this.refusal = Some(e);
                         cx.notify();
                     }
                 }
             });
         })
         .detach();
+    }
+
+    /// Shows a refusal as if the server had sent it (a screenshot scene).
+    pub fn preview_refusal(
+        &mut self,
+        name: &str,
+        e: Option<AdminError>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.name
+            .update(cx, |st, cx| st.set_value(name.to_string(), window, cx));
+        self.refusal = e;
+        cx.notify();
     }
 }
 
@@ -382,7 +667,7 @@ impl Render for NewGroupForm {
         let new_group = self.mode == FormMode::NewGroup;
         let typed = self.name.read(cx).value().to_string();
         // A field problem (a name that is too long) turns the default button
-        // off and shows one quiet footnote; an empty name only turns it off.
+        // off and marks the field; an empty name only turns it off.
         let name_problem = (new_group && !typed.trim().is_empty())
             .then(|| validate_group_name(&typed).err())
             .flatten();
@@ -401,17 +686,13 @@ impl Render for NewGroupForm {
                 let id = m.id.clone();
                 let checked = selected.contains(m.id.as_str());
                 // The whole row toggles the checkbox (a Mac table row).
-                sheet_list_row(
+                MemberPicker::row(
                     gpui::SharedString::from(format!("pick-row-{}", m.id)),
-                    false,
-                    true,
+                    m,
+                    PickMode::Many,
+                    checked,
                     cx,
                 )
-                .child(NativeCheckbox::new(
-                    gpui::SharedString::from(format!("pick-{}", m.id)),
-                    checked,
-                ))
-                .child(member_line(m, k.content, k.secondary))
                 .on_click(cx.listener(move |this, _, _, cx| {
                     let on = !this.selected.contains(&id);
                     this.toggle(&id, on, cx)
@@ -419,7 +700,6 @@ impl Render for NewGroupForm {
                 .into_any_element()
             })
             .collect();
-        let empty = rows.is_empty();
         let title: gpui::SharedString = match &self.mode {
             FormMode::NewGroup => nav::NEW_GROUP.into(),
             FormMode::AddMembers { .. } => self.title.clone(),
@@ -434,113 +714,90 @@ impl Render for NewGroupForm {
         let create = disabled_push(create, !ready, cx)
             .loading(self.busy)
             .on_click(cx.listener(|this, _, window, cx| this.submit(window, cx)));
-        let field_w = form_field_width(SheetWidth::List);
-        let members = div()
-            .w(field_w)
-            .flex()
-            .flex_col()
-            .gap(crate::ui::native::tokens::space::S8)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(crate::ui::native::tokens::space::S12)
-                    .child(SearchField::new("new-group-filter", &self.filter).width(px(220.)))
-                    .child(div().flex_1())
-                    .child(
-                        div()
-                            .flex_none()
-                            .n_subheadline()
-                            .n_figures()
-                            .text_color(k.secondary)
-                            .child(fill(
-                                nav::SELECTED_COUNT,
-                                &[("n", &self.selected.len().to_string())],
-                            )),
-                    ),
+        // The line under the list: the name's problem or the server's
+        // refusal in destructive, else the count.
+        let refusal = self.refusal.map(|e| {
+            let title = if new_group {
+                o::NEW_GROUP_REFUSED
+            } else {
+                o::ADD_MEMBERS_REFUSED
+            };
+            format!(
+                "{title}：{}",
+                crate::views::settings::widgets::error_text(e)
             )
-            .child(
-                sheet_list(7, cx).child(
-                    div()
-                        .id("new-group-members")
-                        .size_full()
-                        .py(px(5.))
-                        .overflow_y_scroll()
-                        .track_scroll(&self.scroll)
-                        .flex()
-                        .flex_col()
-                        .children(rows)
-                        .when(empty, |el| {
-                            el.child(
-                                div()
-                                    .size_full()
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .n_body()
-                                    .text_color(k.secondary)
-                                    .child(if self.members.is_empty() {
-                                        nav::ALL_MEMBERS_IN
-                                    } else {
-                                        nav::NO_MEMBERS_MATCH
-                                    }),
-                            )
-                        }),
+        });
+        let (line, error) = match name_problem.clone().or(refusal) {
+            Some(e) => (e, true),
+            None => (
+                fill(
+                    nav::SELECTED_COUNT,
+                    &[("n", &self.selected.len().to_string())],
                 ),
-            );
-        SheetLayout::new(title)
+                false,
+            ),
+        };
+        let picker = MemberPicker::new(
+            "new-group",
+            &self.filter,
+            &self.scroll,
+            rows,
+            if self.members.is_empty() {
+                nav::ALL_MEMBERS_IN
+            } else {
+                nav::NO_MEMBERS_MATCH
+            },
+        );
+        // The footer's left slot (2.9): the count, or the error.
+        let status = if error {
+            crate::ui::native::sheet::sheet_status_error(line, cx).into_any_element()
+        } else {
+            div()
+                .n_footnote()
+                .n_figures()
+                .text_color(k.secondary)
+                .child(line)
+                .into_any_element()
+        };
+        let mut layout = SheetLayout::new(title)
             .explanation(if new_group {
                 o::NEW_GROUP_EXPLANATION
             } else {
                 o::ADD_MEMBERS_EXPLANATION
             })
-            .body(
-                sheet_form()
-                    .when(new_group, |f| {
-                        f.child(sheet_form_row(
-                            o::GROUP_NAME,
-                            NativeTextField::new("new-group-name", &self.name).width(px(280.)),
-                            cx,
-                        ))
-                        .when_some(name_problem, |f, p| f.child(sheet_footnote(p, cx)))
-                    })
-                    .child(sheet_form_row_top(o::MEMBERS, members, cx)),
-            )
-            .buttons([cancel, create])
+            .status(status);
+        if new_group {
+            layout = layout.body(
+                sheet_form().child(sheet_form_row_invalid(
+                    o::GROUP_NAME,
+                    NativeTextField::new("new-group-name", &self.name)
+                        .full_width()
+                        .error(name_problem.is_some()),
+                    name_problem.is_some(),
+                    cx,
+                )),
+            );
+        }
+        layout.body(picker).buttons([cancel, create])
     }
 }
 
-/// One member in a picker row: a 20 pt avatar, the name and the 岗位 in
-/// `role_color` (it shrinks first). `surface` is what the avatar sits on.
-fn member_line(m: &Member, surface: gpui::Hsla, role_color: gpui::Hsla) -> gpui::Div {
-    div()
-        .flex_1()
-        .min_w(px(0.))
-        .flex()
-        .items_center()
-        .gap(crate::ui::native::tokens::space::S8)
-        .child(
-            div().flex_none().child(
-                ui::MemberAvatar::new(Some(m), px(20.))
-                    .presence(Some(m))
-                    .on(surface),
-            ),
-        )
-        .child(
-            div()
-                .flex_shrink_0()
-                .max_w(gpui::relative(0.6))
-                .one_line()
-                .child(m.name.clone()),
-        )
-        .children(m.role.clone().map(|r| {
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .text_color(role_color)
-                .one_line()
-                .child(r)
-        }))
+/// Opens the new-group sheet with `name` typed and the server's refusal
+/// `e` shown (a screenshot scene).
+pub fn open_new_group_with(
+    services: Services,
+    name: &str,
+    e: Option<AdminError>,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let form = cx.new(|cx| {
+        let mut f = NewGroupForm::new(services, FormMode::NewGroup, window, cx);
+        f.preview_refusal(name, e, window, cx);
+        f
+    });
+    let focus = form.read(cx).name.read(cx).focus_handle(cx);
+    open_sheet(form, focus, SheetWidth::List, window, cx);
 }
 
 fn open_sheet<V: gpui::Render>(
@@ -658,7 +915,6 @@ impl DmPicker {
 
 impl Render for DmPicker {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = native_colors(cx);
         let shown = self.shown(cx);
         if self.active >= shown.len() {
             self.active = 0;
@@ -671,22 +927,13 @@ impl Render for DmPicker {
             .enumerate()
             .map(|(ix, m)| {
                 let active = ix == self.active;
-                let surface = if active { k.accent } else { k.content };
-                sheet_list_row(
+                MemberPicker::row(
                     gpui::SharedString::from(format!("dm-row-{}", m.id)),
+                    m,
+                    PickMode::One,
                     active,
-                    true,
                     cx,
                 )
-                .child(member_line(
-                    m,
-                    surface,
-                    if active {
-                        k.on_accent.opacity(0.72)
-                    } else {
-                        k.secondary
-                    },
-                ))
                 .on_click(cx.listener(move |this, e: &gpui::ClickEvent, window, cx| {
                     this.active = ix;
                     if e.click_count() > 1 {
@@ -721,32 +968,13 @@ impl Render for DmPicker {
             .child(
                 SheetLayout::new(nav::START_DM)
                     .explanation(o::START_DM_EXPLANATION)
-                    .body(SearchField::new("start-dm-filter", &self.filter))
-                    .body(
-                        sheet_list(8, cx).child(
-                            div()
-                                .id("start-dm-members")
-                                .size_full()
-                                .py(px(5.))
-                                .overflow_y_scroll()
-                                .track_scroll(&self.scroll)
-                                .flex()
-                                .flex_col()
-                                .children(rows)
-                                .when(empty, |el| {
-                                    el.child(
-                                        div()
-                                            .size_full()
-                                            .flex()
-                                            .items_center()
-                                            .justify_center()
-                                            .n_body()
-                                            .text_color(k.secondary)
-                                            .child(nav::NO_MEMBERS_MATCH),
-                                    )
-                                }),
-                        ),
-                    )
+                    .body(MemberPicker::new(
+                        "start-dm",
+                        &self.filter,
+                        &self.scroll,
+                        rows,
+                        nav::NO_MEMBERS_MATCH,
+                    ))
                     .buttons([cancel, open]),
             )
     }
@@ -806,13 +1034,36 @@ pub fn confirm_leave(
 ) {
     destructive_alert(
         "leave-group",
-        fill(nav::LEAVE_CONFIRM_TITLE, &[("name", &name)]),
+        fill(nav::LEAVE_CONFIRM_TITLE, &[("name", &short_name(&name))]),
         nav::LEAVE_CONFIRM_BODY.to_string(),
         nav::LEAVE_OK,
         move |_, cx| leave(&services, &group_id, cx),
         window,
         cx,
     );
+}
+
+/// Display units an alert title holds for a name: CJK and other wide
+/// characters take 2, the rest 1 (2.10: the title fits one line).
+const TITLE_NAME_UNITS: usize = 20;
+
+/// `name` cut at the end with "…" to fit an alert title on one line.
+pub fn short_name(name: &str) -> String {
+    let units = |c: char| if c.is_ascii() { 1 } else { 2 };
+    if name.chars().map(units).sum::<usize>() <= TITLE_NAME_UNITS {
+        return name.to_string();
+    }
+    let mut used = 0;
+    let mut out = String::new();
+    for c in name.chars() {
+        if used + units(c) > TITLE_NAME_UNITS - 1 {
+            break;
+        }
+        used += units(c);
+        out.push(c);
+    }
+    out.push('…');
+    out
 }
 
 fn leave(services: &Services, group_id: &str, cx: &mut App) {
@@ -879,6 +1130,14 @@ mod tests {
             validate_group_name("\u{3000}\n").unwrap_err(),
             nav::GROUP_NAME_REQUIRED
         );
+    }
+
+    #[test]
+    fn alert_titles_cut_long_names() {
+        assert_eq!(short_name("设计"), "设计");
+        let cut = short_name(&"产品设计与前端体验改进讨论组".repeat(2));
+        assert!(cut.ends_with('…'));
+        assert!(cut.chars().count() <= 11);
     }
 
     #[test]

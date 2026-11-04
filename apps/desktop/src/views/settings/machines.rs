@@ -1,32 +1,40 @@
-//! 机器 (NATIVE.md §8): where AI members work. Group 团队的电脑 lists the
-//! team's computers (symbol, name, state dot and text, version and what it
-//! is doing) with the `+`/`−` pair under it (`+` opens the add sheet; its
-//! install command and credential are shown once). Group 云端 says that the
-//! cloud is not open yet. Members do not run only on the team's computers.
+//! 机器 (COMPLETENESS 2.19): where AI members work. Section 团队的电脑
+//! (count, description, 添加电脑… in its header) lists the team's
+//! computers: a 28 icon box by OS, the name, what it does · version · OS ·
+//! tags, a StatusBadge and "⋯". Section 云端 says the cloud is not open
+//! yet. Every list has its loading, empty and failed state.
 
 use std::time::Duration;
 
 use gpui::{
-    App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement, Render,
+    App, AppContext as _, ClipboardItem, Context, ElementId, Entity, Focusable as _,
+    InteractiveElement as _, IntoElement, ParentElement, Render, StatefulInteractiveElement as _,
     Styled, Task, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{Disableable as _, WindowExt as _, input::InputState};
+use gpui_component::{
+    WindowExt as _,
+    input::{InputEvent, InputState},
+    menu::{DropdownMenu as _, PopupMenuItem},
+    tooltip::Tooltip,
+};
 
 use super::{
     i_am_owner,
     widgets::{self, Status, answer},
 };
+use crate::ui::native::sheet::sheet_status_error;
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row, sheet_form_row_invalid};
 use crate::{
     app::Services,
     copy::{common, fill, settings as s},
     data::{MachineCreated, MachineInfo},
     theme,
     ui::{
-        self, Sym, SymSize,
+        Sym,
         native::{
-            FormRow, GroupedForm, NativeTextField, NativeType as _, PushSize, PushStyle,
-            SheetLayout, SheetWidth, disabled_push, metrics, native_colors, push_button,
-            square_button, square_pair,
+            BadgeState, GroupedForm, NativeTextField, NativeType as _, PushSize, PushStyle,
+            SectionTitle, SheetLayout, SheetWidth, StatusBadge, disabled_push, metrics,
+            native_colors, push_button, tokens,
         },
     },
     views::topic_list::relative_time,
@@ -74,6 +82,13 @@ impl MachinesPage {
         &self.status
     }
 
+    /// The loading state of 团队的电脑 (a self-test scene).
+    pub fn preview_loading(&mut self, cx: &mut Context<Self>) {
+        self.machines = None;
+        self.status = Status::Busy(s::LOADING.into());
+        cx.notify();
+    }
+
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if self.status.busy() {
             return;
@@ -97,39 +112,47 @@ impl MachinesPage {
         cx.notify();
     }
 
-    /// One computer: its symbol, the name (cut in the middle: host names
-    /// differ at the end), version, tags and what it does; the state dot.
-    fn row(&self, m: &MachineInfo, cx: &App) -> FormRow {
-        let k = native_colors(cx);
+    /// One computer (2.19): a 28 icon box by OS, the name, then what it
+    /// does · version · OS · tags (the status first, tags last), a
+    /// StatusBadge (异常 explains itself in a tooltip) and "⋯".
+    fn row(&self, m: &MachineInfo, window: &Window, cx: &App) -> gpui::AnyElement {
         let now = crate::selftest::clock::local_now();
-        let (dot, state_text) = if !m.connected {
-            (None, s::MACHINE_OFFLINE)
+        let badge = if !m.connected {
+            StatusBadge::new(BadgeState::Offline, s::MACHINE_OFFLINE)
         } else if !m.healthy {
-            (Some(k.amber), s::MACHINE_UNHEALTHY)
+            StatusBadge::new(BadgeState::Abnormal, s::MACHINE_UNHEALTHY)
         } else {
-            (Some(k.green), s::MACHINE_ONLINE)
+            StatusBadge::new(BadgeState::Online, s::MACHINE_ONLINE)
         };
-        let mut facts: Vec<String> = Vec::new();
-        if let Some(v) = &m.version {
-            facts.push(fill(s::MACHINE_VERSION, &[("v", v)]));
-        }
-        let tags: Vec<String> = m.labels.iter().map(|l| tag_text(l)).collect();
-        if !tags.is_empty() {
-            facts.push(tags.join("、"));
-        }
-        facts.push(match m.last_heartbeat_at {
-            _ if m.connected && m.active_runs > 0 => {
-                fill(s::MACHINE_BUSY, &[("n", &m.active_runs.to_string())])
-            }
-            _ if m.connected => s::MACHINE_IDLE.to_string(),
-            Some(at) => fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))]),
-            None => s::MACHINE_NEVER_SEEN.to_string(),
+        let badge = div()
+            .id(ElementId::Name(format!("machine-state-{}", m.id).into()))
+            .child(badge)
+            .when(m.connected && !m.healthy, |d| {
+                d.tooltip(|window, cx| Tooltip::new(s::MACHINE_UNHEALTHY_TIP).build(window, cx))
+            });
+        let name: gpui::SharedString = m.name.clone().into();
+        let more = crate::views::settings::widgets::more_button(
+            ElementId::Name(format!("machine-more-{}", m.id).into()),
+            window,
+            cx,
+        )
+        .dropdown_menu(move |menu, _, _| {
+            let name = name.clone();
+            menu.item(
+                PopupMenuItem::new(s::MACHINE_COPY_NAME).on_click(move |_, _, cx| {
+                    cx.write_to_clipboard(ClipboardItem::new_string(name.to_string()))
+                }),
+            )
         });
-        FormRow::new(m.name.clone())
-            .detail(facts.join(" · "))
-            .leading(ui::sym(machine_glyph(m), SymSize::SIDEBAR, k.secondary))
-            .control(widgets::dot_text(dot, state_text, cx))
-            .min_height(px(44.))
+        widgets::ItemRow::new(
+            ElementId::Name(format!("machine-{}", m.id).into()),
+            m.name.clone(),
+        )
+        .media(widgets::icon_box_28(machine_glyph(m), cx))
+        .description(machine_facts(m, now))
+        .value(badge)
+        .menu(more)
+        .into_any_element()
     }
 
     fn open_add(this: Entity<Self>, window: &mut Window, cx: &mut App) {
@@ -147,85 +170,135 @@ impl MachinesPage {
 
 impl Render for MachinesPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = native_colors(cx);
         let owner = i_am_owner(&self.services);
-        let note = |text: gpui::SharedString| {
-            div()
-                .h(metrics::FORM_ROW)
-                .px(metrics::FORM_ROW_INSET)
-                .flex()
-                .items_center()
-                .n_body()
-                .text_color(k.secondary)
-                .child(text)
-                .into_any_element()
-        };
-        let rows: Vec<gpui::AnyElement> = match (&self.machines, &self.status) {
-            (Some(list), _) if !list.is_empty() => list
-                .iter()
-                .map(|m| self.row(m, cx).into_any_element())
-                .collect(),
-            (Some(_), _) => vec![note(s::NO_COMPUTERS.into())],
-            (None, Status::Failed(t)) => vec![
-                FormRow::new(t.clone())
-                    .control(
-                        push_button(
-                            "machines-retry",
-                            s::RETRY,
-                            PushStyle::Outline,
-                            PushSize::Small,
-                            cx,
-                        )
-                        .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
-                    )
-                    .into_any_element(),
-            ],
-            (None, _) => vec![
-                div()
-                    .h(metrics::FORM_ROW)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(ui::native::spinner())
-                    .into_any_element(),
-            ],
-        };
         let page = cx.entity();
-        let add = disabled_push(
-            square_button("machine-add", true, s::COMPUTER_ADD, window, cx),
-            !owner,
-            cx,
-        )
-        .bg(gpui::transparent_black())
-        .on_click(move |_, window, cx| Self::open_add(page.clone(), window, cx));
-        // No computer can be removed from here yet: `−` stays dimmed.
-        let remove = square_button("machine-remove", false, s::COMPUTER_REMOVE, window, cx)
-            .disabled(true)
-            .opacity(0.4);
-        let computers = GroupedForm::new()
-            .header(s::TEAM_COMPUTERS)
-            .rows(rows)
-            .below(widgets::list_controls(
-                square_pair(add, remove, cx),
-                s::TEAM_COMPUTERS_FOOTER,
+        let add = owner.then(|| {
+            push_button(
+                "machine-add",
+                s::COMPUTER_ADD_OPEN,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(move |_, window, cx| Self::open_add(page.clone(), window, cx))
+        });
+        let mut header = SectionTitle::new(s::TEAM_COMPUTERS).description(s::TEAM_COMPUTERS_FOOTER);
+        if let Some(add) = add {
+            header = header.action(add);
+        }
+        let body: gpui::AnyElement = match (&self.machines, &self.status) {
+            (Some(list), _) if !list.is_empty() => {
+                header = header.count(list.len() as u32);
+                let rows = list.iter().map(|m| self.row(m, window, cx)).collect();
+                GroupedForm::new()
+                    .row(widgets::item_rows(rows, tokens::height::SM, cx))
+                    .into_any_element()
+            }
+            (Some(_), _) => GroupedForm::new()
+                .row(widgets::list_empty(
+                    Sym::Computer,
+                    s::NO_COMPUTERS,
+                    None,
+                    cx,
+                ))
+                .into_any_element(),
+            (None, Status::Failed(t)) => widgets::failed_alert(
+                "machines-failed",
+                s::COMPUTERS_FAILED,
+                Some(t.clone()),
+                Some(
+                    widgets::retry_button("machines-retry", cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                ),
+                cx,
+            ),
+            (None, _) => GroupedForm::new()
+                .row(widgets::list_loading("machines-loading", 2, true, cx))
+                .into_any_element(),
+        };
+        // A reload that failed after the list was shown: the Alert under it.
+        let reload_failed = match (&self.machines, &self.status) {
+            (Some(_), Status::Failed(t)) => Some(widgets::failed_alert(
+                "machines-reload-failed",
+                s::COMPUTERS_FAILED,
+                Some(t.clone()),
+                Some(
+                    widgets::retry_button("machines-reload-retry", cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh(cx))),
+                ),
+                cx,
+            )),
+            _ => None,
+        };
+        let open_cloud = div()
+            .id("cloud-open")
+            .tooltip(|window, cx| Tooltip::new(s::CLOUD_OPEN_TIP).build(window, cx))
+            .child(disabled_push(
+                push_button(
+                    "cloud-open-button",
+                    s::CLOUD_OPEN,
+                    PushStyle::Outline,
+                    PushSize::Small,
+                    cx,
+                ),
+                true,
                 cx,
             ));
-        let cloud = GroupedForm::new()
-            .row(
-                FormRow::new(s::CLOUD)
-                    .leading(ui::sym(Sym::Cloud, SymSize::SIDEBAR, k.secondary))
-                    .value(s::CLOUD_NOT_YET, cx),
-            )
-            .footer(s::CLOUD_FOOTER);
+        let cloud = GroupedForm::new().row(
+            widgets::ItemRow::new("cloud", s::CLOUD)
+                .media(widgets::icon_box_28(Sym::Cloud, cx))
+                .description(s::CLOUD_NOT_YET)
+                .value(open_cloud),
+        );
         widgets::pane()
-            .child(computers)
-            .children(
-                (self.machines.is_some() && matches!(self.status, Status::Failed(_)))
-                    .then(|| widgets::native_status(&self.status, cx))
-                    .flatten(),
-            )
-            .child(cloud)
+            .child(widgets::section(
+                header,
+                div()
+                    .w_full()
+                    .flex()
+                    .flex_col()
+                    .gap(tokens::space::S12)
+                    .child(body)
+                    .children(reload_failed),
+            ))
+            .child(widgets::section(
+                SectionTitle::new(s::CLOUD).description(s::CLOUD_FOOTER),
+                cloud,
+            ))
     }
+}
+
+/// The second line of a computer row, most important first: what it does
+/// (or when it was last seen; a time of 0 is never), the version, the OS,
+/// then the other tags.
+fn machine_facts(m: &MachineInfo, now: chrono::DateTime<chrono::Local>) -> String {
+    let mut facts: Vec<String> = Vec::new();
+    facts.push(match m.last_heartbeat_at {
+        _ if m.connected && m.active_runs > 0 => {
+            fill(s::MACHINE_BUSY, &[("n", &m.active_runs.to_string())])
+        }
+        _ if m.connected => s::MACHINE_IDLE.to_string(),
+        Some(at) if at > 0 => fill(s::MACHINE_SEEN, &[("when", &relative_time(at, now))]),
+        _ => s::MACHINE_NEVER_ONLINE.to_string(),
+    });
+    if let Some(v) = &m.version {
+        facts.push(fill(s::MACHINE_VERSION, &[("v", v)]));
+    }
+    let (os, tags): (Vec<&String>, Vec<&String>) = m.labels.iter().partition(|l| os_tag(l));
+    facts.extend(os.into_iter().map(|l| tag_text(l)));
+    let tags: Vec<String> = tags.into_iter().map(|l| tag_text(l)).collect();
+    if !tags.is_empty() {
+        facts.push(tags.join("、"));
+    }
+    facts.join(" · ")
+}
+
+/// A tag that names the operating system.
+fn os_tag(label: &str) -> bool {
+    matches!(
+        label.trim().to_ascii_lowercase().as_str(),
+        "mac" | "macos" | "darwin" | "osx" | "linux" | "ubuntu" | "debian" | "windows" | "win"
+    )
 }
 
 /// A machine tag as people read it: the common routing tags in plain words,
@@ -244,9 +317,10 @@ fn tag_text(label: &str) -> String {
     }
 }
 
-/// The symbol of a computer by its kind, read from its name and tags: a
-/// notebook `laptopcomputer`, a Mac mini `macmini`, a server `cloud`,
-/// anything else `desktopcomputer`.
+/// The symbol of a computer by its OS and kind (2.19): a Linux or other
+/// server gets the server glyph (`Sym::Server` until the kit has
+/// `Sym::Server`), a notebook `laptopcomputer`, a Mac mini `macmini`,
+/// any other Mac `desktopcomputer`. The cloud glyph is only for 云端.
 fn machine_glyph(m: &MachineInfo) -> Sym {
     let words: Vec<String> = std::iter::once(m.name.to_lowercase())
         .chain(m.labels.iter().map(|l| l.to_lowercase()))
@@ -256,8 +330,16 @@ fn machine_glyph(m: &MachineInfo) -> Sym {
         Sym::Laptop
     } else if has(&["mini"]) {
         Sym::MacMini
-    } else if has(&["server", "服务器", "linux", "vps", "cloud", "云", "ubuntu"]) {
-        Sym::Cloud
+    } else if has(&[
+        "server",
+        "服务器",
+        "linux",
+        "ubuntu",
+        "debian",
+        "vps",
+        "windows",
+    ]) {
+        Sym::Server
     } else {
         Sym::Computer
     }
@@ -271,17 +353,27 @@ pub struct MachineForm {
     labels: Entity<InputState>,
     status: Status,
     created: Option<MachineCreated>,
+    _subscriptions: Vec<gpui::Subscription>,
 }
 
 impl MachineForm {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let name =
+            cx.new(|cx| InputState::new(window, cx).placeholder(s::MACHINE_NAME_PLACEHOLDER));
+        // The default button follows the name as it is typed.
+        let subscriptions = vec![cx.subscribe(&name, |_, _, e: &InputEvent, cx| {
+            if matches!(e, InputEvent::Change) {
+                cx.notify();
+            }
+        })];
         Self {
             services,
-            name: cx.new(|cx| InputState::new(window, cx).placeholder(s::MACHINE_NAME_PLACEHOLDER)),
+            name,
             labels: cx
                 .new(|cx| InputState::new(window, cx).placeholder(s::RUNNER_LABELS_PLACEHOLDER)),
             status: Status::Idle,
             created: None,
+            _subscriptions: subscriptions,
         }
     }
 
@@ -396,38 +488,60 @@ impl Render for MachineForm {
                     "machine-done",
                     s::DONE,
                     PushStyle::Default,
-                    PushSize::Large,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(|_, window, cx| window.close_dialog(cx))])
                 .into_any_element();
         }
         let busy = self.status.busy();
-        let submit = cx.entity();
+        let typed = self.name.read(cx).value().trim().to_string();
+        // An empty name only turns the default button off; a name that is
+        // too long also shows why under the field.
+        let problem = (!typed.is_empty())
+            .then(|| widgets::check_len(&typed, 64).err())
+            .flatten();
+        let off = busy || typed.is_empty() || problem.is_some();
+        let (submit, retry) = (cx.entity(), cx.entity());
+        let failed = match &self.status {
+            Status::Failed(t) => Some(widgets::failed_alert(
+                "machine-add-failed",
+                s::MACHINE_ADD_FAILED,
+                Some(t.clone()),
+                Some(
+                    widgets::retry_button("machine-add-retry", cx)
+                        .on_click(move |_, _, cx| retry.update(cx, |f, cx| f.submit(cx))),
+                ),
+                cx,
+            )),
+            _ => None,
+        };
         SheetLayout::new(s::COMPUTER_ADD)
             .explanation(s::COMPUTER_ADD_HINT)
             .body(
-                GroupedForm::new()
-                    .row(
-                        FormRow::new(s::MACHINE_NAME).control(
-                            NativeTextField::new("machine-name", &self.name)
-                                .width(metrics::FIELD_NAME_WIDTH),
-                        ),
-                    )
-                    .row(
-                        FormRow::new(s::MACHINE_LABELS).control(
-                            NativeTextField::new("machine-labels", &self.labels)
-                                .width(metrics::FIELD_NAME_WIDTH),
-                        ),
-                    ),
+                sheet_form()
+                    .child(sheet_form_row_invalid(
+                        s::MACHINE_NAME,
+                        NativeTextField::new("machine-name", &self.name)
+                            .full_width()
+                            .error(problem.is_some()),
+                        problem.is_some(),
+                        cx,
+                    ))
+                    .child(sheet_form_row(
+                        s::MACHINE_LABELS,
+                        NativeTextField::new("machine-labels", &self.labels).full_width(),
+                        cx,
+                    )),
             )
-            .when_some(widgets::native_status(&self.status, cx), |l, st| l.body(st))
+            .when_some(failed, |l, f| l.body(f))
+            .when_some(problem, |l, p| l.status(sheet_status_error(p, cx)))
             .buttons([
                 push_button(
                     "machine-cancel",
                     common::CANCEL,
                     PushStyle::Outline,
-                    PushSize::Large,
+                    PushSize::Regular,
                     cx,
                 )
                 .on_click(|_, window, cx| window.close_dialog(cx)),
@@ -436,12 +550,13 @@ impl Render for MachineForm {
                         "machine-submit",
                         s::MACHINE_CREATE,
                         PushStyle::Default,
-                        PushSize::Large,
+                        PushSize::Regular,
                         cx,
                     ),
-                    busy,
+                    off,
                     cx,
                 )
+                .loading(busy)
                 .on_click(move |_, _, cx| submit.update(cx, |f, cx| f.submit(cx))),
             ])
             .into_any_element()
@@ -518,7 +633,8 @@ mod tests {
             machine_glyph(&machine("joye-macbook-pro-m4-max", &[])),
             Sym::Laptop
         );
-        assert_eq!(machine_glyph(&machine("build-01", &["linux"])), Sym::Cloud);
+        assert_eq!(machine_glyph(&machine("build-01", &["linux"])), Sym::Server);
+        assert_eq!(machine_glyph(&machine("构建服务器", &[])), Sym::Server);
     }
 
     #[test]
