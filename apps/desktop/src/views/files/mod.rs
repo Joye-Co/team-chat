@@ -26,9 +26,9 @@ pub const PREVIEW_MAX_H: Pixels = px(320.);
 pub const PREVIEW_MIN: Pixels = px(48.);
 /// Width of a file row in the timeline: the one measure (§4.4).
 pub const FILE_ROW_W: Pixels = px(620.);
-/// Height of a file row: 12 + 40 pt tile + 12 (fixed, so progress does not
+/// Height of a file row: 12 + two lines + 12 + the 4 pt bar room (fixed, so progress does not
 /// change the row height).
-pub const FILE_ROW_H: Pixels = px(64.);
+pub const FILE_ROW_H: Pixels = px(52.);
 /// Height of a 产出 or file row in the side panel (§7.11).
 pub const PANEL_ROW_H: Pixels = px(48.);
 
@@ -241,9 +241,45 @@ pub fn open_file(
     .detach();
 }
 
-/// Shows an error in the active window (or the first window).
+/// Shows an error in the active window (or the first window) as a Tahoe
+/// alert (NATIVE.md §7.2, §7.4: errors that block use an alert, never a
+/// toast): the app icon, the message and one `好` button (Return or Escape
+/// close it). When the window already shows a sheet or an alert, the error
+/// goes to the log instead of stacking a second one.
 pub fn notify_error(message: String, cx: &mut App) {
-    notify(Notification::error(message), cx);
+    use crate::ui::native::{
+        AlertLayout, PushStyle, alert_button, metrics,
+        overlays::{app_icon, native_alert},
+    };
+    use gpui::ParentElement as _;
+    let target = cx
+        .active_window()
+        .or_else(|| cx.windows().into_iter().next());
+    let Some(window) = target else {
+        tracing::info!("no window for an error alert");
+        return;
+    };
+    let _ = window.update(cx, move |_, window, cx| {
+        if window.has_active_dialog(cx) {
+            tracing::info!("an error came while a dialog was open");
+            return;
+        }
+        let message: gpui::SharedString = message.into();
+        window.open_dialog(cx, move |dialog, _, cx| {
+            native_alert(dialog, cx).on_ok(|_, _, _| true).child(
+                AlertLayout::new(message.clone())
+                    .icon(app_icon(metrics::ALERT_ICON))
+                    .buttons([alert_button(
+                        "files-error-ok",
+                        f::ALERT_OK,
+                        PushStyle::Default,
+                        false,
+                        cx,
+                    )
+                    .on_click(|_, window, cx| window.close_dialog(cx))]),
+            )
+        });
+    });
 }
 
 pub fn notify(note: Notification, cx: &mut App) {

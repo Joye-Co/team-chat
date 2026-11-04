@@ -21,7 +21,7 @@ use super::{
 use crate::{
     copy::diagrams as c,
     theme::{self, Type as _, radius, space},
-    ui::{self, Lucide, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
 };
 
 /// Largest inline height before the image scales down or is cut.
@@ -324,7 +324,7 @@ fn header(
         .gap(space::S6)
         .border_b_1()
         .border_color(k.line)
-        .child(ui::icon(Lucide::Workflow, px(14.), k.ink_3))
+        .child(ui::icon(Sym::Diagram, px(14.), k.ink_3))
         .child(
             div()
                 .t_meta()
@@ -357,7 +357,7 @@ fn header(
                     }),
             )
             .child(
-                ui::icon_button_sm(ElementId::Name(format!("dcopy-{id}").into()), Lucide::Copy)
+                ui::icon_button_sm(ElementId::Name(format!("dcopy-{id}").into()), Sym::Copy)
                     .named(c::COPY_SOURCE)
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))
@@ -365,14 +365,11 @@ fn header(
             )
             .when_some(viewer, |el, (spec, n, focus)| {
                 el.child(
-                    ui::icon_button_sm(
-                        ElementId::Name(format!("dzoom-{id}").into()),
-                        Lucide::Maximize2,
-                    )
-                    .named(c::ZOOM_IN)
-                    .on_click(move |_, window, cx| {
-                        open_viewer(&spec, &n, focus.clone(), window, cx)
-                    }),
+                    ui::icon_button_sm(ElementId::Name(format!("dzoom-{id}").into()), Sym::Expand)
+                        .named(c::ZOOM_IN)
+                        .on_click(move |_, window, cx| {
+                            open_viewer(&spec, &n, focus.clone(), window, cx)
+                        }),
                 )
             })
         })
@@ -648,13 +645,13 @@ fn error_frame(
         ErrorKind::Failed => (
             k.bad.opacity(0.35),
             k.bad.opacity(0.07),
-            Lucide::CircleX,
+            Sym::Failed,
             k.bad_ink,
             k.bad_ink,
         ),
-        ErrorKind::TooBig => (k.line, k.sunken, Lucide::Clock, k.ink_3, k.ink_2),
+        ErrorKind::TooBig => (k.line, k.sunken, Sym::Waiting, k.ink_3, k.ink_2),
         ErrorKind::Unsupported | ErrorKind::Forbidden => {
-            (k.line, k.raised, Lucide::Workflow, k.ink_3, k.ink)
+            (k.line, k.raised, Sym::Diagram, k.ink_3, k.ink)
         }
     };
     let hint_text = hint.and_then(|h| match h {
@@ -708,7 +705,7 @@ fn error_frame(
                 })
                 .child(div().flex_1())
                 .child(
-                    ui::icon_button_sm(ElementId::Name(format!("dcopy-{id}").into()), Lucide::Copy)
+                    ui::icon_button_sm(ElementId::Name(format!("dcopy-{id}").into()), Sym::Copy)
                         .named(c::COPY_SOURCE)
                         .on_click(move |_, _, cx| {
                             cx.write_to_clipboard(ClipboardItem::new_string(source.clone()))

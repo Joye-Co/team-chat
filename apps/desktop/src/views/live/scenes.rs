@@ -15,6 +15,59 @@ fn live(services: &Services, cx: &mut App) {
     });
 }
 
+// --- v12/fx-overlays: the stop scenes ---
+
+/// The main window on the running sample run's steps, with its own
+/// provider: `hold` keeps a stop unanswered (`正在停止…`).
+fn open_stop_with(
+    hold: bool,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<(gpui::AnyWindowHandle, Services), String> {
+    use crate::views::process::preview as p;
+    let fake = crate::fake::FakeProvider::new();
+    if hold {
+        fake.hold_stop(p::RUN);
+    }
+    let services = Services::new(fake, cx);
+    p::open_running(&services, cx);
+    let handle = open_main(services.clone(), content, cx)?;
+    Ok((handle, services))
+}
+
+/// 停止 pressed: the alert that asks first.
+pub fn open_stop(
+    _services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<gpui::AnyWindowHandle, String> {
+    use crate::views::process::preview as p;
+    let (handle, services) = open_stop_with(false, content, cx)?;
+    let run = services
+        .provider
+        .runs(p::GROUP, p::TOPIC)
+        .into_iter()
+        .find(|r| r.id == p::RUN)
+        .ok_or("no sample run")?;
+    handle
+        .update(cx, |_, window, cx| {
+            crate::views::process::confirm_stop(&services, &run, window, cx)
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+/// After 停止: `正在停止…` until the run ends.
+pub fn open_stopping(
+    _services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<gpui::AnyWindowHandle, String> {
+    open_stop_with(true, content, cx).map(|(h, _)| h)
+}
+
+// --- end v12/fx-overlays ---
+
 pub const SCENES: &[Scene] = &[
     Scene {
         name: "live",

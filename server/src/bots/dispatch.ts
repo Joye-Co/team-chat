@@ -193,6 +193,8 @@ export function buildPrompt(opts: {
    * question without the server's quote lines.
    */
   refs?: string;
+  /** Settings: the team's approval rules for this bot (settings/rules.ts `policyPrompt`). */
+  rules?: string;
   /** The daemon reads acceptance blocks (feature "acceptance"): the prompt says how to write them. */
   acceptance?: boolean;
 }): string {
@@ -202,6 +204,7 @@ export function buildPrompt(opts: {
     "Your final answer is posted into the topic as is, so keep it short and in the language of the request.",
     ...(opts.acceptance ? [ACCEPTANCE_RULE] : []),
     ...(opts.refs ? [REFS_RULE] : []),
+    ...(opts.rules ? [opts.rules] : []),
     "",
     "Recent messages of the topic, oldest first:",
     ...opts.messages.map((m) => `${name(m.authorId)}: ${m.body}`),

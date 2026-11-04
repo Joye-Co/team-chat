@@ -14,9 +14,11 @@ Read [docs/PRODUCT.md](docs/PRODUCT.md) (what we build, interface words, V1 bar)
 - **Design bar**: first-class visual design is a V1 requirement, not polish for later. Build
   every UI element from gpui-component (the first-class GPUI component library: button, input,
   list, popover, menu, dialog, tooltip, badge, avatar, tabs, switch, notification and the rest),
-  styled through the theme; never hand-roll a control that gpui-component has. Follow
-  [docs/DESIGN.md](docs/DESIGN.md) once it is on main; until then keep every color, size and
-  duration in theme tokens so the design pass can restyle them. Look at your screens: capture
+  styled through the theme; never hand-roll a control that gpui-component has. The app is a
+  Mac client, not a web page: follow [docs/design/NATIVE.md](docs/design/NATIVE.md) (window,
+  toolbar, sidebar, controls, SF Symbols, sheets, settings window, behavior), which wins over
+  [docs/DESIGN.md](docs/DESIGN.md) where they differ; DESIGN.md still owns Card v2, status words
+  and content. Keep every color, size and duration in theme tokens. Look at your screens: capture
   only the app's own window (`screencapture -l <window id> -o -x <png>`, or the app's
   screenshot self-test when it exists), never the full screen, in light and dark mode, and read
   the PNGs. Before merging UI work, check it with the vendored skills in

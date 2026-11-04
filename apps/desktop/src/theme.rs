@@ -170,8 +170,10 @@ pub fn live_pane_width(window_w: Pixels) -> Pixels {
 pub const WINDOW_MIN_HEIGHT: Pixels = px(680.);
 pub const WINDOW_DEFAULT_WIDTH: Pixels = px(1440.);
 pub const WINDOW_DEFAULT_HEIGHT: Pixels = px(900.);
-/// Traffic light origin: their center lands on y 26, the title row center.
-pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(20.), px(20.));
+/// Traffic light origin (v12/shell, NATIVE.md §2): the 14 pt lights sit in
+/// the floating sidebar, the red one centred 25, 26 pt from the window
+/// corner, on the centre line of the 52 pt toolbar row.
+pub const TRAFFIC_LIGHTS: (Pixels, Pixels) = (px(18.), px(19.));
 /// Leading inset of a toolbar band that holds the traffic lights.
 pub const TRAFFIC_LIGHTS_INSET: Pixels = px(84.);
 /// Timeline and topic row avatar size.
@@ -269,28 +271,28 @@ pub mod icon {
 pub mod size {
     use gpui::{Pixels, px};
     /// Button `sm`: inline in a message or card row (重试).
-    pub const BUTTON_SM: Pixels = px(28.);
+    pub const BUTTON_SM: Pixels = px(20.); // v12/kit: small push button
     /// Card actions (Card v2 footers, 首页 asks, the pinned card): one height
     /// for primary, quiet and text actions (§7.5).
-    pub const BUTTON_CARD: Pixels = px(28.);
+    pub const BUTTON_CARD: Pixels = px(24.); // v12/kit: regular push button
     /// Side padding of a card action.
     pub const BUTTON_CARD_PAD: Pixels = px(12.);
     /// Button `md`: the default (card actions, dialogs).
-    pub const BUTTON_MD: Pixels = px(32.);
+    pub const BUTTON_MD: Pixels = px(24.); // v12/kit: regular push button
     /// Button `md` page primary (settings `添加成员 ▾`).
-    pub const BUTTON_PAGE: Pixels = px(36.);
+    pub const BUTTON_PAGE: Pixels = px(24.); // v12/kit: regular push button
     /// Button `lg`: login, empty-state primary, full-width submit.
-    pub const BUTTON_LG: Pixels = px(40.);
+    pub const BUTTON_LG: Pixels = px(28.); // v12/kit: large capsule
     /// Text button inside a message (重试 after a failed send).
-    pub const TEXT_BUTTON: Pixels = px(22.);
-    pub const ICON_BUTTON: Pixels = px(32.);
-    pub const ICON_BUTTON_SM: Pixels = px(28.);
+    pub const TEXT_BUTTON: Pixels = px(20.); // v12/kit
+    pub const ICON_BUTTON: Pixels = px(28.); // v12/kit
+    pub const ICON_BUTTON_SM: Pixels = px(24.); // v12/kit
     /// Search and filter fields.
-    pub const SEARCH_FIELD: Pixels = px(36.);
+    pub const SEARCH_FIELD: Pixels = px(24.); // v12/kit: search field
     /// Form fields (login, settings, dialogs).
-    pub const FORM_FIELD: Pixels = px(40.);
+    pub const FORM_FIELD: Pixels = px(24.); // v12/kit: standalone field
     /// Select in a table row: 36 x 120.
-    pub const SELECT: Pixels = px(36.);
+    pub const SELECT: Pixels = px(24.); // v12/kit: pop-up button
     pub const SELECT_WIDTH: Pixels = px(120.);
     /// Invite code box: 42 x 48.
     pub const INVITE_BOX: (Pixels, Pixels) = (px(42.), px(48.));
@@ -315,7 +317,7 @@ pub mod size {
     pub const SIDEBAR_ROW: Pixels = px(32.);
     pub const SIDEBAR_FOOTER: Pixels = px(56.);
     pub const TOPIC_ROW: Pixels = px(68.);
-    pub const MENU_ROW: Pixels = px(32.);
+    pub const MENU_ROW: Pixels = px(24.); // v12/kit: menu row
     pub const POPUP_ROW: Pixels = px(40.);
     pub const SWITCHER_ROW: Pixels = px(44.);
     pub const SWITCHER_HIT_ROW: Pixels = px(60.);
@@ -438,6 +440,7 @@ pub fn set_mode(mode: ThemeMode, cx: &mut App) {
     crate::ui::motion::sync_accessibility(cx);
     let dark = mode.is_dark();
     Theme::update(cx, |theme| apply(theme, dark));
+    apply_menu_style(cx);
 }
 
 /// Applies a change of the accessibility display options (Increase
@@ -446,6 +449,7 @@ pub fn set_mode(mode: ThemeMode, cx: &mut App) {
 pub fn refresh_accessibility(cx: &mut App) {
     let dark = is_dark(cx);
     Theme::update(cx, |theme| apply(theme, dark));
+    apply_menu_style(cx);
     cx.refresh_windows();
 }
 
@@ -456,6 +460,45 @@ pub fn is_dark(cx: &App) -> bool {
 fn c(hex: u32) -> Hsla {
     rgba(hex).into()
 }
+
+// --- v12/fx-shell: every menu (NATIVE.md §7.3) ---
+/// The style of every gpui-component menu, dropdown and context menu
+/// (NATIVE.md §7.3): an opaque `sheet` fill, radius 12, the glass edge and
+/// `float`, 5 pt inner padding, 24 pt rows with 13 pt text, the `accent`
+/// highlight inset 5 pt with radius 6, 1 px separators inset to the text.
+pub fn apply_menu_style(cx: &mut App) {
+    use crate::ui::native::{metrics, tokens::text};
+    let k = crate::ui::native::native_colors(cx);
+    let mut shadow = k.glass();
+    if k.is_dark() {
+        // A dark outer hairline keeps the menu off a dark page (AppKit draws one).
+        shadow.push(BoxShadow {
+            color: c(0x00000099),
+            offset: point(px(0.), px(0.)),
+            blur_radius: px(0.),
+            spread_radius: metrics::HAIRLINE,
+            inset: false,
+        });
+    }
+    gpui_component::menu::MenuStyle {
+        fill: k.sheet,
+        radius: metrics::MENU_RADIUS,
+        shadow,
+        padding: metrics::MENU_PAD,
+        row_height: metrics::MENU_ROW,
+        row_radius: metrics::MENU_ROW_RADIUS,
+        row_padding: metrics::MENU_ROW_PAD,
+        text_size: text::BODY.0,
+        line_height: text::BODY.1,
+        highlight: k.accent,
+        highlight_text: k.on_accent,
+        separator: k.separator,
+        separator_height: px(1.),
+        separator_margin: px(5.),
+    }
+    .set(cx);
+}
+// --- end v12/fx-shell ---
 
 /// Every gpui-component slot the app can show (DESIGN.md §2.8).
 fn apply(t: &mut Theme, dark: bool) {
@@ -621,6 +664,75 @@ fn apply(t: &mut Theme, dark: bool) {
     m.easing_enter = motion::out();
     m.easing_exit = motion::out();
     m.easing_move = motion::moving();
+
+    // --- v12/kit: gpui-component at native values (NATIVE.md §3–§5, §7.3) ---
+    let n = crate::ui::native::NativeColors::for_mode(dark);
+    // Body 13 pt for every control; controls 6 pt radius, menus and
+    // popovers 12.
+    t.font_size = crate::ui::native::tokens::text::BODY.0;
+    t.radius = crate::ui::native::metrics::BUTTON_REGULAR_RADIUS;
+    t.radius_lg = crate::ui::native::metrics::MENU_RADIUS;
+    // No hover backgrounds on rows (§1 rule 9); selection stays gray.
+    t.list_hover = clear;
+    t.table_hover = clear;
+    t.list_active = n.selection;
+    t.table_active = n.selection;
+    // Push buttons: `fill`, no hover change, `fillHover` pressed (§5.2).
+    t.button = n.fill;
+    t.button_hover = n.fill;
+    t.button_active = n.fill_hover;
+    t.button_foreground = n.label;
+    t.button_secondary = n.fill;
+    t.button_secondary_hover = n.fill;
+    t.button_secondary_active = n.fill_hover;
+    t.button_secondary_foreground = n.label;
+    t.secondary = n.fill;
+    t.secondary_hover = n.fill;
+    t.secondary_active = n.fill_hover;
+    t.button_primary = n.accent;
+    t.button_primary_hover = n.accent;
+    t.button_primary_foreground = n.on_accent;
+    t.primary = n.accent;
+    t.primary_hover = n.accent;
+    t.primary_foreground = n.on_accent;
+    // Ghost buttons and menu rows hover in `fillHover` (`accent` drives both
+    // in gpui-component, and also inline code in markdown, so it stays a
+    // gray rather than the ink of §7.3).
+    t.accent = n.fill_hover;
+    t.accent_foreground = n.label;
+    // Fields: `separator` edge, the accent focus ring.
+    t.input = n.separator;
+    t.ring = n.focus;
+    t.border = n.separator;
+    // Switches and checkboxes: `accent` on, `quaternary` off.
+    t.switch = n.quaternary;
+    t.switch_thumb = n.knob;
+    // Menus and popovers: `sheet` (menus at 92 %).
+    t.popover = n.sheet;
+    t.popover_foreground = n.label;
+    t.overlay = n.dim;
+    t.progress_bar = n.label;
+    t.tab_bar_segmented = n.fill;
+    t.sidebar = n.sidebar;
+    t.sidebar_accent = n.selection;
+    t.sidebar_accent_foreground = n.accent_text;
+    t.background = n.content;
+    t.window_border = n.separator;
+    // --- end v12/kit ---
+    // --- v12/shell: the app accent and the soft focus halo (NATIVE.md §4) ---
+    let accent = app_accent(dark);
+    let on_accent = accent_ink(dark);
+    t.button_primary = accent;
+    t.button_primary_hover = accent;
+    t.button_primary_active = accent.opacity(0.82);
+    t.button_primary_foreground = on_accent;
+    t.primary = accent;
+    t.primary_hover = accent;
+    t.primary_active = accent.opacity(0.82);
+    t.primary_foreground = on_accent;
+    t.sidebar_accent_foreground = system_accent().unwrap_or(n.label);
+    t.ring = focus_ring_color(accent, n.content);
+    // --- end v12/shell ---
 }
 
 // ---------------------------------------------------------------------------
@@ -647,23 +759,23 @@ pub mod type_scale {
     /// 17 / 24: v3 page titles in the title bar.
     pub const PAGE_TITLE: (Pixels, Pixels) = (px(17.), px(24.));
     /// 16 / 24: topic list header, side panel header, dialog title.
-    pub const TITLE: (Pixels, Pixels) = (px(16.), px(24.));
+    pub const TITLE: (Pixels, Pixels) = (px(17.), px(22.)); // v12/kit: Title 2
     /// 15 / 22: card titles.
     pub const CARD_TITLE: (Pixels, Pixels) = (px(15.), px(22.));
     /// 14 / 22: message text, composer text, card text, option rows.
-    pub const BODY: (Pixels, Pixels) = (px(14.), px(22.));
+    pub const BODY: (Pixels, Pixels) = (px(14.), px(21.)); // v12/kit: Message
     /// 14 / 20: rows, tabs, buttons, menus, fields.
-    pub const UI: (Pixels, Pixels) = (px(14.), px(20.));
+    pub const UI: (Pixels, Pixels) = (px(13.), px(18.)); // v12/kit: Body
     /// 13 / 20: previews, live line, inline buttons, footnotes, snippets.
-    pub const SMALL: (Pixels, Pixels) = (px(13.), px(20.));
+    pub const SMALL: (Pixels, Pixels) = (px(12.), px(16.)); // v12/kit: Callout
     /// 12 / 16: times, chips, badges, kbd, role tag, file meta, help.
-    pub const META: (Pixels, Pixels) = (px(12.), px(16.));
+    pub const META: (Pixels, Pixels) = (px(11.), px(14.)); // v12/kit: Subheadline
     /// 13 / 20 Menlo.
     pub const CODE: (Pixels, Pixels) = (px(13.), px(20.));
     /// 20 / 28: invite code boxes only.
     pub const CODE_ENTRY: (Pixels, Pixels) = (px(20.), px(28.));
     /// 15 / 20: the `lg` button label (buttons only).
-    pub const BUTTON_LG: (Pixels, Pixels) = (px(15.), px(20.));
+    pub const BUTTON_LG: (Pixels, Pixels) = (px(13.), px(18.)); // v12/kit: Body
     /// 32 / 40: a message of one to three emoji.
     pub const EMOJI: (Pixels, Pixels) = (px(32.), px(40.));
     /// 16 / 16: emoji in reaction pills.
@@ -1345,7 +1457,121 @@ pub fn palette_index(id: &str) -> usize {
 /// names are kept and point at the v3 tokens, so views written before v3
 /// build and take the new look: ink primary buttons, grey selection, rail
 /// and sunken surfaces, amber only for "you", blue only for "live".
+// --- v12/kit: the v3 colors under the native surfaces (NATIVE.md §4) ---
 fn build(dark: bool) -> Colors {
+    native_surfaces(build_v3(dark), dark)
+}
+
+/// Maps the shared surfaces, selection, separators, fills, scrim and the
+/// four state colors onto the macOS semantic values of NATIVE.md §4, so
+/// every screen built on these tokens gets the native look. Text colors and
+/// member tints stay as they are (the monochrome palette).
+fn native_surfaces(mut k: Colors, dark: bool) -> Colors {
+    let n = crate::ui::native::NativeColors::for_mode(dark);
+    // Surfaces.
+    k.bg = n.content;
+    k.content = n.content;
+    k.panel = n.content;
+    k.window_bg = n.content;
+    k.background = n.content;
+    k.group = n.content;
+    k.rail = n.sidebar;
+    k.sidebar = n.sidebar;
+    // Raised blocks stay a step above the page in dark mode.
+    if dark {
+        k.raised = rgba(0x262628FF).into();
+        // `ink-3` keeps 4.5:1 on the lighter native sidebar.
+        k.ink_3 = rgba(0x9C9CA4FF).into();
+        k.text_3 = k.ink_3;
+        k.offline = k.ink_3;
+    }
+    // Ink: the strongest text. The accent (graphite or the system
+    // accent) is a fill, never body text.
+    k.ink = n.ink;
+    k.text_1 = n.ink;
+    k.foreground = n.ink;
+    k.code_text = n.ink;
+    k.sel_glyph = n.ink;
+    k.overlay = n.sheet;
+    k.elevated = n.sheet;
+    k.scrim = n.dim;
+    // Selection: gray, never a hover (§1 rule 9).
+    for f in [
+        &mut k.sel,
+        &mut k.rail_sel,
+        &mut k.selected,
+        &mut k.sidebar_selected,
+        &mut k.fill_selected,
+        &mut k.fill_active,
+    ] {
+        *f = n.selection;
+    }
+    for f in [
+        &mut k.hover,
+        &mut k.rail_hover,
+        &mut k.sidebar_hover,
+        &mut k.row_hover,
+        &mut k.fill_hover,
+        &mut k.opt_hover,
+        &mut k.btn_quiet_hover,
+    ] {
+        *f = n.fill_hover;
+    }
+    k.pressed = n.quaternary;
+    k.fill_pressed = n.quaternary;
+    k.btn_quiet_pressed = n.quaternary;
+    // Quiet fills.
+    for f in [
+        &mut k.sunken,
+        &mut k.field,
+        &mut k.fill_field,
+        &mut k.code_bg,
+        &mut k.code_background,
+        &mut k.count_bg,
+        &mut k.opt_bg,
+        &mut k.tile,
+        &mut k.desk,
+        &mut k.btn_quiet,
+    ] {
+        *f = n.fill;
+    }
+    // Lines.
+    k.line = n.separator;
+    k.sep = n.separator;
+    k.border = n.separator;
+    k.control_border = n.separator;
+    // Accent (ink) and focus.
+    k.accent = n.accent;
+    k.btn = n.accent;
+    k.on_accent = n.on_accent;
+    k.btn_ink = n.on_accent;
+    // A solid count carries `onAccent` (white) text: graphite, like the accent.
+    k.count_solid = n.accent;
+    k.focus = n.focus;
+    k.focus_border = n.accent;
+    k.control_border_focus = n.accent;
+    // The four state colors (system orange, blue, red, green).
+    k.you = n.amber;
+    k.you_glyph = n.amber;
+    k.you_bar = n.amber;
+    k.warning = n.amber;
+    k.glyph_wait = n.amber;
+    k.live = n.blue;
+    k.glyph_progress = n.blue;
+    k.unread_dot = n.blue;
+    k.ok = n.green;
+    k.success = n.green;
+    k.online = n.green;
+    k.glyph_done = n.green;
+    k.bad = n.red;
+    k.danger = n.red;
+    k.badge = n.red;
+    k.new_divider = n.red;
+    k
+}
+// --- end v12/kit ---
+
+fn build_v3(dark: bool) -> Colors {
     let p = |l: u32, d: u32| if dark { c(d) } else { c(l) };
     // --- v3 tokens ---
     let bg = p(0xFFFFFFFF, 0x111113FF);
@@ -1728,7 +1954,7 @@ pub mod card_v2 {
     /// The status strip at the top of a card.
     pub const STRIP: Pixels = px(34.);
     /// The card title: 16/24 600.
-    pub const TITLE: (Pixels, Pixels) = (px(16.), px(24.));
+    pub const TITLE: (Pixels, Pixels) = (px(17.), px(22.)); // v12/kit: Title 2
     /// Widest card on the 首页 and in the gallery.
     pub const MAX_WIDTH: Pixels = px(680.);
     /// Header tile and the key letter tile of an option.
@@ -1812,9 +2038,206 @@ pub mod card_v2 {
 
 // --- end cards v2 track ---
 
+// ---------------------------------------------------------------------------
+// --- v12/shell: the app accent (NATIVE.md §4) ---
+//
+// The accent is graphite (`#6E6E73`, light and dark, white text on it)
+// while the system accent is multicolor (`AppleAccentColor` unset). When the person picked an accent
+// color in System Settings, the app uses `NSColor.controlAccentColor`, read
+// again when the system colors change. Self-tests never read it: they draw
+// the ink accent.
+
+/// The system accent as `0xRRGGBBAA`, or 0 for multicolor (graphite).
+static SYSTEM_ACCENT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// The accent the person picked in System Settings; `None` for multicolor.
+pub fn system_accent() -> Option<Hsla> {
+    match SYSTEM_ACCENT.load(Ordering::Relaxed) {
+        0 => None,
+        v => Some(rgba(v).into()),
+    }
+}
+
+/// Sets the system accent (`None`: multicolor). True when it changed.
+pub fn set_system_accent(accent: Option<Hsla>) -> bool {
+    let v = accent.map_or(0, |a| {
+        let c = gpui::Rgba::from(a);
+        let byte = |x: f32| (x.clamp(0., 1.) * 255.).round() as u32;
+        // 0 means multicolor: an opaque color never packs to 0.
+        (byte(c.r) << 24) | (byte(c.g) << 16) | (byte(c.b) << 8) | 0xFF
+    });
+    SYSTEM_ACCENT.swap(v, Ordering::Relaxed) != v
+}
+
+/// The app accent of a mode: graphite, or the system accent.
+pub fn app_accent(dark: bool) -> Hsla {
+    system_accent().unwrap_or_else(|| crate::ui::native::NativeColors::for_mode(dark).accent)
+}
+
+/// Text and symbols on the app accent: white on graphite and on a system
+/// accent color.
+pub fn accent_ink(dark: bool) -> Hsla {
+    match system_accent() {
+        Some(_) => c(0xFFFFFFFF),
+        None => crate::ui::native::NativeColors::for_mode(dark).on_accent,
+    }
+}
+
+/// The share of the accent in the focus halo.
+pub const FOCUS_HALO: f32 = 0.35;
+
+/// gpui-component's `ring` for a soft 3 pt halo of the accent at 35 %:
+/// gpui-component paints its outer band in `ring` at 50 %, so the ring is
+/// the accent blended toward `under` until half of it is 35 % accent.
+pub fn focus_ring_color(accent: Hsla, under: Hsla) -> Hsla {
+    let (a, b) = (gpui::Rgba::from(accent), gpui::Rgba::from(under));
+    let t = (FOCUS_HALO * 2.).min(1.);
+    let mix = |x: f32, y: f32| x * t + y * (1. - t);
+    gpui::Rgba {
+        r: mix(a.r, b.r),
+        g: mix(a.g, b.g),
+        b: mix(a.b, b.b),
+        a: 1.,
+    }
+    .into()
+}
+
+/// The focus halo drawn by our own controls: 3 pt of the accent at 35 %.
+pub fn focus_halo(dark: bool) -> Vec<BoxShadow> {
+    vec![BoxShadow {
+        color: app_accent(dark).opacity(FOCUS_HALO),
+        offset: point(px(0.), px(0.)),
+        blur_radius: px(0.),
+        spread_radius: crate::ui::native::metrics::FOCUS_RING,
+        inset: false,
+    }]
+}
+
+/// Reads the system accent now: `None` while `AppleAccentColor` is unset
+/// (multicolor).
+#[cfg(target_os = "macos")]
+fn read_system_accent() -> Option<Hsla> {
+    use objc2_app_kit::{NSColor, NSColorSpace};
+    use objc2_foundation::{NSString, NSUserDefaults};
+
+    let defaults = NSUserDefaults::standardUserDefaults();
+    defaults.objectForKey(&NSString::from_str("AppleAccentColor"))?;
+    let color = NSColor::controlAccentColor();
+    let srgb = color.colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())?;
+    let (mut r, mut g, mut b, mut a) = (0., 0., 0., 0.);
+    // SAFETY: the four pointers are valid for writes for the whole call.
+    unsafe { srgb.getRed_green_blue_alpha(&mut r, &mut g, &mut b, &mut a) };
+    Some(
+        gpui::Rgba {
+            r: r as f32,
+            g: g as f32,
+            b: b as f32,
+            a: 1.,
+        }
+        .into(),
+    )
+}
+
+#[cfg(not(target_os = "macos"))]
+fn read_system_accent() -> Option<Hsla> {
+    None
+}
+
+/// Reads the system accent and repaints when it changed.
+fn sync_system_accent(cx: &mut App) {
+    if set_system_accent(read_system_accent()) {
+        let dark = is_dark(cx);
+        Theme::update(cx, |theme| apply(theme, dark));
+        apply_menu_style(cx);
+        cx.refresh_windows();
+    }
+}
+
+/// Follows the accent color of System Settings while the app runs: read at
+/// start and again on `NSSystemColorsDidChangeNotification` and when the
+/// color preferences change. Call once on the main thread (the app only).
+#[cfg(target_os = "macos")]
+pub fn watch_system_accent(cx: &mut App) {
+    use std::ptr::NonNull;
+
+    use block2::RcBlock;
+    use futures::StreamExt as _;
+    use objc2_app_kit::NSSystemColorsDidChangeNotification;
+    use objc2_foundation::{
+        NSDistributedNotificationCenter, NSNotification, NSNotificationCenter, NSString,
+    };
+
+    sync_system_accent(cx);
+    let (tx, mut rx) = futures::channel::mpsc::unbounded::<()>();
+    let block = RcBlock::new(move |_n: NonNull<NSNotification>| {
+        let _ = tx.unbounded_send(());
+    });
+    // SAFETY: valid notification names; the block only sends on a channel.
+    let observers = unsafe {
+        let local = NSNotificationCenter::defaultCenter()
+            .addObserverForName_object_queue_usingBlock(
+                Some(NSSystemColorsDidChangeNotification),
+                None,
+                None,
+                &block,
+            );
+        let distributed = NSDistributedNotificationCenter::defaultCenter()
+            .addObserverForName_object_queue_usingBlock(
+                Some(&NSString::from_str(
+                    "AppleColorPreferencesChangedNotification",
+                )),
+                None,
+                None,
+                &block,
+            );
+        (local, distributed)
+    };
+    // Observe for the life of the process.
+    std::mem::forget(observers);
+    std::mem::forget(block);
+    cx.spawn(async move |cx| {
+        while rx.next().await.is_some() {
+            cx.update(sync_system_accent);
+        }
+    })
+    .detach();
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn watch_system_accent(_cx: &mut App) {}
+// --- end v12/shell ---
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- v12/shell ---
+    #[test]
+    fn the_accent_is_graphite_until_a_system_accent_is_set() {
+        set_system_accent(None);
+        let graphite: Hsla = rgba(crate::ui::native::tokens::GRAPHITE).into();
+        for dark in [false, true] {
+            assert_eq!(app_accent(dark), graphite);
+            assert_eq!(accent_ink(dark), rgba(0xFFFFFFFF).into());
+        }
+        let blue: Hsla = rgba(0x007AFFFF).into();
+        assert!(set_system_accent(Some(blue)));
+        assert!(
+            !set_system_accent(Some(blue)),
+            "the same accent is no change"
+        );
+        let back = gpui::Rgba::from(app_accent(false));
+        assert!((back.b - 1.).abs() < 0.01 && back.r < 0.01);
+        assert_eq!(accent_ink(false), rgba(0xFFFFFFFF).into());
+        set_system_accent(None);
+        // The halo: half of the ring over `under` is 35 % accent.
+        let ring = gpui::Rgba::from(focus_ring_color(
+            rgba(0x000000FF).into(),
+            rgba(0xFFFFFFFF).into(),
+        ));
+        assert!((ring.r - 0.3).abs() < 0.01 && ring.a == 1.);
+    }
+    // --- end v12/shell ---
 
     #[test]
     fn the_side_panel_fits_every_window_width() {
@@ -1940,13 +2363,16 @@ mod tests {
     }
 
     #[test]
-    fn primary_is_ink_and_selection_is_grey() {
+    fn primary_is_graphite_and_selection_is_grey() {
+        // No white or black filled buttons: the default button is the
+        // graphite accent with white text, in both modes.
         for k in [build(false), build(true)] {
             assert_eq!(k.accent, k.btn);
-            assert_eq!(k.btn, k.ink);
+            assert_ne!(k.btn, k.ink);
+            assert_eq!(k.btn, rgba(crate::ui::native::tokens::GRAPHITE).into());
             assert_eq!(k.selected, k.sel);
             assert!(k.sel.s < 0.1, "selection has no hue");
-            assert!(contrast(k.btn_ink, k.btn) >= 12.0);
+            assert!(contrast(k.btn_ink, k.btn) >= 4.5);
         }
     }
 

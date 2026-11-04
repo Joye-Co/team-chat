@@ -11,7 +11,11 @@ use gpui::{
     SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window, div, img,
     prelude::FluentBuilder as _, px, relative,
 };
-use gpui_component::{Disableable as _, tooltip::Tooltip};
+use gpui_component::{
+    Disableable as _,
+    menu::{ContextMenuExt as _, PopupMenuItem},
+    tooltip::Tooltip,
+};
 
 use super::{
     AUTO_DOWNLOAD_MAX_BYTES, FILE_ROW_H, FILE_ROW_W, OpenAction, error_text, open_file,
@@ -23,7 +27,11 @@ use crate::{
     data::{ChatProvider, FileAttachment, Message, TransferState, download_key, upload_key},
     provider::files::THUMB_SOURCE_MAX_BYTES,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{
+        self, Sym,
+        native::{NativeType as _, metrics as n_metrics, native_colors},
+        sf_symbols::{SymSize, Weight},
+    },
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -130,7 +138,7 @@ fn image_preview(
             .gap(space::S6)
             .px(space::S12)
             .max_w_full()
-            .child(ui::icon(Lucide::FileImage, theme::icon::EMPTY, k.text_3))
+            .child(ui::icon(Sym::Image, theme::icon::EMPTY, k.text_3))
             .child(line)
             .into_any_element()
     };
@@ -147,12 +155,12 @@ fn image_preview(
         (Some(path), _) => img(path.clone())
             .size_full()
             .object_fit(ObjectFit::Cover)
-            .rounded(theme::radius::MD - px(1.))
+            .rounded(theme::radius::MD)
             .into_any_element(),
         (None, Some(TransferState::Failed(e))) => skeleton(
             div()
                 .t_meta()
-                .text_color(k.danger_text)
+                .text_color(native_colors(cx).red)
                 .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
                 .into_any_element(),
         ),
@@ -172,13 +180,10 @@ fn image_preview(
         .flex_none()
         .rounded(theme::radius::MD)
         .overflow_hidden()
-        .border_1()
-        .border_color(k.border)
-        .bg(k.field)
+        .bg(native_colors(cx).fill)
         .flex()
         .items_center()
         .justify_center()
-        .cursor_pointer()
         .child(inner)
         .when_some(progress, |el, p| el.child(track(p, cx)))
         .tooltip(move |window, cx| Tooltip::new(f::OPEN_IMAGE).build(window, cx))
@@ -187,13 +192,13 @@ fn image_preview(
 }
 
 /// The type glyph of a file tile.
-fn file_icon(file: &FileAttachment) -> Lucide {
+fn file_icon(file: &FileAttachment) -> Sym {
     if file.is_image() {
-        Lucide::FileImage
+        Sym::Image
     } else if super::is_html(&file.name) {
-        Lucide::FileCode
+        Sym::CodeFile
     } else {
-        Lucide::FileText
+        Sym::Document
     }
 }
 
@@ -208,35 +213,35 @@ fn kind_word(file: &FileAttachment) -> &'static str {
     }
 }
 
-/// The inset progress track of a file row (§7.11): left 12, right 12,
-/// bottom 6, 3 pt tall, radius 1.5, `field` track and `accent` fill, so the
-/// bar never crosses the row's rounded corners or border.
+/// The progress of a file row (NATIVE.md §5.7): a 4 pt determinate bar,
+/// radius 2, `quaternary` track and `label` fill, under the text column
+/// (as Messages draws a transfer), 6 pt from the row's bottom.
 fn track(percent: f32, cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
+    let n = native_colors(cx);
     div()
         .absolute()
         .left(space::S12)
         .right(space::S12)
         .bottom(space::S6)
-        .h(px(3.))
-        .rounded(px(1.5))
-        .bg(k.field)
+        .h(n_metrics::BAR)
+        .rounded(n_metrics::BAR_RADIUS)
+        .bg(n.quaternary)
         .overflow_hidden()
         .child(
             div()
                 .h_full()
                 .w(relative((percent / 100.).clamp(0., 1.)))
-                .rounded(px(1.5))
-                .bg(k.accent),
+                .rounded(n_metrics::BAR_RADIUS)
+                .bg(n.label),
         )
 }
 
-/// The frame of a file row (§7.11). In the timeline: 12 pt padding (8 at the
-/// right), radius 12, 1 pt `border`, a 40 pt `accent-soft` tile with the type
-/// glyph, the name 14/500 cut in the middle, the meta line 12/16 `text-2`, and
-/// 32 pt icon buttons that show on hover (always while `pin_actions`). In the
-/// side panel (`compact`): a 48 pt row with a 32 pt tile, no border, a hover
-/// fill.
+/// The frame of a file row (NATIVE.md §9.2 attachments, like a Card v2
+/// surface): in the timeline a 52 pt row on `fill`, radius 12, no border
+/// and no shadow, the type symbol in `secondary` (no colored tile), the name
+/// in Body cut in the middle, the meta line in Subheadline `secondary`, and
+/// borderless buttons that show on hover (always while `pin_actions`). In
+/// the side panel (`compact`): a 48 pt row without a fill.
 #[allow(clippy::too_many_arguments)]
 fn row_frame(
     group: SharedString,
@@ -248,48 +253,41 @@ fn row_frame(
     pin_actions: bool,
     cx: &App,
 ) -> gpui::Div {
-    let k = theme::colors(cx);
-    let tile = if compact { px(32.) } else { px(40.) };
-    let glyph = if compact {
-        theme::icon::ROW
-    } else {
-        theme::icon::EMPTY
-    };
+    let n = native_colors(cx);
     let row = div()
         .group(group.clone())
         .relative()
         .flex_none()
         .flex()
         .items_center()
-        .gap(space::S12)
+        .gap(space::S10)
         .overflow_hidden();
     let row = if compact {
         row.h(super::PANEL_ROW_H)
             .mx(-space::S8)
             .px(space::S8)
             .rounded(theme::radius::MD)
-            .hover(|s| s.bg(k.hover))
     } else {
         row.w_full()
             .max_w(FILE_ROW_W)
             .h(FILE_ROW_H)
             .pl(space::S12)
             .pr(space::S8)
-            .rounded(theme::radius::LG)
-            .border_1()
-            .border_color(k.border)
-            .bg(k.content)
+            .rounded(px(12.))
+            .bg(n.fill)
     };
     row.child(
         div()
             .flex_none()
-            .size(tile)
-            .rounded(theme::radius::MD)
-            .bg(k.accent_soft)
+            .size(px(28.))
             .flex()
             .items_center()
             .justify_center()
-            .child(ui::icon(file_icon(file), glyph, k.accent_text)),
+            .child(ui::icons::sym(
+                file_icon(file),
+                SymSize::new(22., 28., Weight::Regular),
+                n.secondary,
+            )),
     )
     .child(
         div()
@@ -297,20 +295,25 @@ fn row_frame(
             .min_w(px(0.))
             .flex()
             .flex_col()
-            .when(!compact, |el| el.gap(space::S2))
             .child(
                 // Middle cut on the measured width: the last 12 characters
                 // and the extension stay (§15).
                 div()
-                    .t_ui()
-                    .medium()
-                    .text_color(k.text_1)
+                    .n_body()
+                    .text_color(n.label)
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis_middle()
                     .child(file.name.clone()),
             )
-            .child(div().t_meta().text_color(k.text_2).one_line().child(meta)),
+            .child(
+                div()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .one_line()
+                    .child(meta),
+            ),
     )
     .child(
         div()
@@ -326,11 +329,27 @@ fn row_frame(
         // In the side panel the track runs under the text column, 2 pt
         // from the row's bottom, so it never covers the meta line.
         el.child(if compact {
-            track(p, cx).left(px(52.)).right(space::S8).bottom(px(1.))
+            track(p, cx).left(px(46.)).right(space::S8).bottom(px(1.))
         } else {
+            // Under the name and meta: the symbol slot, then the gap.
             track(p, cx)
+                .left(space::S12 + px(28.) + space::S10)
+                .right(px(44.))
+                .bottom(px(5.))
         })
     })
+}
+
+/// A borderless symbol button inside a file row (§5.2, §6): 24 × 24,
+/// radius 6, a 13 pt Regular symbol (inline size, not the 16 pt toolbar
+/// size), `fillHover` on hover.
+fn row_button(id: ElementId, glyph: Sym) -> gpui_component::button::Button {
+    use gpui_component::{Sizable as _, button::ButtonVariants as _};
+    gpui_component::button::Button::new(id)
+        .ghost()
+        .icon(ui::icons::button_sym(glyph, SymSize::INLINE, px(24.)))
+        .with_size(px(24.))
+        .rounded(n_metrics::BUTTON_REGULAR_RADIUS)
 }
 
 fn upload_row(
@@ -339,11 +358,10 @@ fn upload_row(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
     let (meta, progress) = match state {
         TransferState::Failed(e) => (
             div()
-                .text_color(k.danger_text)
+                .text_color(native_colors(cx).red)
                 .child(fill(f::UPLOAD_FAILED, &[("reason", error_text(e))]))
                 .into_any_element(),
             None,
@@ -394,7 +412,6 @@ pub fn file_row_in(
     id: impl Fn(&str) -> ElementId,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
     let state = provider.file_transfer(&download_key(file));
     let plain = fill(
         f::META,
@@ -414,7 +431,7 @@ pub fn file_row_in(
         ),
         Some(TransferState::Failed(e)) => (
             div()
-                .text_color(k.danger_text)
+                .text_color(native_colors(cx).red)
                 .child(fill(f::DOWNLOAD_FAILED, &[("reason", error_text(e))]))
                 .into_any_element(),
             None,
@@ -423,10 +440,10 @@ pub fn file_row_in(
     };
     let running = progress.is_some();
     let failed = matches!(state, Some(TransferState::Failed(_)));
-    let action = |part: &str, label: &'static str, what: OpenAction, glyph: Lucide| {
+    let action = |part: &str, label: &'static str, what: OpenAction, glyph: Sym| {
         let provider = provider.clone();
         let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
-        ui::icon_button(id(part), glyph)
+        row_button(id(part), glyph)
             .named(label)
             .disabled(running)
             .on_click(move |_, _, cx| {
@@ -436,18 +453,13 @@ pub fn file_row_in(
             .into_any_element()
     };
     let actions = if failed {
-        vec![action(
-            "retry",
-            f::RETRY,
-            OpenAction::Open,
-            Lucide::RefreshCw,
-        )]
+        vec![action("retry", f::RETRY, OpenAction::Open, Sym::Refresh)]
     } else if running {
         // Downloading: cancel `x` (§7.11).
         let provider = provider.clone();
         let file = file.clone();
         vec![
-            ui::icon_button(id("cancel"), Lucide::X)
+            row_button(id("cancel"), Sym::Close)
                 .named(f::CANCEL_DOWNLOAD)
                 .on_click(move |_, _, cx| {
                     cx.stop_propagation();
@@ -457,13 +469,8 @@ pub fn file_row_in(
         ]
     } else {
         vec![
-            action("open", f::OPEN, OpenAction::Open, Lucide::ExternalLink),
-            action(
-                "reveal",
-                f::REVEAL,
-                OpenAction::RevealInFinder,
-                Lucide::FolderOpen,
-            ),
+            action("open", f::OPEN, OpenAction::Open, Sym::OpenExternal),
+            action("reveal", f::REVEAL, OpenAction::RevealInFinder, Sym::Folder),
         ]
     };
     let group = group_name(&id);
@@ -482,8 +489,31 @@ pub fn file_row_in(
     )
     .id(id("frame"))
     .when(!running, |el| {
-        el.cursor_pointer()
-            .on_click(move |_, _, cx| open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx))
+        el.on_click(move |_, _, cx| open_file(&provider2, &g, &t, &file2, OpenAction::Open, cx))
+    })
+    // v12/behavior: the row's buttons as a context menu (§7.3).
+    .context_menu({
+        let provider = provider.clone();
+        let (g, t, file) = (group_id.to_string(), topic_id.to_string(), file.clone());
+        move |menu, _, _| {
+            let item = |label: &'static str, what: OpenAction| {
+                let (provider, g, t, file) = (provider.clone(), g.clone(), t.clone(), file.clone());
+                PopupMenuItem::new(label)
+                    .on_click(move |_, _, cx| open_file(&provider, &g, &t, &file, what, cx))
+            };
+            if running {
+                let (provider, file) = (provider.clone(), file.clone());
+                menu.item(
+                    PopupMenuItem::new(f::CANCEL_DOWNLOAD)
+                        .on_click(move |_, _, _| provider.cancel_download(&file)),
+                )
+            } else if failed {
+                menu.item(item(f::RETRY, OpenAction::Open))
+            } else {
+                menu.item(item(f::OPEN, OpenAction::Open))
+                    .item(item(f::REVEAL, OpenAction::RevealInFinder))
+            }
+        }
     })
     .into_any_element()
 }

@@ -13,7 +13,7 @@ use gpui_component::{
 
 use crate::{
     theme::{self, Type as _, size, space, type_scale},
-    ui::{Lucide, icon},
+    ui::{Sym, icon},
 };
 
 /// Emoji in the picker: the reactions a team uses most.
@@ -46,7 +46,8 @@ pub fn picker_cell(
         .items_center()
         .justify_center()
         .rounded(theme::radius::SM)
-        .cursor_pointer()
+        // v12/kit: the arrow cursor (NATIVE.md §10); a picker cell is a
+        // menu-like item, so its hover stays.
         .text_size(px(20.))
         .hover(|el| el.bg(colors.hover))
         .active(|el| el.bg(colors.pressed))
@@ -150,11 +151,7 @@ pub fn reaction_add(id: impl Into<ElementId>, cx: &App) -> Button {
         .w(px(34.))
         .rounded(size::REACTION / 2.)
         .bg(k.field)
-        .child(icon(
-            Lucide::FaceSlightlySmilingPlus,
-            theme::icon::ROW,
-            k.text_2,
-        ))
+        .child(icon(Sym::Emoji, theme::icon::ROW, k.text_2))
 }
 
 /// The pill label (§7.5): the names for one or two members (`Joye、Tata`),

@@ -29,7 +29,7 @@ crate::copy! {
     MUTE = "静音",
     UNMUTE = "取消静音",
     MUTED = "已静音",
-    LEAVE_GROUP = "离开群",
+    LEAVE_GROUP = "离开群…",
     LEAVE_CONFIRM_TITLE = "离开「{name}」？",
     LEAVE_CONFIRM_BODY = "离开后你不会再收到这个群的消息。要回来，需要群里的成员重新邀请你。",
     LEAVE_OK = "离开",
@@ -49,7 +49,7 @@ crate::copy! {
     RENAME_GROUP_TITLE = "重命名群",
     RENAME_GROUP_FORBIDDEN = "你已不在这个群里，不能重命名",
     // add members dialog
-    ADD_MEMBERS = "添加成员",
+    ADD_MEMBERS = "添加成员…",
     ADD_MEMBERS_TITLE = "添加成员到「{name}」",
     ALL_MEMBERS_IN = "所有成员都已在这个群里",
     // start DM picker
@@ -115,6 +115,9 @@ crate::copy! {
     MENU_VIEW = "显示",
     MENU_SIDE_PANEL = "话题详情",
     MENU_FULL_SCREEN = "切换全屏幕",
+    // --- v12/behavior ---
+    MENU_SIDEBAR = "侧栏",
+    // --- end v12/behavior ---
     // menu bar item
     STATUS_ITEM_UNREAD = "{n} 条未读",
     STATUS_ITEM_MENTIONS = "{n} 条@你的消息",

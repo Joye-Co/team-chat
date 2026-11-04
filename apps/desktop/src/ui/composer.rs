@@ -19,7 +19,7 @@ use gpui_component::{
 use super::NamedButton as _;
 use crate::{
     theme::{self, Type as _, size, space},
-    ui::icons::{Lucide, button_glyph},
+    ui::icons::{Sym, button_glyph},
 };
 
 /// The horizontal inset gpui-component's `Textarea` keeps at `xsmall`.
@@ -235,7 +235,7 @@ impl RenderOnce for ComposerShell {
 /// `text-2` (`plus` 添加附件, `at-sign` 提及, `smile` 表情, `type` 格式).
 pub fn composer_tool(
     id: impl Into<ElementId>,
-    name: Lucide,
+    name: Sym,
     tooltip: impl Into<SharedString>,
 ) -> Button {
     Button::new(id)
@@ -257,7 +257,7 @@ pub fn send_button(
     let k = theme::colors(cx);
     let b = Button::new(id)
         .icon(button_glyph(
-            Lucide::ArrowUp,
+            Sym::ArrowUp,
             theme::icon::HEADER,
             size::ICON_BUTTON,
         ))

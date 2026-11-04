@@ -263,6 +263,16 @@ impl CoreProvider {
         let group = n.title.as_str();
         let topic = n.subtitle.clone().unwrap_or_default();
         let excerpt = excerpt(&n.body);
+        // --- settings-backend track: 成员卡住或出错 ---
+        if let Some(title) = super::settings_backend::event_title(n, group) {
+            return Notice {
+                title,
+                body: topic,
+                group_id: n.group_id.clone(),
+                topic_id: n.topic_id.clone(),
+            };
+        }
+        // --- end settings-backend track ---
         let (title, body) = match n.reason {
             NotifyReason::Mention => (
                 fill(n::MENTION_TITLE, &[("name", &actor), ("group", group)]),

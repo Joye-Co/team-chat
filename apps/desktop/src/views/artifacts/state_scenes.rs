@@ -5,8 +5,7 @@
 //!   在窗口打开).
 //! - `artifact-ref-toast`: the 话题 of the report; a page element asks 就这里提问 through the
 //!   page host (the same `ArtifactEvent::Ref` a page sends). The chip goes into the 话题
-//!   composer and the toast says 已放进话题的输入框 (the toast shows only on a real add;
-//!   `host` tests the other outcomes).
+//!   composer, and the chip is the confirmation: no toast (NATIVE.md §7.4).
 
 use std::cell::RefCell;
 use std::time::{Duration, Instant};
@@ -196,11 +195,7 @@ async fn ask_once(
             .timer(Duration::from_millis(50))
             .await;
     }
-    // One toast, and the one of a real add.
-    let toasts = cx.update(|cx| host::toasts(cx));
-    if toasts != [crate::copy::page_host::PAGE_REF_ADDED] {
-        return Err(format!("the toasts are {toasts:?}"));
-    }
+    // No toast (NATIVE.md §7.4): the composer's chip is the confirmation.
     cx.background_executor()
         .timer(Duration::from_millis(250))
         .await;

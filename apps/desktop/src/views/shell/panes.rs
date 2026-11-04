@@ -7,10 +7,9 @@ use gpui::{
     Pixels, Styled, Subscription, Window, div,
 };
 
-use super::PaneView;
 use crate::{
     app::{Changes, RightPane, Services},
-    theme, ui,
+    ui::{self, native::metrics},
     views::{
         artifact_page::pane::ArtifactPane,
         live::LivePane,
@@ -48,16 +47,13 @@ impl Panes {
         }
     }
 
-    /// The width `pane` takes in a window `window_w` wide; zero for none.
-    pub fn width(&self, pane: &RightPane, window_w: Pixels, cx: &App) -> Pixels {
-        match pane {
-            RightPane::None => gpui::px(0.),
-            RightPane::TopicRail => self.topic_rail.read(cx).width(window_w),
-            RightPane::Changes => self.changes.read(cx).width(window_w),
-            RightPane::SideChat(_) => self.side_chat.read(cx).width(window_w),
-            RightPane::Live(_) => self.live.read(cx).width(window_w),
-            RightPane::Artifact { .. } => self.artifact.read(cx).width(window_w),
-        }
+    /// The width `pane` takes; zero for none. One width per kind on every
+    /// screen (coordinator decision): the inspector and 改动 are 280 pt,
+    /// 单独问, the 产出 pane and 实时查看 are 400 pt. The panes' own
+    /// `PaneView::width` is not asked, so the trailing column never jumps
+    /// between screens.
+    pub fn width(&self, pane: &RightPane, _window_w: Pixels, _cx: &App) -> Pixels {
+        pane_width(pane)
     }
 
     fn view(&self, pane: &RightPane) -> Option<gpui::AnyView> {
@@ -71,26 +67,21 @@ impl Panes {
         })
     }
 
-    /// The width `pane` gets beside the page: the 实时查看 pane gives up
-    /// room down to its minimum so the page keeps [`theme::PAGE_MIN_WIDTH`].
+    /// The width `pane` gets beside the page: always its one width; a
+    /// window without room floats the pane over the page instead.
     pub fn fitted_width(
         &self,
         pane: &RightPane,
         window_w: Pixels,
-        room: Pixels,
+        _room: Pixels,
         cx: &App,
     ) -> Pixels {
-        let want = self.width(pane, window_w, cx);
-        match pane {
-            RightPane::Live(_) => want
-                .min(room - theme::PAGE_MIN_WIDTH)
-                .max(theme::LIVE_PANE_MIN_WIDTH),
-            _ => want,
-        }
+        self.width(pane, window_w, cx)
     }
 
-    /// The pane in its column, `width` wide: a hairline at its start, the
-    /// entrance, and a float over the page (level 2) when the window has no
+    /// The pane in its column, `width` wide (NATIVE.md §2 inspector): edge
+    /// to edge with the `sidebar` fill and a 1 px `separator` on its leading
+    /// edge, the entrance, and a float over the page when the window has no
     /// room for it.
     pub fn render(
         &self,
@@ -100,7 +91,6 @@ impl Panes {
         cx: &App,
     ) -> Option<AnyElement> {
         let view = self.view(pane)?;
-        let k = theme::colors(cx);
         let kind = match pane {
             RightPane::None => "none",
             RightPane::TopicRail => "rail",
@@ -109,29 +99,60 @@ impl Panes {
             RightPane::Live(_) => "live",
             RightPane::Artifact { .. } => "artifact",
         };
+        // Content starts below the toolbar row (coordinator decision). A
+        // pane with its own header (单独问, 实时查看, the 产出 pane) draws it
+        // in a 52 pt row at its top; the inspector panes have none, so the
+        // shell starts them below the row.
+        let top = if header_less(pane) {
+            metrics::PANE_TOP
+        } else {
+            gpui::px(0.)
+        };
         let body = ui::motion::pane_enter(
             ElementId::Name(format!("pane-enter-{kind}").into()),
-            div().size_full().child(view),
+            div().size_full().pt(top).child(view),
             cx,
         );
-        let column = div()
-            .w(width)
-            .h_full()
-            .flex_none()
-            .bg(k.rail)
-            .relative()
-            .overflow_hidden()
-            .child(body)
-            .child(ui::column_start_edge(cx));
+        let column = super::chrome::inspector_frame(width, cx).child(body);
         Some(if floats {
             column
                 .absolute()
                 .top_0()
                 .right_0()
-                .shadow(k.shadow(theme::Elevation::Overlay))
+                .shadow(super::chrome::colors(cx).float())
                 .into_any_element()
         } else {
             column.into_any_element()
         })
+    }
+}
+
+/// The one width of a pane kind (coordinator decision): 280 for the
+/// inspector panes, 400 for the wide panes.
+pub fn pane_width(pane: &RightPane) -> Pixels {
+    match pane {
+        RightPane::None => gpui::px(0.),
+        RightPane::TopicRail | RightPane::Changes => metrics::INSPECTOR_WIDTH,
+        RightPane::SideChat(_) | RightPane::Live(_) | RightPane::Artifact { .. } => {
+            metrics::WIDE_PANE_WIDTH
+        }
+    }
+}
+
+/// Whether `pane` has no header row of its own (the inspector panes).
+fn header_less(pane: &RightPane) -> bool {
+    matches!(pane, RightPane::TopicRail | RightPane::Changes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_pane_kind_has_one_of_two_widths() {
+        assert_eq!(pane_width(&RightPane::TopicRail), gpui::px(280.));
+        assert_eq!(pane_width(&RightPane::Changes), gpui::px(280.));
+        assert_eq!(pane_width(&RightPane::None), gpui::px(0.));
+        assert!(header_less(&RightPane::TopicRail));
     }
 }

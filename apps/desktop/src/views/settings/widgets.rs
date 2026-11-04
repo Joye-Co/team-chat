@@ -15,7 +15,7 @@ use crate::{
     copy::{fill, settings as s},
     data::{AdminError, AdminReply, MemberLevel, Millis},
     theme::{self, Elevation, Type as _, space},
-    ui::Lucide,
+    ui::Sym,
 };
 
 /// Waits for a reply off the UI thread. A dropped sender is [`AdminError::Other`].
@@ -397,11 +397,7 @@ pub fn status_line(id: impl Into<ElementId>, status: &Status, cx: &App) -> Optio
             div().into_any_element()
         } else if failed {
             line(text, color)
-                .child(crate::ui::icon(
-                    Lucide::CircleAlert,
-                    theme::icon::CHIP,
-                    k.danger,
-                ))
+                .child(crate::ui::icon(Sym::Alert, theme::icon::CHIP, k.danger))
                 .into_any_element()
         } else {
             line(text, color).into_any_element()
@@ -416,11 +412,7 @@ pub fn error_row(text: impl Into<SharedString>, retry: Button, cx: &App) -> Div 
     let k = theme::colors(cx);
     table(cx).child(
         table_row()
-            .child(crate::ui::icon(
-                Lucide::CircleAlert,
-                theme::icon::ROW,
-                k.danger,
-            ))
+            .child(crate::ui::icon(Sym::Alert, theme::icon::ROW, k.danger))
             .child(
                 div()
                     .flex_1()
@@ -495,11 +487,7 @@ pub fn select_button(id: impl Into<ElementId>, label: impl Into<SharedString>, c
                 .one_line()
                 .child(label.into()),
         )
-        .child(crate::ui::icon(
-            Lucide::ChevronsUpDown,
-            theme::icon::CHIP,
-            k.text_3,
-        ))
+        .child(crate::ui::icon(Sym::PopUp, theme::icon::CHIP, k.text_3))
 }
 
 /// A presence dot of the settings tables (§8.4): 8 pt; filled for a live
@@ -679,6 +667,233 @@ pub fn dialog_footer(buttons: Vec<Button>) -> Div {
         .gap(space::S8)
         .children(buttons)
 }
+
+// --- v12/settings track: native pane parts (NATIVE.md §5, §7, §8) ---
+
+/// The body of a pane (§8): 20 pt side margins, groups 20 pt apart.
+pub fn pane() -> Div {
+    use crate::ui::native::metrics;
+    div()
+        .w_full()
+        .px(metrics::GROUP_MARGIN)
+        .pt(px(20.))
+        .pb(px(20.))
+        .flex()
+        .flex_col()
+        .gap(metrics::GROUP_GAP)
+}
+
+/// A quiet line under a group or in a sheet (Subheadline): `secondary`, or
+/// `red` when the request failed. `None` when idle.
+pub fn native_status(status: &Status, cx: &App) -> Option<Div> {
+    use crate::ui::native::{NativeType as _, native_colors};
+    let k = native_colors(cx);
+    let (text, color) = match status {
+        Status::Idle => return None,
+        Status::Busy(t) | Status::Done(t) => (t.clone(), k.secondary),
+        Status::Failed(t) => (t.clone(), k.red),
+    };
+    Some(
+        div()
+            .px(px(2.))
+            .n_subheadline()
+            .text_color(color)
+            .child(text),
+    )
+}
+
+/// A `secondary` Subheadline line (a footer of my own, a field's help).
+pub fn quiet(text: impl Into<SharedString>, cx: &App) -> Div {
+    use crate::ui::native::{NativeType as _, native_colors};
+    div()
+        .px(px(2.))
+        .n_subheadline()
+        .text_color(native_colors(cx).secondary)
+        .child(text.into())
+}
+
+/// A field error under a standalone field: `red` Subheadline.
+pub fn field_error(text: impl Into<SharedString>, cx: &App) -> Div {
+    use crate::ui::native::{NativeType as _, native_colors};
+    div()
+        .n_subheadline()
+        .text_color(native_colors(cx).red)
+        .child(text.into())
+}
+
+/// A state dot and its text (§1 rule 4: a dot, never a pill).
+pub fn dot_text(color: Option<gpui::Hsla>, text: impl Into<SharedString>, cx: &App) -> Div {
+    use crate::ui::native::{NativeType as _, native_colors};
+    let k = native_colors(cx);
+    div()
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .child(
+            div()
+                .flex_none()
+                .size(px(7.))
+                .rounded_full()
+                .bg(color.unwrap_or(k.tertiary)),
+        )
+        .child(
+            div()
+                .n_body()
+                .text_color(k.secondary)
+                .whitespace_nowrap()
+                .child(text.into()),
+        )
+}
+
+/// The 48 pt app icon of an alert (§7.2).
+pub fn app_icon(cx: &App) -> AnyElement {
+    let icon = if theme::is_dark(cx) {
+        crate::ui::icons::APP_ICON_DARK_72
+    } else {
+        crate::ui::icons::APP_ICON_72
+    };
+    gpui::img(icon)
+        .flex_none()
+        .size(crate::ui::native::metrics::ALERT_ICON)
+        .into_any_element()
+}
+
+/// Opens a sheet attached under the settings toolbar (§7.1): Escape is
+/// 取消, the window grows to `floor` while it is up. `build` lays out the
+/// inside with `SheetLayout` on the configured dialog.
+pub fn open_sheet(
+    window: &mut Window,
+    cx: &mut App,
+    width: crate::ui::native::SheetWidth,
+    floor: Pixels,
+    build: impl Fn(
+        gpui_component::dialog::Dialog,
+        &mut Window,
+        &mut App,
+    ) -> gpui_component::dialog::Dialog
+    + 'static,
+) {
+    use gpui_component::WindowExt as _;
+    super::window_fit::sheet_floor(floor);
+    window.open_dialog(cx, move |dialog, window, cx| {
+        let dialog = crate::ui::native::native_sheet(dialog, width, cx)
+            .margin_top(super::TOOLBAR_HEIGHT)
+            .px(px(0.));
+        build(dialog, window, cx)
+    });
+}
+
+/// Opens a Tahoe alert (§7.2) on the settings window: 260 wide, attached
+/// under the toolbar like a sheet. `build` returns the `AlertLayout`.
+pub fn open_alert(
+    window: &mut Window,
+    cx: &mut App,
+    build: impl Fn(&mut Window, &mut App) -> AnyElement + 'static,
+) {
+    use crate::ui::native::metrics;
+    use gpui_component::WindowExt as _;
+    super::window_fit::sheet_floor(px(420.));
+    window.open_dialog(cx, move |dialog, window, cx| {
+        crate::ui::native::native_sheet(dialog, crate::ui::native::SheetWidth::Form, cx)
+            .width(metrics::ALERT_WIDTH)
+            .margin_top(super::TOOLBAR_HEIGHT)
+            .px(px(0.))
+            .child(build(window, cx))
+    });
+}
+
+/// A pop-up button (§5.3) of a fixed width, for a column of pop-ups: the
+/// title at the leading edge, the `chevron.up.chevron.down` at the trailing
+/// edge, so the marks line up row under row.
+pub fn popup_fixed(
+    id: impl Into<ElementId>,
+    title: impl Into<SharedString>,
+    width: Pixels,
+    window: &Window,
+    cx: &App,
+) -> Button {
+    use crate::ui::{
+        native::{PushSize, PushStyle, metrics, native_colors, push_button},
+        sf_symbols::{Sf, Weight, symbol},
+    };
+    let k = native_colors(cx);
+    push_button(id, "", PushStyle::Standard, PushSize::Regular, cx)
+        .w(width)
+        .pl(metrics::BUTTON_REGULAR_PAD)
+        .pr(metrics::FIELD_PAD)
+        .child(
+            div()
+                .w_full()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap(px(6.))
+                .child(
+                    div()
+                        .min_w(px(0.))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .child(title.into()),
+                )
+                .child(symbol(
+                    Sf::Popup,
+                    metrics::POPUP_CHEVRON_SLOT,
+                    Weight::Semibold,
+                    k.secondary,
+                    window,
+                )),
+        )
+}
+
+/// A row under a list group: the `+`/`−` buttons, then a quiet line.
+pub fn list_controls(buttons: impl IntoElement, note: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(10.))
+        .child(buttons)
+        .child(quiet(note, cx))
+}
+
+/// A pop-up of the hours of the day (and `current` when it is not on the
+/// hour), checked at `current`; `pick` gets the chosen time.
+pub fn time_popup(
+    id: impl Into<ElementId>,
+    current: crate::data::ClockTime,
+    disabled: bool,
+    pick: impl Fn(crate::data::ClockTime, &mut Window, &mut App) + 'static,
+    window: &Window,
+    cx: &App,
+) -> impl IntoElement {
+    use crate::data::ClockTime;
+    use crate::ui::native::{PushSize, disabled_push, popup_button};
+    use gpui_component::menu::{DropdownMenu as _, PopupMenuItem};
+    let pick = std::rc::Rc::new(pick);
+    let mut times: Vec<ClockTime> = (0..24).map(|h| ClockTime::new(h, 0)).collect();
+    if !times.contains(&current) {
+        times.push(current);
+        times.sort();
+    }
+    disabled_push(
+        popup_button(id, current.wire(), PushSize::Regular, window, cx),
+        disabled,
+        cx,
+    )
+    .dropdown_menu(move |menu, _, _| {
+        times
+            .iter()
+            .fold(menu.scrollable(true).max_h(px(264.)), |menu, t| {
+                let (t, pick) = (*t, pick.clone());
+                menu.item(
+                    PopupMenuItem::new(t.wire())
+                        .checked(t == current)
+                        .on_click(move |_, window, cx| pick(t, window, cx)),
+                )
+            })
+    })
+}
+
+// --- end v12/settings track ---
 
 #[cfg(test)]
 mod tests {

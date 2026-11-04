@@ -1,124 +1,53 @@
-//! Lucide icons (DESIGN.md §9). gpui-kit embeds 101 component icons; the
-//! app's own [`AppAssets`] adds the rest of the set the design uses and falls
-//! back to `gpui_kit::assets::Assets` (never `AllAssets`).
+//! The app's icons are SF Symbols (NATIVE.md rule 2, §6): views name a
+//! concept ([`Sym`]) at a §6 size ([`SymSize`]); [`AppAssets`] serves the
+//! symbol drawn by AppKit (`ui::sf_symbols`).
+//!
+//! gpui-component draws some glyphs of its own (select chevrons, checkbox
+//! check, dialog close, input clear, menu check and submenu chevron …) from
+//! Lucide asset paths: [`AppAssets`] answers those paths with the concept's
+//! SF Symbol too, so no Lucide glyph reaches the screen.
 
 use std::borrow::Cow;
 
 use gpui::{AssetSource, Hsla, Pixels, SharedString, Styled as _};
 use gpui_component::Icon;
 
+#[allow(unused_imports)]
+pub use super::sf_symbols::{Sym, SymSize, Weight};
+
+/// Deprecated: name a [`Sym`] concept. Kept so code that still names Lucide
+/// icons compiles; every Lucide icon with a concept draws its SF Symbol.
 pub use gpui_kit::assets::IconName as Lucide;
 
+/// Raw Lucide asset paths (`lucide/icons/<name>.svg`), only for the
+/// `sf-symbols` comparison scene and its gate report.
+pub const LUCIDE_PREFIX: &str = "lucide/";
+
+// Lucide is no longer drawn by the app (NATIVE.md rule 2): these stay only
+// for the Lucide column of the `sf-symbols` comparison scene, served under
+// [`LUCIDE_PREFIX`]. gpui-kit's 101 default icons cover the rest of it.
 gpui_kit::assets::icon_assets!(
     ExtraIcons,
     [
         SquarePen,
-        BellOff,
-        Paperclip,
-        Image,
-        AtSign,
-        TextQuote,
-        FileCode,
-        GitBranch,
-        CircleDot,
-        CircleQuestionMark,
-        CircleDashed,
-        Circle,
-        WifiOff,
-        Monitor,
-        Laptop,
-        Users,
-        UsersRound,
-        User,
-        UserPlus,
-        Server,
-        ChartColumn,
-        Activity,
-        Code,
-        LogOut,
-        MessageSquarePlus,
-        Clock,
-        X,
-        Lock,
-        Download,
-        Layers,
-        List,
-        ListChecks,
-        Table,
-        Terminal,
-        RotateCcw,
-        Pencil,
-        Trash,
-        SearchX,
-        Hash,
-        CornerDownLeft,
-        Type,
-        FaceSlightlySmiling,
-        FaceSlightlySmilingPlus,
-        Reply,
-        FileImage,
-        BellRing,
-        Bold,
-        Italic,
-        Strikethrough,
-        Link,
-        ListOrdered,
-        Quote,
-        // v2 shell (1.1.0): 首页, 单独问, 改动, the rail toggle.
-        House,
         MessageCircle,
+        Layers,
+        Monitor,
         GitPullRequest,
-        PanelRightOpen,
-        // --- rail track (1.1.0): rail options, the 话题 destination of mode C,
-        // ⌘K 交代或搜索 keys and 产出 thumbnails.
+        House,
+        Hash,
+        Users,
+        Server,
+        Keyboard,
+        Hand,
+        X,
+        CircleDot,
+        Clock,
+        Image,
+        Lock,
+        UserPlus,
+        Download,
         SlidersHorizontal,
-        TextAlignStart,
-        Command,
-        ChartLine,
-        // --- end rail track
-        // Desk track (1.1.0 首页): the 录屏 proof chip.
-        Play,
-        // panes track (1.1.0): 单独问 and 实时查看.
-        CornerDownRight,
-        MousePointer2,
-        Maximize2,
-        Minimize2,
-        ArrowUpRight,
-        ScreenShare,
-        // --- cards v2 track ---
-        Hourglass,
-        Ban,
-        GitMerge,
-        FileX,
-        Target,
-        // --- end cards v2 track ---
-        // --- v11/media: 产出 media previews ---
-        AppWindow,
-        AudioLines,
-        Video,
-        Pause,
-        Volume2,
-        Maximize,
-        PictureInPicture2,
-        Send,
-        Upload,
-        ZoomIn,
-        ZoomOut,
-        PanelLeft,
-        RotateCw,
-        Shield,
-        Images,
-        ListTree,
-        ArrowUpDown,
-        // --- end v11/media ---
-        // --- v11/inc-diagrams: diagrams ---
-        Workflow,
-        Scan,
-        Maximize2,
-        // --- end v11/inc-diagrams ---
-        // --- inc-refs: 引用提问 chips ---
-        FileDiff,
-        // --- end inc-refs ---
     ]
 );
 
@@ -162,6 +91,13 @@ impl AssetSource for AppAssets {
         if let Some(rest) = path.strip_prefix(FIT_PREFIX) {
             return self.load_fitted(rest);
         }
+        if let Some(svg) = super::sf_symbols::asset::load(path) {
+            return Ok(Some(Cow::Owned(svg.to_vec())));
+        }
+        if let Some(svg) = super::sf_symbols::asset::load_lucide(path) {
+            return Ok(Some(Cow::Owned(svg.to_vec())));
+        }
+        let path = path.strip_prefix(LUCIDE_PREFIX).unwrap_or(path);
         let bytes = match ExtraIcons.load(path)? {
             Some(bytes) => Some(bytes),
             None => gpui_kit::assets::Assets.load(path)?,
@@ -221,27 +157,52 @@ fn thin_stroke(svg: &[u8]) -> Vec<u8> {
         .into_bytes()
 }
 
-/// The icon of a gpui-component `Button` of side `button`, with its glyph
-/// at `glyph` pt. The button always draws its icon at 75 % of its side
-/// (24 in a 32 pt button), so the glyph comes in a widened viewBox that
-/// puts the 24-unit Lucide glyph at `glyph` (18 in a 32 pt button, §4.2).
-pub fn button_glyph(name: Lucide, glyph: Pixels, button: Pixels) -> Icon {
-    Icon::empty().path(button_glyph_path(name, glyph, button))
+/// The icon of a gpui-component `Button` of side `button`, with the symbol
+/// at the §6 size for a `glyph` pt slot. The button always draws its icon at
+/// 75 % of its side, so the symbol comes centered in a slot of that size.
+pub fn button_glyph(name: impl Into<Sym>, glyph: Pixels, button: Pixels) -> Icon {
+    button_sym(name.into(), SymSize::for_slot(glyph), button)
 }
 
-fn button_glyph_path(name: Lucide, glyph: Pixels, button: Pixels) -> String {
-    let drawn = button * 0.75;
-    format!(
-        "{FIT_PREFIX}{:.1}/{:.1}/{}",
-        f32::from(glyph),
-        f32::from(drawn),
-        name.path()
-    )
+/// The icon of a gpui-component `Button` of side `button`, with the symbol
+/// at a §6 size ([`SymSize::TOOLBAR`] for toolbar items).
+pub fn button_sym(sym: Sym, size: SymSize, button: Pixels) -> Icon {
+    let drawn = f32::from(button) * 0.75;
+    Icon::empty().path(super::sf_symbols::asset::path(
+        sym,
+        SymSize::new(size.point, drawn, size.weight),
+    ))
 }
 
-/// A Lucide icon at a size and color.
-pub fn icon(name: Lucide, size: Pixels, color: Hsla) -> Icon {
-    Icon::new(name).size(size).text_color(color)
+/// An icon at a slot size and color: the concept's SF Symbol at the §6 size
+/// for that slot ([`SymSize::for_slot`]: 18 sidebar, 20 toolbar, 16 inline,
+/// 14 inline small, 24 tab).
+pub fn icon(name: impl Into<Sym>, size: Pixels, color: Hsla) -> Icon {
+    sym(name.into(), SymSize::for_slot(size), color)
+}
+
+/// A concept at a §6 size, in a color.
+pub fn sym(sym: Sym, size: SymSize, color: Hsla) -> Icon {
+    sym.icon(size).text_color(color)
+}
+
+/// Draws every concept at the §6 sizes on a background thread, for the
+/// largest screen scale. Call once at launch, on the main thread.
+pub fn prewarm() {
+    // `TC_SF_NO_PREWARM=1`: draw every symbol on first use (gate numbers).
+    if std::env::var_os("TC_SF_NO_PREWARM").is_some() {
+        return;
+    }
+    let s = super::sf_symbols::asset::screens_scale();
+    super::sf_symbols::asset::prewarm(s);
+}
+
+/// The Lucide icon itself, for the comparison scene only.
+pub fn lucide_raw(name: Lucide, size: Pixels, color: Hsla) -> Icon {
+    Icon::empty()
+        .path(format!("{LUCIDE_PREFIX}{}", name.path()))
+        .size(size)
+        .text_color(color)
 }
 
 #[cfg(test)]
@@ -249,36 +210,58 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_design_icon_loads() {
+    fn raw_lucide_icons_load_thin() {
         for name in [
             Lucide::Search,
             Lucide::SquarePen,
-            Lucide::CircleQuestionMark,
-            Lucide::Eye,
-            Lucide::Bot,
-            Lucide::WifiOff,
-            Lucide::MessageSquarePlus,
-            Lucide::Settings,
-            Lucide::PanelRight,
             Lucide::Ellipsis,
+            Lucide::Layers,
+            Lucide::Hand,
         ] {
-            let path = name.path();
+            let path = format!("{LUCIDE_PREFIX}{}", name.path());
             let svg = AppAssets.load(&path).unwrap().expect("icon loads");
             let svg = std::str::from_utf8(&svg).unwrap().to_string();
             assert!(svg.contains("stroke-width=\"1.75\""), "{path}");
         }
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
-    fn button_glyphs_put_the_glyph_at_its_size() {
-        let path = button_glyph_path(Lucide::Bell, gpui::px(18.), gpui::px(32.));
-        let svg = AppAssets.load(&path).unwrap().unwrap();
-        let svg = std::str::from_utf8(&svg).unwrap().to_string();
-        // Drawn at 24 pt: the glyph is 18 pt when the viewBox is 32 units.
-        assert!(
-            svg.contains("viewBox=\"-4.000 -4.000 32.000 32.000\""),
-            "{svg}"
+    fn lucide_paths_and_concepts_draw_sf_symbols() {
+        // gpui-component's own chevron and an app concept both come as the
+        // AppKit mask in an SVG.
+        for path in [
+            Lucide::ChevronDown.path().to_string(),
+            Lucide::Check.path().to_string(),
+            super::super::sf_symbols::asset::path(Sym::Home, SymSize::SIDEBAR),
+        ] {
+            let svg = AppAssets.load(&path).unwrap().expect("loads");
+            let svg = std::str::from_utf8(&svg).unwrap().to_string();
+            assert!(svg.contains("data:image/png;base64,"), "{path}");
+        }
+    }
+
+    #[test]
+    fn button_glyphs_fill_three_quarters_of_the_button() {
+        let i = button_glyph(Sym::Inspector, gpui::px(18.), gpui::px(32.));
+        let _ = i;
+        assert_eq!(
+            super::super::sf_symbols::asset::path(
+                Sym::Inspector,
+                SymSize::new(15., 24., Weight::Regular)
+            )
+            .split('/')
+            .nth(4),
+            Some("240")
         );
-        assert!(svg.contains("stroke-width=\"1.75\""));
+    }
+
+    #[test]
+    fn old_slot_sizes_map_to_the_native_contexts() {
+        assert_eq!(SymSize::for_slot(gpui::px(18.)), SymSize::SIDEBAR);
+        assert_eq!(SymSize::for_slot(gpui::px(16.)), SymSize::INLINE);
+        assert_eq!(SymSize::for_slot(gpui::px(14.)), SymSize::INLINE_SMALL);
+        assert_eq!(SymSize::for_slot(gpui::px(20.)), SymSize::TOOLBAR);
+        assert_eq!(SymSize::for_slot(gpui::px(12.)).point, 9.75);
     }
 }

@@ -1,4 +1,5 @@
-//! ⌘K 交代或搜索 (Ask.dc.html): one 640 pt panel over the page. Typing a
+//! ⌘K 交代或搜索 in the Spotlight-style panel (NATIVE.md §9.7): 600 wide, a
+//! 48 pt capsule field with 22 pt text, 32 pt rows with symbols. Typing a
 //! sentence offers 交代 first: 交给 <the member it names> opens a 话题
 //! addressed to that member in the 群 of 发到 (Enter), and 交给 Jojo 安排
 //! hands it to the main helper (⌘Enter). Below, the 话题, 产出, 成员 and 群
@@ -12,14 +13,13 @@ use std::ops::Range;
 
 use gpui::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable,
-    FontWeight, HighlightStyle, InteractiveElement as _, IntoElement, KeyBinding, ParentElement,
-    Pixels, Point, Render, ScrollHandle, SharedString, StatefulInteractiveElement as _, Styled,
-    StyledText, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    InteractiveElement as _, IntoElement, KeyBinding, ParentElement, Pixels, Point, Render,
+    ScrollHandle, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     WindowExt as _,
-    button::{Button, ButtonVariants as _},
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
 
@@ -30,8 +30,19 @@ use crate::{
         ArtifactKind, ArtifactSummary, GroupId, GroupKind, Member, StartTopicRequest, Topic,
         TopicStatus,
     },
-    theme::{self, Type as _, space},
-    ui::{self, Lucide, MemberAvatar, Ring},
+    theme::Type as _,
+    ui::{
+        MemberAvatar, Sym,
+        native::{
+            NativeType as _, PushSize, native_colors,
+            overlays::{
+                SpotlightField, return_mark, spot, spotlight, spotlight_divider, spotlight_ink,
+                spotlight_row, spotlight_section, spotlight_symbol, weighted,
+            },
+            popup_button,
+        },
+        sf_symbols::SymSize,
+    },
     views::{
         nav::switcher::{self, Entry, Target},
         rail::model::{self as rail_model, RowState},
@@ -44,23 +55,8 @@ gpui::actions!(
 );
 
 const CONTEXT: &str = "AskPalette";
-/// The query row.
-const QUERY_ROW: Pixels = px(52.);
-/// A 交代 row: avatar 32, two lines.
-const GIVE_ROW: Pixels = px(56.);
-/// 话题, 成员 and 群 rows.
-const ROW: Pixels = px(40.);
-/// 产出 rows (a page thumbnail).
-const ARTIFACT_ROW: Pixels = px(44.);
-const LABEL_ROW: Pixels = px(28.);
-const DIVIDER: Pixels = px(13.);
-const FOOTER: Pixels = px(40.);
-/// Corner radius of the palette surface (the Ask artboard).
-const RADIUS: Pixels = px(14.);
-/// Radius of a fill inside the surface's 1 pt edge.
-const INNER_RADIUS: Pixels = px(13.);
-/// The leading slot of every row.
-const SLOT: Pixels = px(32.);
+/// Space above and below the rows.
+const LIST_PAD: Pixels = px(10.);
 /// Rows per section while a query is typed.
 const TOPICS_MAX: usize = 5;
 const OTHERS_MAX: usize = 3;
@@ -100,14 +96,6 @@ enum Item {
 }
 
 impl Item {
-    fn height(&self) -> Pixels {
-        match self {
-            Item::Give { .. } => GIVE_ROW,
-            Item::Artifact { .. } => ARTIFACT_ROW,
-            _ => ROW,
-        }
-    }
-
     fn key(&self) -> String {
         match self {
             Item::Give { member, helper, .. } => format!("give-{}-{helper}", member.id),
@@ -526,91 +514,34 @@ impl AskPalette {
     }
 }
 
-/// `text` with `ranges` in weight 600 `ink`, the rest in `base`.
-fn weighed(text: &str, ranges: &[Range<usize>], cx: &App) -> StyledText {
-    let k = theme::colors(cx);
-    StyledText::new(text.to_string()).with_highlights(ranges.iter().cloned().map(|r| {
-        (
-            r,
-            HighlightStyle {
-                color: Some(k.ink),
-                font_weight: Some(FontWeight::SEMIBOLD),
-                ..Default::default()
-            },
-        )
-    }))
-}
-
-/// A 岗位 tag: 18 pt, radius 5, `sunken`.
-fn tag(text: String, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    div()
-        .flex_none()
-        .h(theme::TAG_HEIGHT)
-        .px(space::S6)
-        .rounded(theme::TAG_RADIUS)
-        .bg(k.sunken)
-        .flex()
-        .items_center()
-        .t_meta()
-        .text_color(k.ink_2)
-        .child(text)
-        .into_any_element()
-}
-
-/// A key in the footer: 20 pt, `sunken`.
-fn key_box(children: Vec<AnyElement>, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    div()
-        .flex_none()
-        .min_w(px(20.))
-        .h(px(20.))
-        .px(px(5.))
-        .rounded(px(5.))
-        .bg(k.sunken)
-        .flex()
-        .items_center()
-        .justify_center()
-        .gap(space::S2)
-        .text_color(k.ink_2)
-        .children(children)
-        .into_any_element()
-}
-
-fn enter_glyph(cx: &App) -> AnyElement {
-    ui::icon(Lucide::CornerDownLeft, px(12.), theme::colors(cx).ink_2).into_any_element()
-}
-
 impl AskPalette {
-    fn row_shell(
-        &self,
-        ix: usize,
-        item: &Item,
-        cx: &mut Context<Self>,
-    ) -> gpui::Stateful<gpui::Div> {
-        let k = theme::colors(cx);
-        let active = ix == self.active;
-        div()
-            .id(ElementId::NamedInteger("ask-row".into(), ix as u64))
-            .flex_none()
-            .w_full()
-            .h(item.height())
-            .px(space::S10)
-            .rounded(px(10.))
-            .flex()
-            .items_center()
-            .gap(space::S12)
-            .cursor_pointer()
-            .when(active, |el| el.bg(k.sunken))
-            .active(|s| s.bg(k.pressed))
-            .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
-                this.pointer_moved(ix, e.position, cx)
-            }))
-            .on_click(cx.listener(move |this, _, window, cx| this.open_row(ix, window, cx)))
+    fn row_shell(&self, ix: usize, cx: &mut Context<Self>) -> gpui::Stateful<gpui::Div> {
+        spotlight_row(
+            ElementId::NamedInteger("ask-row".into(), ix as u64),
+            ix == self.active,
+            cx,
+        )
+        .on_mouse_move(cx.listener(move |this, e: &gpui::MouseMoveEvent, _, cx| {
+            this.pointer_moved(ix, e.position, cx)
+        }))
+        .on_click(cx.listener(move |this, _, window, cx| this.open_row(ix, window, cx)))
     }
 
+    /// The avatar slot of a row (20 pt), on the row's fill.
+    fn avatar(&self, ix: usize, member: &Member, cx: &App) -> gpui::Div {
+        let k = native_colors(cx);
+        let surface = if ix == self.active { k.accent } else { k.sheet };
+        div()
+            .flex_none()
+            .size(spot::SLOT)
+            .child(MemberAvatar::new(Some(member), spot::AVATAR).on(surface))
+    }
+
+    /// 交给 <member>: the avatar, the action, what it opens; the member's
+    /// state; `return` on the first row (when chosen), `⌘return` on the
+    /// helper's.
     fn give_row(&self, ix: usize, item: &Item, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
+        let k = native_colors(cx);
         let Item::Give {
             member,
             task,
@@ -620,28 +551,27 @@ impl AskPalette {
             return div().into_any_element();
         };
         let active = ix == self.active;
+        let (ink, ink2) = spotlight_ink(active, cx);
         let first = self.first_give().is_some_and(|m| m.id == member.id);
-        let (title, detail, detail_color) = if *helper && !first {
+        let (title, detail) = if *helper && !first {
             (
                 fill(c::ASK_GIVE_TO_JOJO, &[("name", &member.name)]),
                 fill(c::ASK_GIVE_JOJO_DETAIL, &[("name", &member.name)]),
-                k.ink_3,
             )
         } else {
             (
                 fill(c::ASK_GIVE_TO, &[("name", &member.name)]),
                 fill(c::ASK_GIVE_DETAIL, &[("work", task)]),
-                k.ink_2,
             )
         };
-        // What the member does now.
+        // What the member does now: a `blue` dot while it works.
         let run = self
             .services
             .provider
             .active_runs()
             .into_iter()
             .find(|r| r.bot_id == member.id);
-        let status: Option<AnyElement> = match run {
+        let status: Option<(bool, String)> = match run {
             Some(r) => {
                 let title = self
                     .services
@@ -649,128 +579,56 @@ impl AskPalette {
                     .topic(&r.group_id, &r.topic_id)
                     .map(|t| t.title)
                     .unwrap_or_default();
-                Some(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .t_meta()
-                        .text_color(k.ink_3)
-                        .child(ui::motion::breathe(
-                            SharedString::from(format!("ask-live-{}", member.id)),
-                            div().size(px(6.)).rounded_full().bg(k.live),
-                            cx,
-                        ))
-                        .child(
-                            div()
-                                .max_w(STATUS_MAX)
-                                .one_line()
-                                .child(fill(c::ASK_WORKING_ON, &[("title", &title)])),
-                        )
-                        .into_any_element(),
-                )
+                Some((true, fill(c::ASK_WORKING_ON, &[("title", &title)])))
             }
-            None if member.is_bot() => Some(
-                div()
-                    .flex_none()
-                    .flex()
-                    .items_center()
-                    .gap(space::S6)
-                    .t_meta()
-                    .text_color(k.ink_3)
-                    .child(
-                        div()
-                            .size(px(6.))
-                            .rounded_full()
-                            .border(px(1.5))
-                            .border_color(k.ink_3),
-                    )
-                    .child(c::ASK_IDLE)
-                    .into_any_element(),
-            ),
+            None if member.is_bot() => Some((false, c::ASK_IDLE.to_string())),
             None => None,
         };
-        // Enter gives to the first row (shown when it is chosen); ⌘Enter to
-        // the helper (always shown).
-        let keys: Vec<AnyElement> = if first {
-            vec![enter_glyph(cx)]
-        } else {
-            vec![
-                div().t_meta().child("⌘").into_any_element(),
-                enter_glyph(cx),
-            ]
-        };
         let show_keys = !first || active;
-        self.row_shell(ix, item, cx)
-            .child(MemberAvatar::new(Some(member), SLOT))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S2)
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap(space::S8)
-                            .child(
-                                div()
-                                    .flex_shrink(1.)
-                                    .min_w_0()
-                                    .one_line()
-                                    .t_ui()
-                                    .medium()
-                                    .text_color(k.ink)
-                                    .child(title),
-                            )
-                            .children(
-                                member
-                                    .role
-                                    .clone()
-                                    .filter(|r| !r.trim().is_empty())
-                                    .map(|r| tag(r, cx)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .t_meta()
-                            .line_height(px(18.))
-                            .text_color(detail_color)
-                            .one_line()
-                            .child(detail),
-                    ),
-            )
-            .children(status)
+        self.row_shell(ix, cx)
+            .child(self.avatar(ix, member, cx))
             .child(
                 div()
                     .flex_none()
-                    .min_w(px(26.))
-                    .h(px(22.))
-                    .px(px(5.))
-                    .rounded(px(6.))
-                    .border_1()
-                    .border_color(k.line_2)
-                    .bg(k.bg)
-                    .shadow(k.sec_hi())
+                    .max_w(px(200.))
+                    .n_headline()
+                    .text_color(ink)
+                    .one_line()
+                    .child(title),
+            )
+            .child(
+                div()
+                    .flex_shrink(1.)
+                    .min_w(px(40.))
+                    .text_color(ink2)
+                    .one_line()
+                    .child(detail),
+            )
+            .child(div().flex_1())
+            .children(status.map(|(live, text)| {
+                div()
+                    .flex_none()
+                    .max_w(STATUS_MAX)
                     .flex()
                     .items_center()
-                    .justify_center()
-                    .gap(space::S2)
-                    .text_color(k.ink_2)
-                    .when(!show_keys, |el| el.opacity(0.))
-                    .children(keys),
-            )
+                    .gap(px(4.))
+                    .n_subheadline()
+                    .text_color(ink2)
+                    .when(live, |d| {
+                        d.child(Sym::Live.icon(SymSize::INLINE_SMALL).text_color(k.blue))
+                    })
+                    .child(div().min_w(px(0.)).one_line().child(text))
+            }))
+            .when(show_keys, |el| el.child(return_mark(!first, ink2)))
             .into_any_element()
     }
 
     fn topic_row(&self, ix: usize, item: &Item, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
         let Item::Topic { topic, ranges } = item else {
             return div().into_any_element();
         };
+        let active = ix == self.active;
+        let (_, ink2) = spotlight_ink(active, cx);
         let p = self.services.provider.as_ref();
         let me = self.services.me();
         let (state, meta) = rail_model::row_state(p, me.as_deref(), topic);
@@ -801,70 +659,41 @@ impl AskPalette {
         };
         let time = (topic.status == TopicStatus::Done || ranges.is_empty())
             .then(|| crate::views::shell::clock(topic.last_activity_at));
-        let slot: AnyElement = match &state {
-            RowState::NeedsYou => div()
-                .size(px(7.))
-                .rounded_full()
-                .bg(k.you)
-                .into_any_element(),
-            RowState::Working(m) => {
-                let m = p.member(m);
-                MemberAvatar::new(m.as_ref(), px(18.))
-                    .ring(Some(Ring::Live))
-                    .into_any_element()
-            }
-            RowState::Done => ui::icon(Lucide::Check, px(16.), k.ok).into_any_element(),
-            RowState::Waiting => div()
-                .size(px(7.))
-                .rounded_full()
-                .border(px(1.5))
-                .border_color(k.ink_3)
-                .into_any_element(),
-            RowState::Idle => ui::icon(Lucide::Hash, px(16.), k.ink_3).into_any_element(),
-        };
         let title = crate::views::sidebar::topic_display_title(&topic.title).0;
         let ranges: Vec<Range<usize>> = if title == topic.title {
             ranges.clone()
         } else {
             Vec::new()
         };
-        self.row_shell(ix, item, cx)
-            .child(
-                div()
-                    .flex_none()
-                    .w(SLOT)
-                    .flex()
-                    .justify_center()
-                    .child(slot),
-            )
+        self.row_shell(ix, cx)
+            .child(switcher::topic_symbol(p, me.as_deref(), topic, ink2, cx))
             .child(
                 div()
                     .flex_shrink(1.)
                     .min_w_0()
                     .one_line()
-                    .t_ui()
-                    .text_color(if ranges.is_empty() { k.ink } else { k.ink_2 })
-                    .child(weighed(&title, &ranges, cx)),
+                    .child(weighted(&title, &ranges)),
             )
             .child(
                 div()
                     .flex_shrink(1.)
                     .min_w(px(40.))
                     .one_line()
-                    .t_meta()
-                    .text_color(k.ink_3)
+                    .text_color(ink2)
                     .child(detail),
             )
             .child(div().flex_1())
-            .children(time.map(|t| div().flex_none().t_mono().text_color(k.ink_3).child(t)))
+            .children(time.map(|t| div().flex_none().n_figures().text_color(ink2).child(t)))
+            .when(active, |el| el.child(return_mark(false, ink2)))
             .into_any_element()
     }
 
     fn artifact_row(&self, ix: usize, item: &Item, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
         let Item::Artifact { artifact, ranges } = item else {
             return div().into_any_element();
         };
+        let active = ix == self.active;
+        let (_, ink2) = spotlight_ink(active, cx);
         let kind = match artifact.kind {
             ArtifactKind::Page => art_copy::PANEL_KIND_PAGE,
             ArtifactKind::File => art_copy::KIND_FILE,
@@ -877,121 +706,93 @@ impl AskPalette {
             .member(&artifact.created_by)
             .map(|m| fill(c::ASK_ARTIFACT_BY, &[("name", &m.name)]));
         let glyph = match artifact.kind {
-            ArtifactKind::Page => Lucide::ChartLine,
-            ArtifactKind::Image => Lucide::Image,
-            ArtifactKind::Decision => Lucide::Check,
-            ArtifactKind::File => Lucide::File,
+            ArtifactKind::Page => Sym::Document,
+            ArtifactKind::Image => Sym::Image,
+            ArtifactKind::Decision => Sym::Check,
+            ArtifactKind::File => Sym::File,
         };
-        self.row_shell(ix, item, cx)
-            .child(
-                div()
-                    .flex_none()
-                    .w(SLOT)
-                    .h(px(26.))
-                    .rounded(px(5.))
-                    .border_1()
-                    .border_color(k.line)
-                    .bg(k.bg)
-                    .shadow(k.lift())
-                    .overflow_hidden()
-                    .pt(px(3.))
-                    .px(px(4.))
-                    .flex()
-                    .flex_col()
-                    .gap(px(2.))
-                    .child(div().w(px(14.)).h(px(2.)).rounded(px(1.)).bg(k.ink_2))
-                    .child(ui::icon(glyph, px(14.), k.ink_2)),
-            )
+        let version = fill(
+            art_copy::VERSION_SHORT,
+            &[("n", &artifact.version.to_string())],
+        );
+        self.row_shell(ix, cx)
+            .child(spotlight_symbol(glyph, ink2))
             .child(
                 div()
                     .flex_shrink(1.)
                     .min_w_0()
                     .one_line()
-                    .t_ui()
-                    .text_color(k.ink_2)
-                    .child(weighed(&artifact.title, ranges, cx)),
+                    .child(weighted(&artifact.title, ranges)),
             )
             .child(
                 div()
                     .flex_none()
-                    .flex()
-                    .items_center()
-                    .t_meta()
-                    .text_color(k.ink_3)
-                    .child(div().mono().child(fill(
-                        art_copy::VERSION_SHORT,
-                        &[("n", &artifact.version.to_string())],
-                    )))
-                    .child(format!(" · {kind}")),
+                    .n_figures()
+                    .text_color(ink2)
+                    .child(format!("{version} · {kind}")),
             )
             .child(div().flex_1())
-            .children(by.map(|b| div().flex_none().t_meta().text_color(k.ink_3).child(b)))
+            .children(by.map(|b| div().flex_none().text_color(ink2).child(b)))
+            .when(active, |el| el.child(return_mark(false, ink2)))
             .into_any_element()
     }
 
     fn member_row(&self, ix: usize, item: &Item, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
         let Item::Member { member, ranges } = item else {
             return div().into_any_element();
         };
+        let active = ix == self.active;
+        let (_, ink2) = spotlight_ink(active, cx);
         let week = self
             .services
             .provider
             .member_stats(&member.id)
             .map(|s| s.topics_this_week)
             .filter(|n| *n > 0);
-        self.row_shell(ix, item, cx)
-            .child(
-                div()
-                    .flex_none()
-                    .w(SLOT)
-                    .flex()
-                    .justify_center()
-                    .child(MemberAvatar::new(Some(member), px(22.))),
-            )
+        self.row_shell(ix, cx)
+            .child(self.avatar(ix, member, cx))
             .child(
                 div()
                     .flex_shrink(1.)
                     .min_w_0()
                     .one_line()
-                    .t_ui()
-                    .text_color(k.ink_2)
-                    .child(weighed(&member.name, ranges, cx)),
+                    .child(weighted(&member.name, ranges)),
             )
             .children(
                 member
                     .role
                     .clone()
                     .filter(|r| !r.trim().is_empty())
-                    .map(|r| tag(r, cx)),
+                    .map(|r| {
+                        div()
+                            .flex_shrink(1.)
+                            .min_w(px(40.))
+                            .one_line()
+                            .text_color(ink2)
+                            .child(r)
+                    }),
             )
             .child(div().flex_1())
             .children(week.map(|n| {
-                // `本周 4 个话题` with the count in mono.
-                let n = n.to_string();
-                let text = fill(c::ASK_MEMBER_WEEK, &[("n", &n)]);
-                let (pre, post) = text.split_once(n.as_str()).unwrap_or((text.as_str(), ""));
                 div()
                     .flex_none()
-                    .flex()
-                    .items_center()
-                    .t_meta()
-                    .text_color(k.ink_3)
-                    .child(pre.to_string())
-                    .child(div().mono().child(n.clone()))
-                    .child(post.to_string())
+                    .n_figures()
+                    .text_color(ink2)
+                    .child(fill(c::ASK_MEMBER_WEEK, &[("n", &n.to_string())]))
             }))
+            .when(active, |el| el.child(return_mark(false, ink2)))
             .into_any_element()
     }
 
     fn group_row(&self, ix: usize, item: &Item, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
         let Item::Group { entry, ranges } = item else {
             return div().into_any_element();
         };
-        let lead: AnyElement = match &entry.member {
-            Some(m) => MemberAvatar::new(Some(m), px(22.)).into_any_element(),
-            None => ui::icon(Lucide::Hash, px(16.), k.ink_3).into_any_element(),
+        let active = ix == self.active;
+        let (_, ink2) = spotlight_ink(active, cx);
+        let lead = match &entry.member {
+            Some(m) => self.avatar(ix, m, cx),
+            None => spotlight_symbol(Sym::Members, ink2),
         };
         let detail = match &entry.target {
             Target::Group(g) => self
@@ -1009,33 +810,25 @@ impl AskPalette {
                 .or_else(|| entry.detail.clone()),
             _ => entry.detail.clone(),
         };
-        self.row_shell(ix, item, cx)
-            .child(
-                div()
-                    .flex_none()
-                    .w(SLOT)
-                    .flex()
-                    .justify_center()
-                    .child(lead),
-            )
+        self.row_shell(ix, cx)
+            .child(lead)
             .child(
                 div()
                     .flex_shrink(1.)
                     .min_w_0()
                     .one_line()
-                    .t_ui()
-                    .text_color(if ranges.is_empty() { k.ink } else { k.ink_2 })
-                    .child(weighed(&entry.label, ranges, cx)),
+                    .child(weighted(&entry.label, ranges)),
             )
             .children(detail.map(|d| {
                 div()
                     .flex_shrink(1.)
                     .min_w(px(40.))
                     .one_line()
-                    .t_meta()
-                    .text_color(k.ink_3)
+                    .text_color(ink2)
                     .child(d)
             }))
+            .child(div().flex_1())
+            .when(active, |el| el.child(return_mark(false, ink2)))
             .into_any_element()
     }
 
@@ -1049,195 +842,65 @@ impl AskPalette {
         }
     }
 
-    /// 发到 <群> ⌄: where a new 话题 goes.
-    fn target_button(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+    /// 发到 <群>: a pop-up button at the trailing edge of the field (where a
+    /// new 话题 goes).
+    fn target_button(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let member = self.first_give()?.clone();
         let (_, name) = self.target_group(Some(&member), cx)?;
-        let k = theme::colors(cx);
         let groups: Vec<(GroupId, String)> = rail_model::groups(self.services.provider.as_ref());
         let this = cx.entity().downgrade();
         let current = self.target_group(Some(&member), cx).map(|(id, _)| id);
         Some(
-            Button::new("ask-target")
-                .ghost()
-                .h(px(26.))
-                .pl(space::S8)
-                .pr(space::S6)
-                .rounded(px(7.))
-                .border_1()
-                .border_color(k.line)
-                .tooltip(c::ASK_SEND_TO_GROUP)
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .t_meta()
-                        .line_height(px(18.))
-                        .text_color(k.ink_3)
-                        .child(c::ASK_SEND_TO)
-                        .child(
-                            div()
-                                .max_w(TARGET_NAME_MAX)
-                                .one_line()
-                                .text_color(k.ink)
-                                .medium()
-                                .child(name),
-                        )
-                        .child(ui::icon(Lucide::ChevronDown, px(12.), k.ink_3)),
-                )
-                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-                    groups.iter().fold(menu, |menu, (id, name)| {
-                        let this = this.clone();
-                        let id2 = id.clone();
-                        menu.item(
-                            PopupMenuItem::new(name.clone())
-                                .checked(current.as_ref() == Some(id))
-                                .on_click(move |_, _, cx| {
-                                    let id = id2.clone();
-                                    let _ = this.update(cx, |this, cx| {
-                                        this.target = Some(id);
-                                        cx.notify();
-                                    });
-                                }),
-                        )
-                    })
+            popup_button(
+                "ask-target",
+                format!("{} {name}", c::ASK_SEND_TO),
+                PushSize::Regular,
+                window,
+                cx,
+            )
+            .max_w(TARGET_NAME_MAX)
+            .tooltip(c::ASK_SEND_TO_GROUP)
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                groups.iter().fold(menu, |menu, (id, name)| {
+                    let this = this.clone();
+                    let id2 = id.clone();
+                    menu.item(
+                        PopupMenuItem::new(name.clone())
+                            .checked(current.as_ref() == Some(id))
+                            .on_click(move |_, _, cx| {
+                                let id = id2.clone();
+                                let _ = this.update(cx, |this, cx| {
+                                    this.target = Some(id);
+                                    cx.notify();
+                                });
+                            }),
+                    )
                 })
-                .into_any_element(),
+            })
+            .into_any_element(),
         )
-    }
-
-    fn footer(&self, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
-        let enter = match self.active_item() {
-            Some(Item::Give { member, .. }) => fill(c::ASK_GIVE_TO, &[("name", &member.name)]),
-            _ => c::ASK_HINT_OPEN.to_string(),
-        };
-        // ⌘Enter gives to the helper while another row is chosen.
-        let helper = self.items().find_map(|i| match i {
-            Item::Give {
-                member,
-                helper: true,
-                ..
-            } => Some(member.clone()),
-            _ => None,
-        });
-        let helper_hint = helper.filter(
-            |h| !matches!(self.active_item(), Some(Item::Give { member, .. }) if member.id == h.id),
-        );
-        let hint = |keys: AnyElement, label: String| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .child(keys)
-                .child(label)
-        };
-        div()
-            .flex_none()
-            .h(FOOTER)
-            .px(space::S16)
-            .flex()
-            .items_center()
-            .gap(space::S20)
-            .border_t_1()
-            .border_color(k.line)
-            .bg(k.raised)
-            // The dialog clips its content to a rectangle, not to its
-            // rounded edge: a fill must round its own bottom corners.
-            .rounded_b(INNER_RADIUS)
-            .t_meta()
-            .line_height(px(18.))
-            .text_color(k.ink_3)
-            .child(hint(key_box(vec![enter_glyph(cx)], cx), enter))
-            .children(helper_hint.map(|h| {
-                hint(
-                    key_box(
-                        vec![div().child("⌘").into_any_element(), enter_glyph(cx)],
-                        cx,
-                    ),
-                    fill(c::ASK_GIVE_TO, &[("name", &h.name)]),
-                )
-            }))
-            .child(hint(
-                key_box(
-                    vec![
-                        ui::icon(Lucide::ArrowUp, px(12.), k.ink_2).into_any_element(),
-                        ui::icon(Lucide::ArrowDown, px(12.), k.ink_2).into_any_element(),
-                    ],
-                    cx,
-                ),
-                c::ASK_HINT_SELECT.into(),
-            ))
-            .child(div().flex_1())
-            .child(hint(
-                key_box(
-                    vec![
-                        div()
-                            .t_mono()
-                            .text_size(px(11.))
-                            .child(nav_copy::KEY_ESC)
-                            .into_any_element(),
-                    ],
-                    cx,
-                ),
-                c::ASK_HINT_CLOSE.into(),
-            ))
-            .into_any_element()
     }
 }
 
 impl Render for AskPalette {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
+        let k = native_colors(cx);
         // Children of the list with their heights (rows true, labels false).
         let mut children: Vec<AnyElement> = Vec::new();
         let mut heights: Vec<(Pixels, bool)> = Vec::new();
         let mut active_child = 0;
         let mut ix = 0;
         let sections = self.sections.clone();
-        for (si, section) in sections.iter().enumerate() {
-            children.push(
-                div()
-                    .flex_none()
-                    .h(LABEL_ROW)
-                    .px(space::S10)
-                    .when(si > 0 && !sections[si - 1].divider, |el| el.mt(space::S2))
-                    .flex()
-                    .items_center()
-                    .t_meta_medium()
-                    .text_color(k.ink_3)
-                    .child(section.label)
-                    .into_any_element(),
-            );
-            heights.push((LABEL_ROW, false));
+        for section in sections.iter() {
+            children.push(spotlight_section(section.label, cx).into_any_element());
+            heights.push((spot::SECTION, false));
             for item in &section.items {
                 if ix == self.active {
                     active_child = children.len();
                 }
-                let row = self.row(ix, item, cx);
-                children.push(ui::motion::rise(
-                    SharedString::from(format!("ask-{}", item.key())),
-                    ix.min(6),
-                    div().flex_none().child(row),
-                    cx,
-                ));
-                heights.push((item.height(), true));
+                children.push(self.row(ix, item, cx));
+                heights.push((spot::ROW, true));
                 ix += 1;
-            }
-            if section.divider {
-                children.push(
-                    div()
-                        .flex_none()
-                        .h(DIVIDER)
-                        .px(space::S10)
-                        .flex()
-                        .items_center()
-                        .child(div().w_full().h(px(1.)).bg(k.line))
-                        .into_any_element(),
-                );
-                heights.push((DIVIDER, false));
             }
         }
         let empty = ix == 0;
@@ -1249,10 +912,14 @@ impl Render for AskPalette {
             };
             self.scroll.scroll_to_item(target);
         }
-        let max = (window.viewport_size().height * 0.7 - QUERY_ROW - FOOTER - px(14.)).max(ROW);
+        let max = (window.viewport_size().height * 0.6 - spot::FIELD - LIST_PAD).max(spot::ROW);
         let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
         let list_h = total.min(max);
-        let target = self.target_button(cx);
+        let has_query = !self.text(cx).is_empty();
+        let field = match self.target_button(window, cx) {
+            Some(t) => SpotlightField::new(&self.query).trailing(t),
+            None => SpotlightField::new(&self.query),
+        };
         div()
             .key_context(CONTEXT)
             .track_focus(&self.focus)
@@ -1265,63 +932,43 @@ impl Render for AskPalette {
             .w_full()
             .flex()
             .flex_col()
-            .bg(k.bg)
-            .rounded(INNER_RADIUS)
-            .text_color(k.ink)
-            .child(
-                div()
-                    .flex_none()
-                    .h(QUERY_ROW)
-                    .px(space::S16)
-                    .flex()
-                    .items_center()
-                    .gap(space::S12)
-                    .border_b_1()
-                    .border_color(k.line)
-                    .child(ui::icon(Lucide::Search, px(18.), k.ink_3))
-                    .child(
-                        div().flex_1().min_w(px(0.)).child(ui::placeholder_input(
-                            Input::new(&self.query)
-                                .appearance(false)
-                                .px_0()
-                                .py_0()
-                                .text_size(px(15.))
-                                .line_height(px(22.)),
-                            window,
-                            cx,
-                        )),
-                    )
-                    .children(target),
-            )
-            .child(
-                div()
-                    .id("ask-list")
-                    .flex_none()
-                    .when(!empty, |el| el.h(list_h + px(14.)))
-                    .overflow_y_scroll()
-                    .track_scroll(&self.scroll)
-                    .pt(space::S6)
-                    .px(space::S6)
-                    .pb(space::S8)
-                    .flex()
-                    .flex_col()
-                    .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, _| {
-                        this.pointer.get_or_insert(e.position);
-                    }))
-                    .children(children)
-                    .when(empty, |el| {
-                        el.child(
-                            div()
-                                .h(px(120.))
-                                .child(ui::EmptyState::new(Lucide::SearchX, c::ASK_EMPTY)),
-                        )
-                    }),
-            )
-            .child(self.footer(cx))
+            .text_color(k.label)
+            .child(field)
+            .when(!empty || has_query, |el| el.child(spotlight_divider(cx)))
+            .when(!empty, |el| {
+                el.child(
+                    div()
+                        .id("ask-list")
+                        .flex_none()
+                        .h(list_h + LIST_PAD)
+                        .overflow_y_scroll()
+                        .track_scroll(&self.scroll)
+                        .pt(px(2.))
+                        .pb(px(8.))
+                        .flex()
+                        .flex_col()
+                        .on_mouse_move(cx.listener(|this, e: &gpui::MouseMoveEvent, _, _| {
+                            this.pointer.get_or_insert(e.position);
+                        }))
+                        .children(children),
+                )
+            })
+            .when(empty && has_query, |el| {
+                el.child(
+                    div()
+                        .h(px(56.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .n_body()
+                        .text_color(k.secondary)
+                        .child(c::ASK_EMPTY),
+                )
+            })
     }
 }
 
-/// Opens 交代或搜索 in `window` (⌘K).
+/// Opens 搜索或交代 in `window` (⌘K).
 pub fn open(services: Services, window: &mut Window, cx: &mut App) {
     open_with(services, "", None, window, cx);
 }
@@ -1354,16 +1001,7 @@ pub fn open_with(
             let input = view.read(cx).query.clone();
             input.update(cx, |q, cx| q.focus(window, cx));
         }
-        let k = theme::colors(cx);
-        crate::ui::sheet::switcher(dialog, cx)
-            .close_button(false)
-            .p_0()
-            .bg(k.bg)
-            .border_color(k.line)
-            .rounded(RADIUS)
-            .shadow(k.pop())
-            .overflow_hidden()
-            .child(view.clone())
+        spotlight(dialog, cx).child(view.clone())
     });
     let view2 = view.clone();
     window.defer(cx, move |window, cx| {

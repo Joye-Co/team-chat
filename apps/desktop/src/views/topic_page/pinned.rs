@@ -1,13 +1,14 @@
-//! The pinned decision card above the composer (Topic.dc.html): the newest
-//! open ask for me in this 话题. A review of the 话题's change shows 看改动,
-//! 要求修改 and 批准合并; another ask shows its card's buttons. Once I
+//! The decision bar above the composer (NATIVE.md §9.2): the newest open
+//! ask for me in this 话题, a row on `fill` with radius 12. A review of the
+//! 话题's change shows 看改动, 要求修改… and the default 批准合并; another
+//! ask shows its card's buttons as push buttons. Once I
 //! answer, the controls give way to a one-line record that rises in with its
 //! check drawn, and 撤回 while my approval is still queued on this computer
 //! (撤回 can take back only a queued answer).
 
 use gpui::{
     AnyElement, ClickEvent, Context, ElementId, IntoElement, ParentElement, SharedString, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    Window, div, px,
 };
 
 use super::TopicPage;
@@ -19,8 +20,11 @@ use crate::{
         card::ActionStyle,
         v2::{AskItem, AskKind, ChangeState},
     },
-    theme::{self, Type as _, space},
-    ui::{self, ButtonKind, ButtonSize, Lucide},
+    theme::{Type as _, space},
+    ui::{
+        self, Sym,
+        native::{NativeType as _, PushSize, PushStyle, native_colors, push_button},
+    },
     views::shell::{clock, member_name},
 };
 
@@ -172,252 +176,197 @@ impl TopicPage {
         });
     }
 
-    /// The pinned card, or `None` when nothing waits on me here.
+    /// The decision bar above the composer (NATIVE.md §9.2), or `None`
+    /// when nothing waits on me here: a row on `fill` with radius 12, the
+    /// state symbol, a Headline title over one `secondary` line, and
+    /// trailing native push buttons with the default one last.
     pub(super) fn render_pinned(
         &mut self,
         g: &str,
         t: &str,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
-        let k = theme::colors(cx);
+        let k = native_colors(cx);
         let state = self.pinned_state(g, t)?;
         let (g, t) = (g.to_string(), t.to_string());
-        let dot = || div().flex_none().size(px(6.)).rounded(px(3.)).bg(k.you);
-        let body: AnyElement = match state {
-            Pinned::Record { text, at, withdraw } => {
-                let id = format!("pinned-record-{t}-{at}");
-                let row = div()
-                    .flex_1()
-                    .min_w_0()
-                    .min_h(px(60.))
+        let needs_you = || ui::sym(Sym::NeedsYou, ui::SymSize::INLINE, k.amber).into_any_element();
+        let bar =
+            |symbol: AnyElement, title: String, line: Option<String>, buttons: Vec<AnyElement>| {
+                div()
+                    .w_full()
+                    .min_h(px(52.))
+                    .pl(space::S12)
+                    .pr(space::S10)
+                    .py(space::S8)
+                    .rounded(px(12.))
+                    .bg(k.fill)
                     .flex()
                     .items_center()
                     .gap(space::S10)
-                    .pl(space::S16)
-                    .pr(space::S12)
-                    .py(space::S10)
-                    .bg(k.raised)
-                    .t_small()
-                    .text_color(k.ink)
-                    .child(ui::motion::check_mark(
-                        ElementId::Name(format!("{id}-check").into()),
-                        ui::icon(Lucide::Check, px(16.), k.ok),
-                        px(16.),
-                        ui::motion::just_answered(at),
-                        cx,
-                    ))
-                    .child(div().min_w_0().one_line().child(text))
+                    .child(div().flex_none().self_start().pt(px(1.)).child(symbol))
                     .child(
                         div()
-                            .flex_none()
-                            .t_mono()
-                            .text_color(k.ink_3)
-                            .child(when(at)),
-                    )
-                    .child(div().flex_1())
-                    .when(withdraw, |el| {
-                        el.child(
-                            ui::button(
-                                "pinned-withdraw",
-                                c::WITHDRAW,
-                                ButtonKind::Ghost,
-                                ButtonSize::Sm,
-                                cx,
-                            )
-                            .on_click(cx.listener({
-                                let (g, t) = (g.clone(), t.clone());
-                                move |this, _: &ClickEvent, _, cx| {
-                                    this.withdraw(g.clone(), t.clone(), cx)
-                                }
-                            })),
-                        )
-                    });
-                ui::motion::rise(SharedString::from(id), 0, row, cx)
-            }
-            Pinned::Review {
-                number,
-                files,
-                merger,
-            } => div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .items_center()
-                .gap(space::S12)
-                .pl(space::S16)
-                .pr(space::S12)
-                .py(space::S10)
-                .child(
-                    div()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            div()
-                                .flex()
-                                .items_center()
-                                .gap(space::S8)
-                                .t_ui()
-                                .line_height(px(22.))
-                                .semibold()
-                                .text_color(k.ink)
-                                .child(dot())
-                                .child(fill(c::REVIEW_TITLE, &[("n", &number.to_string())])),
-                        )
-                        .child(
-                            div()
-                                .pl(space::S14)
-                                .t_meta()
-                                .line_height(px(18.))
-                                .text_color(k.ink_3)
-                                .one_line()
-                                .child(fill(
-                                    c::REVIEW_LINE,
-                                    &[("files", &files.to_string()), ("name", &merger)],
-                                )),
-                        ),
-                )
-                .child(div().flex_1())
-                .child(
-                    div()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .child(
-                            ui::button(
-                                "pinned-see-changes",
-                                c::SEE_CHANGES,
-                                ButtonKind::Ghost,
-                                ButtonSize::Card,
-                                cx,
-                            )
-                            .on_click(cx.listener(
-                                |this, _: &ClickEvent, _, cx| {
-                                    this.services.nav.update(cx, |nav, cx| {
-                                        nav.set_right_pane(RightPane::Changes, cx)
-                                    });
-                                },
-                            )),
-                        )
-                        .child(
-                            ui::button(
-                                "pinned-request",
-                                c::REQUEST_CHANGES,
-                                ButtonKind::Quiet,
-                                ButtonSize::Card,
-                                cx,
-                            )
-                            .on_click(cx.listener(
-                                |this, _: &ClickEvent, window, cx| this.request_changes(window, cx),
-                            )),
-                        )
-                        .child(
-                            ui::button(
-                                "pinned-approve",
-                                c::APPROVE_MERGE,
-                                ButtonKind::Primary,
-                                ButtonSize::Card,
-                                cx,
-                            )
-                            .on_click(cx.listener({
-                                let (g, t) = (g.clone(), t.clone());
-                                move |this, _: &ClickEvent, _, cx| {
-                                    this.approve(g.clone(), t.clone(), cx)
-                                }
-                            })),
-                        ),
-                )
-                .into_any_element(),
-            Pinned::Ask { ask, actions } => {
-                let from = fill(
-                    c::ASK_FROM,
-                    &[("name", &member_name(&self.services, &ask.from))],
-                );
-                let message_id = ask.message_id.clone().unwrap_or_default();
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .items_center()
-                    .gap(space::S12)
-                    .pl(space::S16)
-                    .pr(space::S12)
-                    .py(space::S10)
-                    .child(
-                        div()
+                            .flex_1()
                             .min_w_0()
                             .flex()
                             .flex_col()
                             .child(
                                 div()
-                                    .flex()
-                                    .items_center()
-                                    .gap(space::S8)
-                                    .t_ui()
-                                    .line_height(px(22.))
-                                    .semibold()
-                                    .text_color(k.ink)
-                                    .child(dot())
-                                    .child(div().min_w_0().one_line().child(ask.title.clone())),
-                            )
-                            .child(
-                                div()
-                                    .pl(space::S14)
-                                    .t_meta()
-                                    .line_height(px(18.))
-                                    .text_color(k.ink_3)
+                                    .n_headline()
+                                    .text_color(k.label)
                                     .one_line()
-                                    .child(format!("{from} · {}", when(ask.at))),
-                            ),
+                                    .child(title),
+                            )
+                            .children(line.map(|l| {
+                                div()
+                                    .n_subheadline()
+                                    .n_figures()
+                                    .text_color(k.secondary)
+                                    .one_line()
+                                    .child(l)
+                            })),
                     )
-                    .child(div().flex_1())
                     .child(
                         div()
                             .flex_none()
                             .flex()
                             .items_center()
                             .gap(space::S8)
-                            .children(actions.into_iter().enumerate().map(
-                                |(i, (id, label, primary))| {
-                                    let kind = if primary {
-                                        ButtonKind::Primary
-                                    } else {
-                                        ButtonKind::Quiet
-                                    };
-                                    let (g, t, m) = (g.clone(), t.clone(), message_id.clone());
-                                    ui::button(
-                                        ElementId::Name(format!("pinned-action-{i}").into()),
-                                        label,
-                                        kind,
-                                        ButtonSize::Card,
-                                        cx,
-                                    )
-                                    .on_click(cx.listener(
-                                        move |this, _: &ClickEvent, _, cx| {
-                                            this.services
-                                                .provider
-                                                .press_card_action(&g, &t, &m, &id);
-                                            cx.notify();
-                                        },
-                                    ))
-                                },
-                            )),
+                            .children(buttons),
                     )
-                    .into_any_element()
+            };
+        let body: AnyElement = match state {
+            Pinned::Record { text, at, withdraw } => {
+                let id = format!("pinned-record-{t}-{at}");
+                let mark = ui::motion::check_mark(
+                    ElementId::Name(format!("{id}-check").into()),
+                    ui::sym(Sym::Done, ui::SymSize::INLINE, k.green).into_any_element(),
+                    px(16.),
+                    ui::motion::just_answered(at),
+                    cx,
+                )
+                .into_any_element();
+                let mut buttons = Vec::new();
+                if withdraw {
+                    buttons.push(
+                        push_button(
+                            "pinned-withdraw",
+                            c::WITHDRAW,
+                            PushStyle::Standard,
+                            PushSize::Regular,
+                            cx,
+                        )
+                        .on_click(cx.listener({
+                            let (g, t) = (g.clone(), t.clone());
+                            move |this, _: &ClickEvent, _, cx| {
+                                this.withdraw(g.clone(), t.clone(), cx)
+                            }
+                        }))
+                        .into_any_element(),
+                    );
+                }
+                let row = bar(mark, text, Some(when(at)), buttons);
+                ui::motion::rise(SharedString::from(id), 0, row, cx)
+            }
+            Pinned::Review {
+                number,
+                files,
+                merger,
+            } => bar(
+                needs_you(),
+                fill(c::REVIEW_TITLE, &[("n", &number.to_string())]),
+                Some(fill(
+                    c::REVIEW_LINE,
+                    &[("files", &files.to_string()), ("name", &merger)],
+                )),
+                vec![
+                    push_button(
+                        "pinned-see-changes",
+                        c::SEE_CHANGES,
+                        PushStyle::Standard,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                        this.services
+                            .nav
+                            .update(cx, |nav, cx| nav.set_right_pane(RightPane::Changes, cx));
+                    }))
+                    .into_any_element(),
+                    push_button(
+                        "pinned-request",
+                        c::REQUEST_CHANGES_MORE,
+                        PushStyle::Standard,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _: &ClickEvent, window, cx| {
+                        this.request_changes(window, cx)
+                    }))
+                    .into_any_element(),
+                    push_button(
+                        "pinned-approve",
+                        c::APPROVE_MERGE,
+                        PushStyle::Default,
+                        PushSize::Regular,
+                        cx,
+                    )
+                    .on_click(cx.listener({
+                        let (g, t) = (g.clone(), t.clone());
+                        move |this, _: &ClickEvent, _, cx| this.approve(g.clone(), t.clone(), cx)
+                    }))
+                    .into_any_element(),
+                ],
+            )
+            .into_any_element(),
+            Pinned::Ask { ask, actions } => {
+                let from = fill(
+                    c::ASK_FROM,
+                    &[("name", &member_name(&self.services, &ask.from))],
+                );
+                let message_id = ask.message_id.clone().unwrap_or_default();
+                // At most one default button: the card's first primary.
+                let default = actions.iter().position(|(_, _, primary)| *primary);
+                let buttons = actions
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, (id, label, _))| {
+                        let style = if Some(i) == default {
+                            PushStyle::Default
+                        } else {
+                            PushStyle::Standard
+                        };
+                        let (g, t, m) = (g.clone(), t.clone(), message_id.clone());
+                        push_button(
+                            ElementId::Name(format!("pinned-action-{i}").into()),
+                            label,
+                            style,
+                            PushSize::Regular,
+                            cx,
+                        )
+                        .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                            this.services.provider.press_card_action(&g, &t, &m, &id);
+                            cx.notify();
+                        }))
+                        .into_any_element()
+                    })
+                    .collect();
+                bar(
+                    needs_you(),
+                    ask.title.clone(),
+                    Some(format!("{from} · {}", when(ask.at))),
+                    buttons,
+                )
+                .into_any_element()
             }
         };
-        let card = ui::card(cx)
-            .min_h(px(62.))
-            .flex()
-            .items_stretch()
-            .overflow_hidden()
-            .child(body);
-        // First paint: the card rises in after the timeline rows.
+        let _ = window;
+        // First paint: the bar rises in after the timeline rows.
         Some(ui::motion::rise(
             SharedString::from(format!("pinned-{t}")),
             6,
-            card,
+            div().w_full().child(body),
             cx,
         ))
     }

@@ -15,12 +15,12 @@ use crate::{
     copy::refs as c,
     data::{ChatProvider, DraftRef, Message},
     theme::{self, Type as _, radius, space},
-    ui::{self, Lucide, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
     views::timeline::extras::{ExtrasContext, MessageExtra, Placement},
 };
 
 /// The chip glyph of a reference, from its part kind (or the block for a whole block).
-pub fn glyph(r: &chat_core::proto::BlockRefInput) -> Lucide {
+pub fn glyph(r: &chat_core::proto::BlockRefInput) -> Sym {
     let kind = r.part.as_ref().map(|p| p.kind.as_str());
     let has = |k: &str| {
         r.part
@@ -29,20 +29,20 @@ pub fn glyph(r: &chat_core::proto::BlockRefInput) -> Lucide {
             .is_some_and(|keys| keys.contains_key(k))
     };
     match kind {
-        Some("cell" | "row" | "column") => Lucide::Table,
-        Some("point" | "series") => Lucide::ChartLine,
-        Some("bar") => Lucide::ChartColumn,
-        Some("metric") => Lucide::Hash,
-        Some("step") => Lucide::ListChecks,
-        Some("hunk") => Lucide::FileDiff,
-        Some("line") if has("side") => Lucide::FileDiff,
-        Some("line") => Lucide::Code,
-        Some("image") => Lucide::Image,
-        Some("node") => Lucide::Workflow,
-        Some("element") => Lucide::FileText,
-        Some("item") => Lucide::List,
-        _ if r.artifact.is_some() => Lucide::FileText,
-        _ => Lucide::TextQuote,
+        Some("cell" | "row" | "column") => Sym::Table,
+        Some("point" | "series") => Sym::Chart,
+        Some("bar") => Sym::BarChart,
+        Some("metric") => Sym::Topic,
+        Some("step") => Sym::Checklist,
+        Some("hunk") => Sym::Diff,
+        Some("line") if has("side") => Sym::Diff,
+        Some("line") => Sym::Code,
+        Some("image") => Sym::Image,
+        Some("node") => Sym::Diagram,
+        Some("element") => Sym::Document,
+        Some("item") => Sym::List,
+        _ if r.artifact.is_some() => Sym::Document,
+        _ => Sym::Quote,
     }
 }
 
@@ -133,22 +133,21 @@ pub fn composer_chip(
         .items_center()
         .gap(space::S6)
         .max_w(px(320.))
-        .h(px(26.))
-        .pl(space::S8)
-        .pr(space::S2)
+        // Quiet inline text with a symbol (NATIVE.md rule 4): no chip box;
+        // a flash marks it with the selection fill only.
+        .h(px(22.))
+        .px(space::S4)
         .rounded(radius::SM)
-        .bg(if flashing { k.sel } else { k.sunken })
-        .border_1()
-        .border_color(k.line)
-        .t_meta()
+        .when(flashing, |d| d.bg(k.sel))
+        .text_size(px(13.))
+        .line_height(px(18.))
         .text_color(k.ink_3)
-        .cursor_pointer()
         .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
         .on_click(move |_, window, cx| on_open(window, cx))
         .child(
             div()
                 .flex_none()
-                .child(ui::icon(glyph(&r.input), theme::icon::TAG, k.ink_3)),
+                .child(ui::icon(glyph(&r.input), px(16.), k.ink_3)),
         )
         .child(
             div()
@@ -167,23 +166,16 @@ pub fn composer_chip(
                     )
                 })
                 // The part stays whole (`fit` already cut it); the lead gives way.
-                .child(
-                    div()
-                        .flex_none()
-                        .one_line()
-                        .text_color(k.ink)
-                        .medium()
-                        .child(part),
-                ),
+                .child(div().flex_none().one_line().text_color(k.ink).child(part)),
         )
         .when(updated, |d| {
             d.child(div().flex_none().text_color(k.ink_3).child(c::UPDATED))
         })
         .child(
-            ui::icon_button(ElementId::Name(format!("{id:?}-x").into()), Lucide::X)
-                .with_size(px(22.))
-                .rounded(radius::SM)
-                .icon(ui::button_glyph(Lucide::X, theme::icon::TAG, px(22.)))
+            ui::icon_button(ElementId::Name(format!("{id:?}-x").into()), Sym::Close)
+                .with_size(px(18.))
+                .rounded(px(9.))
+                .icon(ui::button_glyph(Sym::Close, px(14.), px(18.)))
                 .named(c::REMOVE)
                 .on_click(move |_, window, cx| {
                     cx.stop_propagation();
@@ -285,8 +277,7 @@ fn sent_line(id: ElementId, r: &BlockRef, topic: (&str, &str), cx: &App) -> AnyE
         .t_meta()
         .text_color(k.ink_3)
         .when(!deleted, |d| {
-            d.cursor_pointer()
-                .hover(|s| s.text_color(k.ink_2))
+            d.hover(|s| s.text_color(k.ink_2))
                 .on_click(move |_, _, cx| open_source(&draft, cx))
         })
         .child(
@@ -333,7 +324,7 @@ pub fn side_lines(labels: &[String], cx: &App) -> AnyElement {
                 .min_w_0()
                 .t_meta()
                 .text_color(k.ink_3)
-                .child(ui::icon(Lucide::TextQuote, theme::icon::TAG, k.ink_3))
+                .child(ui::icon(Sym::Quote, theme::icon::TAG, k.ink_3))
                 .when(!a.trim().is_empty(), |d| {
                     d.child(div().flex_none().one_line().child(a.trim_end().to_string()))
                 })
@@ -381,9 +372,9 @@ pub fn sent_refs(message: &Message, refs: &[BlockRef], cx: &App) -> AnyElement {
                     .h(px(22.))
                     .t_meta()
                     .text_color(k.ink_3)
-                    .child(ui::icon(Lucide::TextQuote, theme::icon::TAG, k.ink_3))
+                    .child(ui::icon(Sym::Quote, theme::icon::TAG, k.ink_3))
                     .child(super::cited(refs.len()))
-                    .child(ui::icon(Lucide::ChevronDown, theme::icon::TAG, k.ink_3)),
+                    .child(ui::icon(Sym::ChevronDown, theme::icon::TAG, k.ink_3)),
             )
         })
         .children(lines)
@@ -421,7 +412,8 @@ pub fn row(chips: Vec<AnyElement>) -> AnyElement {
     div()
         .flex()
         .flex_wrap()
-        .gap(space::S6)
+        .gap_x(space::S12)
+        .gap_y(space::S2)
         .children(chips)
         .into_any_element()
 }

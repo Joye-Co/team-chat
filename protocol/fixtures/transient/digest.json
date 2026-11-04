@@ -1,0 +1,27 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "value": {
+    "type": "digest",
+    "at": 1762214400000,
+    "since": 1762128000000,
+    "counts": {
+      "waiting": 2,
+      "mention": 1,
+      "result": 3,
+      "blocked": 0
+    },
+    "items": [
+      {
+        "groupId": "01JBX0GENERAL000000000000A",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "event": "waiting"
+      },
+      {
+        "groupId": "01JBX0GENERAL000000000000A",
+        "topicId": "01JBX0TOPIC0000000000000AD",
+        "event": "result"
+      }
+    ]
+  }
+}

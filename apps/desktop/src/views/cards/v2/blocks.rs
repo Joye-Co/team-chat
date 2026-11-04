@@ -5,18 +5,18 @@
 use gpui::{
     AnyElement, App, Div, FontWeight, Hsla, InteractiveElement as _, IntoElement, ObjectFit,
     ParentElement, SharedString, StatefulInteractiveElement as _, Styled, StyledImage as _, Window,
-    div, img, prelude::FluentBuilder as _, px, relative,
+    div, img, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, Sizable as _,
-    button::{Button, ButtonCustomVariant, ButtonVariants as _},
+    button::Button,
     input::{Input, Textarea},
     menu::{DropdownMenu as _, PopupMenuItem},
     switch::Switch,
 };
 use serde_json::Value;
 
-use super::{Ctx, choice_text, form::Field, letter, meta, option_label, state::CardState};
+use super::{Ctx, choice_text, form::Field, meta, option_label, state::CardState};
 use crate::{
     copy::{cards_v2 as c, fill},
     data::{
@@ -28,7 +28,7 @@ use crate::{
         },
     },
     theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
-    ui::{self, Lucide},
+    ui::{self, Sym, native::NativeType as _},
     views::refs::{
         affordance::Anchor,
         cards::{self as ref_parts, BlockParts, CardParts, Pick},
@@ -424,20 +424,11 @@ pub(crate) fn table_with_refs(
             .gap(space::S8)
             .when(num, |el| el.justify_end())
             .when_some(pct, |el, p| {
-                el.child(
-                    div()
-                        .w(m::TABLE_PCT_BAR)
-                        .h(px(3.))
-                        .rounded(px(2.))
-                        .bg(k.line_2)
-                        .child(
-                            div()
-                                .h_full()
-                                .rounded(px(2.))
-                                .bg(k.ink_2)
-                                .w(relative((p / 100.).clamp(0., 1.))),
-                        ),
-                )
+                el.child(div().w(m::TABLE_PCT_BAR).child(ui::native::determinate_bar(
+                    (p / 100.).clamp(0., 1.) as f32,
+                    None,
+                    cx,
+                )))
             })
             .child(
                 div()
@@ -546,10 +537,10 @@ pub(crate) fn list_with(
         .children(items.iter().enumerate().map(|(i, it)| {
             let pick = Pick::Item(i);
             let (glyph, color, text) = match it.status {
-                Some(CardListStatus::Done) => (Some(Lucide::Check), k.ink_3, k.ink_2),
+                Some(CardListStatus::Done) => (Some(Sym::Check), k.ink_3, k.ink_2),
                 Some(CardListStatus::InProgress) => (None, k.live, k.ink),
-                Some(CardListStatus::Failed) => (Some(Lucide::X), k.bad, k.ink),
-                Some(CardListStatus::Skipped) => (Some(Lucide::Minus), k.ink_3, k.ink_3),
+                Some(CardListStatus::Failed) => (Some(Sym::Close), k.bad, k.ink),
+                Some(CardListStatus::Skipped) => (Some(Sym::Minus), k.ink_3, k.ink_3),
                 Some(CardListStatus::Todo) | None => (None, k.ink_3, k.ink_2),
             };
             let row = div()
@@ -608,35 +599,12 @@ fn segments(label: Option<&str>) -> Option<usize> {
     (2..=40).contains(&n).then_some(n)
 }
 
-fn progress_bar(value: f64, label: Option<&str>, count: Option<usize>, cx: &App) -> AnyElement {
+/// Progress (NATIVE.md §5.7): the one determinate bar, 4 pt, radius 2, in `blue` while
+/// it is live work. A counted label (`已重启 9/24`) stays text; no segments.
+fn progress_bar(value: f64, label: Option<&str>, _count: Option<usize>, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
     let v = value.clamp(0., 1.) as f32;
-    let bar = match count.or_else(|| segments(label)) {
-        Some(n) => {
-            let lit = (v * n as f32).round() as usize;
-            div()
-                .flex()
-                .gap(px(3.))
-                .children((0..n).map(|i| {
-                    div().flex_1().h(px(4.)).rounded(px(2.)).bg(
-                        if i + 1 < lit || (i < lit && lit == n) {
-                            k.ink_2
-                        } else if i + 1 == lit {
-                            k.live
-                        } else {
-                            k.line_2
-                        },
-                    )
-                }))
-                .into_any_element()
-        }
-        None => div()
-            .h(px(4.))
-            .rounded(px(2.))
-            .bg(k.line_2)
-            .child(div().h_full().rounded(px(2.)).bg(k.live).w(relative(v)))
-            .into_any_element(),
-    };
     div()
         .flex()
         .flex_col()
@@ -644,7 +612,7 @@ fn progress_bar(value: f64, label: Option<&str>, count: Option<usize>, cx: &App)
         .when_some(label, |el, l| {
             el.child(meta(div()).text_color(k.ink_3).child(l.to_string()))
         })
-        .child(bar)
+        .child(ui::native::determinate_bar(v, Some(n.blue), cx))
         .into_any_element()
 }
 
@@ -709,34 +677,17 @@ fn link(ctx: &Ctx, label: &str, target: &LinkTarget, ix: usize, cx: &App) -> Any
         .flex()
         .items_center()
         .gap(space::S4)
-        .cursor_pointer()
         .text_color(k.ink)
         .font_weight(theme::MEDIUM_WEIGHT)
         .hover(|s| s.text_color(k.ink_2))
         .child(label.to_string())
-        .child(ui::icon(Lucide::ChevronRight, px(14.), k.ink_3))
+        .child(ui::icon(Sym::ChevronRight, px(14.), k.ink_3))
         .on_click(move |_, window, cx| a.open(&t, window, cx))
         .into_any_element()
 }
 
 // ---------------------------------------------------------------------------
 // Decisions and the answer record
-
-pub(crate) fn key_tile(i: usize, cx: &App) -> Div {
-    let k = theme::colors(cx);
-    div()
-        .flex_none()
-        .size(m::TILE)
-        .rounded(theme::radius::SM)
-        .bg(k.sunken)
-        .flex()
-        .items_center()
-        .justify_center()
-        .text_size(px(11.))
-        .mono()
-        .text_color(k.ink_2)
-        .child(letter(i).to_string())
-}
 
 pub(crate) fn decision(
     ctx: &Ctx,
@@ -746,114 +697,168 @@ pub(crate) fn decision(
     recommended: &[String],
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
+    use crate::ui::native::{self as nk, NativeType as _};
+    let n = nk::native_colors(cx);
     let quick = ctx.quick();
     let live = ctx.live();
     let chosen = ctx.form.read(cx).choice(id).to_vec();
     let a = ctx.answerer();
     let sending = matches!(ctx.state, CardState::Sending { .. });
-    let row = |i: usize, o: &DecisionOption| {
-        let picked = chosen.contains(&o.id);
-        let (a, block, option, form) = (a.clone(), id.to_string(), o.id.clone(), ctx.form.clone());
-        div()
-            .id(ctx.id(format!("opt-{id}-{}", o.id)))
-            .flex()
-            .items_center()
-            .gap(space::S10)
-            .h(m::OPTION)
-            .pl(space::S8)
-            .pr(if quick { space::S14 } else { space::S12 })
-            .rounded(m::OPTION_RADIUS)
-            .bg(k.bg)
-            .border_1()
-            .border_color(if picked { k.ink } else { k.line_2 })
-            .shadow(k.sec_hi())
-            .text_size(px(13.))
-            .line_height(px(20.))
-            .text_color(k.ink)
-            .when(!quick, |el| el.w_full())
-            .when(live && !sending, |el| {
-                el.cursor_pointer()
-                    .hover(|s| s.border_color(k.ink_3))
-                    .on_click(move |_, _, cx| {
-                        if quick {
-                            a.pick(&block, &option, cx);
-                        } else {
-                            form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx));
-                        }
-                    })
-            })
-            .child(key_tile(i, cx))
-            .child(
-                div()
-                    .min_w(px(0.))
-                    .one_line()
-                    .when(picked, |el| el.font_weight(theme::MEDIUM_WEIGHT))
-                    .child(o.label.clone()),
-            )
-            .when_some(o.detail.clone(), |el, d| {
-                el.child(meta(div()).one_line().text_color(k.ink_3).child(d))
-            })
-            .when(!quick, |el| {
-                el.child(
-                    div()
-                        .ml_auto()
-                        .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .map(|el| {
-                            let rec = recommended.contains(&o.id);
-                            el.when(rec, |el| {
-                                el.child(meta(div()).text_color(k.ink_3).child(c::RECOMMENDED))
-                            })
-                            .when(picked, |el| {
-                                el.child(ui::icon(Lucide::Check, px(14.), k.ink))
-                            })
-                        }),
-                )
-            })
-    };
-    let grid =
-        !quick && options.len() == 4 && options.iter().all(|o| o.label.chars().count() <= 12);
-    if grid {
-        let mut cells: Vec<_> = options.iter().enumerate().map(|(i, o)| row(i, o)).collect();
-        let second = cells.split_off(2);
-        let line = |cells: Vec<gpui::Stateful<Div>>| {
-            div().flex().gap(space::S8).children(
-                cells
-                    .into_iter()
-                    .map(|c| div().flex_1().min_w(px(0.)).child(c)),
-            )
-        };
-        return div()
-            .flex()
-            .flex_col()
-            .gap(space::S8)
-            .child(line(cells))
-            .child(line(second))
-            .into_any_element();
-    }
-    let rows = options.iter().enumerate().map(|(i, o)| row(i, o));
+    let enabled = live && !sending;
+    // Two or three short options: a row of Regular push buttons, a press
+    // answers (NATIVE.md §5.2). No letters: the recommended option is the
+    // Default button, the chosen one leads with a checkmark.
     if quick {
-        div()
+        let buttons = options.iter().map(|o| {
+            let picked = chosen.contains(&o.id);
+            let (a, block, option) = (a.clone(), id.to_string(), o.id.clone());
+            option_button(
+                ctx.id(format!("opt-{id}-{}", o.id)),
+                &o.label,
+                recommended.contains(&o.id),
+                picked,
+                enabled || picked,
+                cx,
+            )
+            .on_click(move |_, _, cx| a.pick(&block, &option, cx))
+        });
+        return div()
             .flex()
             .flex_wrap()
             .gap(space::S8)
-            .children(rows)
-            .into_any_element()
-    } else {
-        div()
-            .flex()
-            .flex_col()
-            .gap(space::S8)
-            .children(rows)
-            .into_any_element()
+            .children(buttons)
+            .into_any_element();
     }
+    // More: radio buttons (checkboxes when several may be chosen), one
+    // 24 pt row each: the label, `推荐` in `secondary` right after it, then
+    // a `secondary` detail (§5.4). No letters, no tiles.
+    let rows = options.iter().map(|o| {
+        let picked = chosen.contains(&o.id);
+        let rec = recommended.contains(&o.id);
+        let choose = {
+            let (block, option, form) = (id.to_string(), o.id.clone(), ctx.form.clone());
+            move |_: bool, _: &mut Window, cx: &mut App| {
+                form.update(cx, |f, cx| f.choose(&block, &option, multiple, cx))
+            }
+        };
+        let control = if multiple {
+            nk::NativeCheckbox::new(ctx.id(format!("opt-{id}-{}-c", o.id)), picked)
+                .disabled(!enabled)
+                .on_change(choose.clone())
+                .into_any_element()
+        } else {
+            nk::NativeRadio::new(ctx.id(format!("opt-{id}-{}-c", o.id)), picked)
+                .disabled(!enabled)
+                .on_change(choose.clone())
+                .into_any_element()
+        };
+        div()
+            .id(ctx.id(format!("opt-{id}-{}", o.id)))
+            .min_h(px(24.))
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .n_body()
+            .text_color(n.label)
+            .when(enabled, |el| {
+                el.on_click(move |_, window, cx| choose(true, window, cx))
+            })
+            .child(control)
+            .child(option_title(&o.label, rec, cx))
+            .when_some(o.detail.clone(), |el, d| {
+                el.child(
+                    div()
+                        .ml_auto()
+                        .min_w(px(0.))
+                        .one_line()
+                        .text_color(n.secondary)
+                        .child(d),
+                )
+            })
+    });
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S4)
+        .children(rows)
+        .into_any_element()
+}
+
+/// The title of an option row: the label, then `推荐` as `secondary` text
+/// right after it, never a capsule (NATIVE.md rule 4).
+pub(crate) fn option_title(label: &str, recommended: bool, cx: &App) -> Div {
+    let n = ui::native::native_colors(cx);
+    div()
+        .min_w(px(0.))
+        .flex()
+        .items_baseline()
+        .gap(space::S6)
+        .n_body()
+        .text_color(n.label)
+        .child(div().min_w(px(0.)).one_line().child(label.to_string()))
+        .when(recommended, |el| {
+            el.child(
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .text_color(n.secondary)
+                    .child(c::RECOMMENDED),
+            )
+        })
+}
+
+/// The mark of a chosen picture or page (Photos): a 20 pt `accent` circle
+/// with an `onAccent` checkmark.
+pub(crate) fn chosen_badge(cx: &App) -> Div {
+    let n = ui::native::native_colors(cx);
+    div()
+        .size(px(20.))
+        .rounded_full()
+        .bg(n.accent)
+        .shadow(n.float())
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(Sym::Check.inline_small().text_color(n.on_accent))
+}
+
+/// A short option as a Regular push button (NATIVE.md §5.2): no letter
+/// badge; the recommended option in the Default style; the chosen one
+/// leads with a 13 pt checkmark. Disabled while the card is not live.
+pub(crate) fn option_button(
+    id: SharedString,
+    label: &str,
+    recommended: bool,
+    picked: bool,
+    enabled: bool,
+    cx: &App,
+) -> Button {
+    use crate::ui::native as nk;
+    let n = nk::native_colors(cx);
+    let style = if recommended {
+        nk::PushStyle::Default
+    } else {
+        nk::PushStyle::Standard
+    };
+    let ink = if recommended { n.on_accent } else { n.label };
+    nk::disabled_push(
+        nk::push_button(id, "", style, nk::PushSize::Regular, cx)
+            .flex_none()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S4)
+                    .when(picked, |el| el.child(Sym::Check.inline().text_color(ink)))
+                    .child(label.to_string()),
+            ),
+        !enabled,
+        cx,
+    )
 }
 
 /// The answer record that replaces the controls once answered: a `sunken`
-/// row with the drawn check, `你选了 B：…` (or `Joye 选了 B：…`), where it
+/// row with the drawn check, `你选了「…」` (or `Joye 选了「…」`), where it
 /// went, the time, and `撤回` while my answer is still on its way or
 /// `展开` for others.
 pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
@@ -923,19 +928,15 @@ pub(crate) fn record(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement
         .flex()
         .items_center()
         .gap(space::S8)
-        .h(m::OPTION)
-        .pl(space::S12)
-        .pr(space::S4)
-        .rounded(m::OPTION_RADIUS)
-        .bg(k.sunken)
+        .min_h(px(24.))
         .text_size(px(13.))
-        .line_height(px(20.))
+        .line_height(px(18.))
         .child(if sending {
             ui::motion::spinner().color(k.ink_3).into_any_element()
         } else {
             ui::motion::check_mark(
                 ctx.id("record-check"),
-                ui::icon(Lucide::Check, px(16.), k.ok),
+                ui::icon(Sym::Check, px(16.), k.ok),
                 px(16.),
                 fresh,
                 cx,
@@ -1017,10 +1018,10 @@ fn answered_fields(
             }
             CardV2Block::Decision { id, options, .. } => {
                 if let Some(Value::String(s)) = inputs.and_then(|i| i.get(id))
-                    && let Some((i, o)) = options.iter().enumerate().find(|(_, o)| &o.id == s)
+                    && let Some(o) = options.iter().find(|o| &o.id == s)
                 {
                     rows.push(CardField {
-                        label: letter(i).to_string(),
+                        label: c::RECORD_CHOICE.to_string(),
                         value: o.label.clone(),
                     });
                 }
@@ -1031,21 +1032,17 @@ fn answered_fields(
     fields_grid(&rows, cx)
 }
 
-pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> gpui::Stateful<Div> {
-    let k = theme::colors(cx);
-    div()
-        .id(id)
-        .flex_none()
-        .h(px(28.))
-        .px(space::S8)
-        .rounded(px(7.))
-        .flex()
-        .items_center()
-        .text_size(px(13.))
-        .text_color(k.ink_2)
-        .cursor_pointer()
-        .hover(|s| s.bg(k.hover))
-        .child(label.to_string())
+/// A small standard push button for an action inside a block (`撤回`,
+/// `展开`): NATIVE.md §5.2.
+pub(crate) fn quiet_button(id: SharedString, label: &str, cx: &App) -> Button {
+    ui::native::push_button(
+        id,
+        label.to_string(),
+        ui::native::PushStyle::Standard,
+        ui::native::PushSize::Small,
+        cx,
+    )
+    .flex_none()
 }
 
 // ---------------------------------------------------------------------------
@@ -1083,26 +1080,29 @@ pub(crate) fn footer_note_input(card: &CardV2) -> Option<(String, Option<String>
 /// A field box: 36 pt (32 in the footer), radius 8, 1 pt `line-2`; `ink-3`
 /// while focused or when it is the first empty required field; `bad` when
 /// invalid.
+/// A standalone text field (NATIVE.md §5.6): 24 pt (taller only for a
+/// multi-line area), radius 6, `content` fill, a 1 pt `separator` edge, 7 pt
+/// sides, the 3 pt focus ring; `red` edge on an error.
 pub(crate) fn field_box(focused: bool, error: bool, height: gpui::Pixels, cx: &App) -> Div {
-    let k = theme::colors(cx);
+    let n = ui::native::native_colors(cx);
+    let h = if height <= m::OPTION {
+        ui::native::metrics::FIELD
+    } else {
+        height
+    };
     div()
-        .h(height)
+        .h(h)
         .w_full()
         .min_w(px(0.))
-        .px(space::S10)
-        .rounded(theme::radius::MD)
-        .bg(k.bg)
+        .px(ui::native::metrics::FIELD_PAD)
+        .rounded(ui::native::metrics::FIELD_RADIUS)
+        .bg(n.content)
         .border_1()
-        .border_color(if error {
-            k.bad
-        } else if focused {
-            k.ink_3
-        } else {
-            k.line_2
-        })
+        .border_color(if error { n.red } else { n.separator })
+        .when(focused && !error, |el| el.shadow(n.focus_ring()))
         .flex()
         .items_center()
-        .gap(space::S8)
+        .gap(space::S6)
 }
 
 pub(crate) fn line_input(
@@ -1216,16 +1216,27 @@ pub(crate) fn form_grid(
                 .flex()
                 .when(top, |el| el.items_start())
                 .when(!top, |el| el.items_center())
-                .gap(space::S12)
+                .gap(space::S8)
+                // A Mac form: the label right-aligned before its control,
+                // the control as wide as its text (NATIVE.md §5.6).
                 .child(
-                    small(div())
+                    div()
+                        .n_body()
                         .flex_none()
                         .w(m::FORM_LABEL)
-                        .when(top, |el| el.pt(space::S6))
+                        .flex()
+                        .justify_end()
+                        .when(kind == &InputKind::Textarea, |el| el.pt(space::S4))
                         .text_color(k.ink)
                         .child(label.clone()),
                 )
-                .child(div().flex_1().min_w(px(0.)).child(control))
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .when(!top, |el| el.max_w(px(280.)))
+                        .child(control),
+                )
                 .into_any_element(),
         );
     }
@@ -1261,37 +1272,26 @@ pub(crate) fn input_control(
                 .as_ref()
                 .and_then(|c| options.iter().find(|o| &o.id == c))
                 .map(|o| o.label.clone());
-            let empty = text.is_none();
             let shown = text.unwrap_or_else(|| {
                 placeholder
                     .map(str::to_string)
                     .unwrap_or_else(|| fill(c::FORM_SELECT_PLACEHOLDER, &[("label", label)]))
             });
-            let trigger = Button::new(ctx.id(format!("select-{id}")))
-                .custom(
-                    ButtonCustomVariant::new(cx)
-                        .color(k.bg)
-                        .foreground(k.ink)
-                        .hover(k.bg)
-                        .active(k.hover),
-                )
-                .w_full()
-                .h(m::OPTION)
-                .px(space::S10)
-                .rounded(theme::radius::MD)
-                .border_1()
-                .border_color(if lead { k.ink_3 } else { k.line_2 })
-                .disabled(!live)
-                .child(
-                    small(div())
-                        .flex_1()
-                        .min_w(px(0.))
-                        .one_line()
-                        .font_weight(FontWeight::NORMAL)
-                        .text_color(if empty { k.ink_3 } else { k.ink })
-                        .child(shown),
-                )
-                .child(ui::icon(Lucide::ChevronDown, px(14.), k.ink_3));
+            // A pop-up button (NATIVE.md §5.3): the chosen option and the
+            // `chevron.up.chevron.down` mark; the placeholder in `tertiary`.
+            let _ = lead;
+            let trigger = ui::native::disabled_push(
+                ui::native::popup_button(
+                    ctx.id(format!("select-{id}")),
+                    shown,
+                    ui::native::PushSize::Regular,
+                    window,
+                    cx,
+                ),
+                !live,
+                cx,
+            )
+            .w_full();
             if !live {
                 return trigger.into_any_element();
             }
@@ -1341,51 +1341,30 @@ pub(crate) fn input_control(
                     let lock = locked.contains(&o.id);
                     let on = chosen.contains(&o.id) && !lock;
                     let (form, block, oid) = (ctx.form.clone(), id.to_string(), o.id.clone());
-                    small(div())
+                    // A checkbox per option (NATIVE.md §5.4); a locked
+                    // option shows `lock` and cannot change.
+                    div()
                         .id(ctx.id(format!("chip-{id}-{}", o.id)))
                         .flex()
                         .items_center()
-                        .gap(space::S6)
-                        .h(m::CHIP)
-                        .px(space::S10)
-                        .rounded(m::CHIP_RADIUS)
-                        .map(|el| {
-                            if lock {
-                                el.bg(k.sunken).text_color(k.ink_2).child(ui::icon(
-                                    Lucide::Lock,
-                                    px(12.),
-                                    k.ink_2,
-                                ))
-                            } else {
-                                el.bg(k.bg)
-                                    .border_1()
-                                    .border_color(if on { k.ink } else { k.line_2 })
-                                    .shadow(k.sec_hi())
-                                    .text_color(k.ink)
-                                    .when(on, |el| {
-                                        el.font_weight(theme::MEDIUM_WEIGHT).child(ui::icon(
-                                            Lucide::Check,
-                                            px(13.),
-                                            k.ink,
-                                        ))
-                                    })
-                                    .when(live, |el| {
-                                        el.cursor_pointer()
-                                            .hover(|s| s.border_color(k.ink_3))
-                                            .on_click(move |_, _, cx| {
-                                                form.update(cx, |f, cx| {
-                                                    f.choose(&block, &oid, true, cx)
-                                                })
-                                            })
-                                    })
-                            }
-                        })
-                        .child(o.label.clone())
+                        .gap(space::S4)
+                        .child(
+                            ui::native::NativeCheckbox::new(
+                                ctx.id(format!("chip-{id}-{}-c", o.id)),
+                                on || lock,
+                            )
+                            .label(o.label.clone())
+                            .disabled(!live || lock)
+                            .on_change(move |_, _, cx| {
+                                form.update(cx, |f, cx| f.choose(&block, &oid, true, cx))
+                            }),
+                        )
                         .when(lock, |el| {
-                            el.tooltip(|window, cx| {
-                                gpui_component::tooltip::Tooltip::new(c::FORM_LOCKED)
-                                    .build(window, cx)
-                            })
+                            el.child(ui::icon(Sym::Lock, px(14.), k.ink_3))
+                                .tooltip(|window, cx| {
+                                    gpui_component::tooltip::Tooltip::new(c::FORM_LOCKED)
+                                        .build(window, cx)
+                                })
                         })
                 }))
                 .into_any_element()
@@ -1436,7 +1415,7 @@ pub(crate) fn input_control(
                         .child(line_input(&field, !live, window, cx)),
                 )
                 .when(kind == InputKind::Date, |el| {
-                    el.child(ui::icon(Lucide::Calendar, px(14.), k.ink_3))
+                    el.child(ui::icon(Sym::Calendar, px(14.), k.ink_3))
                 })
                 .into_any_element()
         }
@@ -1541,7 +1520,7 @@ fn draft_well(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut 
                     .items_center()
                     .gap(space::S8)
                     .text_color(k.ink_3)
-                    .child(ui::icon(Lucide::Image, px(14.), k.ink_3))
+                    .child(ui::icon(Sym::Image, px(14.), k.ink_3))
                     .child(fill(c::DRAFT_IMAGES, &[("n", &images.len().to_string())]))
                     .into_any_element(),
             );
@@ -1732,7 +1711,7 @@ fn plan(
                 current_seen = true;
             }
             let glyph: AnyElement = match it.state {
-                RunPlanState::Done => ui::icon(Lucide::Check, px(14.), k.ink_3).into_any_element(),
+                RunPlanState::Done => ui::icon(Sym::Check, px(14.), k.ink_3).into_any_element(),
                 RunPlanState::Current => ui::motion::breathe(
                     ctx.id(format!("plan-dot-{i}")),
                     div().size(px(8.)).rounded_full().bg(k.live),
@@ -2158,32 +2137,33 @@ fn diff(
 // ---------------------------------------------------------------------------
 // Evidence
 
-/// A proof chip: 26 pt, radius 7, 1 pt `line`, a state glyph and the label.
+/// A proof fact (NATIVE.md rule 4: no chips): the state symbol and the
+/// label as a `secondary` Callout run; a proof with a link opens it.
 pub(crate) fn proof_chip(
     id: SharedString,
-    glyph: Option<(Lucide, Hsla)>,
+    glyph: Option<(Sym, Hsla)>,
     label: String,
     url: Option<String>,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
-    meta(div())
+    let n = ui::native::native_colors(cx);
+    let has_url = url.is_some();
+    div()
         .id(id)
+        .flex_none()
         .flex()
         .items_center()
-        .gap(space::S6)
-        .h(m::PROOF)
-        .px(space::S8)
-        .rounded(m::CHIP_RADIUS)
-        .bg(k.sunken)
-        .text_color(k.ink_2)
+        .gap(space::S4)
+        .n_callout()
+        .n_figures()
+        .text_color(if has_url { n.label } else { n.secondary })
         .when_some(glyph, |el, (g, color)| {
-            el.child(ui::icon(g, px(13.), color))
+            // Done reads quietly in a row: `checkmark` in `green`.
+            el.child(ui::icon(g, px(14.), color))
         })
-        .child(div().mono().child(label))
+        .child(div().whitespace_nowrap().child(label))
         .when_some(url, |el, url| {
             el.cursor_pointer()
-                .hover(|s| s.bg(k.hover))
                 .on_click(move |_, _, cx| cx.open_url(&url))
         })
         .into_any_element()
@@ -2216,8 +2196,8 @@ fn evidence(ctx: &Ctx, blocks: &[&CardV2Block], window: &mut Window, cx: &mut Ap
         }
         let bp = part(b);
         let glyph = match state {
-            Some(EvidenceState::Pass) => Some((Lucide::Check, k.ok)),
-            Some(EvidenceState::Fail) => Some((Lucide::X, k.bad)),
+            Some(EvidenceState::Pass) => Some((Sym::Check, k.ok)),
+            Some(EvidenceState::Fail) => Some((Sym::Close, k.bad)),
             _ => None,
         };
         // A result with a sentence of detail reads as a line; a bare count
@@ -2431,7 +2411,7 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             .rounded(theme::radius::MD)
             .bg(k.sunken)
             .text_color(k.ink_2)
-            .child(ui::icon(Lucide::Info, px(14.), k.ink_3))
+            .child(ui::icon(Sym::Info, px(14.), k.ink_3))
             .child(
                 div()
                     .flex_1()
@@ -2456,23 +2436,21 @@ fn no_evidence(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
 // ---------------------------------------------------------------------------
 // Refs
 
-fn ref_tile(glyph: Lucide, dashed: bool, cx: &App) -> AnyElement {
+fn ref_tile(glyph: Sym, dashed: bool, cx: &App) -> AnyElement {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .size(m::REF_TILE)
-        .rounded(px(7.))
+        .size(px(20.))
         .flex()
         .items_center()
         .justify_center()
-        .map(|el| {
-            if dashed {
-                el.border_1().border_dashed().border_color(k.line_2)
-            } else {
-                el.bg(k.sunken)
-            }
-        })
-        .child(ui::icon(glyph, px(15.), k.ink_2))
+        // A plain `secondary` symbol, no tile (NATIVE.md §6); a missing
+        // target reads `tertiary`.
+        .child(ui::icon(
+            glyph,
+            px(18.),
+            if dashed { k.ink_3 } else { k.ink_2 },
+        ))
         .into_any_element()
 }
 
@@ -2576,7 +2554,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                     let tone = state.as_ref().map_or(PrTone::Plain, |s| s.tone);
                     (
                         ref_tile(
-                            if tone == PrTone::Merged { Lucide::GitMerge } else { Lucide::GitPullRequest },
+                            if tone == PrTone::Merged { Sym::Merge } else { Sym::PullRequest },
                             false,
                             cx,
                         ),
@@ -2600,7 +2578,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         let shown = version.unwrap_or(a.summary.version);
                         let newer = a.summary.version > shown;
                         (
-                            ref_tile(Lucide::FileText, false, cx),
+                            ref_tile(Sym::Document, false, cx),
                             a.summary.title.clone(),
                             fill(
                                 c::REF_ARTIFACT_LINE,
@@ -2613,7 +2591,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                         )
                     }
                     None => (
-                        ref_tile(Lucide::FileX, true, cx),
+                        ref_tile(Sym::MissingFile, true, cx),
                         c::REF_ARTIFACT_GONE.to_string(),
                         fill(c::REF_ARTIFACT_GONE_DETAIL, &[("title", label)]),
                         None,
@@ -2642,7 +2620,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                             format!("{}/{}", (done + 1).min(r.plan.len()), r.plan.len())
                         });
                     (
-                        ref_tile(Lucide::List, false, cx),
+                        ref_tile(Sym::List, false, cx),
                         topic.map(|t| t.title).unwrap_or_else(|| label.clone()),
                         fill(c::REF_TOPIC_LINE, &[("group", &group), ("status", &status)]),
                         run,
@@ -2652,7 +2630,7 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 RefTarget::Member { member_id } => {
                     let member = p.member(member_id);
                     (
-                        ui::MemberAvatar::new(member.as_ref(), m::REF_TILE).into_any_element(),
+                        ui::MemberAvatar::new(member.as_ref(), px(20.)).into_any_element(),
                         member.as_ref().map(|m| m.name.clone()).unwrap_or_else(|| label.clone()),
                         member.and_then(|m| m.role).unwrap_or_default(),
                         None,
@@ -2660,14 +2638,14 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                     )
                 }
                 RefTarget::Url { url } => (
-                    ref_tile(Lucide::Link, false, cx),
+                    ref_tile(Sym::Link, false, cx),
                     label.clone(),
                     url.clone(),
                     None,
                     k.ink_2,
                 ),
                 RefTarget::Unknown => (
-                    ref_tile(Lucide::Link, false, cx),
+                    ref_tile(Sym::Link, false, cx),
                     label.clone(),
                     String::new(),
                     None,
@@ -2683,11 +2661,10 @@ fn refs(ctx: &Ctx, blocks: &[&CardV2Block], cx: &App) -> AnyElement {
                 .flex()
                 .items_center()
                 .gap(space::S12)
-                .min_h(m::REF_ROW)
+                .min_h(px(44.))
                 .py(space::S8)
                 .when(!gone, |el| {
-                    el.cursor_pointer()
-                        .hover(|s| s.bg(k.hover))
+                    el
                         .on_click(move |_, window, cx| a.open(&t, window, cx))
                 })
                 .child(lead)

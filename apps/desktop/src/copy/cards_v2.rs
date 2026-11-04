@@ -214,4 +214,7 @@ crate::copy! {
     GALLERY_SNAPSHOT = "快照和回执",
     // PR ref states (docs/protocol.md TopicLink.state).
     REF_PR_DRAFT = "草稿",
+    // --- v12/fx-cards ---
+    RECORD_CHOICE = "选择",
+    // --- end v12/fx-cards ---
 }

@@ -93,6 +93,14 @@ pub struct EventFrame {
         skip_serializing_if = "Option::is_none"
     )]
     pub notify: Option<NotifyReason>,
+    /// Settings: which switchable event this notification is (absent on older servers).
+    #[serde(
+        rename = "notifyEvent",
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub notify_event: Option<crate::settings::NotifyEvent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

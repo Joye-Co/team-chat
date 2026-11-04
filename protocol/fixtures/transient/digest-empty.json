@@ -1,0 +1,17 @@
+{
+  "kind": "TransientEvent",
+  "valid": true,
+  "description": "nothing happened",
+  "value": {
+    "type": "digest",
+    "at": 1762214400000,
+    "since": 1762128000000,
+    "counts": {
+      "waiting": 0,
+      "mention": 0,
+      "result": 0,
+      "blocked": 0
+    },
+    "items": []
+  }
+}

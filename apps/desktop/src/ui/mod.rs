@@ -28,10 +28,16 @@ pub mod emoji;
 pub mod gallery;
 pub mod icons;
 pub mod motion;
+// --- v12/kit: the native component kit (docs/design/NATIVE.md) ---
+pub mod native;
+// --- end v12/kit ---
 pub mod overlay;
 pub mod parts;
 pub mod rows;
 pub mod sheet;
+// --- v11/pl-sf-symbols: SF Symbols spike (POLISH-SPEC §10.2) ---
+pub mod sf_symbols;
+// --- end v11/pl-sf-symbols ---
 pub mod truncate;
 pub mod web_embed;
 
@@ -48,7 +54,11 @@ pub use controls::{
     field_label, icon_button, icon_button_sm, placeholder_input, primary_button, secondary_button,
     select_trigger, text_button,
 };
-pub use icons::{AppAssets, Lucide, button_glyph, icon};
+pub use icons::{AppAssets, Sym, button_glyph, icon};
+// --- v12/symbols: the SF Symbols API (NATIVE.md §6) ---
+#[allow(unused_imports)]
+pub use icons::{Lucide, SymSize, sym};
+// --- end v12/symbols ---
 pub use motion::spinner;
 #[allow(unused_imports)]
 pub use overlay::{

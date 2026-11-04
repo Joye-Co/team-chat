@@ -29,6 +29,13 @@ pub struct HttpState {
     pub release: Option<(UpdateInfo, Vec<u8>)>,
     pub diagnostics: Vec<Vec<u8>>,
     pub runs: BTreeMap<String, (BotRun, Vec<chat_core::proto::machine::RunLogEntry>)>,
+    // --- settings-backend track ---
+    pub notify_settings: NotifySettings,
+    pub approval_policy: ApprovalPolicy,
+    /// Answer `PATCH /v1/settings/approvals` with 403 (a member who is not an owner).
+    pub not_owner: bool,
+    pub devices: Vec<Device>,
+    // --- end settings-backend track ---
     // Knobs.
     /// Serve file contents with the last byte flipped.
     pub corrupt_downloads: bool,
@@ -543,6 +550,68 @@ async fn handle(st: Arc<Mutex<HttpState>>, req: Request<Incoming>) -> Response<F
             let id = s.id("D");
             ok(json!({"id": id}))
         }
+        // --- settings-backend track: like server/src/settings ---
+        (&Method::GET, ["v1", "me", "notify-settings"]) => ok(s.notify_settings.clone()),
+        (&Method::PATCH, ["v1", "me", "notify-settings"]) => {
+            let r: UpdateNotifySettingsRequest = serde_json::from_value(json_body()).unwrap();
+            let n = &mut s.notify_settings;
+            if let Some(e) = r.events {
+                n.events.waiting = e.waiting.unwrap_or(n.events.waiting);
+                n.events.mention = e.mention.unwrap_or(n.events.mention);
+                n.events.result = e.result.unwrap_or(n.events.result);
+                n.events.blocked = e.blocked.unwrap_or(n.events.blocked);
+            }
+            if let Some(d) = r.digest_at {
+                n.digest_at = d;
+            }
+            if let Some(q) = r.quiet_hours {
+                n.quiet_hours.enabled = q.enabled.unwrap_or(n.quiet_hours.enabled);
+                n.quiet_hours.start = q.start.unwrap_or(n.quiet_hours.start.clone());
+                n.quiet_hours.end = q.end.unwrap_or(n.quiet_hours.end.clone());
+            }
+            if let Some(z) = r.time_zone {
+                n.time_zone = z;
+            }
+            n.updated_at += 1;
+            ok(n.clone())
+        }
+        (&Method::GET, ["v1", "settings", "approvals"]) => ok(s.approval_policy.clone()),
+        (&Method::PATCH, ["v1", "settings", "approvals"]) => {
+            if s.not_owner {
+                return err(StatusCode::FORBIDDEN, "forbidden");
+            }
+            let r: UpdateApprovalPolicyRequest = serde_json::from_value(json_body()).unwrap();
+            let p = &mut s.approval_policy;
+            if let Some(a) = r.ask_before {
+                p.ask_before.merge_main = a.merge_main.unwrap_or(p.ask_before.merge_main);
+                p.ask_before.deploy_prod = a.deploy_prod.unwrap_or(p.ask_before.deploy_prod);
+                p.ask_before.prod_config = a.prod_config.unwrap_or(p.ask_before.prod_config);
+                p.ask_before.delete_data = a.delete_data.unwrap_or(p.ask_before.delete_data);
+                p.ask_before.external_publish =
+                    a.external_publish.unwrap_or(p.ask_before.external_publish);
+            }
+            if let Some(m) = r.max_spend_cny {
+                p.max_spend_cny = m;
+            }
+            if let Some(a) = r.approver {
+                p.approver = a;
+            }
+            p.updated_at += 1;
+            ok(p.clone())
+        }
+        (&Method::GET, ["v1", "me", "devices"]) => ok(DevicesResponse {
+            devices: s.devices.clone(),
+        }),
+        (&Method::DELETE, ["v1", "me", "devices", id]) => {
+            let before = s.devices.len();
+            let id = unescape(id);
+            s.devices.retain(|d| d.id != id);
+            if s.devices.len() == before {
+                return err(StatusCode::NOT_FOUND, "not_found");
+            }
+            ok(json!({"revoked": 1}))
+        }
+        // --- end settings-backend track ---
         _ => err(StatusCode::NOT_FOUND, "not_found"),
     }
 }

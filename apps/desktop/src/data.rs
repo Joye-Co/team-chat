@@ -2355,6 +2355,40 @@ pub trait ChatProvider: Send + Sync + 'static {
 
     // --- end inc-refs track ---
 
+    // --- settings-backend track: 设置 panes 账号 (devices), 通知 and 成员 (approval rules) ---
+    // Every method has a default, so test and preview providers need no change.
+
+    /// 通知: my notification settings (`GET /v1/me/notify-settings`), fresh from the server.
+    fn notify_preferences(&self) -> AdminReply<NotifyPreferences> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 通知: saves every field of `prefs` (`PATCH /v1/me/notify-settings`) and answers with what
+    /// the server stored. The time zone sent is this Mac's.
+    fn set_notify_preferences(&self, _prefs: NotifyPreferences) -> AdminReply<NotifyPreferences> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 成员 › 默认规则: the team's approval rules for AI members (`GET /v1/settings/approvals`).
+    /// Every member may read them.
+    fn approval_defaults(&self) -> AdminReply<ApprovalDefaults> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 成员 › 默认规则, owners only: saves every field (`PATCH /v1/settings/approvals`). A member
+    /// who is not an owner gets `AdminError::Forbidden`.
+    fn set_approval_defaults(&self, _defaults: ApprovalDefaults) -> AdminReply<ApprovalDefaults> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 账号 › 登录的设备: my signed-in devices (`GET /v1/me/devices`), newest use first.
+    fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+    /// 账号 › 登录的设备 `−`: signs out one of my devices (`DELETE /v1/me/devices/:id`). Use
+    /// `sign_out` for this Mac (the row with `this_mac`).
+    fn sign_out_device(&self, _device_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::Unsupported))
+    }
+
+    // --- end settings-backend track ---
+
     // --- changes ---
 
     /// A new stream of change batches. Each call gives a new receiver; all
@@ -2362,3 +2396,176 @@ pub trait ChatProvider: Send + Sync + 'static {
     /// `app::ChangeHub`, so views do not call this themselves.
     fn subscribe(&self) -> UnboundedReceiver<Vec<Change>>;
 }
+
+// --- settings-backend track: view types of 设置 › 账号 (devices), 通知 and 成员 (approval rules) ---
+
+/// A wall-clock time in this Mac's time zone (the 每日摘要 and 勿扰 time pop-ups).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct ClockTime {
+    pub hour: u8,
+    pub minute: u8,
+}
+
+impl ClockTime {
+    pub const fn new(hour: u8, minute: u8) -> Self {
+        Self { hour, minute }
+    }
+    /// "HH:MM" on a 24 h clock; `None` for anything else.
+    pub fn parse(text: &str) -> Option<Self> {
+        let m = chat_core::proto::clock_minutes(text)?;
+        Some(Self::new((m / 60) as u8, (m % 60) as u8))
+    }
+    /// "HH:MM", as the server and the pop-ups show it.
+    pub fn wire(self) -> String {
+        format!("{:02}:{:02}", self.hour, self.minute)
+    }
+}
+
+/// 设置 › 通知: group 提醒我 (one switch per row, 每日摘要 with its time) and group 勿扰.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotifyPreferences {
+    /// 需要我拍板的事.
+    pub waiting: bool,
+    /// 我交代的事做完了.
+    pub result: bool,
+    /// 成员卡住或出错.
+    pub blocked: bool,
+    /// 有人 @我.
+    pub mention: bool,
+    /// 每日摘要: `None` = switch off; `Some(time)` = on at that time.
+    pub digest_at: Option<ClockTime>,
+    /// 勿扰 switch.
+    pub quiet_enabled: bool,
+    /// 勿扰 从.
+    pub quiet_start: ClockTime,
+    /// 勿扰 到 (before 从 = the next morning).
+    pub quiet_end: ClockTime,
+}
+
+impl NotifyPreferences {
+    /// The time the 每日摘要 pop-up shows while the switch is off.
+    pub const DIGEST_DEFAULT: ClockTime = ClockTime::new(9, 0);
+}
+
+impl Default for NotifyPreferences {
+    fn default() -> Self {
+        Self {
+            waiting: true,
+            result: true,
+            blocked: true,
+            mention: true,
+            digest_at: None,
+            quiet_enabled: false,
+            quiet_start: ClockTime::new(22, 0),
+            quiet_end: ClockTime::new(8, 0),
+        }
+    }
+}
+
+/// Who answers an AI member's approval requests.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
+pub enum ApproverRole {
+    /// Owners only.
+    Owners,
+    /// The member who asked for the work, or an owner (the released rule).
+    #[default]
+    Requester,
+}
+
+/// 设置 › 成员 › 默认规则: what an AI member asks before, the spend limit and who approves.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ApprovalDefaults {
+    /// 合并到 main.
+    pub merge_main: bool,
+    /// 发布到生产.
+    pub deploy_prod: bool,
+    /// 改生产环境配置 (not in the pane today; default on).
+    pub prod_config: bool,
+    /// 删除数据或文件 (not in the pane today; default on).
+    pub delete_data: bool,
+    /// 对外发布, social media and email (not in the pane today; default on).
+    pub external_publish: bool,
+    /// 单次花费超过 ¥…, whole yuan 1..=1_000_000; `None` = no limit.
+    pub max_spend_cny: Option<u32>,
+    pub approver: ApproverRole,
+}
+
+impl Default for ApprovalDefaults {
+    fn default() -> Self {
+        Self {
+            merge_main: true,
+            deploy_prod: true,
+            prod_config: true,
+            delete_data: true,
+            external_publish: true,
+            max_spend_cny: Some(50),
+            approver: ApproverRole::Requester,
+        }
+    }
+}
+
+/// The SF Symbol of a 登录的设备 row.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum DeviceKind {
+    /// `laptopcomputer`.
+    Laptop,
+    /// `desktopcomputer`.
+    Desktop,
+    /// `iphone`.
+    Phone,
+}
+
+impl DeviceKind {
+    /// The SF Symbol name.
+    pub fn symbol(self) -> &'static str {
+        match self {
+            DeviceKind::Laptop => "laptopcomputer",
+            DeviceKind::Desktop => "desktopcomputer",
+            DeviceKind::Phone => "iphone",
+        }
+    }
+}
+
+/// One signed-in device (账号 › 登录的设备).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DeviceInfo {
+    /// The device's record id (never a credential).
+    pub id: String,
+    /// The name given at sign in; may be empty.
+    pub name: String,
+    /// From the name: "iPhone" is a phone, "iMac", "Mac mini", "Mac Studio" and "Mac Pro" are
+    /// desktops, anything else a laptop.
+    pub kind: DeviceKind,
+    pub signed_in_at: u64,
+    /// `None` = never used since sign in.
+    pub last_seen_at: Option<u64>,
+    /// 这台 Mac: show `这台 Mac` instead of the last seen time; sign out with `sign_out`.
+    pub this_mac: bool,
+}
+
+impl DeviceKind {
+    /// The kind a device name suggests.
+    pub fn from_name(name: &str) -> Self {
+        let n = name.to_lowercase();
+        if n.contains("iphone") || n.contains("ipad") {
+            DeviceKind::Phone
+        } else if [
+            "imac",
+            "mac mini",
+            "macmini",
+            "mac studio",
+            "mac pro",
+            "macpro",
+        ]
+        .iter()
+        .any(|k| n.contains(k))
+            && !n.contains("macbook")
+        {
+            DeviceKind::Desktop
+        } else {
+            DeviceKind::Laptop
+        }
+    }
+}
+
+// --- end settings-backend track ---

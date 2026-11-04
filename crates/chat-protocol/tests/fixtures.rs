@@ -62,6 +62,10 @@ check!(
     BlockRefInput,
     BlockRef,
     PutArtifactDataRequest,
+    NotifySettings,
+    UpdateNotifySettingsRequest,
+    ApprovalPolicy,
+    UpdateApprovalPolicyRequest,
     RecordDecisionRequest,
     PutArtifactMediaRequest,
     FileRef,
@@ -194,6 +198,19 @@ const KINDS: &[(&str, RoundTrip)] = &[
         "PutArtifactDataRequest",
         validated::<PutArtifactDataRequest>,
     ),
+    // Settings
+    ("NotifySettings", validated::<NotifySettings>),
+    (
+        "UpdateNotifySettingsRequest",
+        validated::<UpdateNotifySettingsRequest>,
+    ),
+    ("ApprovalPolicy", validated::<ApprovalPolicy>),
+    (
+        "UpdateApprovalPolicyRequest",
+        validated::<UpdateApprovalPolicyRequest>,
+    ),
+    ("Device", plain::<Device>),
+    ("DevicesResponse", plain::<DevicesResponse>),
     // 1.1 gap fixes
     ("RecordedDecision", plain::<RecordedDecision>),
     ("RecordDecisionRequest", validated::<RecordDecisionRequest>),
@@ -359,7 +376,7 @@ fn every_frame_and_event_type_has_a_valid_fixture() {
         ]
     );
     assert_eq!(valid("Event", "type").len(), 19);
-    assert_eq!(valid("TransientEvent", "type").len(), 8);
+    assert_eq!(valid("TransientEvent", "type").len(), 9);
 }
 
 #[test]

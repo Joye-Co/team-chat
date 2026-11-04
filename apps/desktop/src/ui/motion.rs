@@ -661,7 +661,7 @@ impl gpui::RenderOnce for BusySpinner {
         window.request_animation_frame();
         gpui::div()
             .child(
-                gpui_component::Icon::new(gpui_component::IconName::Loader)
+                gpui_component::Icon::from(crate::ui::Sym::Spinner)
                     .with_size(self.size)
                     .when_some(self.color, |i, c| i.text_color(c))
                     .transform(gpui::Transformation::rotate(gpui::percentage(turn_at(

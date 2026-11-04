@@ -35,4 +35,22 @@ crate::copy! {
     RUN_DOWNLOAD_FAILED = "Session download failed: {error}",
     // search
     SEARCH_HIT = "message {id} · seq {seq}",
+    // --- v11/pl-sf-symbols: the SF Symbols spike scene (developer scene) ---
+    SF_TITLE = "SF Symbols spike (POLISH-SPEC §10.2)",
+    SF_COLD = "cold: first lookup {lookup} ms · 40 at 1x {x1} ms · 40 at 2x {x2} ms · warm 80 {warm} ms",
+    SF_SET_LUCIDE = "Lucide (today, stroke 1.75)",
+    SF_SET_REGULAR = "SF Symbols Regular 13 pt (tiles Semibold)",
+    SF_SET_MEDIUM = "SF Symbols Medium 13 pt (tiles Semibold)",
+    SF_SAMPLE_GROUP_1 = "产品研发",
+    SF_SAMPLE_GROUP_2 = "夜间告警降噪",
+    SF_SAMPLE_TOPIC_DONE = "staging 验收",
+    SF_SAMPLE_TOPIC_YOU = "发布 1.2 需要拍板",
+    SF_PAGE_APPEARANCE = "外观",
+    SF_PAGE_SHORTCUTS = "快捷键",
+    SF_PAGE_PRIVACY = "隐私与数据",
+    // --- end v11/pl-sf-symbols ---
+    // --- v12/symbols: the app's own SF Symbols path in the comparison scene ---
+    SF_SET_APP = "App icons (Sym via svg(), §6 sizes)",
+    SF_SET_BEFORE = "Lucide (before, stroke 1.75)",
+    // --- end v12/symbols ---
 }

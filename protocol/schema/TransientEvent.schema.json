@@ -408,6 +408,94 @@
         "eventId",
         "ok"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "digest"
+        },
+        "at": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "since": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "counts": {
+          "type": "object",
+          "properties": {
+            "waiting": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "mention": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "result": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "blocked": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "waiting",
+            "mention",
+            "result",
+            "blocked"
+          ]
+        },
+        "items": {
+          "maxItems": 20,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "groupId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "topicId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "event": {
+                "type": "string",
+                "enum": [
+                  "waiting",
+                  "mention",
+                  "result",
+                  "blocked"
+                ]
+              }
+            },
+            "required": [
+              "groupId",
+              "topicId",
+              "event"
+            ]
+          }
+        }
+      },
+      "required": [
+        "type",
+        "at",
+        "since",
+        "counts",
+        "items"
+      ]
     }
   ],
   "$defs": {

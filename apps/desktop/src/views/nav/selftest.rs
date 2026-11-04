@@ -361,6 +361,20 @@ pub mod scenes {
         })
     }
 
+    // --- v12/overlays ---
+    /// The 新话题 sheet over the open 群, a first message typed.
+    pub fn new_topic(
+        services: Services,
+        content: Size<Pixels>,
+        cx: &mut App,
+    ) -> Result<AnyWindowHandle, String> {
+        over_main(services, content, cx, |services, window, cx| {
+            let group = services.nav.read(cx).current_group();
+            super::super::new_topic::open_new_topic(services, group, window, cx);
+        })
+    }
+    // --- end v12/overlays ---
+
     /// The new-group sheet.
     pub fn new_group(
         services: Services,
@@ -474,25 +488,24 @@ pub mod scenes {
             })
         })
         .map_err(|e| e.to_string())?;
-        let sidebar = root.read(cx).sidebar().clone();
+        // v12/shell: the 群 headers live in the rail now.
+        let _ = group;
+        let rail = root.read(cx).rail().clone();
         handle
-            .update(cx, |_, window, _| {
-                right_click_when_drawn(sidebar, group.id, 0, window)
-            })
+            .update(cx, |_, window, _| right_click_when_drawn(rail, 0, window))
             .map_err(|e| e.to_string())?;
         Ok(handle)
     }
 
     fn right_click_when_drawn(
-        sidebar: gpui::Entity<crate::views::sidebar::Sidebar>,
-        group_id: String,
+        rail: gpui::Entity<crate::views::rail::RailView>,
         tries: u32,
         window: &mut Window,
     ) {
         window.on_next_frame(move |window, cx| {
-            let Some(bounds) = sidebar.read(cx).group_row_bounds(&group_id) else {
+            let Some(bounds) = rail.read(cx).first_row_bounds(true) else {
                 if tries < 10 {
-                    right_click_when_drawn(sidebar, group_id, tries + 1, window);
+                    right_click_when_drawn(rail, tries + 1, window);
                 }
                 return;
             };
@@ -543,7 +556,7 @@ pub mod scenes {
     }
 
     /// The 重命名群 dialog after the server refused: a new name typed and
-    /// the error under the field.
+    /// the refusal in an alert over it.
     pub fn rename_group_error(
         services: Services,
         content: Size<Pixels>,
@@ -552,12 +565,11 @@ pub mod scenes {
         over_main(services, content, cx, |services, window, cx| {
             if let Some(g) = open_group(&services, cx) {
                 let typed = format!("{} · 新名称", g.name);
-                let error = crate::copy::nav::RENAME_GROUP_FORBIDDEN.into();
                 super::super::rename::open_with(
                     services,
                     g.id,
                     g.name,
-                    Some((typed, error)),
+                    Some((typed, crate::data::AdminError::Forbidden)),
                     window,
                     cx,
                 );

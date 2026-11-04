@@ -27,7 +27,7 @@ use crate::{
     selftest::scenes::capture_bounds,
     theme::{self, Type as _, radius, space},
     ui::{
-        self, Lucide, MemberAvatar,
+        self, MemberAvatar, Sym,
         web_embed::{Phase, live},
     },
 };
@@ -197,36 +197,14 @@ impl MediaPreview {
         div()
             .w(px(600.))
             .flex_none()
-            .rounded(radius::LG)
-            .border_1()
-            .border_color(k.border)
             .bg(k.content)
             .flex()
             .flex_col()
+            // The topic's toolbar title and subtitle (NATIVE.md §2), no
+            // breadcrumb.
             .child(
-                div()
-                    .h(px(44.))
-                    .px(space::S16)
-                    .flex()
-                    .items_center()
-                    .gap(space::S4)
-                    .border_b_1()
-                    .border_color(k.sep)
-                    .child(
-                        div()
-                            .t_small()
-                            .text_color(k.text_3)
-                            .child(format!("{} /", t.group)),
-                    )
-                    .child(
-                        div()
-                            .t_small()
-                            .semibold()
-                            .text_color(k.text_1)
-                            .child(t.title),
-                    )
-                    .child(div().flex_1())
-                    .child(div().t_meta().text_color(k.text_3).child(t.state)),
+                crate::ui::native::ToolbarRow::new(t.title)
+                    .subtitle(format!("{} · {}", t.group, t.state)),
             )
             .child(
                 div()
@@ -354,6 +332,7 @@ impl Render for MediaPreview {
                         close: Some(std::rc::Rc::new(|_: &mut Window, _: &mut App| {})),
                         id: SharedString::from(format!("scene-full-{s:?}")),
                         autoplay: false,
+                        title_row: None,
                     };
                     let body = full::render(&spec, &state, window, cx);
                     let images = s == Sample::Images;
@@ -362,8 +341,7 @@ impl Render for MediaPreview {
                         .h(px(780.))
                         .flex_none()
                         .rounded(radius::LG)
-                        .border_1()
-                        .border_color(k.border)
+                        .shadow(crate::ui::native::native_colors(cx).float())
                         .overflow_hidden()
                         .when_images(images, cx)
                         .child(body)
@@ -391,13 +369,9 @@ trait WhenImages {
 }
 
 impl WhenImages for gpui::Div {
-    /// The lightbox sits on a grey desk with padding, as in the design.
-    fn when_images(self, on: bool, cx: &App) -> Self {
-        if on {
-            self.h(px(600.)).p(px(24.)).bg(theme::colors(cx).tile)
-        } else {
-            self
-        }
+    /// The image viewer is one Quick Look panel: no grey desk around it.
+    fn when_images(self, on: bool, _cx: &App) -> Self {
+        if on { self.h(px(600.)) } else { self }
     }
 }
 
@@ -434,7 +408,7 @@ fn states_column(cx: &App) -> gpui::Div {
         .child(label(cm::STATES_TITLE))
         .child(states::row(
             "st-up",
-            Lead::Icon(Lucide::Video),
+            Lead::Icon(Sym::Video),
             "重连后重复-第二次.mov",
             &Status::Uploading {
                 done: 2_400_000,
@@ -470,20 +444,20 @@ fn states_column(cx: &App) -> gpui::Div {
         ))
         .child(states::row(
             "st-fail",
-            Lead::Icon(Lucide::File),
+            Lead::Icon(Sym::File),
             "夹夹 3.0 发布会.key",
             &Status::Failed { size: 18_600_000 },
             Some(states::action(
                 "st-sys",
                 cm::OPEN_WITH_SYSTEM,
-                Some(Lucide::ExternalLink),
+                Some(Sym::OpenExternal),
                 cx,
             )),
             cx,
         ))
         .child(states::row(
             "st-big",
-            Lead::Icon(Lucide::Video),
+            Lead::Icon(Sym::Video),
             "周会全程-4K.mov",
             &Status::TooLarge {
                 limit: 2_000_000_000,

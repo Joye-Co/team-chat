@@ -11,7 +11,7 @@ use crate::{
     copy::{artifacts as ca, fill},
     data::{ArtifactKind, Message},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -56,8 +56,11 @@ impl MessageExtra for ArtifactRefsExtra {
                         .map(|m| m.name.clone())
                         .unwrap_or_else(|| crate::copy::composer::UNKNOWN_MEMBER.to_string());
                     let (kind, icon) = match d.summary.kind {
-                        ArtifactKind::Page => (ca::CARD_KIND_PAGE, Lucide::FileCode),
-                        _ => (ca::CARD_KIND_FILE, Lucide::FileText),
+                        // The kind symbol (NATIVE.md §6): a page is `doc.text`, an
+                        // image `photo`, any other file `doc`.
+                        ArtifactKind::Page => (ca::CARD_KIND_PAGE, Sym::Document),
+                        ArtifactKind::Image => (ca::CARD_KIND_FILE, Sym::Image),
+                        _ => (ca::CARD_KIND_FILE, Sym::File),
                     };
                     let mut meta = format!(
                         "{kind} · {} · {name}",
@@ -75,7 +78,7 @@ impl MessageExtra for ArtifactRefsExtra {
                 None => (
                     crate::copy::panel::ARTIFACTS.to_string(),
                     ca::CARD_LOADING.to_string(),
-                    Lucide::FileCode,
+                    Sym::CodeFile,
                 ),
             };
             let key = if message.id.is_empty() {
@@ -98,13 +101,8 @@ impl MessageExtra for ArtifactRefsExtra {
                     .flex_none()
                     .pl(space::S12)
                     .pr(space::S16)
-                    .rounded(theme::radius::LG)
-                    .border_1()
-                    .border_color(k.border)
-                    .bg(k.content)
-                    .hover(|s| s.border_color(k.border_strong))
-                    .active(|s| s.bg(k.hover))
-                    .cursor_pointer()
+                    .rounded(crate::ui::native::cards::card::RADIUS)
+                    .bg(crate::ui::native::native_colors(cx).fill)
                     .flex()
                     .items_center()
                     .gap(space::S12)
@@ -145,7 +143,7 @@ impl MessageExtra for ArtifactRefsExtra {
                     .child(if opening {
                         crate::ui::spinner().into_any_element()
                     } else {
-                        ui::icon(Lucide::ExternalLink, theme::icon::HEADER, k.text_2)
+                        ui::icon(Sym::OpenExternal, theme::icon::HEADER, k.text_2)
                             .into_any_element()
                     })
                     .on_click(move |_, _, cx| {

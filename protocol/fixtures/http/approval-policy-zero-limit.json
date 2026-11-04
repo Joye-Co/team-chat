@@ -1,0 +1,17 @@
+{
+  "kind": "ApprovalPolicy",
+  "valid": false,
+  "description": "limit below 1",
+  "value": {
+    "askBefore": {
+      "mergeMain": true,
+      "deployProd": true,
+      "prodConfig": true,
+      "deleteData": true,
+      "externalPublish": false
+    },
+    "maxSpendCny": 0,
+    "approver": "owners",
+    "updatedAt": 1762128000000
+  }
+}

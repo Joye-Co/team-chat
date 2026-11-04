@@ -27,6 +27,9 @@ mod model;
 pub mod plan;
 pub mod preview;
 mod row;
+// --- v12/fx-topic: Messages-style tapbacks ---
+mod tapback;
+// --- end v12/fx-topic ---
 pub mod selftest;
 pub mod v2;
 
@@ -50,7 +53,7 @@ use crate::{
         Change, GroupId, Member, MemberLevel, Message, MessageId, SessionState, Topic, TopicId,
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 use model::ListOp;
@@ -629,11 +632,14 @@ impl TimelineView {
         if !self.v2 {
             return el;
         }
+        // `el` (the typing line) starts its text 38 pt in; move it so the
+        // text lines up with message text: the shared leading inset, the
+        // 28 pt avatar and the 12 pt gap.
         div()
             .w_full()
-            .px(v2::SIDE - theme::CONTENT_GUTTER)
-            .flex()
-            .justify_center()
+            .relative()
+            .left(v2::LEADING + v2::GUTTER + space::S12 - theme::CONTENT_GUTTER - space::S14)
+            .pr(v2::SIDE - theme::CONTENT_GUTTER)
             .child(
                 div()
                     .w_full()
@@ -718,7 +724,7 @@ impl Render for TimelineView {
                 .flex()
                 .justify_center()
                 .child(
-                    jump_pill("jump-latest", label, Lucide::ArrowDown, cx).on_click(cx.listener(
+                    jump_pill("jump-latest", label, Sym::ArrowDown, cx).on_click(cx.listener(
                         |this, _, _, cx| {
                             this.jump_to_latest();
                             cx.notify();
@@ -738,7 +744,7 @@ impl Render for TimelineView {
                     jump_pill(
                         "jump-unread",
                         fill(t::JUMP_UNREAD, &[("n", &self.unread_at_open.to_string())]),
-                        Lucide::ArrowUp,
+                        Sym::ArrowUp,
                         cx,
                     )
                     .on_click(cx.listener(|this, _, _, cx| {
@@ -819,12 +825,7 @@ impl Render for TimelineView {
 }
 
 /// A 28 pt level-1 pill: the jump to the first unread or to the latest.
-fn jump_pill(
-    id: &'static str,
-    label: String,
-    glyph: Lucide,
-    cx: &App,
-) -> gpui::Stateful<gpui::Div> {
+fn jump_pill(id: &'static str, label: String, glyph: Sym, cx: &App) -> gpui::Stateful<gpui::Div> {
     let colors = theme::colors(cx);
     ui::float_surface(cx)
         .id(id)
@@ -833,7 +834,6 @@ fn jump_pill(
         .pr(space::S10)
         .rounded_full()
         .gap(space::S6)
-        .cursor_pointer()
         .t_ui()
         .medium()
         .tnum()

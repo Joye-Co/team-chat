@@ -807,6 +807,7 @@ fn open(
         .update(cx, |_, window, cx| {
             let root = root.read(cx);
             let (timeline, composer) = (root.timeline().clone(), root.composer().clone());
+            let provider = root.services().provider.clone();
             match sample {
                 Sample::Main => {
                     composer.update(cx, |c, cx| c.preview_mention(window, cx));
@@ -814,7 +815,26 @@ fn open(
                 Sample::Short => {
                     timeline.update(cx, |t, cx| t.preview_hover(1, cx));
                 }
-                Sample::Worst | Sample::Stop | Sample::Stopping => {}
+                Sample::Worst | Sample::Stopping => {}
+                // --- v12/fx-topic: the stop scene shows the confirmation
+                // alert that the plan card's 停止… opens.
+                Sample::Stop => {
+                    use crate::copy::{fill, overlays as o};
+                    let name = provider
+                        .member("m-reviewer")
+                        .map(|m| m.name)
+                        .unwrap_or_default();
+                    crate::views::nav::dialogs::destructive_alert(
+                        "stop-run",
+                        fill(o::STOP_TITLE, &[("name", &name)]),
+                        fill(o::STOP_MESSAGE, &[("name", &name)]),
+                        o::STOP_OK,
+                        |_, _| {},
+                        window,
+                        cx,
+                    );
+                }
+                // --- end v12/fx-topic ---
                 Sample::React => {
                     timeline.update(cx, |t, cx| t.preview_reacting(1, cx));
                 }

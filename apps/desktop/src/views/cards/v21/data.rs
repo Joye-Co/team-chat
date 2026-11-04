@@ -14,7 +14,7 @@ use crate::{
     copy::{cards21 as c, fill},
     data::cards_v2::{CardV2Block, ChartKind, PartKey, PartRef, TableSelect},
     theme::{self, Type as _, card_v2 as m, card_v2::mix, card_v21 as t, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::cards::v2::{blocks as b20, meta},
 };
 
@@ -139,32 +139,26 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                 .gap(space::S4)
                 .when(numeric[ci], |el| el.justify_end())
                 .when(sortable.unwrap_or(false), |el| {
-                    el.cursor_pointer()
-                        .hover(|s| s.text_color(k.ink))
-                        .on_click(move |_, _, cx| {
-                            let asc = !matches!(sorted_here, Some((_, true)));
-                            uie.update(cx, |u, cx| {
-                                u.block_mut(&block).sort = Some((ci, asc));
-                                cx.notify();
-                            });
-                            // The bot gets `table.sort` only when it is declared.
-                            emit.send(
+                    el.hover(|s| s.text_color(k.ink)).on_click(move |_, _, cx| {
+                        let asc = !matches!(sorted_here, Some((_, true)));
+                        uie.update(cx, |u, cx| {
+                            u.block_mut(&block).sort = Some((ci, asc));
+                            cx.notify();
+                        });
+                        // The bot gets `table.sort` only when it is declared.
+                        emit.send(
                             &block,
                             "table.sort",
                             json!({ "column": col_label, "dir": if asc { "asc" } else { "desc" } }),
                             None,
                             cx,
                         );
-                        })
+                    })
                 })
                 .child(div().one_line().child(label.clone()))
                 .when_some(sorted_here, |el, (_, asc)| {
                     el.child(ui::icon(
-                        if asc {
-                            Lucide::ArrowUp
-                        } else {
-                            Lucide::ArrowDown
-                        },
+                        if asc { Sym::ArrowUp } else { Sym::ArrowDown },
                         px(12.),
                         k.ink_2,
                     ))
@@ -180,6 +174,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             id.clone(),
             super::leaves::PickTarget::of(node),
         );
+        let mark_id = eid(node, format!("tr-{id}-{key}-mark"));
         div()
             .id(eid(node, format!("tr-{id}-{key}")))
             .flex()
@@ -193,43 +188,31 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             .when(on, |el| el.bg(k.sunken))
             .text_color(k.ink)
             .when(can_pick, |el| {
-                el.cursor_pointer()
-                    .hover(|s| s.bg(k.hover))
-                    .on_click(move |_, _, cx| {
-                        form.update(cx, |f, cx| {
-                            let mut cur = f.choice(&block).to_vec();
-                            if multiple {
-                                if let Some(i) = cur.iter().position(|x| *x == key) {
-                                    cur.remove(i);
-                                } else {
-                                    cur.push(key.clone());
-                                }
+                el.on_click(move |_, _, cx| {
+                    form.update(cx, |f, cx| {
+                        let mut cur = f.choice(&block).to_vec();
+                        if multiple {
+                            if let Some(i) = cur.iter().position(|x| *x == key) {
+                                cur.remove(i);
                             } else {
-                                cur = vec![key.clone()];
+                                cur.push(key.clone());
                             }
-                            f.set_choice(&block, cur, cx);
-                        });
-                        target.after(&block, cx);
-                    })
+                        } else {
+                            cur = vec![key.clone()];
+                        }
+                        f.set_choice(&block, cur, cx);
+                    });
+                    target.after(&block, cx);
+                })
             })
             .when(can_pick, |el| {
-                el.child(
-                    div()
-                        .flex_none()
-                        .size(px(16.))
-                        .when(multiple, |el| el.rounded(px(4.)))
-                        .when(!multiple, |el| el.rounded_full())
-                        .border_1()
-                        .border_color(if on { k.ink } else { k.line_2 })
-                        .when(on && multiple, |el| {
-                            el.bg(k.ink)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(ui::icon(Lucide::Check, px(12.), k.bg))
-                        })
-                        .when(on && !multiple, |el| el.border(px(5.))),
-                )
+                // The native check box or radio button (NATIVE.md §5.4).
+                let mark_id = mark_id.clone();
+                el.child(if multiple {
+                    crate::ui::native::NativeCheckbox::new(mark_id, on).into_any_element()
+                } else {
+                    crate::ui::native::NativeRadio::new(mark_id, on).into_any_element()
+                })
             })
             .children((0..columns.len()).map(|ci| {
                 let text = r.get(ci).cloned().unwrap_or_default();
@@ -485,7 +468,6 @@ pub fn chart(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                                 .relative()
                                 .flex_1()
                                 .h_full()
-                                .cursor_pointer()
                                 .child(hot)
                                 .on_click(move |_, _, cx| {
                                     if on {
@@ -634,7 +616,6 @@ fn bar_rows(
             .px(space::S6)
             .mx(-space::S6)
             .rounded(t::BAR_ROW_RADIUS)
-            .cursor_pointer()
             .when(hot == Some(i), |el| el.bg(k.hover))
             .text_size(px(13.))
             .relative()
@@ -805,7 +786,6 @@ pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App)
     if !(super::interact::sends(ctx.card, b, "metric.press") && super::interact::may_emit(ctx, b)) {
         return el;
     }
-    let k = theme::colors(cx);
     let emit = Emitter::of(ctx);
     let block = id.to_string();
     div()
@@ -815,8 +795,6 @@ pub fn metric(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App)
         .py(px(4.))
         .my(px(-4.))
         .rounded(theme::radius::MD)
-        .cursor_pointer()
-        .hover(|s| s.bg(k.hover))
         .on_click(move |_, _, cx| {
             emit.send(
                 &block,

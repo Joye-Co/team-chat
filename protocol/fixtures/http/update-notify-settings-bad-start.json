@@ -1,0 +1,10 @@
+{
+  "kind": "UpdateNotifySettingsRequest",
+  "valid": false,
+  "description": "start needs two hour digits",
+  "value": {
+    "quietHours": {
+      "start": "9:00"
+    }
+  }
+}

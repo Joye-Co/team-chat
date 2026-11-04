@@ -1,12 +1,15 @@
-//! The v2 timeline style of the 话题 page (Topic.dc.html, 1.1.0): a 720 pt
-//! column with a 28 pt gutter, the full date divider, 岗位 tags, real file
-//! cards, and three compact rows built from the messages themselves:
+//! The v2 timeline style of the 话题 page (NATIVE.md §9.2): the full content
+//! width with 24 pt side insets and message text at most 680 pt; 28 pt
+//! avatars; the sender name in Headline with 岗位 and time as one
+//! `secondary` run; centered day separators without rules; file rows on
+//! `fill`; and three rows built from the messages themselves:
 //!
-//! - a routing line (`Jojo 转给了 Forge`) for a member's hand-off message;
-//! - the decision record (`Joye 选了「…」`) for a message that made a
-//!   decision of the 话题;
-//! - the done card of a result message: title, why, proof chips, and links
-//!   to the change and the 产出 (in the right pane).
+//! - a quiet one-line routing row (`Jojo 转给了 Forge`) for a hand-off;
+//! - a quiet one-line decision row (`Joye 选了「…」`) for a message that
+//!   made a decision of the 话题;
+//! - the done card of a result message (radius 12 on `fill`, no border):
+//!   title, why, facts as symbol + text runs, and rows to the change and
+//!   the 产出 with a trailing `arrow.up.forward`.
 //!
 //! The topic track owns this file; `row.rs` calls it only when the view is
 //! in the v2 style.
@@ -25,7 +28,10 @@ use crate::{
     data::{FileAttachment, Member, Message, RunStatus, v2::ChangeState, v2::Proof},
     markdown,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{
+        self, Sym,
+        native::{NativeType as _, native_colors},
+    },
     views::{
         files::{OpenAction, open_file, size_text},
         topic_rail::{kind_text, media_time},
@@ -36,8 +42,17 @@ use crate::{
 pub const GUTTER: Pixels = px(28.);
 /// The column of a v2 timeline (and of the pinned card and composer).
 pub const COLUMN: Pixels = px(720.);
-/// Side padding of the v2 column.
-pub const SIDE: Pixels = px(32.);
+/// Trailing padding of the v2 column (NATIVE.md §9.2: 24 pt side insets).
+pub const SIDE: Pixels = px(24.);
+// --- v12/fx-topic: one leading content inset (coordinator decision) ---
+/// The shared leading inset: the toolbar title, transcript avatars, the
+/// decision bar and the composer start 20 pt after the sidebar panel. The
+/// content view starts after the panel's 8 pt inset, so the inset inside
+/// it is 12 pt. Use the shell's token once it lands.
+pub const LEADING: Pixels = px(12.);
+// --- end v12/fx-topic ---
+/// The widest message text and card (NATIVE.md §9.2).
+pub const TEXT_MAX: Pixels = px(680.);
 /// Rows drawn this soon after a 话题 opens rise in (first paint).
 pub const FIRST_PAINT: std::time::Duration = std::time::Duration::from_millis(600);
 
@@ -65,24 +80,21 @@ pub fn date_label(at: crate::data::Millis) -> String {
     )
 }
 
-/// The v2 date divider: 12/18 `ink-3` between two `line` hairlines.
+/// The day separator (NATIVE.md §9.2): centered `secondary` Subheadline
+/// text, no rules.
 pub fn date_divider(at: crate::data::Millis, first: bool, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    let row = div()
+    let k = native_colors(cx);
+    div()
         .when(!first, |el| el.mt(space::S16))
         .mb(space::S4)
-        .px(space::S8)
         .h(px(18.))
         .flex()
         .items_center()
-        .gap(space::S12)
-        .t_meta()
-        .line_height(px(18.))
-        .text_color(k.ink_3)
-        .child(div().flex_1().h(theme::BORDER).bg(k.line))
+        .justify_center()
+        .n_subheadline()
+        .text_color(k.secondary)
         .child(date_label(at))
-        .child(div().flex_1().h(theme::BORDER).bg(k.line));
-    row.into_any_element()
+        .into_any_element()
 }
 
 /// The other member a hand-off message routes to: the message is only
@@ -126,24 +138,6 @@ pub(super) enum Special {
     },
 }
 
-fn chip(cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    div()
-        .flex()
-        .items_center()
-        .gap(space::S6)
-        .h(theme::card_v2::PROOF)
-        .px(space::S8)
-        .rounded(theme::card_v2::CHIP_RADIUS)
-        .bg(k.sunken)
-        .t_meta()
-        .text_color(k.ink_2)
-}
-
-fn check(size: Pixels, color: Hsla) -> AnyElement {
-    ui::icon(Lucide::Check, size, color).into_any_element()
-}
-
 impl TimelineView {
     /// Scrolls to a message of the open 话题 and highlights it (看问题).
     fn show_message(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -181,60 +175,49 @@ impl TimelineView {
         self.members.iter().find(|m| m.id == id)
     }
 
-    /// The meta line of a v2 message: name 14/600 `ink` (the lead of the
-    /// group, a step above the 14/400 body), the 岗位 (a tag for a member
-    /// that works for the team, plain `ink-3` text for a person) and the
-    /// time in tabular figures `ink-3` (§7.6).
+    /// The sender line of a message block (NATIVE.md §9.2): the name in
+    /// Headline, then 岗位 and time as one `secondary` Subheadline run
+    /// (`前端实习 · 09:12`). No tag pill.
     pub(super) fn v2_meta(
         &self,
         author: Option<&Member>,
         at: crate::data::Millis,
         cx: &App,
     ) -> AnyElement {
-        let k = theme::colors(cx);
+        let k = native_colors(cx);
         let role = author
             .and_then(|a| a.role.clone())
             .filter(|r| !r.trim().is_empty());
-        let bot = author.is_some_and(Member::is_bot);
+        let time = model::clock(at);
+        let run = match role {
+            Some(role) => fill(c::ROLE_TIME, &[("role", role.trim()), ("time", &time)]),
+            None => time,
+        };
         div()
-            .h(px(20.))
+            .h(px(18.))
             .min_w_0()
             .flex()
-            .items_center()
-            .gap(space::S8)
+            .items_baseline()
+            .gap(space::S6)
             .child(
                 ui::truncating(
                     "sender-name",
                     author.map(|m| m.name.clone()).unwrap_or_default(),
                 )
                 .flex_shrink(1.)
-                .max_w(px(160.))
-                .t_ui()
-                .semibold()
-                .text_color(k.ink),
+                .max_w(px(200.))
+                .n_headline()
+                .text_color(k.label),
             )
-            .when_some(role, |el, role| {
-                if bot {
-                    el.child(ui::JobTag::new(role))
-                } else {
-                    el.child(
-                        div()
-                            .flex_shrink(1.)
-                            .min_w(px(40.))
-                            .max_w(px(200.))
-                            .one_line()
-                            .t_meta()
-                            .text_color(k.ink_3)
-                            .child(role),
-                    )
-                }
-            })
             .child(
                 div()
-                    .flex_none()
-                    .t_mono()
-                    .text_color(k.ink_3)
-                    .child(model::clock(at)),
+                    .flex_shrink(1.)
+                    .min_w(px(40.))
+                    .one_line()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(k.secondary)
+                    .child(run),
             )
             .into_any_element()
     }
@@ -305,6 +288,34 @@ impl TimelineView {
         })
     }
 
+    /// A quiet one-line system row (NATIVE.md §9.2: 转给, 选了): Callout
+    /// `secondary` text in the text column, the time after it in `tertiary`.
+    fn system_row(
+        lead: Option<AnyElement>,
+        text: String,
+        at: crate::data::Millis,
+        cx: &App,
+    ) -> gpui::Div {
+        let k = native_colors(cx);
+        div()
+            .pl(GUTTER + space::S12)
+            .min_h(px(20.))
+            .flex()
+            .items_center()
+            .gap(space::S6)
+            .n_callout()
+            .text_color(k.secondary)
+            .children(lead)
+            .child(div().min_w_0().flex_shrink(1.).one_line().child(text))
+            .child(
+                div()
+                    .flex_none()
+                    .n_figures()
+                    .text_color(k.tertiary)
+                    .child(model::clock(at)),
+            )
+    }
+
     fn v2_routing_row(
         &self,
         message: &Message,
@@ -312,32 +323,16 @@ impl TimelineView {
         to: &str,
         cx: &App,
     ) -> AnyElement {
-        let k = theme::colors(cx);
+        let text = fill(
+            c::ROUTED,
+            &[
+                ("from", &author.map(|a| a.name.clone()).unwrap_or_default()),
+                ("to", to),
+            ],
+        );
         div()
-            .mt(px(-6.))
             .px(space::S8)
-            .flex()
-            .items_center()
-            .gap(space::S12)
-            .t_meta()
-            .line_height(px(20.))
-            .text_color(k.ink_3)
-            .child(
-                div()
-                    .flex_none()
-                    .w(GUTTER)
-                    .flex()
-                    .justify_center()
-                    .child(ui::MemberAvatar::new(author, px(16.))),
-            )
-            .child(fill(
-                c::ROUTED,
-                &[
-                    ("from", &author.map(|a| a.name.clone()).unwrap_or_default()),
-                    ("to", to),
-                ],
-            ))
-            .child(div().mono().child(model::clock(message.created_at)))
+            .child(Self::system_row(None, text, message.created_at, cx))
             .into_any_element()
     }
 
@@ -348,91 +343,37 @@ impl TimelineView {
         text: &str,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let k = theme::colors(cx);
-        let see = self.decision_question(message).map(|q| {
-            div()
-                .id(ElementId::Name(format!("v2-see-q-{}", message.id).into()))
-                .flex_none()
-                .h(px(26.))
-                .px(space::S8)
-                .rounded(theme::radius::SM)
-                .flex()
-                .items_center()
-                .t_meta()
-                .text_color(k.ink_2)
-                .cursor_pointer()
-                .hover(|s| s.bg(k.hover))
-                .child(c::SEE_QUESTION)
+        let k = native_colors(cx);
+        let name = author.map(|a| a.name.clone()).unwrap_or_default();
+        let line = format!("{name} {}", fill(c::PICKED, &[("text", text)]));
+        // The check draws once, when the answer is new; a record read later
+        // shows it whole. Rows show `checkmark` in `secondary` (§6).
+        let mark = div()
+            .flex_none()
+            .size(px(14.))
+            .child(ui::motion::check_mark(
+                ElementId::Name(format!("v2-dec-check-{}", message.id).into()),
+                ui::sym(Sym::Check, ui::SymSize::INLINE_SMALL, k.secondary).into_any_element(),
+                px(14.),
+                ui::motion::just_answered(message.created_at),
+                cx,
+            ))
+            .into_any_element();
+        let see = self.decision_question(message);
+        div()
+            .id(ElementId::Name(
+                format!("v2-decision-{}", message.id).into(),
+            ))
+            .px(space::S8)
+            .child(Self::system_row(Some(mark), line, message.created_at, cx))
+            .when_some(see, |el, q| {
+                el.tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(c::SEE_QUESTION).build(window, cx)
+                })
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     this.show_message(&q, cx);
                 }))
-        });
-        div()
-            .px(space::S8)
-            .flex()
-            .items_center()
-            .gap(space::S12)
-            .child(
-                div()
-                    .flex_none()
-                    .child(ui::MemberAvatar::new(author, GUTTER)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .h(px(40.))
-                    .pl(space::S12)
-                    .pr(space::S8)
-                    .rounded(theme::radius::FIELD)
-                    .bg(k.sunken)
-                    .flex()
-                    .items_center()
-                    .gap(space::S10)
-                    .t_small()
-                    .text_color(k.ink)
-                    // The green check draws once, when the answer is new;
-                    // a record read later shows it whole.
-                    .child(
-                        div()
-                            .flex_none()
-                            .size(px(14.))
-                            .child(ui::motion::check_mark(
-                                ElementId::Name(format!("v2-dec-check-{}", message.id).into()),
-                                check(px(14.), k.ok),
-                                px(14.),
-                                ui::motion::just_answered(message.created_at),
-                                cx,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .flex_1()
-                            .flex()
-                            .gap(space::S4)
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .medium()
-                                    .child(author.map(|a| a.name.clone()).unwrap_or_default()),
-                            )
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .one_line()
-                                    .child(fill(c::PICKED, &[("text", text)])),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex_none()
-                            .t_mono()
-                            .text_color(k.ink_3)
-                            .child(model::clock(message.created_at)),
-                    )
-                    .children(see),
-            )
+            })
             .into_any_element()
     }
 
@@ -447,7 +388,6 @@ impl TimelineView {
         mut proof: Vec<Proof>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let k = theme::colors(cx);
         let p = self.services.provider.clone();
         let changes = p.topic_changes(&message.group_id, &message.topic_id);
         // Derive what the provider did not report: the change of the 话题
@@ -482,7 +422,23 @@ impl TimelineView {
                 });
             }
         }
-        let chips: Vec<AnyElement> = proof
+        let n = native_colors(cx);
+        // Facts (NATIVE.md §9.2): symbol + text runs 12 pt apart, no chips.
+        let fact = |glyph: AnyElement| {
+            div()
+                .flex_none()
+                .flex()
+                .items_center()
+                .gap(space::S4)
+                .n_callout()
+                .n_figures()
+                .text_color(n.secondary)
+                .child(glyph)
+        };
+        let small = |sym: Sym, color: Hsla| {
+            ui::sym(sym, ui::SymSize::INLINE_SMALL, color).into_any_element()
+        };
+        let facts: Vec<AnyElement> = proof
             .iter()
             .filter_map(|x| match x {
                 Proof::Pr {
@@ -490,37 +446,32 @@ impl TimelineView {
                     additions,
                     deletions,
                 } => Some(
-                    chip(cx)
-                        .mono()
-                        .child(ui::icon(Lucide::GitBranch, px(12.), k.ink_2))
+                    fact(small(Sym::Branch, n.secondary))
                         .child(format!("#{number}"))
-                        .child(div().text_color(k.ok_ink).child(format!("+{additions}")))
-                        .child(div().text_color(k.bad_ink).child(format!("−{deletions}")))
+                        .child(div().text_color(n.green).child(format!("+{additions}")))
+                        .child(div().text_color(n.red).child(format!("−{deletions}")))
                         .into_any_element(),
                 ),
                 Proof::Tests { passed, failed } => Some(
-                    chip(cx)
-                        .child(if *failed == 0 {
-                            check(px(12.), k.ok)
-                        } else {
-                            ui::icon(Lucide::CircleAlert, px(12.), k.bad).into_any_element()
-                        })
-                        .child(if *failed == 0 {
-                            fill(c::TESTS_PASSED, &[("n", &passed.to_string())])
-                        } else {
-                            fill(c::TESTS_FAILED, &[("failed", &failed.to_string())])
-                        })
-                        .into_any_element(),
+                    fact(if *failed == 0 {
+                        small(Sym::Done, n.green)
+                    } else {
+                        small(Sym::Problem, n.red)
+                    })
+                    .child(if *failed == 0 {
+                        fill(c::TESTS_PASSED, &[("n", &passed.to_string())])
+                    } else {
+                        fill(c::TESTS_FAILED, &[("failed", &failed.to_string())])
+                    })
+                    .into_any_element(),
                 ),
                 Proof::Recording { duration_ms } => Some(
-                    chip(cx)
-                        .child(ui::icon(Lucide::Play, px(11.), k.ink_2))
+                    fact(small(Sym::Play, n.secondary))
                         .child(fill(c::RECORDING, &[("time", &media_time(*duration_ms))]))
                         .into_any_element(),
                 ),
                 Proof::Checks { passed, total } => Some(
-                    chip(cx)
-                        .child(check(px(12.), k.ok))
+                    fact(small(Sym::Done, n.green))
                         .child(fill(
                             c::CHECKS_CHIP,
                             &[
@@ -542,38 +493,45 @@ impl TimelineView {
                 ChangeState::Merged => c::CHANGES_MERGED,
                 ChangeState::Closed => c::CHANGES_CLOSED,
             };
+            let open = cx.listener(|this, _: &ClickEvent, _, cx| {
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.set_right_pane(RightPane::Changes, cx));
+            });
             links.push(
                 link_row(ElementId::Name(format!("v2-pr-{key}").into()), cx)
-                    .child(ui::icon(Lucide::GitPullRequest, px(15.), k.ink_3))
-                    .child(
-                        div()
-                            .flex_none()
-                            .flex()
-                            .items_baseline()
-                            .gap(space::S4)
-                            .medium()
-                            .child(c::PR_LABEL)
-                            .child(div().t_mono().child(format!("#{}", ch.number))),
-                    )
+                    .child(ui::sym(Sym::PullRequest, ui::SymSize::INLINE, n.secondary))
+                    .child(div().flex_none().n_figures().child(format!(
+                        "{} #{}",
+                        c::PR_LABEL,
+                        ch.number
+                    )))
                     .child(
                         div()
                             .min_w_0()
                             .flex_1()
                             .one_line()
-                            .text_color(k.ink_2)
+                            .text_color(n.secondary)
                             .child(ch.title.clone()),
                     )
                     .when(ch.checks_total > 0, |el| {
-                        el.child(div().flex_none().t_meta().text_color(k.ink_3).child(fill(
-                            c::PR_ROW_META,
-                            &[("n", &ch.checks_passed.to_string()), ("state", state)],
-                        )))
+                        el.child(
+                            div()
+                                .flex_none()
+                                .n_subheadline()
+                                .text_color(n.secondary)
+                                .child(fill(
+                                    c::PR_ROW_META,
+                                    &[("n", &ch.checks_passed.to_string()), ("state", state)],
+                                )),
+                        )
                     })
-                    .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                        this.services
-                            .nav
-                            .update(cx, |nav, cx| nav.set_right_pane(RightPane::Changes, cx));
-                    }))
+                    .child(open_arrow(
+                        ElementId::Name(format!("v2-pr-open-{key}").into()),
+                        c::OPEN_CHANGES,
+                        cx,
+                    ))
+                    .on_click(open)
                     .into_any_element(),
             );
         }
@@ -601,31 +559,31 @@ impl TimelineView {
                     ElementId::Name(format!("v2-out-{key}-{artifact_id}").into()),
                     cx,
                 )
-                .child(ui::icon(Lucide::FileText, px(15.), k.ink_3))
+                .child(ui::sym(Sym::Document, ui::SymSize::INLINE, n.secondary))
                 .child(
                     div()
                         .min_w_0()
                         .flex_shrink(1.)
                         .one_line()
-                        .medium()
                         .child(fill(c::OUTPUT_ROW, &[("title", title)])),
                 )
-                .child(div().flex_none().t_mono().text_color(k.ink_3).child(fill(
-                    c::OUTPUT_META,
-                    &[("v", &version.to_string()), ("kind", kind)],
-                )))
-                .child(div().flex_1())
                 .child(
                     div()
                         .flex_none()
-                        .flex()
-                        .items_center()
-                        .gap(space::S4)
-                        .t_meta()
-                        .text_color(k.ink_2)
-                        .child(c::OPEN_RIGHT)
-                        .child(ui::icon(Lucide::ChevronRight, px(12.), k.ink_2)),
+                        .n_subheadline()
+                        .n_figures()
+                        .text_color(n.secondary)
+                        .child(fill(
+                            c::OUTPUT_META,
+                            &[("v", &version.to_string()), ("kind", kind)],
+                        )),
                 )
+                .child(div().flex_1())
+                .child(open_arrow(
+                    ElementId::Name(format!("v2-out-open-{key}-{artifact_id}").into()),
+                    c::OPEN_OUTPUT,
+                    cx,
+                ))
                 .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
                     let pane = pane.clone();
                     this.services
@@ -643,75 +601,60 @@ impl TimelineView {
                 &markdown::mention_targets(&self.members, self.me.as_deref()),
             )
             .w_full()
-            .text_color(k.ink_2)
+            .text_color(n.label)
         });
-        let header = div()
+        // The state of the result: `checkmark.circle.fill` in `green` and
+        // its word, before the title (no chip).
+        let state = div()
             .flex()
             .items_center()
-            .gap(space::S8)
-            .t_meta()
-            .line_height(px(18.))
-            .text_color(k.ink_3)
+            .gap(space::S4)
+            .n_callout()
+            .text_color(n.secondary)
+            .child(small(Sym::Done, n.green))
+            .child(c::DONE_MARK);
+        let card = div()
+            .w_full()
+            .max_w(TEXT_MAX)
+            .rounded(px(12.))
+            .bg(n.fill)
+            .overflow_hidden()
+            .p(px(14.))
+            .flex()
+            .flex_col()
+            .child(state)
             .child(
                 div()
-                    .t_small()
-                    .medium()
-                    .text_color(k.ink)
-                    .child(author.map(|a| a.name.clone()).unwrap_or_default()),
+                    .mt(space::S4)
+                    .n_title3()
+                    .text_color(n.label)
+                    .child(title),
             )
-            .children(
-                author
-                    .and_then(|a| a.role.clone())
-                    .filter(|r| !r.trim().is_empty())
-                    .map(ui::JobTag::new),
-            )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S4)
-                    .text_color(k.ink_2)
-                    .child(check(px(12.), k.ok))
-                    .child(c::DONE_MARK),
-            )
-            .child(div().flex_1())
-            .child(div().mono().child(model::clock(message.created_at)));
-        let card = ui::card(cx).flex_1().min_w_0().overflow_hidden().child(
-            div()
-                .pt(space::S14)
-                .px(space::S16)
-                .pb(space::S16)
-                .child(header)
-                .child(
+            .children(body.map(|b| div().mt(space::S6).child(b)))
+            .when(!facts.is_empty(), |el| {
+                el.child(
                     div()
                         .mt(space::S10)
-                        .t_title()
-                        .semibold()
-                        .text_color(k.ink)
-                        .child(title),
+                        .flex()
+                        .flex_wrap()
+                        .gap_x(space::S12)
+                        .gap_y(space::S4)
+                        .children(facts),
                 )
-                .children(body.map(|b| div().mt(space::S6).child(b)))
-                .when(!chips.is_empty(), |el| {
-                    el.child(
-                        div()
-                            .mt(space::S12)
-                            .flex()
-                            .flex_wrap()
-                            .gap(space::S6)
-                            .children(chips),
-                    )
-                })
-                .when(!links.is_empty(), |el| {
-                    // No box of its own inside the card (one container level).
-                    el.child(
-                        ui::divided(links, theme::LIST_ROW_BLEED, cx)
-                            .mt(space::S8)
-                            .mx(-theme::LIST_ROW_BLEED),
-                    )
-                }),
-        );
+            })
+            .when(!links.is_empty(), |el| {
+                el.child(
+                    div().mt(space::S10).flex().flex_col().children(
+                        links
+                            .into_iter()
+                            .map(|l| div().border_t(px(1.)).border_color(n.separator).child(l)),
+                    ),
+                )
+            });
         div()
             .px(space::S8)
+            .pt(space::S4)
+            .pb(space::S4)
             .flex()
             .gap(space::S12)
             .child(
@@ -719,7 +662,16 @@ impl TimelineView {
                     .flex_none()
                     .child(ui::MemberAvatar::new(author, GUTTER)),
             )
-            .child(card)
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S6)
+                    .child(self.v2_meta(author, message.created_at, cx))
+                    .child(card),
+            )
             .into_any_element()
     }
 
@@ -736,10 +688,11 @@ impl TimelineView {
             return None;
         }
         let k = theme::colors(cx);
+        let n = native_colors(cx);
         let p = self.services.provider.clone();
         Some(
             div()
-                .mt(space::S10)
+                .mt(space::S6)
                 .flex()
                 .flex_col()
                 .gap(space::S8)
@@ -759,7 +712,7 @@ impl TimelineView {
                             .relative()
                             .w(px(72.))
                             .h(px(44.))
-                            .rounded(theme::radius::SM)
+                            .rounded(px(6.))
                             .bg(k.screen)
                             .children(poster.map(|path| {
                                 gpui::StyledImage::object_fit(
@@ -787,19 +740,19 @@ impl TimelineView {
                                     .flex()
                                     .items_center()
                                     .justify_center()
-                                    .child(ui::icon(Lucide::Play, px(8.), k.screen)),
+                                    .child(ui::icon(Sym::Play, px(8.), k.screen)),
                             )
                     } else {
                         div()
                             .flex_none()
                             .w(px(72.))
                             .h(px(44.))
-                            .rounded(theme::radius::SM)
-                            .bg(k.sunken)
+                            .rounded(px(6.))
+                            .bg(n.fill)
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(ui::icon(Lucide::File, px(18.), k.ink_3))
+                            .child(ui::sym(Sym::File, ui::SymSize::SIDEBAR, n.secondary))
                     };
                     let file_c: FileAttachment = file.clone();
                     let (g, t) = (message.group_id.clone(), message.topic_id.clone());
@@ -810,38 +763,26 @@ impl TimelineView {
                         ))
                         .w(px(300.))
                         .max_w_full()
-                        .py(space::S6)
-                        .pl(space::S6)
+                        .p(space::S6)
                         .pr(space::S12)
-                        .rounded(theme::radius::FIELD)
-                        .border_1()
-                        .border_color(k.line)
-                        .bg(k.bg)
-                        .shadow(k.lift())
+                        .rounded(px(10.))
+                        .bg(n.fill)
                         .flex()
                         .items_center()
-                        .gap(space::S12)
-                        .cursor_pointer()
-                        .hover(|s| s.bg(k.hover))
+                        .gap(space::S10)
                         .child(thumb)
                         .child(
                             div()
                                 .min_w_0()
                                 .flex()
                                 .flex_col()
+                                .gap(px(2.))
+                                .child(div().n_body().text_color(n.label).one_line().child(name))
                                 .child(
                                     div()
-                                        .t_small()
-                                        .medium()
-                                        .text_color(k.ink)
-                                        .one_line()
-                                        .child(name),
-                                )
-                                .child(
-                                    div()
-                                        .t_mono()
-                                        .line_height(px(18.))
-                                        .text_color(k.ink_3)
+                                        .n_subheadline()
+                                        .n_figures()
+                                        .text_color(n.secondary)
                                         .child(meta),
                                 ),
                         )
@@ -861,19 +802,37 @@ impl TimelineView {
     }
 }
 
-/// A 38 pt link row inside a done card.
+/// A 32 pt link row inside a done card: Body text, no hover fill.
 fn link_row(id: ElementId, cx: &App) -> gpui::Stateful<gpui::Div> {
-    let k = theme::colors(cx);
-    ui::inset_row(div().id(id))
+    let k = native_colors(cx);
+    div()
+        .id(id)
         .w_full()
-        .h(px(38.))
+        .h(px(32.))
         .flex()
         .items_center()
-        .gap(space::S10)
-        .t_small()
-        .text_color(k.ink)
-        .cursor_pointer()
-        .hover(|s| s.bg(k.hover))
+        .gap(space::S8)
+        .n_body()
+        .text_color(k.label)
+}
+
+/// The trailing `arrow.up.forward` borderless button of a row that opens
+/// something in the right pane (NATIVE.md §9.3: no text links).
+fn open_arrow(id: ElementId, name: &'static str, cx: &App) -> AnyElement {
+    let k = native_colors(cx);
+    div()
+        .id(id)
+        .flex_none()
+        .size(px(24.))
+        .mr(px(-6.))
+        .rounded(px(6.))
+        .flex()
+        .items_center()
+        .justify_center()
+        .hover(|s| s.bg(k.fill_hover))
+        .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(name).build(window, cx))
+        .child(ui::sym(Sym::OpenExternal, ui::SymSize::INLINE, k.secondary))
+        .into_any_element()
 }
 
 #[cfg(test)]

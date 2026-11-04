@@ -1,0 +1,21 @@
+{
+  "kind": "NotifySettings",
+  "valid": false,
+  "description": "digest time out of range",
+  "value": {
+    "events": {
+      "waiting": true,
+      "mention": true,
+      "result": true,
+      "blocked": true
+    },
+    "digestAt": "24:00",
+    "quietHours": {
+      "enabled": true,
+      "start": "22:00",
+      "end": "08:00"
+    },
+    "timeZone": "Asia/Shanghai",
+    "updatedAt": 1762128000000
+  }
+}

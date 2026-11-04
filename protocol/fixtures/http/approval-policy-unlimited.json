@@ -1,0 +1,17 @@
+{
+  "kind": "ApprovalPolicy",
+  "valid": true,
+  "description": "no spend limit",
+  "value": {
+    "askBefore": {
+      "mergeMain": true,
+      "deployProd": true,
+      "prodConfig": true,
+      "deleteData": true,
+      "externalPublish": false
+    },
+    "maxSpendCny": null,
+    "approver": "requester",
+    "updatedAt": 1762128000000
+  }
+}

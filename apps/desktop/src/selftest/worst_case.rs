@@ -240,6 +240,61 @@ impl ChatProvider for WorstCase {
             .map(|(i, m)| member(m, i))
             .collect()
     }
+    // --- settings-backend track: break-ui data for 设置 › 账号, 通知 and 成员 ---
+    /// Twelve devices: names at the 128-character limit, an empty name, never used, mixed kinds.
+    fn devices(&self) -> AdminReply<Vec<DeviceInfo>> {
+        let now = self.now.max(0) as u64;
+        let long = "很长的设备名称".repeat(19);
+        let names = [
+            "Joye 的 MacBook Pro（公司配的那台，16 英寸，M5 Max，128 GB）".to_string(),
+            long.chars().take(128).collect(),
+            String::new(),
+            "Joye 的 iPhone".into(),
+            "办公室 iMac".into(),
+            "Mac mini".into(),
+        ];
+        let devices = (0..12)
+            .map(|i| {
+                let name = names[i % names.len()].clone();
+                DeviceInfo {
+                    id: format!("tk-{i:02}"),
+                    kind: DeviceKind::from_name(&name),
+                    name,
+                    signed_in_at: now.saturating_sub(400 * 86_400_000),
+                    last_seen_at: (i % 4 != 2)
+                        .then(|| now.saturating_sub(i as u64 * 7 * 86_400_000)),
+                    this_mac: i == 0,
+                }
+            })
+            .collect();
+        reply_now(Ok(devices))
+    }
+    fn sign_out_device(&self, _device_id: &str) -> AdminReply<()> {
+        reply_now(Err(AdminError::NotFound))
+    }
+    /// Every switch off, digest and quiet hours at the clock's edges.
+    fn notify_preferences(&self) -> AdminReply<NotifyPreferences> {
+        reply_now(Ok(NotifyPreferences {
+            waiting: false,
+            result: false,
+            blocked: false,
+            mention: false,
+            digest_at: Some(ClockTime::new(23, 59)),
+            quiet_enabled: true,
+            quiet_start: ClockTime::new(0, 0),
+            quiet_end: ClockTime::new(23, 59),
+        }))
+    }
+    /// The largest spend limit.
+    fn approval_defaults(&self) -> AdminReply<ApprovalDefaults> {
+        reply_now(Ok(ApprovalDefaults {
+            max_spend_cny: Some(1_000_000),
+            approver: ApproverRole::Owners,
+            ..ApprovalDefaults::default()
+        }))
+    }
+    // --- end settings-backend track ---
+
     /// Host names that differ only at the end, and a machine with seven
     /// tags (break-ui: twelve tags on one item).
     fn machines(&self) -> AdminReply<Vec<MachineInfo>> {

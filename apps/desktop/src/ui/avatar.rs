@@ -26,7 +26,7 @@ use crate::{
     characters::{self, CharacterStatus, status::StatusBoard},
     data::{Change, Member},
     theme::{self, Type as _, type_scale},
-    ui::icons::{Lucide, icon},
+    ui::icons::{Sym, icon},
 };
 
 /// Ring around presence dots and pips.
@@ -192,7 +192,7 @@ impl RenderOnce for MemberAvatar {
                     characters::tile::tile_image(*c, status, size, window.scale_factor())
                         .into_any_element()
                 }
-                None => icon(Lucide::Bot, size * 0.5, k.text_2).into_any_element(),
+                None => icon(Sym::AiMember, size * 0.5, k.text_2).into_any_element(),
             };
             let pip = match status {
                 CharacterStatus::Working => Some(k.accent),
@@ -376,7 +376,7 @@ impl RenderOnce for GroupGlyph {
             .flex()
             .items_center()
             .justify_center()
-            .child(icon(Lucide::Hash, glyph, color))
+            .child(icon(Sym::Topic, glyph, color))
     }
 }
 

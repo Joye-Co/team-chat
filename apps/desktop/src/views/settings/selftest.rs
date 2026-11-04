@@ -24,8 +24,10 @@ use serde_json::{Value, json};
 
 use super::{
     Page, SettingsView,
+    account::AccountPage,
     machines::{MachineForm, open_add_machine},
     members::{BotForm, InviteForm, open_add_bot, open_invite},
+    notifications::NotificationsPage,
     widgets::Status,
 };
 use crate::{
@@ -124,6 +126,7 @@ fn invite_code_shape(code: &str) -> bool {
 
 pub fn run(args: Args, finish: Finish, cx: &mut App) {
     cx.set_activation_policy(ActivationPolicy::Accessory);
+    super::prefs::stop_saving();
     let report = args.report.clone();
     let mut live_provider: Option<Arc<CoreProvider>> = None;
     let mut data_root = None;
@@ -229,7 +232,7 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
         wait_for(cx, |_| (!provider.groups().is_empty()).then_some(())).await;
     }
 
-    let opened = cx.update(|cx| super::open_window(services.clone(), Page::Profile, false, cx));
+    let opened = cx.update(|cx| super::open_window(services.clone(), Page::Account, false, cx));
     let (handle, view): (AnyWindowHandle, Entity<SettingsView>) = match opened {
         Ok(v) => v,
         Err(e) => return (false, json!({ "ok": false, "error": e })),
@@ -252,8 +255,8 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
         pages_ok.then_some(()).ok_or("page switch".into()),
     );
 
-    // 个人: save the profile through the page.
-    let profile = cx.update(|cx| view.read(cx).profile().clone());
+    // 账号: save the profile through the pane.
+    let profile = cx.update(|cx| view.read(cx).account().clone());
     let new_role = format!("自测 {}", chrono::Local::now().format("%H%M%S"));
     let old_role = me.role.clone().unwrap_or_default();
     let _ = handle.update(cx, |_, window, cx| {
@@ -565,8 +568,8 @@ async fn drive(services: Services, live: bool, cx: &mut AsyncApp) -> (bool, Valu
         provider.set_topic_following(&g, &t, true);
     }
 
-    // 关于: send diagnostics with a description.
-    let about = cx.update(|cx| view.read(cx).about().clone());
+    // 通用: send diagnostics with a description.
+    let about = cx.update(|cx| view.read(cx).general().clone());
     let _ = handle.update(cx, |_, window, cx| {
         about.update(cx, |a, cx| {
             a.set_description("设置自测：发送诊断", window, cx);
@@ -616,6 +619,17 @@ fn open_bot(
 
 // --- screenshot scenes (selftest/scenes.rs) ---
 
+/// The settings window on `page`, for a scene: it never saves this Mac's
+/// settings.
+fn open_page(
+    services: Services,
+    page: Page,
+    cx: &mut App,
+) -> Result<(AnyWindowHandle, Entity<SettingsView>), String> {
+    super::prefs::stop_saving();
+    super::open_window(services, page, false, cx)
+}
+
 macro_rules! scene_opener {
     ($name:ident, $page:expr) => {
         pub fn $name(
@@ -623,83 +637,205 @@ macro_rules! scene_opener {
             _content: gpui::Size<gpui::Pixels>,
             cx: &mut App,
         ) -> Result<AnyWindowHandle, String> {
-            super::open_window(services, $page, false, cx).map(|(h, _)| h)
+            open_page(services, $page, cx).map(|(h, _)| h)
         }
     };
 }
 
-scene_opener!(open_profile, Page::Profile);
+scene_opener!(open_profile, Page::Account);
 scene_opener!(open_members, Page::Members);
 scene_opener!(open_machines, Page::Machines);
 scene_opener!(open_notifications, Page::Notifications);
-scene_opener!(open_about, Page::About);
+/// 通用 after 检查更新 (the version row says 已是最新版本), so it differs
+/// from `settings-general`.
+pub fn open_about(
+    services: Services,
+    content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    crate::updater::preview::open_up_to_date(services, content, cx)
+}
+scene_opener!(open_general, Page::General);
 
-/// 成员 scrolled to its end: the last rows and the footnote under the table.
+/// 快捷键: the menus' key bindings must exist, as in the app.
+pub fn open_shortcuts(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    static BOUND: std::sync::Once = std::sync::Once::new();
+    let mut first = false;
+    BOUND.call_once(|| first = true);
+    if first {
+        crate::app::install_menus_and_actions(services.clone(), cx);
+    }
+    open_page(services, Page::Shortcuts, cx).map(|(h, _)| h)
+}
+
+/// Runs `f` on the window once it has taken its pane's height, as a sheet
+/// opened by a click finds it.
+fn after_fit(
+    handle: AnyWindowHandle,
+    cx: &mut App,
+    f: impl FnOnce(&mut gpui::Window, &mut App) + 'static,
+) {
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(Duration::from_millis(60))
+            .await;
+        let _ = handle.update(cx, |_, window, cx| f(window, cx));
+    })
+    .detach();
+}
+
+/// A pane scrolled to its end after its first layout.
+fn open_end(services: Services, page: Page, cx: &mut App) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, page, cx)?;
+    handle
+        .update(cx, |_, window, _| {
+            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_end());
+        })
+        .map_err(|e| e.to_string())?;
+    Ok(handle)
+}
+
+/// 成员 scrolled to its end: 默认规则.
 pub fn open_members_end(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, view) = super::open_window(services, Page::Members, false, cx)?;
-    handle
-        .update(cx, |_, window, _| {
-            // After the first layout, when the page knows its height.
-            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_end());
-        })
-        .map_err(|e| e.to_string())?;
-    Ok(handle)
+    open_end(services, Page::Members, cx)
 }
 
-/// 通知 scrolled to its end: the 私聊 table and 关注的话题 under it.
+/// 通知 with its lower groups at work: 每日摘要 and 勿扰 on (the pane fits
+/// the window, so "the end" is these groups in use, not a scroll).
 pub fn open_notifications_end(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, view) = super::open_window(services, Page::Notifications, false, cx)?;
-    handle
-        .update(cx, |_, window, _| {
-            // After the first layout, when the page knows its height.
-            window.on_next_frame(move |_, cx| view.read(cx).scroll_to_end());
-        })
-        .map_err(|e| e.to_string())?;
+    let (handle, view) = open_page(services, Page::Notifications, cx)?;
+    after_fit(handle, cx, move |_, cx| {
+        let page = view.read(cx).notifications().clone();
+        page.update(cx, |p, cx| {
+            p.change(
+                |p| {
+                    p.digest_at = Some(crate::data::NotifyPreferences::DIGEST_DEFAULT);
+                    p.quiet_enabled = true;
+                },
+                cx,
+            )
+        });
+    });
     Ok(handle)
 }
 
-/// 我的资料 after saving an empty name: the field error state.
+/// The 编辑资料 sheet over 账号.
+pub fn open_edit_profile(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let account = view.read(cx).account().clone();
+        AccountPage::open_edit(account, window, cx);
+    });
+    Ok(handle)
+}
+
+/// The 编辑资料 sheet after 完成 with an empty name: the field error.
 pub fn open_profile_error(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, view) = super::open_window(services, Page::Profile, false, cx)?;
-    handle
-        .update(cx, |_, window, cx| {
-            let profile = view.read(cx).profile().clone();
-            profile.update(cx, |p, cx| {
-                p.set_values(" ", "", window, cx);
-                p.save(window, cx);
-            });
-        })
-        .map_err(|e| e.to_string())?;
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let account = view.read(cx).account().clone();
+        AccountPage::open_edit(account.clone(), window, cx);
+        account.update(cx, |p, cx| {
+            p.set_values(" ", "", window, cx);
+            p.save(window, cx);
+        });
+    });
     Ok(handle)
 }
 
-/// A settings page with one of its dialogs open, for a scene.
+/// The 退出登录 alert over 账号.
+pub fn open_sign_out(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let account = view.read(cx).account().clone();
+        AccountPage::confirm_sign_out(account, window, cx);
+    });
+    Ok(handle)
+}
+
+/// 账号 with a device selected and its sign-out alert open.
+pub fn open_device_remove(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    let account = view.read(cx).account().clone();
+    cx.spawn(async move |cx| {
+        cx.background_executor()
+            .timer(Duration::from_millis(120))
+            .await;
+        // The list loads off the UI thread.
+        let id = wait_for(cx, |cx| {
+            cx.update(|cx| {
+                account
+                    .read(cx)
+                    .devices()
+                    .map(|list| list.iter().find(|d| !d.this_mac).map(|d| d.id.clone()))
+            })
+        })
+        .await
+        .flatten();
+        let _ = handle.update(cx, |_, window, cx| {
+            account.update(cx, |a, cx| a.select_device(id, cx));
+            AccountPage::confirm_remove_device(account.clone(), window, cx);
+        });
+    })
+    .detach();
+    Ok(handle)
+}
+
+/// 通知 with the 按群设置 sheet open.
+pub fn open_notify_groups(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Notifications, cx)?;
+    after_fit(handle, cx, move |window, cx| {
+        let page = view.read(cx).notifications().clone();
+        NotificationsPage::open_groups(page, window, cx);
+    });
+    Ok(handle)
+}
+
+/// A settings pane with one of its sheets open, for a scene.
 fn open_with_dialog(
     services: Services,
     page: Page,
     open: fn(Services, &mut gpui::Window, &mut App),
     cx: &mut App,
 ) -> Result<AnyWindowHandle, String> {
-    let (handle, _) = super::open_window(services.clone(), page, false, cx)?;
-    handle
-        .update(cx, |_, window, cx| open(services, window, cx))
-        .map_err(|e| e.to_string())?;
+    let (handle, _) = open_page(services.clone(), page, cx)?;
+    after_fit(handle, cx, move |window, cx| open(services, window, cx));
     Ok(handle)
 }
 
-/// 成员 with the invite dialog open.
+/// 成员 with the 邀请成员 sheet open.
 pub fn open_invite_dialog(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
@@ -715,7 +851,7 @@ pub fn open_invite_dialog(
     )
 }
 
-/// 成员 with the add-bot dialog open.
+/// 成员 with the 添加 AI 成员 sheet open.
 pub fn open_bot_dialog(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
@@ -731,8 +867,8 @@ pub fn open_bot_dialog(
     )
 }
 
-/// 成员 with the add-bot dialog open and a name typed that the roster does not know: the
-/// grid selects the first character no member uses.
+/// 成员 with the 添加 AI 成员 sheet open and a name the roster does not
+/// know: the grid selects the first look no member uses.
 pub fn open_bot_dialog_new_name(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
@@ -749,7 +885,7 @@ pub fn open_bot_dialog_new_name(
     )
 }
 
-/// 成员 with the character dialog of the first bot open.
+/// 成员 with the look sheet of the first AI member open.
 pub fn open_character_dialog(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
@@ -768,7 +904,7 @@ pub fn open_character_dialog(
     )
 }
 
-/// 机器 with the add-machine dialog open.
+/// 机器 with the 添加电脑 sheet open.
 pub fn open_machine_dialog(
     services: Services,
     _content: gpui::Size<gpui::Pixels>,
@@ -783,6 +919,66 @@ pub fn open_machine_dialog(
         cx,
     )
 }
+
+// --- v12/settings track: the scenes of the new panes and their sheets ---
+
+use crate::selftest::scenes::{Scene, Start};
+
+pub const SCENES: &[Scene] = &[
+    Scene {
+        name: "settings-general",
+        about: "Settings: 通用 (启动时, 登录时启动, 菜单栏里显示, 声音, version, developer view)",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_general,
+    },
+    Scene {
+        name: "settings-shortcuts",
+        about: "Settings: 快捷键, the menus' shortcuts",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_shortcuts,
+    },
+    Scene {
+        name: "settings-edit-profile",
+        about: "Settings: the 编辑资料 sheet over 账号",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_edit_profile,
+    },
+    Scene {
+        name: "settings-sign-out",
+        about: "Settings: the 退出登录 alert with its checkbox",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_sign_out,
+    },
+    Scene {
+        name: "settings-device-remove",
+        about: "Settings: a device selected and its sign-out alert",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_device_remove,
+    },
+    // --- v12/fx-overlays ---
+    Scene {
+        name: "update-ready",
+        about: "The 重启安装 sheet over the main window once a downloaded update is ready",
+        start: Start::SignedIn,
+        setup: crate::selftest::scenes::open_first_topic,
+        open: crate::updater::preview::open_ready,
+    },
+    // --- end v12/fx-overlays ---
+    Scene {
+        name: "settings-notify-groups",
+        about: "Settings: the 按群设置通知 sheet over 通知",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_notify_groups,
+    },
+];
+
+// --- end v12/settings track ---
 
 #[cfg(test)]
 mod tests {
