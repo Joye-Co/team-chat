@@ -341,6 +341,11 @@ impl Render for TopicPage {
                     .flex_col()
                     .gap(space::S10)
                     .children(pinned)
+                    // §2.15: the offline Alert docked above the composer.
+                    .children(
+                        cx.try_global::<crate::views::banners::AppBanners>()
+                            .map(|b| b.connection.clone()),
+                    )
                     .child(self.composer.clone()),
             )
     }

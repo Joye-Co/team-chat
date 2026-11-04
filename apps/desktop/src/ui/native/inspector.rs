@@ -86,23 +86,25 @@ impl RenderOnce for InspectorSection {
         } else {
             Sf::ChevronDown
         };
+        // COMPLETENESS.md §2.5: px 16, sections 24 apart; the GroupLabel h32
+        // (12 medium muted) with an optional 28 ghost action.
         div()
             .w_full()
             .px(metrics::INSPECTOR_PAD)
-            .pt(px(12.))
-            .pb(px(4.))
+            .pt(super::tokens::space::S16)
+            .pb(super::tokens::space::S8)
             .flex()
             .flex_col()
             .child(
                 div()
                     .id(self.id)
-                    .h(px(24.))
+                    .h(super::tokens::height::ROW)
                     .flex()
                     .items_center()
-                    .gap(px(4.))
+                    .gap(super::tokens::space::S4)
                     .child(symbol(
                         chevron,
-                        px(11.),
+                        super::tokens::icon::SM,
                         Weight::Semibold,
                         k.secondary,
                         window,

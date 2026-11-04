@@ -191,15 +191,9 @@ impl RenderOnce for SectionHeader {
                             .one_line()
                             .child(self.label),
                     )
+                    // F29: a section count is a count pill.
                     .when_some(self.count, |el, n| {
-                        el.child(
-                            div()
-                                .flex_none()
-                                .t_section()
-                                .tnum()
-                                .text_color(k.text_3)
-                                .child(CountBadge::cap(n)),
-                        )
+                        el.child(crate::ui::native::CountPill::new(n))
                     }),
             )
             .children(self.trailing)
@@ -209,17 +203,22 @@ impl RenderOnce for SectionHeader {
 /// A label in a side panel or popup section (§8.1): 12/16 600 `text-3` with
 /// the count inline (`产出 · 2`).
 pub fn panel_label(label: impl Into<SharedString>, count: Option<u32>, cx: &App) -> gpui::Div {
+    // COMPLETENESS.md §2.3: a GroupLabel (12 medium muted); a count is a
+    // count pill (F29).
     let k = theme::colors(cx);
-    let text: SharedString = match count {
-        Some(n) => format!("{} · {}", label.into(), CountBadge::cap(n)).into(),
-        None => label.into(),
-    };
     div()
-        .t_section()
-        .tnum()
-        .text_color(k.text_3)
-        .one_line()
-        .child(text)
+        .flex()
+        .items_center()
+        .gap(space::S8)
+        .child(
+            div()
+                .min_w(px(0.))
+                .t_section()
+                .text_color(k.text_2)
+                .one_line()
+                .child(label.into()),
+        )
+        .children(count.map(crate::ui::native::CountPill::new))
 }
 
 /// The 8 pt unread dot in the left padding of a topic row (§7.6).
@@ -241,53 +240,6 @@ pub fn row_count(unread: u32, mentions: u32) -> Option<CountBadge> {
     } else {
         None
     }
-}
-
-/// A tab in the 40 pt band under the topic list title (§8.1): `ui` 14/20
-/// `text-2`, count 13 `text-3`; active `text-1` 600 with a 2 pt underline
-/// on the bottom hairline.
-pub fn tab(
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    count: u32,
-    active: bool,
-    cx: &App,
-) -> gpui::Stateful<gpui::Div> {
-    let k = theme::colors(cx);
-    div()
-        .id(id)
-        .flex_none()
-        .h_full()
-        .relative()
-        .flex()
-        .items_center()
-        .gap(space::S6)
-        .t_ui()
-        .text_color(if active { k.text_1 } else { k.text_2 })
-        .when(active, |el| el.semibold())
-        .child({
-            // A hidden 600 copy reserves the bold width, so switching tabs
-            // never moves the tabs after this one (§12: tabs never move).
-            let label: SharedString = label.into();
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .child(label.clone())
-                .child(div().h_0().overflow_hidden().semibold().child(label))
-        })
-        .when(count > 0, |el| {
-            el.child(
-                div()
-                    .t_small()
-                    .font_weight(gpui::FontWeight::NORMAL)
-                    .tnum()
-                    .text_color(k.text_3)
-                    .child(CountBadge::cap(count)),
-            )
-        })
-    // v12/kit: never underline tabs (NATIVE.md §5.5); the active tab
-    // reads by its weight until the screen moves to a segmented control.
 }
 
 /// The height of a row kind, for virtual lists.

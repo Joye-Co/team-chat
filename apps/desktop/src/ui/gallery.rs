@@ -949,9 +949,15 @@ impl Render for Gallery {
                     .gap(space::S24)
                     .border_b(theme::HAIRLINE)
                     .border_color(k.sep)
-                    .child(ui::tab("tab-1", "全部", 0, true, cx))
-                    .child(ui::tab("tab-2", "未读", 3, false, cx))
-                    .child(ui::tab("tab-3", "等我", 128, false, cx)),
+                    .items_center()
+                    .child(ui::native::Segmented::new(
+                        "tabs",
+                        [
+                            ui::native::Segment::Counted("全部".into(), 0),
+                            ui::native::Segment::Counted("未读".into(), 3),
+                            ui::native::Segment::Counted("等我".into(), 128),
+                        ],
+                    )),
             )
             .child(
                 div()

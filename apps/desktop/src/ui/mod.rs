@@ -72,8 +72,7 @@ pub use parts::{
 };
 #[allow(unused_imports)]
 pub use rows::{
-    RowKind, RowSurface, SectionHeader, disabled_row, list_row, panel_label, row_count, tab,
-    unread_dot,
+    RowKind, RowSurface, SectionHeader, disabled_row, list_row, panel_label, row_count, unread_dot,
 };
 pub use sheet::SheetExt;
 pub use truncate::{cut_line, row_tip, tip_when_cut, truncating};
