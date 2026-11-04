@@ -122,6 +122,7 @@ crate::copy! {
     MEMBERS_PLAN = "汇报和限额",
     MEMBERS_PLAN_REPORTS = "汇报给",
     MEMBERS_PLAN_LIMIT = "每周限额",
+    MEMBERS_PLAN_LIMIT_UNIT = "美元",
     MEMBERS_PLAN_NOBODY = "不汇报",
     MEMBERS_PLAN_EXPLANATION = "{name} 向谁汇报，每周最多花多少。超过限额时只做提醒，不会停下工作。",
     MEMBERS_PLAN_LIMIT_PLACEHOLDER = "不限",

@@ -1104,8 +1104,14 @@ fn group_menu(
         }),
     )
     .separator()
+    // A destructive item reads in the destructive color (§2.11, T4-14).
     .item(
-        PopupMenuItem::new(nav_copy::LEAVE_GROUP).on_click(move |_, window, cx| {
+        PopupMenuItem::element(|_, cx: &mut App| {
+            div()
+                .text_color(crate::ui::native::native_colors(cx).red)
+                .child(nav_copy::LEAVE_GROUP)
+        })
+        .on_click(move |_, window, cx| {
             nav_views::dialogs::confirm_leave(
                 leave.clone(),
                 g3.id.clone(),
