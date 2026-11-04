@@ -374,7 +374,8 @@ daemon that does not answer `chat-run` in 20 s gives `{ code: "timeout", reason:
   the same way; `chat-run` reads and removes it, waiting at most 20 s. A request nobody takes
   is removed and reported as `unavailable`. When the run ends the daemon removes only the
   transport's own files (`.gitignore`, `<id>.req`, `<id>.res` and their temp files), then the
-  folder if it is empty. Codex runs
+  folder if it is empty. A daemon that crashed cannot do this, so at start (and every 30 minutes
+  for runs whose CLI is not running) it does the same for each `runs/<id>/work/.chat-run-<id>`. Codex runs
   in the `read-only` sandbox cannot write the folder and get no note.
 
 A connect or write that the CLI's sandbox refuses gives `{ code: "unavailable", reason:

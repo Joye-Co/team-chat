@@ -105,6 +105,11 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
     {
         let cfg = d.cfg.clone();
         let active: Vec<String> = d.runs.keys().cloned().collect();
+        // No CLI runs yet: every request folder is left from a crash.
+        let swept = crate::workspace::sweep_spools(&cfg, &[]);
+        if swept > 0 {
+            log!("removed {swept} chat-run request folders left from a crash");
+        }
         tokio::spawn(async move {
             crate::workspace::cleanup(&cfg, &active).await;
         });
@@ -128,6 +133,7 @@ pub async fn run(cfg: Config, shutdown: impl Future<Output = ()>) -> Result<(), 
             _ = cleanup.tick() => {
                 let cfg = d.cfg.clone();
                 let active: Vec<String> = d.runs.keys().cloned().collect();
+                crate::workspace::sweep_spools(&cfg, &active);
                 tokio::spawn(async move { crate::workspace::cleanup(&cfg, &active).await; });
             }
         }

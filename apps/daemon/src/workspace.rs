@@ -289,6 +289,31 @@ pub async fn remove_run(dir: &Path) {
     let _ = tokio::fs::remove_dir_all(dir).await;
 }
 
+/// Removes the `chat-run` request folders (`work/.chat-run-<run id>`) that a daemon crash left
+/// in the working folders of runs whose CLI is not running (not in `active`). Only the
+/// transport's own files go, then the folder when it is empty. Returns the folders removed.
+pub fn sweep_spools(cfg: &Config, active: &[String]) -> usize {
+    let Ok(rd) = std::fs::read_dir(runs_dir(cfg)) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        if active.contains(&name) {
+            continue;
+        }
+        let spool = crate::chat_run::spool_dir(&e.path().join("work"), &name);
+        let is_dir = std::fs::symlink_metadata(&spool).is_ok_and(|m| m.is_dir());
+        if is_dir {
+            crate::chat_run::remove_spool(&spool);
+            if !spool.exists() {
+                removed += 1;
+            }
+        }
+    }
+    removed
+}
+
 /// Removes finished runs older than `keep_runs_hours`, then the oldest finished runs while
 /// free disk is below `min_free_gb`. Active runs are never touched.
 pub async fn cleanup(cfg: &Config, active: &[String]) -> usize {

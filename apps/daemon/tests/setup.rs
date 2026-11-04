@@ -394,3 +394,41 @@ async fn mirror_runs_keep_their_branches() {
         "branch without own commits deleted"
     );
 }
+
+/// A daemon crash leaves `work/.chat-run-<run id>` (the Codex request folder) behind: the next
+/// start removes the transport's files and the folder of every run whose CLI is not running,
+/// and keeps other files, other folders and the folders of active runs.
+#[test]
+fn crash_leftover_request_folders_are_removed_at_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let cfg = Config::parse(&base_config(dir.path())).unwrap();
+    let runs = daemon::workspace::runs_dir(&cfg);
+    let spool = |run: &str| {
+        let s = daemon::chat_run::spool_dir(&runs.join(run).join("work"), run);
+        std::fs::create_dir_all(&s).unwrap();
+        std::fs::write(s.join(".gitignore"), "*\n").unwrap();
+        std::fs::write(s.join("a1-1.req"), "{}").unwrap();
+        std::fs::write(s.join("a1-1.res.tmp"), "{}").unwrap();
+        s
+    };
+    let left = spool("dead1");
+    let kept_files = spool("dead2");
+    std::fs::write(kept_files.join("notes.md"), "not ours").unwrap();
+    let live = spool("live1");
+    // A folder of the repository with the same prefix but another run id stays.
+    let repo_dir = runs.join("dead1/work/.chat-run-other");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+
+    let removed = daemon::workspace::sweep_spools(&cfg, &["live1".to_string()]);
+    assert_eq!(removed, 1);
+    assert!(!left.exists());
+    assert_eq!(
+        std::fs::read_dir(&kept_files)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect::<Vec<_>>(),
+        ["notes.md"]
+    );
+    assert!(live.join("a1-1.req").exists());
+    assert!(repo_dir.exists());
+}
