@@ -1,0 +1,11 @@
+{
+  "kind": "UpdateApprovalPolicyRequest",
+  "valid": true,
+  "description": "no spend limit",
+  "value": {
+    "askBefore": {
+      "mergeMain": false
+    },
+    "maxSpendCny": null
+  }
+}

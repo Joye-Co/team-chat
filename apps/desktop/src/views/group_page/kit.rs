@@ -13,15 +13,15 @@ use crate::{
     copy::{common, fill, group_page as c},
     data::{ArtifactSummary, Millis, PlanItem, PlanState, v2::ScreenLineKind},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// 12 / 18: the v3 meta line (card meta, footers, rail card labels).
-pub const META: (Pixels, Pixels) = (px(12.), px(18.));
+pub const META: (Pixels, Pixels) = crate::ui::native::tokens::text::META;
 /// 13 / 20.
-pub const SMALL: (Pixels, Pixels) = (px(13.), px(20.));
+pub const SMALL: (Pixels, Pixels) = crate::ui::native::tokens::text::UI;
 /// 11 / 16: plan step names and option labels inside previews.
-pub const TINY: (Pixels, Pixels) = (px(11.), px(16.));
+pub const TINY: (Pixels, Pixels) = crate::ui::native::tokens::text::META;
 /// The 群 and 产出 side column (Group.dc.html `aside`, Artifact.dc.html).
 pub const ASIDE_WIDTH: Pixels = px(320.);
 /// The 成员 side column (工作环境).
@@ -68,7 +68,7 @@ pub fn page_title(text: impl Into<SharedString>, cx: &App) -> Div {
 /// its tooltip and accessibility); `active` has the grey `sel` fill.
 pub fn bar_icon(
     id: impl Into<ElementId>,
-    icon: Lucide,
+    icon: Sym,
     tip: &'static str,
     active: bool,
     cx: &App,
@@ -130,7 +130,7 @@ pub fn aside(
                 .children(on_collapse.map(|f| {
                     bar_icon(
                         SharedString::from(format!("{id}-collapse")),
-                        Lucide::PanelRight,
+                        Sym::Inspector,
                         c::GROUP_PAGE_COLLAPSE,
                         true,
                         cx,
@@ -178,7 +178,6 @@ pub fn text_link(id: impl Into<ElementId>, label: &str, cx: &App) -> Stateful<Di
         .rounded(px(6.))
         .flex()
         .items_center()
-        .cursor_pointer()
         .type_role(META)
         .text_color(k.ink_2)
         .hover(|s| s.bg(k.hover))
@@ -464,7 +463,7 @@ pub fn artifact_thumb(
             );
         }
         return frame.flex().items_center().justify_center().child(ui::icon(
-            Lucide::FileText,
+            Sym::Document,
             theme::icon::ROW,
             k.ink_3,
         ));

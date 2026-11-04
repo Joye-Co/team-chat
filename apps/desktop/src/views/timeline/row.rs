@@ -26,7 +26,7 @@ use crate::{
     data::{Member, Message, SendState, Topic},
     markdown,
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 /// The row's inset inside the content box: hover fills reach 8 pt past the
@@ -145,19 +145,14 @@ impl TimelineView {
             } else {
                 item.into_any_element()
             };
-            // The 720 pt column of the v2 page, centered, 32 pt from the
-            // edges; rows reach 8 pt past the text for their hover fill.
+            // NATIVE.md §9.2: the transcript takes the full content width;
+            // avatars start on the shared leading inset, the trailing inset
+            // is 24 pt; message text stops at 680 pt.
             return div()
                 .w_full()
-                .px(super::v2::SIDE - ROW_INSET)
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .w_full()
-                        .max_w(super::v2::COLUMN + ROW_INSET * 2.)
-                        .child(item),
-                )
+                .pl(super::v2::LEADING - ROW_INSET)
+                .pr(super::v2::SIDE - ROW_INSET)
+                .child(item)
                 .into_any_element();
         }
         item.into_any_element()
@@ -175,7 +170,25 @@ impl TimelineView {
             && self.editing.as_ref().is_none_or(|e| e.key != key)
             && let Some(row) = self.v2_special_row(message, key, cx)
         {
-            return row;
+            // v12/behavior: the special rows get the message menu too (§7.3).
+            let menu_message = message.clone();
+            let view = cx.entity().downgrade();
+            let (can_edit, can_delete) = (self.can_edit(message), self.can_delete(message));
+            return div()
+                .id(ElementId::Name(format!("special-{key}").into()))
+                .child(row)
+                .context_menu(move |menu, window, cx| {
+                    super::menu::build(
+                        menu,
+                        view.clone(),
+                        &menu_message,
+                        can_edit,
+                        can_delete,
+                        window,
+                        cx,
+                    )
+                })
+                .into_any_element();
         }
         let v2 = self.v2;
         let colors = theme::colors(cx);
@@ -367,11 +380,7 @@ impl TimelineView {
                         .gap(space::S4)
                         .t_meta()
                         .text_color(colors.danger_text)
-                        .child(ui::icon(
-                            Lucide::CircleAlert,
-                            theme::icon::CHIP,
-                            colors.danger_text,
-                        ))
+                        .child(ui::icon(Sym::Alert, theme::icon::CHIP, colors.danger_text))
                         .child(t::FAILED),
                 )
                 .child(
@@ -389,7 +398,7 @@ impl TimelineView {
                 .flex()
                 .flex_col()
                 .child(self.v2_meta(author.as_ref(), message.created_at, cx))
-                .child(div().h(space::S4))
+                .child(div().h(space::S2))
                 .into_any_element()
         });
         let meta = meta.or_else(|| {
@@ -505,7 +514,6 @@ impl TimelineView {
             .rounded(theme::radius::MD)
             .flex()
             .gap(space::S12)
-            .when(hovered, |el| el.bg(colors.hover))
             // The search highlight, fading out (§7.5).
             .when(self.highlight_alpha(key) > 0., |el| {
                 el.bg(colors.me_bg.opacity(self.highlight_alpha(key)))
@@ -527,7 +535,13 @@ impl TimelineView {
                 div()
                     .flex_1()
                     .min_w(px(0.))
-                    .when(!v2, |el| el.max_w(theme::MEASURE))
+                    .map(|el| {
+                        if v2 {
+                            el.max_w(super::v2::TEXT_MAX)
+                        } else {
+                            el.max_w(theme::MEASURE)
+                        }
+                    })
                     .flex()
                     .flex_col()
                     .children(meta)
@@ -569,7 +583,7 @@ impl TimelineView {
         let view = cx.entity().downgrade();
         let can_edit = self.can_edit(message);
         let can_delete = self.can_delete(message);
-        let tool = |id: &str, glyph: Lucide| {
+        let tool = |id: &str, glyph: Sym| {
             ui::icon_button(ElementId::Name(format!("{id}-{key}").into()), glyph)
                 .rounded(theme::radius::SM)
         };
@@ -585,11 +599,11 @@ impl TimelineView {
                     message,
                     key,
                     false,
-                    tool("react", Lucide::FaceSlightlySmilingPlus).named(t::ADD_REACTION),
+                    tool("react", Sym::Emoji).named(t::ADD_REACTION),
                     cx,
                 ))
                 .child(
-                    tool("reply", Lucide::Reply)
+                    tool("reply", Sym::Reply)
                         .named(t::REPLY)
                         .on_click(cx.listener({
                             let m = message.clone();
@@ -599,31 +613,34 @@ impl TimelineView {
             })
             .child({
                 let quoted = quote_markdown(&message.body);
-                tool("copy-quote", Lucide::TextQuote)
+                tool("copy-quote", Sym::Quote)
                     .named(t::COPY_QUOTE)
                     .on_click(move |_, _, cx| {
                         cx.write_to_clipboard(ClipboardItem::new_string(quoted.clone()))
                     })
             })
-            .child(tool("more", Lucide::Ellipsis).named(t::MORE).dropdown_menu(
-                move |menu, window, cx| {
-                    super::menu::build(
-                        menu,
-                        view.clone(),
-                        &menu_message,
-                        can_edit,
-                        can_delete,
-                        window,
-                        cx,
-                    )
-                },
-            ))
+            .child(
+                tool("more", Sym::More)
+                    .named(t::MORE)
+                    .dropdown_menu(move |menu, window, cx| {
+                        super::menu::build(
+                            menu,
+                            view.clone(),
+                            &menu_message,
+                            can_edit,
+                            can_delete,
+                            window,
+                            cx,
+                        )
+                    }),
+            )
             .into_any_element()
     }
 
-    /// The reactions under the body and attachments (§7.5): 26 pt pills 6 pt
-    /// apart, then the add pill while the message is hovered. A click toggles my reaction; the tooltip
-    /// names everyone who reacted.
+    /// The reactions under the body and attachments: Messages-style
+    /// tapbacks (an emoji and a count in a quiet bubble, mine tinted with
+    /// the accent), 4 pt apart, then the add bubble while the message is
+    /// hovered. A click toggles my reaction; hovering shows the names.
     fn render_reactions(&self, message: &Message, key: &str, cx: &mut Context<Self>) -> AnyElement {
         let me = self.me.clone().unwrap_or_default();
         let name = |id: &str| {
@@ -640,7 +657,6 @@ impl TimelineView {
             .map(|(i, r)| {
                 let names: Vec<String> = r.member_ids.iter().map(|id| name(id)).collect();
                 let mine = r.member_ids.contains(&me);
-                let label = ui::emoji::reaction_label(&names);
                 let known: Vec<&str> = names
                     .iter()
                     .filter(|n| !n.is_empty())
@@ -652,47 +668,50 @@ impl TimelineView {
                 );
                 let emoji = r.emoji.clone();
                 let m = message.clone();
-                ui::emoji::reaction_pill(
+                let bubble = super::tapback::bubble(
                     ElementId::Name(format!("reaction-{key}-{i}").into()),
                     r.emoji.clone().into(),
-                    label.into(),
+                    r.member_ids.len(),
                     mine,
                     cx,
                 )
-                .tooltip(tip)
                 .on_click(cx.listener(move |this, _, _, cx| {
                     this.react(&m, &emoji, !mine, cx);
-                }))
-                .into_any_element()
+                }));
+                super::tapback::with_names(
+                    ElementId::Name(format!("reaction-names-{key}-{i}").into()),
+                    bubble,
+                    tip.into(),
+                )
             })
             .collect::<Vec<_>>();
-        // Like Slack, the add pill shows on the hovered message (or while its
-        // picker is open); it keeps its place so the line never reflows.
+        // The add bubble shows on the hovered message (or while its picker
+        // is open); it keeps its place so the line never reflows.
         let show_add = self.hovered.as_deref() == Some(key)
             || self.reacting.as_ref() == Some(&(key.to_string(), true));
         let add = self.reaction_picker(
             message,
             key,
             true,
-            ui::emoji::reaction_add(ElementId::Name(format!("reaction-add-{key}").into()), cx)
+            super::tapback::add_bubble(ElementId::Name(format!("reaction-add-{key}").into()), cx)
                 .named(t::ADD_REACTION),
             cx,
         );
-        // The add pill rides with the last reaction in one unbreakable
-        // group, so the hidden pill never wraps onto a blank line of its own.
+        // The add bubble rides with the last reaction in one unbreakable
+        // group, so the hidden bubble never wraps onto a blank line of its own.
         let mut pills = pills;
         let last = pills.pop();
         div()
-            .mt(space::S6)
+            .mt(space::S4)
             .flex()
             .flex_wrap()
-            .gap(space::S6)
+            .gap(space::S4)
             .children(pills)
             .child(
                 div()
                     .flex()
                     .flex_none()
-                    .gap(space::S6)
+                    .gap(space::S4)
                     .children(last)
                     .child(div().when(!show_add, |el| el.invisible()).child(add)),
             )
@@ -1087,8 +1106,8 @@ mod start_fade_tests {
 
     #[test]
     fn a_half_cut_title_is_hidden_and_the_meta_line_stays() {
-        // Title top is at 84; half of a one-line title (15 pt) is cut.
-        let f = StartFade::at(px(99.), px(30.));
+        // Title top is at 24 + 40 + 12 = 76; half of a one-line title (15 pt) is cut.
+        let f = StartFade::at(px(91.), px(30.));
         assert_eq!(f.avatar, 0.);
         assert_eq!(f.title, 0.);
         assert_eq!(f.meta, 1.);
@@ -1096,10 +1115,10 @@ mod start_fade_tests {
 
     #[test]
     fn a_half_cut_meta_line_is_hidden() {
-        // Meta top is at 84 + 60 + 8 = 152 under a two-line title.
-        let f = StartFade::at(px(162.), px(60.));
+        // Meta top is at 76 + 60 + 8 = 144 under a two-line title.
+        let f = StartFade::at(px(154.), px(60.));
         assert_eq!(f.meta, 0.);
-        let f = StartFade::at(px(130.), px(60.));
+        let f = StartFade::at(px(122.), px(60.));
         assert!(f.meta > 0.9);
     }
 }

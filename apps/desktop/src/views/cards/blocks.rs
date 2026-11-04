@@ -8,7 +8,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, relative,
 };
 use gpui_component::{
-    Disableable as _, IconName,
+    Disableable as _,
     button::{Button, ButtonVariants as _},
 };
 
@@ -21,7 +21,7 @@ use crate::{
     },
     markdown,
     theme::{self, Type as _, space},
-    ui::{self, ButtonSpec as _, Lucide},
+    ui::{self, ButtonSpec as _, Sym},
     views::timeline::extras::ExtrasContext,
 };
 
@@ -399,11 +399,11 @@ fn list_icon(status: Option<CardListStatus>, cx: &App) -> AnyElement {
                 .bg(k.text_3)
                 .into_any_element();
         }
-        Some(CardListStatus::Todo) => (Lucide::CircleDashed, k.text_3),
-        Some(CardListStatus::InProgress) => (Lucide::CircleDot, k.text_1),
-        Some(CardListStatus::Done) => (Lucide::CircleCheck, k.success),
-        Some(CardListStatus::Failed) => (Lucide::CircleX, k.danger),
-        Some(CardListStatus::Skipped) => (Lucide::Minus, k.text_3),
+        Some(CardListStatus::Todo) => (Sym::Todo, k.text_3),
+        Some(CardListStatus::InProgress) => (Sym::Live, k.text_1),
+        Some(CardListStatus::Done) => (Sym::Done, k.success),
+        Some(CardListStatus::Failed) => (Sym::Failed, k.danger),
+        Some(CardListStatus::Skipped) => (Sym::Minus, k.text_3),
     };
     ui::icon(glyph, theme::icon::ROW, color).into_any_element()
 }
@@ -611,11 +611,7 @@ fn render_image(
             .px(space::S12)
             .t_meta()
             .text_color(colors.text_3)
-            .child(ui::icon(
-                Lucide::FileImage,
-                theme::icon::EMPTY,
-                colors.text_3,
-            ))
+            .child(ui::icon(Sym::Image, theme::icon::EMPTY, colors.text_3))
             .child(text)
     };
     match ctx
@@ -675,7 +671,7 @@ fn link_button(
             Some(safe) if safe.starts_with("http") || safe.starts_with("HTTP") => {
                 let url = safe.to_string();
                 button
-                    .icon(IconName::ExternalLink)
+                    .icon(Sym::OpenExternal)
                     .tooltip(url.clone())
                     .on_click(move |_, _, cx| cx.open_url(&url))
                     .into_any_element()
@@ -686,7 +682,7 @@ fn link_button(
             let (g, t) = (group_id.clone(), topic_id.clone());
             let _ = message;
             button
-                .icon(IconName::ArrowRight)
+                .icon(Sym::ArrowRight)
                 .tooltip(c::OPEN_TOPIC)
                 .on_click(move |_, _, cx| crate::views::nav::open_topic(g.clone(), t.clone(), cx))
                 .into_any_element()
@@ -698,7 +694,7 @@ fn link_button(
             let provider = ctx.provider.clone();
             let (id, version) = (artifact_id.clone(), *version);
             button
-                .icon(IconName::FileText)
+                .icon(Sym::Document)
                 .tooltip(c::OPEN_ARTIFACT)
                 .on_click(move |_, _, cx| {
                     crate::views::artifacts::window::open_artifact(&provider, &id, version, cx)

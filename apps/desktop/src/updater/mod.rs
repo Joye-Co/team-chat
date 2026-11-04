@@ -3,12 +3,14 @@
 //! - [`Updater`] is an app-wide entity (a GPUI global, see [`install`]). It checks
 //!   `GET /v1/updates/latest` through chat-core when the app starts (as soon as a
 //!   session exists) and every 6 hours, downloads the DMG with progress (chat-core checks
-//!   size and SHA-256), waits until no send is pending, then installs on a background
-//!   thread ([`install::install`]) and relaunches.
+//!   size and SHA-256) and stops at [`Phase::Ready`]: the user chooses 重启安装 (a
+//!   sheet, Settings › 通用 or the app menu). Then it waits until no send is
+//!   pending, installs on a background thread ([`install::install`]) and relaunches.
+//!   The progress shows in Settings › 通用 (the version row) and in the app menu.
 //! - When the running bundle cannot be replaced (not writable, or no bundle under
 //!   `cargo run`), it opens the DMG in Finder and the banner explains what to do.
-//! - [`banner::UpdateBanner`] (main window) and [`banner::AboutUpdate`] (settings, 关于)
-//!   render the state. They read only this entity; the network and the cache stay here.
+//! - [`banner::UpdateBanner`] (main window; the settings 通用 pane draws its own version row)
+//!   renders the state. It reads only this entity; the network and the cache stay here.
 //! - On start, [`install::finish_on_launch`] removes the old bundle of the previous update.
 
 pub mod banner;
@@ -61,6 +63,11 @@ pub enum Phase {
         done: u64,
         total: u64,
     },
+    /// Downloaded and verified: waits for the user's 重启安装.
+    Ready {
+        info: UpdateInfo,
+        dmg: PathBuf,
+    },
     /// Downloaded; waits for pending sends before it installs.
     WaitingForSends(UpdateInfo),
     Installing(UpdateInfo),
@@ -78,6 +85,7 @@ impl Phase {
         match self {
             Phase::Available(i)
             | Phase::Downloading { info: i, .. }
+            | Phase::Ready { info: i, .. }
             | Phase::WaitingForSends(i)
             | Phase::Installing(i)
             | Phase::Manual(i) => Some(i),
@@ -134,6 +142,66 @@ pub fn running_bundle() -> Option<PathBuf> {
 
 /// Creates the updater, finishes a previous update and starts the schedule. Call once
 /// at start on the chat-core provider.
+/// The app menu's update item for `phase`: its title and whether it can be
+/// chosen. The download shows its progress here (NATIVE.md §7.4: no
+/// sheet or banner while it runs).
+pub fn menu_item(phase: &Phase) -> (String, bool) {
+    use crate::copy::{fill, overlays as o};
+    match phase {
+        Phase::Checking => (crate::copy::update::CHECKING.to_string(), false),
+        Phase::Available(i) | Phase::Failed { info: Some(i), .. } => {
+            (fill(o::MENU_UPDATE_TO, &[("version", &i.version)]), true)
+        }
+        Phase::Downloading { info, done, total } => {
+            let total = if *total == 0 { info.size } else { *total };
+            let pct = version::percent(*done, total).to_string();
+            (
+                fill(
+                    o::MENU_DOWNLOADING,
+                    &[("version", &info.version), ("percent", &pct)],
+                ),
+                false,
+            )
+        }
+        Phase::Ready { info, .. } => (fill(o::MENU_RESTART, &[("version", &info.version)]), true),
+        Phase::WaitingForSends(i) | Phase::Installing(i) => (
+            fill(o::UPDATE_INSTALLING_TITLE, &[("version", &i.version)]),
+            false,
+        ),
+        Phase::Manual(i) => (
+            fill(o::UPDATE_MANUAL_TITLE, &[("version", &i.version)]),
+            true,
+        ),
+        Phase::Idle | Phase::UpToDate | Phase::Failed { info: None, .. } => {
+            (o::MENU_CHECK.to_string(), true)
+        }
+    }
+}
+
+gpui::actions!(updater, [UpdateCommand]);
+
+/// The app menu's update item: installs a downloaded update, starts an
+/// available one, or opens Settings › 通用 and checks.
+fn on_update_command(cx: &mut App) {
+    let Some(updater) = global(cx) else { return };
+    let phase = updater.read(cx).phase().clone();
+    match phase {
+        Phase::Ready { .. } => updater.update(cx, |u, cx| u.install_now(cx)),
+        Phase::Available(_) | Phase::Failed { info: Some(_), .. } => {
+            updater.update(cx, |u, cx| u.start_update(cx))
+        }
+        _ => {
+            updater.update(cx, |u, cx| {
+                if !u.phase.busy() && !matches!(u.phase, Phase::Manual(_)) {
+                    u.check_now(cx)
+                }
+            });
+            let services = crate::views::nav::services_of(cx);
+            crate::views::settings::open_page(services, crate::views::settings::Page::General, cx);
+        }
+    }
+}
+
 pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity<Updater> {
     let marker = marker_path(&data_root);
     cx.background_executor()
@@ -152,6 +220,12 @@ pub fn install(source: ClientSource, data_root: PathBuf, cx: &mut App) -> Entity
         postponed: None,
     });
     cx.set_global(UpdaterGlobal(updater.clone()));
+    cx.on_action(|_: &UpdateCommand, cx| on_update_command(cx));
+    // The app menu's item follows the phase.
+    cx.observe(&updater, |_, cx| {
+        crate::views::nav::menus::refresh_menus(cx)
+    })
+    .detach();
     let weak = updater.downgrade();
     cx.spawn(async move |cx| {
         loop {
@@ -181,6 +255,7 @@ impl Updater {
                 POSTPONE_FOR,
             ),
             Phase::Downloading { .. }
+            | Phase::Ready { .. }
             | Phase::WaitingForSends(_)
             | Phase::Installing(_)
             | Phase::Manual(_) => true,
@@ -190,7 +265,8 @@ impl Updater {
     }
 
     fn tick(&mut self, cx: &mut Context<Self>) {
-        if self.phase.busy() {
+        // A downloaded update waits for 重启安装; no check replaces it.
+        if self.phase.busy() || matches!(self.phase, Phase::Ready { .. }) {
             return;
         }
         let due = match self.last_attempt {
@@ -252,7 +328,14 @@ impl Updater {
                         u.after_failed_check(before, by_user)
                     }
                 };
+                let found = matches!(phase, Phase::Available(_));
                 u.set_phase(phase, cx);
+                // A found update downloads in the background; its progress
+                // shows in Settings › 通用 and the app menu, and a sheet asks
+                // for 重启安装 once it is ready.
+                if found {
+                    u.start_update(cx);
+                }
             });
         })
         .detach();
@@ -280,12 +363,23 @@ impl Updater {
         }
     }
 
+    /// The app menu's update item: its title and whether it can be chosen.
+    pub fn menu_item(&self) -> (String, bool) {
+        menu_item(&self.phase)
+    }
+
     /// "稍后": hides the banner for this version for a day; stops waiting for sends.
     pub fn postpone(&mut self, cx: &mut Context<Self>) {
         let Some(info) = self.phase.info().cloned().or_else(|| self.found.clone()) else {
             return;
         };
         if matches!(self.phase, Phase::Installing(_) | Phase::Downloading { .. }) {
+            return;
+        }
+        // A downloaded update stays downloaded: 稍后 only hides the sheet.
+        if matches!(self.phase, Phase::Ready { .. }) {
+            self.postponed = Some((info.version.clone(), Instant::now()));
+            cx.notify();
             return;
         }
         self.postponed = Some((info.version.clone(), Instant::now()));
@@ -300,7 +394,10 @@ impl Updater {
         };
         if matches!(
             self.phase,
-            Phase::Downloading { .. } | Phase::Installing(_) | Phase::WaitingForSends(_)
+            Phase::Downloading { .. }
+                | Phase::Ready { .. }
+                | Phase::Installing(_)
+                | Phase::WaitingForSends(_)
         ) {
             return;
         }
@@ -350,7 +447,8 @@ impl Updater {
             let _ = this.update(cx, |u, cx| match result {
                 Ok(Ok(path)) => {
                     remove_other_dmgs(&path);
-                    u.install_when_idle(info, path, cx)
+                    // The user chooses when the app restarts.
+                    u.set_phase(Phase::Ready { info, dmg: path }, cx)
                 }
                 Ok(Err(e)) => {
                     tracing::warn!(error = %e, "update download failed");
@@ -381,6 +479,15 @@ impl Updater {
             });
         })
         .detach();
+    }
+
+    /// "重启安装": installs a downloaded update (after pending sends) and
+    /// relaunches.
+    pub fn install_now(&mut self, cx: &mut Context<Self>) {
+        if let Phase::Ready { info, dmg } = self.phase.clone() {
+            self.postponed = None;
+            self.install_when_idle(info, dmg, cx);
+        }
     }
 
     /// Number of messages and other writes still waiting in the outbox.

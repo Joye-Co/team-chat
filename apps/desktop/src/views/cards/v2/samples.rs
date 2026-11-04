@@ -131,11 +131,11 @@ fn choice_card(rev: u32) -> serde_json::Value {
         "fallback": "Forge 在等你选邀请码输入框的样式",
         "ask": { "from": [ME] },
         "blocks": [
-            { "type": "decision", "id": "style", "options": [
+            { "type": "decision", "id": "style", "default": ["one"], "options": [
                 { "id": "one", "label": "一个输入框，粘贴自动识别" },
                 { "id": "eight", "label": "8 个分格，逐位输入" }
             ]},
-            { "type": "text", "id": "why", "text": "Forge 推荐 A：实习生大多从微信复制邀请码。" }
+            { "type": "text", "id": "why", "text": "Forge 推荐一个输入框：实习生大多从微信复制邀请码。" }
         ],
         "actions": [{ "id": "pick", "label": "选这个", "style": "primary" }]
     })
@@ -272,7 +272,7 @@ fn all() -> Vec<Sample> {
                     { "id": "wed", "label": "周三 15:00" },
                     { "id": "thu", "label": "周四 10:00" }
                 ]},
-                { "type": "text", "id": "why", "text": "Pocket 推荐 A：人最齐。" },
+                { "type": "text", "id": "why", "text": "Pocket 推荐周二：人最齐。" },
                 { "type": "input", "id": "note", "kind": "text", "label": "补充一句",
                   "placeholder": "补充一句（可选）" }
             ],

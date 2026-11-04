@@ -10,7 +10,7 @@ use crate::{
     copy::{dev, fill, process as p},
     data::{FileChangeKind, ProcessStep, RunProcess, RunStatus},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 use super::status_text;
@@ -182,34 +182,34 @@ fn mono_id(ix: usize, slot: usize) -> ElementId {
 }
 
 /// The 16 pt glyph of a step (§17 U31: steps with icons).
-pub fn glyph(step: &ProcessStep, cx: &App) -> (Lucide, Hsla) {
+pub fn glyph(step: &ProcessStep, cx: &App) -> (Sym, Hsla) {
     let k = theme::colors(cx);
     match step {
-        ProcessStep::Message { from_bot: true, .. } => (Lucide::Bot, k.text_3),
-        ProcessStep::Message { .. } => (Lucide::User, k.text_3),
-        ProcessStep::Reasoning { .. } => (Lucide::Activity, k.text_3),
-        ProcessStep::Tool { ok: None, .. } => (Lucide::Terminal, k.accent_text),
-        ProcessStep::Tool { ok: Some(true), .. } => (Lucide::Terminal, k.text_3),
+        ProcessStep::Message { from_bot: true, .. } => (Sym::AiMember, k.text_3),
+        ProcessStep::Message { .. } => (Sym::Person, k.text_3),
+        ProcessStep::Reasoning { .. } => (Sym::Activity, k.text_3),
+        ProcessStep::Tool { ok: None, .. } => (Sym::Terminal, k.accent_text),
+        ProcessStep::Tool { ok: Some(true), .. } => (Sym::Terminal, k.text_3),
         ProcessStep::Tool {
             ok: Some(false), ..
-        } => (Lucide::Terminal, k.danger),
-        ProcessStep::Files { .. } => (Lucide::FileCode, k.text_3),
-        ProcessStep::Approval { approved: None, .. } => (Lucide::CircleQuestionMark, k.you_glyph),
-        ProcessStep::Approval { .. } => (Lucide::CircleCheck, k.text_3),
-        ProcessStep::TurnStarted => (Lucide::CircleDot, k.text_3),
-        ProcessStep::TurnCompleted { ok: true, .. } => (Lucide::CircleCheck, k.success),
-        ProcessStep::TurnCompleted { .. } => (Lucide::CircleX, k.danger),
-        ProcessStep::Status { .. } => (Lucide::Info, k.text_3),
+        } => (Sym::Terminal, k.danger),
+        ProcessStep::Files { .. } => (Sym::CodeFile, k.text_3),
+        ProcessStep::Approval { approved: None, .. } => (Sym::Help, k.you_glyph),
+        ProcessStep::Approval { .. } => (Sym::Done, k.text_3),
+        ProcessStep::TurnStarted => (Sym::Live, k.text_3),
+        ProcessStep::TurnCompleted { ok: true, .. } => (Sym::Done, k.success),
+        ProcessStep::TurnCompleted { .. } => (Sym::Failed, k.danger),
+        ProcessStep::Status { .. } => (Sym::Info, k.text_3),
         ProcessStep::Done { status, error, .. }
             if error.is_some() || matches!(status, RunStatus::Failed | RunStatus::Blocked) =>
         {
-            (Lucide::CircleAlert, k.danger)
+            (Sym::Alert, k.danger)
         }
         ProcessStep::Done {
             status: RunStatus::Cancelled,
             ..
-        } => (Lucide::CircleX, k.text_3),
-        ProcessStep::Done { .. } => (Lucide::CircleCheck, k.success),
+        } => (Sym::Failed, k.text_3),
+        ProcessStep::Done { .. } => (Sym::Done, k.success),
     }
 }
 

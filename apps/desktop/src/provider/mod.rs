@@ -47,6 +47,9 @@ pub mod selftest_interact;
 pub mod selftest_live;
 pub mod session;
 mod settings;
+// --- settings-backend track ---
+mod settings_backend;
+// --- end settings-backend track ---
 // desktop-data: cached aggregates of the 首页, 成员, 群 and 产出 pages.
 mod snapshot;
 // provider track: v2 topic surfaces and the seeded cache of the `topic-core` scene.
@@ -898,6 +901,13 @@ impl CoreProvider {
             | ClientUpdate::CardEvent(_)
             | ClientUpdate::ArtifactData(_)
             | ClientUpdate::ArtifactReply(_) => {}
+            // --- settings-backend track: the daily digest becomes one notice ---
+            ClientUpdate::Digest(d) => {
+                let notice = self.digest_notice(&d);
+                if let Some(tx) = lock(&self.shared.notices).as_ref() {
+                    let _ = tx.unbounded_send(notice);
+                }
+            } // --- end settings-backend track ---
         }
     }
 
@@ -1772,6 +1782,33 @@ impl ChatProvider for CoreProvider {
     fn send_diagnostics(&self, description: String) -> AdminReply<String> {
         self.send_diagnostics_inner(description)
     }
+
+    // --- settings-backend track ---
+    fn notify_preferences(&self) -> AdminReply<crate::data::NotifyPreferences> {
+        self.notify_preferences_inner()
+    }
+    fn set_notify_preferences(
+        &self,
+        prefs: crate::data::NotifyPreferences,
+    ) -> AdminReply<crate::data::NotifyPreferences> {
+        self.set_notify_preferences_inner(prefs)
+    }
+    fn approval_defaults(&self) -> AdminReply<crate::data::ApprovalDefaults> {
+        self.approval_defaults_inner()
+    }
+    fn set_approval_defaults(
+        &self,
+        defaults: crate::data::ApprovalDefaults,
+    ) -> AdminReply<crate::data::ApprovalDefaults> {
+        self.set_approval_defaults_inner(defaults)
+    }
+    fn devices(&self) -> AdminReply<Vec<crate::data::DeviceInfo>> {
+        self.devices_inner()
+    }
+    fn sign_out_device(&self, device_id: &str) -> AdminReply<()> {
+        self.sign_out_device_inner(device_id)
+    }
+    // --- end settings-backend track ---
 
     fn card(&self, _group_id: &str, message_id: &str) -> Option<Arc<crate::data::card::Card>> {
         let a = self.account()?;

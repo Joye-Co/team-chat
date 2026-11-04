@@ -9,13 +9,16 @@ use super::{Folders, embed};
 use crate::{
     app::{RightPane, Services},
     copy::artifact_page as c,
-    theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    theme::space,
+    ui::Sym,
     views::{
         group_page::{kind_label, kit},
         shell::{PaneView, panes::watch, stub_body},
     },
 };
+
+/// The wider trailing panes (单独问, 产出, 实时查看) are all 400 pt; the inspector is 280.
+const PANE_WIDTH: Pixels = crate::ui::native::metrics::WIDE_PANE_WIDTH;
 
 pub struct ArtifactPane {
     services: Services,
@@ -35,18 +38,17 @@ impl ArtifactPane {
 
 impl PaneView for ArtifactPane {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        theme::ARTIFACT_PANE_WIDTH
+        PANE_WIDTH
     }
 }
 
 impl Render for ArtifactPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
         let RightPane::Artifact { id, version } = self.services.nav.read(cx).visible_pane() else {
-            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Outputs, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
         };
         let Some(detail) = self.services.provider.artifact(&id) else {
-            return stub_body(Lucide::Layers, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
+            return stub_body(Sym::Outputs, c::ARTIFACTS_EMPTY, None, cx).into_any_element();
         };
         let shown = version.unwrap_or(detail.summary.version);
         // topic track: a 产出 with a provider preview (metrics, table, chart)
@@ -61,7 +63,8 @@ impl Render for ArtifactPane {
         {
             return pane;
         }
-        let height = window.viewport_size().height - theme::TITLE_BAR - space::S12 - px(2.);
+        // The page fills the pane edge to edge under its toolbar row.
+        let height = window.viewport_size().height - crate::ui::native::metrics::TOOLBAR_ROW;
         let body = match self.folders.get(&self.services, &id, shown, cx) {
             Some(Ok(folder)) if folder.is_page => embed(
                 &self.services,
@@ -91,11 +94,11 @@ impl Render for ArtifactPane {
                         cx,
                     ))
                     .child(
-                        ui::button(
+                        crate::ui::native::push_button(
                             "artifact-pane-open",
                             c::ARTIFACT_OPEN,
-                            ui::ButtonKind::Primary,
-                            ui::ButtonSize::Md,
+                            crate::ui::native::PushStyle::Default,
+                            crate::ui::native::PushSize::Regular,
                             cx,
                         )
                         .on_click(move |_, _, cx| {
@@ -118,67 +121,47 @@ impl Render for ArtifactPane {
             .size_full()
             .flex()
             .flex_col()
-            .px(space::S12)
-            .pb(space::S12)
-            .child(
-                kit::bar()
-                    .px(space::S4)
-                    .child(
-                        div()
-                            .min_w_0()
-                            .one_line()
-                            .t_small()
-                            .semibold()
-                            .text_color(k.ink)
-                            .child(detail.summary.title.clone()),
+            // The pane's toolbar row (NATIVE.md §5.1): the 产出's name over
+            // `类型 · v3`, one glass group.
+            .child({
+                use crate::ui::{native as nk, sf_symbols::Sf};
+                let active = nk::emphasized(window);
+                let open_window = nk::toolbar_item(
+                    "artifact-pane-window",
+                    Sf::Open,
+                    c::ARTIFACT_OPEN_WINDOW,
+                    nk::ToolbarItemKind::Plain,
+                    active,
+                    window,
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    crate::views::artifacts::window::open_artifact(
+                        &provider,
+                        &open,
+                        Some(shown),
+                        cx,
                     )
-                    .child(ui::JobTag::new(kind_label(detail.summary.kind)))
-                    .child(
-                        div()
-                            .mono()
-                            .type_role(kit::META)
-                            .text_color(k.ink_3)
-                            .child(format!("v{shown}")),
-                    )
-                    .child(div().flex_1())
-                    .child(
-                        kit::bar_icon(
-                            "artifact-pane-window",
-                            Lucide::ExternalLink,
-                            c::ARTIFACT_OPEN_WINDOW,
-                            false,
-                            cx,
-                        )
-                        .on_click(move |_, _, cx| {
-                            crate::views::artifacts::window::open_artifact(
-                                &provider,
-                                &open,
-                                Some(shown),
-                                cx,
-                            )
-                        }),
-                    )
-                    .child(
-                        kit::bar_icon(
-                            "artifact-pane-page",
-                            Lucide::Layers,
-                            c::ARTIFACTS_TITLE,
-                            false,
-                            cx,
-                        )
-                        .on_click(move |_, _, cx| {
-                            let id = id.clone();
-                            nav.update(cx, |n, cx| n.open_artifact(id, version, cx))
-                        }),
-                    ),
-            )
-            .child(
-                ui::card(cx)
-                    .flex_1()
-                    .min_h(px(0.))
-                    .overflow_hidden()
-                    .child(body),
-            )
+                });
+                let page = nk::toolbar_item(
+                    "artifact-pane-page",
+                    Sf::Outputs,
+                    c::ARTIFACTS_TITLE,
+                    nk::ToolbarItemKind::Plain,
+                    active,
+                    window,
+                    cx,
+                )
+                .on_click(move |_, _, cx| {
+                    let id = id.clone();
+                    nav.update(cx, |n, cx| n.open_artifact(id, version, cx))
+                });
+                nk::ToolbarRow::new(detail.summary.title.clone())
+                    .subtitle(format!("{} · v{shown}", kind_label(detail.summary.kind)))
+                    .leading_inset(crate::ui::native::metrics::TOOLBAR_LEADING)
+                    .group(nk::ToolbarGroup::new([open_window, page]))
+            })
+            .child(div().flex_1().min_h(px(0.)).overflow_hidden().child(body))
             .into_any_element()
     }
 }

@@ -1,16 +1,22 @@
-//! The app-level connection banner above the sidebar footer while the connection is not up:
+//! The quiet connection status at the bottom of the sidebar while the connection is not up:
 //! connecting, reconnecting (with the next retry) or offline. Hidden when
 //! online or signed out.
 
-use gpui::{Context, IntoElement, Render, Subscription, Window, div};
-use gpui_component::button::{ButtonCustomVariant, ButtonVariants as _};
+use gpui::{
+    Context, InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _,
+    Subscription, Window, div, px,
+};
 
 use crate::{
     app::{Changes, Services},
     copy::{connection as c, fill},
     data::{Change, ConnectionState, SessionState},
-    theme,
-    ui::{self, Lucide},
+    theme::Type as _,
+    ui::{
+        Sym,
+        native::{NativeType as _, borderless_text, native_colors},
+        sf_symbols::SymSize,
+    },
 };
 
 pub struct ConnectionBanner {
@@ -78,46 +84,56 @@ impl Render for ConnectionBanner {
         let Some((title, detail)) = banner_lines(state).filter(|_| signed_in) else {
             return div().into_any_element();
         };
-        // An app-level banner (DESIGN.md §8.6): a neutral 48 pt card above
-        // the sidebar footer. Never red: being offline is not an error the
-        // user made, and messages still queue.
+        // A quiet status line at the bottom of the sidebar (NATIVE.md §7.4,
+        // as Mail shows it), never a banner and never red: being offline is
+        // not an error the user made, and messages still queue.
+        let k = native_colors(cx);
         let can_retry = !matches!(state, ConnectionState::Connecting);
-        let colors = theme::colors(cx);
-        let actions = if can_retry {
-            vec![
-                ui::button(
-                    "reconnect-now",
-                    if state == ConnectionState::TokenUnreadable {
-                        c::RETRY_TOKEN
-                    } else {
-                        c::RECONNECT
-                    },
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .custom(
-                    ButtonCustomVariant::new(cx)
-                        .foreground(colors.accent_text)
-                        .hover(colors.hover)
-                        .active(colors.pressed),
-                )
-                .on_click(cx.listener(|this, _, _, _| this.services.provider.reconnect_now()))
-                .into_any_element(),
-            ]
-        } else {
-            Vec::new()
-        };
-        crate::views::banners::Card {
-            id: "connection-banner",
-            glyph: ui::icon(Lucide::WifiOff, theme::icon::ROW, colors.text_2).into_any_element(),
-            title: title.into(),
-            detail: Some(crate::views::banners::detail_text(detail)),
-            actions,
-            tooltip: None,
-        }
-        .render(cx)
-        .into_any_element()
+        let retry = can_retry.then(|| {
+            borderless_text(
+                "reconnect-now",
+                if state == ConnectionState::TokenUnreadable {
+                    c::RETRY_TOKEN
+                } else {
+                    c::RECONNECT
+                },
+                cx,
+            )
+            .h(px(20.))
+            .px(px(6.))
+            .n_subheadline()
+            .text_color(k.label)
+            .on_click(cx.listener(|this, _, _, _| this.services.provider.reconnect_now()))
+        });
+        div()
+            .id("connection-status")
+            .flex_none()
+            .pl(px(20.))
+            .pr(px(14.))
+            .pb(px(10.))
+            .flex()
+            .items_start()
+            .gap(px(6.))
+            .child(
+                div().pt(px(3.)).child(
+                    Sym::Offline
+                        .icon(SymSize::INLINE_SMALL)
+                        .text_color(k.secondary),
+                ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w(px(0.))
+                    .flex()
+                    .flex_col()
+                    .n_subheadline()
+                    .n_figures()
+                    .child(div().text_color(k.label).one_line().child(title))
+                    .child(div().text_color(k.secondary).one_line().child(detail)),
+            )
+            .children(retry)
+            .into_any_element()
     }
 }
 

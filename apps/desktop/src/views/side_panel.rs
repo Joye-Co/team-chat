@@ -33,7 +33,7 @@ use crate::{
         create_key,
     },
     theme::{self, Type as _, size, space},
-    ui::{self, Lucide, MemberAvatar},
+    ui::{self, MemberAvatar, Sym},
     views::{
         artifacts::panel::TopicOutputs,
         cards::{is_ask, waits_for_viewer},
@@ -116,7 +116,7 @@ enum BotState {
 /// One row of the progress list: glyph, color, text, and whether it is the
 /// current step (`text-1` 500).
 struct PlanRow {
-    glyph: Lucide,
+    glyph: Sym,
     color: gpui::Hsla,
     text: String,
     current: bool,
@@ -439,10 +439,10 @@ impl SidePanel {
                 .take(PLAN_ITEMS)
                 .map(|item| {
                     let (glyph, color, current) = match item.state {
-                        PlanState::Done => (Lucide::CircleCheck, k.success, false),
-                        PlanState::Current => (Lucide::CircleDot, k.text_1, true),
-                        PlanState::Waiting => (Lucide::Eye, k.text_1, true),
-                        PlanState::Pending => (Lucide::CircleDashed, k.text_3, false),
+                        PlanState::Done => (Sym::Done, k.success, false),
+                        PlanState::Current => (Sym::Live, k.text_1, true),
+                        PlanState::Waiting => (Sym::Watch, k.text_1, true),
+                        PlanState::Pending => (Sym::Todo, k.text_3, false),
                     };
                     PlanRow {
                         glyph,
@@ -477,21 +477,13 @@ impl SidePanel {
                 .take(PLAN_ITEMS)
                 .map(|item| {
                     let (glyph, color, current) = match item.status {
-                        Some(CardListStatus::Done) => (Lucide::CircleCheck, k.success, false),
-                        Some(CardListStatus::InProgress) => (
-                            if waits {
-                                Lucide::Eye
-                            } else {
-                                Lucide::CircleDot
-                            },
-                            k.text_1,
-                            true,
-                        ),
-                        Some(CardListStatus::Failed) => (Lucide::CircleX, k.danger, false),
-                        Some(CardListStatus::Skipped) => (Lucide::Minus, k.text_3, false),
-                        Some(CardListStatus::Todo) | None => {
-                            (Lucide::CircleDashed, k.text_3, false)
+                        Some(CardListStatus::Done) => (Sym::Done, k.success, false),
+                        Some(CardListStatus::InProgress) => {
+                            (if waits { Sym::Watch } else { Sym::Live }, k.text_1, true)
                         }
+                        Some(CardListStatus::Failed) => (Sym::Failed, k.danger, false),
+                        Some(CardListStatus::Skipped) => (Sym::Minus, k.text_3, false),
+                        Some(CardListStatus::Todo) | None => (Sym::Todo, k.text_3, false),
                     };
                     PlanRow {
                         glyph,
@@ -606,7 +598,7 @@ impl SidePanel {
             .gap(space::S4)
             .when(sub, |el| {
                 el.child(
-                    ui::icon_button("panel-back", Lucide::ChevronLeft)
+                    ui::icon_button("panel-back", Sym::ChevronLeft)
                         .named(p::BACK)
                         .on_click(cx.listener(|this, _, _, cx| {
                             cx.stop_propagation();
@@ -627,7 +619,7 @@ impl SidePanel {
                 el.child(b)
             })
             .child(
-                ui::icon_button("panel-close", Lucide::X)
+                ui::icon_button("panel-close", Sym::Close)
                     .named(p::CLOSE)
                     .on_click(cx.listener(|this, _, _, cx| {
                         cx.stop_propagation();
@@ -829,7 +821,7 @@ impl SidePanel {
                             .t_small()
                             .text_color(k.text_3)
                             .when(m.is_bot(), |el| {
-                                el.child(ui::icon(Lucide::Bot, theme::icon::TAG, k.text_3))
+                                el.child(ui::icon(Sym::AiMember, theme::icon::TAG, k.text_3))
                             })
                             .child(ui::truncating(
                                 gpui::ElementId::Name(format!("panel-role-{}", m.id).into()),
@@ -863,7 +855,7 @@ impl SidePanel {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .child(ui::icon(Lucide::UserPlus, theme::icon::ROW, k.accent_text)),
+                            .child(ui::icon(Sym::Invite, theme::icon::ROW, k.accent_text)),
                     )
                     .child(
                         div()

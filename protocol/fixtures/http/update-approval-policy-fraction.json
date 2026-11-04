@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateApprovalPolicyRequest",
+  "valid": false,
+  "description": "whole yuan only",
+  "value": {
+    "maxSpendCny": 20.5
+  }
+}

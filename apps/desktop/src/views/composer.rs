@@ -13,6 +13,7 @@
 //! dropped files and images become chips until the message is sent.
 
 mod model;
+mod native;
 #[cfg(test)]
 mod tests;
 
@@ -32,6 +33,7 @@ use gpui_component::{
 };
 
 use crate::ui::NamedButton as _;
+use crate::ui::native::NativeType as _;
 use crate::{
     app::{Changes, Services},
     copy::{composer as c, fill},
@@ -40,7 +42,7 @@ use crate::{
         StartTopicRequest,
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
 };
 
 pub use model::MentionQuery;
@@ -160,7 +162,7 @@ impl ComposerView {
                 // One line empty; the box grows with the text to about 40 %
                 // of the topic view in the smallest window (§7.4), then
                 // scrolls inside.
-                .auto_grow(1, 10)
+                .auto_grow(1, 8)
                 .submit_on_enter(true)
                 .placeholder(c::PLACEHOLDER)
         });
@@ -996,16 +998,16 @@ impl Format {
         Format::Code,
     ];
 
-    fn glyph(self) -> Lucide {
+    fn glyph(self) -> Sym {
         match self {
-            Format::Bold => Lucide::Bold,
-            Format::Italic => Lucide::Italic,
-            Format::Strike => Lucide::Strikethrough,
-            Format::Link => Lucide::Link,
-            Format::Numbered => Lucide::ListOrdered,
-            Format::Bulleted => Lucide::List,
-            Format::Quote => Lucide::Quote,
-            Format::Code => Lucide::Code,
+            Format::Bold => Sym::Bold,
+            Format::Italic => Sym::Italic,
+            Format::Strike => Sym::Strikethrough,
+            Format::Link => Sym::Link,
+            Format::Numbered => Sym::NumberedList,
+            Format::Bulleted => Sym::List,
+            Format::Quote => Sym::Quote,
+            Format::Code => Sym::Code,
         }
     }
 
@@ -1075,31 +1077,33 @@ impl ComposerView {
     fn render_chip(
         &self,
         id: ElementId,
-        glyph: Lucide,
+        glyph: Sym,
         text: String,
         on_remove: impl Fn(&mut Self, &mut Context<Self>) + 'static,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        let colors = theme::colors(cx);
+        // A quiet attachment row (NATIVE.md rule 4: no pills): `fill`,
+        // radius 6, 24 pt, Callout text, a borderless remove `xmark`.
+        let k = ui::native::native_colors(cx);
         div()
             .flex()
             .items_center()
-            .gap(space::S6)
+            .gap(space::S4)
             .max_w(px(360.))
-            .h(px(28.))
-            .pl(space::S8)
-            .pr(space::S2)
-            .rounded(theme::radius::SM)
-            .bg(colors.field)
-            .t_small()
-            .text_color(colors.text_2)
-            .child(ui::icon(glyph, theme::icon::CHIP, colors.text_3))
+            .h(px(24.))
+            .pl(space::S6)
+            .pr(px(2.))
+            .rounded(px(6.))
+            .bg(k.fill)
+            .n_callout()
+            .text_color(k.label)
+            .child(ui::sym(glyph, ui::SymSize::INLINE_SMALL, k.secondary))
             .child(div().min_w(px(0.)).one_line().child(text))
             .child(
-                ui::icon_button(id, Lucide::X)
-                    .with_size(px(24.))
-                    .rounded(theme::radius::SM)
-                    .icon(ui::button_glyph(Lucide::X, theme::icon::CHIP, px(24.)))
+                ui::icon_button(id, Sym::Close)
+                    .with_size(px(20.))
+                    .rounded(px(5.))
+                    .icon(ui::button_glyph(Sym::Close, px(11.), px(20.)))
                     .named(c::REMOVE)
                     .on_click(cx.listener(move |this, _, _, cx| on_remove(this, cx))),
             )
@@ -1140,54 +1144,70 @@ impl ComposerView {
         cx: &mut Context<Self>,
     ) -> Option<impl IntoElement> {
         let popup = self.mention.as_ref()?;
-        let colors = theme::colors(cx);
+        // The member pop-up (NATIVE.md §7.3): the native menu surface, a
+        // Section header, 28 pt rows with a 20 pt avatar, the name in Body
+        // and the 岗位 in `secondary`; the chosen row is an inset `accent`
+        // fill with `onAccent` text.
+        let k = ui::native::native_colors(cx);
         let left = self.mention_left(window, cx);
         let rows = popup.results.iter().enumerate().map(|(i, m)| {
             let active = i == popup.selected;
-            ui::popup_row(
-                ElementId::Name(SharedString::from(format!("mention-{}", m.id))),
-                active,
-                cx,
-            )
-            .child(
-                ui::MemberAvatar::new(Some(m), px(24.))
-                    .presence(Some(m))
-                    .on(if active {
-                        colors.selected
-                    } else {
-                        colors.overlay
-                    }),
-            )
-            .child(div().flex_none().child(m.name.clone()))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .t_small()
-                    .text_color(colors.text_3)
-                    .one_line()
-                    .children(m.role.clone()),
-            )
-            .when(active, |el| el.child(ui::return_hint(cx)))
-            .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(i, window, cx)))
+            let (name_ink, role_ink) = if active {
+                (k.on_accent, k.on_accent.opacity(0.75))
+            } else {
+                (k.label, k.secondary)
+            };
+            div()
+                .id(ElementId::Name(SharedString::from(format!(
+                    "mention-{}",
+                    m.id
+                ))))
+                .flex_none()
+                .h(px(28.))
+                .px(px(6.))
+                .rounded(px(6.))
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .when(active, |el| el.bg(k.accent))
+                .child(ui::MemberAvatar::new(Some(m), px(20.)))
+                .child(
+                    div()
+                        .flex_none()
+                        .n_body()
+                        .text_color(name_ink)
+                        .child(m.name.clone()),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(0.))
+                        .n_subheadline()
+                        .text_color(role_ink)
+                        .one_line()
+                        .children(m.role.clone()),
+                )
+                .on_click(cx.listener(move |this, _, window, cx| this.pick_mention(i, window, cx)))
         });
         Some(
-            ui::mention_surface(cx)
+            ui::native::menu_surface(cx)
                 .id("mention-popup")
                 .absolute()
                 .left(left)
                 .bottom(relative(1.))
                 .mb(space::S8)
+                .w(theme::size::MENTION_POPUP_WIDTH)
+                .max_h(px(260.))
                 .overflow_y_scroll()
                 .child(
                     div()
                         .flex_none()
-                        .h(px(28.))
-                        .px(space::S10)
+                        .h(px(22.))
+                        .px(px(6.))
                         .flex()
                         .items_center()
-                        .t_meta_medium()
-                        .text_color(colors.text_3)
+                        .n_section()
+                        .text_color(k.secondary)
                         .child(crate::copy::nav::SECTION_MEMBERS),
                 )
                 .children(rows),
@@ -1257,6 +1277,9 @@ impl Render for ComposerView {
         let group_v2 = self.v2 && self.key.as_ref().is_some_and(|k| k.topic_id.is_none());
         let topic_v2 = self.v2 && self.key.as_ref().is_some_and(|k| k.topic_id.is_some());
         let v2 = topic_v2 || group_v2;
+        if v2 {
+            return self.render_native(group_v2, window, cx);
+        }
         let colors = theme::colors(cx);
         let enabled = self.key.is_some();
         let editing = self.editing.is_some();
@@ -1285,7 +1308,7 @@ impl Render for ComposerView {
         if let Some(q) = quote {
             chips = chips.child(self.render_chip(
                 "quote-remove".into(),
-                Lucide::TextQuote,
+                Sym::Quote,
                 q.text,
                 |this, cx| this.remove_quote(cx),
                 cx,
@@ -1296,7 +1319,7 @@ impl Render for ComposerView {
             let id = file.id.clone();
             chips = chips.child(self.render_chip(
                 ElementId::Name(SharedString::from(format!("file-remove-{}", file.id))),
-                Lucide::Paperclip,
+                Sym::Attach,
                 file.name,
                 move |this, cx| this.remove_file(&id, cx),
                 cx,
@@ -1317,7 +1340,7 @@ impl Render for ComposerView {
         )
         .when(editing, |b| {
             b.icon(ui::button_glyph(
-                Lucide::Check,
+                Sym::Check,
                 theme::icon::HEADER,
                 theme::size::ICON_BUTTON,
             ))
@@ -1359,21 +1382,21 @@ impl Render for ComposerView {
         .tool(
             ui::composer_tool(
                 "attach",
-                if v2 { Lucide::Paperclip } else { Lucide::Plus },
+                if v2 { Sym::Attach } else { Sym::Plus },
                 c::ATTACH,
             )
             .disabled(!enabled || editing)
             .on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))),
         )
         .tool(
-            ui::composer_tool("mention", Lucide::AtSign, c::MENTION)
+            ui::composer_tool("mention", Sym::Mention, c::MENTION)
                 .disabled(!enabled)
                 .on_click(cx.listener(|this, _, window, cx| this.insert_text("@", window, cx))),
         );
         if !v2 {
             shell = shell
                 .tool(
-                    ui::composer_tool("emoji", Lucide::FaceSlightlySmiling, c::EMOJI)
+                    ui::composer_tool("emoji", Sym::Emoji, c::EMOJI)
                         .disabled(!enabled)
                         .when(self.emoji_open, |b| b.selected(true))
                         .on_click(cx.listener(|this, e: &gpui::ClickEvent, _, cx| {
@@ -1381,7 +1404,7 @@ impl Render for ComposerView {
                         })),
                 )
                 .tool(
-                    ui::composer_tool("format", Lucide::Type, c::FORMAT)
+                    ui::composer_tool("format", Sym::TextFormat, c::FORMAT)
                         .disabled(!enabled)
                         .when(self.format_open, |b| b.selected(true))
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -1452,7 +1475,6 @@ impl Render for ComposerView {
                         .pr(space::S8)
                         .t_meta()
                         .text_color(colors.ink_3)
-                        .cursor_pointer()
                         .child(crate::copy::topic_rail::JUST_ASK)
                         .child(
                             div()
@@ -1568,5 +1590,6 @@ impl Render for ComposerView {
                     .children(self.render_mentions(window, cx))
                     .children(self.render_emoji(cx)),
             )
+            .into_any_element()
     }
 }

@@ -59080,6 +59080,336 @@
         }
       }
     },
+    "NotifySettings": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "object",
+          "properties": {
+            "waiting": {
+              "type": "boolean"
+            },
+            "mention": {
+              "type": "boolean"
+            },
+            "result": {
+              "type": "boolean"
+            },
+            "blocked": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "waiting",
+            "mention",
+            "result",
+            "blocked"
+          ]
+        },
+        "digestAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quietHours": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+            },
+            "end": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+            }
+          },
+          "required": [
+            "enabled",
+            "start",
+            "end"
+          ]
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_+\\-/]+$"
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "events",
+        "digestAt",
+        "quietHours",
+        "timeZone",
+        "updatedAt"
+      ]
+    },
+    "UpdateNotifySettingsRequest": {
+      "type": "object",
+      "properties": {
+        "events": {
+          "type": "object",
+          "properties": {
+            "waiting": {
+              "type": "boolean"
+            },
+            "mention": {
+              "type": "boolean"
+            },
+            "result": {
+              "type": "boolean"
+            },
+            "blocked": {
+              "type": "boolean"
+            }
+          }
+        },
+        "digestAt": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "quietHours": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "start": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+            },
+            "end": {
+              "type": "string",
+              "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$"
+            }
+          }
+        },
+        "timeZone": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64,
+          "pattern": "^[A-Za-z0-9_+\\-/]+$"
+        }
+      }
+    },
+    "ApprovalPolicy": {
+      "type": "object",
+      "properties": {
+        "askBefore": {
+          "type": "object",
+          "properties": {
+            "mergeMain": {
+              "type": "boolean"
+            },
+            "deployProd": {
+              "type": "boolean"
+            },
+            "prodConfig": {
+              "type": "boolean"
+            },
+            "deleteData": {
+              "type": "boolean"
+            },
+            "externalPublish": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "mergeMain",
+            "deployProd",
+            "prodConfig",
+            "deleteData",
+            "externalPublish"
+          ]
+        },
+        "maxSpendCny": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approver": {
+          "type": "string",
+          "enum": [
+            "owners",
+            "requester"
+          ]
+        },
+        "updatedAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        }
+      },
+      "required": [
+        "askBefore",
+        "maxSpendCny",
+        "approver",
+        "updatedAt"
+      ]
+    },
+    "UpdateApprovalPolicyRequest": {
+      "type": "object",
+      "properties": {
+        "askBefore": {
+          "type": "object",
+          "properties": {
+            "mergeMain": {
+              "type": "boolean"
+            },
+            "deployProd": {
+              "type": "boolean"
+            },
+            "prodConfig": {
+              "type": "boolean"
+            },
+            "deleteData": {
+              "type": "boolean"
+            },
+            "externalPublish": {
+              "type": "boolean"
+            }
+          }
+        },
+        "maxSpendCny": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approver": {
+          "type": "string",
+          "enum": [
+            "owners",
+            "requester"
+          ]
+        }
+      }
+    },
+    "Device": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "createdAt": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "lastUsedAt": {
+          "anyOf": [
+            {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "current": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "createdAt",
+        "lastUsedAt",
+        "current"
+      ]
+    },
+    "DevicesResponse": {
+      "type": "object",
+      "properties": {
+        "devices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 128
+              },
+              "createdAt": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 9007199254740991
+              },
+              "lastUsedAt": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "current": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "name",
+              "createdAt",
+              "lastUsedAt",
+              "current"
+            ]
+          }
+        }
+      },
+      "required": [
+        "devices"
+      ]
+    },
     "PutArtifactMediaRequest": {
       "type": "object",
       "properties": {

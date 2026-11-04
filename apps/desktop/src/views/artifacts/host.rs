@@ -152,8 +152,6 @@ pub struct PageHost {
     follow: HashMap<SharedString, bool>,
     /// Self-tests: events sent, as `(artifact, version, name, kind)`.
     sent: Vec<(String, u32, String, PageEventKind)>,
-    /// Self-tests: the 引用提问 toasts pushed to a window.
-    toasts: Vec<&'static str>,
 }
 
 impl Global for PageHost {}
@@ -172,7 +170,6 @@ impl PageHost {
             updated: HashMap::new(),
             follow: HashMap::new(),
             sent: Vec::new(),
-            toasts: Vec::new(),
         }
     }
 }
@@ -941,20 +938,12 @@ fn ask_about(
         value: value.clone().map(refs::value::cap),
         card_rev: None,
     };
-    // The toast goes to the window that asked. A page in the main window asks while that
-    // window is being updated, so it cannot be found and updated again (`files::notify`).
-    use gpui_component::WindowExt as _;
-    let toast = |asked: refs::Asked, w: &mut Window, cx: &mut App| {
-        if let Some(text) = ref_notice(asked) {
-            host(cx).toasts.push(text);
-            let n = gpui_component::notification::Notification::new().message(text.to_string());
-            w.push_notification(n, cx);
-        }
-    };
+    // No toast (NATIVE.md §7.4): the chip in the 话题's composer is the confirmation.
+    // A page in the main window asks while that window is being updated, so it cannot be
+    // found and updated again (`files::notify`).
     match window {
         Some(w) => {
-            let asked = refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
-            toast(asked, w, cx);
+            refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
         }
         None => {
             let _ = cx
@@ -962,8 +951,7 @@ fn ask_about(
                 .or_else(|| cx.windows().into_iter().next())
                 .map(|handle| {
                     handle.update(cx, |_, w, cx| {
-                        let asked = refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
-                        toast(asked, w, cx);
+                        refs::ask_about_outcome(target, refs::RefIntent::Topic, w, cx);
                     })
                 });
         }
@@ -990,14 +978,6 @@ fn selector_key(selector: &str) -> String {
 /// What the page says after 就这里提问: 已放进话题的输入框 only when the chip was added to
 /// the 话题 composer, 已引用 when the part is a chip already. A sixth part already shows
 /// 最多引用 5 处 (from [`refs::ask_about_outcome`]); a chip in 单独问 shows in its composer.
-fn ref_notice(asked: refs::Asked) -> Option<&'static str> {
-    match asked.added {
-        crate::data::AddRef::Added if !asked.side_chat => Some(cp::PAGE_REF_ADDED),
-        crate::data::AddRef::Duplicate(_) => Some(crate::copy::refs::CITED_HERE),
-        _ => None,
-    }
-}
-
 // --- the footer band ---------------------------------------------------------------------
 
 /// The band of a version's pages now, in words.
@@ -1181,8 +1161,8 @@ pub fn page_footer(
     cx: &App,
 ) -> gpui::Div {
     use crate::{
-        theme::{Type as _, radius, space},
-        ui::{self, Lucide},
+        theme::{Type as _, space},
+        ui::{self, Sym},
     };
     use gpui::{
         InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
@@ -1251,19 +1231,15 @@ pub fn page_footer(
                 .items_center()
                 .gap(space::S4)
                 .whitespace_nowrap()
-                .child(ui::icon(Lucide::Info, px(12.), k.ink_3))
+                .child(ui::icon(Sym::Info, px(12.), k.ink_3))
                 .child(short)
                 .tooltip(move |window, cx| Tooltip::new(whole.clone()).build(window, cx))
         }));
     let pill = || {
         div()
             .flex_none()
+            // Symbol + text, no box (NATIVE.md rule 4).
             .h(px(24.))
-            .px(space::S8)
-            .rounded(radius::MD)
-            .border_1()
-            .border_color(k.border)
-            .bg(k.content)
             .flex()
             .items_center()
             .gap(space::S6)
@@ -1311,13 +1287,13 @@ pub fn page_footer(
         }
         BandView::Failed(t) => base.child(
             pill()
-                .child(ui::icon(Lucide::CircleAlert, px(13.), k.ink_3))
+                .child(ui::icon(Sym::Alert, px(13.), k.ink_3))
                 .child(t),
         ),
         BandView::Done(t) => base.child(
             pill()
                 .id(SharedString::from(format!("{id}-band")))
-                .child(ui::icon(Lucide::Check, px(13.), k.ok))
+                .child(ui::icon(Sym::Check, px(13.), k.ok))
                 .child(t),
         ),
     }
@@ -1325,20 +1301,20 @@ pub fn page_footer(
 
 /// A chip for the header of a page frame: 已更新到 v{n} or 有 v{n}.
 pub fn notice_chip(text: String, cx: &App) -> gpui::Div {
-    use crate::theme::{Type as _, radius, space};
+    // A `blue` symbol and text, never a pill (NATIVE.md rule 4).
+    use crate::theme::{Type as _, space};
     use gpui::{ParentElement as _, Styled as _, div, px};
-    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     div()
         .flex_none()
         .h(px(20.))
-        .px(space::S6)
-        .rounded(radius::SM)
-        .bg(k.info_bg)
         .flex()
         .items_center()
+        .gap(space::S4)
         .t_meta()
-        .text_color(k.info_text)
+        .text_color(n.blue)
         .whitespace_nowrap()
+        .child(crate::ui::icon(crate::ui::Sym::Refresh, px(14.), n.blue))
         .child(text)
 }
 
@@ -1442,13 +1418,6 @@ fn on_artifacts_changed(changes: &Changes, cx: &mut App) {
 pub fn sent(cx: &App) -> Vec<(String, u32, String, PageEventKind)> {
     cx.try_global::<PageHost>()
         .map(|h| h.sent.clone())
-        .unwrap_or_default()
-}
-
-/// The 引用提问 toasts this host pushed to a window (self-tests).
-pub fn toasts(cx: &App) -> Vec<&'static str> {
-    cx.try_global::<PageHost>()
-        .map(|h| h.toasts.clone())
         .unwrap_or_default()
 }
 
@@ -1822,22 +1791,6 @@ mod tests {
         emit_only.runner = true;
         assert_eq!(capability_text(Some(emit_only), "Ledger").run_log, None);
         assert_eq!(capability_text(None, "").line, cp::PAGE_READ_ONLY);
-    }
-
-    #[test]
-    fn the_page_confirms_a_ref_only_when_it_was_added() {
-        use crate::data::AddRef;
-        let at = |added, side_chat| ref_notice(refs::Asked { added, side_chat });
-        assert_eq!(at(AddRef::Added, false), Some(cp::PAGE_REF_ADDED));
-        // In 单独问 the chip shows in that composer; 已放进话题的输入框 would be wrong.
-        assert_eq!(at(AddRef::Added, true), None);
-        assert_eq!(
-            at(AddRef::Duplicate(2), false),
-            Some(crate::copy::refs::CITED_HERE)
-        );
-        // 最多引用 5 处 is shown by refs; no second, contradicting toast.
-        assert_eq!(at(AddRef::Full, false), None);
-        assert_eq!(at(AddRef::Unsupported, false), None);
     }
 
     #[test]

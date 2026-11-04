@@ -16,17 +16,21 @@ use gpui::{
     App, Context, InteractiveElement, IntoElement, ParentElement, Render,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
-use gpui_component::{ActiveTheme as _, Disableable as _};
+use gpui_component::ActiveTheme as _;
 
 use crate::{
     app::{Changes, Services},
-    copy::{dev, fill, process as p},
+    copy::{dev, fill, overlays as o, process as p},
     data::{
         AdminError, BotRunSummary, Change, GroupId, Member, Millis, RunLoadError, RunProcess,
         RunStatus, TopicId,
     },
     theme::{self, Type as _, space},
-    ui,
+    ui::{
+        self, Sym,
+        native::{NativeType as _, PushSize, PushStyle, disabled_push, native_colors, push_button},
+        sf_symbols::SymSize,
+    },
     views::time_text,
 };
 
@@ -81,11 +85,40 @@ pub fn run_duration(run: &BotRunSummary, now: Millis) -> Option<u64> {
     Some(end.saturating_sub(start).max(0) as u64)
 }
 
-/// Asks the provider to stop a run (`停止`, DESIGN.md §9.2). No confirmation:
-/// a stop loses nothing. The views show `正在停止…` from
-/// `ChatProvider::run_stopping` until the run ends. A run that already ended
-/// answers `Ok`; any other failure shows the standard error toast.
+/// `停止` (NATIVE.md §7.2): asks in a Tahoe alert in the active window
+/// (停止 in red, a Standard 取消), then stops the run with [`stop_run_now`].
 pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
+    let Some(window) = cx.active_window() else {
+        stop_run_now(services, run, cx);
+        return;
+    };
+    let (s, r) = (services.clone(), run.clone());
+    let _ = window.update(cx, |_, window, cx| confirm_stop(&s, &r, window, cx));
+}
+
+/// The 停止 alert in `window`.
+pub fn confirm_stop(services: &Services, run: &BotRunSummary, window: &mut Window, cx: &mut App) {
+    let name = services
+        .provider
+        .member(&run.bot_id)
+        .map(|m| m.name)
+        .unwrap_or_default();
+    let (s, r) = (services.clone(), run.clone());
+    crate::views::nav::dialogs::destructive_alert(
+        "stop-run",
+        fill(o::STOP_TITLE, &[("name", &name)]),
+        fill(o::STOP_MESSAGE, &[("name", &name)]),
+        o::STOP_OK,
+        move |_, cx| stop_run_now(&s, &r, cx),
+        window,
+        cx,
+    )
+}
+
+/// Asks the provider to stop a run. The views show `正在停止…` from
+/// `ChatProvider::run_stopping` until the run ends. A run that already ended
+/// answers `Ok`; any other failure blocks and opens an alert (no toast).
+pub fn stop_run_now(services: &Services, run: &BotRunSummary, cx: &mut App) {
     let reply = services
         .provider
         .cancel_run(&run.group_id, &run.topic_id, &run.id);
@@ -93,17 +126,24 @@ pub fn stop_run(services: &Services, run: &BotRunSummary, cx: &mut App) {
         let result = reply.await.unwrap_or(Err(AdminError::Other));
         if let Err(e) = result {
             cx.update(|cx| {
-                crate::views::files::notify_error(
-                    fill(p::STOP_FAILED, &[("reason", stop_error_text(e))]),
-                    cx,
-                )
+                if let Some(window) = cx.active_window() {
+                    let _ = window.update(cx, |_, window, cx| {
+                        crate::views::nav::dialogs::error_alert(
+                            o::STOP_REFUSED,
+                            stop_error_text(e),
+                            |_, _| {},
+                            window,
+                            cx,
+                        )
+                    });
+                }
             });
         }
     })
     .detach();
 }
 
-/// Why a stop failed, for the toast.
+/// Why a stop failed, for its alert.
 pub fn stop_error_text(e: AdminError) -> &'static str {
     match e {
         // Only people in the run's 群 stop runs; the server says forbidden.
@@ -145,10 +185,17 @@ pub struct ProcessView {
     /// The run the poll loop follows.
     polling: Option<String>,
     download: Download,
+    /// Shows its own 工作记录 header (off when a pane's toolbar row names it).
+    titled: bool,
     _subscriptions: Vec<Subscription>,
 }
 
 impl ProcessView {
+    /// A pane's toolbar row names the view: no 工作记录 header inside.
+    pub fn set_titled(&mut self, titled: bool) {
+        self.titled = titled;
+    }
+
     pub fn new(services: Services, cx: &mut Context<Self>) -> Self {
         let subscriptions = vec![
             cx.subscribe(&services.hub, |this, _, changes: &Changes, cx| {
@@ -173,6 +220,7 @@ impl ProcessView {
             visible: false,
             polling: None,
             download: Download::Idle,
+            titled: true,
             _subscriptions: subscriptions,
         };
         this.open_topic(open, cx);
@@ -437,7 +485,11 @@ impl ProcessView {
                         .gap(space::S6)
                         .t_meta()
                         .text_color(colors.accent_text)
-                        .child(div().size(px(6.)).rounded_full().bg(colors.accent))
+                        .child(
+                            Sym::Live
+                                .icon(SymSize::INLINE_SMALL)
+                                .text_color(native_colors(cx).blue),
+                        )
                         .child(p::LIVE),
                 )
             })
@@ -530,14 +582,17 @@ impl ProcessView {
             .gap(space::S6)
             .t_meta()
             .child(
-                ui::button(
-                    "download-session",
-                    dev::RUN_DOWNLOAD_SESSION,
-                    ui::ButtonKind::Secondary,
-                    ui::ButtonSize::Sm,
+                disabled_push(
+                    push_button(
+                        "download-session",
+                        dev::RUN_DOWNLOAD_SESSION,
+                        PushStyle::Standard,
+                        PushSize::Small,
+                        cx,
+                    ),
+                    matches!(self.download, Download::Running),
                     cx,
                 )
-                .disabled(matches!(self.download, Download::Running))
                 .on_click(cx.listener(|this, _, _, cx| this.download_session(cx))),
             )
             .when_some(download_line, |el, line| {
@@ -556,17 +611,33 @@ impl ProcessView {
     }
 }
 
-/// The status label of a run (§7.8): a glyph and the word, no fill.
-pub fn status_badge(status: RunStatus, _cx: &App) -> impl IntoElement {
-    use crate::{data::TopicStatus as S, theme::ChipKind as K};
-    let (topic_status, kind) = match status {
-        RunStatus::Created | RunStatus::Cancelled => (S::Open, K::Quiet),
-        RunStatus::Running => (S::InProgress, K::Quiet),
-        RunStatus::Waiting => (S::WaitingAnswer, K::Quiet),
-        RunStatus::Blocked | RunStatus::Failed => (S::Blocked, K::Blocked),
-        RunStatus::Done => (S::Done, K::Quiet),
+/// The status of a run (NATIVE.md §6): its state symbol and the word, no
+/// chip. Working is a `blue` dot, a problem `red`, the rest `secondary`.
+pub fn status_badge(status: RunStatus, cx: &App) -> impl IntoElement {
+    let k = native_colors(cx);
+    let (sym, color) = match status {
+        RunStatus::Created => (Sym::Todo, k.secondary),
+        RunStatus::Running => (Sym::Live, k.blue),
+        RunStatus::Waiting => (Sym::Waiting, k.secondary),
+        RunStatus::Blocked => (Sym::Problem, k.red),
+        RunStatus::Failed => (Sym::Failed, k.red),
+        RunStatus::Done => (Sym::Check, k.secondary),
+        RunStatus::Cancelled => (Sym::Stopped, k.secondary),
     };
-    ui::StatusChip::labeled(status_text(status), topic_status, kind).style(ui::ChipStyle::Label)
+    let ink = if matches!(status, RunStatus::Blocked | RunStatus::Failed) {
+        k.red
+    } else {
+        k.secondary
+    };
+    div()
+        .flex_none()
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .n_subheadline()
+        .text_color(ink)
+        .child(sym.icon(SymSize::INLINE_SMALL).text_color(color))
+        .child(status_text(status))
 }
 
 impl Render for ProcessView {
@@ -618,7 +689,9 @@ impl Render for ProcessView {
             (None, true, true) => Some((p::NO_STEPS, false)),
             _ => None,
         };
-        body.child(section(p::RUNS, cx))
+        let titled = self.titled;
+        body.when(titled, |el| el.child(section(p::RUNS, cx)))
+            .when(!titled, |el| el.pt(space::S4))
             .child(div().mx(-space::S8).flex().flex_col().children(rows))
             .when_some(run, |el, run| {
                 el.child(self.render_run_details(&run, developer, cx))
@@ -639,7 +712,7 @@ impl Render for ProcessView {
                                 })
                                 .when(retry, |el| {
                                     el.child(ui::icon(
-                                        ui::Lucide::CircleAlert,
+                                        ui::Sym::Alert,
                                         theme::icon::CHIP,
                                         colors.danger,
                                     ))
@@ -648,7 +721,14 @@ impl Render for ProcessView {
                                 .when(retry, |el| {
                                     let id = run.id.clone();
                                     el.child(
-                                        ui::text_button("process-retry", p::RETRY, cx).on_click(
+                                        push_button(
+                                            "process-retry",
+                                            p::RETRY,
+                                            PushStyle::Standard,
+                                            PushSize::Small,
+                                            cx,
+                                        )
+                                        .on_click(
                                             cx.listener(move |this, _, _, cx| {
                                                 this.services.provider.follow_run(&id);
                                                 cx.notify();

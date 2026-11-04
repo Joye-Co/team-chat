@@ -16,7 +16,7 @@ use crate::{
     copy::{fill, realtime as r, timeline as t},
     data::{GroupKind, Topic, TopicStatus},
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
+    ui::{self, Sym},
     views::topic_menu,
 };
 
@@ -73,11 +73,7 @@ impl TimelineView {
                         let (g, tid) = (topic.group_id.clone(), topic.id.clone());
                         ui::icon_button(
                             "topic-follow",
-                            if following {
-                                Lucide::BellRing
-                            } else {
-                                Lucide::Bell
-                            },
+                            if following { Sym::BellBadge } else { Sym::Bell },
                         )
                         .named(if following { t::UNFOLLOW } else { t::FOLLOW })
                         .on_click(move |_, _, _| {
@@ -88,9 +84,9 @@ impl TimelineView {
                         ui::icon_button(
                             "toggle-panel",
                             if panel_open {
-                                Lucide::PanelRightClose
+                                Sym::Inspector
                             } else {
-                                Lucide::PanelRight
+                                Sym::Inspector
                             },
                         )
                         .named(t::TOGGLE_PANEL)
@@ -103,7 +99,7 @@ impl TimelineView {
                     .child({
                         let services = self.services.clone();
                         let (g, tid) = (topic.group_id.clone(), topic.id.clone());
-                        ui::icon_button("topic-status", Lucide::Ellipsis)
+                        ui::icon_button("topic-status", Sym::More)
                             .named(r::STATUS_MENU)
                             .dropdown_menu(move |menu, window, cx| {
                                 // Read the topic again: the menu shows the newest state.
@@ -137,7 +133,7 @@ impl TimelineView {
                 .mr(px(2.))
                 .child(ui::MemberAvatar::new(peer, BREADCRUMB_AVATAR).on(colors.content))
                 .into_any_element(),
-            None => ui::icon(Lucide::Hash, theme::icon::CHIP, colors.text_3).into_any_element(),
+            None => ui::icon(Sym::Topic, theme::icon::CHIP, colors.text_3).into_any_element(),
         };
         let mut items: Vec<AnyElement> = vec![
             div()
@@ -166,10 +162,9 @@ impl TimelineView {
                 .mx(-space::S4)
                 .h(px(24.))
                 .rounded(theme::radius::SM)
-                .cursor_pointer()
                 .hover(|el| el.bg(colors.hover))
                 .active(|el| el.bg(colors.pressed))
-                .child(ui::icon(Lucide::Users, theme::icon::CHIP, colors.text_3))
+                .child(ui::icon(Sym::Members, theme::icon::CHIP, colors.text_3))
                 .child(
                     div()
                         .tnum()

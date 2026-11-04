@@ -20,7 +20,7 @@ use super::{
 use crate::{
     copy::diagrams as c,
     theme::{self, Type as _, radius, space},
-    ui::{self, Lucide, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
 };
 
 pub const MIN_ZOOM: f32 = 0.25;
@@ -219,9 +219,7 @@ impl DiagramViewer {
             .flex()
             .items_center()
             .gap(space::S8)
-            .border_b_1()
-            .border_color(k.line)
-            .child(ui::icon(Lucide::Workflow, px(16.), k.ink_3))
+            .child(ui::icon(Sym::Diagram, px(16.), k.ink_3))
             .child(
                 div().t_bar_title().text_color(k.ink).child(
                     self.spec
@@ -244,11 +242,8 @@ impl DiagramViewer {
                     .flex()
                     .items_center()
                     .h(px(28.))
-                    .rounded(radius::MD)
-                    .border_1()
-                    .border_color(k.line_2)
                     .child(
-                        ui::icon_button_sm("dv-out", Lucide::Minus)
+                        ui::icon_button_sm("dv-out", Sym::Minus)
                             .named(c::ZOOM_OUT)
                             .on_click(
                                 cx.listener(|this, _, _, cx| {
@@ -269,7 +264,7 @@ impl DiagramViewer {
                             )),
                     )
                     .child(
-                        ui::icon_button_sm("dv-in", Lucide::Plus)
+                        ui::icon_button_sm("dv-in", Sym::Plus)
                             .named(c::ZOOM_IN)
                             .on_click(
                                 cx.listener(|this, _, _, cx| this.set_zoom(zoom_in(this.zoom), cx)),
@@ -277,62 +272,38 @@ impl DiagramViewer {
                     ),
             )
             .child(
-                ui::button(
-                    "dv-fit",
-                    c::FIT,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Lucide::Scan, px(14.), k.ink_2))
-                .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
+                ui::icon_button_sm("dv-fit", Sym::Scan)
+                    .named(c::FIT)
+                    .on_click(cx.listener(|this, _, _, cx| this.fit(cx))),
             )
             .child(
-                ui::button(
-                    "dv-src",
-                    c::VIEW_SOURCE,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Lucide::Code, px(14.), k.ink_2))
-                .selected(self.show_source)
-                .on_click(cx.listener(|this, _, _, cx| {
-                    this.show_source = !this.show_source;
-                    cx.notify();
-                })),
+                ui::icon_button_sm("dv-src", Sym::Code)
+                    .named(c::VIEW_SOURCE)
+                    .selected(self.show_source)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.show_source = !this.show_source;
+                        cx.notify();
+                    })),
             )
             .child(
-                ui::button(
-                    "dv-copy",
-                    c::COPY_SOURCE,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Lucide::Copy, px(14.), k.ink_2))
-                .on_click(move |_, _, cx| {
-                    cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
-                }),
+                ui::icon_button_sm("dv-copy", Sym::Copy)
+                    .named(c::COPY_SOURCE)
+                    .on_click(move |_, _, cx| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(raw.clone()))
+                    }),
             )
             .child(
-                ui::button(
-                    "dv-img",
-                    c::COPY_IMAGE,
-                    ui::ButtonKind::Ghost,
-                    ui::ButtonSize::Sm,
-                    cx,
-                )
-                .icon(ui::icon(Lucide::Image, px(14.), k.ink_2))
-                .disabled(image.is_none())
-                .on_click(move |_, _, cx| {
-                    if let Some(i) = &image {
-                        cx.write_to_clipboard(ClipboardItem::new_image(i));
-                    }
-                }),
+                ui::icon_button_sm("dv-img", Sym::Image)
+                    .named(c::COPY_IMAGE)
+                    .disabled(image.is_none())
+                    .on_click(move |_, _, cx| {
+                        if let Some(i) = &image {
+                            cx.write_to_clipboard(ClipboardItem::new_image(i));
+                        }
+                    }),
             )
             .child(
-                ui::icon_button_sm("dv-close", Lucide::X)
+                ui::icon_button_sm("dv-close", Sym::Close)
                     .named(c::CLOSE)
                     .on_click(|_, window, cx| window.close_dialog(cx)),
             )
@@ -402,19 +373,8 @@ impl DiagramViewer {
                     }),
             );
         }
-        div()
-            .p(px(32.))
-            .flex_none()
-            .child(
-                div()
-                    .p(px(24.))
-                    .rounded(radius::LG)
-                    .border_1()
-                    .border_color(k.line)
-                    .bg(k.raised)
-                    .child(layer),
-            )
-            .into_any_element()
+        // One panel (Quick Look): the drawing sits on the panel itself, no card inside.
+        div().p(px(32.)).flex_none().child(layer).into_any_element()
     }
 }
 
@@ -490,7 +450,6 @@ impl Render for DiagramViewer {
                             .flex_1()
                             .min_w_0()
                             .h_full()
-                            .bg(k.sunken)
                             .child(measure)
                             .child(
                                 div()

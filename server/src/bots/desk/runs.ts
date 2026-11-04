@@ -4,6 +4,8 @@ import { type BotRunner, RUN_KIND_ASIDE, type RunAssignFrame, type TopicContext 
 import { roomStub } from "../../core/env";
 import { unwrap } from "../../core/errors";
 import { ulid } from "../../core/ids";
+import { effectivePolicy } from "../../settings/approvals";
+import { policyPrompt } from "../../settings/rules";
 import { LEASE_MS, MAX_RUN_MS, type MachineView, TEXT, buildAsidePrompt, buildPrompt, candidates, cut, hasFeature, pickMachine } from "../dispatch";
 import { linkStub } from "../env";
 import type { ClaimResult, SourceContext, TopicMessage } from "../room";
@@ -193,6 +195,8 @@ export abstract class DeskRuns extends DeskCore {
       request: { authorId: m.authorId, body: m.body },
       followUps,
       refs,
+      // settings: who must approve what (merge to main, publish, spend over the limit).
+      rules: policyPrompt(await effectivePolicy(this.env.DB)),
       acceptance,
     });
   }

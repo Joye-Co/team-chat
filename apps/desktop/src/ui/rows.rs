@@ -12,7 +12,7 @@ use crate::{
     theme::{self, Type as _, size, space},
     ui::{
         chip::{BadgeKind, CountBadge},
-        icons::{Lucide, icon},
+        icons::{Sym, icon},
     },
 };
 
@@ -59,9 +59,11 @@ pub fn list_row(
         .rounded(radius)
         .flex()
         .items_center()
-        .cursor_pointer()
+        // v12/kit (NATIVE.md §1 rule 9, §10): the arrow cursor and no hover
+        // fill on rows; the Tahoe gray selection. Only menu rows (overlay)
+        // keep a hover highlight.
         .when(selected, |el| el.bg(sel))
-        .when(!selected, |el| {
+        .when(!selected && surface == RowSurface::Overlay, |el| {
             el.hover(|s| s.bg(hover)).active(|s| s.bg(k.pressed))
         })
         .when(surface != RowSurface::Overlay, |el| {
@@ -96,7 +98,7 @@ pub fn selection_emphasized(window: &Window) -> bool {
     window.is_window_active() || DRAW_AS_KEY.load(std::sync::atomic::Ordering::Relaxed)
 }
 
-/// A row that cannot be used: its content at 40 %, no hover, no pointer.
+/// A row that cannot be used: its content at 40 %, no hover.
 pub fn disabled_row(id: impl Into<ElementId>) -> gpui::Stateful<gpui::Div> {
     div()
         .id(id)
@@ -156,9 +158,9 @@ impl RenderOnce for SectionHeader {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let k = theme::colors(cx);
         let chevron = if self.collapsed {
-            Lucide::ChevronRight
+            Sym::ChevronRight
         } else {
-            Lucide::ChevronDown
+            Sym::ChevronDown
         };
         div()
             .id(self
@@ -172,8 +174,7 @@ impl RenderOnce for SectionHeader {
             .items_center()
             .gap(space::S6)
             .when(self.collapsible, |el| {
-                el.cursor_pointer()
-                    .child(icon(chevron, theme::icon::TAG, k.text_3))
+                el.child(icon(chevron, theme::icon::TAG, k.text_3))
             })
             .child(
                 div()
@@ -261,11 +262,9 @@ pub fn tab(
         .flex()
         .items_center()
         .gap(space::S6)
-        .cursor_pointer()
         .t_ui()
         .text_color(if active { k.text_1 } else { k.text_2 })
         .when(active, |el| el.semibold())
-        .when(!active, |el| el.hover(|s| s.text_color(k.text_1)))
         .child({
             // A hidden 600 copy reserves the bold width, so switching tabs
             // never moves the tabs after this one (§12: tabs never move).
@@ -287,18 +286,8 @@ pub fn tab(
                     .child(CountBadge::cap(count)),
             )
         })
-        .when(active, |el| {
-            el.child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .right_0()
-                    .bottom_0()
-                    .h(px(2.))
-                    .rounded(px(1.))
-                    .bg(k.text_1),
-            )
-        })
+    // v12/kit: never underline tabs (NATIVE.md §5.5); the active tab
+    // reads by its weight until the screen moves to a segmented control.
 }
 
 /// The height of a row kind, for virtual lists.

@@ -24,8 +24,8 @@ use crate::{
     theme::{self, ChipKind, Type as _, size, space},
     ui::{
         self, BadgeKind, ButtonKind, ButtonSize, ButtonSpec as _, ChipStyle, ComposerShell,
-        CountBadge, FieldKind, GroupGlyph, Kbd, Lucide, MemberAvatar, RoleTag, RowSurface,
-        SectionHeader, StatusChip, TextField,
+        CountBadge, FieldKind, GroupGlyph, Kbd, MemberAvatar, RoleTag, RowSurface, SectionHeader,
+        StatusChip, Sym, TextField,
     },
 };
 
@@ -238,7 +238,7 @@ fn forced_states(cx: &App) -> gpui::Div {
     }
     let mut icons = vec![label("icon")];
     for (state, sname) in FORCED {
-        let b = ui::icon_button(SharedString::from(format!("st-icon-{sname}")), Lucide::Bell)
+        let b = ui::icon_button(SharedString::from(format!("st-icon-{sname}")), Sym::Bell)
             .named("关注");
         let b = match state {
             Forced::Rest => b.into_any_element(),
@@ -370,19 +370,19 @@ impl Render for Gallery {
                     .text_color(k.text_3)
                     .child("icon")
                     .into_any_element(),
-                ui::icon_button("ib-1", Lucide::Bell)
+                ui::icon_button("ib-1", Sym::Bell)
                     .named("关注")
                     .into_any_element(),
-                ui::icon_button("ib-2", Lucide::PanelRight)
+                ui::icon_button("ib-2", Sym::Inspector)
                     .named("话题详情")
                     .into_any_element(),
-                ui::icon_button("ib-3", Lucide::Ellipsis)
+                ui::icon_button("ib-3", Sym::More)
                     .named("更多")
                     .into_any_element(),
-                ui::icon_button("ib-4", Lucide::SquarePen)
+                ui::icon_button("ib-4", Sym::Compose)
                     .named("新话题")
                     .into_any_element(),
-                ui::icon_button_sm("ib-5", Lucide::Plus)
+                ui::icon_button_sm("ib-5", Sym::Plus)
                     .named("新建群")
                     .into_any_element(),
                 ui::text_button("tb-1", "重试", cx).into_any_element(),
@@ -394,7 +394,7 @@ impl Render for Gallery {
                     ButtonSize::Page,
                     cx,
                 )
-                .icon(Icon::new(Lucide::UserPlus))
+                .icon(Icon::new(Sym::Invite))
                 .into_any_element(),
             ])
             .into_any_element(),
@@ -580,7 +580,7 @@ impl Render for Gallery {
             .child(
                 SectionHeader::new("群")
                     .collapsible("sh-groups", false)
-                    .trailing(ui::icon_button_sm("sh-add", Lucide::Plus).named("新建群")),
+                    .trailing(ui::icon_button_sm("sh-add", Sym::Plus).named("新建群")),
             )
             .children(
                 [
@@ -789,25 +789,12 @@ impl Render for Gallery {
         // Menu and @mention popup (§7.12, §7.2)
         let menu = ui::menu_surface(cx)
             .w(px(220.))
-            .child(ui::menu_row("m-1", Some(Lucide::Pencil), "编辑", false, cx))
-            .child(ui::menu_row(
-                "m-2",
-                Some(Lucide::Copy),
-                "复制链接",
-                true,
-                cx,
-            ))
-            .child(ui::menu_row(
-                "m-3",
-                Some(Lucide::Eye),
-                "标为未读",
-                false,
-                cx,
-            ))
+            .child(ui::menu_row("m-1", Some(Sym::Edit), "编辑", false, cx))
+            .child(ui::menu_row("m-2", Some(Sym::Copy), "复制链接", true, cx))
+            .child(ui::menu_row("m-3", Some(Sym::Watch), "标为未读", false, cx))
             .child(ui::menu_separator(cx))
             .child(
-                ui::menu_row("m-4", Some(Lucide::Trash), "删除", false, cx)
-                    .text_color(k.danger_text),
+                ui::menu_row("m-4", Some(Sym::Delete), "删除", false, cx).text_color(k.danger_text),
             );
         let mention = ui::mention_surface(cx)
             .child(
@@ -860,22 +847,22 @@ impl Render for Gallery {
             .focused(focused)
             .tool(ui::composer_tool(
                 SharedString::from(format!("{id}-plus")),
-                Lucide::Plus,
+                Sym::Plus,
                 "添加附件",
             ))
             .tool(ui::composer_tool(
                 SharedString::from(format!("{id}-at")),
-                Lucide::AtSign,
+                Sym::Mention,
                 "提及",
             ))
             .tool(ui::composer_tool(
                 SharedString::from(format!("{id}-emoji")),
-                Lucide::FaceSlightlySmiling,
+                Sym::Emoji,
                 "表情",
             ))
             .tool(ui::composer_tool(
                 SharedString::from(format!("{id}-fmt")),
-                Lucide::Type,
+                Sym::TextFormat,
                 "格式",
             ))
             .send(ui::send_button(
@@ -936,7 +923,7 @@ impl Render for Gallery {
             .child(card)
             .child(
                 div().w(px(232.)).child(
-                    ui::Banner::new(Lucide::Download, "新版本已下载")
+                    ui::Banner::new(Sym::Download, "新版本已下载")
                         .detail("重启后生效")
                         .action(ui::button(
                             "bn-1",
@@ -948,7 +935,7 @@ impl Render for Gallery {
                 ),
             )
             .child(
-                ui::Toast::new(Lucide::CircleCheck, "已复制链接")
+                ui::Toast::new(Sym::Done, "已复制链接")
                     .tone(ui::Tone::Success)
                     .action(ui::text_button("t-undo", "撤销", cx)),
             )
@@ -971,7 +958,7 @@ impl Render for Gallery {
                     .border_1()
                     .border_color(k.sep)
                     .child(
-                        ui::EmptyState::new(Lucide::SearchX, "没有找到「部署」")
+                        ui::EmptyState::new(Sym::Search, "没有找到「部署」")
                             .description("换个词，或在所有群里搜索")
                             .action(ui::text_button("e-1", "在所有群里搜索", cx)),
                     ),

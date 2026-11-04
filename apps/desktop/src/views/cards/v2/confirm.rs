@@ -6,21 +6,20 @@
 use std::cell::Cell;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, FontWeight, IntoElement,
-    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, AppContext as _, Context, Entity, Focusable as _, IntoElement, ParentElement,
+    Render, SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
     Sizable as _, WindowExt as _,
     input::{Input, InputEvent, InputState},
 };
 
-use super::{Answerer, button, disabled_button};
+use super::Answerer;
 use crate::{
     copy::{cards_v2 as c, common, fill},
     data::cards_v2::{AskIrreversible, CardV2Action, CardV2ActionStyle},
-    theme::{self, Type as _, space},
-    ui::{self, ButtonKind},
+    theme::{self, space},
+    ui,
 };
 
 /// What the sheet says.
@@ -85,125 +84,78 @@ pub(crate) fn sheet(
     on_ok: Option<Handler>,
     cx: &App,
 ) -> AnyElement {
-    let k = theme::colors(cx);
-    let ok_id = SharedString::from(format!("{id}-ok"));
-    let ok = if ready {
-        let b = button(
-            ok_id,
-            text.ok.clone(),
-            if text.danger {
-                ButtonKind::Danger
-            } else {
-                ButtonKind::Primary
-            },
-            cx,
-        );
-        match on_ok {
-            Some(f) => b
-                .on_click(move |_, window, cx| f(window, cx))
-                .into_any_element(),
-            None => b.into_any_element(),
-        }
-    } else {
-        disabled_button(ok_id, text.ok.clone(), cx).into_any_element()
+    use crate::ui::native::{self as nk, NativeType as _};
+    let n = nk::native_colors(cx);
+    // Large capsule buttons at the bottom trailing edge (NATIVE.md §7.1):
+    // `取消`, then the default. A destructive verb is a standard button
+    // whose title says what it does.
+    let ok = nk::push_button(
+        SharedString::from(format!("{id}-ok")),
+        text.ok.clone(),
+        if text.danger {
+            nk::PushStyle::Destructive
+        } else {
+            nk::PushStyle::Default
+        },
+        nk::PushSize::Large,
+        cx,
+    );
+    let ok = nk::disabled_push(ok, !ready, cx);
+    let ok = match on_ok {
+        Some(f) if ready => ok.on_click(move |_, window, cx| f(window, cx)),
+        _ => ok,
     };
-    let cancel = button(
+    let cancel = nk::push_button(
         SharedString::from(format!("{id}-cancel")),
         common::CANCEL,
-        ButtonKind::Secondary,
+        nk::PushStyle::Standard,
+        nk::PushSize::Large,
         cx,
     );
     let cancel = match on_cancel {
-        Some(f) => cancel
-            .on_click(move |_, window, cx| f(window, cx))
-            .into_any_element(),
-        None => cancel.into_any_element(),
+        Some(f) => cancel.on_click(move |_, window, cx| f(window, cx)),
+        None => cancel,
     };
-    div()
-        .w_full()
-        .flex()
-        .flex_col()
-        .child(
+    let mut layout = nk::SheetLayout::new(text.title.clone());
+    if let Some(b) = text.body.clone() {
+        layout = layout.explanation(b);
+    }
+    if let Some((code, verb)) = text.type_to_confirm.clone() {
+        layout = layout.body(
             div()
-                .pt(space::S20)
-                .px(space::S20)
-                .pb(space::S16)
                 .flex()
                 .flex_col()
-                .child(
-                    div()
-                        .text_size(px(16.))
-                        .line_height(px(24.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(k.ink)
-                        .child(text.title.clone()),
-                )
-                .when_some(text.body.clone(), |el, b| {
-                    el.child(
-                        div()
-                            .mt(space::S6)
-                            .text_size(px(13.))
-                            .line_height(px(20.))
-                            .text_color(k.ink_2)
-                            .child(b),
-                    )
-                })
-                .when_some(text.type_to_confirm.clone(), |el, (code, verb)| {
-                    el.child(
-                        div()
-                            .mt(space::S16)
-                            .flex()
-                            .items_center()
-                            .gap(space::S4)
-                            .text_size(px(13.))
-                            .line_height(px(20.))
-                            .text_color(k.ink)
-                            .child(c::CONFIRM_TYPE_BEFORE)
-                            .child(
-                                div()
-                                    .px(px(5.))
-                                    .rounded(px(5.))
-                                    .bg(k.sunken)
-                                    .text_size(px(12.))
-                                    .code_font()
-                                    .child(code),
-                            )
-                            .child(fill(c::CONFIRM_TYPE_AFTER, &[("verb", &verb)])),
-                    )
-                    .children(field.map(|f| div().mt(space::S8).child(f)))
-                }),
-        )
-        .child(
-            div()
-                .flex()
-                .justify_end()
-                .gap(space::S8)
-                .px(space::S20)
-                .py(space::S12)
-                .border_t_1()
-                .border_color(k.line)
-                .bg(k.raised)
-                .child(cancel)
-                .child(ok),
-        )
-        .into_any_element()
+                .gap(space::S6)
+                .child(div().n_body().text_color(n.label).child(format!(
+                    "{} {} {}",
+                    c::CONFIRM_TYPE_BEFORE,
+                    code,
+                    fill(c::CONFIRM_TYPE_AFTER, &[("verb", &verb)])
+                )))
+                .children(field),
+        );
+    }
+    layout.buttons([cancel, ok]).into_any_element()
 }
 
-/// The field box of the sheet: 36 pt, mono, `ink-3` edge.
+/// The type-to-confirm field: a standalone 24 pt field (NATIVE.md §5.6),
+/// as wide as a name.
 pub(crate) fn field_box(child: AnyElement, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
+    let m = crate::ui::native::metrics::FIELD;
     div()
-        .h(px(36.))
-        .px(space::S10)
-        .rounded(theme::radius::MD)
+        .w(crate::ui::native::metrics::FIELD_NAME_WIDTH)
+        .h(m)
+        .px(crate::ui::native::metrics::FIELD_PAD)
+        .rounded(crate::ui::native::metrics::FIELD_RADIUS)
         .border_1()
-        .border_color(k.ink_3)
-        .bg(k.bg)
+        .border_color(n.separator)
+        .bg(n.content)
+        .shadow(n.focus_ring())
         .flex()
         .items_center()
         .text_size(px(13.))
-        .code_font()
-        .text_color(k.ink)
+        .text_color(n.label)
         .child(child)
         .into_any_element()
 }
@@ -297,17 +249,13 @@ pub(crate) fn open(
     });
     let first = Cell::new(true);
     window.open_dialog(cx, move |dialog, window, cx| {
-        let dialog = crate::ui::SheetExt::sheet(dialog, cx);
+        let dialog =
+            crate::ui::native::native_sheet(dialog, crate::ui::native::SheetWidth::Form, cx);
         if first.replace(false) {
             let handle = form.read(cx).input.read(cx).focus_handle(cx);
             handle.focus(window, cx);
         }
-        dialog
-            .close_button(false)
-            .p_0()
-            .rounded(px(16.))
-            .overflow_hidden()
-            .child(form.clone())
+        dialog.overflow_hidden().child(form.clone())
     });
 }
 

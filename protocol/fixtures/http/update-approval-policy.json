@@ -1,0 +1,8 @@
+{
+  "kind": "UpdateApprovalPolicyRequest",
+  "valid": true,
+  "value": {
+    "maxSpendCny": 100,
+    "approver": "requester"
+  }
+}

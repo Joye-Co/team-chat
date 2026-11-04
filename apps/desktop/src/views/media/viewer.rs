@@ -6,7 +6,7 @@ use std::{collections::HashMap, rc::Rc, sync::Arc};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, InteractiveElement as _,
     IntoElement, KeyDownEvent, ParentElement, Render, SharedString, Styled, Window, WindowBounds,
-    WindowHandle, div, px, size,
+    WindowHandle, div, prelude::FluentBuilder as _, px, size,
 };
 
 use super::{
@@ -183,6 +183,8 @@ impl Render for MediaViewer {
                     })),
                     id: SharedString::from(format!("viewer-{}", self.key.artifact_id)),
                     autoplay: self.opening.autoplay,
+                    title_row: matches!(media.data, Data::Images(_))
+                        .then_some(theme::TRAFFIC_LIGHTS_INSET),
                 };
                 if let (Data::Video(v), Some(f)) = (&media.data, self.opening.frame.take())
                     && let Some(fr) = v.frames.get(f)
@@ -212,6 +214,11 @@ impl Render for MediaViewer {
                 .child(cm::STATE_LOADING)
                 .into_any_element(),
         };
+        // Images draw their own title row (Quick Look); the others get the window's.
+        let own_title_row = matches!(
+            store::get(&self.key, cx),
+            Some(Load::Ready(m)) if matches!(m.data, Data::Images(_))
+        );
         div()
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
@@ -220,20 +227,22 @@ impl Render for MediaViewer {
             .flex_col()
             .bg(k.content)
             .text_color(k.text_1)
-            .child(
-                toolbar_band("media-viewer-bar")
-                    .pl(theme::TRAFFIC_LIGHTS_INSET)
-                    .pr(space::S16)
-                    .child(
-                        div()
-                            .t_ui()
-                            .medium()
-                            .text_color(k.text_2)
-                            .one_line()
-                            .child(self.title.clone()),
-                    ),
-            )
-            .child(ui::hairline(cx))
+            .when(!own_title_row, |d| {
+                d.child(
+                    toolbar_band("media-viewer-bar")
+                        .pl(theme::TRAFFIC_LIGHTS_INSET)
+                        .pr(space::S16)
+                        .child(
+                            div()
+                                .t_ui()
+                                .medium()
+                                .text_color(k.text_2)
+                                .one_line()
+                                .child(self.title.clone()),
+                        ),
+                )
+                .child(ui::hairline(cx))
+            })
             .child(div().flex_1().min_h(px(0.)).child(body))
     }
 }

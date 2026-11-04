@@ -1,6 +1,6 @@
-//! The topic rail beside a 话题 page (Topic.dc.html, CONCEPT2 §3): cards 负责,
-//! 计划, 改动, 产出, 用到的决定, 电脑 and 用时和成本 on `rail`, each hidden
-//! when it has no data. Also the 改动 pane.
+//! The topic inspector beside a 话题 page (NATIVE.md §9.3, `native.rs`):
+//! sections 负责, 计划, 改动, 产出, 用到的决定, 在哪干活 and 用时和成本 on
+//! `sidebar`, each hidden when it has no data. Also the 改动 pane.
 //!
 //! The rail shows status only: the merge decision is the pinned card above
 //! the composer, never a second button here.
@@ -8,9 +8,9 @@
 use std::{collections::HashMap, rc::Rc};
 
 use gpui::{
-    AnyElement, App, ClickEvent, Context, ElementId, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled,
-    Subscription, Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, Context, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
+    Pixels, Render, StatefulInteractiveElement as _, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -18,11 +18,11 @@ use crate::{
     copy::{fill, topic_rail as c},
     data::{
         ArtifactKind, ArtifactSummary, BotRunSummary, Member, MemberId, Millis, PlanState, Topic,
-        v2::{ArtifactPreview, ChangeState, Currency, Decision, Proof, TopicChanges, TopicCost},
+        v2::{ArtifactPreview, Currency, Decision, Proof, TopicChanges, TopicCost},
     },
     theme::{self, Type as _, space},
-    ui::{self, Lucide},
-    views::shell::{PaneView, clock, panes::watch, stub_body},
+    ui::{self, Sym},
+    views::shell::{PaneView, panes::watch, stub_body},
 };
 
 /// What the rail of one 话题 shows, read from the provider once per change
@@ -67,7 +67,7 @@ impl Data {
         if let Some(r) = &run {
             ids.push(&r.bot_id);
         }
-        ids.extend(decisions.first().map(|d| d.by.as_str()));
+        ids.extend(decisions.iter().map(|d| d.by.as_str()));
         let members = ids
             .into_iter()
             .filter_map(|id| p.member(id).map(|m| (id.to_string(), m)))
@@ -103,10 +103,37 @@ impl Data {
     }
 }
 
+mod native;
+
+// --- v12/fx-topic: one trailing pane width (coordinator decision): the
+// inspector is 280 pt, the wider panes (单独问, 产出, 改动) are 400 pt. Use the
+// shell's token for the wide pane once it lands.
+/// The width of the wider trailing panes: 单独问, the topic's 产出 and 改动.
+pub const PANE_WIDE: Pixels = crate::ui::native::metrics::WIDE_PANE_WIDTH;
+// --- end v12/fx-topic ---
+
+/// The empty inspector (NATIVE.md §9.4 empty states): centered `secondary`
+/// Body text on the inspector fill, no illustration.
+fn rail_empty(cx: &App) -> AnyElement {
+    use crate::ui::native::{NativeType as _, native_colors};
+    let n = native_colors(cx);
+    div()
+        .size_full()
+        .bg(n.sidebar)
+        .flex()
+        .items_center()
+        .justify_center()
+        .px(space::S16)
+        .n_body()
+        .text_color(n.secondary)
+        .child(c::TOPIC_RAIL_EMPTY)
+        .into_any_element()
+}
+
 pub struct TopicRail {
     services: Services,
-    /// The finished plan is opened to its steps.
-    plan_open: bool,
+    /// The inspector sections closed with their disclosure chevron.
+    collapsed: std::collections::HashSet<&'static str>,
     data: Option<Rc<Data>>,
     _subscriptions: Vec<Subscription>,
 }
@@ -123,7 +150,7 @@ impl TopicRail {
         Self {
             _subscriptions: subscriptions,
             services,
-            plan_open: false,
+            collapsed: Default::default(),
             data: None,
         }
     }
@@ -143,7 +170,7 @@ impl TopicRail {
 
 impl PaneView for TopicRail {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        theme::TOPIC_RAIL_WIDTH
+        crate::ui::native::metrics::INSPECTOR_WIDTH
     }
 }
 
@@ -244,759 +271,11 @@ pub fn live_dot(id: impl Into<ElementId>, color: Hsla, cx: &App) -> AnyElement {
     )
 }
 
-/// The label row of a rail card: 12/500 `ink-3`, 20 pt tall, with an
-/// optional action at the right.
-fn label_row(label: &'static str, action: Option<AnyElement>, cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    div()
-        .h(px(20.))
-        .flex()
-        .items_center()
-        .child(
-            div()
-                .flex_1()
-                .t_meta_medium()
-                .line_height(px(20.))
-                .text_color(k.ink_3)
-                .child(label),
-        )
-        .children(action)
-}
-
-/// A quiet text action at the right of a label row (`看改动`, `打开`).
-fn label_action(
-    id: &'static str,
-    label: impl Into<SharedString>,
-    cx: &App,
-) -> gpui::Stateful<gpui::Div> {
-    let k = theme::colors(cx);
-    div()
-        .id(id)
-        .flex_none()
-        .mr(px(-6.))
-        .h(px(22.))
-        .px(space::S6)
-        .rounded(theme::radius::SM)
-        .flex()
-        .items_center()
-        .gap(px(2.))
-        .t_meta()
-        .text_color(k.ink_2)
-        .cursor_pointer()
-        .hover(|s| s.bg(k.hover))
-        .child(label.into())
-}
-
-fn check(size: Pixels, color: Hsla) -> AnyElement {
-    ui::icon(Lucide::Check, size, color).into_any_element()
-}
-
 impl TopicRail {
     fn open_pane(&self, pane: RightPane, cx: &mut Context<Self>) {
         self.services
             .nav
             .update(cx, |nav, cx| nav.set_right_pane(pane, cx));
-    }
-
-    fn owner_card(
-        &self,
-        d: &Data,
-        owner: &str,
-        run: Option<&BotRunSummary>,
-        by: Option<(String, Millis)>,
-        cx: &App,
-    ) -> AnyElement {
-        let k = theme::colors(cx);
-        let member = d.member(owner);
-        let live = run.is_some_and(|r| r.status.is_active());
-        let state: Option<AnyElement> = match run {
-            Some(r) if r.status.is_active() => {
-                let done = r.plan.iter().filter(|i| i.state == PlanState::Done).count();
-                Some(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S6)
-                        .t_meta()
-                        .text_color(k.ink_2)
-                        .child(live_dot("rail-owner-live", k.live, cx))
-                        .child(fill(
-                            c::OWNER_WORKING,
-                            &[
-                                ("n", &(done + 1).min(r.plan.len()).to_string()),
-                                ("total", &r.plan.len().to_string()),
-                            ],
-                        ))
-                        .into_any_element(),
-                )
-            }
-            Some(r) if r.ended_at.is_some() => Some(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S4)
-                    .t_meta()
-                    .text_color(k.ink_2)
-                    .child(check(px(12.), k.ok))
-                    .child(c::DONE_MARK)
-                    .child("·")
-                    .child(
-                        div()
-                            .mono()
-                            .child(r.ended_at.map(clock).unwrap_or_default()),
-                    )
-                    .into_any_element(),
-            ),
-            _ => None,
-        };
-        let asker = by.map(|(id, at)| {
-            let m = d.member(&id);
-            div()
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .t_meta()
-                .text_color(k.ink_3)
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(24.))
-                        .flex()
-                        .justify_center()
-                        .child(ui::MemberAvatar::new(m.as_ref(), px(16.))),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .gap(space::S4)
-                        .child(fill(c::ASKED_BY_NAME, &[("name", &d.name(&id))]))
-                        .child(div().mono().child(clock(at))),
-                )
-        });
-        div()
-            .child(label_row(c::TOPIC_RAIL_OWNER, None, cx))
-            .child(
-                div()
-                    .mt(space::S8)
-                    .flex()
-                    .items_center()
-                    .gap(space::S8)
-                    .child(
-                        ui::MemberAvatar::new(member.as_ref(), px(24.))
-                            .ring(live.then_some(ui::Ring::Live)),
-                    )
-                    .child(
-                        div()
-                            .min_w_0()
-                            .one_line()
-                            .t_small()
-                            .medium()
-                            .text_color(k.ink)
-                            .child(member.as_ref().map(|m| m.name.clone()).unwrap_or_default()),
-                    )
-                    .children(
-                        member
-                            .as_ref()
-                            .and_then(|m| m.role.clone())
-                            .filter(|r| !r.trim().is_empty())
-                            .map(ui::JobTag::new),
-                    )
-                    .child(div().flex_1())
-                    .children(state),
-            )
-            .children(asker.map(|a| a.mt(space::S8)))
-            .into_any_element()
-    }
-
-    fn plan_card(&self, d: &Data, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
-        let k = theme::colors(cx);
-        let starts = &d.step_times;
-        let minutes = step_minutes(run, starts);
-        let all_done = run.plan.iter().all(|i| i.state == PlanState::Done);
-        let open = !all_done || self.plan_open;
-        let total = match (run.started_at, run.ended_at) {
-            (Some(a), Some(b)) => Some(((b - a).max(0)) as u64),
-            _ => None,
-        };
-        let toggle = all_done.then(|| {
-            label_action(
-                "rail-plan-toggle",
-                if self.plan_open {
-                    c::PLAN_COLLAPSE
-                } else {
-                    c::PLAN_EXPAND
-                },
-                cx,
-            )
-            .child(ui::icon(
-                if self.plan_open {
-                    Lucide::ChevronUp
-                } else {
-                    Lucide::ChevronDown
-                },
-                px(12.),
-                k.ink_2,
-            ))
-            .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
-                this.plan_open = !this.plan_open;
-                cx.notify();
-            }))
-            .into_any_element()
-        });
-        // The segments: one per step, as wide as the step took.
-        let weights: Vec<f32> = minutes
-            .iter()
-            .map(|m| m.map(|m| m.max(1) as f32).unwrap_or(4.))
-            .collect();
-        let segments = div().mt(space::S8).flex().gap(px(3.)).children(
-            run.plan
-                .iter()
-                .zip(weights)
-                .enumerate()
-                .map(|(i, (item, w))| {
-                    let color = match item.state {
-                        PlanState::Done => k.ink_3,
-                        PlanState::Current => k.live,
-                        PlanState::Waiting => k.you,
-                        PlanState::Pending => k.line_2,
-                    };
-                    let mut bar = div().flex_basis(px(0.)).h(px(3.)).rounded(px(2.)).bg(color);
-                    bar.style().flex_grow = Some(w);
-                    if item.state == PlanState::Current {
-                        ui::motion::breathe(
-                            ElementId::Name(format!("rail-seg-{i}").into()),
-                            bar,
-                            cx,
-                        )
-                    } else {
-                        bar.into_any_element()
-                    }
-                }),
-        );
-        let summary = all_done.then(|| {
-            let (n, unit) = total.map(duration_parts).unwrap_or_default();
-            div()
-                .mt(space::S8)
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .t_small()
-                .text_color(k.ink)
-                .child(check(px(14.), k.ok))
-                .child(fill(
-                    c::PLAN_ALL_DONE,
-                    &[("n", &run.plan.len().to_string())],
-                ))
-                .child(div().flex_1())
-                .when(total.is_some(), |el| {
-                    el.child(
-                        div()
-                            .t_mono()
-                            .text_color(k.ink_3)
-                            .child(format!("{n} {unit}")),
-                    )
-                })
-        });
-        let steps = open.then(|| {
-            div()
-                .mt(space::S10)
-                .when(all_done, |el| {
-                    el.pt(space::S8).border_t_1().border_color(k.line)
-                })
-                .when(!all_done, |el| el.mt(space::S8))
-                .flex()
-                .flex_col()
-                .children(run.plan.iter().enumerate().map(|(i, item)| {
-                    let glyph: AnyElement = match item.state {
-                        PlanState::Done => check(px(13.), k.ink_3),
-                        PlanState::Current => {
-                            live_dot(ElementId::Name(format!("rail-step-{i}").into()), k.live, cx)
-                        }
-                        PlanState::Waiting => div()
-                            .size(px(6.))
-                            .rounded(px(3.))
-                            .bg(k.you)
-                            .into_any_element(),
-                        PlanState::Pending => div()
-                            .size(px(7.))
-                            .rounded(px(4.))
-                            .border(px(1.5))
-                            .border_color(k.ink_3)
-                            .into_any_element(),
-                    };
-                    let color = match item.state {
-                        PlanState::Done | PlanState::Pending => k.ink_3,
-                        _ => k.ink,
-                    };
-                    let row = div()
-                        .h(theme::size::PLAN_ROW)
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .t_small()
-                        .child(
-                            div()
-                                .flex_none()
-                                .w(px(14.))
-                                .flex()
-                                .justify_center()
-                                .child(glyph),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .one_line()
-                                .text_color(color)
-                                .child(item.text.clone()),
-                        )
-                        .children(minutes.get(i).copied().flatten().map(|m| {
-                            div()
-                                .flex_none()
-                                .t_mono()
-                                .text_color(k.ink_3)
-                                .child(fill(c::STEP_MINUTES, &[("n", &m.to_string())]))
-                        }));
-                    ui::motion::rise(
-                        ElementId::Name(format!("rail-step-rise-{}-{i}", run.id).into()),
-                        i,
-                        row,
-                        cx,
-                    )
-                }))
-        });
-        div()
-            .child(label_row(c::TOPIC_RAIL_PLAN, toggle, cx))
-            .children(summary)
-            .child(segments)
-            .children(steps)
-            .into_any_element()
-    }
-
-    fn changes_card(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let k = theme::colors(cx);
-        let ch = d.changes.clone()?;
-        let action = label_action("rail-see-changes", c::SEE_CHANGES, cx)
-            .on_click(
-                cx.listener(|this, _: &ClickEvent, _, cx| this.open_pane(RightPane::Changes, cx)),
-            )
-            .into_any_element();
-        let status: AnyElement = match ch.state {
-            ChangeState::Merging => div()
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .h(px(20.))
-                .px(px(7.))
-                .rounded(theme::TAG_RADIUS)
-                .bg(k.sunken)
-                .t_meta()
-                .text_color(k.live_ink)
-                .child(live_dot("rail-merging", k.live, cx))
-                .child(c::CHANGES_MERGING)
-                .into_any_element(),
-            state => div()
-                .h(px(20.))
-                .px(px(7.))
-                .rounded(theme::TAG_RADIUS)
-                .bg(k.sunken)
-                .flex()
-                .items_center()
-                .t_meta()
-                .text_color(k.ink_2)
-                .child(match state {
-                    ChangeState::Merged => c::CHANGES_MERGED,
-                    ChangeState::Closed => c::CHANGES_CLOSED,
-                    _ => c::CHANGES_OPEN,
-                })
-                .into_any_element(),
-        };
-        let checks_ok = ch.checks_total > 0 && ch.checks_passed == ch.checks_total;
-        Some(
-            div()
-                .child(label_row(c::TOPIC_RAIL_CHANGES, Some(action), cx))
-                .child(
-                    div()
-                        .mt(space::S8)
-                        .one_line()
-                        .t_small()
-                        .medium()
-                        .text_color(k.ink)
-                        .child(ch.title.clone()),
-                )
-                .child(
-                    div()
-                        .mt(space::S2)
-                        .flex()
-                        .items_center()
-                        .gap(space::S8)
-                        .t_meta()
-                        .line_height(px(18.))
-                        .text_color(k.ink_3)
-                        .child(div().mono().child(format!("#{}", ch.number)))
-                        .child(
-                            div()
-                                .mono()
-                                .flex()
-                                .gap(space::S4)
-                                .child(
-                                    div()
-                                        .text_color(k.ok_ink)
-                                        .child(format!("+{}", ch.additions)),
-                                )
-                                .child(
-                                    div()
-                                        .text_color(k.bad_ink)
-                                        .child(format!("−{}", ch.deletions)),
-                                ),
-                        )
-                        .child(diff_squares(ch.additions, ch.deletions, cx))
-                        .child(div().flex_1())
-                        .child(
-                            div()
-                                .flex()
-                                .gap(space::S4)
-                                .child(div().mono().child(ch.files.to_string()))
-                                .child(c::FILES_UNIT),
-                        ),
-                )
-                .when(ch.checks_total > 0, |el| {
-                    el.child(
-                        div()
-                            .mt(space::S10)
-                            .pt(space::S10)
-                            .border_t_1()
-                            .border_color(k.line)
-                            .flex()
-                            .items_center()
-                            .gap(space::S6)
-                            .t_meta()
-                            .line_height(px(18.))
-                            .text_color(k.ink_2)
-                            .child(if checks_ok {
-                                check(px(12.), k.ok)
-                            } else {
-                                ui::icon(Lucide::CircleAlert, px(12.), k.bad).into_any_element()
-                            })
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(space::S4)
-                                    .child(
-                                        div().mono().child(format!(
-                                            "{}/{}",
-                                            ch.checks_passed, ch.checks_total
-                                        )),
-                                    )
-                                    .child(c::CHECKS_UNIT),
-                            )
-                            .child(div().flex_1())
-                            .child(status),
-                    )
-                })
-                .into_any_element(),
-        )
-    }
-
-    fn outputs_card(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let k = theme::colors(cx);
-        let recording = d.recording;
-        let outputs = &d.artifacts;
-        let first = outputs.first()?.clone();
-        let pane = RightPane::Artifact {
-            id: first.id.clone(),
-            version: None,
-        };
-        let action = label_action("rail-open-output", c::OPEN, cx)
-            .on_click(cx.listener({
-                let pane = pane.clone();
-                move |this, _: &ClickEvent, _, cx| this.open_pane(pane.clone(), cx)
-            }))
-            .into_any_element();
-        let thumb = d.preview.clone().map(|preview| {
-            div()
-                .id("rail-output-thumb")
-                .mt(space::S8)
-                .w_full()
-                .h(px(80.))
-                .pt(space::S8)
-                .px(space::S12)
-                .rounded(theme::radius::MD)
-                .bg(k.sunken)
-                .overflow_hidden()
-                .cursor_pointer()
-                .child(preview_thumbnail(&preview, cx))
-                .on_click(cx.listener({
-                    let pane = pane.clone();
-                    move |this, _: &ClickEvent, _, cx| this.open_pane(pane.clone(), cx)
-                }))
-        });
-        let rows = outputs.iter().map(|a| {
-            div()
-                .mt(space::S8)
-                .flex()
-                .items_center()
-                .gap(space::S8)
-                .t_small()
-                .child(
-                    div()
-                        .min_w_0()
-                        .one_line()
-                        .medium()
-                        .text_color(k.ink)
-                        .child(a.title.clone()),
-                )
-                .child(div().flex_1())
-                .child(div().flex_none().t_mono().text_color(k.ink_3).child(fill(
-                    c::OUTPUT_VERSION,
-                    &[
-                        ("v", &a.version.to_string()),
-                        ("time", &clock(a.updated_at)),
-                    ],
-                )))
-        });
-        let rec = recording.map(|ms| {
-            div()
-                .mt(space::S4)
-                .mx(px(-6.))
-                .mb(px(-4.))
-                .h(px(32.))
-                .px(space::S6)
-                .rounded(theme::radius::MD)
-                .flex()
-                .items_center()
-                .gap(space::S10)
-                .t_small()
-                .text_color(k.ink)
-                .child(
-                    div()
-                        .flex_none()
-                        .w(px(36.))
-                        .h(px(24.))
-                        .rounded(px(5.))
-                        .bg(k.screen)
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .when(theme::is_dark(cx), |el| {
-                            el.border_1().border_color(k.line_2)
-                        })
-                        .child(ui::icon(Lucide::Play, px(10.), k.screen_ink)),
-                )
-                .child(c::RECORDING_ROW)
-                .child(div().flex_1())
-                .child(div().t_mono().text_color(k.ink_3).child(media_time(ms)))
-        });
-        Some(
-            div()
-                .child(label_row(c::TOPIC_RAIL_OUTPUTS, Some(action), cx))
-                .children(thumb)
-                .children(rows)
-                .children(rec)
-                .into_any_element(),
-        )
-    }
-
-    fn decisions_card(&self, d: &Data, cx: &App) -> Option<AnyElement> {
-        let k = theme::colors(cx);
-        let decisions = &d.decisions;
-        let first = decisions.first()?;
-        let by = d.member(&first.by);
-        let who = div()
-            .flex()
-            .items_center()
-            .gap(space::S6)
-            .t_meta()
-            .text_color(k.ink_3)
-            .child(ui::MemberAvatar::new(by.as_ref(), px(16.)))
-            .child(by.as_ref().map(|m| m.name.clone()).unwrap_or_default())
-            .child(div().mono().child(clock(first.at)))
-            .into_any_element();
-        Some(
-            div()
-                .child(label_row(c::TOPIC_RAIL_DECISIONS, Some(who), cx))
-                .children(decisions.iter().map(|d| {
-                    div()
-                        .mt(space::S8)
-                        .flex()
-                        .items_start()
-                        .gap(space::S8)
-                        .t_small()
-                        .text_color(k.ink)
-                        .child(div().flex_none().pt(px(3.)).child(check(px(14.), k.ink_3)))
-                        .child(div().flex_1().min_w_0().child(d.text.clone()))
-                }))
-                .into_any_element(),
-        )
-    }
-
-    fn machine_card(
-        &self,
-        d: &Data,
-        run: &BotRunSummary,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
-        let k = theme::colors(cx);
-        let name = run.machine_name.clone()?;
-        let busy = run.status.is_active();
-        let who = d.name(&run.bot_id);
-        let line = if busy {
-            fill(c::MACHINE_USING, &[("name", &who)])
-        } else {
-            fill(
-                c::MACHINE_DONE,
-                &[
-                    ("name", &who),
-                    ("time", &run.ended_at.map(clock).unwrap_or_default()),
-                ],
-            )
-        };
-        let state: AnyElement = if busy {
-            div()
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .t_meta()
-                .text_color(k.live_ink)
-                .child(live_dot("rail-machine-live", k.live, cx))
-                .child(c::MACHINE_BUSY)
-                .into_any_element()
-        } else {
-            div()
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .t_meta()
-                .text_color(k.ink_2)
-                .child(
-                    div()
-                        .size(px(7.))
-                        .rounded(px(4.))
-                        .border(px(1.5))
-                        .border_color(k.ink_3),
-                )
-                .child(c::MACHINE_IDLE)
-                .into_any_element()
-        };
-        let see = busy.then(|| {
-            let run_id = run.id.clone();
-            div()
-                .id("rail-see-machine")
-                .mt(space::S8)
-                .h(px(28.))
-                .rounded(theme::radius::MD)
-                .border_1()
-                .border_color(k.line_2)
-                .shadow(k.sec_hi())
-                .flex()
-                .items_center()
-                .justify_center()
-                .gap(space::S6)
-                .t_small()
-                .text_color(k.ink)
-                .cursor_pointer()
-                .hover(|s| s.bg(k.hover))
-                .child(ui::icon(Lucide::Monitor, px(14.), k.ink_2))
-                .child(fill(c::SEE_MACHINE, &[("name", &who)]))
-                .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
-                    this.open_pane(RightPane::Live(run_id.clone()), cx)
-                }))
-        });
-        Some(
-            div()
-                .child(label_row(c::TOPIC_RAIL_MACHINE, None, cx))
-                .child(
-                    div()
-                        .mt(space::S8)
-                        .flex()
-                        .items_center()
-                        .gap(space::S10)
-                        .child(
-                            div()
-                                .flex_none()
-                                .size(px(28.))
-                                .rounded(theme::radius::MD)
-                                .bg(k.sunken)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(ui::icon(Lucide::Monitor, px(16.), k.ink_2)),
-                        )
-                        .child(
-                            div()
-                                .min_w_0()
-                                .flex()
-                                .flex_col()
-                                .child(
-                                    div()
-                                        .t_small()
-                                        .medium()
-                                        .text_color(k.ink)
-                                        .one_line()
-                                        .child(name),
-                                )
-                                .child(
-                                    div()
-                                        .t_meta()
-                                        .line_height(px(18.))
-                                        .text_color(k.ink_3)
-                                        .one_line()
-                                        .child(line),
-                                ),
-                        )
-                        .child(div().flex_1())
-                        .child(state),
-                )
-                .children(see)
-                .into_any_element(),
-        )
-    }
-
-    fn cost_card(&self, d: &Data, cx: &App) -> Option<AnyElement> {
-        let k = theme::colors(cx);
-        let cost = d.cost?;
-        if cost.duration_ms == 0 && cost.cost_cents.is_none() {
-            return None;
-        }
-        let (n, unit) = duration_parts(cost.duration_ms);
-        let value = |s: String| div().mono().medium().text_color(k.ink).child(s);
-        let range = match (cost.started_at, cost.ended_at) {
-            (Some(a), Some(b)) => Some(format!("{}–{}", clock(a), clock(b))),
-            _ => None,
-        };
-        Some(
-            div()
-                .child(label_row(c::TOPIC_RAIL_COST, None, cx))
-                .child(
-                    div()
-                        .mt(space::S8)
-                        .flex()
-                        .items_baseline()
-                        .gap(space::S6)
-                        .t_small()
-                        .text_color(k.ink_2)
-                        .child(c::COST_LABEL)
-                        .child(value(n))
-                        .child(unit)
-                        .when_some(cost.cost_cents, |el, cents| {
-                            el.child(div().text_color(k.ink_3).child("·"))
-                                .child(value(money_text(cents, cost.currency)))
-                        })
-                        .child(div().flex_1())
-                        .when_some(range, |el, r| {
-                            el.child(
-                                div()
-                                    .flex()
-                                    .gap(space::S4)
-                                    .t_meta()
-                                    .text_color(k.ink_3)
-                                    .child(c::TODAY)
-                                    .child(div().mono().child(r)),
-                            )
-                        }),
-                )
-                .into_any_element(),
-        )
     }
 }
 
@@ -1128,16 +407,17 @@ fn topic_recording(services: &Services, g: &str, t: &str) -> Option<u64> {
 }
 
 impl Render for TopicRail {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let k = ui::native::native_colors(cx);
         let Some((g, t)) = self.services.nav.read(cx).topic.clone() else {
-            return stub_body(Lucide::PanelRight, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
+            return rail_empty(cx);
         };
         let d = self.data(&g, &t);
         let topic = d.topic.as_ref();
         let run = d.run.as_ref();
-        let mut cards: Vec<AnyElement> = Vec::new();
-        // 负责
+        // NATIVE.md §9.3: 负责, 计划, 改动, 产出, 用到的决定, 在哪干活,
+        // 用时和成本; a section without data is left out.
+        let mut sections: Vec<AnyElement> = Vec::new();
         if let Some(owner) = topic.and_then(|t| t.owner_id.clone()) {
             let by = topic
                 .filter(|x| x.created_by != owner)
@@ -1145,52 +425,34 @@ impl Render for TopicRail {
             // The 负责 card says only what its own member does (DU-1): another member's
             // run in the same 话题 is not the owner's.
             let own = run.filter(|r| r.bot_id == owner);
-            cards.push(self.owner_card(&d, &owner, own, by, cx));
+            sections.push(self.native_owner(&d, &owner, own, by, cx));
         }
-        // 计划
         if let Some(r) = run.filter(|r| !r.plan.is_empty()) {
-            cards.push(self.plan_card(&d, r, cx));
+            sections.push(self.native_plan(&d, r, cx));
         }
-        // 改动
-        cards.extend(self.changes_card(&d, cx));
-        // 产出
-        cards.extend(self.outputs_card(&d, cx));
-        // 用到的决定
-        cards.extend(self.decisions_card(&d, cx));
-        // 电脑
+        sections.extend(self.native_changes(&d, window, cx));
+        sections.extend(self.native_outputs(&d, window, cx));
+        sections.extend(self.native_decisions(&d, cx));
         if let Some(r) = run {
-            cards.extend(self.machine_card(&d, r, cx));
+            sections.extend(self.native_where(&d, r, window, cx));
         }
-        // 用时和成本
-        cards.extend(self.cost_card(&d, cx));
-        if cards.is_empty() {
-            return stub_body(Lucide::PanelRight, c::TOPIC_RAIL_EMPTY, None, cx).into_any_element();
+        sections.extend(self.native_cost(&d, cx));
+        if sections.is_empty() {
+            return rail_empty(cx);
         }
-        // One id per place, not per 话题: the rail rises on its first paint
-        // only, never again on a 话题 switch (§12).
-        let cards: Vec<AnyElement> = cards
-            .into_iter()
-            .enumerate()
-            .map(|(i, el)| {
-                ui::motion::rise(
-                    SharedString::from(format!("topic-rail-{i}")),
-                    i + 1,
-                    ui::rail_section(cx).flex_none().child(el),
-                    cx,
-                )
-            })
-            .collect();
         div()
             .id("topic-rail")
             .size_full()
             .overflow_y_scroll()
-            .bg(k.rail)
-            .pt(space::S4)
-            .px(space::S16)
+            .bg(k.sidebar)
+            // The shell starts the inspector below the 52 pt toolbar row
+            // (shell/panes.rs, PANE_TOP). Pull up by the section's own 12 pt
+            // top padding so the first header row starts at 52, as on 首页.
+            .mt(-gpui::px(12.))
             .pb(space::S16)
             .flex()
             .flex_col()
-            .child(ui::rail_stack(cards, cx))
+            .children(sections)
             .into_any_element()
     }
 }
@@ -1212,7 +474,7 @@ impl ChangesPane {
 
 impl PaneView for ChangesPane {
     fn width(&self, _window_w: Pixels) -> Pixels {
-        theme::ARTIFACT_PANE_WIDTH
+        PANE_WIDE
     }
 }
 
@@ -1231,7 +493,7 @@ impl Render for ChangesPane {
                 ch.number, ch.title, ch.additions, ch.deletions
             )
         });
-        stub_body(Lucide::GitPullRequest, c::TITLE_CHANGES, line, cx)
+        stub_body(Sym::PullRequest, c::TITLE_CHANGES, line, cx)
     }
 }
 

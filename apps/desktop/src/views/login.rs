@@ -1,26 +1,36 @@
-//! The login view (DESIGN.md §8.3): one centered column with the app icon,
-//! the welcome, the invite code as eight boxes and `加入`. The built-in server
-//! sits behind `使用其他服务器`; a custom one shows as `host · 更改` (U39). A
+//! The login window (NATIVE.md §9.7): a small window of its own (480 x 520,
+//! not resizable) with the app icon 96, a Title 2 welcome line, one 28 pt
+//! standalone field at a time (the invite code 140 wide, or the server),
+//! `继续` (Large, default) at the bottom trailing edge and the borderless
+//! `使用其他服务器…` at the bottom leading edge (also in the app menu). A
+//! refused code or an unreachable server opens an alert (§7.4); no red text.
+//! A custom server shows its host under the code field. A
 //! pasted login credential (`tc_…`) or a legacy 12-character code is accepted
 //! in the same place and shows as one locked field. The server URL defaults to
 //! the production URL from product.json, then staging.
 
 use gpui::{
     AppContext, Context, Entity, Focusable as _, InteractiveElement as _, IntoElement,
-    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    Window, div, img, prelude::FluentBuilder as _, px,
+    ParentElement, Render, SharedString, Styled, Subscription, Window, div,
+    prelude::FluentBuilder as _, px,
 };
-use gpui_component::{
-    ActiveTheme as _,
-    input::{Input, InputEvent, InputState},
-};
+use gpui_component::input::{Input, InputEvent, InputState};
 
 use crate::{
     app::{Changes, Services},
-    copy::login as l,
+    copy::{common, login as l, overlays as o},
     data::{Change, Credential, LoginError, LoginRequest, SessionState},
-    theme::{self, Type as _, space},
-    ui::{self, ButtonSpec as _, Lucide},
+    theme::Type as _,
+    ui::{
+        self, Sym,
+        native::{
+            FieldSize, NativeTextField, NativeType as _, PushSize, PushStyle, borderless_text,
+            disabled_push, metrics, native_colors,
+            overlays::{app_icon, spot},
+            push_button,
+        },
+        sf_symbols::SymSize,
+    },
 };
 
 pub fn default_server_url() -> &'static str {
@@ -37,15 +47,21 @@ pub const CODE_LEN: usize = 8;
 /// Characters of a code made before the 8-character format
 /// (`XXXX-XXXX-XXXX`); the server still redeems them.
 pub const LEGACY_CODE_LEN: usize = 12;
-/// Characters per group of boxes.
+/// Characters per group of a code (`XXXX-XXXX`).
 const GROUP: usize = 4;
-/// One code box (§7.4): 42 x 48.
-const BOX: (gpui::Pixels, gpui::Pixels) = (px(42.), px(48.));
-/// The column (§8.3): 8 boxes, 6 gaps of 6 and one 18 pt dash slot = 390.
-const COLUMN: gpui::Pixels = px(390.);
-/// Under the code boxes: 6 pt and the 16 pt error line, kept even without
-/// an error so `加入` never moves (§7.1).
-const ERROR_SLOT: gpui::Pixels = px(22.);
+/// The code field fits `XXXX-XXXX` (§5.6: width fits the expected text).
+const CODE_FIELD: gpui::Pixels = metrics::FIELD_CODE_WIDTH;
+/// A pasted credential's lock line needs a little more.
+const LOCKED_FIELD: gpui::Pixels = px(180.);
+/// The server field fits a URL.
+const SERVER_FIELD: gpui::Pixels = px(320.);
+/// The login window: small, fixed, not resizable.
+pub const WINDOW_SIZE: gpui::Size<gpui::Pixels> = gpui::Size {
+    width: px(480.),
+    height: px(520.),
+};
+
+gpui::actions!(login, [UseOtherServer]);
 
 /// What the code field holds.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -127,9 +143,9 @@ pub struct LoginView {
     code: Entity<InputState>,
     /// The server field is open (`更改`, or after an unreachable server).
     server_open: bool,
-    local_error: Option<&'static str>,
-    /// The last error stays until the user types again.
-    show_error: bool,
+    /// Drawn inside a main window (signed out there): a sign-out moves to
+    /// the login window.
+    embedded: bool,
     /// The wrong code after a failed try: the next typed character or paste
     /// starts a new code from box 1, Backspace edits it from the end.
     rejected: Option<String>,
@@ -143,7 +159,7 @@ impl LoginView {
                 .placeholder(l::SERVER_PLACEHOLDER)
                 .default_value(default_server_url())
         });
-        let code = cx.new(|cx| InputState::new(window, cx));
+        let code = cx.new(|cx| InputState::new(window, cx).placeholder(l::CODE_PLACEHOLDER));
         // The first box has the caret when the view opens.
         code.read(cx).focus_handle(cx).focus(window, cx);
         let subscriptions = vec![
@@ -166,8 +182,6 @@ impl LoginView {
                             this.code
                                 .update(cx, |st, cx| st.set_value(kept, window, cx));
                         }
-                        this.show_error = false;
-                        this.local_error = None;
                         cx.notify();
                     }
                     _ => cx.notify(),
@@ -178,7 +192,7 @@ impl LoginView {
                 window,
                 |this, _, event: &InputEvent, window, cx| {
                     if let InputEvent::PressEnter { .. } = event {
-                        this.submit(window, cx);
+                        this.continue_(window, cx);
                     }
                 },
             ),
@@ -189,8 +203,8 @@ impl LoginView {
                     if !changes.any(|c| matches!(c, Change::Session)) {
                         return;
                     }
-                    this.show_error = true;
-                    match this.services.provider.session() {
+                    let session = this.services.provider.session();
+                    match &session {
                         SessionState::SignedOut {
                             last_error: Some(LoginError::ServerUnreachable),
                         } => {
@@ -204,6 +218,24 @@ impl LoginView {
                         } => this.reject_code(window, cx),
                         _ => {}
                     }
+                    // A refusal blocks: an alert says why (no red text).
+                    if let SessionState::SignedOut {
+                        last_error: Some(e),
+                    } = session
+                    {
+                        window.defer(cx, move |window, cx| {
+                            crate::views::nav::dialogs::error_alert(
+                                o::LOGIN_REFUSED,
+                                error_text(e),
+                                |_, _| {},
+                                window,
+                                cx,
+                            )
+                        });
+                    }
+                    if this.embedded && matches!(session, SessionState::SignedOut { .. }) {
+                        move_to_login_window(this.services.clone(), window, cx);
+                    }
                     cx.notify();
                 },
             ),
@@ -213,8 +245,7 @@ impl LoginView {
             server,
             code,
             server_open: false,
-            local_error: None,
-            show_error: true,
+            embedded: true,
             rejected: None,
             _subscriptions: subscriptions,
         }
@@ -278,14 +309,11 @@ impl LoginView {
         let Some(credential) = self.input(cx).credential() else {
             return;
         };
+        // No server: the server step, whose 继续 is off until it has one.
         if server_url.is_empty() {
-            self.local_error = Some(l::ERROR_EMPTY);
-            self.server_open = true;
-            cx.notify();
+            self.open_server_field(window, cx);
             return;
         }
-        self.local_error = None;
-        self.show_error = false;
         self.services.provider.login(LoginRequest {
             server_url,
             credential,
@@ -310,308 +338,198 @@ impl LoginView {
         self.submit(window, cx);
     }
 
-    /// The invite code boxes, 4-4 with a dash between the groups, over the
-    /// real input (transparent), so typing, paste, IME and Backspace work.
-    fn render_boxes(
+    /// The code field: a 28 pt standalone field (§5.6). A pasted credential
+    /// or legacy code shows as a locked line (the secret is never drawn);
+    /// the real input sits on top of it so paste and Backspace still work.
+    fn render_code_field(
         &self,
         input: &CodeInput,
         focused: bool,
-        error: bool,
         cx: &mut Context<Self>,
-    ) -> impl IntoElement {
-        let k = theme::colors(cx);
-        // The whole code is selected after a wrong try: typing replaces it.
-        let selected = focused && {
-            let st = self.code.read(cx);
-            let range = st.selected_range();
-            !st.value().is_empty() && range.start == 0 && range.end >= st.value().len()
-        };
-        // The text-selection color of the theme (§2.8 maps it).
-        let selection = cx.theme().selection;
+    ) -> gpui::AnyElement {
+        let k = native_colors(cx);
         let locked = match input {
             CodeInput::Token(_) => Some(l::CODE_TOKEN),
             CodeInput::Legacy(_) => Some(l::CODE_LEGACY),
             CodeInput::Code(_) => None,
         };
-        let row = match (input, locked) {
-            (_, Some(locked)) => div()
-                .w_full()
-                .h(BOX.1)
-                .px(space::S12)
-                .rounded(theme::radius::FIELD)
+        match locked {
+            None => NativeTextField::new("login-code", &self.code)
+                .size(FieldSize::Large)
+                .width(CODE_FIELD)
+                .into_any_element(),
+            Some(text) => div()
+                .id("login-code")
+                .relative()
+                .w(LOCKED_FIELD)
+                .h(metrics::FIELD_LARGE)
+                .px(metrics::FIELD_PAD)
+                .rounded(metrics::FIELD_RADIUS)
                 .bg(k.content)
                 .border_1()
-                .border_color(if error {
-                    k.danger
-                } else if focused {
-                    k.focus_border
-                } else {
-                    k.border
-                })
-                .when(focused && !error, |el| el.shadow(k.focus_halo()))
-                .when(error, |el| el.shadow(k.error_halo()))
-                .when(selected, |el| el.bg(selection))
+                .border_color(k.separator)
+                .when(focused, |d| d.shadow(k.focus_ring()))
                 .flex()
                 .items_center()
-                .gap(space::S8)
-                .child(ui::icon(Lucide::Lock, theme::icon::ROW, k.text_3))
-                .child(div().t_ui().text_color(k.text_2).child(locked)),
-            (CodeInput::Code(chars), None) => {
-                let chars: Vec<char> = chars.chars().collect();
-                let cursor = chars.len().min(CODE_LEN - 1);
-                let mut row = div().w_full().flex().items_center().gap(space::S6);
-                for ix in 0..CODE_LEN {
-                    if ix > 0 && ix % GROUP == 0 {
-                        row = row.child(
-                            div()
-                                .flex_none()
-                                .w(space::S6)
-                                .h(px(2.))
-                                .rounded(px(1.))
-                                .bg(k.border_strong),
-                        );
-                    }
-                    let active = focused && !selected && ix == cursor;
-                    let ch = chars.get(ix).copied();
-                    // With all eight in, the caret sits after the last one.
-                    let caret_after = active && ch.is_some() && chars.len() == CODE_LEN;
-                    row = row.child(
-                        div()
-                            .flex_none()
-                            .w(BOX.0)
-                            .h(BOX.1)
-                            .rounded(theme::radius::FIELD)
-                            .bg(k.content)
-                            .border_1()
-                            .border_color(if error {
-                                k.danger
-                            } else if active {
-                                k.focus_border
-                            } else {
-                                k.border
-                            })
-                            .when(active && !error, |el| el.shadow(k.focus_halo()))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .t_code_entry()
-                            .text_color(k.text_1)
-                            // Selected characters sit on a text-selection
-                            // chip, as selected text does in a field.
-                            .children(ch.map(|c| {
-                                div()
-                                    .relative()
-                                    .px(space::S6)
-                                    .rounded(theme::radius::MARK)
-                                    .when(selected, |el| el.bg(selection))
-                                    .child(c.to_string())
-                                    .when(caret_after, |el| {
-                                        el.child(
-                                            div()
-                                                .absolute()
-                                                .top_0()
-                                                .bottom_0()
-                                                .right(px(1.))
-                                                .flex()
-                                                .items_center()
-                                                .child(
-                                                    div()
-                                                        .w(px(2.))
-                                                        .h(px(22.))
-                                                        .rounded(px(1.))
-                                                        .bg(k.accent),
-                                                ),
-                                        )
-                                    })
-                            }))
-                            // The caret sits in the next empty box.
-                            .when(active && ch.is_none(), |el| {
-                                el.child(div().w(px(2.)).h(px(22.)).rounded(px(1.)).bg(k.accent))
-                            }),
-                    );
-                }
-                row
-            }
-            (_, None) => div(),
-        };
-        let code = self.code.clone();
-        div()
-            .id("login-code")
-            .relative()
-            .w_full()
-            .cursor_text()
-            .child(row)
-            // The real input covers the boxes: it takes clicks, keys and the
-            // IME; its own text and caret are not drawn.
-            .child(
-                div()
-                    .absolute()
-                    .inset_0()
-                    .opacity(0.)
-                    .child(Input::new(&self.code).appearance(false).h(BOX.1)),
-            )
-            .on_click(cx.listener(move |_, _, window, cx| {
-                code.read(cx).focus_handle(cx).focus(window, cx);
-            }))
+                .gap(px(6.))
+                .n_body()
+                .text_color(k.secondary)
+                .child(Sym::Lock.icon(SymSize::INLINE).text_color(k.secondary))
+                .child(text)
+                .child(
+                    div()
+                        .absolute()
+                        .inset_0()
+                        .opacity(0.)
+                        .child(Input::new(&self.code).appearance(false).h_full()),
+                )
+                .into_any_element(),
+        }
+    }
+
+    /// 继续: on the code step it joins; on the server step it goes back to
+    /// the code, or joins when the code is complete.
+    fn continue_(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.server_open && self.input(cx).credential().is_none() {
+            self.close_server_field(window, cx);
+        } else {
+            self.submit(window, cx);
+        }
+    }
+
+    fn close_server_field(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.server_open = false;
+        self.code.read(cx).focus_handle(cx).focus(window, cx);
+        cx.notify();
     }
 }
 
 impl Render for LoginView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = theme::colors(cx);
+        let k = native_colors(cx);
         let session = self.services.provider.session();
         let signing_in = matches!(session, SessionState::SigningIn);
-        let session_error = match session {
-            SessionState::SignedOut {
-                last_error: Some(e),
-            } => Some(match e {
-                LoginError::BadCredential => l::ERROR_BAD_CREDENTIAL,
-                LoginError::ServerUnreachable => l::ERROR_UNREACHABLE,
-                LoginError::Unsupported => l::ERROR_UNSUPPORTED,
-                LoginError::Other => l::ERROR_OTHER,
-            }),
-            _ => None,
-        };
-        let error = self
-            .local_error
-            .or(session_error.filter(|_| self.show_error));
-        let code_error = error == Some(l::ERROR_BAD_CREDENTIAL);
         let input = self.input(cx);
         let complete = input.credential().is_some();
         let focused = self.code.read(cx).focus_handle(cx).is_focused(window);
-        let icon = if theme::is_dark(cx) {
-            ui::icons::APP_ICON_DARK_72
-        } else {
-            ui::icons::APP_ICON_72
-        };
         let server_url = self.server.read(cx).value().to_string();
         let host: SharedString = server_host(&server_url).to_string().into();
-        let open_server = cx.listener(|this, _, window, cx| {
-            this.open_server_field(window, cx);
-        });
-        // The built-in server is not worth a line of its own (U39): a quiet
-        // `使用其他服务器` opens the field. A custom server shows its host.
         let custom =
             server_url.trim().trim_end_matches('/') != default_server_url().trim_end_matches('/');
-        let server_line = if custom {
+        // One field at a time: the server, or the invite code.
+        let server_step = self.server_open;
+        let field: gpui::AnyElement = if server_step {
+            NativeTextField::new("login-server", &self.server)
+                .size(FieldSize::Large)
+                .width(SERVER_FIELD)
+                .into_any_element()
+        } else {
+            self.render_code_field(&input, focused, cx)
+        };
+        // Under the code field: the custom server, quietly.
+        let note = (!server_step && custom).then(|| {
             div()
-                .pt(space::S16)
                 .flex()
                 .items_center()
-                .justify_center()
-                .gap(space::S6)
-                .t_small()
-                .text_color(k.text_3)
-                .child(ui::icon(Lucide::Server, theme::icon::CHIP, k.text_3))
-                .child(div().min_w_0().one_line().child(host))
-                .child("·")
+                .gap(px(4.))
+                .n_subheadline()
+                .text_color(k.secondary)
                 .child(
-                    ui::text_button("login-server-change", l::CHANGE_SERVER, cx)
-                        .on_click(open_server),
+                    Sym::MacMini
+                        .icon(SymSize::INLINE_SMALL)
+                        .text_color(k.secondary),
                 )
+                .child(div().min_w_0().one_line().child(host))
+        });
+        let ready = if server_step {
+            !server_url.trim().is_empty()
         } else {
-            div().pt(space::S12).flex().justify_center().child(
-                ui::text_button("login-server-other", l::OTHER_SERVER, cx).on_click(open_server),
-            )
+            complete
         };
-        let server_field = div()
-            .pt(space::S16)
-            .w_full()
-            .flex()
-            .flex_col()
-            .child(ui::field_label(l::SERVER_LABEL, cx))
-            .child(ui::TextField::new(
-                "login-server",
-                &self.server,
-                ui::FieldKind::Form,
-            ));
+        let go = push_button(
+            "login",
+            if signing_in {
+                l::SIGNING_IN
+            } else {
+                o::LOGIN_CONTINUE
+            },
+            PushStyle::Default,
+            PushSize::Large,
+            cx,
+        );
+        let go = disabled_push(go, !ready || signing_in, cx)
+            .loading(signing_in)
+            .on_click(cx.listener(|this, _, window, cx| this.continue_(window, cx)));
+        // Bottom: the borderless way to the server step at the leading edge;
+        // on the server step, 取消 next to 继续 at the trailing edge.
+        let other = (!server_step).then(|| {
+            borderless_text("login-server-other", l::OTHER_SERVER, cx)
+                .on_click(cx.listener(|this, _, window, cx| this.open_server_field(window, cx)))
+        });
+        let cancel = server_step.then(|| {
+            push_button(
+                "login-server-cancel",
+                common::CANCEL,
+                PushStyle::Standard,
+                PushSize::Large,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)))
+        });
         div()
             .size_full()
             .relative()
-            .bg(k.content)
+            .bg(k.window)
+            .on_action(cx.listener(|this, _: &UseOtherServer, window, cx| {
+                this.open_server_field(window, cx)
+            }))
             .child(
                 div()
                     .size_full()
                     .flex()
+                    .flex_col()
                     .items_center()
-                    .justify_center()
-                    // 24 pt above the optical center (§8.3).
-                    .pb(space::S44)
+                    // The icon sits in the upper part of the window, under
+                    // the title bar, as in a setup window.
+                    .pt(px(72.))
+                    .child(app_icon(spot::LOGIN_ICON))
                     .child(
                         div()
-                            .w(COLUMN)
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .child(
-                                // Drawn bare: the squircle with a soft drop shadow.
-                                div()
-                                    .size(px(72.))
-                                    .rounded(px(16.))
-                                    .shadow(vec![gpui::BoxShadow {
-                                        color: gpui::hsla(220. / 360., 0.14, 0.07, 0.12),
-                                        offset: gpui::point(px(0.), px(4.)),
-                                        blur_radius: px(12.),
-                                        spread_radius: px(0.),
-                                        inset: false,
-                                    }])
-                                    .child(img(icon).size(px(72.))),
-                            )
-                            .child(
-                                div()
-                                    .pt(space::S24)
-                                    .t_display()
-                                    .text_color(k.text_1)
-                                    .child(l::WELCOME),
-                            )
-                            .child(
-                                div()
-                                    .pt(space::S6)
-                                    .t_body()
-                                    .text_color(k.text_2)
-                                    .child(l::LEAD),
-                            )
-                            .child(
-                                div()
-                                    .pt(px(28.))
-                                    .w_full()
-                                    .child(ui::field_label(l::CODE_LABEL, cx)),
-                            )
-                            // The error slot is always there (6 pt, a 16 pt
-                            // line), so nothing moves when the error shows,
-                            // and the message belongs to the boxes: 16 pt
-                            // stay between it and `加入` (§7.1, §8.3).
-                            .child(self.render_boxes(&input, focused, code_error, cx))
-                            .child(
-                                div().w_full().h(ERROR_SLOT).children(
-                                    error.map(|e| ui::field_help(e, true, cx).one_line()),
-                                ),
-                            )
-                            .child(
-                                div().pt(space::S16).w_full().child(
-                                    ui::button(
-                                        "login",
-                                        if signing_in { l::SIGNING_IN } else { l::SUBMIT },
-                                        ui::ButtonKind::Primary,
-                                        ui::ButtonSize::Lg,
-                                        cx,
-                                    )
-                                    .w_full()
-                                    .loading(signing_in)
-                                    .disabled_fill(!complete && !signing_in, cx)
-                                    .on_click(
-                                        cx.listener(|this, _, window, cx| this.submit(window, cx)),
-                                    ),
-                                ),
-                            )
-                            .map(|el| {
-                                if self.server_open {
-                                    el.child(server_field)
-                                } else {
-                                    el.child(server_line)
-                                }
-                            }),
+                            .pt(px(16.))
+                            .n_title2()
+                            .text_color(k.label)
+                            .child(l::WELCOME),
+                    )
+                    .child(div().pt(px(4.)).n_body().text_color(k.secondary).child(
+                        if server_step {
+                            l::SERVER_LABEL
+                        } else {
+                            l::LEAD
+                        },
+                    ))
+                    .child(div().pt(px(24.)).child(field))
+                    // The note slot keeps its height, so nothing moves.
+                    .child(
+                        div()
+                            .pt(px(8.))
+                            .h(px(22.))
+                            .max_w(SERVER_FIELD)
+                            .children(note),
                     ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .left(metrics::SHEET_BUTTON_EDGE)
+                    .right(metrics::SHEET_BUTTON_EDGE)
+                    .bottom(metrics::SHEET_BUTTON_EDGE)
+                    .flex()
+                    .items_center()
+                    .gap(metrics::SHEET_BUTTON_GAP)
+                    .children(other)
+                    .child(div().flex_1())
+                    .children(cancel)
+                    .child(go),
             )
             // The top band drags the window, as a title bar does.
             .child(
@@ -621,6 +539,150 @@ impl Render for LoginView {
                     .left_0(),
             )
     }
+}
+
+/// The text of a refused login.
+fn error_text(e: LoginError) -> &'static str {
+    match e {
+        LoginError::BadCredential => l::ERROR_BAD_CREDENTIAL,
+        LoginError::ServerUnreachable => l::ERROR_UNREACHABLE,
+        LoginError::Unsupported => l::ERROR_UNSUPPORTED,
+        LoginError::Other => l::ERROR_OTHER,
+    }
+}
+
+// --- the login window ---
+
+/// The login window while it is open.
+struct LoginWindowGlobal(Option<gpui::AnyWindowHandle>);
+
+impl gpui::Global for LoginWindowGlobal {}
+
+/// Set by the app (not the self-tests): signing out in a main window moves
+/// to the login window.
+static STANDALONE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The root of the login window: the form, and the move to the main window
+/// once the session is signed in.
+pub struct LoginWindow {
+    login: Entity<LoginView>,
+    _subscriptions: Vec<Subscription>,
+}
+
+impl LoginWindow {
+    fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let login = cx.new(|cx| {
+            let mut view = LoginView::new(services.clone(), window, cx);
+            view.embedded = false;
+            view
+        });
+        let hub = services.hub.clone();
+        let subscriptions =
+            vec![
+                cx.subscribe_in(&hub, window, move |_, _, changes: &Changes, window, cx| {
+                    if !changes.any(|c| matches!(c, Change::Session)) {
+                        return;
+                    }
+                    if matches!(services.provider.session(), SessionState::SignedIn { .. }) {
+                        let services = services.clone();
+                        window.defer(cx, move |window, cx| {
+                            if let Err(e) = crate::app::open_main_window(services, true, None, cx) {
+                                eprintln!("failed to open the window: {e}");
+                                return;
+                            }
+                            cx.set_global(LoginWindowGlobal(None));
+                            window.remove_window();
+                        });
+                    }
+                }),
+            ];
+        Self {
+            login,
+            _subscriptions: subscriptions,
+        }
+    }
+
+    pub fn login(&self) -> &Entity<LoginView> {
+        &self.login
+    }
+
+    /// The window of a screenshot scene.
+    pub fn new_for_scene(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::new(services, window, cx)
+    }
+}
+
+impl Render for LoginWindow {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().size_full().child(self.login.clone())
+    }
+}
+
+/// The options of the login window: 480 x 520, centred, not resizable, a
+/// transparent title bar (the content draws under it).
+pub fn window_options(focus: bool, cx: &gpui::App) -> gpui::WindowOptions {
+    gpui::WindowOptions {
+        window_bounds: Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
+            None,
+            WINDOW_SIZE,
+            cx,
+        ))),
+        titlebar: Some(gpui::TitlebarOptions {
+            title: Some(env!("PRODUCT_NAME").into()),
+            appears_transparent: true,
+            traffic_light_position: None,
+        }),
+        window_background: gpui::WindowBackgroundAppearance::Opaque,
+        is_resizable: false,
+        focus,
+        show: true,
+        ..Default::default()
+    }
+}
+
+/// Opens the login window, or brings the open one to the front.
+pub fn open_window(
+    services: Services,
+    focus: bool,
+    cx: &mut gpui::App,
+) -> Result<(gpui::AnyWindowHandle, Entity<LoginWindow>), String> {
+    let (handle, view) = gpui_kit::open_window(window_options(focus, cx), cx, move |window, cx| {
+        cx.new(|cx| LoginWindow::new(services, window, cx))
+    })
+    .map_err(|e| e.to_string())?;
+    cx.set_global(LoginWindowGlobal(Some(handle)));
+    Ok((handle, view))
+}
+
+/// The app's start and the Dock icon: while signed out, the login window
+/// (brought to the front, or opened again). Returns false when signed in.
+pub fn show_login_window(services: Services, cx: &mut gpui::App) -> bool {
+    STANDALONE.store(true, std::sync::atomic::Ordering::Relaxed);
+    if matches!(services.provider.session(), SessionState::SignedIn { .. }) {
+        return false;
+    }
+    let open = cx
+        .try_global::<LoginWindowGlobal>()
+        .and_then(|g| g.0)
+        .is_some_and(|h| {
+            h.update(cx, |_, window, _| window.activate_window())
+                .is_ok()
+        });
+    if !open && let Err(e) = open_window(services, true, cx) {
+        eprintln!("failed to open the login window: {e}");
+    }
+    true
+}
+
+/// Signed out in a main window: the login window takes its place.
+fn move_to_login_window(services: Services, window: &mut Window, cx: &mut gpui::App) {
+    if !STANDALONE.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
+    window.defer(cx, move |window, cx| {
+        show_login_window(services, cx);
+        window.remove_window();
+    });
 }
 
 #[cfg(test)]

@@ -24,14 +24,13 @@ use gpui::{
 
 use crate::{
     data::{Change, ChatProvider, GroupId, MemberId, SessionState, TopicId},
-    theme, ui,
+    theme,
     views::{
         composer::ComposerView,
         connection_banner::ConnectionBanner,
         login::LoginView,
         rail::RailView,
         shell::{pages::Pages, panes::Panes},
-        sidebar::Sidebar,
         timeline::TimelineView,
     },
 };
@@ -518,8 +517,6 @@ impl Services {
             nav,
             characters,
         };
-        // Pages area (1.1.0 fixes): the ink disc of my own avatar.
-        crate::ui::avatar::track_viewer(&services, cx);
         // --- inc-host track: the 产出 page host (data, asks, new versions) ---
         crate::views::artifacts::host::start(&services, cx);
         // --- end inc-host track ---
@@ -550,9 +547,6 @@ pub type FirstFrameHook = Box<dyn FnOnce(&mut Window, &mut App)>;
 pub struct RootView {
     services: Services,
     rail: Entity<RailView>,
-    /// The v1 sidebar: not drawn, kept for the navigation self-test until
-    /// the cutover deletes it.
-    sidebar: Entity<Sidebar>,
     timeline: Entity<TimelineView>,
     composer: Entity<ComposerView>,
     pages: Pages,
@@ -561,6 +555,8 @@ pub struct RootView {
     banner: Entity<ConnectionBanner>,
     update_banner: Entity<crate::updater::banner::UpdateBanner>,
     first_frame: Option<FirstFrameHook>,
+    /// v12/shell: draw as an inactive window (a self-test scene).
+    show_inactive: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -576,7 +572,11 @@ impl RootView {
             theme::follow_system(window, cx),
             cx.subscribe(&services.hub, |_, _, changes: &Changes, cx| {
                 // Groups too: the first 群 replaces the welcome (§8.5).
-                if changes.any(|c| matches!(c, Change::Session | Change::Groups)) {
+                // v12/fx-shell: Connection too: the toolbar subtitle says
+                // 连接已断开 · n 秒后重连 while it is down.
+                if changes
+                    .any(|c| matches!(c, Change::Session | Change::Groups | Change::Connection))
+                {
                     cx.notify();
                 }
             }),
@@ -590,9 +590,15 @@ impl RootView {
         let composer = cx.new(|cx| ComposerView::new(services.clone(), window, cx));
         let pages = Pages::new(&services, timeline.clone(), composer.clone(), cx);
         let panes = Panes::new(&services, window, cx);
+        let rail = cx.new(|cx| RailView::new(services.clone(), window, cx));
+        // --- v12/behavior ---
+        let mut subscriptions = subscriptions;
+        subscriptions.extend(crate::views::nav::menus::watch_menu_state(
+            &services, &rail, cx,
+        ));
+        // --- end v12/behavior ---
         Self {
-            rail: cx.new(|cx| RailView::new(services.clone(), cx)),
-            sidebar: cx.new(|cx| Sidebar::new(services.clone(), cx)),
+            rail,
             timeline,
             composer,
             pages,
@@ -602,6 +608,7 @@ impl RootView {
             update_banner,
             services,
             first_frame,
+            show_inactive: false,
             _subscriptions: subscriptions,
         }
     }
@@ -614,9 +621,12 @@ impl RootView {
         &self.login
     }
 
-    pub fn sidebar(&self) -> &Entity<Sidebar> {
-        &self.sidebar
+    // --- v12/behavior ---
+    /// The left rail (the screenshot scenes right-click its rows).
+    pub fn rail(&self) -> &Entity<RailView> {
+        &self.rail
     }
+    // --- end v12/behavior ---
 
     pub fn timeline(&self) -> &Entity<TimelineView> {
         &self.timeline
@@ -641,11 +651,9 @@ impl Render for RootView {
             window.on_next_frame(hook);
         }
         let k = theme::colors(cx);
-        let root = div()
-            .id("root")
-            .size_full()
-            .bg(k.bg)
-            .text_color(k.ink)
+        let root = div().id("root").size_full().bg(k.bg).text_color(k.ink);
+        // v12/behavior: the 显示 commands of the rail and the toolbar panes.
+        let root = crate::views::nav::menus::on_view_commands(root, &self.services, &self.rail)
             .on_action(cx.listener(|this, _: &ToggleSidePanel, _, cx| {
                 // v2: ⌘⌥I toggles the topic rail.
                 this.services
@@ -685,8 +693,15 @@ impl Render for RootView {
                     .nav
                     .update(cx, |nav, cx| nav.toggle_sidebar(cx));
             }))
-            .on_action(cx.listener(|this, _: &NewTopic, _, cx| {
-                this.services.nav.update(cx, |nav, cx| nav.new_topic(cx));
+            .on_action(cx.listener(|this, _: &NewTopic, window, cx| {
+                // v12/overlays: ⌘N opens the 新话题 sheet (NATIVE.md §7.1).
+                let group = this.services.nav.read(cx).current_group();
+                crate::views::nav::new_topic::open_new_topic(
+                    this.services.clone(),
+                    group,
+                    window,
+                    cx,
+                );
             }))
             .on_action(cx.listener(|this, _: &MentionInComposer, window, cx| {
                 this.composer
@@ -698,32 +713,36 @@ impl Render for RootView {
         ) {
             return root.child(self.login.clone());
         }
+        // v12/shell: the main window of NATIVE.md §2: the floating sidebar
+        // (traffic lights inside it), the content running under its 8 pt
+        // gap, the page column with its toolbar row, and the inspector
+        // edge to edge.
         let nav = self.services.nav.read(cx);
         let rail_shown = !nav.sidebar_hidden;
+        let active = !self.show_inactive && crate::ui::native::tokens::emphasized(window);
+        let root = root.bg(crate::views::shell::chrome::colors(cx).content);
         let rail = rail_shown.then(|| {
-            div()
-                .w(theme::RAIL_WIDTH)
-                .h_full()
-                .flex_none()
-                .relative()
-                .child(self.rail.clone())
-                .child(ui::column_edge(cx))
+            crate::ui::native::floating_sidebar(cx)
+                .child(crate::views::shell::chrome::menu_accent(self.rail.clone()))
                 .into_any_element()
         });
-        // No 群 yet: the rail and one welcome, nothing else (§8.5, U06).
+        // No 群 yet: the sidebar and the 首页 empty state (v12/fx-shell:
+        // centered text and two push buttons, no illustration).
         if self.services.provider.groups().is_empty() {
+            let leading = if rail_shown {
+                crate::ui::native::metrics::CONTENT_LEADING
+            } else {
+                theme::TRAFFIC_LIGHTS_INSET
+            };
             return root.flex().flex_row().children(rail).child(
-                div()
-                    .flex_1()
-                    .h_full()
-                    .child(crate::views::welcome::Welcome),
+                crate::views::shell::pages::empty_page(leading, active, window, cx),
             );
         }
         let page = nav.page();
         let pane = nav.visible_pane();
         let window_w = window.viewport_size().width;
         let rail_w = if rail_shown {
-            theme::RAIL_WIDTH
+            crate::views::shell::chrome::sidebar_room()
         } else {
             px(0.)
         };
@@ -733,12 +752,32 @@ impl Render for RootView {
         // A pane takes its own column while the page keeps its minimum;
         // in a narrower window it floats over the page (level 2).
         let floats = window_w - rail_w - pane_w < theme::PAGE_MIN_WIDTH;
+        // v12/fx-shell: one leading content inset. The title starts 20 pt
+        // after the visible sidebar edge (`CONTENT_LEADING` from the page
+        // column), or past the traffic lights when the sidebar is hidden;
+        // then the page column shifts by the sidebar's 8 pt gap so lists
+        // still start 20 pt from the window edge.
         let leading = if rail_shown {
-            px(0.)
+            crate::ui::native::metrics::CONTENT_LEADING
         } else {
-            theme::TRAFFIC_LIGHTS_INSET
+            theme::TRAFFIC_LIGHTS_INSET - crate::ui::native::metrics::SIDEBAR_INSET
         };
-        let page_el = self.pages.render(page, &pane, leading, &self.services, cx);
+        let page_el = self
+            .pages
+            .render(page, &pane, leading, active, &self.services, window, cx);
+        let page_el = if rail_shown {
+            page_el
+        } else {
+            div()
+                .flex_1()
+                .min_w(px(0.))
+                .h_full()
+                .flex()
+                .pl(crate::ui::native::metrics::SIDEBAR_INSET)
+                .bg(crate::views::shell::chrome::colors(cx).content)
+                .child(page_el)
+                .into_any_element()
+        };
         let pane_el = self.panes.render(&pane, pane_w, floats, cx);
         root.flex()
             .flex_row()
@@ -748,6 +787,19 @@ impl Render for RootView {
             .children(pane_el)
     }
 }
+
+// --- v12/shell ---
+impl RootView {
+    /// Draws the window as an inactive window (the `window-inactive`
+    /// scene): gray selections and `secondary` toolbar symbols (§4).
+    pub fn show_inactive(&mut self, cx: &mut Context<Self>) {
+        self.show_inactive = true;
+        self.rail
+            .update(cx, |rail, cx| rail.set_show_inactive(true, cx));
+        cx.notify();
+    }
+}
+// --- end v12/shell ---
 
 /// Options of the main window. `focus: false` keeps self-tests from taking focus.
 pub fn main_window_options(focus: bool, cx: &App) -> WindowOptions {
@@ -759,8 +811,9 @@ pub fn main_window_options(focus: bool, cx: &App) -> WindowOptions {
         ))),
         titlebar: Some(TitlebarOptions {
             title: Some(env!("PRODUCT_NAME").into()),
-            // Each column draws its own 52 pt toolbar band; the traffic
-            // lights sit in the sidebar's band (§5.1).
+            // v12/shell: a full-size content view; the traffic lights sit
+            // inside the floating sidebar, on the toolbar row's centre line
+            // (NATIVE.md §2).
             appears_transparent: true,
             traffic_light_position: Some(point(theme::TRAFFIC_LIGHTS.0, theme::TRAFFIC_LIGHTS.1)),
         }),
@@ -808,7 +861,8 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
         KeyBinding::new("cmd-q", Quit, None),
         KeyBinding::new("cmd-,", OpenSettings, None),
         KeyBinding::new("cmd-alt-i", ToggleSidePanel, None),
-        KeyBinding::new("cmd-shift-s", ToggleSidebar, None),
+        // ⌃⌘S is the Mac's 显示侧栏; ⇧⌘S stays 另存为 (NATIVE.md §10).
+        KeyBinding::new("ctrl-cmd-s", ToggleSidebar, None),
         KeyBinding::new("cmd-n", NewTopic, None),
         KeyBinding::new("cmd-;", ToggleSideChat, None),
         KeyBinding::new("cmd-alt-r", ToggleTopicRail, None),
@@ -824,5 +878,12 @@ pub fn install_menus_and_actions(services: Services, cx: &mut App) {
     cx.on_action(move |_: &OpenSettings, cx| open_settings_window(services.clone(), cx));
     crate::views::nav::menus::install(cx);
     crate::views::topic_list::bind_keys(cx);
+    // --- v12/behavior ---
+    crate::views::rail::bind_keys(cx);
+    crate::views::members_page::bind_keys(cx);
+    // --- end v12/behavior ---
+    // --- v12/shell: the accent of System Settings (NATIVE.md §4) ---
+    theme::watch_system_accent(cx);
+    // --- end v12/shell ---
     crate::ui::motion::watch_reduce_motion(cx);
 }

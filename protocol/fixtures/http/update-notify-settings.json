@@ -1,0 +1,13 @@
+{
+  "kind": "UpdateNotifySettingsRequest",
+  "valid": true,
+  "value": {
+    "events": {
+      "mention": false
+    },
+    "quietHours": {
+      "enabled": true
+    },
+    "digestAt": null
+  }
+}

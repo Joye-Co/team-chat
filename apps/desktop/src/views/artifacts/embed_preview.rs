@@ -27,7 +27,6 @@ use crate::{
     ui::{
         self, MemberAvatar,
         overlay::{menu_row, menu_surface},
-        parts::{hairline, toolbar_band, vhairline},
         web_embed::{WebEmbed, WebEmbedSpec, WebEmbedState, live},
     },
 };
@@ -36,7 +35,8 @@ const INLINE_ID: &str = "selftest-weekly";
 const PANE_ID: &str = "selftest-media";
 /// The page's bar colour (#E8590C). The app's theme has no such orange.
 const BAR: (u8, u8, u8) = (0xE8, 0x59, 0x0C);
-const PANE_WIDTH: Pixels = px(440.);
+/// The wider trailing panes are 400 pt (the inspector 280).
+const PANE_WIDTH: Pixels = crate::ui::native::metrics::WIDE_PANE_WIDTH;
 /// How far the scrolled scene moves the inline page above the clip edge.
 const CUT: Pixels = px(96.);
 
@@ -147,15 +147,34 @@ impl EmbedPreview {
                     .flex()
                     .flex_col()
                     .gap(space::S2)
-                    .child(
+                    // The standard sender block (NATIVE.md §9.2): name in Headline, then
+                    // 岗位 · time as one `secondary` Subheadline run.
+                    .child({
+                        use crate::ui::native::{NativeType as _, native_colors};
+                        let n = native_colors(cx);
+                        let role = member.and_then(|m| m.role.clone());
+                        let time = format!("10:{:02}", 2 + index * 3);
+                        let meta = match role {
+                            Some(r) if !r.trim().is_empty() => format!("{r} · {time}"),
+                            _ => time,
+                        };
                         div()
-                            .t_ui()
-                            .font_weight(gpui::FontWeight::SEMIBOLD)
-                            .text_color(k.text_1)
-                            .child(SharedString::from(
-                                member.map(|m| m.name.clone()).unwrap_or_default(),
-                            )),
-                    )
+                            .flex()
+                            .items_baseline()
+                            .gap(space::S6)
+                            .child(div().n_headline().text_color(n.label).child(
+                                SharedString::from(
+                                    member.map(|m| m.name.clone()).unwrap_or_default(),
+                                ),
+                            ))
+                            .child(
+                                div()
+                                    .n_subheadline()
+                                    .n_figures()
+                                    .text_color(n.secondary)
+                                    .child(meta),
+                            )
+                    })
                     .child(div().t_body().text_color(k.text_1).child(text))
                     .children(extra.map(|e| div().pt(space::S8).w_full().child(e))),
             )
@@ -171,7 +190,8 @@ impl Render for EmbedPreview {
             .pass_scroll(true)
             .on_event(record);
         let pane = WebEmbed::new(PANE_ID, pane_spec())
-            .height(px(640.))
+            .height(px(900.) - crate::ui::native::metrics::TOOLBAR_ROW)
+            .rounded(px(0.))
             .autoplay(true)
             .on_event(record);
 
@@ -197,12 +217,9 @@ impl Render for EmbedPreview {
             .flex()
             .flex_col()
             .child(
-                toolbar_band("embed-topic-bar")
-                    .pl(theme::TRAFFIC_LIGHTS_INSET)
-                    .pr(space::S16)
-                    .child(div().t_title().text_color(k.text_1).child(SAMPLE_TITLE)),
+                crate::ui::native::ToolbarRow::new(SAMPLE_TITLE)
+                    .leading_inset(theme::TRAFFIC_LIGHTS_INSET),
             )
-            .child(hairline(cx))
             .child(
                 div()
                     .id("embed-topic-scroll")
@@ -219,15 +236,10 @@ impl Render for EmbedPreview {
             .flex()
             .flex_col()
             .bg(k.sidebar)
-            .child(
-                toolbar_band("embed-pane-bar")
-                    .px(space::S16)
-                    .gap(space::S8)
-                    .child(div().t_title().text_color(k.text_1).child(cp::ARTIFACTS))
-                    .child(div().t_ui().text_color(k.text_3).child(version)),
-            )
-            .child(hairline(cx))
-            .child(div().p(space::S16).child(pane));
+            // The pane's toolbar row (Title 3 over a `secondary` subtitle, like every
+            // toolbar), then the 产出 edge to edge under it.
+            .child(crate::ui::native::ToolbarRow::new(cp::ARTIFACTS).subtitle(version))
+            .child(pane);
 
         let mut root = div()
             .size_full()
@@ -237,7 +249,12 @@ impl Render for EmbedPreview {
             .bg(k.content)
             .text_color(k.text_1)
             .child(topic_column)
-            .child(vhairline(cx))
+            .child(
+                div()
+                    .w(px(1.))
+                    .h_full()
+                    .bg(crate::ui::native::native_colors(cx).separator),
+            )
             .child(pane_column);
         if self.cover
             && let Some(b) = embed(INLINE_ID, cx).and_then(|e| e.read(cx).bounds())
@@ -245,7 +262,11 @@ impl Render for EmbedPreview {
             let at = point(b.origin.x + px(48.), b.origin.y + px(40.));
             let menu = Bounds {
                 origin: at,
-                size: gpui::size(px(220.), px(3. * 32. + 8.)),
+                // Three menu rows inside the menu padding (ui::overlay::menu_surface).
+                size: gpui::size(
+                    px(220.),
+                    theme::size::MENU_ROW * 3. + crate::ui::native::metrics::MENU_PAD * 2.,
+                ),
             };
             PROBE.with(|p| p.borrow_mut().menu = Some(menu));
             root = root.child(
@@ -258,21 +279,21 @@ impl Render for EmbedPreview {
                     .w(menu.size.width)
                     .child(menu_row(
                         "m-open",
-                        Some(ui::Lucide::FileCode),
+                        Some(ui::Sym::CodeFile),
                         ca::OPEN,
                         true,
                         cx,
                     ))
                     .child(menu_row(
                         "m-copy",
-                        Some(ui::Lucide::Copy),
+                        Some(ui::Sym::Copy),
                         cn::MENU_COPY,
                         false,
                         cx,
                     ))
                     .child(menu_row(
                         "m-new",
-                        Some(ui::Lucide::Download),
+                        Some(ui::Sym::Download),
                         ca::NEW_VERSION,
                         false,
                         cx,
@@ -389,7 +410,7 @@ pub fn verify(mode: Mode, png: &Path, cx: &mut App) -> Result<(), String> {
     if count(pb) < 200 {
         return Err("the pane page is not in the capture".into());
     }
-    let clip_top = theme::TOOLBAR_HEIGHT + theme::HAIRLINE;
+    let clip_top = crate::ui::native::metrics::TOOLBAR_ROW;
     match mode {
         Mode::Topic => {
             if count(ib) < 2000 {

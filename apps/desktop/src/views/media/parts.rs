@@ -18,36 +18,30 @@ use crate::{
     copy::media as cm,
     data::{DraftKey, NewFile},
     theme::{self, Type as _, radius, space},
-    ui::{self, Lucide, NamedButton as _},
+    ui::{self, NamedButton as _, Sym},
 };
 
-/// The frame of an inline preview: 1 pt border, radius 10, `content` fill.
+/// The frame of an inline preview (NATIVE.md §9.2): the card container,
+/// radius 12, `fill`, no border, no shadow.
 pub fn card(cx: &App) -> Div {
-    let k = theme::colors(cx);
-    div()
-        .flex()
-        .flex_col()
-        .rounded(px(10.))
-        .border_1()
-        .border_color(k.border)
-        .bg(k.content)
-        .overflow_hidden()
+    crate::ui::native::cards::card_frame(cx).flex().flex_col()
 }
 
 /// The header of an inline card: glyph, name, meta, then trailing tools.
-pub fn card_header(icon: Lucide, title: impl Into<SharedString>, cx: &App) -> Div {
+pub fn card_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .h(px(38.))
-        .px(space::S12)
+        .h(px(36.))
+        .px(space::S14)
         .flex()
         .items_center()
         .gap(space::S8)
-        .bg(k.raised)
-        .border_b_1()
-        .border_color(k.sep)
-        .child(ui::icon(icon, theme::icon::ROW, k.text_2))
+        .child(ui::icon(
+            icon,
+            px(16.),
+            crate::ui::native::native_colors(cx).secondary,
+        ))
         .child(
             div()
                 .t_small()
@@ -61,18 +55,20 @@ pub fn card_header(icon: Lucide, title: impl Into<SharedString>, cx: &App) -> Di
 }
 
 /// The header of a full view: 48 pt, glyph, name 15/600, kind or meta, tools on the right.
-pub fn pane_header(icon: Lucide, title: impl Into<SharedString>, cx: &App) -> Div {
+pub fn pane_header(icon: Sym, title: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .h(px(48.))
+        .h(px(52.))
         .px(space::S16)
         .flex()
         .items_center()
         .gap(space::S8)
-        .border_b_1()
-        .border_color(k.sep)
-        .child(ui::icon(icon, theme::icon::ROW, k.text_2))
+        .child(ui::icon(
+            icon,
+            px(16.),
+            crate::ui::native::native_colors(cx).secondary,
+        ))
         .child(
             div()
                 .t_card_title()
@@ -95,17 +91,13 @@ pub fn mono(text: impl Into<SharedString>, color: Hsla) -> Div {
         .child(text.into())
 }
 
-/// A small outlined chip (`表格 1`, `v3`).
+/// A quiet `secondary` label (`表格 1`, `v3`): text, not a chip (NATIVE.md
+/// rule 4).
 pub fn chip(text: impl Into<SharedString>, cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
         .h(px(22.))
-        .px(space::S8)
-        .rounded(radius::SM)
-        .border_1()
-        .border_color(k.border)
-        .bg(k.content)
         .flex()
         .items_center()
         .t_meta()
@@ -120,27 +112,24 @@ pub fn footer(cx: &App) -> Div {
     let k = theme::colors(cx);
     div()
         .flex_none()
-        .min_h(px(34.))
-        .px(space::S12)
+        .min_h(px(32.))
+        .px(space::S14)
         .flex()
         .items_center()
         .gap(space::S8)
-        .bg(k.raised)
-        .border_t_1()
-        .border_color(k.sep)
         .t_meta()
         .text_color(k.text_3)
 }
 
 /// A named 28 pt tool button.
-pub fn tool(id: impl Into<ElementId>, icon: Lucide, name: &'static str) -> Button {
+pub fn tool(id: impl Into<ElementId>, icon: Sym, name: &'static str) -> Button {
     ui::icon_button_sm(id, icon).named(name)
 }
 
 /// A tool button on the dark screen (lightbox, video): `screen-ink` glyph.
 pub fn screen_tool(
     id: impl Into<ElementId>,
-    icon: Lucide,
+    icon: Sym,
     name: &'static str,
     s: &Screen,
     cx: &App,
@@ -256,8 +245,9 @@ pub fn placeholder(h: gpui::Pixels, note: impl IntoElement, cx: &App) -> Div {
         .child(note)
 }
 
-/// The round ink play / pause control of the audio players (Media.dc.html): `text-1`
-/// fill, `content` glyph. Labelled for VoiceOver.
+/// The play / pause control of the audio players: a borderless symbol
+/// button (NATIVE.md §5.1): the `label` symbol, a `fillHover` circle on
+/// hover, `quaternary` pressed. Labelled for VoiceOver.
 pub fn play_button(
     id: impl Into<ElementId>,
     playing: bool,
@@ -266,29 +256,28 @@ pub fn play_button(
     on_click: impl Fn(&gpui::ClickEvent, &mut gpui::Window, &mut App) + 'static,
 ) -> gpui::Stateful<Div> {
     use gpui::{InteractiveElement as _, StatefulInteractiveElement as _};
-    let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     let label = if playing {
         cm::AUDIO_PAUSE
     } else {
         cm::AUDIO_PLAY
     };
+    let size = size.min(32.);
     div()
         .id(id.into())
         .flex_none()
         .size(px(size))
         .rounded_full()
-        .bg(k.text_1)
-        .hover(|s| s.opacity(0.88))
-        .active(|s| s.opacity(0.76))
-        .cursor_pointer()
+        .hover(|s| s.bg(n.fill_hover))
+        .active(|s| s.bg(n.quaternary))
         .flex()
         .items_center()
         .justify_center()
         .tooltip(move |window, cx| gpui_component::tooltip::Tooltip::new(label).build(window, cx))
         .child(ui::icon(
-            if playing { Lucide::Pause } else { Lucide::Play },
-            px(size * 0.42),
-            k.content,
+            if playing { Sym::Pause } else { Sym::Play },
+            px(20.),
+            n.label,
         ))
         .on_click(on_click)
 }

@@ -39,8 +39,8 @@ use crate::{
         Message,
         card::{Card, CardBlock, CardTone},
     },
-    theme::{self, Type as _, space},
-    ui,
+    theme::{self, space},
+    ui::{self, Sym, native::NativeType as _},
     views::timeline::extras::{ExtrasContext, MessageExtra},
 };
 
@@ -135,6 +135,8 @@ pub(crate) fn toggle_expanded(key: String, window: &mut Window, cx: &mut App) {
 /// The quiet label of a card status (§7.8): a glyph and the words, no fill.
 /// A card that waits for the viewer shows no label: its 3 pt `you-bar`
 /// already says it, so amber appears once per card (§7.10).
+/// A card that waits for the viewer shows no label: its 3 pt `you-bar`
+/// already says it, so amber appears once per card (§7.10).
 fn status_label(tone: CardTone, label: impl Into<String>) -> ui::StatusChip {
     use crate::{data::TopicStatus as S, theme::ChipKind as K};
     let (status, kind) = match tone {
@@ -202,30 +204,39 @@ pub fn render_card(
 ) -> AnyElement {
     let k = theme::colors(cx);
     let tone = card.tone.unwrap_or_default();
-    let waits = waits_for_viewer(card);
 
-    let header = div()
-        .flex()
-        .items_start()
-        .gap(space::S12)
-        .child(
-            div()
-                .flex_1()
-                .min_w(px(0.))
-                .t_card_title()
-                .text_color(k.text_1)
-                .child(card.title.clone()),
+    // NATIVE.md §9.2: the state is a symbol and its word in the state
+    // color over the title, never a pill or a colored bar.
+    let n = ui::native::native_colors(cx);
+    let state = card.status.as_ref().map(|s| {
+        let (sym, color) = match tone {
+            CardTone::Neutral => (Sym::Circle, n.secondary),
+            CardTone::Info => (Sym::Live, n.blue),
+            CardTone::Success => (Sym::Done, n.green),
+            CardTone::Warning => (Sym::NeedsYou, n.amber),
+            CardTone::Danger => (Sym::Problem, n.red),
+        };
+        let ink = if tone == CardTone::Neutral {
+            n.label
+        } else {
+            color
+        };
+        ui::native::cards::state_words(
+            ui::native::cards::state_symbol(sym, color),
+            s.label.clone(),
+            ink,
+            None,
+            cx,
         )
-        .when_some(card.status.as_ref().filter(|_| !waits), |el, s| {
-            el.child(
-                div()
-                    .flex_none()
-                    .h(theme::type_scale::CARD_TITLE.1)
-                    .flex()
-                    .items_center()
-                    .child(status_label(tone, s.label.clone())),
-            )
-        });
+        .mb(space::S8)
+    });
+    let header = div().flex().flex_col().children(state).child(
+        div()
+            .min_w(px(0.))
+            .n_title3()
+            .text_color(n.label)
+            .child(card.title.clone()),
+    );
 
     let shown: Vec<(usize, &CardBlock)> = card
         .blocks
@@ -254,25 +265,12 @@ pub fn render_card(
 
     let actions = actions::render(card, message, ctx, window, cx);
 
-    ui::card(cx)
-        .relative()
+    ui::native::cards::card_frame(cx)
         .mt(space::S6)
-        .w_full()
         .max_w(px(CARD_MAX_WIDTH))
-        .when(waits, |el| {
-            el.child(
-                div()
-                    .absolute()
-                    .left_0()
-                    .top(space::S12)
-                    .bottom(space::S12)
-                    .w(px(3.))
-                    .rounded_r(px(2.))
-                    .bg(k.you_bar),
-            )
-        })
         .child(
-            ui::card_padding(div())
+            div()
+                .p(ui::native::cards::card::INSET)
                 .min_w(px(0.))
                 .flex()
                 .flex_col()

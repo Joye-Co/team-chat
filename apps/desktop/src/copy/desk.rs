@@ -50,4 +50,14 @@ crate::copy! {
     DESK_ELAPSED_HOURS = "已 {n} 小时",
     DESK_HIDE_SIDE = "收起右栏",
     DESK_SHOW_SIDE = "展开右栏",
+    // --- pages track (v12 native) ---
+    DESK_SUBTITLE_ASKS = "{n} 件事等你拍板",
+    DESK_LOOK = "看看",
+    DESK_NOTHING = "没有要你处理的事",
+    DESK_ASK_FROM = "{name} · {topic}",
+    DESK_PROOF_PR = "PR #{n}",
+    // --- end pages track ---
+    // --- v12/fx-pages ---
+    DESK_OPEN_DM = "打开私聊",
+    // --- end v12/fx-pages ---
 }

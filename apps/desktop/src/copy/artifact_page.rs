@@ -31,4 +31,18 @@ crate::copy! {
     ARTIFACT_RESPONSE_VALUE = "{name} {action}「{value}」",
     ARTIFACT_COLLAPSE = "收起右栏",
     ARTIFACT_EXPAND = "显示右栏",
+    // --- track cards: the Finder-like 产出 list (NATIVE.md §9.6) ---
+    ARTIFACTS_COUNT = "{n} 个",
+    ARTIFACTS_VIEW_GRID = "图标",
+    ARTIFACTS_VIEW_LIST = "列表",
+    ARTIFACTS_SORT_TIME = "按时间",
+    ARTIFACTS_SORT_NAME = "按名称",
+    ARTIFACTS_SORT_KIND = "按类型",
+    ARTIFACTS_COL_NAME = "名称",
+    ARTIFACTS_COL_KIND = "类型",
+    ARTIFACTS_COL_TOPIC = "话题",
+    ARTIFACTS_COL_TIME = "时间",
+    ARTIFACTS_NO_MATCH = "没有找到",
+    ARTIFACT_KIND_TIME = "{kind} · {time}",
+    // --- end track cards ---
 }
