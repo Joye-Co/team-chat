@@ -820,9 +820,11 @@ pub fn theme_vars(id: ThemeId) -> ThemeVars {
         rail: hex(k.rail),
         bg: hex(k.bg),
         sel: hex(k.sel),
-        live_mix: mix(k.live, k.raised, 0.2),
-        ok_mix: mix(k.ok, k.raised, 0.2),
-        bad_mix: mix(k.bad, k.raised, 0.2),
+        // Gantt task states in greys (§1.3: no state color as decoration):
+        // done lightest, active darker, critical darkest; the text stays ink.
+        live_mix: mix(k.ink, k.raised, 0.26),
+        ok_mix: mix(k.ink, k.raised, 0.12),
+        bad_mix: mix(k.ink, k.raised, 0.4),
         font_family:
             "-apple-system, BlinkMacSystemFont, \"PingFang SC\", \"Helvetica Neue\", sans-serif"
                 .into(),

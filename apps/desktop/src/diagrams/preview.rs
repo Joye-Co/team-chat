@@ -44,7 +44,7 @@ const SEQUENCE: &str = "sequenceDiagram\n  participant C as 客户端\n  partici
 
 const FLOW: &str = "flowchart LR\n  build[构建<br/>2 分钟] --> staging[staging<br/>已部署]\n  staging --> check{Scout 验收<br/>12 项通过}\n  check -->|通过| approve[批准]\n  check -.->|没通过就回到构建| build\n  approve --> prod[生产]\n  prod --> watch[盯 15 分钟]\n  style approve fill:#f80,stroke:#f00";
 
-const GANTT: &str = "gantt\n  dateFormat YYYY-MM-DD\n  axisFormat %m-%d\n  section 发布 v2.14\n  构建和单测 :done, b1, 2026-11-01, 1d\n  staging 验收 :active, b2, after b1, 2d\n  回滚演练 :crit, b3, after b2, 1d\n  灰度 10% :b4, after b3, 1d\n  全量 :b5, after b4, 1d";
+const GANTT: &str = "gantt\n  dateFormat YYYY-MM-DD\n  axisFormat %m-%d\n  tickInterval 1day\n  构建和单测 :done, b1, 2026-11-01, 1d\n  staging 验收 :active, b2, after b1, 2d\n  回滚演练 :crit, b3, after b2, 1d\n  灰度 10% :b4, after b3, 1d\n  全量 :b5, after b4, 1d";
 
 fn fence(src: &str) -> String {
     format!("```mermaid\n{src}\n```")

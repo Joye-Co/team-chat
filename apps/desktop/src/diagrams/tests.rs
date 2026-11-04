@@ -148,7 +148,7 @@ fn error_kinds_map_reasons_and_refusals() {
 }
 
 #[test]
-fn theme_vars_are_greyscale_except_gantt_states() {
+fn theme_vars_are_greyscale_and_gantt_states_differ() {
     for id in [
         ThemeId::Light,
         ThemeId::Dark,
@@ -163,6 +163,10 @@ fn theme_vars_are_greyscale_except_gantt_states() {
         }
         assert_ne!(v.live_mix, v.ok_mix);
         assert_ne!(v.ok_mix, v.bad_mix);
+        // Gantt states are greys: equal red, green and blue.
+        for c in [&v.live_mix, &v.ok_mix, &v.bad_mix] {
+            assert!(c[1..3] == c[3..5] && c[3..5] == c[5..7], "{c}");
+        }
     }
     assert_ne!(
         theme_vars(ThemeId::Light).ink,
