@@ -78,6 +78,7 @@ pub struct PrMerge {
 }
 
 /// A link of a topic. A link with the same kind and `url` replaces the older one.
+#[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind")]
 pub enum TopicLink {

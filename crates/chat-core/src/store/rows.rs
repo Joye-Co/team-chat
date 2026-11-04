@@ -73,6 +73,7 @@ impl OutboxState {
 
 /// One queued write. Sends are keyed by their `clientMsgId`. New optional fields must
 /// use `#[serde(default)]` so rows written by older builds still decode.
+#[allow(clippy::large_enum_variant)] // one row per queued write; boxing changes every match on it
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum OutboxOp {

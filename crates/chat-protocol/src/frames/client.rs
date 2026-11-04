@@ -22,6 +22,7 @@ use crate::serde_util::{any_value, non_null, nullable};
 use crate::topic::TopicContext;
 use crate::topic::{TopicFollowFrame, check_waiting_on};
 
+#[allow(clippy::large_enum_variant)] // frames are short-lived; boxing would change the public API
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "t")]
 pub enum ClientFrame {
