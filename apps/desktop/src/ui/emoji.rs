@@ -26,9 +26,11 @@ pub const EMOJI: &[&str] = &[
 pub const PICKER_COLUMNS: f32 = 8.;
 const CELL: f32 = 36.;
 
-/// The picker's width: eight 36 pt cells plus the surface padding.
+/// The picker's width: eight 36 pt cells plus the menu surface's padding
+/// (4 each side) and its 1 px border, so the 24 emoji fill 3 rows of 8
+/// (no 7 + 7 + 7 + 3 tail).
 pub fn picker_width() -> gpui::Pixels {
-    px(PICKER_COLUMNS * CELL + 8.)
+    px(PICKER_COLUMNS * CELL) + crate::ui::native::tokens::metrics::MENU_PAD * 2. + px(2.)
 }
 
 /// One picker cell: 36 × 36, radius 6, a 20 pt emoji; hover `hover`,
@@ -201,6 +203,15 @@ pub fn clip_units(text: &str, max: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_picker_fills_whole_rows() {
+        // 24 emoji in rows of 8, and the surface leaves room for all 8.
+        assert_eq!(EMOJI.len() % PICKER_COLUMNS as usize, 0);
+        let inner =
+            picker_width() - crate::ui::native::tokens::metrics::MENU_PAD * 2. - gpui::px(2.);
+        assert!(inner >= px(PICKER_COLUMNS * CELL));
+    }
 
     #[test]
     fn labels_name_two_then_count() {
