@@ -200,6 +200,11 @@ pub struct NativeColors {
     pub tertiary: Hsla,
     /// `input`: switch OFF track, outline control border.
     pub quaternary: Hsla,
+    /// The fill of an outline control (outline button, select, input,
+    /// checkbox): `background` in light; in dark `input` at 30 % over
+    /// `card` (shadcn `dark:bg-input/30`), so a control on a GroupBox or a
+    /// sheet reads as a raised control, not a hole (§2.22, R1-17).
+    pub control: Hsla,
     /// `border`.
     pub separator: Hsla,
     /// `muted`: control fill (secondary button, segmented track).
@@ -269,6 +274,11 @@ impl NativeColors {
             secondary: p.muted_foreground,
             tertiary: p.muted_foreground,
             quaternary: p.input,
+            control: if p.dark {
+                p.card.blend(p.input.opacity(0.3))
+            } else {
+                p.background
+            },
             separator: p.border,
             fill: p.muted,
             fill_hover: p.accent,
@@ -1198,6 +1208,16 @@ mod tests {
             assert!(contrast(d.border, surface) >= 1.5);
             assert!(contrast(d.input, surface) >= contrast(d.border, surface));
         }
+    }
+
+    #[test]
+    fn dark_controls_rise_from_their_surface() {
+        // R1-17: an outline control on a GroupBox (#171717) is lighter than
+        // the box, not the #0a0a0a window background.
+        let d = NativeColors::dark();
+        let p = Palette::dark();
+        assert!(d.control.l > p.card.l && d.control.a == 1.);
+        assert_eq!(NativeColors::light().control, Palette::light().background);
     }
 
     #[test]

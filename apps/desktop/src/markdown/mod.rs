@@ -431,9 +431,8 @@ struct Mention {
 }
 
 /// Renders mention links (`[@name](<mention:id>)`, made by
-/// [`link_mentions`]) as pills: `mention-bg` with `accent-text`, or `me-bg`
-/// with `me-text` for the viewer; radius 4, padding 0 3 (the mockup's `.mn`), weight 500 (§2.4,
-/// §4.3). Clicking one opens the member.
+/// [`link_mentions`]) as foreground 500 text; a mention of me also sits on
+/// the muted fill, radius 4, padding 0 2. Clicking one opens the member.
 struct MentionPlugin;
 
 impl MarkdownPlugin for MentionPlugin {
@@ -487,11 +486,10 @@ impl MarkdownPlugin for MentionPlugin {
         cx: &mut App,
     ) -> Option<InlineElement> {
         let mention = node.data::<Mention>()?;
-        // --- v12/fx-topic: a mention is Semibold `label` text with no
-        // background; a mention of me is `amber` text (NATIVE.md rule 4).
+        // A mention is foreground 500 (COMPLETENESS.md D3, §1.3: no state
+        // color on text, review 2 R1-05); a mention of me also gets the
+        // muted fill, so it still stands out without a color.
         let k = crate::ui::native::native_colors(cx);
-        let fg = if mention.me { k.amber } else { k.label };
-        // --- end v12/fx-topic ---
         // The text covers the font's ascent and descent and sits on the
         // line's baseline.
         let text_system = window.text_system();
@@ -519,9 +517,14 @@ impl MarkdownPlugin for MentionPlugin {
         let pill = div()
             .id(ElementId::Name(format!("mention-{member}-{at}").into()))
             .ml(gap)
-            .text_color(fg)
-            .font_weight(gpui::FontWeight::SEMIBOLD)
+            .text_color(k.label)
+            .font_weight(theme::MEDIUM_WEIGHT)
             .line_height(ascent + descent)
+            .when(mention.me, |el| {
+                el.bg(k.fill)
+                    .rounded(crate::ui::native::tokens::radius::CHECKBOX)
+                    .px(theme::space::S2)
+            })
             .cursor_pointer()
             .when(!mention.me, move |el| {
                 el.on_click(move |_, _, cx| crate::views::nav::open_dm_with(member.clone(), cx))

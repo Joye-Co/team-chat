@@ -52,21 +52,10 @@ fn ring(color: Hsla) -> BoxShadow {
     }
 }
 
-/// The (border, shadows) of a field that fills its column: the same ring
-/// drawn inside the field edge, so it never leaves the content column of a
-/// sheet or group (T1-12, §2.9).
-pub fn field_edge_inset(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<BoxShadow>) {
-    let (edge, mut shadows) = field_edge(k, focused, error);
-    if focused || error {
-        for s in &mut shadows {
-            s.inset = true;
-            s.spread_radius = metrics::FOCUS_RING - metrics::HAIRLINE;
-        }
-    }
-    (edge, shadows)
-}
-
-/// The (border, shadows) of a field in its state (§1.8).
+/// The (border, shadows) of a field in its state (§1.8). The focus and
+/// error rings are 3 px outside the 1 px border, never inside it, where they
+/// read as a second border (review 2 R1-07). Every field, a full-width one
+/// too, draws them outside; its column keeps 3 px for them.
 pub fn field_edge(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<BoxShadow>) {
     let red = k.red;
     match (error, focused) {
@@ -74,6 +63,23 @@ pub fn field_edge(k: &NativeColors, focused: bool, error: bool) -> (Hsla, Vec<Bo
         (false, true) => (Hsla { a: 1., ..k.focus }, vec![ring(k.focus)]),
         (false, false) => (k.quaternary, shadow::xs()),
     }
+}
+
+/// The 12 px fade at the end of a field's text box at rest: a value that
+/// runs past the box ends in a fade, not on a glyph cut in half. A value that
+/// fits ends before it, so it shows nothing.
+fn rest_fade(fill: Hsla) -> impl IntoElement {
+    div()
+        .absolute()
+        .top_0()
+        .bottom_0()
+        .right_0()
+        .w(space::S12)
+        .bg(gpui::linear_gradient(
+            90.,
+            gpui::linear_color_stop(fill.opacity(0.), 0.),
+            gpui::linear_color_stop(fill, 1.),
+        ))
 }
 
 /// A single-line Input (§1.8).
@@ -149,12 +155,7 @@ impl RenderOnce for NativeTextField {
             .focused
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window))
             && !self.disabled;
-        // A field that fills its column draws its ring inside (T1-12).
-        let (edge, shadows) = if self.width.is_none() {
-            field_edge_inset(&k, focused, self.error)
-        } else {
-            field_edge(&k, focused, self.error)
-        };
+        let (edge, shadows) = field_edge(&k, focused, self.error);
         div()
             .id(self.id)
             .flex_none()
@@ -165,7 +166,7 @@ impl RenderOnce for NativeTextField {
             .h(self.size.height())
             .px(metrics::FIELD_PAD)
             .rounded(metrics::FIELD_RADIUS)
-            .bg(k.content)
+            .bg(k.control)
             .border_1()
             .border_color(edge)
             .shadow(shadows)
@@ -175,11 +176,13 @@ impl RenderOnce for NativeTextField {
             .gap(space::S8)
             .cursor_text()
             .child(
-                // The text clips at the 12 px padding, never mid-glyph at
-                // the border (T1-12).
+                // The text clips at the 12 px padding, never at the border
+                // (T1-12); at rest a value longer than the field fades out
+                // over its last 12 px instead of ending on a cut glyph.
                 div()
                     .flex_1()
                     .min_w(px(0.))
+                    .relative()
                     .overflow_hidden()
                     .child(placeholder_input(
                         Input::new(&self.state)
@@ -192,7 +195,8 @@ impl RenderOnce for NativeTextField {
                             .text_color(k.label),
                         window,
                         cx,
-                    )),
+                    ))
+                    .when(!focused, |d| d.child(rest_fade(k.control))),
             )
             .children(self.trailing)
     }
@@ -242,11 +246,7 @@ impl RenderOnce for SearchField {
         let focused = self
             .focused
             .unwrap_or_else(|| self.state.read(cx).focus_handle(cx).is_focused(window));
-        let (edge, shadows) = if self.width.is_none() {
-            field_edge_inset(&k, focused, false)
-        } else {
-            field_edge(&k, focused, false)
-        };
+        let (edge, shadows) = field_edge(&k, focused, false);
         let shadows = if self.sidebar && !focused {
             Vec::new()
         } else {
@@ -263,7 +263,7 @@ impl RenderOnce for SearchField {
             .pl(metrics::FIELD_PAD)
             .pr(metrics::FIELD_PAD)
             .rounded_full()
-            .bg(k.content)
+            .bg(k.control)
             .border_1()
             .border_color(edge)
             .shadow(shadows)
@@ -322,9 +322,9 @@ mod tests {
             assert_eq!(s[0].spread_radius, metrics::FOCUS_RING);
             let (_, s) = field_edge(&k, true, false);
             assert_eq!(s[0].color, k.focus);
-            // T1-12: a full-width field keeps its ring inside its edge.
-            let (_, s) = field_edge_inset(&k, true, false);
-            assert!(s.iter().all(|s| s.inset));
+            // R1-07: the ring is outside the border, never a second border.
+            let (_, s) = field_edge(&k, true, false);
+            assert!(s.iter().all(|s| !s.inset));
         }
     }
 }

@@ -201,7 +201,7 @@ impl RenderOnce for NativeCheckbox {
                         window,
                     ))
                 } else {
-                    d.bg(k.content).shadow(vec![gpui::BoxShadow {
+                    d.bg(k.control).shadow(vec![gpui::BoxShadow {
                         spread_radius: gpui::px(1.),
                         ..k.inner_edge(k.quaternary)
                     }])
@@ -293,7 +293,7 @@ impl RenderOnce for NativeRadio {
                             .bg(k.on_primary),
                     )
                 } else {
-                    d.bg(k.content).shadow(vec![gpui::BoxShadow {
+                    d.bg(k.control).shadow(vec![gpui::BoxShadow {
                         spread_radius: gpui::px(1.),
                         ..k.inner_edge(k.quaternary)
                     }])
