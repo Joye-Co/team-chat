@@ -108,6 +108,16 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
                     .all(|r| r.get(ci).is_none_or(|v| v.is_empty() || b20::numeric(v)))
         })
         .collect();
+    // Number columns take what their numbers need, right-aligned at the row end.
+    let widths: Vec<Option<gpui::Pixels>> = numeric
+        .iter()
+        .enumerate()
+        .map(|(ci, n)| n.then(|| b20::num_col_width(columns, rows, ci)))
+        .collect();
+    let sized = |el: gpui::Stateful<gpui::Div>, ci: usize| match widths[ci] {
+        Some(w) => el.flex_none().w(w),
+        None => el.flex_1(),
+    };
     let head = meta(div())
         .flex()
         .items_center()
@@ -121,9 +131,7 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             let sorted_here = ui.sort.filter(|(c, _)| *c == ci);
             let emit = Emitter::of(ctx);
             let (uie, block, col_label) = (ctx.ui.clone(), id.clone(), label.clone());
-            div()
-                .id(eid(node, format!("th-{id}-{ci}")))
-                .flex_1()
+            sized(div().id(eid(node, format!("th-{id}-{ci}"))), ci)
                 .when(ci == 0, |el| el.min_w(px(96.)))
                 .min_w(px(0.))
                 .flex()
@@ -226,7 +234,10 @@ pub fn table(node: &Node, b: &CardV2Block, window: &gpui::Window, cx: &mut App) 
             .children((0..columns.len()).map(|ci| {
                 let text = r.get(ci).cloned().unwrap_or_default();
                 let cell = div()
-                    .flex_1()
+                    .map(|el| match widths[ci] {
+                        Some(w) => el.flex_none().w(w),
+                        None => el.flex_1(),
+                    })
                     .when(ci == 0, |el| el.min_w(px(96.)))
                     .min_w(px(0.))
                     .flex()

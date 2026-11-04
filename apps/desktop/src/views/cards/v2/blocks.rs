@@ -348,6 +348,31 @@ pub(crate) fn numeric(s: &str) -> bool {
             .all(|c| c.is_ascii_digit() || "+-−.,%  ".contains(c))
 }
 
+/// The width of number column `ci`: its widest header (12 pt) or mono cell (13 pt), at
+/// least [`m::TABLE_NUM_COL`], so the header and every row line up at the right.
+pub(crate) fn num_col_width(columns: &[String], rows: &[Vec<String>], ci: usize) -> gpui::Pixels {
+    // One CJK character is about one em; a mono or Latin character about 0.62 em.
+    let est = |t: &str, size: f32| -> f32 {
+        t.chars()
+            .map(|c| if c.is_ascii() { 0.62 * size } else { size })
+            .sum()
+    };
+    let head = columns.get(ci).map_or(0., |h| est(h, 12.));
+    let cells = rows
+        .iter()
+        .filter_map(|r| r.get(ci))
+        .map(|v| {
+            let bar = if percent(v).is_some() {
+                f32::from(m::TABLE_PCT_BAR) + f32::from(space::S8)
+            } else {
+                0.
+            };
+            est(v, 13.) + bar
+        })
+        .fold(0f32, f32::max);
+    px(head.max(cells).ceil() + 2.).max(m::TABLE_NUM_COL)
+}
+
 fn percent(s: &str) -> Option<f32> {
     s.trim()
         .strip_suffix('%')
@@ -377,11 +402,21 @@ pub(crate) fn table_with_refs(
                     .all(|r| r.get(ci).is_none_or(|v| v.is_empty() || numeric(v)))
         })
         .collect();
+    let widths: Vec<Option<gpui::Pixels>> = numeric_col
+        .iter()
+        .enumerate()
+        .map(|(ci, n)| n.then(|| num_col_width(columns, rows, ci)))
+        .collect();
     let cell = |ci: usize, text: &str, head: bool, bold: bool| {
         let num = numeric_col.get(ci).copied().unwrap_or(false);
         let pct = (!head).then(|| percent(text)).flatten();
+        // Text columns share the width; number columns take what their numbers need.
+        let width = widths.get(ci).copied().flatten();
         div()
-            .flex_1()
+            .map(|el| match width {
+                Some(w) => el.flex_none().w(w),
+                None => el.flex_1(),
+            })
             .when(ci == 0, |el| el.flex_grow(1.).min_w(px(96.)))
             .min_w(px(0.))
             .flex()
@@ -436,14 +471,7 @@ pub(crate) fn table_with_refs(
                         Some((r, w)) => r.header(el, ci, w, cx),
                         None => el.into_any_element(),
                     }
-                }))
-                .when(refs.is_some(), |el| {
-                    el.child(
-                        div()
-                            .w(px(crate::views::refs::markdown::ROW_BUTTON_SLOT))
-                            .flex_none(),
-                    )
-                }),
+                })),
         )
         .children(rows.iter().enumerate().map(|(ri, r)| {
             let total = ri == last && r.first().is_some_and(|x| x.trim() == c::TABLE_TOTAL);
@@ -481,8 +509,18 @@ pub(crate) fn table_with_refs(
                     None => el.into_any_element(),
                 }
             }))
-            .when_some(refs, |el, (rf, _)| {
-                el.child(rf.row_end_unless(ri, beside, cx))
+            // A name too long for 问这里 beside it gets it at the row end, over the row, so
+            // the number columns stay at the right edge (Interact.dc.html 02).
+            .when_some(refs.filter(|_| !beside), |el, (rf, _)| {
+                el.relative().child(
+                    div()
+                        .absolute()
+                        .top_0()
+                        .bottom_0()
+                        .right_0()
+                        .flex()
+                        .child(rf.row_end(ri, cx)),
+                )
             })
         }))
         .into_any_element()

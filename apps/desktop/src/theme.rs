@@ -1680,8 +1680,12 @@ pub mod card_v2 {
     /// Reference rows and their glyph tile.
     pub const REF_ROW: Pixels = px(60.);
     pub const REF_TILE: Pixels = px(28.);
-    /// Table rows.
-    pub const TABLE_ROW: Pixels = px(40.);
+    /// Table rows (Cards.dc.html 06, Interact.dc.html 02: 32 pt).
+    pub const TABLE_ROW: Pixels = px(32.);
+    /// The least width of a number column; numbers sit right-aligned at the row end.
+    pub const TABLE_NUM_COL: Pixels = px(52.);
+    /// The bar in front of a percent cell, and its gap.
+    pub const TABLE_PCT_BAR: Pixels = px(48.);
     /// Diff lines and the line-number columns.
     pub const DIFF_LINE: Pixels = px(20.);
     pub const DIFF_NUMBER: Pixels = px(30.);

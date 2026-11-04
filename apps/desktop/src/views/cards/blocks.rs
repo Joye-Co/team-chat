@@ -292,7 +292,18 @@ fn render_table(
     };
     let hidden = rows.len() - rows.len().min(COLLAPSED_ROWS);
 
-    let cell = |text: String, width: f32| -> Div {
+    // Number columns are right-aligned, their numbers in mono (DESIGN §7.10 Table).
+    let numeric: Vec<bool> = (0..columns.len())
+        .map(|ci| {
+            ci > 0
+                && rows.iter().all(|r| {
+                    r.get(ci)
+                        .is_none_or(|v| v.is_empty() || super::v2::blocks::numeric(v))
+                })
+        })
+        .collect();
+    let cell_in = |ci: usize, text: String, width: f32, head: bool| -> Div {
+        let num = numeric.get(ci).copied().unwrap_or(false);
         div()
             .w(px(width))
             .flex_none()
@@ -300,7 +311,8 @@ fn render_table(
             .py(space::S6)
             .flex()
             .items_center()
-            .child(text)
+            .when(num, |el| el.justify_end())
+            .child(div().when(num && !head, |el| el.mono()).child(text))
     };
     let header = div()
         .flex()
@@ -312,7 +324,7 @@ fn render_table(
                 .zip(&widths)
                 .enumerate()
                 .map(|(i, (name, w))| {
-                    let el = cell(name.clone(), *w);
+                    let el = cell_in(i, name.clone(), *w, true);
                     match &table_refs {
                         Some(r) => r.header(el, i, window, cx),
                         None => el.into_any_element(),
@@ -345,7 +357,7 @@ fn render_table(
             r.beside(name, inner, window)
         });
         line.children(widths.iter().enumerate().map(|(i, w)| {
-            let mut el = cell(row.get(i).cloned().unwrap_or_default(), *w);
+            let mut el = cell_in(i, row.get(i).cloned().unwrap_or_default(), *w, false);
             if i == 0 && beside {
                 el = el.children(table_refs.as_ref().and_then(|r| r.name_button(ri, 0., cx)));
             }
