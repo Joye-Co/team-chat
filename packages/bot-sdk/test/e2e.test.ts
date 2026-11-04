@@ -5,6 +5,7 @@ import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { BlockRefInput, Card, CardV2, Event, Message, TransientEvent } from "@chat/protocol";
 import {
+  ANONYMOUS_ACTOR,
   approvalCard,
   type AsideContext,
   blocks,
@@ -540,6 +541,48 @@ describe("1.1 cards, side chats and page events", () => {
       .answerCard(generalId, { messageId: r.message.id, rev: 1, actionId: "submit", inputs: { choice: "o1" } })
       .then(() => null, (e) => e as ChatError);
     expect(again?.code).toBe("not_found");
+  });
+
+  test("an anonymous questionnaire: the answer reaches onCardAnswer as anonymous, with no member id", async () => {
+    const got: CardAnswerContext[] = [];
+    bot.onCardAnswer((ctx) => {
+      if (ctx.card?.title === "匿名反馈") got.push(ctx);
+    });
+    const card = composeCard({
+      intent: "ask",
+      title: "匿名反馈",
+      fallback: "两道题，匿名提交。",
+      ask: { from: [ownerId()] },
+      blocks: [
+        blocks.questionnaire({
+          id: "qs",
+          anonymous: true,
+          children: [
+            blocks.rating({ id: "q1", label: "带教清楚吗？", fallbackText: "1 到 5 分" }),
+            blocks.input({ id: "q2", kind: "textarea", label: "还想说什么" }),
+          ],
+        }),
+      ],
+    });
+    const r = await bot.postCardV2({ groupId: generalId }, card);
+    await waitFor("human sees the card", () => events.find((e) => e.type === "message.created" && e.data.message.id === r.message.id));
+    // The desktop sends a questionnaire's submit as action.press of the block.
+    await (human as unknown as { request(f: Record<string, unknown>): Promise<unknown> }).request({
+      t: "card.event",
+      groupId: generalId,
+      messageId: r.message.id,
+      rev: 1,
+      clientEventId: "01JC0CEVANON0000000000000001",
+      blockId: "qs",
+      event: "action.press",
+      inputs: { q1: { value: 4 }, q2: { value: "很好" } },
+    });
+    await waitFor("anonymous answer", () => got.length === 1);
+    const a = got[0] as CardAnswerContext;
+    expect(a.anonymous).toBe(true);
+    expect(a.actorId).toBe(ANONYMOUS_ACTOR);
+    expect(a.actorId).not.toBe(ownerId());
+    expect(a.number("q1")).toBe(4);
   });
 
   test("an approval pressed by an old v1 client arrives as an answer", async () => {

@@ -99,6 +99,42 @@ describe("hello and features", () => {
   });
 });
 
+describe("anonymous actors", () => {
+  test("a run that an answer on a private card started has no requester", async () => {
+    const server = new FakeServer();
+    const bot = await start(server);
+    const runs: unknown[] = [];
+    bot.onEvent(({ event }) => {
+      if (event?.type === "run.updated") runs.push(event.data.run);
+    });
+    const run = { id: "01JC0RUN000000000000000001", botId: "01JC0MBR0000000000000OTHER", groupId: GROUP_ID, topicId: TOPIC_ID, status: "running", createdAt: 1, updatedAt: 1 };
+    server.event({ seq: 1, groupId: GROUP_ID, at: 1, actorId: HUMAN_ID, type: "run.updated", data: { run: { ...run, requestedBy: "anonymous" } } });
+    server.event({ seq: 2, groupId: GROUP_ID, at: 2, actorId: HUMAN_ID, type: "run.updated", data: { run: { ...run, requestedBy: HUMAN_ID } } });
+    for (let i = 0; i < 100 && runs.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(runs).toHaveLength(2);
+    expect(runs[0]).not.toHaveProperty("requestedBy");
+    expect((runs[1] as { requestedBy?: string }).requestedBy).toBe(HUMAN_ID);
+  });
+
+  test("a live event on a private card says it is anonymous", async () => {
+    const { server } = cardServer();
+    const bot = await start(server);
+    const r = await bot.postCardV2({ groupId: GROUP_ID, topicId: TOPIC_ID }, report());
+    const got: CardEventContext[] = [];
+    bot.onCardEvent(async (ctx) => {
+      got.push(ctx);
+      await ctx.resolve("ignored");
+    });
+    server.transient(liveEvent(r.message.id, { actorId: "anonymous" }));
+    server.transient(liveEvent(r.message.id));
+    for (let i = 0; i < 100 && got.length < 2; i++) await new Promise((r) => setTimeout(r, 10));
+    expect(got.map((c) => [c.actorId, c.anonymous])).toEqual([
+      ["anonymous", true],
+      [HUMAN_ID, false],
+    ]);
+  });
+});
+
 describe("live card events", () => {
   test("onCardEvent patches the card: baseRev, cause and the newest card", async () => {
     const { server } = cardServer();

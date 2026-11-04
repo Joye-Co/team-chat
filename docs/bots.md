@@ -197,7 +197,10 @@ bot.onCardAnswer<{ choice: string; count: number }>(async (ctx) => {
 });
 ```
 
-The values come from the client: check them. `ctx.card` is the newest rev the SDK knows (after a
+The values come from the client: check them. On a private card (a non-public poll, an
+anonymous questionnaire) `ctx.anonymous` is true and `ctx.actorId` is `"anonymous"`
+(`ANONYMOUS_ACTOR`), not a member id: do not mention it or put it in `from` or `waitingOn`. A run
+such an answer starts has no `requestedBy` in the SDK's events. `ctx.card` is the newest rev the SDK knows (after a
 restart it reads the card from the topic history). The helpers read 2.0 values (`"o2"`) and 2.1
 values (`{value}`, `{values}`, `{value, other}`). The server takes only the first answer of an
 ask round and only from members that `ask.from` names.

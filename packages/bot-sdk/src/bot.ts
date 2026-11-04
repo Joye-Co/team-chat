@@ -259,8 +259,13 @@ export interface CardEventContext {
   inputs: Record<string, unknown>;
   /** The part the event targets (`chart.select`: point or bar; `metric.press`: metric). */
   part?: PartRef;
-  /** Who acted (always a person). */
+  /**
+   * Who acted (always a person), or "anonymous" (`ANONYMOUS_ACTOR`) on a private card (a
+   * non-public poll, an anonymous questionnaire): then it is not a member id.
+   */
   actorId: string;
+  /** True on a private card: the server does not say who acted, and `actorId` is "anonymous". */
+  anonymous: boolean;
   /** True for a stored answer. */
   stored: boolean;
   answerId?: string;
@@ -491,6 +496,18 @@ interface PatchLane {
   running: boolean;
   notBefore: number;
   timer: ReturnType<typeof setTimeout> | null;
+}
+
+/** The actor id the server gives instead of a member id on a private card (protocol.md "Private answers"). */
+export const ANONYMOUS_ACTOR = "anonymous";
+
+/**
+ * A run that an answer on a private card started has `requestedBy: "anonymous"`: no member
+ * asked for it that the SDK may name, so the field is left out (no requester).
+ */
+export function withoutAnonymousRequester<R extends { requestedBy?: string | null }>(run: R): R {
+  if (run.requestedBy === ANONYMOUS_ACTOR) delete run.requestedBy;
+  return run;
 }
 
 const PING_MS = 30_000;
@@ -1143,6 +1160,7 @@ export class Bot {
   }
 
   private noteRun(run: BotRun): void {
+    withoutAnonymousRequester(run);
     if (run.botId !== this.meMember?.id && this.meMember) return;
     if (run.endedAt === undefined) this.currentRuns.set(run.topicId, run.id);
     else if (this.currentRuns.get(run.topicId) === run.id) this.currentRuns.delete(run.topicId);
@@ -1659,6 +1677,7 @@ export class Bot {
     g.applied = raw.seq;
     const parsed = EventSchema.safeParse(raw);
     const event = parsed.success ? parsed.data : null;
+    if (event?.type === "run.updated") withoutAnonymousRequester(event.data.run);
     if (!parsed.success) this.log.debug("unknown or invalid event; skipped", { type: raw.type, seq: raw.seq });
     const me = this.meMember?.id;
     const jobs: (() => unknown)[] = [];
@@ -1948,6 +1967,7 @@ export class Bot {
     const ctx: CardEventContext = {
       bot: this,
       ...rest,
+      anonymous: rest.actorId === ANONYMOUS_ACTOR,
       groupId,
       topicId,
       messageId,
