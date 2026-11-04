@@ -103,6 +103,29 @@ pub struct RailView {
     _subscriptions: Vec<Subscription>,
 }
 
+/// The 话题 whose every ask for me has my answer on 首页 that the
+/// provider does not show yet.
+fn answered_topics(services: &Services, cx: &App) -> std::collections::HashSet<String> {
+    let Some(local) = cx.try_global::<crate::views::desk::model::DeskAnswers>() else {
+        return Default::default();
+    };
+    let key = |a: &crate::data::v2::AskItem| {
+        a.message_id
+            .clone()
+            .unwrap_or_else(|| format!("topic-{}", a.topic_id))
+    };
+    let asks = services.provider.asks_for_me();
+    asks.iter()
+        .filter(|a| local.keys.contains(&key(a)))
+        .map(|a| a.topic_id.clone())
+        .filter(|t| {
+            asks.iter()
+                .filter(|a| &a.topic_id == t)
+                .all(|a| local.keys.contains(&key(a)))
+        })
+        .collect()
+}
+
 impl RailView {
     pub fn new(services: Services, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let search =
@@ -124,7 +147,8 @@ impl RailView {
             services,
             cache: None,
             list: ListState::new(0, ListAlignment::Top, LIST_OVERDRAW),
-            focus: cx.focus_handle(),
+            // R2-12, E3: Tab reaches the sidebar; ↑↓ then walk its rows.
+            focus: cx.focus_handle().tab_index(0).tab_stop(true),
             search,
             show_inactive: false,
             show_all: false,
@@ -169,11 +193,25 @@ impl RailView {
         }
         let p = self.services.provider.clone();
         let side = p.side_chat_topics();
-        let entries = match inputs.mode {
+        let mut entries = match inputs.mode {
             RailMode::Work => modes::work(p.as_ref(), &inputs),
             RailMode::Attention => modes::attention(p.as_ref(), &inputs, &side),
             RailMode::Member => modes::by_member(p.as_ref(), &mut inputs, &side),
         };
+        // R2-04, B1-06: an ask I answered on 首页 (sent, queued or still in
+        // its undo window) no longer waits on me here either: the row reads
+        // 已回答 until the server's state follows.
+        let answered = answered_topics(&self.services, cx);
+        for e in &mut entries {
+            if let modes::Item::Topic(t) = &mut e.item
+                && t.line.badge == crate::ui::native::BadgeState::NeedsYou
+                && answered.contains(&t.topic.id)
+            {
+                t.line.badge = crate::ui::native::BadgeState::Done;
+                t.line.short = c::RAIL_ANSWERED.to_string();
+                t.line.text = c::RAIL_ANSWERED.to_string();
+            }
+        }
         // C opens its first busy member on the first read.
         self.open_members = inputs.open_members.clone();
         let old = self
@@ -379,7 +417,9 @@ impl RailView {
         // §2.1: the second line is the role, never a server address.
         let role = me.role.clone().filter(|r| !r.trim().is_empty());
         let footer = match self.services.provider.connection() {
-            ConnectionState::Online | ConnectionState::Connecting => match role {
+            // R2-02, §2.15: while it connects, the second line says so.
+            ConnectionState::Connecting => footer.detail(crate::copy::connection::CONNECTING, cx),
+            ConnectionState::Online => match role {
                 Some(role) => footer.detail(role, cx),
                 None => footer,
             },
@@ -407,6 +447,12 @@ impl Render for RailView {
         let page = nav.page();
         let mode = nav.rail_mode;
         let asks = self.cache.as_ref().map_or(0, |c| c.asks);
+        // R2-02: no count on 首页 until the first sync has rows.
+        let syncing = self.cache.as_ref().is_none_or(|c| c.entries.is_empty())
+            && matches!(
+                self.services.provider.connection(),
+                crate::data::ConnectionState::Connecting
+            );
         let view = cx.entity();
         let rows = list(self.list.clone(), move |ix, _, cx| {
             view.update(cx, |this, cx| this.entry(ix, cx))
@@ -419,7 +465,7 @@ impl Render for RailView {
                 Sf::Desk,
                 c::RAIL_DESK,
                 page == Page::Desk,
-                Some(asks),
+                (!syncing).then_some(asks),
                 |n, cx| n.open_desk(cx),
             ),
             self.destination(
@@ -614,46 +660,75 @@ impl RailView {
         }
     }
 
-    /// Selects the 话题 or 私聊 row `step` rows from the selected one (the
-    /// first or last when none is selected) and opens it, as a click does;
-    /// a step of 0 opens the selected row again.
+    /// ↑↓ in the sidebar (R2-12): selects the row `step` rows from the
+    /// selected one (the first or last when none is) and opens it, as a
+    /// click does, over every row that opens something: 首页, 产出, 成员,
+    /// then the 群 headers (their pages), 话题 and 私聊. A step of 0 opens
+    /// the selected row again.
     fn move_selection(&mut self, step: isize, cx: &mut Context<Self>) {
         self.refresh(cx);
         let Some(entries) = self.cache.as_ref().map(|c| c.entries.clone()) else {
             return;
         };
-        let rows: Vec<usize> = entries
-            .iter()
-            .enumerate()
-            .filter(|(_, e)| matches!(e.item, modes::Item::Topic(_) | modes::Item::Dm { .. }))
-            .map(|(ix, _)| ix)
-            .collect();
-        let Some(last) = rows.len().checked_sub(1) else {
-            return;
-        };
-        let current = rows.iter().position(|&ix| match &entries[ix].item {
-            modes::Item::Topic(t) => t.selected,
-            modes::Item::Dm { selected, .. } => *selected,
-            _ => false,
+        #[derive(Clone, Copy, PartialEq)]
+        enum Stop {
+            Desk,
+            Artifacts,
+            Members,
+            Row(usize),
+        }
+        let page = self.services.nav.read(cx).page();
+        let mut stops = vec![Stop::Desk, Stop::Artifacts, Stop::Members];
+        stops.extend(
+            entries
+                .iter()
+                .enumerate()
+                .filter(|(_, e)| {
+                    matches!(
+                        e.item,
+                        modes::Item::Topic(_)
+                            | modes::Item::Dm { .. }
+                            | modes::Item::GroupHeader { .. }
+                    )
+                })
+                .map(|(ix, _)| Stop::Row(ix)),
+        );
+        let current = stops.iter().position(|s| match *s {
+            Stop::Desk => page == Page::Desk,
+            Stop::Artifacts => matches!(page, Page::Artifacts | Page::Artifact),
+            Stop::Members => page == Page::Members,
+            Stop::Row(ix) => match &entries[ix].item {
+                modes::Item::Topic(t) => t.selected,
+                modes::Item::Dm { selected, .. } => *selected,
+                modes::Item::GroupHeader { selected, .. } => *selected,
+                _ => false,
+            },
         });
+        let last = stops.len() - 1;
         let next = match current {
             Some(p) => p.saturating_add_signed(step).min(last),
             None if step < 0 => last,
             None => 0,
         };
-        let ix = rows[next];
-        self.list.scroll_to_reveal_item(ix);
         let nav = self.services.nav.clone();
-        match &entries[ix].item {
-            modes::Item::Topic(t) => {
-                let (g, id) = (t.topic.group_id.clone(), t.topic.id.clone());
-                nav.update(cx, |nav, cx| nav.open_topic(g, id, cx));
+        match stops[next] {
+            Stop::Desk => nav.update(cx, |nav, cx| nav.open_desk(cx)),
+            Stop::Artifacts => nav.update(cx, |nav, cx| nav.open_artifacts(cx)),
+            Stop::Members => nav.update(cx, |nav, cx| nav.open_members(None, cx)),
+            Stop::Row(ix) => {
+                self.list.scroll_to_reveal_item(ix);
+                match &entries[ix].item {
+                    modes::Item::Topic(t) => {
+                        let (g, id) = (t.topic.group_id.clone(), t.topic.id.clone());
+                        nav.update(cx, |nav, cx| nav.open_topic(g, id, cx));
+                    }
+                    modes::Item::Dm { id, .. } | modes::Item::GroupHeader { id, .. } => {
+                        let id = id.clone();
+                        nav.update(cx, |nav, cx| nav.open_group(id, cx));
+                    }
+                    _ => {}
+                }
             }
-            modes::Item::Dm { id, .. } => {
-                let id = id.clone();
-                nav.update(cx, |nav, cx| nav.open_group(id, cx));
-            }
-            _ => {}
         }
     }
 }
@@ -768,8 +843,9 @@ mod tests {
     }
 
     // --- v12/behavior ---
-    /// With the rail focused, ↓ selects and opens the next 话题 row (Mac
-    /// sidebar behavior, NATIVE.md §10), ↑ goes back, Return keeps it.
+    /// With the rail focused, ↓ selects and opens the next row (Mac sidebar
+    /// behavior, NATIVE.md §10): from 首页 through 产出, 成员 and the 群
+    /// headers to the 话题 rows (R2-12); ↑ goes back, Return keeps it.
     #[gpui::test]
     fn arrow_keys_move_the_selection_through_the_rows(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
@@ -804,8 +880,14 @@ mod tests {
         let topics = rows(&view, cx);
         assert!(topics.len() >= 2, "the sample rail lists 话题");
         view.update_in(cx, |this, window, cx| window.focus(&this.focus, cx));
-        cx.simulate_keystrokes("down");
-        cx.run_until_parked();
+        // 产出, 成员 and the first 群 header come before the first 话题.
+        for _ in 0..8 {
+            cx.simulate_keystrokes("down");
+            cx.run_until_parked();
+            if open(&view, cx).is_some() {
+                break;
+            }
+        }
         let first = open(&view, cx).expect("↓ opened a row");
         cx.simulate_keystrokes("down");
         cx.run_until_parked();

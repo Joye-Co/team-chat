@@ -13,7 +13,7 @@ pub use steps::{error_line, glyph as step_glyph, step_line};
 use std::{path::PathBuf, time::Duration};
 
 use gpui::{
-    AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, Render,
+    AnyElement, App, Context, InteractiveElement, IntoElement, ParentElement, Render, SharedString,
     StatefulInteractiveElement, Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::ActiveTheme as _;
@@ -29,7 +29,8 @@ use crate::{
     ui::{
         self, Sym,
         native::{
-            PushSize, PushStyle, StatusKind, disabled_push, label_value, native_colors, push_button,
+            NativeType as _, PushSize, PushStyle, StatusKind, disabled_push, label_value,
+            native_colors, push_button,
         },
     },
     views::shell::{clock, clock_range},
@@ -450,7 +451,11 @@ impl ProcessView {
         let now = crate::selftest::clock::utc_now().timestamp_millis();
         // The facts as DescriptionList rows (§2.5): one label column, one
         // value per row, so a fact never wraps onto a `·` of its own.
-        let value = |text: String| div().min_w_0().one_line().tnum().child(text);
+        // F3: a cut value shows the whole value in its tooltip.
+        let value = |text: String| {
+            let id = SharedString::from(format!("run-fact-{}-{}", run.id, text.len()));
+            crate::ui::truncate::TruncText::new(text).id(id).tnum()
+        };
         let ends_with_summary = self.process.steps.iter().any(|s| {
             matches!(
                 s,
@@ -518,6 +523,107 @@ impl ProcessView {
                 }
                 el.child(developer_panel(rows, cx))
             })
+    }
+
+    /// A run that ended failed (§2.15, R2-07): one Alert in the pane, in
+    /// place of the end step: the cause once (the time is the 用时 fact),
+    /// 重试 (primary sm) and 查看日志 (outline sm, the developer view with
+    /// the raw log).
+    fn failure_alert(
+        &self,
+        run: &BotRunSummary,
+        developer: bool,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if !matches!(run.status, RunStatus::Failed | RunStatus::Blocked) {
+            return None;
+        }
+        // The thread's alert reads the same cause (`timeline/plan.rs`).
+        let cause = run
+            .summary
+            .clone()
+            .or_else(|| steps::error_line(&self.process.steps))
+            .map(|c| c.trim().trim_end_matches(['。', '.']).to_string())
+            .filter(|c| !c.is_empty());
+        let title = fill(p::STEP_DONE, &[("status", status_text(run.status))]);
+        let retry = {
+            let (bot, id) = (run.bot_id.clone(), run.id.clone());
+            push_button(
+                "process-run-retry",
+                p::RETRY,
+                PushStyle::Default,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _, _, cx| {
+                let rx = this.services.provider.retry_member_problem(&bot, &id);
+                cx.spawn(async move |_, _| {
+                    let _ = rx.await;
+                })
+                .detach();
+                cx.notify();
+            }))
+        };
+        let log = (!developer).then(|| {
+            push_button(
+                "process-run-log",
+                crate::copy::timeline::RUN_VIEW_LOG,
+                PushStyle::Outline,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(|this, _, _, cx| {
+                this.services
+                    .nav
+                    .update(cx, |nav, cx| nav.set_developer_view(true, cx));
+            }))
+        });
+        // The Alert anatomy (§2.15) with the actions under the text: the
+        // pane is narrow, so the title and its cause keep the full width.
+        let n = native_colors(cx);
+        let alert = div()
+            .px(space::S16)
+            .py(space::S12)
+            .rounded(ui::native::tokens::radius::CONTAINER)
+            .border_1()
+            .border_color(n.separator)
+            .flex()
+            .items_start()
+            .gap(space::S12)
+            .child(
+                div()
+                    .flex_none()
+                    .h(ui::native::tokens::text::UI.1)
+                    .flex()
+                    .items_center()
+                    .child(ui::sym(Sym::Failed, ui::SymSize::INLINE, n.red)),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(
+                        div()
+                            .n_headline()
+                            .text_color(n.label)
+                            .line_clamp(2)
+                            .child(cause.unwrap_or(title)),
+                    )
+                    .child(div().n_body().text_color(n.secondary).child(p::FAILED_HINT))
+                    .child(
+                        div()
+                            .pt(space::S8)
+                            .flex()
+                            .items_center()
+                            .gap(space::S8)
+                            .child(retry)
+                            .children(log),
+                    ),
+            );
+        Some(div().pt(space::S12).child(alert).into_any_element())
     }
 
     fn render_developer_tail(&self, cx: &mut Context<Self>) -> impl IntoElement {
@@ -606,17 +712,15 @@ fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
         .map(|(l, v)| format!("{l}: {v}"))
         .collect::<Vec<_>>()
         .join("\n");
+    // R2-07, F4: no inner inset, so its values share the one value x of
+    // the facts above; a rule above its header sets it apart.
     div()
         .mt(space::S4)
-        .rounded(theme::radius::FIELD)
-        .border_1()
+        .border_t_1()
         .border_color(n.separator)
-        .overflow_hidden()
         .child(
             div()
                 .h(ui::native::tokens::height::FOOTER_ROW)
-                .pl(space::S12)
-                .pr(space::S8)
                 .flex()
                 .items_center()
                 .border_b_1()
@@ -643,7 +747,6 @@ fn developer_panel(rows: Vec<(&'static str, String)>, cx: &App) -> AnyElement {
         )
         .child(
             div()
-                .px(space::S12)
                 .py(space::S4)
                 .children(rows.into_iter().map(|(label, v)| {
                     label_value(
@@ -739,11 +842,14 @@ impl Render for ProcessView {
         let loading = self.process.error.is_none() && !self.process.loaded;
         body.when(titled, |el| el.child(section(p::RUNS, cx)))
             .when(!titled, |el| el.pt(space::S16))
-            .child(div().mx(-space::S8).flex().flex_col().children(rows))
+            // R2-07: the run rows sit inside the pane padding (x 1056), so
+            // the selected band lines up with the facts below.
+            .child(div().flex().flex_col().children(rows))
             .when_some(run, |el, run| {
                 el.child(self.render_run_details(&run, developer, cx))
                     .child(section(p::STEPS, cx))
                     .children(steps)
+                    .children(self.failure_alert(&run, developer, cx))
                     .when(loading, |el| {
                         el.child(ui::native::skeleton_rows(
                             ui::native::SkeletonKind::ListRow,

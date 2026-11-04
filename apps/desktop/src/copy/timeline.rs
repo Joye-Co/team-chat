@@ -77,4 +77,8 @@ crate::copy! {
     RUN_RETRY_REFUSED = "没能重试",
     RUN_VIEW_LOG = "查看日志",
     // --- end v12/fx-topic ---
+    // §2.17, R2-01: a 话题 with no messages, under its start block.
+    THREAD_EMPTY = "还没有消息，说点什么开始吧",
+    // §2.4 working card: the member and the step it is on.
+    PLAN_DOING_NAMED = "{name} 正在做：{step}",
 }

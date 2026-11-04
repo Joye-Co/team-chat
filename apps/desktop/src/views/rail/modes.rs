@@ -576,20 +576,29 @@ impl RailView {
                 r.member.name.clone(),
             )
             .leading(MemberAvatar::new(Some(&r.member), ROW_AVATAR).on(k.sidebar))
-            .unread(r.waiting_on_me > 0)
-            .disclosure(expanded);
-        row = if r.waiting_on_me > 0 {
-            row.trailing_element(crate::ui::native::page::status_badge(
+            .unread(r.waiting_on_me > 0);
+        // R2-11, §2.1: one right-column kind in the group: a StatusBadge on
+        // every busy member (`等你 2`, else `在做 3`). An open member keeps its
+        // badge (its 话题 under it show that it is open); a closed one shows
+        // the chevron on hover.
+        if !expanded {
+            row = row.disclosure(false);
+        }
+        let (status, text) = if r.waiting_on_me > 0 {
+            (
                 crate::ui::native::page::Status::NeedsYou,
                 crate::copy::fill(
                     c::RAIL_WAITS_ON_YOU_N,
                     &[("n", &r.waiting_on_me.to_string())],
                 ),
-                cx,
-            ))
+            )
         } else {
-            row.count(r.topics.len() as u32)
+            (
+                crate::ui::native::page::Status::Working,
+                crate::copy::fill(c::RAIL_WORKING_N, &[("n", &r.topics.len().to_string())]),
+            )
         };
+        row = row.trailing_element(crate::ui::native::page::status_badge(status, text, cx));
         row.on_click(move |_, _, cx| {
             let id: MemberId = id.clone();
             let _ = this.update(cx, |this, cx| {

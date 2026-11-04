@@ -10,8 +10,8 @@
 //! It replaces the v1 pending row (`live.rs`) on the 话题 page.
 
 use gpui::{
-    AnyElement, ClickEvent, Context, ElementId, IntoElement, ParentElement, SharedString, Styled,
-    div, prelude::FluentBuilder as _, px,
+    AnyElement, ClickEvent, Context, ElementId, InteractiveElement as _, IntoElement,
+    ParentElement, SharedString, Styled, div, prelude::FluentBuilder as _, px,
 };
 
 use super::{TimelineView, model, v2::GUTTER};
@@ -143,11 +143,15 @@ impl TimelineView {
             .flex()
             .items_center()
             .gap(space::S8)
+            // A2-24: while it stops, the badge says 停止中 and the title
+            // names the member only (never `Forge 在做` beside `停止中`).
             .child(div().flex_none().n_headline().text_color(n.label).child(
-                if run.plan.is_empty() {
-                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
-                } else {
+                if !run.plan.is_empty() {
                     l::LIVE_PLAN.to_string()
+                } else if stopping {
+                    name.clone()
+                } else {
+                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
                 },
             ))
             .children(progress.as_ref().map(|(step, total, _)| {
@@ -366,7 +370,7 @@ impl TimelineView {
         times: &[Millis],
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        use crate::ui::native::{BadgeState, StatusBadge, badge::state_mark, progress};
+        use crate::ui::native::{BadgeState, badge::state_mark};
         crate::selftest::drawn::mark("plan-card", run.id.clone());
         let n = native_colors(cx);
         let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
@@ -419,54 +423,25 @@ impl TimelineView {
                 None => (BadgeState::Working, c::STATE_WORKING_SHORT.to_string()),
             }
         };
+        // R2-05, A2-10: the title names the member and the step it is on;
+        // with no plan, `Forge 在做` (never a bare `计划`).
+        let name = crate::copy::isolate(&bot.as_ref().map(|m| m.name.clone()).unwrap_or_default());
         let doing = progress_of
             .as_ref()
             .and_then(|(_, _, now)| now.clone())
-            .map(|step| fill(t::PLAN_DOING, &[("step", &step)]))
-            .unwrap_or_else(|| l::LIVE_PLAN.to_string());
-        let header = div()
-            .flex()
-            .items_center()
-            .gap(space::S8)
-            .child(
-                crate::ui::truncate::TruncText::new(doing)
-                    .id(SharedString::from(format!("plan-doing-{}", run.id)))
-                    .flex_1()
-                    .n_headline()
-                    .text_color(n.label),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .child(StatusBadge::new(badge_state, badge_text)),
-            )
-            .children(toggle);
-
-        // D12: the one Progress, and the count beside it.
-        let bar = progress_of.as_ref().map(|(step, total, _)| {
-            let done = run
-                .plan
-                .iter()
-                .filter(|s| s.state == PlanState::Done)
-                .count();
-            div()
-                .flex()
-                .items_center()
-                .gap(space::S12)
-                .child(
-                    div()
-                        .flex_1()
-                        .child(progress(done as f32 / (*total).max(1) as f32, cx)),
-                )
-                .child(
-                    div()
-                        .flex_none()
-                        .n_footnote()
-                        .n_figures()
-                        .text_color(n.secondary)
-                        .child(format!("{step}/{total}")),
-                )
-        });
+            .map(|step| fill(t::PLAN_DOING_NAMED, &[("name", &name), ("step", &step)]))
+            .unwrap_or_else(|| {
+                if stopping {
+                    name.clone()
+                } else {
+                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
+                }
+            });
+        let done_steps = run
+            .plan
+            .iter()
+            .filter(|s| s.state == PlanState::Done)
+            .count();
 
         // Expanded: every step. Collapsed: only the step it is on.
         let rows: Vec<AnyElement> = run
@@ -612,62 +587,44 @@ impl TimelineView {
             .child(view)
             .children(stop);
 
-        // §2.4 compact card: radius 14, a 1 px border, the card fill,
-        // shadow-sm, p 16, gap 16, the one in-thread width.
-        let card = div()
-            .w_full()
-            .max_w(super::v2::TEXT_MAX)
-            .rounded(crate::ui::native::tokens::radius::CARD)
-            .border_1()
-            .border_color(n.separator)
-            .bg(n.sheet)
-            .shadow(crate::ui::native::tokens::shadow::sm())
-            .p(space::S16)
-            .flex()
-            .flex_col()
-            .gap(space::S16)
-            .child(header)
-            .children(bar)
-            .when(!rows.is_empty(), |el| {
-                el.child(
+        let steps = (!rows.is_empty()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .children(rows)
+                .children(doing_now.map(|d| {
                     div()
-                        .flex()
-                        .flex_col()
-                        .gap(space::S2)
-                        .children(rows)
-                        .children(doing_now.map(|d| {
-                            div()
-                                .pl(space::S32)
-                                .min_w_0()
-                                .one_line()
-                                .n_footnote()
-                                .text_color(n.secondary)
-                                .child(d)
-                        })),
-                )
-            })
-            .child(footer);
+                        .pl(space::S32)
+                        .min_w_0()
+                        .one_line()
+                        .n_footnote()
+                        .text_color(n.secondary)
+                        .child(d)
+                }))
+                .into_any_element()
+        });
+        let card = WorkingCard {
+            id: SharedString::from(format!("plan-{}", run.id)),
+            member: bot,
+            title: doing,
+            badge: (badge_state, badge_text),
+            progress: progress_of.map(|(step, total, _)| (done_steps, step, total)),
+            trailing: toggle.map(IntoElement::into_any_element),
+            body: steps,
+            footer: Some(footer.into_any_element()),
+        }
+        .render(cx);
 
+        // In the thread the card sits on the text column (x 332): its
+        // header avatar names the member, so the gutter stays empty.
         div()
             .mt(space::S16)
             .px(space::S8)
             .flex()
             .gap(space::S12)
-            .child(
-                div()
-                    .flex_none()
-                    .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER)),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S6)
-                    .child(self.v2_meta(bot.as_ref(), run.started_at.unwrap_or(run.created_at), cx))
-                    .child(card),
-            )
+            .child(div().flex_none().w(GUTTER))
+            .child(div().flex_1().min_w_0().child(card))
             .into_any_element()
     }
 
@@ -675,6 +632,93 @@ impl TimelineView {
     fn doing_now(&self, run_id: &str) -> Option<String> {
         let process = self.services.provider.run_process(run_id);
         super::live::live_label(&process.steps)
+    }
+}
+
+/// The working card (§2.4), one component for the thread and Card v2:
+/// header = avatar 24 + title 14 medium (`Forge 正在做：<step>`) + a
+/// StatusBadge (`在做 3/5`) and an optional trailing control; content =
+/// Progress h4 + `3/5` 12 muted tabular, then an optional body (the steps);
+/// footer = elapsed and start 12 muted + ghost sm 查看 and outline sm 停止…
+/// (owner decision v15), built by the caller.
+pub struct WorkingCard {
+    pub id: SharedString,
+    pub member: Option<crate::data::Member>,
+    pub title: String,
+    pub badge: (crate::ui::native::BadgeState, String),
+    /// `(done, step, total)`: the bar fills `done / total`, the count reads
+    /// `step/total`.
+    pub progress: Option<(usize, usize, usize)>,
+    pub trailing: Option<AnyElement>,
+    pub body: Option<AnyElement>,
+    pub footer: Option<AnyElement>,
+}
+
+impl WorkingCard {
+    pub fn render(self, cx: &gpui::App) -> AnyElement {
+        use crate::ui::native::{StatusBadge, progress, tokens};
+        let n = native_colors(cx);
+        let header = div()
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(div().flex_none().child(ui::MemberAvatar::new(
+                self.member.as_ref(),
+                tokens::avatar::SM,
+            )))
+            .child(
+                crate::ui::truncate::TruncText::new(self.title)
+                    .id(SharedString::from(format!("{}-title", self.id)))
+                    .flex_1()
+                    .n_headline()
+                    .text_color(n.label),
+            )
+            .child(
+                div()
+                    .flex_none()
+                    .child(StatusBadge::new(self.badge.0, self.badge.1)),
+            )
+            .children(self.trailing);
+        // D12: the one Progress, and the count beside it.
+        let bar = self.progress.map(|(done, step, total)| {
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S12)
+                .child(
+                    div()
+                        .flex_1()
+                        .child(progress(done as f32 / total.max(1) as f32, cx)),
+                )
+                .child(
+                    div()
+                        .flex_none()
+                        .n_footnote()
+                        .n_figures()
+                        .text_color(n.secondary)
+                        .child(format!("{step}/{total}")),
+                )
+        });
+        // §2.4 compact card: radius 14, a 1 px border, the card fill,
+        // shadow-sm, p 16, gap 16, the one in-thread width.
+        div()
+            .id(self.id)
+            .w_full()
+            .max_w(super::v2::TEXT_MAX)
+            .rounded(tokens::radius::CARD)
+            .border_1()
+            .border_color(n.separator)
+            .bg(n.sheet)
+            .shadow(tokens::shadow::sm())
+            .p(space::S16)
+            .flex()
+            .flex_col()
+            .gap(space::S16)
+            .child(header)
+            .children(bar)
+            .children(self.body)
+            .children(self.footer)
+            .into_any_element()
     }
 }
 

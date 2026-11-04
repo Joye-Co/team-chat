@@ -190,6 +190,7 @@ impl SideChat {
     fn header(
         &self,
         member: Option<&Member>,
+        description: String,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
@@ -259,11 +260,11 @@ impl SideChat {
                             .child(picker),
                     )
                     .child(
-                        div()
-                            .one_line()
+                        crate::ui::truncate::TruncText::new(description)
+                            .id("side-chat-description")
                             .n_footnote()
-                            .text_color(k.secondary)
-                            .child(c::SIDE_CHAT_PRIVATE),
+                            .n_figures()
+                            .text_color(k.secondary),
                     ),
             )
             .child(
@@ -317,23 +318,6 @@ impl SideChat {
                 .children(starters),
         )
         .into_any_element()
-    }
-
-    /// `Jojo 读过话题里 10:20 之前的内容`: centered `secondary` Subheadline,
-    /// no rules (NATIVE.md §9.2 day separators).
-    fn context_line(&self, template: &str, name: &str, at: Millis, cx: &App) -> AnyElement {
-        let k = native_colors(cx);
-        let text = fill(template, &[("name", name)]);
-        let text = text.replace("{time}", &clock(at));
-        div()
-            .flex()
-            .justify_center()
-            .text_center()
-            .n_subheadline()
-            .n_figures()
-            .text_color(k.secondary)
-            .child(text)
-            .into_any_element()
     }
 
     /// One message row as the thread draws it (§2.17): avatar 32, then at
@@ -901,6 +885,7 @@ impl Render for SideChat {
         // Empty: the Empty state centered in the body (§2.5). Else the
         // aside reads from the top (short threads stay top-anchored, A1),
         // and the scroll content ends 24 above the composer (§2.21).
+        let mut description = c::SIDE_CHAT_PRIVATE.to_string();
         let body = if thread.messages.is_empty() {
             let read = self.read_upto(&g, &t, None);
             div()
@@ -909,9 +894,11 @@ impl Render for SideChat {
                 .child(self.empty(&name, read, cx))
                 .into_any_element()
         } else {
-            let context = self
-                .read_upto(&g, &t, first_question)
-                .map(|at| self.context_line(c::SIDE_CHAT_READ_UPTO, &name, at, cx));
+            // R2-18, §2.5: what the member read is the header description,
+            // not a line in the body.
+            if let Some(at) = self.read_upto(&g, &t, first_question) {
+                description = fill(c::SIDE_CHAT_HEADER_READ, &[("time", &clock(at))]);
+            }
             let rows: Vec<AnyElement> = thread
                 .messages
                 .iter()
@@ -937,7 +924,6 @@ impl Render for SideChat {
                         .flex()
                         .flex_col()
                         .gap(space::S16)
-                        .children(context)
                         .children(rows),
                 )
                 .into_any_element()
@@ -948,7 +934,7 @@ impl Render for SideChat {
             .flex()
             .flex_col()
             .bg(native_colors(cx).content)
-            .child(self.header(member.as_ref(), window, cx))
+            .child(self.header(member.as_ref(), description, window, cx))
             .child(body)
             .child(self.composer(&name, window, cx))
             .into_any_element()

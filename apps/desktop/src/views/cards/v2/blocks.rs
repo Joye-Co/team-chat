@@ -2872,7 +2872,7 @@ mod tests {
     #[test]
     fn pr_tones_match_exact_words_only() {
         assert_eq!(pr_state("未合并").tone, PrTone::Plain);
-        assert_eq!(pr_state("合并中").tone, PrTone::Running);
+        assert_eq!(pr_state(rail::CHANGES_MERGING).tone, PrTone::Running);
         assert_eq!(pr_state("3 项检查通过 · 未合并").tone, PrTone::Plain);
         assert_eq!(pr_state("未合并 · 等你审").tone, PrTone::Waits);
         assert_eq!(pr_state("已合并").tone, PrTone::Merged);

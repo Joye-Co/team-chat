@@ -7,7 +7,8 @@
 
 use gpui::{
     AnyElement, App, ClickEvent, Context, ElementId, Hsla, InteractiveElement as _, IntoElement,
-    ParentElement, SharedString, StatefulInteractiveElement as _, Styled, div, px,
+    ParentElement, SharedString, StatefulInteractiveElement as _, Styled, div,
+    prelude::FluentBuilder as _, px,
 };
 
 use super::{Data, TopicRail, media_time, money_text, preview_thumbnail, step_minutes};
@@ -41,6 +42,19 @@ pub(super) const COST: &str = "cost";
 /// A small symbol in a 14 pt slot, beside 11–13 pt text.
 fn mark(sym: Sym, color: Hsla) -> AnyElement {
     ui::sym(sym, SymSize::INLINE_SMALL, color).into_any_element()
+}
+
+/// The room of a person value in the inspector: the 320 pane less its
+/// px 16, the 112 label column, its gap, and the avatar 16 with its gap 8.
+const VALUE_ROOM: f32 = 320. - 32. - 112. - 8. - 24.;
+/// A time after the person (`提出 … 09:30`) and its gap.
+const TAIL_ROOM: f32 = 48.;
+
+/// About how wide `text` sets at 14: CJK 14, other characters 7.5.
+fn text_width(text: &str) -> f32 {
+    text.chars()
+        .map(|ch| if ch.is_ascii() { 7.5 } else { 14. })
+        .sum()
 }
 
 /// A Body row: leading content, a flexible middle, trailing content.
@@ -167,9 +181,16 @@ impl TopicRail {
     ) -> AnyElement {
         let k = native_colors(cx);
         let name = member.map(|m| m.name.clone()).unwrap_or_default();
+        // R2-14, §2.21: the role truncates first, and goes when fewer than
+        // 2 of its characters would fit (never a lone `…`).
+        let room = VALUE_ROOM - if tail.is_some() { TAIL_ROOM } else { 0. };
         let role = member
             .and_then(|m| m.role.clone())
-            .filter(|r| !r.trim().is_empty());
+            .filter(|r| !r.trim().is_empty())
+            .filter(|r| {
+                let two: String = r.chars().take(2).collect();
+                text_width(&name) + 8. + text_width(&two) + 14. <= room
+            });
         div()
             .w_full()
             .min_w(px(0.))
@@ -212,16 +233,21 @@ impl TopicRail {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let k = native_colors(cx);
+        // R2-17, §2.13: no owner is a compact empty (icon and muted line),
+        // and the section header offers the ghost 指派 (§2.5).
         let owner_value: AnyElement = match owner {
             Some(id) => self.person(id, d.member(id).as_ref(), None, cx),
-            None => div()
-                .text_color(k.secondary)
-                .child(c::RAIL_EMPTY_OWNER)
+            None => EmptyLine::new(c::RAIL_EMPTY_OWNER)
+                .icon(Sym::Person)
                 .into_any_element(),
         };
-        let mut section = self
-            .section(OWNER, c::TOPIC_RAIL_PEOPLE, cx)
-            .row(label_value(c::INSPECTOR_OWNER, owner_value, cx));
+        let mut section = self.section(OWNER, c::TOPIC_RAIL_PEOPLE, cx);
+        if owner.is_none()
+            && let Some(t) = d.topic.as_ref()
+        {
+            section = section.action(self.assign_button(t, cx));
+        }
+        let mut section = section.row(label_value(c::INSPECTOR_OWNER, owner_value, cx));
         if let Some((id, at)) = by {
             // The time keeps a fixed tabular slot; the name truncates first.
             let time = div()
@@ -240,14 +266,49 @@ impl TopicRail {
         section.into_any_element()
     }
 
+    /// 计划: the plan of the run the rail shows and, while more members
+    /// work (A2-11), one block per member's run, each led by its member.
     pub(super) fn native_plan(
         &self,
         d: &Data,
         run: &BotRunSummary,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let mut section = self.section(PLAN, c::TOPIC_RAIL_PLAN, cx);
+        let many = !d.others.is_empty();
+        let blocks = std::iter::once((run, d.step_times.as_slice()))
+            .chain(d.others.iter().map(|(r, t)| (r, t.as_slice())));
+        for (i, (run, times)) in blocks.enumerate() {
+            if many {
+                let who = self.person(
+                    &format!("plan-{}", run.id),
+                    d.member(&run.bot_id).as_ref(),
+                    None,
+                    cx,
+                );
+                section = section.row(
+                    div()
+                        .w_full()
+                        .when(i > 0, |el| el.pt(space::S12))
+                        .pb(space::S4)
+                        .n_body()
+                        .child(who),
+                );
+            }
+            section = self.plan_rows(section, run, times, cx);
+        }
+        section.into_any_element()
+    }
+
+    fn plan_rows(
+        &self,
+        mut section: InspectorSection,
+        run: &BotRunSummary,
+        times: &[crate::data::Millis],
+        cx: &mut Context<Self>,
+    ) -> InspectorSection {
         let k = native_colors(cx);
-        let minutes = step_minutes(run, &d.step_times);
+        let minutes = step_minutes(run, times);
         let total = run.plan.len();
         let done = run
             .plan
@@ -291,10 +352,7 @@ impl TopicRail {
         let _ = live;
         // D12: the one Progress (h4, primary on primary 20 %).
         let bar = div().py(space::S6).child(progress(value, cx));
-        let mut section = self
-            .section(PLAN, c::TOPIC_RAIL_PLAN, cx)
-            .row(summary)
-            .row(bar);
+        section = section.row(summary).row(bar);
         for (i, item) in run.plan.iter().enumerate() {
             // §2.12: the step at work spins (info), a step that waits on a
             // person has the needs-you icon; never a free colored dot.
@@ -341,7 +399,7 @@ impl TopicRail {
                     })),
             );
         }
-        section.into_any_element()
+        section
     }
 
     pub(super) fn native_changes(
@@ -547,6 +605,8 @@ impl TopicRail {
         let name = run.machine_name.clone()?;
         let busy = run.status.is_active();
         let who = d.name(&run.bot_id);
+        // R2-14: a right-to-left name keeps its place in the line (FSI…PDI).
+        let who = crate::copy::isolate(&who);
         let line = if busy {
             fill(c::MACHINE_USING, &[("name", &who)])
         } else {
@@ -625,17 +685,28 @@ impl TopicRail {
     }
 
     pub(super) fn native_cost(&self, d: &Data, cx: &mut Context<Self>) -> Option<AnyElement> {
-        let cost = d.cost?;
-        if cost.duration_ms == 0 && cost.cost_cents.is_none() {
-            return None;
-        }
-        // One time source (T2-19): while a member works, 用时 is its run's
-        // time, the number its working card shows.
+        // One time source (T2-19, R2-04): while a member works, 用时 and 时间
+        // are its run's, the numbers its working card shows, also before the
+        // server reports a cost.
         let active = d
             .run
             .as_ref()
             .filter(|r| r.status.is_active())
             .and_then(|r| r.started_at);
+        let cost = match (d.cost, active) {
+            (Some(cost), _) => cost,
+            (None, Some(_)) => crate::data::v2::TopicCost {
+                duration_ms: 0,
+                cost_cents: None,
+                currency: crate::data::v2::Currency::Usd,
+                started_at: None,
+                ended_at: None,
+            },
+            (None, None) => return None,
+        };
+        if active.is_none() && cost.duration_ms == 0 && cost.cost_cents.is_none() {
+            return None;
+        }
         let used = match active {
             Some(at) => crate::views::timeline::plan::span_text(
                 crate::views::timeline::plan::TOOK,
@@ -658,7 +729,11 @@ impl TopicRail {
                 cx,
             ));
         }
-        if let (Some(a), Some(b)) = (cost.started_at, cost.ended_at) {
+        let range = match active {
+            Some(at) => Some((at, crate::selftest::clock::now_ms())),
+            None => cost.started_at.zip(cost.ended_at),
+        };
+        if let Some((a, b)) = range {
             section = section.row(label_value(c::INSPECTOR_WHEN, when_range(a, b), cx));
         }
         Some(section.into_any_element())

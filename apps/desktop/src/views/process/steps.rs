@@ -1,8 +1,8 @@
 //! One element per process step, in product words.
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
+    StatefulInteractiveElement as _, Styled, Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -63,6 +63,9 @@ pub fn render_steps(
         .filter(|(_, step)| {
             !(ended_with_error && matches!(step, ProcessStep::TurnCompleted { ok: false, .. }))
         })
+        // R2-07, §2.15: a failed end is the pane's failure Alert (with 重试
+        // and 查看日志), not a step row.
+        .filter(|(_, step)| !failed_end(step))
         .filter_map(|(i, step)| render_step(start + i, step, bot_name, developer, window, cx))
         .collect()
 }
@@ -85,24 +88,36 @@ fn block(_cx: &App) -> gpui::Div {
         .gap(space::S4)
 }
 
-/// Command lines and output: `code` 13/20 Menlo on `code-bg`, radius 8.
-/// The pane is narrow, so a long line wraps (a path or a log line breaks
-/// at the edge) instead of being clipped mid-glyph; explicit line breaks
-/// stay. `id` is unique within the step list.
+/// Command lines and output, in the thread's code recipe (§2.17, R2-07):
+/// `code` 13/20 Menlo, a 1 px border, radius 8, px 12, and lines that never
+/// wrap mid-token: a long line scrolls sideways inside the box. Explicit
+/// line breaks stay. `id` is unique within the step list.
 fn mono_box(id: ElementId, text: String, _window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     div()
         .id(id)
         .mt(space::S2)
         .w_full()
         .min_w(px(0.))
         .rounded(theme::radius::MD)
+        .border_1()
+        .border_color(n.separator)
         .bg(k.code_bg)
-        .px(space::S10)
-        .py(space::S8)
-        .t_code()
-        .text_color(k.text_1)
-        .child(text)
+        .overflow_x_scroll()
+        .child(
+            div()
+                .px(space::S12)
+                .py(space::S8)
+                .t_code()
+                .whitespace_nowrap()
+                .text_color(k.text_1)
+                .children(
+                    text.lines()
+                        .map(|l| div().child(l.to_string()))
+                        .collect::<Vec<_>>(),
+                ),
+        )
 }
 
 /// Where a path is cut: the folders before the last two parts, and those
@@ -207,6 +222,17 @@ pub fn step_line(step: &ProcessStep, bot_name: &str) -> Option<String> {
 }
 
 /// The error line of a failed run: the last error its steps carry.
+/// The run ended failed or stuck.
+pub fn failed_end(step: &ProcessStep) -> bool {
+    matches!(
+        step,
+        ProcessStep::Done {
+            status: RunStatus::Failed | RunStatus::Blocked,
+            ..
+        }
+    )
+}
+
 pub fn error_line(steps: &[ProcessStep]) -> Option<String> {
     steps.iter().rev().find_map(|s| match s {
         ProcessStep::Done { error: Some(e), .. }
@@ -430,7 +456,7 @@ fn render_step(
             status,
             summary,
             error,
-            duration_ms,
+            duration_ms: _,
         } => block(cx)
             .child(
                 div()
@@ -440,11 +466,8 @@ fn render_step(
                     .t_ui()
                     .medium()
                     .text_color(colors.text_1)
-                    .child(fill(p::STEP_DONE, &[("status", status_text(*status))]))
-                    .child(div().t_meta().tnum().text_color(colors.text_3).child(fill(
-                        p::DURATION,
-                        &[("d", &super::duration_text(*duration_ms))],
-                    ))),
+                    // The time is the 用时 fact above (A5): said once.
+                    .child(fill(p::STEP_DONE, &[("status", status_text(*status))])),
             )
             .when_some(summary.clone(), |el, s| {
                 el.child(
