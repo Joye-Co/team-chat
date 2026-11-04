@@ -204,6 +204,8 @@ fn body_style() -> TextViewStyle {
     let mut code = StyleRefinement::default()
         .pt(px(36.))
         .pr(theme::space::S16)
+        // §2.4: a code block takes the one in-thread width, not its text's.
+        .w_full()
         .flex()
         .flex_row()
         .items_start();

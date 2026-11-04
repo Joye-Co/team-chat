@@ -231,7 +231,12 @@ impl ComposerView {
         let key = self.key.as_ref()?;
         let topic = key.topic_id.as_deref()?;
         let runs = self.services.provider.runs(&key.group_id, topic);
-        let run = crate::views::topic_page::working_run(&runs)?;
+        let owner = self
+            .services
+            .provider
+            .topic(&key.group_id, topic)
+            .and_then(|t| t.owner_id);
+        let run = crate::views::topic_page::lead_run(&runs, owner.as_deref())?;
         Some(crate::views::shell::member_name(
             &self.services,
             &run.bot_id,

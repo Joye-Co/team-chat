@@ -16,6 +16,8 @@ crate::copy! {
     RAIL_WORKING = "在做",
     RAIL_WAITING = "等别人",
     RAIL_DONE_TODAY = "做完了 · 今天",
+    EMPTY_NO_GROUPS_TITLE = "还没有加入群",
+    RAIL_EMPTY_HINT = "加入群后，话题会列在这里",
     RAIL_MORE_MEMBERS = "+{n}",
     RAIL_SETTINGS = "设置",
     RAIL_MODE_WORK = "以工作为中心",

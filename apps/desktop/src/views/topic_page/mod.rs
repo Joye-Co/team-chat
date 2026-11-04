@@ -129,6 +129,18 @@ pub fn working_run(runs: &[BotRunSummary]) -> Option<&BotRunSummary> {
     working_runs(runs).pop()
 }
 
+/// The run a 话题's state names (T2-01): the owner's run at work, so the
+/// title bar, the inspector's 负责 and 计划 and the composer hint name one
+/// member; else the newest member at work.
+pub fn lead_run<'a>(runs: &'a [BotRunSummary], owner: Option<&str>) -> Option<&'a BotRunSummary> {
+    let at_work = working_runs(runs);
+    at_work
+        .iter()
+        .find(|r| owner == Some(r.bot_id.as_str()))
+        .or(at_work.last())
+        .copied()
+}
+
 /// The runs members work on in this 话题 now, one per member (its latest),
 /// in the order they started: one plan card each on the timeline.
 pub fn working_runs(runs: &[BotRunSummary]) -> Vec<&BotRunSummary> {
@@ -248,7 +260,7 @@ pub fn topic_state(p: &dyn ChatProvider, me: Option<&str>, topic: &Topic) -> Sta
             .short(c::STATE_YOU_SHORT);
     }
     let runs = p.runs(g, t);
-    if let Some(run) = working_run(&runs) {
+    if let Some(run) = lead_run(&runs, topic.owner_id.as_deref()) {
         let who = name(&run.bot_id);
         if p.run_stopping(&run.id) {
             let mut line = StateLine::plain(

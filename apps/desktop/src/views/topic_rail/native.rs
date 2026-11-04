@@ -11,7 +11,7 @@ use gpui::{
 };
 
 use super::{
-    Data, TopicRail, duration_parts, media_time, money_text, preview_thumbnail, step_minutes,
+    Data, TopicRail, media_time, money_text, preview_thumbnail, step_minutes,
 };
 use crate::{
     app::RightPane,
@@ -270,12 +270,14 @@ impl TopicRail {
             })
             .child(div().flex_1())
             .children(took.map(|ms| {
-                let (n, unit) = duration_parts(ms);
                 div()
                     .n_subheadline()
                     .n_figures()
                     .text_color(k.secondary)
-                    .child(format!("{n} {unit}"))
+                    .child(crate::views::timeline::plan::span_text(
+                        crate::views::timeline::plan::TOOK,
+                        ms as i64,
+                    ))
             }));
         let value = if total == 0 {
             0.
@@ -328,7 +330,10 @@ impl TopicRail {
                             .n_subheadline()
                             .n_figures()
                             .text_color(k.secondary)
-                            .child(fill(c::STEP_MINUTES, &[("n", &m.to_string())]))
+                            .child(crate::views::timeline::plan::span_text(
+                                crate::views::timeline::plan::TOOK,
+                                (m * 60_000) as i64,
+                            ))
                     })),
             );
         }
@@ -618,12 +623,26 @@ impl TopicRail {
         if cost.duration_ms == 0 && cost.cost_cents.is_none() {
             return None;
         }
-        let (n, unit) = duration_parts(cost.duration_ms);
-        let mut section = self.section(COST, c::TOPIC_RAIL_COST, cx).row(label_value(
-            c::INSPECTOR_TIME,
-            format!("{n} {unit}"),
-            cx,
-        ));
+        // One time source (T2-19): while a member works, 用时 is its run's
+        // time, the number its working card shows.
+        let active = d
+            .run
+            .as_ref()
+            .filter(|r| r.status.is_active())
+            .and_then(|r| r.started_at);
+        let used = match active {
+            Some(at) => crate::views::timeline::plan::span_text(
+                crate::views::timeline::plan::TOOK,
+                crate::selftest::clock::now_ms() - at,
+            ),
+            None => crate::views::timeline::plan::span_text(
+                crate::views::timeline::plan::TOOK,
+                cost.duration_ms as i64,
+            ),
+        };
+        let mut section = self
+            .section(COST, c::TOPIC_RAIL_COST, cx)
+            .row(label_value(c::INSPECTOR_TIME, used, cx));
         if let Some(cents) = cost.cost_cents {
             section = section.row(label_value(
                 c::INSPECTOR_COST,

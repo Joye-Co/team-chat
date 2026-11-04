@@ -443,7 +443,8 @@ impl Render for RailView {
             .tool("rail-new-topic", Sym::Compose, c::RAIL_NEW_TOPIC, cx)
             .on_click(|_, window, cx| window.dispatch_action(Box::new(NewTopic), cx));
         let filter = self.filter_button(mode, cx);
-        let first_sync = self.cache.as_ref().is_none_or(|c| c.entries.is_empty())
+        let no_rows = self.cache.as_ref().is_none_or(|c| c.entries.is_empty());
+        let first_sync = no_rows
             && matches!(
                 self.services.provider.connection(),
                 crate::data::ConnectionState::Connecting
@@ -505,7 +506,19 @@ impl Render for RailView {
                         gpui::MouseButton::Left,
                         cx.listener(|this, _, window, cx| window.focus(&this.focus, cx)),
                     )
-                    .child(if first_sync {
+                    .child(if no_rows && !first_sync {
+                        // §2.13: an empty sidebar says what will show here.
+                        div()
+                            .px(metrics::SIDEBAR_ROW_INSET)
+                            .pt(space::S8)
+                            .child(
+                                div().px(space::S8).child(
+                                    crate::ui::native::EmptyLine::new(c::RAIL_EMPTY_HINT)
+                                        .icon(Sym::Topic),
+                                ),
+                            )
+                            .into_any_element()
+                    } else if first_sync {
                         // §2.14: the first sync shows the sidebar's own
                         // shapes, never an empty panel.
                         crate::ui::native::skeleton_rows(
