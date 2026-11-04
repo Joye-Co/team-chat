@@ -1019,10 +1019,12 @@ fn date_divider(at: crate::data::Millis, cx: &App) -> impl IntoElement {
         .child(div().flex_1().h(theme::HAIRLINE).bg(colors.sep))
 }
 
-/// The new-messages divider (§7.5): a `danger` hairline with `新消息`
-/// 12/500 `danger-text` at the right.
+/// The new-messages divider: a neutral hairline (the separator token) with
+/// `新消息` in 12/500 `secondary` at the trailing end. Never a state color:
+/// red means a problem in this app, and an unread marker is not one.
 fn new_messages_divider(cx: &App) -> impl IntoElement {
     let colors = theme::colors(cx);
+    let n = crate::ui::native::native_colors(cx);
     div()
         .mx(ROW_INSET)
         .mt(space::S16)
@@ -1032,8 +1034,8 @@ fn new_messages_divider(cx: &App) -> impl IntoElement {
         .items_center()
         .gap(space::S8)
         .t_meta_medium()
-        .text_color(colors.danger_text)
-        .child(div().flex_1().h(theme::BORDER).bg(colors.danger))
+        .text_color(n.secondary)
+        .child(div().flex_1().h(theme::HAIRLINE).bg(colors.sep))
         .child(t::NEW_MESSAGES)
 }
 
