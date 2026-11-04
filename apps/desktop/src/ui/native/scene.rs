@@ -17,18 +17,20 @@ use gpui_component::input::InputState;
 use super::{
     buttons::{
         PushSize, PushStyle, ToolbarItemKind, borderless_button, borderless_text, disabled_push,
-        popup_button, pull_down, push_button, square_button, square_pair, toolbar_item,
+        popup_button, pull_down, push_button, toolbar_item,
     },
     fields::{FieldSize, NativeTextField, SearchField},
     form::{FormRow, GroupedForm, InlineValueField},
-    inspector::{CompactRow, InspectorSection, determinate_bar, inspector_column, label_value},
+    inspector::{CompactRow, InspectorSection, inspector_column, label_value},
     menu::{MenuRow, menu_separator, menu_surface, popover_surface},
     segmented::{Segment, Segmented},
     sheet::{
         AlertLayout, SheetLayout, SheetWidth, alert_button, alert_surface, sheet_buttons,
         sheet_surface,
     },
-    sidebar::{SidebarRow, SidebarSection, floating_sidebar},
+    sidebar::{
+        RightColumn, SidebarGroup, SidebarMedia, SidebarRow, SidebarSection, floating_sidebar,
+    },
     toggles::{NativeCheckbox, NativeRadio, NativeSwitch, SwitchSize},
     tokens::{NativeColors, NativeType as _, metrics, native_colors},
     toolbar::{ToolbarGroup, ToolbarRow},
@@ -67,6 +69,29 @@ pub const SCENES: &[Scene] = &[
         open: |s, c, cx| open(s, c, 2, cx),
     },
 ];
+
+/// A device row's value and its "⋯" action (§2.19).
+fn device_value(
+    id: &'static str,
+    value: &'static str,
+    window: &mut Window,
+    cx: &mut App,
+) -> gpui::Div {
+    let k = native_colors(cx);
+    div()
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .child(div().n_body().text_color(k.secondary).child(value))
+        .child(super::icon_button(
+            id,
+            Sf::More,
+            t::DEVICE_MORE,
+            super::IconSize::Small,
+            window,
+            cx,
+        ))
+}
 
 fn open(
     _services: Services,
@@ -151,7 +176,6 @@ fn hstack() -> gpui::Div {
 
 impl NativeKit {
     fn sidebar(&self, window: &mut Window, cx: &mut App) -> AnyElement {
-        let k = native_colors(cx);
         let avatar = |cx: &App| MemberAvatar::new(None, px(16.)).on(native_colors(cx).sidebar);
         floating_sidebar(cx)
             .h(px(452.))
@@ -187,26 +211,35 @@ impl NativeKit {
             )
             .child(SidebarRow::new("kit-outputs", t::OUTPUTS).symbol(Sf::Outputs))
             .child(SidebarRow::new("kit-members", t::MEMBERS).symbol(Sf::Members))
-            .child(SidebarSection::new("kit-sec-dev", t::GROUP_DEV).show_chevron(true))
+            // One media kind per group; state in the right column (§2.1).
             .child(
-                SidebarRow::new("kit-t-a", t::TOPIC_A)
-                    .state_symbol(Sf::Alert, k.amber)
-                    .unread(true)
-                    .trailing(t::TIME_A),
+                SidebarGroup::new(
+                    SidebarSection::new("kit-sec-dev", t::GROUP_DEV).show_chevron(true),
+                    SidebarMedia::None,
+                )
+                .row(SidebarRow::new("kit-t-a", t::TOPIC_A).unread(true).right(
+                    RightColumn::Status(
+                        crate::ui::native::BadgeState::NeedsYou,
+                        t::ST_NEEDS_YOU.into(),
+                    ),
+                ))
+                .row(
+                    SidebarRow::new("kit-t-b", t::TOPIC_B)
+                        .unread(true)
+                        .right(RightColumn::Count(3)),
+                )
+                .row(
+                    SidebarRow::new("kit-t-c", t::TOPIC_C)
+                        .right(RightColumn::Time(t::TIME_B.into())),
+                ),
             )
             .child(
-                SidebarRow::new("kit-t-b", t::TOPIC_B)
-                    .leading(avatar(cx))
-                    .count(3)
-                    .unread(true),
+                SidebarGroup::new(
+                    SidebarSection::new("kit-sec-dm", t::GROUP_DM),
+                    SidebarMedia::Avatar,
+                )
+                .row(SidebarRow::new("kit-dm-a", t::INS_MEMBER_VALUE).leading(avatar(cx))),
             )
-            .child(
-                SidebarRow::new("kit-t-c", t::TOPIC_C)
-                    .state_symbol(Sf::Done, k.secondary)
-                    .trailing(t::TIME_B),
-            )
-            .child(SidebarSection::new("kit-sec-dm", t::GROUP_DM))
-            .child(SidebarRow::new("kit-dm-a", t::INS_MEMBER_VALUE).leading(avatar(cx)))
             .into_any_element()
     }
 
@@ -322,7 +355,7 @@ impl NativeKit {
                     .child(sample(
                         t::STATE_PRESSED,
                         push_button("kb-5", t::APPROVE, PushStyle::Default, reg, cx)
-                            .bg(k.accent.opacity(0.82)),
+                            .bg(k.primary.opacity(0.82)),
                         &k,
                     ))
                     .child(sample(
@@ -376,11 +409,6 @@ impl NativeKit {
                         t::INVITE,
                         PushSize::Regular,
                         window,
-                        cx,
-                    ))
-                    .child(square_pair(
-                        square_button("kb-add", true, t::ADD, window, cx),
-                        square_button("kb-rm", false, t::REMOVE, window, cx),
                         cx,
                     ))
                     .child(borderless_button("kb-open", Sf::Open, t::OPEN, window, cx))
@@ -578,22 +606,18 @@ impl NativeKit {
             .child(
                 GroupedForm::new()
                     .header(t::FORM_DEVICES)
-                    .footer(t::FORM_DEVICES_FOOTER)
+                    // Row actions are visible in the row: a ghost 28 "⋯"
+                    // (§2.19), never select-then-"−".
                     .row(
                         FormRow::new(t::DEVICE_A)
                             .leading(device(Sf::Computer, window, cx))
-                            .value(t::THIS_MAC, cx),
+                            .control(device_value("kform-more-a", t::THIS_MAC, window, cx)),
                     )
                     .row(
                         FormRow::new(t::DEVICE_B)
                             .leading(device(Sf::Machines, window, cx))
-                            .value(t::LAST_SEEN, cx),
-                    )
-                    .below(square_pair(
-                        square_button("kform-add", true, t::ADD, window, cx),
-                        square_button("kform-rm", false, t::REMOVE, window, cx),
-                        cx,
-                    )),
+                            .control(device_value("kform-more-b", t::LAST_SEEN, window, cx)),
+                    ),
             )
             .into_any_element()
     }
@@ -724,7 +748,7 @@ impl NativeKit {
                     InspectorSection::new("ki-cost", t::INS_COST)
                         .row(label_value(t::INS_TIME, t::INS_TIME_VALUE, cx))
                         .row(label_value(t::INS_COST, t::INS_COST_VALUE, cx))
-                        .row(div().pt(px(6.)).child(determinate_bar(0.44, None, cx))),
+                        .row(div().pt(px(6.)).child(super::progress(0.44, cx))),
                 ),
         );
         let row = |id: &'static str, title: &'static str, cx: &App| {
@@ -762,16 +786,16 @@ impl NativeKit {
                 .flex_col()
                 .gap(px(10.))
                 .child(caption(t::PROGRESS_LABEL, &k))
-                .child(determinate_bar(0.62, None, cx))
-                .child(determinate_bar(0.3, Some(k.blue), cx))
-                .child(determinate_bar(1.0, Some(k.green), cx))
+                // D12: one Progress (and its steps variant), no colored bars.
+                .child(super::progress(0.62, cx))
+                .child(super::progress_steps(3, 5, cx))
                 .child(hstack().child(crate::ui::motion::spinner())),
         );
         // A sheet attached under the toolbar of a dimmed window.
         let app_icon = div()
             .size(metrics::ALERT_ICON)
             .rounded(px(11.))
-            .bg(k.accent)
+            .bg(k.primary)
             .flex()
             .items_center()
             .justify_center()
@@ -779,7 +803,7 @@ impl NativeKit {
                 Sf::SideChat,
                 px(26.),
                 Weight::Medium,
-                k.on_accent,
+                k.on_primary,
                 window,
             ));
         let sheet = section(t::SEC_SHEET, &k).child(
@@ -870,7 +894,7 @@ impl NativeKit {
             Alert, AlertTone, Badge, BadgeState, BadgeVariant, Card, Column, CountPill, Empty,
             EmptyLine, IconSize, KeyCap, LIST_TITLE_INSET, ListRow, PushSize, PushStyle,
             SkeletonKind, StatusBadge, icon_button, list_frame, media_box, push_button,
-            skeleton_rows, table, toast_surface, tokens::space,
+            skeleton_rows, table, tokens::space,
         };
         use crate::ui::Sym;
         let k = native_colors(cx);
@@ -900,6 +924,9 @@ impl NativeKit {
             (BadgeState::Online, t::ST_ONLINE),
             (BadgeState::Offline, t::ST_OFFLINE),
             (BadgeState::Deactivated, t::ST_DEACTIVATED),
+            (BadgeState::Paused, t::ST_PAUSED),
+            (BadgeState::Merging, t::ST_MERGING),
+            (BadgeState::Quiet, t::ST_WAITING),
         ];
         let status = section(t::SEC_STATUS, &k).child(
             div()
@@ -1032,7 +1059,9 @@ impl NativeKit {
             Column::fixed(t::COL_VERSION, px(64.)).right(),
             Column::fixed(t::COL_UPDATED, px(80.)).right(),
         ];
-        let cell = |s: &'static str| div().child(s).into_any_element();
+        // §2.21: a cell cuts with "…" and shows the whole value in a
+        // tooltip (T1-19).
+        let cell = |s: &'static str| crate::ui::truncate::TruncText::new(s).into_any_element();
         let data = vec![
             vec![
                 cell(t::TOPIC_A),
@@ -1137,27 +1166,78 @@ impl NativeKit {
                         )),
                 )
                 .child(
-                    toast_surface(cx)
-                        .flex()
-                        .items_center()
-                        .gap(space::S12)
-                        .child(crate::ui::icons::icon(
-                            Sym::Done,
-                            super::tokens::icon::MD,
-                            k.green,
-                        ))
-                        .child(div().flex_1().n_headline().child(t::TOAST_TEXT)),
+                    crate::ui::overlay::Toast::new(Sym::Done, t::TOAST_TEXT)
+                        .tone(crate::ui::overlay::Tone::Success)
+                        .description(t::TOAST_DETAIL)
+                        .action(push_button(
+                            "k3-t1",
+                            t::TOAST_UNDO,
+                            PushStyle::Outline,
+                            PushSize::Small,
+                            cx,
+                        )),
                 ),
+        );
+        // The state matrix of the current kit (T1-18, §1.8): rest, hover,
+        // pressed, focus (3 px ring), loading and disabled, for the
+        // default and the outline button.
+        let matrix_row = |style: PushStyle, label: &'static str, id: &'static str| {
+            let base = |n: &str| {
+                push_button(format!("{id}-{n}"), label, style, PushSize::Small, cx).w(px(64.))
+            };
+            let look = super::buttons::look(style, &k);
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S8)
+                .child(base("rest"))
+                .child(base("hover").bg(look.hover))
+                .child(base("pressed").bg(look.pressed))
+                .child(
+                    div()
+                        .rounded(super::tokens::radius::CONTROL)
+                        .shadow(k.focus_ring())
+                        .child(base("focus")),
+                )
+                .child(super::loading_push(base("loading"), true, PushSize::Small))
+                .child(super::disabled_push(base("disabled"), true, cx))
+        };
+        let state_labels = [
+            t::STATE_REST,
+            t::STATE_HOVER,
+            t::STATE_PRESSED,
+            t::STATE_FOCUSED,
+            t::STATE_LOADING,
+            t::STATE_DISABLED,
+        ];
+        let matrix = section(t::SEC_STATES, &k).child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S8)
+                .child(
+                    div()
+                        .flex()
+                        .gap(space::S8)
+                        .n_footnote()
+                        .text_color(k.secondary)
+                        .children(state_labels.map(|l| div().w(px(64.)).child(l))),
+                )
+                .child(matrix_row(PushStyle::Default, t::CONTINUE, "k3-m1"))
+                .child(matrix_row(PushStyle::Outline, t::CANCEL, "k3-m2")),
         );
         let col = || div().w(px(440.)).flex().flex_col().gap(space::S24);
         div()
             .size_full()
             .bg(k.content)
             .p(space::S24)
+            // The traffic lights sit in the top 52 band; content starts
+            // under it (T1-19).
+            .pt(metrics::TOOLBAR_ROW)
             .flex()
             .gap(space::S24)
             .child(col().child(badges).child(status).child(buttons).child(card))
-            .child(col().child(list).child(tables))
+            .child(col().child(list).child(tables).child(matrix))
             .child(col().child(feedback).child(empty).child(loading))
             .into_any_element()
     }

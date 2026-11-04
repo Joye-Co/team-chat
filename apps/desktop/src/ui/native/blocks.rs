@@ -2,6 +2,7 @@
 //! SectionHeader, GroupLabel, the ListRow with its frame, the Table (on
 //! gpui-component's `Table`), the DescriptionList row and the hairline.
 
+use crate::ui::truncate::TruncText;
 use std::rc::Rc;
 
 use gpui::{
@@ -306,14 +307,7 @@ pub fn group_label(label: impl Into<SharedString>, cx: &App) -> gpui::Div {
         .gap(space::S8)
         .n_section()
         .text_color(k.secondary)
-        .child(
-            div()
-                .min_w(px(0.))
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label.into()),
-        )
+        .child(TruncText::new(label))
 }
 
 // ---------------------------------------------------------------------------
@@ -463,16 +457,7 @@ impl RenderOnce for ListRow {
                             .flex()
                             .items_center()
                             .gap(space::S8)
-                            .child(
-                                div()
-                                    .min_w(px(0.))
-                                    .n_headline()
-                                    .text_color(k.label)
-                                    .overflow_hidden()
-                                    .whitespace_nowrap()
-                                    .text_ellipsis()
-                                    .child(self.title),
-                            )
+                            .child(TruncText::new(self.title).n_headline().text_color(k.label))
                             .children(self.title_lead),
                     )
                     .children(self.description.map(|d| {
@@ -736,25 +721,21 @@ pub fn description_row(
         .items_center()
         .gap(space::S8)
         .child(
-            div()
+            TruncText::new(label)
                 .flex_none()
                 .w(metrics::LABEL_COLUMN)
                 .n_body()
-                .text_color(k.secondary)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
-                .child(label.into()),
+                .text_color(k.secondary),
         )
         .child(
             div()
                 .flex_1()
                 .min_w(px(0.))
-                .n_body()
-                .text_color(k.label)
                 .overflow_hidden()
                 .whitespace_nowrap()
                 .text_ellipsis()
+                .n_body()
+                .text_color(k.label)
                 .child(value),
         )
 }

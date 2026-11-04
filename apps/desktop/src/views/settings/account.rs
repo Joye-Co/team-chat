@@ -5,32 +5,37 @@
 //! alert that can also delete this Mac's local copy.
 
 use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
-    InteractiveElement as _, IntoElement, KeyDownEvent, ParentElement, PathPromptOptions, Render,
-    Styled, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    App, AppContext as _, Context, ElementId, Entity, Focusable as _, InteractiveElement as _,
+    IntoElement, ParentElement, PathPromptOptions, Render, StatefulInteractiveElement as _, Styled,
+    Subscription, Window, div, prelude::FluentBuilder as _, px,
 };
 use gpui_component::{
     Disableable as _, WindowExt as _,
     input::{InputEvent, InputState},
-    menu::{ContextMenuExt as _, PopupMenuItem},
+    menu::{DropdownMenu as _, PopupMenuItem},
 };
 
 use super::widgets::{self, Status, answer};
-use crate::views::nav::dialogs::{sheet_footnote, sheet_form, sheet_form_row};
+use crate::ui::native::sheet::sheet_status_error;
+use crate::views::nav::dialogs::{sheet_form, sheet_form_row_invalid};
 use crate::{
     app::{Changes, Services},
-    copy::{common, fill, overlays as o, settings as s},
+    copy::{common, fill, settings as s},
     data::{Change, DeviceInfo, DeviceKind, Member, SessionState},
     ui::{
-        self, Sym, SymSize,
+        self, Sym,
         native::{
-            AlertLayout, CompactRow, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _,
-            PushSize, PushStyle, SheetLayout, SheetWidth, alert_button, disabled_push, emphasized,
-            metrics, native_colors, push_button, square_button,
+            AlertLayout, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _, PushSize,
+            PushStyle, SectionTitle, SheetLayout, SheetWidth, alert_button, disabled_push, metrics,
+            native_colors, page::outline_badge, push_button, tokens,
         },
     },
     views::topic_list::relative_time,
 };
+
+/// Device rows shown before the list scrolls inside its group (2.6): six
+/// and a half, so the cut row says there is more.
+const DEVICE_ROWS_SHOWN: f32 = 6.5;
 
 pub const NAME_MAX: usize = 64;
 pub const ROLE_MAX: usize = 64;
@@ -91,7 +96,8 @@ pub struct AccountPage {
     devices: Option<Vec<DeviceInfo>>,
     devices_status: Status,
     selected_device: Option<String>,
-    device_list: FocusHandle,
+    /// The device whose sign-out failed, for 重试.
+    failed_device: Option<String>,
     /// The 退出登录 alert's checkbox.
     wipe: bool,
     _subscriptions: Vec<Subscription>,
@@ -126,7 +132,7 @@ impl AccountPage {
             devices: None,
             devices_status: Status::Idle,
             selected_device: None,
-            device_list: cx.focus_handle(),
+            failed_device: None,
             wipe: false,
             _subscriptions: subscriptions,
         };
@@ -251,21 +257,15 @@ impl AccountPage {
                 };
                 cx.notify();
             });
-            let _ = window_handle.update(cx, |_, window, cx| match refused {
-                None => {
+            // A refusal stays in the sheet as an Alert with 重试 (no
+            // second modal over it).
+            if refused.is_none() {
+                let _ = window_handle.update(cx, |_, window, cx| {
                     if window.has_active_dialog(cx) {
                         window.close_dialog(cx);
                     }
-                }
-                // A refusal blocks: an alert over the sheet, which stays.
-                Some(e) => crate::views::nav::dialogs::error_alert(
-                    o::PROFILE_REFUSED,
-                    widgets::error_text(e),
-                    |_, _| {},
-                    window,
-                    cx,
-                ),
-            });
+                });
+            }
         })
         .detach();
     }
@@ -335,6 +335,13 @@ impl AccountPage {
         .detach();
     }
 
+    /// The failed state of 登录的设备 (a self-test scene).
+    pub fn preview_devices_failed(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.devices = None;
+        self.devices_status = Status::Failed(text.to_string().into());
+        cx.notify();
+    }
+
     pub fn select_device(&mut self, id: Option<String>, cx: &mut Context<Self>) {
         self.selected_device = id;
         cx.notify();
@@ -345,27 +352,10 @@ impl AccountPage {
         self.devices.as_ref()?.iter().find(|d| &d.id == id).cloned()
     }
 
-    fn move_selection(&mut self, down: bool, cx: &mut Context<Self>) {
-        let Some(list) = &self.devices else { return };
-        if list.is_empty() {
-            return;
-        }
-        let at = self
-            .selected_device
-            .as_ref()
-            .and_then(|id| list.iter().position(|d| &d.id == id));
-        let next = match (at, down) {
-            (None, _) => 0,
-            (Some(i), true) => (i + 1).min(list.len() - 1),
-            (Some(i), false) => i.saturating_sub(1),
-        };
-        self.selected_device = Some(list[next].id.clone());
-        cx.notify();
-    }
-
     fn sign_out_device(&mut self, id: String, cx: &mut Context<Self>) {
         let reply = self.services.provider.sign_out_device(&id);
         self.devices_status = Status::Idle;
+        self.failed_device = None;
         cx.spawn(async move |this, cx| {
             let result = answer(reply).await;
             let _ = this.update(cx, |this, cx| {
@@ -378,7 +368,10 @@ impl AccountPage {
                         this.selected_device = None;
                         this.refresh_devices(cx);
                     }
-                    Err(e) => this.devices_status = Status::from_error(e),
+                    Err(e) => {
+                        this.failed_device = Some(id.clone());
+                        this.devices_status = Status::from_error(e);
+                    }
                 }
                 cx.notify();
             });
@@ -386,7 +379,7 @@ impl AccountPage {
         .detach();
     }
 
-    /// `−` or ⌫ on the selected device: an alert; this Mac signs out the
+    /// "⋯" › 退出登录… on the selected device: an alert; this Mac signs out the
     /// whole app instead.
     pub fn confirm_remove_device(this: Entity<Self>, window: &mut Window, cx: &mut App) {
         let Some(device) = this.read(cx).selected() else {
@@ -396,10 +389,11 @@ impl AccountPage {
             Self::confirm_sign_out(this, window, cx);
             return;
         }
-        // An alert title stays short: a long name is cut with an ellipsis.
+        // The title stays one line; the name goes to the body, cut at
+        // two lines' worth.
         let full = device_name(&device);
-        let name = if full.chars().count() > 24 {
-            format!("{}…", full.chars().take(24).collect::<String>())
+        let name = if full.chars().count() > 40 {
+            format!("{}…", full.chars().take(40).collect::<String>())
         } else {
             full
         };
@@ -407,9 +401,9 @@ impl AccountPage {
         widgets::open_alert(window, cx, move |_, cx| {
             let page = this.clone();
             let id = id.clone();
-            AlertLayout::new(fill(s::DEVICE_REMOVE_TITLE, &[("name", &name)]))
+            AlertLayout::new(s::DEVICE_REMOVE_TITLE)
                 .icon(widgets::app_icon(cx))
-                .message(s::DEVICE_REMOVE_BODY)
+                .message(fill(s::DEVICE_REMOVE_BODY, &[("name", &name)]))
                 .buttons([
                     alert_button(
                         "device-remove-ok",
@@ -500,52 +494,92 @@ impl AccountPage {
                 let page = this.read(cx);
                 let me = page.me();
                 let busy = page.save.busy();
-                // A field problem turns 完成 off and shows one quiet footnote;
-                // an empty name only turns it off (NATIVE.md §7.4).
+                // The error of the last 完成 (an empty name), or a field
+                // that is too long while typing: the field turns
+                // destructive, its label too, and the message sits under it.
                 let typed_name = page.name.read(cx).value().to_string();
                 let problem = validate(&typed_name, &page.role.read(cx).value()).err();
-                let footnote = problem
-                    .as_ref()
-                    .filter(|(f, _)| !(*f == Field::Name && typed_name.trim().is_empty()))
-                    .map(|(_, e)| e.clone());
+                let shown = page.field_error.clone().or_else(|| {
+                    problem
+                        .clone()
+                        .filter(|(f, _)| !(*f == Field::Name && typed_name.trim().is_empty()))
+                });
                 let invalid = problem.is_some();
-                let avatar_status = widgets::native_status(&page.avatar, cx);
+                let bad = |f: Field| shown.as_ref().is_some_and(|(g, _)| *g == f);
                 let choose = this.clone();
                 let (cancel, done, ok) = (this.clone(), this.clone(), this.clone());
+                // Header row: avatar 64 and 更换头像… with its state.
+                let avatar_note = match &page.avatar {
+                    Status::Idle => None,
+                    Status::Busy(t) | Status::Done(t) => Some(widgets::quiet(t.clone(), cx)),
+                    Status::Failed(t) => Some(
+                        div()
+                            .n_subheadline()
+                            .text_color(native_colors(cx).red)
+                            .child(t.clone()),
+                    ),
+                };
                 let photo = div()
                     .w_full()
                     .flex()
-                    .flex_col()
                     .items_center()
-                    .gap(crate::ui::native::tokens::space::S12)
-                    .child(account_avatar(me.as_ref(), px(88.), cx))
+                    .gap(tokens::space::S16)
+                    .child(account_avatar(me.as_ref(), tokens::avatar::XL, cx))
                     .child(
-                        push_button(
-                            "profile-photo",
-                            s::CHANGE_PHOTO,
-                            PushStyle::Outline,
-                            PushSize::Small,
-                            cx,
-                        )
-                        .disabled(page.avatar.busy())
-                        .on_click(move |_, _, cx| choose.update(cx, |p, cx| p.choose_avatar(cx))),
-                    )
-                    .children(avatar_status);
+                        div()
+                            .flex_1()
+                            .min_w(gpui::Pixels::ZERO)
+                            .flex()
+                            .flex_col()
+                            .items_start()
+                            .gap(tokens::space::S8)
+                            .child(
+                                push_button(
+                                    "profile-photo",
+                                    s::CHANGE_PHOTO,
+                                    PushStyle::Outline,
+                                    PushSize::Small,
+                                    cx,
+                                )
+                                .disabled(page.avatar.busy())
+                                .on_click(move |_, _, cx| {
+                                    choose.update(cx, |p, cx| p.choose_avatar(cx))
+                                }),
+                            )
+                            .child(
+                                avatar_note.unwrap_or_else(|| widgets::quiet(s::AVATAR_HINT, cx)),
+                            ),
+                    );
                 let fields = sheet_form()
-                    .pt(px(4.))
-                    .child(sheet_form_row(
+                    .child(sheet_form_row_invalid(
                         s::NAME,
                         NativeTextField::new("profile-name", &page.name)
-                            .width(metrics::FIELD_NAME_WIDTH),
+                            .full_width()
+                            .error(bad(Field::Name)),
+                        bad(Field::Name),
                         cx,
                     ))
-                    .child(sheet_form_row(
+                    .child(sheet_form_row_invalid(
                         s::ROLE,
                         NativeTextField::new("profile-role", &page.role)
-                            .width(metrics::FIELD_NAME_WIDTH),
+                            .full_width()
+                            .error(bad(Field::Role)),
+                        bad(Field::Role),
                         cx,
-                    ))
-                    .children(footnote.map(|f| sheet_footnote(f, cx)));
+                    ));
+                let failed = match &page.save {
+                    Status::Failed(t) => Some(widgets::failed_alert(
+                        "profile-failed",
+                        s::PROFILE_FAILED,
+                        Some(t.clone()),
+                        Some(widgets::retry_button("profile-retry", cx).on_click({
+                            let page = this.clone();
+                            move |_, window, cx| page.update(cx, |p, cx| p.save(window, cx))
+                        })),
+                        cx,
+                    )),
+                    _ => None,
+                };
                 dialog
                     .on_ok(move |_, window, cx| {
                         ok.update(cx, |p, cx| p.save(window, cx));
@@ -560,12 +594,18 @@ impl AccountPage {
                             .explanation(s::EDIT_PROFILE_HINT)
                             .body(photo)
                             .body(fields)
+                            .when_some(failed, |l, f| l.body(f))
+                            // The field error sits in the footer's left
+                            // slot, so the sheet keeps its height (2.8).
+                            .when_some(shown.clone(), |l, (_, e)| {
+                                l.status(sheet_status_error(e, cx))
+                            })
                             .buttons([
                                 push_button(
                                     "profile-cancel",
                                     common::CANCEL,
                                     PushStyle::Outline,
-                                    PushSize::Large,
+                                    PushSize::Regular,
                                     cx,
                                 )
                                 .on_click({
@@ -580,7 +620,7 @@ impl AccountPage {
                                         "profile-done",
                                         s::DONE,
                                         PushStyle::Default,
-                                        PushSize::Large,
+                                        PushSize::Regular,
                                         cx,
                                     ),
                                     busy || invalid,
@@ -663,200 +703,130 @@ impl AccountPage {
             )
     }
 
-    fn device_row(&self, d: &DeviceInfo, window: &Window, cx: &mut Context<Self>) -> CompactRow {
-        let k = native_colors(cx);
-        let selected = self.selected_device.as_deref() == Some(d.id.as_str());
-        let focused = self.device_list.is_focused(window);
-        let ink = CompactRow::selection_ink(selected, focused, emphasized(window), cx);
-        let text = ink.map(|i| i.1).unwrap_or(k.label);
-        let quiet = if ink.is_some_and(|(fill, _)| fill == k.accent) {
-            k.on_accent
-        } else {
-            k.secondary
-        };
+    /// One device (2.19): a 28 icon box, the name, "这台 Mac" as an
+    /// outline badge, when it was last used, and "⋯" › 退出登录….
+    fn device_row(
+        &self,
+        d: &DeviceInfo,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> gpui::AnyElement {
+        let now = crate::selftest::clock::local_now();
         let when = if d.this_mac {
-            s::THIS_MAC.to_string()
+            s::DEVICE_IN_USE.to_string()
         } else {
             match d.last_seen_at {
-                Some(at) => fill(
-                    s::DEVICE_SEEN,
-                    &[(
-                        "when",
-                        &relative_time(at as i64, crate::selftest::clock::local_now()),
-                    )],
-                ),
-                None => s::DEVICE_NEVER_USED.to_string(),
+                Some(at) if at > 0 => {
+                    fill(s::DEVICE_SEEN, &[("when", &relative_time(at as i64, now))])
+                }
+                _ => s::DEVICE_NEVER_USED.to_string(),
             }
         };
-        let id = d.id.clone();
-        let list = self.device_list.clone();
-        CompactRow::new(ElementId::Name(format!("device-{}", d.id).into()))
-            .height(metrics::FORM_ROW - px(4.))
-            .selected(selected)
-            .list_focused(focused)
-            .on_click(cx.listener(move |this, _, window, cx| {
-                list.focus(window, cx);
-                this.select_device(Some(id.clone()), cx);
-            }))
-            .child(ui::sym(device_symbol(d.kind), SymSize::SIDEBAR, quiet))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w(px(0.))
-                    .n_body()
-                    .text_color(text)
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(device_name(d)),
+        let (page, id) = (cx.entity(), d.id.clone());
+        let more = widgets::more_button(
+            ElementId::Name(format!("device-more-{}", d.id).into()),
+            window,
+            cx,
+        )
+        .dropdown_menu(move |menu, _, _| {
+            let (page, id) = (page.clone(), id.clone());
+            menu.item(
+                PopupMenuItem::new(s::DEVICE_SIGN_OUT_ITEM).on_click(move |_, window, cx| {
+                    page.update(cx, |p, cx| p.select_device(Some(id.clone()), cx));
+                    Self::confirm_remove_device(page.clone(), window, cx);
+                }),
             )
-            .child(
-                div()
-                    .flex_none()
-                    .n_body()
-                    .n_figures()
-                    .text_color(quiet)
-                    .child(when),
-            )
+        });
+        widgets::ItemRow::new(
+            ElementId::Name(format!("device-{}", d.id).into()),
+            device_name(d),
+        )
+        .media(widgets::icon_box_28(device_symbol(d.kind), cx))
+        .when(d.this_mac, |r| r.title_lead(outline_badge(s::THIS_MAC, cx)))
+        .meta(when)
+        .menu(more)
+        .into_any_element()
+    }
+
+    /// 登录的设备: the list in its group, capped with a scroll inside it,
+    /// or its loading, empty or failed state.
+    fn devices_section(&self, window: &Window, cx: &mut Context<Self>) -> gpui::Div {
+        let mut header = SectionTitle::new(s::DEVICES).description(s::DEVICES_HINT);
+        let body: gpui::AnyElement = match (&self.devices, &self.devices_status) {
+            (Some(list), _) if !list.is_empty() => {
+                header = header.count(list.len() as u32);
+                let rows: Vec<gpui::AnyElement> = list
+                    .clone()
+                    .iter()
+                    .map(|d| self.device_row(d, window, cx))
+                    .collect();
+                GroupedForm::new()
+                    .row(
+                        div()
+                            .id("device-rows")
+                            .w_full()
+                            .max_h(metrics::FORM_ROW * DEVICE_ROWS_SHOWN)
+                            .overflow_y_scroll()
+                            .child(widgets::item_rows(rows, tokens::height::SM, cx)),
+                    )
+                    .into_any_element()
+            }
+            (Some(_), _) => GroupedForm::new()
+                .row(widgets::list_empty(Sym::Laptop, s::DEVICES_EMPTY, None, cx))
+                .into_any_element(),
+            (None, Status::Failed(t)) => widgets::failed_alert(
+                "devices-failed",
+                s::DEVICES_FAILED,
+                Some(t.clone()),
+                Some(
+                    widgets::retry_button("devices-retry", cx)
+                        .on_click(cx.listener(|this, _, _, cx| this.refresh_devices(cx))),
+                ),
+                cx,
+            ),
+            (None, _) => GroupedForm::new()
+                .row(widgets::list_loading("devices-loading", 2, false, cx))
+                .into_any_element(),
+        };
+        // A device that did not sign out: the Alert under the list, 重试
+        // signs it out again.
+        let sign_out_failed = match (&self.devices, &self.devices_status, &self.failed_device) {
+            (Some(_), Status::Failed(t), Some(id)) => {
+                let id = id.clone();
+                Some(widgets::failed_alert(
+                    "device-sign-out-failed",
+                    s::DEVICE_SIGN_OUT_FAILED,
+                    Some(t.clone()),
+                    Some(widgets::retry_button("device-sign-out-retry", cx).on_click(
+                        cx.listener(move |this, _, _, cx| this.sign_out_device(id.clone(), cx)),
+                    )),
+                    cx,
+                ))
+            }
+            _ => None,
+        };
+        widgets::section(
+            header,
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .gap(tokens::space::S12)
+                .child(body)
+                .children(sign_out_failed),
+        )
     }
 }
 
 impl Render for AccountPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let k = native_colors(cx);
         let signed_in = self.me().is_some();
-        let page = cx.entity();
-        let rows: Vec<gpui::AnyElement> = match (&self.devices, &self.devices_status) {
-            (Some(list), _) if !list.is_empty() => list
-                .clone()
-                .iter()
-                .map(|d| {
-                    // The context menu: 退出这台设备的登录… (this Mac: the
-                    // 退出登录… alert).
-                    let (page, id) = (page.clone(), d.id.clone());
-                    div()
-                        .id(gpui::ElementId::Name(
-                            format!("device-menu-{}", d.id).into(),
-                        ))
-                        .child(self.device_row(d, window, cx))
-                        .context_menu(move |menu, _, _| {
-                            let (page, id) = (page.clone(), id.clone());
-                            menu.item(PopupMenuItem::new(o::DEVICE_SIGN_OUT_MENU).on_click(
-                                move |_, window, cx| {
-                                    page.update(cx, |p, cx| p.select_device(Some(id.clone()), cx));
-                                    Self::confirm_remove_device(page.clone(), window, cx);
-                                },
-                            ))
-                        })
-                        .into_any_element()
-                })
-                .enumerate()
-                .flat_map(|(i, row)| {
-                    // A hairline between rows, inset 12 pt from the group
-                    // edges (the list sits 4 pt outside them).
-                    let line = (i > 0).then(|| {
-                        div()
-                            .mx(metrics::FORM_ROW_INSET + px(4.))
-                            .h(crate::ui::native::tokens::layout::BORDER)
-                            .bg(k.separator)
-                            .into_any_element()
-                    });
-                    line.into_iter().chain(std::iter::once(row))
-                })
-                .collect(),
-            (Some(_), _) => vec![
-                div()
-                    .px(metrics::FORM_ROW_INSET)
-                    .h(metrics::FORM_ROW)
-                    .flex()
-                    .items_center()
-                    .n_body()
-                    .text_color(k.secondary)
-                    .child(s::DEVICES_EMPTY)
-                    .into_any_element(),
-            ],
-            (None, Status::Failed(t)) => vec![
-                div()
-                    .px(metrics::FORM_ROW_INSET)
-                    .h(metrics::FORM_ROW)
-                    .flex()
-                    .items_center()
-                    .n_body()
-                    .text_color(k.secondary)
-                    .child(t.clone())
-                    .into_any_element(),
-            ],
-            (None, _) => vec![
-                div()
-                    .h(metrics::FORM_ROW)
-                    .flex()
-                    .items_center()
-                    .justify_center()
-                    .child(ui::native::spinner())
-                    .into_any_element(),
-            ],
-        };
-        let can_remove = self.selected().is_some();
-        let remove_page = page.clone();
-        let remove = div()
-            .flex_none()
-            .h(metrics::SQUARE_BUTTON)
-            .rounded(metrics::BUTTON_REGULAR_RADIUS)
-            .bg(k.fill)
-            .overflow_hidden()
-            .when(!can_remove, |d| d.opacity(0.5))
-            .child(
-                square_button("device-remove", false, s::DEVICE_REMOVE, window, cx)
-                    .disabled(!can_remove)
-                    .on_click(move |_, window, cx| {
-                        Self::confirm_remove_device(remove_page.clone(), window, cx)
-                    }),
-            );
-        let key_page = page.clone();
-        let devices = div()
-            .id("device-list")
-            .track_focus(&self.device_list)
-            .on_key_down(
-                move |e: &KeyDownEvent, window, cx| match e.keystroke.key.as_str() {
-                    "up" | "down" => {
-                        let down = e.keystroke.key == "down";
-                        key_page.update(cx, |p, cx| p.move_selection(down, cx));
-                        cx.stop_propagation();
-                    }
-                    "backspace" | "delete" => {
-                        Self::confirm_remove_device(key_page.clone(), window, cx);
-                        cx.stop_propagation();
-                    }
-                    _ => {}
-                },
-            )
-            .child(
-                GroupedForm::new()
-                    .header(s::DEVICES)
-                    // List rows inset their selection; the text lines up
-                    // with the other groups' 12 pt.
-                    .row(
-                        div()
-                            .py(px(4.))
-                            .mx(px(-4.))
-                            .flex()
-                            .flex_col()
-                            .children(rows),
-                    )
-                    .below(div().flex().child(remove)),
-            );
-        let sign_out_page = page.clone();
+        let sign_out_page = cx.entity();
         widgets::pane()
             .child(GroupedForm::new().row(self.header(cx)))
-            .child(devices)
-            // A failed sign-out of a device shows under the list.
-            .children(
-                (self.devices.is_some() && matches!(self.devices_status, Status::Failed(_)))
-                    .then(|| widgets::native_status(&self.devices_status, cx))
-                    .flatten(),
-            )
+            .child(self.devices_section(window, cx))
             .child(
-                div().pt(px(4.)).flex().child(
+                div().flex().child(
                     disabled_push(
                         push_button(
                             "sign-out",

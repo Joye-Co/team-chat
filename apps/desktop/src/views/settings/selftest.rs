@@ -689,7 +689,11 @@ fn after_fit(
 }
 
 /// A pane scrolled to its end after its first layout.
-fn open_end(services: Services, page: Page, cx: &mut App) -> Result<AnyWindowHandle, String> {
+pub(crate) fn open_end(
+    services: Services,
+    page: Page,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
     let (handle, view) = open_page(services, page, cx)?;
     handle
         .update(cx, |_, window, _| {
@@ -727,6 +731,8 @@ pub fn open_notifications_end(
                 cx,
             )
         });
+        // The pane is taller than the window: show its end (按群).
+        view.read(cx).scroll_to_end();
     });
     Ok(handle)
 }
@@ -808,6 +814,53 @@ pub fn open_device_remove(
     .detach();
     Ok(handle)
 }
+
+// --- v14/t4 lists ---
+
+/// 账号 with 登录的设备 failed to load: the Alert with 重试.
+pub fn open_devices_failed(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Account, cx)?;
+    let account = view.read(cx).account().clone();
+    cx.spawn(async move |cx| {
+        // After the first load, so it does not replace the state.
+        wait_for(cx, |cx| {
+            cx.update(|cx| account.read(cx).devices().map(|_| ()))
+        })
+        .await;
+        let _ = cx.update(|cx| {
+            account.update(cx, |a, cx| {
+                a.preview_devices_failed(crate::copy::settings::ERROR_OFFLINE, cx)
+            })
+        });
+    })
+    .detach();
+    Ok(handle)
+}
+
+/// 机器 while the list loads: skeleton rows at the row height.
+pub fn open_machines_loading(
+    services: Services,
+    _content: gpui::Size<gpui::Pixels>,
+    cx: &mut App,
+) -> Result<AnyWindowHandle, String> {
+    let (handle, view) = open_page(services, Page::Machines, cx)?;
+    let machines = view.read(cx).machines().clone();
+    cx.spawn(async move |cx| {
+        wait_for(cx, |cx| {
+            cx.update(|cx| machines.read(cx).machines().map(|_| ()))
+        })
+        .await;
+        let _ = cx.update(|cx| machines.update(cx, |m, cx| m.preview_loading(cx)));
+    })
+    .detach();
+    Ok(handle)
+}
+
+// --- end v14/t4 lists ---
 
 /// 通知 with the 按群设置 sheet open.
 pub fn open_notify_groups(
@@ -969,6 +1022,22 @@ pub const SCENES: &[Scene] = &[
         open: crate::updater::preview::open_ready,
     },
     // --- end v12/fx-overlays ---
+    // --- v14/t4 lists ---
+    Scene {
+        name: "settings-devices-failed",
+        about: "Settings: 账号 when 登录的设备 failed to load: the Alert with 重试",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_devices_failed,
+    },
+    Scene {
+        name: "settings-machines-loading",
+        about: "Settings: 机器 while the list loads: skeleton rows",
+        start: Start::SignedIn,
+        setup: |_, _| {},
+        open: open_machines_loading,
+    },
+    // --- end v14/t4 lists ---
     Scene {
         name: "settings-notify-groups",
         about: "Settings: the 按群设置通知 sheet over 通知",

@@ -95,7 +95,7 @@ impl RenderOnce for NativeSwitch {
             .read(cx)
             .clone();
         let focused = self.focused || handle.is_focused(window);
-        let track = if self.on { k.accent } else { k.quaternary };
+        let track = if self.on { k.primary } else { k.quaternary };
         let on_change = self.on_change.clone();
         BaseSwitch::new(self.id)
             .checked(self.on)
@@ -193,11 +193,11 @@ impl RenderOnce for NativeCheckbox {
             .justify_center()
             .map(|d| {
                 if self.on {
-                    d.bg(k.accent).child(symbol(
+                    d.bg(k.primary).child(symbol(
                         Sf::Check,
                         metrics::CHECKMARK,
                         Weight::Semibold,
-                        k.on_accent,
+                        k.on_primary,
                         window,
                     ))
                 } else {
@@ -286,11 +286,11 @@ impl RenderOnce for NativeRadio {
             .justify_center()
             .map(|d| {
                 if self.on {
-                    d.bg(k.accent).child(
+                    d.bg(k.primary).child(
                         div()
                             .size(metrics::RADIO_DOT)
                             .rounded_full()
-                            .bg(k.on_accent),
+                            .bg(k.on_primary),
                     )
                 } else {
                     d.bg(k.content).shadow(vec![gpui::BoxShadow {

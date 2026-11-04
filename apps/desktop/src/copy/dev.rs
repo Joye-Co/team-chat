@@ -55,4 +55,9 @@ crate::copy! {
     SF_SET_APP = "App icons (Sym via svg(), §6 sizes)",
     SF_SET_BEFORE = "Lucide (before, stroke 1.75)",
     // --- end v12/symbols ---
+    // --- v14/t4: the developer rows of Settings › 通用 (labels localized, 2.19) ---
+    LABEL_CONNECTION = "连接",
+    LABEL_SERVER = "服务器",
+    LABEL_MEMBER_ID = "成员 ID",
+    // --- end v14/t4 ---
 }
