@@ -921,14 +921,17 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
             n += 1;
         }
         let head = numbered.then(|| {
+            // The number and the kind sit on the label's first line, also
+            // when the label wraps (break-ui): top-aligned, on its 20 line.
             div()
                 .flex()
-                .items_baseline()
+                .items_start()
                 .gap(space::S8)
                 .min_w(px(0.))
                 .child(
                     meta(div())
                         .flex_none()
+                        .line_height(px(20.))
                         .mono()
                         .text_color(k.ink_3)
                         .child(n.to_string()),
@@ -944,6 +947,7 @@ fn questionnaire(node: &Node, b: &CardV2Block, window: &mut Window, cx: &mut App
                     meta(div())
                         .ml_auto()
                         .flex_none()
+                        .line_height(px(20.))
                         .text_color(k.ink_3)
                         .child(leaves::question_kind(q)),
                 )
