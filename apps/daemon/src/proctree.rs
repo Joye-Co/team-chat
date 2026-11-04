@@ -199,7 +199,7 @@ pub fn orphans(run_dir: &Path) -> Vec<Target> {
     let (own_group, own_pid) = unsafe { (libc::getpgrp(), libc::getpid()) };
     let mut out = vec![];
     for pid in own_pids() {
-        if pid <= 1 || pid == own_pid || !environ(pid).iter().any(|e| *e == want) {
+        if pid <= 1 || pid == own_pid || !environ(pid).contains(&want) {
             continue;
         }
         let t = match pgid(pid) {
