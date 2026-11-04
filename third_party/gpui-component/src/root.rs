@@ -720,6 +720,9 @@ impl gpui_base::RootPlugin for WindowState {
         surface.style().refine(
             &gpui::StyleRefinement::default()
                 .font_family(cx.theme().font_family.clone())
+                // TeamChat (COMPLETENESS.md D1): rem 16, root text 14.
+                .text_size(gpui::rems(0.875))
+                .line_height(gpui::rems(1.25))
                 .bg(cx.theme().tokens.background)
                 .text_color(cx.theme().foreground),
         );

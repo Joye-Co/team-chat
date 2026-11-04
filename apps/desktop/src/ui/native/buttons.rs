@@ -53,7 +53,8 @@ impl PushSize {
         match self {
             PushSize::Regular => metrics::BUTTON_REGULAR_RADIUS,
             PushSize::Small => metrics::BUTTON_SMALL_RADIUS,
-            PushSize::Large => metrics::BUTTON_LARGE / 2.,
+            // §1.8: every button size has radius 8; the capsule goes.
+            PushSize::Large => metrics::BUTTON_REGULAR_RADIUS,
         }
     }
 
@@ -66,11 +67,21 @@ impl PushSize {
     }
 }
 
-/// The (fill, text, pressed fill) of a push button style.
+/// The (fill, text, pressed fill) of a push button style. Standard and
+/// Destructive are the outline variant of COMPLETENESS.md §1.8 (D11):
+/// `background` fill, a 1 px `input` border, shadow xs.
 fn push_colors(style: PushStyle, k: &NativeColors) -> (Hsla, Hsla, Hsla) {
     match style {
-        PushStyle::Standard | PushStyle::Destructive => (k.fill, k.label, k.fill_hover),
-        PushStyle::Default => (k.accent, k.on_accent, k.accent.opacity(0.82)),
+        PushStyle::Standard | PushStyle::Destructive => (k.content, k.label, k.pressed),
+        PushStyle::Default => (k.accent, k.on_accent, k.accent.opacity(0.8)),
+    }
+}
+
+/// The (hover fill, border) of a push button style.
+fn push_edge(style: PushStyle, k: &NativeColors) -> (Hsla, Option<Hsla>) {
+    match style {
+        PushStyle::Standard | PushStyle::Destructive => (k.fill_hover, Some(k.quaternary)),
+        PushStyle::Default => (k.accent.opacity(0.9), None),
     }
 }
 
@@ -97,10 +108,11 @@ pub fn push_button(
 ) -> Button {
     let k = native_colors(cx);
     let (fill, text, pressed) = push_colors(style, &k);
+    let (hover, border) = push_edge(style, &k);
     let variant = ButtonCustomVariant::new(cx)
         .color(fill)
         .foreground(text)
-        .hover(fill)
+        .hover(hover)
         .active(pressed);
     let b = Button::new(id)
         .custom(variant)
@@ -111,7 +123,13 @@ pub fn push_button(
         .rounded(size.radius())
         .bg(fill)
         .text_color(text)
-        .border_0();
+        .map(|b| match border {
+            Some(edge) => b
+                .border_1()
+                .border_color(edge)
+                .shadow(super::tokens::shadow::xs()),
+            None => b.border_0(),
+        });
     let b = match size {
         PushSize::Small => b.n_callout(),
         _ => b.n_body(),
@@ -122,11 +140,10 @@ pub fn push_button(
     }
 }
 
-/// A disabled push button: `tertiary` text on a quieter fill.
-pub fn disabled_push(b: Button, disabled: bool, cx: &App) -> Button {
-    let k = native_colors(cx);
-    b.disabled(disabled)
-        .when(disabled, |b| b.bg(k.fill).text_color(k.tertiary))
+/// A disabled push button: the same variant at 50 % (COMPLETENESS.md §1.8,
+/// D11), so a disabled primary never looks like Cancel.
+pub fn disabled_push(b: Button, disabled: bool, _cx: &App) -> Button {
+    b.disabled(disabled).when(disabled, |b| b.opacity(0.5))
 }
 
 /// A pop-up button (§5.3): a push button whose title is the chosen option,
@@ -349,13 +366,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn push_sizes_follow_tahoe() {
-        assert_eq!(PushSize::Regular.height(), px(24.));
-        assert_eq!(PushSize::Regular.radius(), px(6.));
-        assert_eq!(PushSize::Small.height(), px(20.));
-        assert_eq!(PushSize::Small.radius(), px(5.));
-        // Large is a capsule.
-        assert_eq!(PushSize::Large.radius() * 2., PushSize::Large.height());
+    fn push_sizes_follow_the_scale() {
+        // §1.8: sm 28, default 32, lg 36, all radius 8.
+        assert_eq!(PushSize::Regular.height(), px(32.));
+        assert_eq!(PushSize::Small.height(), px(28.));
+        assert_eq!(PushSize::Large.height(), px(36.));
+        for size in [PushSize::Regular, PushSize::Small, PushSize::Large] {
+            assert_eq!(size.radius(), px(8.));
+        }
     }
 
     #[test]
@@ -366,7 +384,7 @@ mod tests {
             push_colors(PushStyle::Standard, &k)
         );
         assert_eq!(push_colors(PushStyle::Default, &k).0, k.accent);
-        // No hover fill on push buttons: hover equals the rest fill.
+        // The pressed fill is one step past the rest fill.
         assert_ne!(push_colors(PushStyle::Standard, &k).2, k.fill);
     }
 }
