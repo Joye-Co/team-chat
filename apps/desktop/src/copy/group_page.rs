@@ -49,4 +49,11 @@ crate::copy! {
     GROUP_PAGE_DECISION_FROM = "{question}：{choice}",
     // dfix-topic: the hint beside the send button of the 群 page composer.
     GROUP_PAGE_COMPOSER_HINT = "{name} 会先看一眼，再交给合适的成员",
+    // --- pages track (v12 native) ---
+    GROUP_PAGE_MEMBERS_TITLE = "成员",
+    GROUP_PAGE_WHERE = "在哪干活",
+    GROUP_PAGE_RECORD_MORE = "记一条…",
+    GROUP_PAGE_RECORD_TITLE = "记一条群里的决定",
+    GROUP_PAGE_OPEN_TOPIC = "打开话题",
+    // --- end pages track ---
 }
