@@ -101,13 +101,241 @@ impl TimelineView {
     pub(super) fn render_plans(&mut self, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let runs: Vec<BotRunSummary> = working_runs(&self.runs).into_iter().cloned().collect();
         let p = self.services.provider.clone();
-        runs.iter()
+        // The run 实时查看 shows on the right: the plan is drawn there, so
+        // the 话题 keeps one line for it (never the plan twice).
+        let in_pane = match self.services.nav.read(cx).visible_pane() {
+            crate::app::RightPane::Live(id) => Some(id),
+            _ => None,
+        };
+        let mut out: Vec<AnyElement> = runs
+            .iter()
             .map(|run| {
+                if in_pane.as_deref() == Some(run.id.as_str()) {
+                    return self.plan_line(run, cx);
+                }
                 let paused_by = p.machine_screen(&run.id).and_then(|s| s.paused_by);
                 let times = p.run_step_times(&run.id);
                 self.plan_card(run, paused_by.is_some(), &times, cx)
             })
-            .collect()
+            .collect();
+        out.extend(self.failed_run_alert(cx));
+        out
+    }
+
+    /// The one-line card of a run whose plan shows in 实时查看: `计划 3/5`,
+    /// the step it is on and `在右侧查看`.
+    fn plan_line(&self, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
+        let n = native_colors(cx);
+        let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
+        let name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let progress = crate::views::topic_page::plan_progress(&run.plan);
+        let stopping = self.services.provider.run_stopping(&run.id);
+        let tile = div()
+            .flex_none()
+            .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER).ring(Some(ui::Ring::Live)));
+        let card = div()
+            .flex_1()
+            .min_w_0()
+            .max_w(super::v2::TEXT_MAX)
+            .h(HEADER)
+            .pl(space::S14)
+            .pr(space::S14)
+            .rounded(px(12.))
+            .bg(n.fill)
+            .flex()
+            .items_center()
+            .gap(space::S8)
+            .child(div().flex_none().n_headline().text_color(n.label).child(
+                if run.plan.is_empty() {
+                    fill(c::STATE_WORKING_NO_PLAN, &[("name", &name)])
+                } else {
+                    l::LIVE_PLAN.to_string()
+                },
+            ))
+            .children(progress.as_ref().map(|(step, total, _)| {
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .child(format!("{step}/{total}"))
+            }))
+            .children(progress.and_then(|(_, _, now)| now).map(|now| {
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .one_line()
+                    .n_body()
+                    .text_color(n.label)
+                    .child(now)
+            }))
+            .when(run.plan.is_empty(), |el| el.child(div().flex_1()))
+            .when(stopping, |el| {
+                el.child(crate::views::process::run_badge(run, true, cx))
+            })
+            .child(
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .text_color(n.secondary)
+                    .child(t::PLAN_IN_PANE),
+            );
+        div()
+            .mt(space::S16)
+            .px(space::S8)
+            .flex()
+            .gap(space::S12)
+            .child(tile)
+            .child(card)
+            .into_any_element()
+    }
+
+    /// A run that failed, in place of its card at the foot of the 话题: an
+    /// alert that says why (COMPLETENESS §2.15), with 重试 and 查看日志. It
+    /// shows while the newest run of the 话题 is the failed one.
+    fn failed_run_alert(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        use crate::data::RunStatus;
+        let start = |r: &BotRunSummary| r.started_at.unwrap_or(r.created_at);
+        let run = self.runs.iter().max_by_key(|r| start(r))?;
+        if run.status != RunStatus::Failed {
+            return None;
+        }
+        let n = native_colors(cx);
+        let bot = self.members.iter().find(|m| m.id == run.bot_id).cloned();
+        let raw_name = bot.as_ref().map(|m| m.name.clone()).unwrap_or_default();
+        let name = crate::copy::isolate(&raw_name);
+        let cause = run
+            .summary
+            .clone()
+            .or_else(|| {
+                let process = self.services.provider.run_process(&run.id);
+                crate::views::process::error_line(&process.steps)
+            })
+            .map(|c| c.trim().trim_end_matches(['。', '.']).to_string())
+            .filter(|c| !c.is_empty());
+        // The title states the cause (`打包失败：找不到签名证书`).
+        let title = cause.unwrap_or_else(|| fill(t::RUN_FAILED_TITLE_NO_CAUSE, &[("name", &name)]));
+        let ended = run.ended_at.unwrap_or(run.updated_at);
+        let at = match model::local_day(ended) {
+            Some(day) => format!(
+                "{} {}",
+                model::day_label(day, crate::selftest::clock::local_now().date_naive()),
+                model::clock(ended)
+            ),
+            None => model::clock(ended),
+        };
+        let step = run
+            .plan
+            .iter()
+            .find(|p| !matches!(p.state, PlanState::Done))
+            .map(|p| p.text.clone());
+        let detail = match &step {
+            Some(step) => fill(
+                t::RUN_FAILED_DETAIL,
+                &[("name", &name), ("time", &at), ("step", step)],
+            ),
+            None => fill(
+                t::RUN_FAILED_DETAIL_NO_STEP,
+                &[("name", &name), ("time", &at)],
+            ),
+        };
+        let retry = {
+            // The mention carries the plain name (no isolates).
+            let (run, name) = (run.clone(), raw_name.clone());
+            push_button(
+                ElementId::Name(format!("run-retry-{}", run.id).into()),
+                t::RUN_RETRY,
+                PushStyle::Default,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                // A new run starts when the member is asked again.
+                this.services.provider.send(crate::data::SendRequest {
+                    group_id: run.group_id.clone(),
+                    topic_id: run.topic_id.clone(),
+                    body: fill(t::RUN_RETRY_BODY, &[("name", &name)]),
+                    mentions: vec![run.bot_id.clone()],
+                    quote_of: None,
+                });
+                cx.notify();
+            }))
+        };
+        let log = {
+            let id = run.id.clone();
+            push_button(
+                ElementId::Name(format!("run-log-{}", run.id).into()),
+                t::RUN_VIEW_LOG,
+                PushStyle::Standard,
+                PushSize::Small,
+                cx,
+            )
+            .on_click(cx.listener(move |this, _: &ClickEvent, _, cx| {
+                this.services.nav.update(cx, |nav, cx| {
+                    nav.set_right_pane(crate::app::RightPane::Live(id.clone()), cx)
+                });
+            }))
+        };
+        Some(
+            div()
+                .mt(space::S16)
+                .px(space::S8)
+                .flex()
+                .gap(space::S12)
+                .child(
+                    div()
+                        .flex_none()
+                        .child(ui::MemberAvatar::new(bot.as_ref(), GUTTER)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .max_w(super::v2::TEXT_MAX)
+                        .px(space::S16)
+                        .py(space::S12)
+                        .rounded(crate::theme::radius::FIELD)
+                        .border_1()
+                        .border_color(n.red.opacity(0.4))
+                        .flex()
+                        .items_start()
+                        .gap(space::S12)
+                        .child(
+                            div()
+                                .flex_none()
+                                .h(px(18.))
+                                .flex()
+                                .items_center()
+                                .child(ui::sym(Sym::Failed, ui::SymSize::INLINE, n.red)),
+                        )
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .flex()
+                                .flex_col()
+                                .gap(space::S4)
+                                .child(
+                                    div()
+                                        .n_headline()
+                                        .text_color(n.red)
+                                        .line_clamp(2)
+                                        .child(title),
+                                )
+                                .child(div().n_body().text_color(n.secondary).child(detail)),
+                        )
+                        .child(
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(space::S8)
+                                .child(log)
+                                .child(retry),
+                        ),
+                )
+                .into_any_element(),
+        )
     }
 
     fn plan_card(
@@ -192,6 +420,9 @@ impl TimelineView {
                     .text_color(n.secondary)
                     .child(format!("{step}/{total}"))
             }))
+            .when(self.services.provider.run_stopping(&run.id), |el| {
+                el.child(crate::views::process::run_badge(run, true, cx))
+            })
             .children(toggle);
 
         // The 4 pt determinate bar (§5.7): `blue` while the member works.

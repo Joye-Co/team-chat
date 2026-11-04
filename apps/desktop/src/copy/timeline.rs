@@ -63,5 +63,12 @@ crate::copy! {
     DELETE_CONFIRM_DETAIL = "删除后其他成员只会看到“此消息已删除”。",
     // --- v12/fx-topic: the plan card's stop button (opens the alert) ---
     PLAN_STOP = "停止…",
+    PLAN_IN_PANE = "在右侧查看",
+    RUN_FAILED_TITLE_NO_CAUSE = "{name} 没做完",
+    RUN_FAILED_DETAIL = "{name} {time} 停在「{step}」。看看日志，处理好后让它再试一次。",
+    RUN_FAILED_DETAIL_NO_STEP = "{name} {time} 停下了。看看日志，处理好后让它再试一次。",
+    RUN_RETRY = "重试",
+    RUN_RETRY_BODY = "@{name} 再试一次",
+    RUN_VIEW_LOG = "查看日志",
     // --- end v12/fx-topic ---
 }
