@@ -369,7 +369,7 @@ pub fn list_footer(
 }
 
 /// A KPI card (§2.4): label 14 muted, the number 24 semibold tabular, a
-/// 12 muted footer line; radius 14, border, shadow xs, p 16.
+/// 14 muted footer line; radius 14, border, shadow xs, p 24.
 pub fn kpi_card(
     id: impl Into<ElementId>,
     label: impl Into<SharedString>,
@@ -383,7 +383,8 @@ pub fn kpi_card(
         .id(id.into())
         .flex_1()
         .min_w(px(0.))
-        .p(px(16.))
+        // §2.4 KPI card (T1-11): p 24, footer 14 muted.
+        .p(m::GUTTER)
         .gap(px(4.))
         .child(
             div()
@@ -402,7 +403,12 @@ pub fn kpi_card(
                 .text_color(k.label)
                 .child(value.into()),
         )
-        .child(TruncText::new(foot).n_callout().text_color(k.secondary))
+        .child(
+            TruncText::new(foot)
+                .mt(px(2.))
+                .n_body()
+                .text_color(k.secondary),
+        )
 }
 
 /// The states of §2.12, each with one icon and one color.
@@ -818,7 +824,7 @@ pub fn skeleton_cards(n: usize, cx: &App) -> AnyElement {
         .children((0..n).map(|_| {
             card(cx)
                 .flex_1()
-                .p(px(16.))
+                .p(m::GUTTER)
                 .gap(px(8.))
                 .child(
                     Bone::new()
@@ -1050,8 +1056,9 @@ pub fn stat(
                 .whitespace_nowrap()
                 .child(value.into()),
         )
-        // The note may take two lines in a narrow column; it never cuts.
-        .children(note.map(|n| div().n_callout().text_color(k.secondary).child(n)))
+        // One line (T1-11, §2.21): the note cuts with "…" and shows the
+        // whole note in a tooltip, never a wrap mid-phrase.
+        .children(note.map(|n| TruncText::new(n).n_callout().text_color(k.secondary)))
 }
 
 /// A column of a [`table`]: its header, its width (`None` = the flexible
