@@ -222,7 +222,10 @@ impl TimelineView {
         let time = model::clock(at);
         let name = ui::truncating(
             "sender-name",
-            author.map(|m| m.name.clone()).unwrap_or_default(),
+            // D1-56: the avatar sits in the gutter; no emoji "avatar" again.
+            author
+                .map(|m| crate::ui::avatar::name_beside_avatar(&m.name).to_string())
+                .unwrap_or_default(),
         )
         .flex_shrink(1.)
         .min_w(px(24.))
