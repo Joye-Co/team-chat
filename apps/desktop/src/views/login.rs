@@ -1,10 +1,10 @@
-//! The login window (NATIVE.md §9.7): a small window of its own (480 x 520,
-//! not resizable) with the app icon 96, a Title 2 welcome line, one 28 pt
-//! standalone field at a time (the invite code 140 wide, or the server),
-//! `继续` (Large, default) at the bottom trailing edge and the borderless
-//! `使用其他服务器…` at the bottom leading edge (also in the app menu). A
-//! refused code or an unreachable server opens an alert (§7.4); no red text.
-//! A custom server shows its host under the code field. A
+//! The login window (COMPLETENESS 2.20): a small window of its own (480 x
+//! 520, not resizable) with one centered card 400 wide: the app icon 48, the
+//! 24 hero title, a one-sentence description, the labelled h36 field across
+//! the card, the error (12 destructive) or the custom server under it, the
+//! full-width `继续` (lg) and a 14 muted link row (`使用其他服务器…`, also in
+//! the app menu). Nothing sits at the window corners. A refused code or an
+//! unreachable server marks the field and says why under it; no alert. A
 //! pasted login credential (`tc_…`) or a legacy 12-character code is accepted
 //! in the same place and shows as one locked field. The server URL defaults to
 //! the production URL from product.json, then staging.
@@ -49,12 +49,8 @@ pub const CODE_LEN: usize = 8;
 pub const LEGACY_CODE_LEN: usize = 12;
 /// Characters per group of a code (`XXXX-XXXX`).
 const GROUP: usize = 4;
-/// The code field fits `XXXX-XXXX` (§5.6: width fits the expected text).
-const CODE_FIELD: gpui::Pixels = metrics::FIELD_CODE_WIDTH;
-/// A pasted credential's lock line needs a little more.
-const LOCKED_FIELD: gpui::Pixels = px(180.);
-/// The server field fits a URL.
-const SERVER_FIELD: gpui::Pixels = px(320.);
+/// The login card (2.20): 400 wide.
+const CARD_WIDTH: gpui::Pixels = px(400.);
 /// The login window: small, fixed, not resizable.
 pub const WINDOW_SIZE: gpui::Size<gpui::Pixels> = gpui::Size {
     width: px(480.),
@@ -149,6 +145,12 @@ pub struct LoginView {
     /// The wrong code after a failed try: the next typed character or paste
     /// starts a new code from box 1, Backspace edits it from the end.
     rejected: Option<String>,
+    /// The last refusal, shown under the field until the field changes.
+    error: Option<LoginError>,
+    /// The field text the refusal was about.
+    error_for: String,
+    /// Draws the signing-in state (a screenshot scene).
+    preview_busy: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -182,6 +184,7 @@ impl LoginView {
                             this.code
                                 .update(cx, |st, cx| st.set_value(kept, window, cx));
                         }
+                        this.clear_stale_error(cx);
                         cx.notify();
                     }
                     _ => cx.notify(),
@@ -190,10 +193,13 @@ impl LoginView {
             cx.subscribe_in(
                 &server,
                 window,
-                |this, _, event: &InputEvent, window, cx| {
-                    if let InputEvent::PressEnter { .. } = event {
-                        this.continue_(window, cx);
+                |this, _, event: &InputEvent, window, cx| match event {
+                    InputEvent::PressEnter { .. } => this.continue_(window, cx),
+                    InputEvent::Change => {
+                        this.clear_stale_error(cx);
+                        cx.notify();
                     }
+                    _ => {}
                 },
             ),
             cx.subscribe_in(
@@ -218,20 +224,13 @@ impl LoginView {
                         } => this.reject_code(window, cx),
                         _ => {}
                     }
-                    // A refusal blocks: an alert says why (no red text).
+                    // A refusal marks the field and says why under it.
                     if let SessionState::SignedOut {
                         last_error: Some(e),
                     } = session
                     {
-                        window.defer(cx, move |window, cx| {
-                            crate::views::nav::dialogs::error_alert(
-                                o::LOGIN_REFUSED,
-                                error_text(e),
-                                |_, _| {},
-                                window,
-                                cx,
-                            )
-                        });
+                        this.error = Some(e);
+                        this.error_for = this.field_text(cx);
                     }
                     if this.embedded && matches!(session, SessionState::SignedOut { .. }) {
                         move_to_login_window(this.services.clone(), window, cx);
@@ -247,6 +246,9 @@ impl LoginView {
             server_open: false,
             embedded: true,
             rejected: None,
+            error: None,
+            error_for: String::new(),
+            preview_busy: false,
             _subscriptions: subscriptions,
         }
     }
@@ -272,6 +274,29 @@ impl LoginView {
             st.focus(window, cx);
             st.set_selected_range(0..end, cx);
         });
+        cx.notify();
+    }
+
+    /// The text of the field that is up: the server, or the code.
+    fn field_text(&self, cx: &gpui::App) -> String {
+        if self.server_open {
+            self.server.read(cx).value().to_string()
+        } else {
+            self.code.read(cx).value().to_string()
+        }
+    }
+
+    /// An edit of the field the refusal was about takes the error away.
+    fn clear_stale_error(&mut self, cx: &gpui::App) {
+        if self.error.is_some() && self.field_text(cx) != self.error_for {
+            self.error = None;
+        }
+    }
+
+    /// Draws the signing-in state with `code` typed, for a screenshot scene.
+    pub fn preview_signing_in(&mut self, code: &str, window: &mut Window, cx: &mut Context<Self>) {
+        self.preview(code, false, window, cx);
+        self.preview_busy = true;
         cx.notify();
     }
 
@@ -345,6 +370,7 @@ impl LoginView {
         &self,
         input: &CodeInput,
         focused: bool,
+        error: bool,
         cx: &mut Context<Self>,
     ) -> gpui::AnyElement {
         let k = native_colors(cx);
@@ -356,34 +382,38 @@ impl LoginView {
         match locked {
             None => NativeTextField::new("login-code", &self.code)
                 .size(FieldSize::Large)
-                .width(CODE_FIELD)
+                .full_width()
+                .error(error)
                 .into_any_element(),
-            Some(text) => div()
-                .id("login-code")
-                .relative()
-                .w(LOCKED_FIELD)
-                .h(metrics::FIELD_LARGE)
-                .px(metrics::FIELD_PAD)
-                .rounded(metrics::FIELD_RADIUS)
-                .bg(k.content)
-                .border_1()
-                .border_color(k.separator)
-                .when(focused, |d| d.shadow(k.focus_ring()))
-                .flex()
-                .items_center()
-                .gap(crate::ui::native::tokens::space::S6)
-                .n_body()
-                .text_color(k.secondary)
-                .child(Sym::Lock.icon(SymSize::INLINE).text_color(k.secondary))
-                .child(text)
-                .child(
-                    div()
-                        .absolute()
-                        .inset_0()
-                        .opacity(0.)
-                        .child(Input::new(&self.code).appearance(false).h_full()),
-                )
-                .into_any_element(),
+            Some(text) => {
+                let (edge, shadows) = crate::ui::native::fields::field_edge(&k, focused, error);
+                div()
+                    .id("login-code")
+                    .relative()
+                    .w_full()
+                    .h(metrics::FIELD_LARGE)
+                    .px(metrics::FIELD_PAD)
+                    .rounded(metrics::FIELD_RADIUS)
+                    .bg(k.content)
+                    .border_1()
+                    .border_color(edge)
+                    .shadow(shadows)
+                    .flex()
+                    .items_center()
+                    .gap(crate::ui::native::tokens::space::S6)
+                    .n_body()
+                    .text_color(k.secondary)
+                    .child(Sym::Lock.icon(SymSize::INLINE).text_color(k.secondary))
+                    .child(text)
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .opacity(0.)
+                            .child(Input::new(&self.code).appearance(false).h_full()),
+                    )
+                    .into_any_element()
+            }
         }
     }
 
@@ -406,9 +436,10 @@ impl LoginView {
 
 impl Render for LoginView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        use crate::ui::native::tokens::{radius, shadow, space};
         let k = native_colors(cx);
         let session = self.services.provider.session();
-        let signing_in = matches!(session, SessionState::SigningIn);
+        let signing_in = self.preview_busy || matches!(session, SessionState::SigningIn);
         let input = self.input(cx);
         let complete = input.credential().is_some();
         let focused = self.code.read(cx).focus_handle(cx).is_focused(window);
@@ -418,29 +449,44 @@ impl Render for LoginView {
             server_url.trim().trim_end_matches('/') != default_server_url().trim_end_matches('/');
         // One field at a time: the server, or the invite code.
         let server_step = self.server_open;
+        let error = self.error.filter(|_| !signing_in);
         let field: gpui::AnyElement = if server_step {
             NativeTextField::new("login-server", &self.server)
                 .size(FieldSize::Large)
-                .width(SERVER_FIELD)
+                .full_width()
+                .error(error.is_some())
                 .into_any_element()
         } else {
-            self.render_code_field(&input, focused, cx)
+            self.render_code_field(&input, focused, error.is_some(), cx)
         };
-        // Under the code field: the custom server, quietly.
-        let note = (!server_step && custom).then(|| {
-            div()
-                .flex()
-                .items_center()
-                .gap(crate::ui::native::tokens::space::S4)
-                .n_subheadline()
-                .text_color(k.secondary)
-                .child(
-                    Sym::MacMini
-                        .icon(SymSize::INLINE_SMALL)
-                        .text_color(k.secondary),
-                )
-                .child(div().min_w_0().one_line().child(host))
-        });
+        // Under the field: the error, or on the code step the custom
+        // server, quietly. The slot keeps its height, so nothing moves.
+        let under: Option<gpui::AnyElement> = match error {
+            Some(e) => Some(
+                div()
+                    .id("login-error")
+                    .n_subheadline()
+                    .text_color(k.red)
+                    .one_line()
+                    .child(error_text(e))
+                    .into_any_element(),
+            ),
+            None => (!server_step && custom).then(|| {
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S4)
+                    .n_subheadline()
+                    .text_color(k.secondary)
+                    .child(
+                        Sym::MacMini
+                            .icon(SymSize::INLINE_SMALL)
+                            .text_color(k.secondary),
+                    )
+                    .child(div().min_w_0().one_line().child(host))
+                    .into_any_element()
+            }),
+        };
         let ready = if server_step {
             !server_url.trim().is_empty()
         } else {
@@ -456,26 +502,65 @@ impl Render for LoginView {
             PushStyle::Default,
             PushSize::Large,
             cx,
-        );
-        let go = disabled_push(go, !ready || signing_in, cx)
+        )
+        .w_full();
+        // Busy: a 16 spinner before 正在验证…, at the same width.
+        let go = disabled_push(go, !ready && !signing_in, cx)
+            .when(signing_in, |b| b.icon(gpui_component::IconName::Loader))
             .loading(signing_in)
             .on_click(cx.listener(|this, _, window, cx| this.continue_(window, cx)));
-        // Bottom: the borderless way to the server step at the leading edge;
-        // on the server step, 取消 next to 继续 at the trailing edge.
-        let other = (!server_step).then(|| {
+        // The link row: the way to the server step, or back from it.
+        let link = if server_step {
+            borderless_text("login-server-cancel", common::CANCEL, cx)
+                .text_color(k.secondary)
+                .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)))
+        } else {
             borderless_text("login-server-other", l::OTHER_SERVER, cx)
+                .text_color(k.secondary)
                 .on_click(cx.listener(|this, _, window, cx| this.open_server_field(window, cx)))
-        });
-        let cancel = server_step.then(|| {
-            push_button(
-                "login-server-cancel",
-                common::CANCEL,
-                PushStyle::Outline,
-                PushSize::Large,
-                cx,
+        };
+        let (title, description, label) = if server_step {
+            (l::SERVER_TITLE, l::SERVER_LEAD, l::SERVER_LABEL)
+        } else {
+            (l::WELCOME, l::LEAD, l::CODE_LABEL)
+        };
+        let card = div()
+            .w(CARD_WIDTH)
+            .p(space::S24)
+            .rounded(radius::CARD)
+            .border_1()
+            .border_color(k.separator)
+            .bg(k.sheet)
+            .shadow(shadow::sm())
+            .flex()
+            .flex_col()
+            .gap(space::S16)
+            .child(app_icon(spot::LOGIN_ICON))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S4)
+                    .child(div().n_large_title().text_color(k.label).child(title))
+                    .child(div().n_body().text_color(k.secondary).child(description)),
             )
-            .on_click(cx.listener(|this, _, window, cx| this.close_server_field(window, cx)))
-        });
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S8)
+                    .child(div().n_headline().text_color(k.label).child(label))
+                    .child(field)
+                    .child(
+                        div()
+                            .h(crate::ui::native::tokens::text::META.1)
+                            .flex()
+                            .items_center()
+                            .children(under),
+                    ),
+            )
+            .child(go)
+            .child(div().flex().justify_center().child(link));
         div()
             .size_full()
             .relative()
@@ -487,49 +572,9 @@ impl Render for LoginView {
                 div()
                     .size_full()
                     .flex()
-                    .flex_col()
                     .items_center()
-                    // The icon sits in the upper part of the window, under
-                    // the title bar, as in a setup window.
-                    .pt(px(72.))
-                    .child(app_icon(spot::LOGIN_ICON))
-                    .child(
-                        div()
-                            .pt(px(16.))
-                            .n_title2()
-                            .text_color(k.label)
-                            .child(l::WELCOME),
-                    )
-                    .child(div().pt(px(4.)).n_body().text_color(k.secondary).child(
-                        if server_step {
-                            l::SERVER_LABEL
-                        } else {
-                            l::LEAD
-                        },
-                    ))
-                    .child(div().pt(px(24.)).child(field))
-                    // The note slot keeps its height, so nothing moves.
-                    .child(
-                        div()
-                            .pt(px(8.))
-                            .h(px(22.))
-                            .max_w(SERVER_FIELD)
-                            .children(note),
-                    ),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .left(metrics::SHEET_BUTTON_EDGE)
-                    .right(metrics::SHEET_BUTTON_EDGE)
-                    .bottom(metrics::SHEET_BUTTON_EDGE)
-                    .flex()
-                    .items_center()
-                    .gap(metrics::SHEET_BUTTON_GAP)
-                    .children(other)
-                    .child(div().flex_1())
-                    .children(cancel)
-                    .child(go),
+                    .justify_center()
+                    .child(card),
             )
             // The top band drags the window, as a title bar does.
             .child(
