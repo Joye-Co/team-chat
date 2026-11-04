@@ -63,3 +63,7 @@ pub use toolbar::{ToolbarGroup, ToolbarRow};
 /// The busy spinner (§5.7): for unknown waits, never with "加载中…" text.
 #[allow(unused_imports)]
 pub use crate::ui::motion::spinner;
+
+// --- track cards: the card parts the kit lacked (ui/native/cards.rs) ---
+pub mod cards;
+// --- end track cards ---

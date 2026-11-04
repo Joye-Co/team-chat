@@ -2381,7 +2381,7 @@ pub fn footer(ctx: &Ctx, _window: &mut Window, cx: &mut App) -> Option<Option<An
         return None;
     }
     let k = theme::colors(cx);
-    let bar = |items: Vec<AnyElement>| ui::card_footer(cx).children(items).into_any_element();
+    let bar = |items: Vec<AnyElement>| crate::views::cards::v2::card_footer(cx).children(items).into_any_element();
     let note = |t: String| {
         meta(div())
             .ml_auto()

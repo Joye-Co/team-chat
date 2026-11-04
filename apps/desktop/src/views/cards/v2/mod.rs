@@ -53,8 +53,8 @@ use crate::{
             CardV2AnswerRequest, CardV2Block, CardV2Message, InputKind, RefTarget,
         },
     },
-    theme::{self, Type as _, card_v2 as m, card_v2::mix, space},
-    ui::{self, ButtonKind, ButtonSize, Sym},
+    theme::{self, Type as _, card_v2 as m, space},
+    ui::{self, ButtonKind, Sym, native::NativeType as _},
 };
 
 #[allow(unused_imports)]
@@ -647,80 +647,39 @@ impl Answerer {
 // ---------------------------------------------------------------------------
 // The full card
 
-/// Tone of a strip: its mark color, label ink, fill and edge.
+/// Tone of a state: its symbol color and the color of its word (NATIVE.md
+/// §4: the state color for the four states, `secondary` otherwise).
 struct Tone {
     mark: Hsla,
     ink: Hsla,
-    fill: Hsla,
-    edge: Hsla,
 }
 
-fn tone(state: &CardState, k: &theme::Colors) -> Option<Tone> {
-    let mixed = |c: Hsla, fill: f32, edge: f32, ink: Hsla| Tone {
-        mark: c,
-        ink,
-        fill: mix(c, k.bg, fill),
-        edge: mix(c, k.bg, edge),
-    };
+fn tone(state: &CardState, cx: &App) -> Option<Tone> {
+    let n = ui::native::native_colors(cx);
+    let same = |c: Hsla| Tone { mark: c, ink: c };
     Some(match state {
-        CardState::Pending => mixed(k.you, m::YOU_FILL, m::YOU_EDGE, k.you_ink),
-        CardState::Answered { .. } | CardState::Done { .. } => {
-            mixed(k.ok, m::OK_FILL, m::OK_EDGE, k.ok_ink)
-        }
+        CardState::Pending => same(n.amber),
+        CardState::Answered { .. } | CardState::Done { .. } => same(n.green),
         CardState::Executing { progress, .. } if progress.waiting => Tone {
-            mark: k.ink_2,
-            ink: k.ink_2,
-            fill: k.sunken,
-            edge: k.line,
+            mark: n.secondary,
+            ink: n.label,
         },
-        CardState::Executing { .. } => mixed(k.live, m::LIVE_FILL, m::LIVE_EDGE, k.live_ink),
-        CardState::Failed { .. } | CardState::SendFailed { .. } => {
-            mixed(k.bad, m::OK_FILL, m::OK_EDGE, k.bad_ink)
-        }
+        CardState::Executing { .. } => same(n.blue),
+        CardState::Failed { .. } | CardState::SendFailed { .. } => same(n.red),
         CardState::WaitingOn | CardState::Sending { .. } => Tone {
-            mark: k.ink_2,
-            ink: k.ink_2,
-            fill: k.sunken,
-            edge: k.line,
+            mark: n.secondary,
+            ink: n.label,
         },
-        CardState::Expired | CardState::Superseded => {
-            mixed(k.ink_3, m::QUIET_FILL, m::QUIET_EDGE, k.ink_2)
-        }
+        CardState::Expired | CardState::Superseded => same(n.secondary),
         CardState::Info => return None,
     })
 }
 
-/// The outer box: 1 pt edge, radius 12, `bg`, `lift`; amber edge and glow
-/// while it waits on the viewer.
-pub(crate) fn frame(waits: bool, cx: &App) -> gpui::Div {
-    let k = theme::colors(cx);
-    let base = div()
-        .w_full()
-        .rounded(theme::radius::LG)
-        .bg(k.bg)
-        .border_1()
-        .overflow_hidden();
-    if waits {
-        base.border_color(mix(k.you, k.line, m::YOU_BORDER))
-            .shadow(vec![
-                gpui::BoxShadow {
-                    color: m::alpha(k.you, 0.14),
-                    offset: gpui::point(px(0.), px(1.)),
-                    blur_radius: px(2.),
-                    spread_radius: px(0.),
-                    inset: false,
-                },
-                gpui::BoxShadow {
-                    color: m::alpha(k.you, 0.22),
-                    offset: gpui::point(px(0.), px(8.)),
-                    blur_radius: px(20.),
-                    spread_radius: px(-10.),
-                    inset: false,
-                },
-            ])
-    } else {
-        base.border_color(k.line).shadow(k.lift())
-    }
+/// The card container (NATIVE.md §9.2): radius 12, `fill`, no border, no
+/// shadow. A card that waits on the viewer says so in its header (the
+/// `amber` symbol and word), not with a glow.
+pub(crate) fn frame(_waits: bool, cx: &App) -> gpui::Div {
+    ui::native::cards::card_frame(cx)
 }
 
 /// 12/18 text, the artboard's meta line.
@@ -731,9 +690,9 @@ pub(crate) fn meta(el: gpui::Div) -> gpui::Div {
 fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
     let glyph = |name: Sym| ui::icon(name, px(16.), t.mark).into_any_element();
     match state {
-        CardState::Pending => glyph(Sym::Live),
-        CardState::WaitingOn => glyph(Sym::Hourglass),
-        CardState::Executing { progress, .. } if progress.waiting => glyph(Sym::Hourglass),
+        CardState::Pending => glyph(Sym::NeedsYou),
+        CardState::WaitingOn => glyph(Sym::Waiting),
+        CardState::Executing { progress, .. } if progress.waiting => glyph(Sym::Waiting),
         CardState::Sending { .. } => ui::motion::spinner().color(t.mark).into_any_element(),
         CardState::Answered { answer }
         | CardState::Done {
@@ -760,7 +719,7 @@ fn strip_icon(state: &CardState, t: &Tone, ctx: &Ctx, cx: &App) -> AnyElement {
             .justify_center()
             .child(ui::motion::breathe(
                 ctx.id("strip-dot"),
-                div().size(px(8.)).rounded_full().bg(t.mark),
+                div().size(px(6.)).rounded_full().bg(t.mark),
                 cx,
             ))
             .into_any_element(),
@@ -1022,24 +981,18 @@ fn asked_names(ctx: &Ctx) -> String {
     names.join(c::FORM_LIST_SEPARATOR)
 }
 
-/// The strip's right action, if any.
+/// The state's action at the header's trailing edge, if any: a small
+/// standard push button (NATIVE.md §5.2).
 fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
-    let k = theme::colors(cx);
     let quiet = |id: SharedString, label: &str| {
-        div()
-            .id(id)
-            .ml_auto()
-            .flex_none()
-            .h(px(24.))
-            .px(space::S8)
-            .rounded(theme::radius::SM)
-            .flex()
-            .items_center()
-            .text_size(px(12.))
-            .font_weight(theme::MEDIUM_WEIGHT)
-            .text_color(k.ink_2)
-            .hover(|s| s.bg(k.hover))
-            .child(label.to_string())
+        ui::native::push_button(
+            id,
+            label.to_string(),
+            ui::native::PushStyle::Standard,
+            ui::native::PushSize::Small,
+            cx,
+        )
+        .flex_none()
     };
     let a = ctx.answerer();
     match ctx.state {
@@ -1060,7 +1013,6 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             let action = submit_action(ctx.card)?.clone();
             Some(
                 quiet(ctx.id("retry"), c::STRIP_RETRY)
-                    .text_color(k.bad_ink)
                     .on_click(move |_, window, cx| a.press(&action, window, cx))
                     .into_any_element(),
             )
@@ -1093,7 +1045,6 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
             let form = ctx.form.clone();
             Some(
                 quiet(ctx.id("see-edits"), c::STRIP_SEE_EDITS)
-                    .text_color(k.ok_ink)
                     .on_click(move |_, _, cx| form.update(cx, |f, cx| f.toggle_expanded(cx)))
                     .into_any_element(),
             )
@@ -1102,16 +1053,27 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     }
 }
 
-/// The status strip: 34 pt, the state's tint, a glyph, the label in its
-/// ink, the detail in `ink-2`, an optional action at the right, and for work
-/// in progress a 2 pt live bar along the bottom edge.
-pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
-    let k = theme::colors(cx);
+/// The state of a card as header parts: the symbol, the word and its ink,
+/// the detail, a right note, an action and the progress of work.
+pub(crate) struct StripParts {
+    pub mark: AnyElement,
+    pub label: String,
+    pub ink: Hsla,
+    pub detail: String,
+    pub right: Option<String>,
+    pub action: Option<AnyElement>,
+    pub bar: Option<f32>,
+}
+
+/// The state parts of the card's header, or `None` for a card without a
+/// state (info).
+pub(crate) fn strip_parts(ctx: &Ctx, cx: &App) -> Option<StripParts> {
+    let n = ui::native::native_colors(cx);
     // --- inc-cards21: my live event waits, 2.1 words, the deadline ---
     // inc-integrate: a page event of an embed in this card waits too (the page host).
-    // v11/pb2-cards: the band says the stage (INTERACT §4.4) in its own tone: blue with the
-    // spinner while the author has it, grey once no answer came, red 失败 when the step
-    // was not sent.
+    // v11/pb2-cards: the state says the stage (INTERACT §4.4) in its own tone: blue with
+    // the spinner while the author has it, grey once no answer came, red 失败 when the
+    // step was not sent.
     use super::v21::band::PendTone;
     let waiting = super::v21::band::pending(ctx)
         .map(|p| (p.label, p.detail, p.tone))
@@ -1125,25 +1087,19 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         .flatten();
     let t = match waiting.as_ref().map(|w| w.2) {
         _ if updated.is_some() => Tone {
-            mark: k.ink_2,
-            ink: k.ink,
-            fill: mix(k.live, k.sunken, m::UPDATED_FILL),
-            edge: k.line,
+            mark: n.secondary,
+            ink: n.label,
         },
         Some(PendTone::Live) => Tone {
-            mark: k.live,
-            ink: k.live_ink,
-            fill: mix(k.live, k.bg, m::LIVE_FILL),
-            edge: mix(k.live, k.bg, m::LIVE_EDGE),
+            mark: n.blue,
+            ink: n.blue,
         },
         Some(PendTone::Quiet) => Tone {
-            mark: k.ink_2,
-            ink: k.ink_2,
-            fill: k.sunken,
-            edge: k.line,
+            mark: n.secondary,
+            ink: n.label,
         },
-        Some(PendTone::Bad) => tone(&CardState::Failed { answer: None }, &k)?,
-        None => tone(ctx.state, &k)?,
+        Some(PendTone::Bad) => tone(&CardState::Failed { answer: None }, cx)?,
+        None => tone(ctx.state, cx)?,
     };
     let (label, detail) = match (&waiting, &updated) {
         (Some((l, d, _)), _) => (l.clone(), d.clone()),
@@ -1163,88 +1119,82 @@ pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
         CardState::Executing { progress, .. } if !progress.waiting => progress.fraction(),
         _ => None,
     };
+    let glyph = |sym: Sym| ui::icon(sym, px(16.), t.mark).into_any_element();
+    let mark = match waiting.as_ref().map(|w| w.2) {
+        _ if updated.is_some() => glyph(Sym::Refresh),
+        Some(PendTone::Live) => ui::motion::spinner().color(t.mark).into_any_element(),
+        Some(PendTone::Quiet) => glyph(Sym::Alert),
+        Some(PendTone::Bad) => glyph(Sym::Failed),
+        None => strip_icon(ctx.state, &t, ctx, cx),
+    };
+    Some(StripParts {
+        mark,
+        label,
+        ink: t.ink,
+        detail,
+        right,
+        action,
+        bar,
+    })
+}
+
+/// The state line on its own (the one-line overview): symbol, word,
+/// detail, right note and action, then the 4 pt bar of work in progress.
+pub(crate) fn strip(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
+    let n = ui::native::native_colors(cx);
+    let p = strip_parts(ctx, cx)?;
     Some(
-        meta(div())
-            .relative()
-            .flex_none()
-            .h(m::STRIP)
-            .pl(space::S16)
-            .pr(if action.is_some() {
-                space::S8
-            } else {
-                space::S16
-            })
-            .bg(t.fill)
-            .border_b_1()
-            .border_color(t.edge)
+        div()
             .flex()
-            .items_center()
+            .flex_col()
             .gap(space::S8)
-            .child(match waiting.as_ref().map(|w| w.2) {
-                _ if updated.is_some() => {
-                    ui::icon(Sym::Refresh, px(16.), t.mark).into_any_element()
-                }
-                Some(PendTone::Live) => ui::motion::spinner().color(t.mark).into_any_element(),
-                Some(PendTone::Quiet) => {
-                    ui::icon(Sym::Alert, px(16.), t.mark).into_any_element()
-                }
-                Some(PendTone::Bad) => {
-                    ui::icon(Sym::Failed, px(16.), t.mark).into_any_element()
-                }
-                None => strip_icon(ctx.state, &t, ctx, cx),
-            })
             .child(
                 div()
-                    .flex_shrink(0.)
-                    .max_w(gpui::relative(0.7))
-                    .one_line()
-                    .text_size(px(13.))
-                    .line_height(px(20.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(t.ink)
-                    .child(label),
+                    .flex()
+                    .items_center()
+                    .gap(space::S8)
+                    .child(
+                        ui::native::cards::state_words(
+                            p.mark,
+                            p.label,
+                            p.ink,
+                            Some(p.detail.into()),
+                            cx,
+                        )
+                        .flex_1(),
+                    )
+                    .when_some(p.right, |el, r| {
+                        el.child(
+                            div()
+                                .flex_none()
+                                .one_line()
+                                .n_subheadline()
+                                .text_color(n.secondary)
+                                .child(r),
+                        )
+                    })
+                    .children(p.action),
             )
-            .when(!detail.is_empty(), |el| {
-                el.child(
-                    div()
-                        .min_w(px(0.))
-                        .flex_shrink(1.)
-                        .one_line()
-                        .text_color(k.ink_2)
-                        .child(detail),
-                )
-            })
-            .when_some(right, |el, r| {
-                el.child(
-                    div()
-                        .ml_auto()
-                        .flex_none()
-                        .one_line()
-                        .text_color(t.ink)
-                        .child(r),
-                )
-            })
-            .children(action)
-            .when_some(bar, |el, f| {
-                el.child(
-                    div()
-                        .absolute()
-                        .left_0()
-                        .bottom(px(-1.))
-                        .h(m::LIVE_BAR)
-                        .w(gpui::relative(f.clamp(0.02, 1.)))
-                        .bg(k.live),
-                )
+            .when_some(p.bar, |el, f| {
+                el.child(ui::native::determinate_bar(f.clamp(0.02, 1.), Some(n.blue), cx))
             })
             .into_any_element(),
     )
 }
 
-/// The header: tile 20, name 13/500, 岗位 tag, `群 / 话题` (a link) and the
-/// mono time at the right.
-fn header(ctx: &Ctx, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
+/// The header (NATIVE.md §9.2): the member name in Headline and the state
+/// as a symbol and its word, then the time. In the card's own topic the
+/// transcript's sender block already says who and when, so the header is
+/// the state alone. On the 首页 a second `secondary` line says where:
+/// `群 · 话题` (opens the topic). Work in progress adds a 4 pt bar.
+fn header(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
+    let n = ui::native::native_colors(cx);
     let p = &ctx.env.provider;
+    let parts = strip_parts(ctx, cx);
+    let in_topic = ctx.mode == CardMode::Topic;
+    if in_topic && parts.is_none() {
+        return None;
+    }
     let member = p.member(&ctx.msg.author_id);
     let path = (ctx.mode == CardMode::Desk).then(|| {
         let group = p
@@ -1264,96 +1214,106 @@ fn header(ctx: &Ctx, cx: &App) -> AnyElement {
                 }
             })
             .unwrap_or_default();
-        // Both parts open the topic.
-        let part = |key: &str, text: String| {
-            let a = ctx.answerer();
-            let (g, t) = (ctx.msg.group_id.clone(), ctx.msg.topic_id.clone());
-            div()
-                .id(ctx.id(key))
-                .min_w(px(0.))
-                .one_line()
-                .hover(|s| s.text_color(k.ink))
-                .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
-                .child(text)
-        };
-        // The path takes the room up to the time, so the group can be
-        // held to 45 % of it: the group gives way first (it shrinks ten
-        // times faster, down to one character and an ellipsis), then the
-        // topic shrinks with its own ellipsis. Both stay readable.
-        // A name of one or two characters never shrinks.
-        let short = group.chars().count() <= 2;
-        let both = !group.trim().is_empty() && !topic.trim().is_empty();
+        let text = [group, topic]
+            .into_iter()
+            .filter(|t| !t.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(" · ");
+        let a = ctx.answerer();
+        let (g, t) = (ctx.msg.group_id.clone(), ctx.msg.topic_id.clone());
         div()
-            .ml(px(2.))
+            .id(ctx.id("path"))
+            .pl(ui::native::cards::card::AVATAR + space::S8)
             .min_w(px(0.))
-            .flex_1()
-            .flex()
-            .overflow_hidden()
-            .text_color(k.ink_3)
-            .when(!group.trim().is_empty(), |el| {
-                el.child(
-                    part("path-group", group)
-                        .when(short, |el| el.flex_none())
-                        .when(!short, |el| {
-                            el.min_w(m::PATH_GROUP_MIN)
-                                .max_w(gpui::relative(0.45))
-                                .flex_shrink(10.)
-                        }),
-                )
-            })
-            .when(both, |el| {
-                el.child(div().flex_none().px(space::S4).child("/"))
-            })
-            .when(!topic.trim().is_empty(), |el| {
-                el.child(
-                    part("path-topic", topic)
-                        .flex_shrink(1.)
-                        .text_color(k.ink_2),
-                )
-            })
+            .one_line()
+            .n_subheadline()
+            .text_color(n.secondary)
+            .on_click(move |_, window, cx| a.open_topic(&g, &t, window, cx))
+            .child(text)
     });
-    meta(div())
+    let (state, right, action, bar) = match parts {
+        Some(p) => (
+            Some(
+                ui::native::cards::state_words(p.mark, p.label, p.ink, Some(p.detail.into()), cx)
+                    .flex_1(),
+            ),
+            p.right,
+            p.action,
+            p.bar,
+        ),
+        None => (None, None, None, None),
+    };
+    let row = div()
         .flex()
         .items_center()
         .gap(space::S8)
-        .text_color(k.ink_3)
-        .child(ui::MemberAvatar::new(member.as_ref(), m::TILE))
-        .child(
-            div()
-                .flex_shrink(0.)
-                .max_w(px(180.))
-                .one_line()
-                .text_size(px(13.))
-                .font_weight(theme::MEDIUM_WEIGHT)
-                .text_color(k.ink)
-                .child(ctx.author.clone()),
-        )
-        .children(
-            member
-                .and_then(|m| m.role)
-                .filter(|r| !r.trim().is_empty())
-                .map(|r| div().flex_none().child(ui::JobTag::new(r))),
-        )
-        .children(path)
-        .child(
-            div()
-                .ml_auto()
-                .flex_none()
-                .mono()
-                // When the message was sent: a new rev changes the card, not its time.
-                .child(crate::views::shell::clock(ctx.msg.created_at)),
-        )
-        .into_any_element()
+        .min_h(ui::native::cards::card::AVATAR)
+        .when(!in_topic, |el| {
+            el.child(ui::MemberAvatar::new(
+                member.as_ref(),
+                ui::native::cards::card::AVATAR,
+            ))
+            .child(
+                div()
+                    .flex_shrink(0.)
+                    .max_w(px(180.))
+                    .one_line()
+                    .n_headline()
+                    .text_color(n.label)
+                    .child(ctx.author.clone()),
+            )
+        })
+        .map(|el| match state {
+            Some(s) => el.child(s),
+            None => el.child(div().flex_1()),
+        })
+        .when_some(right, |el, r| {
+            el.child(
+                div()
+                    .flex_none()
+                    .one_line()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    .child(r),
+            )
+        })
+        .children(action)
+        .when(!in_topic, |el| {
+            el.child(
+                div()
+                    .flex_none()
+                    .n_subheadline()
+                    .n_figures()
+                    .text_color(n.secondary)
+                    // When the message was sent: a new rev changes the card, not its time.
+                    .child(crate::views::shell::clock(ctx.msg.created_at)),
+            )
+        });
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .gap(space::S2)
+            .child(row)
+            .children(path)
+            .when_some(bar, |el, f| {
+                el.child(
+                    div()
+                        .pt(space::S8)
+                        .child(ui::native::determinate_bar(f.clamp(0.02, 1.), Some(n.blue), cx)),
+                )
+            })
+            .into_any_element(),
+    )
 }
 
-fn title(ctx: &Ctx, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
+fn title(ctx: &Ctx, has_header: bool, cx: &App) -> AnyElement {
+    let n = ui::native::native_colors(cx);
     div()
-        .mt(space::S10)
-        .text_size(m::TITLE.0)
-        .line_height(m::TITLE.1)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(k.ink)
+        .when(has_header, |el| el.mt(ui::native::cards::card::STACK))
+        .n_title3()
+        .text_color(n.label)
         .child(ctx.card.title.clone())
         // --- inc-cards21: the 2.1 summary line under the title ---
         .when_some(
@@ -1366,10 +1326,9 @@ fn title(ctx: &Ctx, cx: &App) -> AnyElement {
                 el.child(
                     div()
                         .mt(space::S4)
-                        .text_size(px(14.))
-                        .line_height(px(22.))
+                        .n_message()
                         .font_weight(FontWeight::NORMAL)
-                        .text_color(k.ink_2)
+                        .text_color(n.secondary)
                         .child(s),
                 )
             },
@@ -1377,14 +1336,14 @@ fn title(ctx: &Ctx, cx: &App) -> AnyElement {
         .into_any_element()
 }
 
-/// The whole card: strip, header, title, blocks, footer.
+/// The whole card: header (member, state), title, blocks, footer, in one
+/// `fill` container with 14 pt insets.
 fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
-    let waits = matches!(ctx.state, CardState::Pending);
-    let strip = strip(ctx, cx);
     let header = header(ctx, cx);
+    let has_header = header.is_some();
     // --- inc-integrate: 就这张卡提问 on the header (the whole card, `blockId` `card`) ---
-    let header = match (ctx.mode, ctx.msg.message_id.is_empty()) {
-        (CardMode::Topic | CardMode::Desk, false) => {
+    let header = match (ctx.mode, ctx.msg.message_id.is_empty(), header) {
+        (CardMode::Topic | CardMode::Desk, false, Some(header)) => {
             let target = crate::views::refs::parts::whole(&ctx.card.title).target(
                 crate::views::refs::RefSource::Message {
                     group_id: ctx.msg.group_id.clone(),
@@ -1396,12 +1355,16 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
                 None,
                 Some(ctx.card.rev as u64),
             );
-            crate::views::refs::affordance::whole_card(div().child(header), Some(target), cx)
+            Some(crate::views::refs::affordance::whole_card(
+                div().child(header),
+                Some(target),
+                cx,
+            ))
         }
-        _ => header,
+        (_, _, header) => header,
     };
     // --- end inc-integrate ---
-    let title = title(ctx, cx);
+    let title = title(ctx, has_header, cx);
     // --- inc-cards21 ---
     let body = if super::v21::is_21(ctx.card) {
         super::v21::body(ctx, window, cx)
@@ -1411,23 +1374,29 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
     // --- end inc-cards21 ---
     let footer = footer(ctx, window, cx);
     let muted = ctx.state.muted();
-    let card = frame(waits, cx)
+    let inset = ui::native::cards::card::INSET;
+    let card = frame(false, cx)
         .flex()
         .flex_col()
         .when(ctx.mode == CardMode::Desk, |el| el.max_w(m::MAX_WIDTH))
-        .children(strip)
         .child(
             div()
-                .pt(space::S14)
-                .px(space::S16)
-                .pb(space::S16)
+                .pt(inset)
+                .px(inset)
+                .pb(if footer.is_some() { space::S4 } else { inset })
                 .flex()
                 .flex_col()
                 .min_w(px(0.))
-                .when(muted, |el| el.opacity(m::MUTED))
-                .child(header)
-                .child(title)
-                .children(body),
+                .children(header)
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .min_w(px(0.))
+                        .when(muted, |el| el.opacity(m::MUTED))
+                        .child(title)
+                        .children(body),
+                ),
         )
         .children(footer);
     // In a 话题 the timeline row handles arrival; elsewhere the card fades
@@ -1443,34 +1412,32 @@ fn full(ctx: &Ctx, window: &mut Window, cx: &mut App) -> AnyElement {
 // ---------------------------------------------------------------------------
 // Footer and buttons
 
-/// A footer button: 28 pt, radius 7, 13/500 (`ButtonSize::Card`). A
-/// secondary answer takes the quiet soft fill, so the card keeps one
-/// outline.
+/// A card action (NATIVE.md §5.2): a regular push button. The one primary
+/// is the default button (`accent`); every other answer, link or
+/// destructive action is a standard button whose title says what it does.
 pub(crate) fn button(
     id: SharedString,
     label: impl Into<SharedString>,
     kind: ButtonKind,
     cx: &App,
 ) -> Button {
-    let kind = match kind {
-        ButtonKind::Secondary => ButtonKind::Quiet,
-        other => other,
+    use ui::native::{PushSize, PushStyle};
+    let style = match kind {
+        ButtonKind::Primary => PushStyle::Default,
+        ButtonKind::Danger => PushStyle::Destructive,
+        _ => PushStyle::Standard,
     };
-    ui::button(id, label, kind, ButtonSize::Card, cx)
+    ui::native::push_button(id, label, style, PushSize::Regular, cx).flex_none()
 }
 
-/// A disabled primary: `sunken` fill, `ink-3` text, no shadow.
+/// A disabled primary: `tertiary` text on `fill` (never `accent` at
+/// reduced opacity).
 pub(crate) fn disabled_button(
     id: SharedString,
     label: impl Into<SharedString>,
     cx: &App,
 ) -> Button {
-    let k = theme::colors(cx);
-    button(id, label, ButtonKind::Primary, cx)
-        .disabled(true)
-        .bg(k.sunken)
-        .text_color(k.ink_3)
-        .shadow(vec![])
+    ui::native::disabled_push(button(id, label, ButtonKind::Secondary, cx), true, cx)
 }
 
 fn style_kind(action: &CardV2Action, first_default_used: &mut bool) -> ButtonKind {
@@ -1488,24 +1455,40 @@ fn style_kind(action: &CardV2Action, first_default_used: &mut bool) -> ButtonKin
 /// The footer note at the right: `meta` `ink-3`, with a lock glyph for
 /// irreversible asks.
 fn note(text: String, lock: bool, cx: &App) -> AnyElement {
-    let k = theme::colors(cx);
-    meta(div())
+    let n = ui::native::native_colors(cx);
+    div()
+        .n_subheadline()
         .ml_auto()
         .min_w(px(0.))
         .flex_shrink(1.)
         .flex()
         .items_center()
-        .gap(space::S6)
-        .text_color(k.ink_3)
+        .gap(space::S4)
+        .text_color(n.secondary)
         .when(lock, |el| {
-            el.child(ui::icon(Sym::Lock, px(13.), k.ink_3))
+            el.child(ui::icon(Sym::Lock, px(14.), n.secondary))
         })
         .child(div().min_w(px(0.)).one_line().child(text))
         .into_any_element()
 }
 
 fn footer_bar(children: Vec<AnyElement>, cx: &App) -> AnyElement {
-    ui::card_footer(cx).children(children).into_any_element()
+    card_footer(cx).children(children).into_any_element()
+}
+
+/// The footer under the blocks: no band, no rule, no fill; 14 pt insets
+/// like the rest of the card, buttons 8 pt apart.
+pub(crate) fn card_footer(_cx: &App) -> gpui::Div {
+    let inset = ui::native::cards::card::INSET;
+    div()
+        .flex_none()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(space::S8)
+        .px(inset)
+        .pt(ui::native::cards::card::STACK)
+        .pb(inset)
 }
 
 /// The footer for the card's state, or `None`.
