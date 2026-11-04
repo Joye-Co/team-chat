@@ -177,6 +177,34 @@ pub enum CardIntent {
     Unknown,
 }
 
+/// 1.1: test counts of an evidence line, from the run's output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceTests {
+    pub passed: u64,
+    pub failed: u64,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub skipped: Option<u64>,
+}
+
+/// 1.1: a screen recording (录屏): a video file of the group, its length and a poster frame.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EvidenceRecording {
+    pub file_id: String,
+    pub duration_ms: u64,
+    #[serde(
+        default,
+        deserialize_with = "non_null",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub poster_file_id: Option<String>,
+}
+
 /// 1.1: what the author's work on the card is doing now (set by the author; absent: the band
 /// follows `intent`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -1179,6 +1207,20 @@ pub enum CardV2Block {
             skip_serializing_if = "Option::is_none"
         )]
         artifact: Option<ArtifactRef>,
+        /// 1.1: test counts from the run's output (read these, not the label).
+        #[serde(
+            default,
+            deserialize_with = "non_null",
+            skip_serializing_if = "Option::is_none"
+        )]
+        tests: Option<EvidenceTests>,
+        /// 1.1: a screen recording (录屏 tile).
+        #[serde(
+            default,
+            deserialize_with = "non_null",
+            skip_serializing_if = "Option::is_none"
+        )]
+        recording: Option<EvidenceRecording>,
     },
     Ref {
         id: String,
@@ -2966,8 +3008,15 @@ impl CardV2Block {
                 file_id,
                 url,
                 artifact,
+                recording,
                 ..
             } => {
+                if let Some(r) = recording {
+                    check_id("cardV2.blocks.recording.fileId", &r.file_id)?;
+                    if let Some(p) = &r.poster_file_id {
+                        check_id("cardV2.blocks.recording.posterFileId", p)?;
+                    }
+                }
                 check_chars("cardV2.blocks.label", label, 1, 200)?;
                 if *state == Some(EvidenceState::Unknown) {
                     return fail("cardV2.blocks.state", "unknown state");

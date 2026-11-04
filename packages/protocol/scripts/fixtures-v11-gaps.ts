@@ -48,4 +48,13 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
   ok("http/put-artifact-media-response.json", "PutArtifactMediaResponse", {
     version: { artifactId: "01JC0ART00000000000000OCT3", version: 2, entry: "demo.mp4", files: [{ path: "demo.mp4", fileId: "01JC0FIL00000000000000MP4V", size: 48_000_000, mime: "video/mp4" }], createdBy: ID.bot, createdAt: T0, media },
   });
+
+  // SB-11, PC-3: test counts and a 录屏 on evidence lines.
+  const proof = { v: 2, rev: 1, intent: "done", title: "修好了", fallback: "修好了", blocks: [
+    { type: "evidence", id: "tests", label: "测试：12 个通过，1 个没通过", state: "fail", tests: { passed: 12, failed: 1, skipped: 2 } },
+    { type: "evidence", id: "rec", label: "录屏", state: "pass", recording: { fileId: "01JC0FIL00000000000000MP4V", durationMs: 42_000, posterFileId: "01JC0FIL00000000000POSTER1" } },
+  ] };
+  ok("entities/card-v2-evidence-tests-recording.json", "CardV2", proof, "the server's test counts and a screen recording");
+  bad("entities/card-v2-evidence-tests-negative.json", "CardV2", { ...proof, blocks: [{ type: "evidence", id: "tests", label: "测试", tests: { passed: -1, failed: 0 } }] }, "counts are not negative");
+  bad("entities/card-v2-evidence-recording-no-file.json", "CardV2", { ...proof, blocks: [{ type: "evidence", id: "rec", label: "录屏", recording: { durationMs: 1 } }] }, "a recording names its file");
 }

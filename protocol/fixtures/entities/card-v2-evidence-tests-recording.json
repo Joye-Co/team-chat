@@ -1,0 +1,36 @@
+{
+  "kind": "CardV2",
+  "valid": true,
+  "description": "the server's test counts and a screen recording",
+  "value": {
+    "v": 2,
+    "rev": 1,
+    "intent": "done",
+    "title": "修好了",
+    "fallback": "修好了",
+    "blocks": [
+      {
+        "type": "evidence",
+        "id": "tests",
+        "label": "测试：12 个通过，1 个没通过",
+        "state": "fail",
+        "tests": {
+          "passed": 12,
+          "failed": 1,
+          "skipped": 2
+        }
+      },
+      {
+        "type": "evidence",
+        "id": "rec",
+        "label": "录屏",
+        "state": "pass",
+        "recording": {
+          "fileId": "01JC0FIL00000000000000MP4V",
+          "durationMs": 42000,
+          "posterFileId": "01JC0FIL00000000000POSTER1"
+        }
+      }
+    ]
+  }
+}

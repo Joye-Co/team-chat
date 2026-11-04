@@ -857,7 +857,9 @@ CardV2Block =
       x?: string[] /* <= 200, each <= 40 */, series: { name, values: number[] /* <= 200 */ }[] /* 1..5 */ }
   | { type: "diff", id, path? /* <= 1024 */, text /* unified diff <= 32768 */, additions?, deletions? }
   | { type: "evidence", id, label /* 1..200 */, state?: "pass" | "fail" | "info", detail? /* <= 1000 */,
-      fileId?, url?, artifact?: ArtifactRef }
+      fileId?, url?, artifact?: ArtifactRef,
+      tests?: { passed, failed, skipped? } /* 1.1: counts from the run's output; read these, not the label */,
+      recording?: { fileId, durationMs, posterFileId? } /* 1.1: 录屏, files of the same group */ }
   | { type: "ref", id, label /* 1..200 */, target: RefTarget }
   | { type: "group", id, label?, blocks: CardV2Block[] /* 1..20, no group inside */ }
 RefTarget =
@@ -1003,11 +1005,13 @@ Rules:
 - The done card of a run (output contract): `intent: "done"`, `title` = the result's first
   line, `fallback` and `body` = the result, `data.runId` = the run, and blocks in this order: a
   `text` block `result`; an `evidence` block `tests` when the result reports test counts
-  (`12 passed`, `3 failed`, `12 pass`); one `evidence` block `acceptance-N` per acceptance item
+  (`12 passed`, `3 failed`, `12 pass`, `2 skipped`), with the counts in `tests`; one `evidence` block `acceptance-N` per acceptance item
   (`pending` = `info`); one `ref` block `pr-N` per pull request (the topic's `topic.linked`
   links, then GitHub pull request URLs in the result; at most 5); one `ref` block `artifact-N`
   per 产出 the run made (versions with its `runId`, or by the bot in the topic since the run
-  started; the newest version each; at most 10). A card that does not fit the Card v2 limits
+  started; the newest version each; at most 10). A GitHub pull request URL in the result that
+  the topic has no link for yet becomes a `topic.linked` (state `open`, no checks) before the
+  card is posted; the GitHub adapter later replaces it with the real state. A card that does not fit the Card v2 limits
   falls back to a text message. Its v1 `card` is the derived one without the fallback text
   block and the `result` block (the message body holds the result, and 1.0.x draws the body).
   Side chat runs answer with a text message.

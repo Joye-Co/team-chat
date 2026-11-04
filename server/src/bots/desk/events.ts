@@ -6,6 +6,7 @@ import { MAX_RESULT_CHARS, Progress, TEXT, cut, firstLine } from "../dispatch";
 import { linkStub } from "../env";
 import type { SeqFrame } from "../link";
 import { type RunProof, doneCard, doneCardV1, mergePrs, prRefs } from "../proof";
+import { TOPIC_LINK_RPC } from "../../integrations/links";
 import { MAX_FOLLOW_UPS, type RunRow, isStallStatus, sanitizeAcceptance, sanitizePlan, sanitizeUsage } from "./core";
 import { DeskRuns } from "./runs";
 
@@ -375,6 +376,22 @@ export abstract class DeskEvents extends DeskRuns {
     await this.topic(r, topicStatus);
   }
 
+  /**
+   * The pull requests a result names that the topic has no link for yet become `topic.linked`
+   * (state "open" until the GitHub adapter sends the real state, checks and size).
+   */
+  protected async linkPrs(r: RunRow, proof: RunProof, body: string): Promise<void> {
+    for (const pr of prRefs(body)) {
+      if (proof.prs.some((p) => p.url === pr.url)) continue;
+      const link = { kind: "pr", repo: pr.repo, number: pr.number, url: pr.url, title: "", state: "open", checks: [] };
+      try {
+        unwrap(await this.room(r).rpc(r.group_id, TOPIC_LINK_RPC, this.actor(), { topicId: r.topic_id, link }));
+      } catch (err) {
+        this.log.warn("topic link from the result failed", { runId: r.id, err });
+      }
+    }
+  }
+
   /** Posts the result once (idempotent by client message id); returns its message id. */
   protected async postResult(r: RunRow, body: string, success: boolean): Promise<string | null> {
     const cmid = `run:${r.id}:result`;
@@ -384,6 +401,7 @@ export abstract class DeskEvents extends DeskRuns {
         const proof = unwrap(
           await this.room(r).rpc(r.group_id, "bots.runProof", this.actor(), { topicId: r.topic_id, runId: r.id, since: r.created_at }),
         ) as RunProof;
+        await this.linkPrs(r, proof, body);
         const card = doneCard({
           runId: r.id,
           result: body,

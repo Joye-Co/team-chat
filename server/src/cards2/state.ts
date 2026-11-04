@@ -413,10 +413,12 @@ export function namedFiles(b: Block): { files: string[]; artifacts: { artifactId
       }
       break;
     case "evidence": {
-      const e = b as Block & { fileId?: string; posterFileId?: string; artifact?: { artifactId: string; version: number } };
-      if (e.fileId) files.push(e.fileId);
-      if (e.posterFileId) files.push(e.posterFileId);
-      if (e.artifact) artifacts.push(e.artifact);
+      if (b.fileId) files.push(b.fileId);
+      if (b.recording) {
+        files.push(b.recording.fileId);
+        if (b.recording.posterFileId) files.push(b.recording.posterFileId);
+      }
+      if (b.artifact) artifacts.push(b.artifact);
       break;
     }
     case "embed":

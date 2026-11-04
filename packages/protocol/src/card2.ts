@@ -383,6 +383,12 @@ export const DiffBlock = z.object({
   additions: Count.optional(),
   deletions: Count.optional(),
 });
+/** 1.1: test counts of an evidence line, from the run's output (read these, not the label). */
+export const EvidenceTests = z.object({ passed: Count, failed: Count, skipped: Count.optional() });
+export type EvidenceTests = z.infer<typeof EvidenceTests>;
+/** 1.1: a screen recording (录屏): a video file of the group, its length and a poster frame. */
+export const EvidenceRecording = z.object({ fileId: Id, durationMs: Count, posterFileId: Id.optional() });
+export type EvidenceRecording = z.infer<typeof EvidenceRecording>;
 export const EvidenceBlock = z.object({
   type: z.literal("evidence"),
   ...id,
@@ -392,6 +398,10 @@ export const EvidenceBlock = z.object({
   fileId: Id.optional(),
   url: WebUrl.optional(),
   artifact: ArtifactRef.optional(),
+  /** 1.1 */
+  tests: EvidenceTests.optional(),
+  /** 1.1: a 录屏 tile. */
+  recording: EvidenceRecording.optional(),
 });
 export const RefBlock = z.object({ type: z.literal("ref"), ...id, label: Short(200), target: RefTarget });
 

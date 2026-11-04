@@ -3090,6 +3090,52 @@
                           "artifactId",
                           "version"
                         ]
+                      },
+                      "tests": {
+                        "type": "object",
+                        "properties": {
+                          "passed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "failed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "skipped": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "passed",
+                          "failed"
+                        ]
+                      },
+                      "recording": {
+                        "type": "object",
+                        "properties": {
+                          "fileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "posterFileId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "fileId",
+                          "durationMs"
+                        ]
                       }
                     },
                     "required": [
@@ -6581,6 +6627,52 @@
                                   "required": [
                                     "artifactId",
                                     "version"
+                                  ]
+                                },
+                                "tests": {
+                                  "type": "object",
+                                  "properties": {
+                                    "passed": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "failed": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "skipped": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "passed",
+                                    "failed"
+                                  ]
+                                },
+                                "recording": {
+                                  "type": "object",
+                                  "properties": {
+                                    "fileId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "posterFileId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "fileId",
+                                    "durationMs"
                                   ]
                                 }
                               },
@@ -12332,6 +12424,52 @@
                               "artifactId",
                               "version"
                             ]
+                          },
+                          "tests": {
+                            "type": "object",
+                            "properties": {
+                              "passed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "failed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "skipped": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "passed",
+                              "failed"
+                            ]
+                          },
+                          "recording": {
+                            "type": "object",
+                            "properties": {
+                              "fileId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "durationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "posterFileId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "fileId",
+                              "durationMs"
+                            ]
                           }
                         },
                         "required": [
@@ -15823,6 +15961,52 @@
                                       "required": [
                                         "artifactId",
                                         "version"
+                                      ]
+                                    },
+                                    "tests": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "failed": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "skipped": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed"
+                                      ]
+                                    },
+                                    "recording": {
+                                      "type": "object",
+                                      "properties": {
+                                        "fileId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "durationMs": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "posterFileId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "fileId",
+                                        "durationMs"
                                       ]
                                     }
                                   },
@@ -26564,6 +26748,52 @@
                           "artifactId",
                           "version"
                         ]
+                      },
+                      "tests": {
+                        "type": "object",
+                        "properties": {
+                          "passed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "failed": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "skipped": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "passed",
+                          "failed"
+                        ]
+                      },
+                      "recording": {
+                        "type": "object",
+                        "properties": {
+                          "fileId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "posterFileId": {
+                            "type": "string",
+                            "minLength": 1
+                          }
+                        },
+                        "required": [
+                          "fileId",
+                          "durationMs"
+                        ]
                       }
                     },
                     "required": [
@@ -30055,6 +30285,52 @@
                                   "required": [
                                     "artifactId",
                                     "version"
+                                  ]
+                                },
+                                "tests": {
+                                  "type": "object",
+                                  "properties": {
+                                    "passed": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "failed": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "skipped": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "passed",
+                                    "failed"
+                                  ]
+                                },
+                                "recording": {
+                                  "type": "object",
+                                  "properties": {
+                                    "fileId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    },
+                                    "durationMs": {
+                                      "type": "integer",
+                                      "minimum": 0,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "posterFileId": {
+                                      "type": "string",
+                                      "minLength": 1
+                                    }
+                                  },
+                                  "required": [
+                                    "fileId",
+                                    "durationMs"
                                   ]
                                 }
                               },
@@ -40297,6 +40573,52 @@
                       "artifactId",
                       "version"
                     ]
+                  },
+                  "tests": {
+                    "type": "object",
+                    "properties": {
+                      "passed": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "failed": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "skipped": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "passed",
+                      "failed"
+                    ]
+                  },
+                  "recording": {
+                    "type": "object",
+                    "properties": {
+                      "fileId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "durationMs": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      "posterFileId": {
+                        "type": "string",
+                        "minLength": 1
+                      }
+                    },
+                    "required": [
+                      "fileId",
+                      "durationMs"
+                    ]
                   }
                 },
                 "required": [
@@ -43788,6 +44110,52 @@
                               "required": [
                                 "artifactId",
                                 "version"
+                              ]
+                            },
+                            "tests": {
+                              "type": "object",
+                              "properties": {
+                                "passed": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "failed": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "skipped": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "passed",
+                                "failed"
+                              ]
+                            },
+                            "recording": {
+                              "type": "object",
+                              "properties": {
+                                "fileId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                },
+                                "durationMs": {
+                                  "type": "integer",
+                                  "minimum": 0,
+                                  "maximum": 9007199254740991
+                                },
+                                "posterFileId": {
+                                  "type": "string",
+                                  "minLength": 1
+                                }
+                              },
+                              "required": [
+                                "fileId",
+                                "durationMs"
                               ]
                             }
                           },
@@ -50416,6 +50784,52 @@
                               "artifactId",
                               "version"
                             ]
+                          },
+                          "tests": {
+                            "type": "object",
+                            "properties": {
+                              "passed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "failed": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "skipped": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              }
+                            },
+                            "required": [
+                              "passed",
+                              "failed"
+                            ]
+                          },
+                          "recording": {
+                            "type": "object",
+                            "properties": {
+                              "fileId": {
+                                "type": "string",
+                                "minLength": 1
+                              },
+                              "durationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "maximum": 9007199254740991
+                              },
+                              "posterFileId": {
+                                "type": "string",
+                                "minLength": 1
+                              }
+                            },
+                            "required": [
+                              "fileId",
+                              "durationMs"
+                            ]
                           }
                         },
                         "required": [
@@ -53907,6 +54321,52 @@
                                       "required": [
                                         "artifactId",
                                         "version"
+                                      ]
+                                    },
+                                    "tests": {
+                                      "type": "object",
+                                      "properties": {
+                                        "passed": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "failed": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "skipped": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        }
+                                      },
+                                      "required": [
+                                        "passed",
+                                        "failed"
+                                      ]
+                                    },
+                                    "recording": {
+                                      "type": "object",
+                                      "properties": {
+                                        "fileId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        },
+                                        "durationMs": {
+                                          "type": "integer",
+                                          "minimum": 0,
+                                          "maximum": 9007199254740991
+                                        },
+                                        "posterFileId": {
+                                          "type": "string",
+                                          "minLength": 1
+                                        }
+                                      },
+                                      "required": [
+                                        "fileId",
+                                        "durationMs"
                                       ]
                                     }
                                   },

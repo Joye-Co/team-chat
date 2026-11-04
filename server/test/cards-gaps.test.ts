@@ -275,3 +275,22 @@ describe("引用提问 from 单独问 (PC-7)", () => {
     for (const c of [ca, cbot, co]) c.close();
   });
 });
+
+describe("录屏 evidence (PC-3)", () => {
+  it("takes a recording file of the group and refuses one of another group", async () => {
+    const w = await world();
+    const other = await createGroup(w.owner, [w.bot.id]);
+    const cbot = await w.connect(w.bot);
+    const video = await upload(w.bot, w.gid, "demo.mp4", "video/mp4", "mp4");
+    const poster = await upload(w.bot, w.gid, "demo.png", "image/png", "png");
+    const theirs = await upload(w.bot, other, "x.mp4", "video/mp4", "mp4");
+    const rec = (fileId: string, posterFileId?: string) =>
+      base({ intent: "done", blocks: [{ id: "rec", type: "evidence", label: "录屏", state: "pass", recording: { fileId, durationMs: 42_000, ...(posterFileId ? { posterFileId } : {}) } }] });
+    const ok = await send(cbot, w.gid, rec(video, poster));
+    expect(ok, JSON.stringify(ok)).toMatchObject({ ok: true });
+    expect(ok.result.message.cardV2.blocks[0].recording).toEqual({ fileId: video, durationMs: 42_000, posterFileId: poster });
+    expect(await send(cbot, w.gid, rec(theirs))).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    expect(await send(cbot, w.gid, rec(video, theirs))).toMatchObject({ ok: false, error: { reason: "card.limits" } });
+    cbot.close();
+  });
+});

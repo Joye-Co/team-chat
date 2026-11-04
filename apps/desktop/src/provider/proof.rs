@@ -57,6 +57,20 @@ pub fn of_card(card: &CardV2, links: &[TopicLink]) -> Vec<Proof> {
                 title: label.clone(),
                 version: version.unwrap_or(1),
             }),
+            // 1.1: the counts the server parsed from the run's output; older cards only
+            // have the label.
+            CardV2Block::Evidence {
+                tests: Some(t), ..
+            } => out.push(Proof::Tests {
+                passed: t.passed.min(u32::MAX as u64) as u32,
+                failed: t.failed.min(u32::MAX as u64) as u32,
+            }),
+            CardV2Block::Evidence {
+                recording: Some(r),
+                ..
+            } => out.push(Proof::Recording {
+                duration_ms: r.duration_ms,
+            }),
             CardV2Block::Evidence { id, label, .. } if id == "tests" => {
                 if let (Some(passed), failed) = counts(label) {
                     out.push(Proof::Tests {
@@ -141,6 +155,30 @@ mod tests {
                     title: "报告（第 2 版）".into(),
                     version: 2
                 },
+            ]
+        );
+    }
+
+    #[test]
+    fn counts_come_from_the_evidence_tests_and_a_recording_is_proof() {
+        let card: CardV2 = serde_json::from_value(serde_json::json!({
+            "v": 2, "rev": 1, "intent": "done", "title": "修好了", "fallback": "修好了",
+            "blocks": [
+                { "type": "evidence", "id": "tests", "label": "测试：全部通过（3 个跳过）",
+                  "tests": { "passed": 12, "failed": 1, "skipped": 3 } },
+                { "type": "evidence", "id": "rec", "label": "录屏",
+                  "recording": { "fileId": "f1", "durationMs": 42000 } }
+            ]
+        }))
+        .expect("a done card");
+        assert_eq!(
+            of_card(&card, &[]),
+            vec![
+                Proof::Tests {
+                    passed: 12,
+                    failed: 1
+                },
+                Proof::Recording { duration_ms: 42_000 },
             ]
         );
     }

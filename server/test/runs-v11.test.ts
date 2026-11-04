@@ -143,6 +143,9 @@ describe("done card rules", () => {
     expect(testCounts(" 485 pass\n 0 fail")).toEqual({ passed: 485, failed: 0 });
     expect(testCounts("Tests  33 passed (33)")).toEqual({ passed: 33, failed: 0 });
     expect(testCounts("all good")).toBeNull();
+    expect(testCounts("Tests  12 passed | 1 failed | 2 skipped (15)")).toEqual({ passed: 12, failed: 1, skipped: 2 });
+    const card = doneCard({ runId: "r", result: "做完了\n12 passed, 1 failed", prs: [], artifacts: [], acceptance: [] });
+    expect(card?.blocks).toContainEqual(expect.objectContaining({ type: "evidence", id: "tests", state: "fail", tests: { passed: 12, failed: 1 } }));
     expect(prRefs("see https://github.com/a/b/pull/7 and https://github.com/a/b/pull/7, https://github.com/c/d/pull/9")).toEqual([
       { url: "https://github.com/a/b/pull/7", repo: "a/b", number: 7 },
       { url: "https://github.com/c/d/pull/9", repo: "c/d", number: 9 },
