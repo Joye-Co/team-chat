@@ -93,7 +93,8 @@ impl GroupPage {
         if text.is_empty() {
             return;
         }
-        let _ = self.services.provider.record_decision(&g, text);
+        // Fire and forget: the decision list follows the provider's change event.
+        drop(self.services.provider.record_decision(&g, text));
         self.close_note(cx);
     }
 }

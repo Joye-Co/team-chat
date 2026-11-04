@@ -941,6 +941,14 @@ fn retro(rev: u32, note: &str) -> Value {
     )
 }
 
+/// The rev the viewer saw before, for a sample that changed (the drill-down scenes).
+pub fn prev_of(message_id: &str) -> Option<Arc<CardV2>> {
+    all()
+        .into_iter()
+        .find(|s| s.msg.message_id == message_id)
+        .and_then(|s| s.prev)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -966,12 +974,4 @@ mod tests {
             assert!(super::super::is_21(c), "{} is a 2.1 card", s.msg.message_id);
         }
     }
-}
-
-/// The rev the viewer saw before, for a sample that changed (the drill-down scenes).
-pub fn prev_of(message_id: &str) -> Option<Arc<CardV2>> {
-    all()
-        .into_iter()
-        .find(|s| s.msg.message_id == message_id)
-        .and_then(|s| s.prev)
 }

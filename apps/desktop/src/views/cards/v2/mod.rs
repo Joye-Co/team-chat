@@ -1047,7 +1047,12 @@ fn strip_action(ctx: &Ctx, cx: &App) -> Option<AnyElement> {
     match ctx.state {
         CardState::SendFailed { action_id, .. } => {
             crate::selftest::drawn::mark("card-band-retry", ctx.msg.message_id.clone());
-            let action = ctx.card.actions().iter().find(|x| &x.id == action_id).cloned();
+            let action = ctx
+                .card
+                .actions()
+                .iter()
+                .find(|x| &x.id == action_id)
+                .cloned();
             let Some(action) = action else {
                 // A 2.1 answer of a block (an immediate commit): the band's 重试 sends the
                 // same answer again (CARD21 §2).

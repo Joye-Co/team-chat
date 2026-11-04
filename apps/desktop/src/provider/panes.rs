@@ -52,6 +52,9 @@ pub(super) struct PanesCache {
     inner: Mutex<Inner>,
 }
 
+/// One of my first questions in a side chat, not in the cache yet: (clientMsgId, body, at).
+type FirstQuestion = (String, String, Millis);
+
 #[derive(Default)]
 struct Inner {
     generation: u64,
@@ -61,7 +64,7 @@ struct Inner {
     machines_at: Option<Instant>,
     machines_loading: bool,
     /// (group, topic, member) -> my first questions not in the cache yet: (clientMsgId, body, at).
-    pending: HashMap<(String, String, String), Vec<(String, String, Millis)>>,
+    pending: HashMap<(String, String, String), Vec<FirstQuestion>>,
     /// Side chat message id -> when I pressed its suggestion, until the post shows in the
     /// source topic (which keeps it across restarts).
     posted: HashMap<String, Millis>,

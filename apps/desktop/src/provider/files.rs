@@ -411,6 +411,7 @@ impl CoreProvider {
     }
     // --- end inc-refs ---
 
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn start_upload_job(
         &self,
         key: &DraftKey,

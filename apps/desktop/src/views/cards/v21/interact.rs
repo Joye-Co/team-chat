@@ -553,7 +553,8 @@ pub fn after_body(ctx: &Ctx, _window: &mut Window, cx: &mut App) {
 /// (offline) or the author cannot take it now (busy, `expect.mode: none`).
 pub fn undone(e: &MyCardEvent, now: Millis) -> bool {
     !e.durable
-        && stage_of(e, now).is_some_and(|p| matches!(p.stage, Stage::OfflineLive | Stage::Busy | Stage::Refused))
+        && stage_of(e, now)
+            .is_some_and(|p| matches!(p.stage, Stage::OfflineLive | Stage::Busy | Stage::Refused))
 }
 
 /// Blocks with a live event of mine on its way, or one whose state is still to go back.
@@ -1096,14 +1097,23 @@ mod tests {
         let none = ev(ExpectMode::None, 0, false);
         let events = [none.clone()];
         assert!(pending(&events, 100).is_none(), "no band copy");
-        assert!(pending_at(&events, "bars", 100).is_none(), "no 重试 at the block");
+        assert!(
+            pending_at(&events, "bars", 100).is_none(),
+            "no 重试 at the block"
+        );
         assert!(pending_at(&events, "bars", 60_000).is_none());
         assert!(refused(&events, "bars", 1), "read-only for that rev");
-        assert!(!refused(&events, "bars", 2), "a new rev may make it interactive");
+        assert!(
+            !refused(&events, "bars", 2),
+            "a new rev may make it interactive"
+        );
         assert!(!refused(&events, "other", 1));
         assert!(undone(&none, 100), "the optimistic state goes back");
         assert!(!refused(&[ev(ExpectMode::Live, 0, false)], "bars", 1));
-        assert!(!refused(&[ev(ExpectMode::None, 0, true)], "bars", 1), "an answer");
+        assert!(
+            !refused(&[ev(ExpectMode::None, 0, true)], "bars", 1),
+            "an answer"
+        );
     }
 
     #[test]

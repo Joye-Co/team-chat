@@ -408,7 +408,7 @@ impl TopicRail {
     fn plan_card(&self, d: &Data, run: &BotRunSummary, cx: &mut Context<Self>) -> AnyElement {
         let k = theme::colors(cx);
         let starts = &d.step_times;
-        let minutes = step_minutes(run, &starts);
+        let minutes = step_minutes(run, starts);
         let all_done = run.plan.iter().all(|i| i.state == PlanState::Done);
         let open = !all_done || self.plan_open;
         let total = match (run.started_at, run.ended_at) {
@@ -951,7 +951,7 @@ impl TopicRail {
 
     fn cost_card(&self, d: &Data, cx: &App) -> Option<AnyElement> {
         let k = theme::colors(cx);
-        let cost = d.cost.clone()?;
+        let cost = d.cost?;
         if cost.duration_ms == 0 && cost.cost_cents.is_none() {
             return None;
         }

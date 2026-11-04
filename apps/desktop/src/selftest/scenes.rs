@@ -843,7 +843,10 @@ pub fn ready_check(name: &str) -> Option<fn(&App) -> bool> {
 }
 
 /// For a scene that checks its own capture: runs after the PNG is written.
-pub fn verify_check(name: &str) -> Option<fn(&std::path::Path, &mut App) -> Result<(), String>> {
+/// A scene's check of its own capture (the PNG and the app).
+pub type Verify = fn(&std::path::Path, &mut App) -> Result<(), String>;
+
+pub fn verify_check(name: &str) -> Option<Verify> {
     // --- inc-host track ---
     if host_check(name) {
         return Some(host_preview::verify);

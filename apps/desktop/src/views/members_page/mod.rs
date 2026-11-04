@@ -760,11 +760,12 @@ impl MembersPage {
                                 .disabled(run.is_none())
                                 .on_click(move |_, _, _| {
                                     if let Some(r) = &run {
-                                        let _ = services.provider.take_over_run(
+                                        // The 实时查看 state follows the run's change event.
+                                        drop(services.provider.take_over_run(
                                             &r.group_id,
                                             &r.topic_id,
                                             &r.id,
-                                        );
+                                        ));
                                     }
                                 }),
                             )

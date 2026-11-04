@@ -21,7 +21,7 @@ pub const SCENES: &[Scene] = &[
         start: Start::V2,
         setup: |s, cx| {
             v2_open_topic(s, d::DEV, d::T_RECONNECT, cx);
-            let _ = s.provider.approve_changes(d::DEV, d::T_RECONNECT);
+            drop(s.provider.approve_changes(d::DEV, d::T_RECONNECT));
         },
         open: open_main,
     },

@@ -409,7 +409,7 @@ mod tests {
             (AskKind::Review, Some(REVIEW_ASK))
         );
         assert_eq!(p.changes_approval(GROUP, TOPIC), None);
-        let _ = p.approve_changes(GROUP, TOPIC);
+        drop(p.approve_changes(GROUP, TOPIC));
         let pending = p.card_v2_pending(GROUP, REVIEW_ASK).expect("my answer");
         assert_eq!(pending.action_id, "approve");
         let (by, _) = p.changes_approval(GROUP, TOPIC).expect("approved");

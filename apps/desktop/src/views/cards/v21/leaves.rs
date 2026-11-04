@@ -2297,15 +2297,10 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                         .text_color(k.ink_3)
                         .child(fill(c::EMBED_VERSION, &[("n", &version.to_string())])),
                 )
-                .child(
-                    div()
-                        .flex_none()
-                        .text_color(k.ink_3)
-                        .child(format!(
-                            "· {}",
-                            file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
-                        )),
-                )
+                .child(div().flex_none().text_color(k.ink_3).child(format!(
+                    "· {}",
+                    file.map_or(c::EMBED_KIND, crate::views::media::MediaKind::label)
+                )))
                 .when(file.is_none(), |el| {
                     el.child(
                         div()
@@ -2336,21 +2331,23 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
                 ),
         )
         .child(body)
-        .when(file.is_none(), |el| el.child(
-            meta(div())
-                .h(px(32.))
-                .px(space::S12)
-                .flex()
-                .items_center()
-                .gap(space::S6)
-                .bg(k.raised)
-                .border_t_1()
-                .border_color(k.line)
-                .text_color(k.ink_3)
-                .child(ui::icon(Lucide::ArrowRight, px(12.), k.ink_3))
-                .child(fill(c::EMBED_FOOT, &[("name", &ctx.author)]))
-                .child(div().ml_auto().child(c::EMBED_NO_APPROVE)),
-        ))
+        .when(file.is_none(), |el| {
+            el.child(
+                meta(div())
+                    .h(px(32.))
+                    .px(space::S12)
+                    .flex()
+                    .items_center()
+                    .gap(space::S6)
+                    .bg(k.raised)
+                    .border_t_1()
+                    .border_color(k.line)
+                    .text_color(k.ink_3)
+                    .child(ui::icon(Lucide::ArrowRight, px(12.), k.ink_3))
+                    .child(fill(c::EMBED_FOOT, &[("name", &ctx.author)]))
+                    .child(div().ml_auto().child(c::EMBED_NO_APPROVE)),
+            )
+        })
         .into_any_element()
 }
 

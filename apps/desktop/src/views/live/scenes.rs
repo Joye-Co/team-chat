@@ -29,9 +29,10 @@ pub const SCENES: &[Scene] = &[
         start: Start::V2,
         setup: |s, cx| {
             live(s, cx);
-            let _ = s
-                .provider
-                .take_over_run(d::DEV, d::T_VIRTUAL, d::RUN_VIRTUAL);
+            drop(
+                s.provider
+                    .take_over_run(d::DEV, d::T_VIRTUAL, d::RUN_VIRTUAL),
+            );
         },
         open: open_main,
     },
