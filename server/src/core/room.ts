@@ -1411,7 +1411,11 @@ export class GroupRoom extends DurableObject<Env> {
         this.lastSeq = start;
         throw err;
       }
-      if (imported > 0) this.log.info("events imported", { imported, lastSeq: this.lastSeq });
+      if (imported > 0) {
+        this.log.info("events imported", { imported, lastSeq: this.lastSeq });
+        // Feature alarms (ask expiry, retries) set their next wake from the restored tables.
+        this.wakeAt(Date.now() + 1000);
+      }
       return { lastSeq: this.lastSeq, imported, skipped };
     });
   }

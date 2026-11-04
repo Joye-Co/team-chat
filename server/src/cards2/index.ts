@@ -24,6 +24,7 @@ import { checkEmbeds, directory, isPick, recordRev, stateForWrite } from "./stat
 import { EVENT_KEEP_MS, eventRow, extOf, messageRow, pruneEvents } from "./store";
 
 import "./decisions";
+import "./restore";
 
 export {
   type CardEventDelivery,

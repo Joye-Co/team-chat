@@ -315,7 +315,7 @@ registerRoomMigration({
 type TopicWait = { status: TopicStatus; waitingOn: string[] };
 
 /** The people the open blocking asks of the topic wait on; undefined when none is open. */
-function blockingWait(sql: SqlStorage, topicId: string): string[] | undefined {
+export function blockingWait(sql: SqlStorage, topicId: string): string[] | undefined {
   const rows = sql
     .exec<{ from_ids: string }>(
       `SELECT json_extract(ext, '$.cardState.ask.from') AS from_ids FROM messages
@@ -330,12 +330,12 @@ function blockingWait(sql: SqlStorage, topicId: string): string[] | undefined {
   return [...ids];
 }
 
-function baseOf(sql: SqlStorage, topicId: string): TopicWait | undefined {
+export function baseOf(sql: SqlStorage, topicId: string): TopicWait | undefined {
   const r = sql.exec<{ status: string; waiting_on: string }>("SELECT status, waiting_on FROM card_topic_base WHERE topic_id = ?", topicId).toArray()[0];
   return r ? { status: r.status as TopicStatus, waitingOn: JSON.parse(r.waiting_on) as string[] } : undefined;
 }
 
-function saveBase(sql: SqlStorage, topicId: string, base: TopicWait): void {
+export function saveBase(sql: SqlStorage, topicId: string, base: TopicWait): void {
   sql.exec("INSERT OR REPLACE INTO card_topic_base (topic_id, status, waiting_on) VALUES (?, ?, ?)", topicId, base.status, JSON.stringify(base.waitingOn));
 }
 

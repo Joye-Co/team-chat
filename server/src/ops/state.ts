@@ -4,8 +4,19 @@
 import { ApiError } from "../core/errors";
 import { registerGatewayRpc, registerRoomRpc } from "../core/registry";
 
-/** Room tables copied whole. Each must have a primary key so a re-import replaces rows. */
-export const ROOM_STATE_TABLES = ["topic_states", "member_prefs"] as const;
+/**
+ * Room tables copied whole: state the event log cannot give back. Each must have a primary key
+ * so a re-import replaces rows. cards2: idempotency keys and causes of card events, the
+ * requester of each ask round, answers a run took; files: the data snapshot of each 产出 page.
+ */
+export const ROOM_STATE_TABLES = [
+  "topic_states",
+  "member_prefs",
+  "card_events",
+  "card_requesters",
+  "card_consumed",
+  "artifact_data",
+] as const;
 
 export interface RoomStateSnapshot {
   version: 1;
@@ -62,6 +73,14 @@ registerRoomRpc("ops.importState", (room, actor, args) => {
       room.sql.exec(stmt, ...idx.map((i) => r[i] as SqlStorageValue));
       rows++;
     }
+  }
+  // The data rev a 产出 version shows follows its restored data snapshot.
+  if (hasTable(room.sql, "artifact_data")) {
+    room.sql.exec(
+      `UPDATE artifact_versions SET data_rev = (SELECT d.data_rev FROM artifact_data d
+         WHERE d.artifact_id = artifact_versions.artifact_id AND d.version = artifact_versions.version)
+       WHERE EXISTS (SELECT 1 FROM artifact_data d WHERE d.artifact_id = artifact_versions.artifact_id AND d.version = artifact_versions.version)`,
+    );
   }
   return { rows };
 });
