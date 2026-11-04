@@ -1,9 +1,8 @@
 //! One element per process step, in product words.
 
 use gpui::{
-    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement,
-    ScrollHandle, StatefulInteractiveElement as _, Styled, Window, canvas, div,
-    prelude::FluentBuilder as _, px,
+    AnyElement, App, ElementId, Hsla, InteractiveElement as _, IntoElement, ParentElement, Styled,
+    Window, div, prelude::FluentBuilder as _, px,
 };
 
 use crate::{
@@ -71,74 +70,24 @@ fn block(_cx: &App) -> gpui::Div {
         .gap(space::S4)
 }
 
-/// The fade at the right edge of a block whose line is wider than it.
-const LINE_FADE: gpui::Pixels = px(16.);
-
 /// Command lines and output: `code` 13/20 Menlo on `code-bg`, radius 8.
-/// Lines never wrap: a long path or command scrolls sideways (§15), so a
-/// log reads line by line. The text scrolls inside the block's padding, and
-/// while a line runs past the right edge a short fade there says so. `id` is
-/// unique within the step list.
-fn mono_box(id: ElementId, text: String, window: &mut Window, cx: &mut App) -> impl IntoElement {
+/// The pane is narrow, so a long line wraps (a path or a log line breaks
+/// at the edge) instead of being clipped mid-glyph; explicit line breaks
+/// stay. `id` is unique within the step list.
+fn mono_box(id: ElementId, text: String, _window: &mut Window, cx: &mut App) -> impl IntoElement {
     let k = theme::colors(cx);
-    // The scroll position lives as long as the block is drawn, so a scrolled
-    // line stays put while the run streams new steps.
-    let handle = window
-        .use_keyed_state(id.clone(), cx, |_, _| ScrollHandle::new())
-        .read(cx)
-        .clone();
-    let fade_handle = handle.clone();
-    let bg = k.code_bg;
     div()
+        .id(id)
         .mt(space::S2)
         .w_full()
         .min_w(px(0.))
-        .relative()
         .rounded(theme::radius::MD)
-        .bg(bg)
+        .bg(k.code_bg)
         .px(space::S10)
         .py(space::S8)
-        .child(
-            div()
-                .id(id)
-                .w_full()
-                .min_w(px(0.))
-                .flex()
-                .overflow_x_scroll()
-                .track_scroll(&handle)
-                .child(
-                    div()
-                        .flex_none()
-                        .t_code()
-                        .text_color(k.text_1)
-                        .whitespace_nowrap()
-                        .child(text),
-                ),
-        )
-        .child(
-            // Painted after the scroll area has its sizes for this frame, so
-            // the fade shows from the first frame and goes at the line's end.
-            canvas(
-                |_, _, _| {},
-                move |bounds, _, window, _| {
-                    if line_runs_past(&fade_handle) {
-                        window.paint_quad(gpui::fill(
-                            bounds,
-                            gpui::linear_gradient(
-                                90.,
-                                gpui::linear_color_stop(bg.opacity(0.), 0.),
-                                gpui::linear_color_stop(bg, 1.),
-                            ),
-                        ));
-                    }
-                },
-            )
-            .absolute()
-            .top(space::S8)
-            .bottom(space::S8)
-            .right(space::S10)
-            .w(LINE_FADE),
-        )
+        .t_code()
+        .text_color(k.text_1)
+        .child(text)
 }
 
 /// Where a path is cut: the folders before the last two parts, and those
@@ -168,12 +117,6 @@ fn path_line(id: ElementId, path: &str) -> gpui::Stateful<gpui::Div> {
     line.text_overflow(gpui::TextOverflow::Truncate(
         format!("…/{}", tail.trim_start_matches('/')).into(),
     ))
-}
-
-/// True while text in the scroll area of `handle` runs past its right edge.
-fn line_runs_past(handle: &ScrollHandle) -> bool {
-    let max = handle.max_offset().x;
-    max > px(0.5) && handle.offset().x > -max + px(0.5)
 }
 
 /// The id of the `slot`th box of step `ix`.
