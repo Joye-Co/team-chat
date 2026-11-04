@@ -1098,6 +1098,10 @@ pub struct CapabilityLine {
     /// The part of [`line`](Self::line) that is never cut (who gets the page's actions,
     /// or the read-only line): it wraps when the footer is too narrow.
     pub head: String,
+    /// The head split before the member name: (`页面里的操作会发给 `, `{name}`). The footer
+    /// keeps each part whole, so a narrow footer wraps only before the name, never in it.
+    /// `None` for the read-only line, which wraps like text.
+    pub head_parts: Option<(String, String)>,
     /// The declared event labels after the head (` · ` joined), cut first when the footer
     /// is narrow; the whole line shows on hover.
     pub labels: Option<String>,
@@ -1112,12 +1116,16 @@ fn capability_text(bridge: Option<PageBridge>, name: &str) -> CapabilityLine {
         return CapabilityLine {
             line: cp::PAGE_READ_ONLY.to_string(),
             head: cp::PAGE_READ_ONLY.to_string(),
+            head_parts: None,
             labels: None,
             run_log: None,
         };
     };
     let name = name.to_string();
     let head = fill(cp::PAGE_SENDS_TO, &[("name", &name)]);
+    let head_parts = cp::PAGE_SENDS_TO
+        .split_once("{name}")
+        .map(|(before, after)| (before.to_string(), format!("{name}{after}")));
     let labels: Vec<String> = b
         .events
         .iter()
@@ -1131,6 +1139,7 @@ fn capability_text(bridge: Option<PageBridge>, name: &str) -> CapabilityLine {
             None => head.clone(),
         },
         head,
+        head_parts,
         labels,
         run_log: (b.runner && caps.ask).then(|| {
             (
@@ -1156,61 +1165,62 @@ pub fn page_footer(
         ui::{self, Lucide},
     };
     use gpui::{
-        InteractiveElement as _, IntoElement as _, ParentElement as _,
-        StatefulInteractiveElement as _, Styled as _, div, px,
+        InteractiveElement as _, ParentElement as _, StatefulInteractiveElement as _, Styled as _,
+        div, px,
     };
     use gpui_component::{Sizable as _, tooltip::Tooltip};
     let k = theme::colors(cx);
     let CapabilityLine {
         line,
         head,
+        head_parts,
         labels,
         run_log,
     } = capability_line(provider, artifact_id, version);
     let full = SharedString::from(line);
     let view = band(artifact_id, version, cx);
-    // Who gets the page's actions reads in full (it wraps before it is cut). The event
-    // labels after it give way: cut while the footer is free, left out while a band
-    // shows; then the whole line shows on hover.
+    // Who gets the page's actions reads in full on one line. When even that cannot fit,
+    // it wraps only before the member name, never inside it. The event labels follow
+    // it in the same run of text: they take only the room left and are cut with an
+    // ellipsis, and are left out while a band shows; the whole line shows on hover.
+    let head = match head_parts {
+        Some((before, name)) => div()
+            .flex()
+            .flex_wrap()
+            .child(div().whitespace_nowrap().child(before))
+            .child(div().whitespace_nowrap().child(name)),
+        None => div().child(head),
+    }
+    .flex_shrink(1.)
+    .min_w(px(0.))
+    .py(space::S4);
     let can = SharedString::from(format!("{id}-can"));
-    let (head, labels) = match (labels, view.is_some()) {
-        (Some(labels), false) => (
-            div()
-                .flex_shrink(1.)
-                .min_w(px(0.))
-                .py(space::S4)
-                .child(head),
+    let head = match (labels, view.is_some()) {
+        (Some(labels), false) => div().flex().items_center().child(head).child(
             div()
                 .id(can)
                 .flex_1()
                 .min_w(px(0.))
                 .one_line()
                 .child(format!("· {labels}"))
-                .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx))
-                .into_any_element(),
+                .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
         ),
-        (Some(_), true) => (
-            div().flex_shrink(1.).min_w(px(0.)).py(space::S4).child(
-                div()
-                    .id(can)
-                    .child(head)
-                    .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
-            ),
-            div().flex_1().into_any_element(),
-        ),
-        (None, _) => (
+        (Some(_), true) => div().flex().items_center().child(
             div()
+                .id(can)
                 .flex_shrink(1.)
                 .min_w(px(0.))
-                .py(space::S4)
-                .child(head),
-            div().flex_1().into_any_element(),
+                .child(head)
+                .tooltip(move |window, cx| Tooltip::new(full.clone()).build(window, cx)),
         ),
-    };
+        (None, _) => div().flex().items_center().child(head),
+    }
+    // The text takes the free width; what follows sits at the footer's end.
+    .flex_1()
+    .min_w(px(0.));
     let base = crate::views::media::parts::footer(cx)
         .children(lead)
         .child(head)
-        .child(labels)
         // Never cut: the short line, with the whole notice on hover.
         .children(run_log.map(|(short, whole)| {
             let whole = SharedString::from(whole);
