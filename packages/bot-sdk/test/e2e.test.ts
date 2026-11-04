@@ -123,6 +123,14 @@ async function waitFor<T>(what: string, fn: () => T | undefined | null | false, 
   }
 }
 
+/** A message as `history` stores it (with the derived v1 card). */
+async function storedMessage(groupId: string, topicId: string, id: string): Promise<Message> {
+  const page = await human.history(groupId, topicId, { limit: 100 });
+  const m = page.messages.find((x) => x.id === id);
+  if (!m) throw new Error(`message ${id} not in history`);
+  return m;
+}
+
 function botMessages(topicId: string): Message[] {
   return events
     .filter((e): e is Extract<Event, { type: "message.created" }> => e.type === "message.created")
@@ -646,7 +654,9 @@ describe("1.1 cards, side chats and page events", () => {
     );
     const done = await waitFor("done card", () => botMessages(r.message.topicId).find((m) => m.cardV2?.intent === "done"));
     expect(done.cardV2?.blocks.map((b) => b.type)).toEqual(["text", "evidence", "ref"]);
-    expect(done.card?.tone).toBe("success");
+    // A socket that reads tc.card/2.x gets no v1 fallback live; history keeps it for every reader.
+    expect(done.card).toBeUndefined();
+    expect((await storedMessage(r.message.groupId, r.message.topicId, done.id)).card?.tone).toBe("success");
     expect(botMessages(r.message.topicId).filter((m) => !m.cardV2)).toHaveLength(0);
     const ended = await waitFor("run done", () =>
       events.find(
@@ -661,8 +671,9 @@ describe("1.1 cards, side chats and page events", () => {
     const r = await mention("fail now");
     const done = await waitFor("failed done card", () => botMessages(r.message.topicId).find((m) => m.cardV2?.intent === "done"));
     expect(done.cardV2?.blocks[1]).toEqual({ type: "evidence", id: "failed", label: "没有完成", state: "fail" });
-    expect(done.card?.tone).toBe("danger");
-    expect(done.card?.blocks).toContainEqual({ type: "list", items: [{ text: "没有完成", status: "failed" }] });
+    const stored = await storedMessage(r.message.groupId, r.message.topicId, done.id);
+    expect(stored.card?.tone).toBe("danger");
+    expect(stored.card?.blocks).toContainEqual({ type: "list", items: [{ text: "没有完成", status: "failed" }] });
     await waitFor("run failed", () =>
       events.find((e) => e.type === "run.updated" && e.data.run.topicId === r.message.topicId && e.data.run.status === "failed"),
     );
@@ -755,7 +766,9 @@ describe("1.1 interaction loop (INTERACT 8.4, REFS C3)", () => {
   /** The 7.1 report (rev 1), asked of the human. */
   function report(): CardV2 {
     const card = JSON.parse(readFileSync(join(import.meta.dir, "../../../protocol/fixtures/entities/card-v2-report-compose.json"), "utf8")).value as CardV2;
-    return { ...card, ask: { ...(card.ask as NonNullable<CardV2["ask"]>), from: [ownerId()] } };
+    // The fixture links a 产出 of the fixture group; a card names only 产出 of its own group.
+    const blocks = card.blocks.filter((b) => !(b.type === "ref" && b.target.kind === "artifact"));
+    return { ...card, blocks, ask: { ...(card.ask as NonNullable<CardV2["ask"]>), from: [ownerId()] } };
   }
   /** The human's side: a raw 1.1 frame (the desktop sends these). */
   function frame(f: Record<string, unknown> & { t: string }): Promise<any> {
