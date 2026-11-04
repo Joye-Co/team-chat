@@ -65,4 +65,9 @@ export function addGapFixtures({ ok, bad, T0, ID }: InteractCtx) {
     { text: "开 PR", state: "pending", estimateMs: 120_000 },
   ] }, "steps with when they started and ended, and an estimate");
   bad("http/set-run-plan-request-negative-estimate.json", "SetRunPlanRequest", { plan: [{ text: "读代码", state: "current", estimateMs: -1 }] }, "estimateMs is not negative");
+
+  // PC-10: compare and questionnaire need fallbackText.
+  const c21 = (blocks: unknown[]) => ({ v: 2, catalog: "tc.card/2.1", rev: 1, intent: "ask", title: "选", fallback: "选", ask: { from: [JOYE] }, blocks });
+  bad("entities/card-v2-compare-no-fallback.json", "CardV2", c21([{ id: "c", type: "compare", options: [{ id: "a", label: "A" }, { id: "b", label: "B" }] }]), "a compare needs fallbackText", "card.limits");
+  bad("entities/card-v2-questionnaire-no-fallback.json", "CardV2", c21([{ id: "q", type: "questionnaire", children: ["i", "j"] }, { id: "i", type: "input", kind: "text", label: "一" }, { id: "j", type: "input", kind: "text", label: "二" }]), "a questionnaire needs fallbackText", "card.limits");
 }

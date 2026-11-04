@@ -23,7 +23,8 @@
             "id": "B",
             "label": "B"
           }
-        ]
+        ],
+        "fallbackText": "比较 A 和 B"
       },
       {
         "id": "qs",
@@ -31,7 +32,8 @@
         "children": [
           "q1",
           "q2"
-        ]
+        ],
+        "fallbackText": "问卷"
       },
       {
         "id": "q1",

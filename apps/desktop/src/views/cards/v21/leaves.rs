@@ -2331,9 +2331,17 @@ pub fn embed(node: &Node, b: &CardV2Block, _window: &mut Window, cx: &mut App) -
 // ---------------------------------------------------------------------------
 // A block this version does not know (CARD21 §6)
 
-pub fn unknown(node: &Node, cx: &mut App) -> AnyElement {
+pub fn unknown(node: &Node, b: &CardV2Block, cx: &mut App) -> AnyElement {
     let ctx = node.ctx;
     let k = theme::colors(cx);
+    // CARD21 §6: the block's own fallbackText, when the sender gave one.
+    let fallback = ctx
+        .card
+        .blocks
+        .iter()
+        .position(|x| std::ptr::eq(x, b))
+        .and_then(|i| ctx.card.unknown_fallback(i))
+        .map(str::to_string);
     div()
         .p(space::S12)
         .rounded(theme::radius::MD)
@@ -2362,7 +2370,10 @@ pub fn unknown(node: &Node, cx: &mut App) -> AnyElement {
                         ctx.card.catalog(),
                         c::UNKNOWN_KIND
                     ))),
-            ),
+            )
+            .when_some(fallback, |el, t| {
+                el.child(b20::small(div()).text_color(k.ink_2).child(t))
+            }),
         )
         .into_any_element()
 }

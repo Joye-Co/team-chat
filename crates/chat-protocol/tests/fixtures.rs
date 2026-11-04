@@ -456,6 +456,19 @@ fn card_v2_readers_are_lenient() {
     assert_eq!(card.actions()[0].kind(), CardActionKind::Unknown);
     assert!(card.validate().is_err());
 
+    // A future block type keeps its type and fallbackText (CARD21 §6), also through a round trip.
+    let future: CardV2 = serde_json::from_str(
+        r#"{"v":2,"catalog":"tc.card/2.9","rev":1,"intent":"info","title":"t","fallback":"",
+          "blocks":[{"type":"text","id":"a","text":"x"},{"type":"timeline","id":"tl","fallbackText":"三月上线，四月推广","events":[1]}]}"#,
+    )
+    .unwrap();
+    assert_eq!(future.blocks[1], CardV2Block::Unknown);
+    assert_eq!(future.unknown_fallback(1), Some("三月上线，四月推广"));
+    assert_eq!(future.unknown_fallback(0), None);
+    let back: CardV2 = serde_json::from_value(serde_json::to_value(&future).unwrap()).unwrap();
+    assert_eq!(back.unknown_fallback(1), Some("三月上线，四月推广"));
+    assert_eq!(back.unknown[&1].type_name, "timeline");
+
     // A cardV2 that does not parse at all is dropped; the message and its v1 card stay.
     let m: Message = serde_json::from_str(
         r#"{"id":"m","clientMsgId":"c","groupId":"g","topicId":"t","authorId":"a","body":"x","mentions":[],

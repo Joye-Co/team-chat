@@ -191,7 +191,7 @@ fn questionnaire() -> Value {
             "summary": "周宁是新来的数据实习，跟着 Ledger。我按李雪入职时的设置先填好了，你改完一起交。",
             "ask": { "from": [ME], "expiresAt": at(12, 0) },
             "blocks": [
-                { "id": "qs", "type": "questionnaire", "children": ["perm", "groups", "hello"], "submitLabel": "一起提交" },
+                { "id": "qs", "type": "questionnaire", "children": ["perm", "groups", "hello"], "submitLabel": "一起提交", "fallbackText": "上线前确认 3 件事" },
                 { "id": "perm", "type": "decision", "label": "给她开哪一级权限？", "required": true, "fallbackText": "权限",
                   "options": [
                     { "id": "same", "label": "和其他实习生一样：能看所有群，只在自己的话题里交代", "recommended": true },
@@ -523,7 +523,7 @@ pub fn all() -> Vec<Sample21> {
             json!({
                 "ask": { "from": [ME] },
                 "blocks": [
-                    { "id": "qs", "type": "questionnaire", "children": ["clear", "nps"], "anonymous": true },
+                    { "id": "qs", "type": "questionnaire", "children": ["clear", "nps"], "anonymous": true, "fallbackText": "匿名反馈" },
                     { "id": "clear", "type": "rating", "label": "交代给成员的事，结果清楚吗？", "max": 5, "fallbackText": "评分",
                       "labels": { "1": "很乱", "4": "清楚", "5": "很清楚" } },
                     { "id": "nps", "type": "scale", "label": "你会推荐朋友来这样的团队实习吗？", "min": 0, "max": 10,

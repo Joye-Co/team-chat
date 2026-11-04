@@ -1839,8 +1839,10 @@ impl CardV2Block {
         }
     }
 
+    /// 2.1 leaves, and the 2.1 containers that ask (compare, questionnaire).
     fn needs_fallback(&self) -> bool {
-        self.is_21() && !self.is_container()
+        self.is_21()
+            && (!self.is_container() || matches!(self, Self::Compare { .. } | Self::Questionnaire { .. }))
     }
 }
 
@@ -1987,11 +1989,46 @@ pub struct CardV2 {
     /// The first style key the raw JSON had (never on the wire).
     #[serde(skip)]
     pub style_key: Option<String>,
+    /// Blocks of a type this version does not know ([`CardV2Block::Unknown`]), by index in
+    /// `blocks`: what the raw JSON said about them. Serializing writes them back in place.
+    #[serde(skip)]
+    pub unknown: BTreeMap<usize, UnknownBlock>,
+}
+
+/// What a reader keeps of a block whose type it does not know (CARD21 §6): its type, id and
+/// `fallbackText`, so it can show the fallback box.
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UnknownBlock {
+    #[serde(rename = "type")]
+    pub type_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_text: Option<String>,
+}
+
+impl CardV2 {
+    /// The `fallbackText` of the unknown block at `index` of `blocks`, if it had one.
+    pub fn unknown_fallback(&self, index: usize) -> Option<&str> {
+        self.unknown.get(&index)?.fallback_text.as_deref()
+    }
 }
 
 impl Serialize for CardV2 {
     fn serialize<S: Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        CardV2::serialize(self, s)
+        if self.unknown.is_empty() {
+            return CardV2::serialize(self, s);
+        }
+        let mut v = CardV2::serialize(self, serde_json::value::Serializer).map_err(serde::ser::Error::custom)?;
+        if let Some(blocks) = v.get_mut("blocks").and_then(Value::as_array_mut) {
+            for (i, u) in &self.unknown {
+                if let Some(slot) = blocks.get_mut(*i) {
+                    *slot = serde_json::to_value(u).map_err(serde::ser::Error::custom)?;
+                }
+            }
+        }
+        v.serialize(s)
     }
 }
 
@@ -1999,8 +2036,30 @@ impl<'de> Deserialize<'de> for CardV2 {
     fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
         let raw = Value::deserialize(d)?;
         let style_key = card_style_key(&raw);
+        let raw_blocks = raw.get("blocks").and_then(Value::as_array).cloned();
         let mut card = CardV2::deserialize(raw).map_err(serde::de::Error::custom)?;
         card.style_key = style_key;
+        for (i, b) in card.blocks.iter().enumerate() {
+            if *b != CardV2Block::Unknown {
+                continue;
+            }
+            let Some(r) = raw_blocks.as_ref().and_then(|x| x.get(i)) else {
+                continue;
+            };
+            let text = |k: &str, max: usize| {
+                r.get(k)
+                    .and_then(Value::as_str)
+                    .map(|t| t.chars().take(max).collect::<String>())
+            };
+            card.unknown.insert(
+                i,
+                UnknownBlock {
+                    type_name: text("type", 64).unwrap_or_default(),
+                    id: text("id", 64),
+                    fallback_text: text("fallbackText", 300),
+                },
+            );
+        }
         Ok(card)
     }
 }

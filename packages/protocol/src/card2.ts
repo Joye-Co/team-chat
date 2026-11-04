@@ -647,8 +647,22 @@ export const CARD_21_TYPES = new Set([
   "tabs",
   "questionnaire",
 ]);
-/** 2.1 leaves that need `fallbackText`. */
-const NEEDS_FALLBACK = new Set(["rank", "rating", "scale", "confirm", "imageChoice", "matrix", "slots", "poll", "buttons", "diagram", "embed"]);
+/** 2.1 leaves that need `fallbackText`, and the 2.1 containers that ask (compare, questionnaire). */
+const NEEDS_FALLBACK = new Set([
+  "rank",
+  "rating",
+  "scale",
+  "confirm",
+  "imageChoice",
+  "matrix",
+  "slots",
+  "poll",
+  "buttons",
+  "diagram",
+  "embed",
+  "compare",
+  "questionnaire",
+]);
 const CONTAINERS = new Set(["group", "stack", "row", "compare", "tabs", "questionnaire"]);
 
 export const CardActionKind = z.enum(["submit", "cancel", "link", "reject", "press"]);

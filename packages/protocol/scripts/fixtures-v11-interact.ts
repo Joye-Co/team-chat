@@ -143,6 +143,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
       {
         id: "cmp",
         type: "compare",
+        fallbackText: "两个方案选一个",
         question: "首页用哪个？",
         options: [
           { id: "A", label: "按活动整理", pros: ["找照片最快"], cons: ["每个活动要先归类"], preview: { fileId: FILE }, recommended: true, children: ["a_note"] },
@@ -190,7 +191,7 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
     fallback: "三道题，一起提交。",
     ask: { from: ["owners"] },
     blocks: [
-      { id: "qs", type: "questionnaire", children: ["q1", "q2", "q3"], submitLabel: "一起提交", anonymous: true },
+      { id: "qs", type: "questionnaire", children: ["q1", "q2", "q3"], submitLabel: "一起提交", anonymous: true, fallbackText: "实习反馈问卷" },
       { id: "q1", type: "rating", label: "带教清楚吗？", max: 5, required: true, fallbackText: "1 到 5 分" },
       { id: "q2", type: "decision", label: "想留下吗？", options: [{ id: "y", label: "想" }, { id: "n", label: "不想" }], allowOther: { label: "其他", placeholder: "说说看" } },
       { id: "q3", type: "input", kind: "textarea", label: "还想说什么", maxLength: 500 },
@@ -270,8 +271,8 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   bad("entities/card-v2-style-key.json", "CardV2", card21([{ id: "a", type: "text", text: "红字", color: "red" }]), "card.style_property: color", "card.style_property");
   bad("entities/card-v2-two-primary.json", "CardV2", card21([leaf("a")], { actions: [{ id: "x", label: "X", style: "primary" }, { id: "y", label: "Y", style: "primary" }] }), "two primary actions", "card.limits");
   bad("entities/card-v2-two-decision-surfaces.json", "CardV2", card21([
-    { id: "cmp", type: "compare", options: [{ id: "A", label: "A" }, { id: "B", label: "B" }] },
-    { id: "qs", type: "questionnaire", children: ["q1", "q2"] },
+    { id: "cmp", type: "compare", options: [{ id: "A", label: "A" }, { id: "B", label: "B" }], fallbackText: "比较 A 和 B" },
+    { id: "qs", type: "questionnaire", children: ["q1", "q2"], fallbackText: "问卷" },
     { id: "q1", type: "input", kind: "text", label: "一" },
     { id: "q2", type: "input", kind: "text", label: "二" },
   ], { intent: "ask", ask: { from: ["owners"] } }), "card.decision_surfaces: a compare and a questionnaire for one ask", "card.decision_surfaces");
@@ -289,14 +290,14 @@ export function addInteractFixtures({ ok, bad, T0, ID, base, message }: Interact
   bad("entities/card-v2-matrix-one-column.json", "CardV2", card21([{ id: "m", type: "matrix", label: "选", rows: [{ id: "a", label: "A" }], columns: [{ id: "x", label: "X" }], fallbackText: "选" }]), "matrix has 2..5 columns", "card.limits");
   bad("entities/card-v2-poll-201-voters.json", "CardV2", card21([{ id: "p", type: "poll", label: "投", voters: Array.from({ length: 201 }, (_, i) => `m${i}`), closesAt: T0, options: [{ id: "a", label: "A" }, { id: "b", label: "B" }], fallbackText: "投" }]), "poll voters are \"group\" or 1..200 member ids", "card.limits");
   bad("entities/card-v2-poll-7-options.json", "CardV2", card21([{ id: "p", type: "poll", label: "投", voters: "group", closesAt: T0, options: Array.from({ length: 7 }, (_, i) => ({ id: `o${i}`, label: `${i}` })), fallbackText: "投" }]), "poll has 2..6 options", "card.limits");
-  bad("entities/card-v2-compare-5-options.json", "CardV2", card21([{ id: "c", type: "compare", options: Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `${i}` })) }]), "compare has 2..4 options", "card.limits");
+  bad("entities/card-v2-compare-5-options.json", "CardV2", card21([{ id: "c", type: "compare", fallbackText: "比较", options: Array.from({ length: 5 }, (_, i) => ({ id: `o${i}`, label: `${i}` })) }]), "compare has 2..4 options", "card.limits");
   bad("entities/card-v2-group-13-children.json", "CardV2", card21([{ id: "g", type: "group", title: "多", children: Array.from({ length: 13 }, (_, i) => `x${i}`) }, ...Array.from({ length: 13 }, (_, i) => leaf(`x${i}`))]), "group has 1..12 children", "card.limits");
   bad("entities/card-v2-group-blocks-and-children.json", "CardV2", card21([{ id: "g", type: "group", title: "两", blocks: [], children: ["a"] }, leaf("a")]), "a group has blocks or children, even an empty blocks list", "card.limits");
   const inlineGroup = { id: "g", type: "group", title: "填", blocks: [{ id: "i", type: "input", kind: "text", label: "名字" }] };
   bad("entities/card-v2-deliver-on-group.json", "CardV2", card21([{ ...inlineGroup, deliver: "onSubmit" }]), "deliver is for input blocks, not a group of them", "card.limits");
   bad("entities/card-v2-action-inputs-group.json", "CardV2", card21([inlineGroup], { actions: [{ id: "s", label: "交", inputs: ["g"] }] }), "action inputs name input blocks, not a group", "card.limits");
   bad("entities/card-v2-questionnaire-container-child.json", "CardV2", card21([
-    { id: "qs", type: "questionnaire", children: ["s", "q"] },
+    { id: "qs", type: "questionnaire", children: ["s", "q"], fallbackText: "问卷" },
     { id: "s", type: "stack", children: ["a"] },
     { id: "q", type: "input", kind: "text", label: "一" },
     leaf("a"),

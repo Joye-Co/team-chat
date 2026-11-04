@@ -945,7 +945,8 @@ clients skip the event type.
 A deleted card's decisions are not listed, nor the decisions of a private card (a non-public
 poll, an anonymous questionnaire; see "Private answers").
 - Readers are lenient: unknown block types, intents, kinds and styles read as unknown (Rust
-  `Unknown`, rendered as nothing or the safe default), and a `cardV2` that does not parse is
+  `Unknown`, rendered as nothing or the safe default; 1.1: an unknown block keeps its `type`,
+  `id` and `fallbackText` in `CardV2::unknown`, and the client shows the fallback box with it), and a `cardV2` that does not parse is
   dropped while the v1 `card` stays. The server rejects all of these on write.
 
 ## Side chats
@@ -1154,6 +1155,9 @@ options[2..4] {id, label, pros?, cons?, preview?, recommended?, children?}, note
 {tabs[2..5] {id, label, children}, selected?}`, `questionnaire {children, submitLabel?,
 anonymous?}`. New leaves (catalog 2.1, `fallbackText` required): `rank`, `rating` (max 5),
 `scale`, `confirm`, `imageChoice`, `matrix`, `slots`, `poll`, `buttons`, `diagram`, `embed`.
+The two containers that ask, `compare` and `questionnaire`, need `fallbackText` too (1.1.0). A
+block's `fallbackText` is at most 300 characters; the card's `fallback` stays at most 4000 (a
+released 2.0 field: readers show it whole in old clients, notifications and search).
 CARD21's `choice` is the 2.0 `decision` block (wire name kept) with `label?`, `required?`,
 `help?`, `minSelect?`, `maxSelect?`, `allowOther?`, option `recommended?`. `input` gains kind
 `slider` (`step`, `unit`); `secret` is refused. `table` gains `title?`, `rowKeys?` (one key per
