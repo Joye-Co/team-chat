@@ -731,6 +731,9 @@ impl WebEmbedState {
     ) {
         self.last_bounds = Some(bounds);
         self.parked = false;
+        // A float band over the top of the region (the sticky date pill) stays
+        // above the page: the page shows only below it (§2.17, A4).
+        let visible = below_bands(window, visible, cx);
         self.cover_covered = covers_overlap(window, visible, cx);
         #[cfg(target_os = "macos")]
         {
@@ -1087,6 +1090,8 @@ struct Covers {
 struct CoverFrame {
     painting: bool,
     rects: Vec<Bounds<Pixels>>,
+    /// Floating bands (the sticky date pill) the page is cut below.
+    bands: Vec<Bounds<Pixels>>,
     /// Frames of this window so far (the embed cache's clock).
     count: u64,
 }
@@ -1100,6 +1105,7 @@ fn begin_frame(window: &Window, cx: &mut App) {
     if frame.painting {
         frame.painting = false;
         frame.rects.clear();
+        frame.bands.clear();
         frame.count += 1;
     }
 }
@@ -1232,10 +1238,45 @@ pub fn occluder() -> impl IntoElement {
         .top_0()
         .left_0()
         .size_full()
-        .child(Occluder)
+        .child(Occluder { band: false })
 }
 
-struct Occluder;
+/// Wrap a small float that sits at the top of a scrolling region (the sticky date
+/// pill, §2.17) with this, as `occluder()`: an embedded page that reaches under it is
+/// cut below its bottom edge for as long as it is drawn, so the float stays on top of
+/// the native page (A4). The page keeps showing under the rest of the region.
+pub fn clip_band() -> impl IntoElement {
+    div()
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+        .child(Occluder { band: true })
+}
+
+/// `visible` cut below every band of this frame that reaches into it.
+fn below_bands(window: &Window, visible: Bounds<Pixels>, cx: &App) -> Bounds<Pixels> {
+    let id = window.window_handle().window_id();
+    let Some(frame) = cx.try_global::<Covers>().and_then(|c| c.windows.get(&id)) else {
+        return visible;
+    };
+    let mut out = visible;
+    for b in &frame.bands {
+        if !b.intersects(&out) {
+            continue;
+        }
+        let top = b.bottom().max(out.top());
+        let bottom = out.bottom();
+        out.origin.y = top;
+        out.size.height = (bottom - top).max(px(0.));
+    }
+    out
+}
+
+struct Occluder {
+    /// A band to cut the page below, not a cover that hides it.
+    band: bool,
+}
 
 impl IntoElement for Occluder {
     type Element = Self;
@@ -1285,10 +1326,15 @@ impl Element for Occluder {
         let visible = bounds.intersect(&window.content_mask().bounds);
         let id = window.window_handle().window_id();
         let frame = cx.default_global::<Covers>().windows.entry(id).or_default();
-        if frame.rects.len() >= 64 {
-            frame.rects.remove(0);
+        let list = if self.band {
+            &mut frame.bands
+        } else {
+            &mut frame.rects
+        };
+        if list.len() >= 64 {
+            list.remove(0);
         }
-        frame.rects.push(visible);
+        list.push(visible);
     }
 
     fn paint(
