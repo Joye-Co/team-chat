@@ -196,7 +196,10 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
         None => (false, false, false),
     };
     let alt = window.modifiers().alt;
-    let show_button = shown && !spec.control;
+    // Keyboard focus shows 问这里 at once, as the pointer does after its delay (C-03):
+    // a part reached by Tab offers the same action as one under the pointer.
+    let focused = super::keyboard::part_focused(&spec.id, window, cx);
+    let show_button = (shown || focused) && !spec.control;
     // E3, §2.6: the hover look is muted at 50 %, at once (the button follows after the
     // delay); ⌥ adds a 1 px line.
     let n = crate::ui::native::native_colors(cx);
@@ -238,7 +241,6 @@ pub fn part(el: Stateful<Div>, spec: PartSpec, window: &Window, cx: &App) -> Any
             };
             el.child(holder.child(button))
         });
-    let focused = super::keyboard::part_focused(&spec.id, window, cx);
     el.when(focused, |el| {
         el.child(super::keyboard::ring(spec.radius, cx))
     })

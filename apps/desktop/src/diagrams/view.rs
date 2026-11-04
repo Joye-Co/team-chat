@@ -507,7 +507,11 @@ fn image_with_hits(
                             .h(px(oh + 4.))
                             .rounded(radius::MD)
                             .when(hover_line, |d| d.border_1().border_color(n.secondary))
-                            .when(focused == Some(i), |d| d.shadow(vec![ring_shadow(n.focus)])),
+                            // A ring line, not a shadow: a shadow under a clear box
+                            // would fill the node (E3).
+                            .when(focused == Some(i), |d| {
+                                d.child(crate::views::refs::keyboard::ring(radius::MD, cx))
+                            }),
                     )
                 })
                 .on_hover(move |on, _, cx| {
@@ -532,31 +536,37 @@ fn image_with_hits(
                 })
                 // inc-refs: 问这里 outside the node's top edge, never over the node's
                 // border or a connector beside it.
-                .when(hovered == Some(i) && refs_on, |el| {
-                    el.child(
-                        div()
-                            .absolute()
-                            .bottom_full()
-                            .right(px(0.))
-                            .pb(space::S4)
-                            .child(
-                                crate::views::refs::affordance::ask_button(
-                                    ElementId::Name(format!("dask-{id}-{i}").into()),
-                                    cx,
-                                )
-                                .on_click(move |_, window, cx| {
-                                    cx.stop_propagation();
-                                    super::on_node_ref(
-                                        ask_origin.clone(),
-                                        &ask_id,
-                                        &ask_label,
-                                        window,
+                // C-03: keyboard focus on a node shows it too.
+                .when(
+                    (hovered == Some(i) || focused == Some(i)) && refs_on,
+                    |el| {
+                        el.child(
+                            div()
+                                .absolute()
+                                .bottom_full()
+                                .right(px(0.))
+                                .pb(space::S4)
+                                .child(
+                                    crate::views::refs::affordance::ask_button(
+                                        ElementId::Name(format!("dask-{id}-{i}").into()),
                                         cx,
                                     )
-                                }),
-                            ),
-                    )
-                }),
+                                    .on_click(
+                                        move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            super::on_node_ref(
+                                                ask_origin.clone(),
+                                                &ask_id,
+                                                &ask_label,
+                                                window,
+                                                cx,
+                                            )
+                                        },
+                                    ),
+                                ),
+                        )
+                    },
+                ),
         );
     }
     let toggle = ui.clone();

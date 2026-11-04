@@ -1032,7 +1032,9 @@ fn diagram_ready(name: &str) -> Option<fn(&App) -> bool> {
     match name {
         "diagram-inline" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Inline, cx)),
         "diagram-error" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Error, cx)),
-        "diagram-viewer" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx)),
+        "diagram-viewer" | "state-focus-diagram-node" => {
+            Some(|cx| crate::diagrams::preview::ready(DiagramScene::Viewer, cx))
+        }
         // --- t5-media ---
         "diagram-loading" => Some(|cx| crate::diagrams::preview::ready(DiagramScene::Loading, cx)),
         // --- end t5-media ---

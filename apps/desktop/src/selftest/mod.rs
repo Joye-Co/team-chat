@@ -455,7 +455,9 @@ async fn shoot(
             match next_frame(handle, cx).await {
                 Ok(()) => {
                     frames += 1;
-                    if frames == 1 {
+                    // A scene with native or async content presses its keys once
+                    // that content is ready (below), so a key reaches it.
+                    if frames == 1 && scenes::ready_check(scene.name).is_none() {
                         press_keys(handle, scene.name, cx);
                     }
                 }
@@ -481,6 +483,8 @@ async fn shoot(
             for _ in 0..2 {
                 let _ = next_frame(handle, cx).await;
             }
+            press_keys(handle, scene.name, cx);
+            let _ = next_frame(handle, cx).await;
             cx.background_executor().timer(options.settle).await;
         }
         // A hover or focus scene waits for its delay (tooltips, hover pills).

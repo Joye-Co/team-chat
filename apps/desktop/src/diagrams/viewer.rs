@@ -124,6 +124,8 @@ pub struct DiagramViewer {
     /// The height the body needs at the current zoom (the drawing, its margins and
     /// 看原文), once drawn: the sheet hugs it.
     content_h: Option<f32>,
+    /// The node Tab reached (C-03): its ring and 问这里 show, ↩ asks about it.
+    key_node: Option<usize>,
 }
 
 // --- inc-refs: a scene opens the viewer with a node under the pointer (问这里 shows).
@@ -183,6 +185,7 @@ impl DiagramViewer {
             viewport: (0., 0.),
             hovered: PREVIEW_HOVER.with(|h| h.take()),
             content_h: None,
+            key_node: None,
         }
     }
 
@@ -224,9 +227,66 @@ impl DiagramViewer {
         self.scroll.set_offset(Point::new(px(x), px(y)));
     }
 
+    /// Tab and ⇧Tab step through the diagram's nodes before the header's buttons
+    /// (C-03, E3): `false` when the step leaves the nodes, so focus moves on.
+    fn step_node(&mut self, forward: bool, cx: &mut Context<Self>) -> bool {
+        if !crate::views::refs::enabled(cx) {
+            return false;
+        }
+        let Some(r) = self.ready(cx) else {
+            return false;
+        };
+        let count = r.meta.nodes.len();
+        let next = match (self.key_node, forward) {
+            (None, true) if count > 0 => Some(0),
+            (None, false) if count > 0 => Some(count - 1),
+            (Some(i), true) if i + 1 < count => Some(i + 1),
+            (Some(i), false) if i > 0 => Some(i - 1),
+            _ => None,
+        };
+        self.key_node = next;
+        if let Some(i) = next {
+            self.reveal(&r.meta.nodes[i]);
+        }
+        cx.notify();
+        next.is_some()
+    }
+
+    /// Scrolls so node `node` is on screen, with the canvas margin around it.
+    fn reveal(&mut self, node: &super::cache::Node) {
+        let (x, y, w, h) = hit_rect(node, self.zoom);
+        let (x, y) = (x + MARGIN, y + MARGIN);
+        let (vw, vh) = self.viewport;
+        let o = self.scroll.offset();
+        let (mut ox, mut oy) = (-f32::from(o.x), -f32::from(o.y));
+        if x - MARGIN < ox {
+            ox = x - MARGIN;
+        } else if x + w + MARGIN > ox + vw {
+            ox = x + w + MARGIN - vw;
+        }
+        if y - MARGIN < oy {
+            oy = y - MARGIN;
+        } else if y + h + MARGIN > oy + vh {
+            oy = y + h + MARGIN - vh;
+        }
+        let max = self.scroll.max_offset();
+        let ox = ox.clamp(0., f32::from(max.x));
+        let oy = oy.clamp(0., f32::from(max.y));
+        self.scroll.set_offset(Point::new(px(-ox), px(-oy)));
+    }
+
     fn on_key(&mut self, e: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         let k = &e.keystroke;
         let cmd = k.modifiers.platform;
+        if k.key == "enter"
+            && let Some(i) = self.key_node
+            && let Some(r) = self.ready(cx)
+            && let Some(node) = r.meta.nodes.get(i)
+        {
+            super::on_node_ref(self.spec.origin.clone(), &node.id, &node.label, window, cx);
+            cx.stop_propagation();
+            return;
+        }
         match k.key.as_str() {
             "=" | "+" if cmd => self.set_zoom(zoom_in(self.zoom), cx),
             "-" if cmd => self.set_zoom(zoom_out(self.zoom), cx),
@@ -405,7 +465,8 @@ impl DiagramViewer {
             let (_, _, _, oh) = super::view::outline_rect(node, z);
             let origin = self.spec.origin.clone();
             let (nid, label) = (node.id.clone(), node.label.clone());
-            let hovered = self.hovered == Some(i);
+            let keyed = self.key_node == Some(i);
+            let hovered = self.hovered == Some(i) || keyed;
             let n = ui::native::native_colors(cx);
             let _ = &k;
             layer = layer.child(
@@ -426,8 +487,12 @@ impl DiagramViewer {
                                 .w(px(nw + 4.))
                                 .h(px(oh + 4.))
                                 .rounded(radius::MD)
-                                .border_1()
-                                .border_color(n.secondary),
+                                .when(!keyed, |d| d.border_1().border_color(n.secondary))
+                                // A ring line, not a shadow: a shadow under a clear box
+                                // would fill the node (E3).
+                                .when(keyed, |d| {
+                                    d.child(crate::views::refs::keyboard::ring(radius::MD, cx))
+                                }),
                         )
                     })
                     // --- inc-refs: 问这里 beside the hovered node.
@@ -439,16 +504,21 @@ impl DiagramViewer {
                         );
                         // Above the node's box, clear of its edge and of the arrows
                         // beside it.
-                        el.child(div().absolute().bottom_full().right_0().pb(px(2.)).child(
-                            crate::views::refs::affordance::inline_button(
-                                &format!("dv-{i}"),
-                                std::rc::Rc::new(move |cx: &App| {
-                                    super::node_target(&o, &nid, &label, cx)
-                                        .unwrap_or_else(crate::views::refs::empty_target)
-                                }),
-                                cx,
-                            ),
-                        ))
+                        el.child(
+                            div()
+                                .absolute()
+                                .bottom_full()
+                                .right_0()
+                                .pb(space::S8)
+                                .child(crate::views::refs::affordance::inline_button(
+                                    &format!("dv-{i}"),
+                                    std::rc::Rc::new(move |cx: &App| {
+                                        super::node_target(&o, &nid, &label, cx)
+                                            .unwrap_or_else(crate::views::refs::empty_target)
+                                    }),
+                                    cx,
+                                )),
+                        )
                     })
                     // --- end inc-refs
                     .on_hover(cx.listener(move |this, on: &bool, _, cx| {
@@ -550,6 +620,16 @@ impl Render for DiagramViewer {
             .overflow_hidden()
             .bg(k.raised)
             .track_focus(&self.focus)
+            .on_action(cx.listener(|this, _: &crate::app::FocusNext, _, cx| {
+                if !this.step_node(true, cx) {
+                    cx.propagate();
+                }
+            }))
+            .on_action(cx.listener(|this, _: &crate::app::FocusPrev, _, cx| {
+                if !this.step_node(false, cx) {
+                    cx.propagate();
+                }
+            }))
             .on_key_down(on_key)
             .child(toolbar)
             .child(

@@ -44,7 +44,8 @@ const fn keys(keys: &'static [&'static str]) -> Steps {
 const STEPS: &[(&str, Steps)] = &[
     // --- t5 ---
     ("state-hover-message", hover(600., 315., 600)),
-    ("state-hover-code", hover(690., 424., 400)),
+    // The 问这里 slot left of the copy button in the code block's top strip.
+    ("state-hover-code", hover(905., 434., 400)),
     // --- end t5 ---
     // --- t5-cards ---
     ("state-card-option-hover", hover(1011., 290., 400)),
@@ -84,6 +85,7 @@ const STEPS: &[(&str, Steps)] = &[
         keys(&["shift-tab", "shift-tab"]),
     ),
     ("state-hover-settings-row", hover(320., 673., 300)),
+    ("state-focus-diagram-node", keys(&["tab", "tab"])),
     // --- end v16/c-cards ---
 ];
 
