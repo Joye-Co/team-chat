@@ -26,14 +26,17 @@ pub const ROW: Pixels = px(56.);
 pub const MEMBER_ROW: Pixels = px(52.);
 /// The avatar of a list row.
 pub const AVATAR: Pixels = px(32.);
-/// The accessory slot of a row: wide enough for two small push buttons,
-/// so the times of rows with and without buttons line up.
-pub const ACCESSORY_MIN: Pixels = px(168.);
 /// The gap between a row's avatar and its text.
 pub const ROW_GAP: Pixels = px(10.);
-/// Where a list's text column starts: the row inset, its padding, the
-/// avatar and the gap. Section headers and separators line up with it.
-pub const TEXT_START: Pixels = px(8. + 8.);
+/// The padding inside a row, around its selection fill.
+pub const ROW_PAD: Pixels = px(8.);
+/// The one leading content inset (§2): the toolbar title starts 20 pt after
+/// the sidebar, and section headers, row avatars and detail titles start
+/// on that same edge. It follows the toolbar leading token, so a change of
+/// the shell's inset moves every page with it.
+pub const LEADING: Pixels = metrics::TOOLBAR_LEADING;
+/// The gap between the two buttons of a row.
+pub const BUTTON_GAP: Pixels = px(6.);
 
 /// Where a page's toolbar title starts: 20 pt after the sidebar, or after
 /// the traffic lights when the sidebar is hidden (§2).
@@ -54,7 +57,7 @@ pub fn section_header(label: impl Into<SharedString>, count: Option<String>, cx:
         .flex_none()
         .h(px(28.))
         .mt(px(12.))
-        .px(TEXT_START)
+        .px(LEADING)
         .flex()
         .items_center()
         .gap(px(6.))
@@ -115,33 +118,34 @@ impl RowInk {
     }
 }
 
-/// A Mail-like list row: `leading` (an avatar 32), the title (Headline) with
-/// an optional trailing time on its line, one `secondary` line under it and
-/// an optional `accessory` (small push buttons, a state symbol) at the
-/// trailing edge. `separator` draws the hairline under the row, inset to
-/// the text column. The caller adds `on_click` and `context_menu`.
+/// A Mail-like list row (§9.4): `leading` (an avatar 32) on the shared
+/// leading edge, the title (Headline) with one trailing slot on its line
+/// (the time, or the progress of a run), and one `secondary` line under it
+/// with an optional trailing slot (small push buttons, a progress). Rows
+/// have no other trailing column, so every time sits at the trailing edge.
+/// `separator` draws the hairline under the row, inset to the text column.
+/// The caller adds `on_click` and `context_menu`.
 #[allow(clippy::too_many_arguments)]
 pub fn mail_row(
     id: impl Into<ElementId>,
     height: Pixels,
     leading: AnyElement,
     title: impl Into<SharedString>,
-    time: Option<String>,
+    title_trailing: Option<AnyElement>,
     second: AnyElement,
-    accessory: Option<AnyElement>,
+    second_trailing: Option<AnyElement>,
     separator: bool,
     ink: RowInk,
     cx: &App,
 ) -> Stateful<gpui::Div> {
     let k = native_colors(cx);
-    let text_x = metrics::LIST_ROW_INSET + px(8.) + AVATAR + ROW_GAP;
     div()
         .id(id.into())
         .relative()
         .flex_none()
         .h(height)
-        .mx(metrics::LIST_ROW_INSET)
-        .px(px(8.))
+        .mx(LEADING - ROW_PAD)
+        .px(ROW_PAD)
         .rounded(metrics::LIST_ROW_RADIUS)
         .when_some(ink.fill, |d, f| d.bg(f))
         .flex()
@@ -154,53 +158,111 @@ pub fn mail_row(
                 .min_w(px(0.))
                 .flex()
                 .flex_col()
+                .gap(px(2.))
                 .child(
                     div()
                         .flex()
                         .items_center()
                         .gap(px(8.))
-                        .child(
-                            line(title)
-                                .flex_1()
-                                .n_headline()
-                                .text_color(ink.title),
-                        )
-                        .children(time.map(|t| {
-                            div()
-                                .flex_none()
-                                .n_subheadline()
-                                .n_figures()
-                                .text_color(ink.secondary)
-                                .child(t)
+                        .child(line(title).flex_1().n_headline().text_color(ink.title))
+                        .children(title_trailing.map(|t| {
+                            div().flex_none().flex().items_center().child(t)
                         })),
                 )
                 .child(
+                    // 20 pt, the height of a small push button, so rows with
+                    // and without buttons keep one rhythm.
                     div()
+                        .h(metrics::BUTTON_SMALL)
                         .min_w(px(0.))
+                        .flex()
+                        .items_center()
+                        .gap(px(8.))
                         .n_subheadline()
                         .text_color(ink.secondary)
-                        .child(second),
+                        .child(div().flex_1().min_w(px(0.)).child(second))
+                        .children(second_trailing.map(|t| {
+                            div()
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .gap(BUTTON_GAP)
+                                .child(t)
+                        })),
                 ),
         )
-        .children(accessory.map(|a| {
-            div()
-                .flex_none()
-                .flex()
-                .items_center()
-                .gap(px(8.))
-                .child(a)
-        }))
         .when(separator && ink.fill.is_none(), |d| {
             d.child(
                 div()
                     .absolute()
                     .bottom_0()
-                    .left(text_x - metrics::LIST_ROW_INSET)
+                    .left(ROW_PAD + AVATAR + ROW_GAP)
                     .right(px(0.))
                     .h(metrics::HAIRLINE)
                     .bg(k.separator),
             )
         })
+}
+
+/// The time in a row's title-line slot: Subheadline, tabular figures.
+pub fn time_slot(text: impl Into<SharedString>, color: Hsla) -> AnyElement {
+    div()
+        .n_subheadline()
+        .n_figures()
+        .text_color(color)
+        .child(text.into())
+        .into_any_element()
+}
+
+/// The progress of a run in a row's trailing slot: the `blue` live dot and
+/// `3/5` (§6 Live work).
+pub fn progress_slot(n: usize, m: usize, dot: Hsla, text: Hsla) -> AnyElement {
+    div()
+        .flex()
+        .items_center()
+        .gap(px(4.))
+        .child(sym(Sym::Live, SymSize::INLINE_SMALL, dot))
+        .child(
+            div()
+                .n_subheadline()
+                .n_figures()
+                .text_color(text)
+                .child(format!("{n}/{m}")),
+        )
+        .into_any_element()
+}
+
+/// A person without a photo as a letter disk (§4): `quaternary` fill with
+/// `label` text, mine included, so no bright disk outshines the window.
+/// Members with a photo or a character tile use `MemberAvatar`.
+pub fn avatar(member: Option<&crate::data::Member>, size: Pixels, cx: &App) -> AnyElement {
+    let photo = member
+        .and_then(|m| m.avatar_url.as_deref())
+        .map(|p| p.strip_prefix("file://").unwrap_or(p))
+        .is_some_and(|p| p.starts_with('/'));
+    let letter = member.is_some_and(|m| !m.is_bot() && m.character.is_none()) && !photo;
+    if !letter {
+        return crate::ui::MemberAvatar::new(member, size).into_any_element();
+    }
+    let k = native_colors(cx);
+    let name = member.map(|m| m.name.as_str()).unwrap_or_default();
+    let text = crate::ui::avatar::monogram(name, size);
+    let share = if text.chars().count() > 1 { 0.38 } else { 0.44 };
+    div()
+        .flex_none()
+        .size(size)
+        .rounded_full()
+        .bg(k.quaternary)
+        .text_color(k.label)
+        .when(member.is_some_and(|m| m.deactivated), |d| d.opacity(0.5))
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_size((size * share).round().max(px(9.)))
+        .line_height(size)
+        .font_weight(gpui::FontWeight::MEDIUM)
+        .child(text)
+        .into_any_element()
 }
 
 /// The secondary line of a row as runs: an optional state symbol and text

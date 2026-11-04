@@ -1,12 +1,15 @@
 //! The rows of the 首页 list (NATIVE.md §9.4): 需要你拍板, 正在做 and 做完了
-//! as Mail-like 56 pt rows. A needs-you row ends with the small push
-//! buttons `看看` and its default answer; once answered it shows the
-//! record and, while the answer waits to be sent, `撤回`.
+//! as Mail-like 56 pt rows with one trailing slot on the title line (the
+//! time, or the live dot and `3/5` of a run). A needs-you row shows the
+//! Standard Small buttons `看看` and its answer under the time; there is no
+//! Default button in the list (one per view, §5.2: the topic's decision
+//! bar has it). Once answered a row shows the record and, while the answer
+//! waits to be sent, `撤回`. The first row is Jojo's priority note.
 
 use gpui::{
     AnyElement, App, Context, ElementId, IntoElement, ParentElement, SharedString,
     StatefulInteractiveElement as _, Styled, Window,
-    div, prelude::FluentBuilder as _, px,
+    div, prelude::FluentBuilder as _,
 };
 use gpui_component::{
     WindowExt as _,
@@ -26,12 +29,12 @@ use crate::{
     copy::{common, desk as c, fill},
     data::v2::DoneItem,
     ui::{
-        MemberAvatar,
         native::{PushSize, PushStyle, native_colors, push_button},
-        sf_symbols::{Sym, SymSize},
+        sf_symbols::Sym,
     },
     views::{
         group_page::rows::{self, AVATAR, ROW, RowInk, line, mail_row, state_line},
+        nav::open_dm_with,
         shell::clock,
     },
 };
@@ -109,7 +112,11 @@ pub fn ask_row(
                 .map(|r| (r.record.clone(), r.at, false))
         });
     let ink = RowInk::new(None, cx);
-    let (second, accessory): (AnyElement, Option<AnyElement>) = match &done {
+    let from = fill(
+        c::DESK_ASK_FROM,
+        &[("name", &snap.name(&a.item.from)), ("topic", &topic)],
+    );
+    let (time, second, trailing): (String, AnyElement, Option<AnyElement>) = match &done {
         Some((record, at, undoable)) => {
             let when = if crate::ui::motion::just_answered(*at) {
                 c::DESK_JUST_NOW.to_string()
@@ -118,7 +125,7 @@ pub fn ask_row(
             };
             let second = state_line(
                 Some((Sym::Check, k.secondary, record.clone())),
-                Some(when),
+                Some(from.clone()),
                 k.secondary,
             );
             let undo = undoable.then(|| {
@@ -137,22 +144,9 @@ pub fn ask_row(
                 })
                 .into_any_element()
             });
-            // The slot stays when 撤回 goes, so the times line up.
-            let undo = Some(
-                div()
-                    .min_w(rows::ACCESSORY_MIN)
-                    .flex()
-                    .justify_end()
-                    .children(undo)
-                    .into_any_element(),
-            );
-            (second, undo)
+            (when, second, undo)
         }
         None => {
-            let from = fill(
-                c::DESK_ASK_FROM,
-                &[("name", &snap.name(&a.item.from)), ("topic", &topic)],
-            );
             let look = {
                 let services = services.clone();
                 let (g, t) = (a.item.group_id.clone(), a.item.topic_id.clone());
@@ -168,13 +162,15 @@ pub fn ask_row(
                     open_topic(&services, &g, &t, cx);
                 })
             };
+            // Standard, not Default: a list holds many asks, and a view has
+            // at most one Default button (§5.2).
             let approve = quick_answer(a).map(|quick| {
                 let page = cx.entity();
                 let ask = a.clone();
                 push_button(
                     SharedString::from(format!("desk-approve-{key}")),
                     quick.label.clone(),
-                    PushStyle::Default,
+                    PushStyle::Standard,
                     PushSize::Small,
                     cx,
                 )
@@ -184,14 +180,13 @@ pub fn ask_row(
                 })
             });
             (
+                clock(a.item.at),
                 line(from).into_any_element(),
                 Some(
                     div()
-                        .min_w(rows::ACCESSORY_MIN)
                         .flex()
-                        .justify_end()
                         .items_center()
-                        .gap(px(8.))
+                        .gap(rows::BUTTON_GAP)
                         .child(look)
                         .children(approve)
                         .into_any_element(),
@@ -208,11 +203,11 @@ pub fn ask_row(
     mail_row(
         ElementId::Name(format!("desk-ask-{key}").into()),
         ROW,
-        MemberAvatar::new(asker.as_ref(), AVATAR).into_any_element(),
+        rows::avatar(asker.as_ref(), AVATAR, cx),
         a.item.title.clone(),
-        Some(clock(a.item.at)),
+        Some(rows::time_slot(time, ink.secondary)),
         second,
-        accessory,
+        trailing,
         !last,
         ink,
         cx,
@@ -253,25 +248,8 @@ pub fn run_row(
     rest.extend(r.current_text());
     rest.extend(r.step_started.and_then(elapsed));
     let second = state_line(None, Some(rest.join(" · ")), k.secondary);
-    let progress = (m > 0).then(|| {
-        div()
-            .min_w(rows::ACCESSORY_MIN)
-            .flex()
-            .justify_end()
-            .items_center()
-            .gap(px(6.))
-            .child(rows::sym(Sym::Live, SymSize::INLINE, k.blue))
-            .child(
-                div()
-                    .min_w(px(28.))
-                    .flex()
-                    .justify_end()
-                    .text_size(px(11.))
-                    .text_color(k.secondary)
-                    .child(format!("{n}/{m}")),
-            )
-            .into_any_element()
-    });
+    // The run's progress takes the title line's one trailing slot.
+    let progress = (m > 0).then(|| rows::progress_slot(n, m, k.blue, k.secondary));
     let nav = services.nav.clone();
     let (g, t, id) = (
         r.run.group_id.clone(),
@@ -283,11 +261,11 @@ pub fn run_row(
     mail_row(
         ElementId::Name(format!("desk-run-row-{i}").into()),
         ROW,
-        MemberAvatar::new(member.as_ref(), AVATAR).into_any_element(),
+        rows::avatar(member.as_ref(), AVATAR, cx),
         r.topic_title.clone(),
-        None,
-        second,
         progress,
+        second,
+        None,
         !last,
         RowInk::new(None, cx),
         cx,
@@ -328,12 +306,11 @@ pub fn done_row(
     mail_row(
         ElementId::Name(format!("desk-done-{i}").into()),
         ROW,
-        MemberAvatar::new(member.as_ref(), AVATAR).into_any_element(),
+        rows::avatar(member.as_ref(), AVATAR, cx),
         d.title.clone(),
-        Some(clock(d.at)),
+        Some(rows::time_slot(clock(d.at), k.secondary)),
         second,
-        // An empty slot: the times line up with the needs-you rows.
-        Some(div().min_w(rows::ACCESSORY_MIN).into_any_element()),
+        None,
         !last,
         RowInk::new(None, cx),
         cx,
@@ -347,4 +324,38 @@ pub fn done_row(
         )
     })
     .into_any_element()
+}
+
+/// Jojo's priority as the first row of the list (§9.4): avatar 32, the
+/// member's name, the time, and the note as the one `secondary` line.
+/// Opening it opens the 私聊 with that member.
+pub fn note_row(snap: &Snapshot, cx: &App) -> Option<AnyElement> {
+    let n = snap.note.as_ref()?;
+    let k = native_colors(cx);
+    let member = snap.member(&n.member_id);
+    let id = n.member_id.clone();
+    let menu_id = n.member_id.clone();
+    Some(
+        mail_row(
+            "desk-note",
+            ROW,
+            rows::avatar(member.as_ref(), AVATAR, cx),
+            snap.name(&n.member_id),
+            Some(rows::time_slot(clock(n.at), k.secondary)),
+            line(n.text.clone()).into_any_element(),
+            None,
+            false,
+            RowInk::new(None, cx),
+            cx,
+        )
+        .on_click(move |_, _, cx| open_dm_with(id.clone(), cx))
+        .context_menu(move |menu, _, _| {
+            let id = menu_id.clone();
+            menu.item(
+                PopupMenuItem::new(c::DESK_OPEN_DM)
+                    .on_click(move |_, _, cx| open_dm_with(id.clone(), cx)),
+            )
+        })
+        .into_any_element(),
+    )
 }
