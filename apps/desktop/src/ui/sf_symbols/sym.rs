@@ -95,6 +95,9 @@ concepts! {
     /// Cloud runner.
     Cloud = "cloud";
     Offline = "wifi.slash";
+    // v12/settings track: 账号 › 登录的设备 (NATIVE.md §8).
+    /// A signed-in iPhone or iPad.
+    Phone = "iphone";
     // Settings tabs (§8).
     /// 通用, settings.
     General = "gearshape";
