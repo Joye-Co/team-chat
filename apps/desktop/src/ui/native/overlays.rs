@@ -216,7 +216,11 @@ pub fn spotlight_ink(active: bool, cx: &App) -> (Hsla, Hsla) {
 /// A 32 pt result row (§9.7): inset 8 pt, radius 8; the chosen row has
 /// the `accent` fill (a focused list). No hover fill: the pointer moves the
 /// choice, as in Spotlight.
-pub fn spotlight_row(id: impl Into<ElementId>, active: bool, cx: &App) -> gpui::Stateful<gpui::Div> {
+pub fn spotlight_row(
+    id: impl Into<ElementId>,
+    active: bool,
+    cx: &App,
+) -> gpui::Stateful<gpui::Div> {
     let k = native_colors(cx);
     let (ink, _) = spotlight_ink(active, cx);
     div()

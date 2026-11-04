@@ -10,8 +10,7 @@ use gpui::{
     ParentElement, Render, SharedString, Styled, Subscription, Window, div, px,
 };
 use gpui_component::{
-    WindowExt as _,
-    Sizable as _,
+    Sizable as _, WindowExt as _,
     input::{InputEvent, InputState, Textarea, TextareaState},
     menu::{DropdownMenu as _, PopupMenuItem},
 };
@@ -22,12 +21,12 @@ use crate::{
     data::{GroupId, StartTopicRequest},
     ui::{
         controls::placeholder_input,
+        native::overlays::field_error,
         native::{
             FormRow, GroupedForm, NativeTextField, NativeType as _, PushSize, SheetLayout,
             SheetWidth, disabled_push, metrics, native_colors, native_sheet, popup_button,
             sheet_buttons,
         },
-        native::overlays::field_error,
     },
     views::rail::model as rail_model,
 };
@@ -39,7 +38,11 @@ const CONTEXT: &str = "NewTopicSheet";
 /// The sheet's keys (call once at start-up): ⌘Return starts the 话题 from
 /// the multi-line message field.
 pub fn bind_keys(cx: &mut App) {
-    cx.bind_keys([gpui::KeyBinding::new("cmd-enter", StartTopic, Some(CONTEXT))]);
+    cx.bind_keys([gpui::KeyBinding::new(
+        "cmd-enter",
+        StartTopic,
+        Some(CONTEXT),
+    )]);
 }
 
 /// The members of `group_id` that `body` mentions (`@名字`).
@@ -160,25 +163,26 @@ impl Render for NewTopicSheet {
         let groups = self.groups.clone();
         let current = self.group.clone();
         let this = cx.entity().downgrade();
-        let group_popup = popup_button("new-topic-group", group_name, PushSize::Regular, window, cx)
-            .max_w(px(280.))
-            .dropdown_menu(move |menu, _, _| {
-                groups.iter().fold(menu, |menu, (id, name)| {
-                    let this = this.clone();
-                    let id2 = id.clone();
-                    menu.item(
-                        PopupMenuItem::new(name.clone())
-                            .checked(current.as_ref() == Some(id))
-                            .on_click(move |_, _, cx| {
-                                let id = id2.clone();
-                                let _ = this.update(cx, |this, cx| {
-                                    this.group = Some(id);
-                                    cx.notify();
-                                });
-                            }),
-                    )
-                })
-            });
+        let group_popup =
+            popup_button("new-topic-group", group_name, PushSize::Regular, window, cx)
+                .max_w(px(280.))
+                .dropdown_menu(move |menu, _, _| {
+                    groups.iter().fold(menu, |menu, (id, name)| {
+                        let this = this.clone();
+                        let id2 = id.clone();
+                        menu.item(
+                            PopupMenuItem::new(name.clone())
+                                .checked(current.as_ref() == Some(id))
+                                .on_click(move |_, _, cx| {
+                                    let id = id2.clone();
+                                    let _ = this.update(cx, |this, cx| {
+                                        this.group = Some(id);
+                                        cx.notify();
+                                    });
+                                }),
+                        )
+                    })
+                });
         let body_focused = self.body.read(cx).focus_handle(cx).is_focused(window);
         let body_field = div()
             .id("new-topic-body")
@@ -189,7 +193,11 @@ impl Render for NewTopicSheet {
             .rounded(metrics::FIELD_RADIUS)
             .bg(k.content)
             .border_1()
-            .border_color(if self.error.is_some() { k.red } else { k.separator })
+            .border_color(if self.error.is_some() {
+                k.red
+            } else {
+                k.separator
+            })
             .when_focus(body_focused, k.focus_ring())
             .cursor_text()
             .child(placeholder_input(
@@ -202,8 +210,7 @@ impl Render for NewTopicSheet {
                 window,
                 cx,
             ));
-        let [cancel, start] =
-            sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_CREATE, cx);
+        let [cancel, start] = sheet_buttons("new-topic", common::CANCEL, o::NEW_TOPIC_CREATE, cx);
         div()
             .key_context(CONTEXT)
             .on_action(cx.listener(|this, _: &StartTopic, window, cx| this.submit(window, cx)))

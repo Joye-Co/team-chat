@@ -5,10 +5,7 @@
 
 use gpui::{App, Entity, Global, ParentElement, Styled, div};
 
-use crate::{
-    updater::banner::UpdateBanner,
-    views::connection_banner::ConnectionBanner,
-};
+use crate::{updater::banner::UpdateBanner, views::connection_banner::ConnectionBanner};
 
 /// The banners of the open main window.
 pub struct AppBanners {

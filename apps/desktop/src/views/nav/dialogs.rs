@@ -25,8 +25,9 @@ use crate::{
         native::{
             AlertLayout, FormRow, GroupedForm, NativeCheckbox, NativeTextField, NativeType as _,
             PushStyle, SearchField, SheetLayout, SheetWidth, alert_button, disabled_push, metrics,
-            native_colors, native_sheet, sheet_buttons,
+            native_colors, native_sheet,
             overlays::{app_icon, field_error, native_alert, sheet_list, sheet_list_row},
+            sheet_buttons,
         },
     },
 };
@@ -307,7 +308,13 @@ impl Render for NewGroupForm {
                             .flex()
                             .items_center()
                             .gap(px(12.))
-                            .child(div().flex_none().n_headline().text_color(k.label).child(o::MEMBERS))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .n_headline()
+                                    .text_color(k.label)
+                                    .child(o::MEMBERS),
+                            )
                             .child(
                                 div()
                                     .flex_1()
@@ -319,7 +326,9 @@ impl Render for NewGroupForm {
                                         &[("n", &self.selected.len().to_string())],
                                     )),
                             )
-                            .child(SearchField::new("new-group-filter", &self.filter).width(px(200.))),
+                            .child(
+                                SearchField::new("new-group-filter", &self.filter).width(px(200.)),
+                            ),
                     )
                     .child(
                         sheet_list(7, cx).child(
@@ -639,17 +648,11 @@ pub fn destructive_alert(
                     .icon(app_icon(metrics::ALERT_ICON))
                     .message(message.clone())
                     .buttons([
-                        alert_button(
-                            (id, 0usize),
-                            destructive,
-                            PushStyle::Standard,
-                            true,
-                            cx,
-                        )
-                        .on_click(move |_, window, cx| {
-                            window.close_dialog(cx);
-                            on_confirm(window, cx);
-                        }),
+                        alert_button((id, 0usize), destructive, PushStyle::Standard, true, cx)
+                            .on_click(move |_, window, cx| {
+                                window.close_dialog(cx);
+                                on_confirm(window, cx);
+                            }),
                         alert_button((id, 1usize), common::CANCEL, PushStyle::Default, false, cx)
                             .on_click(|_, window, cx| window.close_dialog(cx)),
                     ]),

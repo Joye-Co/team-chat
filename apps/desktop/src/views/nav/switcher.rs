@@ -621,11 +621,9 @@ impl Switcher {
             active,
             cx,
         )
-        .child(
-            div().flex_none().size(spot::SLOT).child(
-                MemberAvatar::new(author, spot::AVATAR).on(if active { k.accent } else { k.sheet }),
-            ),
-        )
+        .child(div().flex_none().size(spot::SLOT).child(
+            MemberAvatar::new(author, spot::AVATAR).on(if active { k.accent } else { k.sheet }),
+        ))
         .child(
             div()
                 .flex_none()
@@ -635,11 +633,7 @@ impl Switcher {
                 .one_line()
                 .child(author.map(|a| a.name.clone()).unwrap_or_default()),
         )
-        .child(
-            marked(&h.snippet, &h.highlights)
-                .flex_1()
-                .text_color(ink2),
-        )
+        .child(marked(&h.snippet, &h.highlights).flex_1().text_color(ink2))
         .when(!time.is_empty(), |el| {
             el.child(div().flex_none().n_figures().text_color(ink2).child(time))
         })
@@ -695,11 +689,9 @@ impl Render for Switcher {
             self.scroll.scroll_to_item(target);
         }
         let empty = self.rows.is_empty();
-        let max_rows = (window.viewport_size().height * 0.6
-            - spot::FIELD
-            - LIST_PAD_TOP
-            - LIST_PAD_BOTTOM)
-            .max(spot::ROW * 3.);
+        let max_rows =
+            (window.viewport_size().height * 0.6 - spot::FIELD - LIST_PAD_TOP - LIST_PAD_BOTTOM)
+                .max(spot::ROW * 3.);
         let total: Pixels = heights.iter().map(|(h, _)| *h).sum();
         let list_h = if total > max_rows {
             whole_rows_height(&heights, max_rows - PEEK) + PEEK
@@ -724,7 +716,11 @@ impl Render for Switcher {
                 .rounded(px(6.))
                 .n_body()
                 .child(fill(search_copy::SCOPE_IN_GROUP, &[("name", name)]))
-                .child(Sym::Close.icon(SymSize::INLINE_SMALL).text_color(k.secondary))
+                .child(
+                    Sym::Close
+                        .icon(SymSize::INLINE_SMALL)
+                        .text_color(k.secondary),
+                )
                 .tooltip(search_copy::SCOPE_REMOVE)
                 .on_click(cx.listener(|this, _, window, cx| {
                     this.set_scope(None, window, cx);

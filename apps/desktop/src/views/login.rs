@@ -23,8 +23,9 @@ use crate::{
         self, Sym,
         native::{
             FieldSize, NativeTextField, NativeType as _, PushSize, PushStyle, disabled_push,
-            metrics, native_colors, push_button,
+            metrics, native_colors,
             overlays::{app_icon, spot},
+            push_button,
         },
         sf_symbols::SymSize,
     },
@@ -431,7 +432,11 @@ impl Render for LoginView {
                     .gap(px(4.))
                     .n_subheadline()
                     .text_color(k.secondary)
-                    .child(Sym::MacMini.icon(SymSize::INLINE_SMALL).text_color(k.secondary))
+                    .child(
+                        Sym::MacMini
+                            .icon(SymSize::INLINE_SMALL)
+                            .text_color(k.secondary),
+                    )
                     .child(div().min_w_0().one_line().child(host)),
             ),
             None => None,
@@ -443,7 +448,11 @@ impl Render for LoginView {
         };
         let go = push_button(
             "login",
-            if signing_in { l::SIGNING_IN } else { o::LOGIN_CONTINUE },
+            if signing_in {
+                l::SIGNING_IN
+            } else {
+                o::LOGIN_CONTINUE
+            },
             PushStyle::Default,
             PushSize::Large,
             cx,
@@ -497,13 +506,13 @@ impl Render for LoginView {
                                     .text_color(k.label)
                                     .child(l::WELCOME),
                             )
-                            .child(
-                                div()
-                                    .pt(px(4.))
-                                    .n_body()
-                                    .text_color(k.secondary)
-                                    .child(if server_step { l::SERVER_LABEL } else { l::LEAD }),
-                            )
+                            .child(div().pt(px(4.)).n_body().text_color(k.secondary).child(
+                                if server_step {
+                                    l::SERVER_LABEL
+                                } else {
+                                    l::LEAD
+                                },
+                            ))
                             .child(div().pt(px(24.)).child(field))
                             // The note slot keeps its height, so nothing
                             // moves when an error shows.

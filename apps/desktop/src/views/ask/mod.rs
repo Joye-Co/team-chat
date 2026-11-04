@@ -34,11 +34,12 @@ use crate::{
     ui::{
         MemberAvatar, Sym,
         native::{
-            NativeType as _, PushSize, native_colors, popup_button,
+            NativeType as _, PushSize, native_colors,
             overlays::{
                 SpotlightField, return_mark, spot, spotlight, spotlight_divider, spotlight_ink,
                 spotlight_row, spotlight_section, spotlight_symbol, weighted,
             },
+            popup_button,
         },
         sf_symbols::SymSize,
     },
@@ -95,7 +96,6 @@ enum Item {
 }
 
 impl Item {
-
     fn key(&self) -> String {
         match self {
             Item::Give { member, helper, .. } => format!("give-{}-{helper}", member.id),
@@ -763,7 +763,14 @@ impl AskPalette {
                     .role
                     .clone()
                     .filter(|r| !r.trim().is_empty())
-                    .map(|r| div().flex_shrink(1.).min_w(px(40.)).one_line().text_color(ink2).child(r)),
+                    .map(|r| {
+                        div()
+                            .flex_shrink(1.)
+                            .min_w(px(40.))
+                            .one_line()
+                            .text_color(ink2)
+                            .child(r)
+                    }),
             )
             .child(div().flex_1())
             .children(week.map(|n| {

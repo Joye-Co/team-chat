@@ -18,7 +18,6 @@ use gpui::{
     Styled, Subscription, Task, Window, div, prelude::FluentBuilder as _, px, relative,
 };
 
-
 use crate::{
     app::{RightPane, Services},
     copy::{fill, live as c, nav as n},
@@ -31,8 +30,9 @@ use crate::{
         self, Sym,
         native::{
             NativeType as _, PushSize, PushStyle, ToolbarGroup, borderless_text, disabled_push,
-            metrics, native_colors, push_button,
+            metrics, native_colors,
             overlays::{decision_bar, sym_toolbar_item},
+            push_button,
         },
         sf_symbols::SymSize,
     },
@@ -332,7 +332,13 @@ impl LivePane {
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(div().n_headline().text_color(n.label).one_line().child(title))
+                    .child(
+                        div()
+                            .n_headline()
+                            .text_color(n.label)
+                            .one_line()
+                            .child(title),
+                    )
                     .child(
                         div()
                             .n_subheadline()

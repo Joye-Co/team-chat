@@ -58,9 +58,9 @@ pub fn banner_text(phase: &Phase) -> Option<String> {
 fn sheet_key(phase: &Phase) -> Option<String> {
     let (kind, info) = match phase {
         Phase::Available(i) => ("available", Some(i)),
-        Phase::Downloading { info, .. } | Phase::WaitingForSends(info) | Phase::Installing(info) => {
-            ("progress", Some(info))
-        }
+        Phase::Downloading { info, .. }
+        | Phase::WaitingForSends(info)
+        | Phase::Installing(info) => ("progress", Some(info)),
         Phase::Manual(i) => ("manual", Some(i)),
         Phase::Failed { info: Some(i), .. } => ("failed", Some(i)),
         _ => ("", None),
@@ -145,7 +145,10 @@ impl Render for UpdateSheet {
                                     .text_color(k.secondary)
                                     .child(fill(
                                         u::BANNER_PERCENT,
-                                        &[("percent", &((share * 100.).round() as u32).to_string())],
+                                        &[(
+                                            "percent",
+                                            &((share * 100.).round() as u32).to_string(),
+                                        )],
                                     )),
                             ),
                     )
@@ -154,30 +157,38 @@ impl Render for UpdateSheet {
             Phase::WaitingForSends(_) | Phase::Installing(_) => {
                 let waiting = matches!(phase, Phase::WaitingForSends(_));
                 SheetLayout::new(fill(o::UPDATE_INSTALLING_TITLE, &[("version", v)]))
-                    .explanation(if waiting { u::WAITING_SENDS } else { u::INSTALLING })
+                    .explanation(if waiting {
+                        u::WAITING_SENDS
+                    } else {
+                        u::INSTALLING
+                    })
                     .body(div().child(spinner().with_size(metrics::SPINNER).color(k.secondary)))
                     .buttons([hide(cx)])
             }
             Phase::Manual(_) => SheetLayout::new(fill(o::UPDATE_MANUAL_TITLE, &[("version", v)]))
                 .explanation(fill(u::MANUAL, &[("product", env!("PRODUCT_NAME"))]))
-                .buttons([button("update-ok", u::DISMISS, PushStyle::Default, cx).on_click(
-                    move |_, window, cx| {
-                        u1.update(cx, |up, cx| up.dismiss(cx));
-                        window.close_dialog(cx);
-                    },
-                )]),
-            Phase::Failed { .. } => SheetLayout::new(fill(o::UPDATE_FAILED_TITLE, &[("version", v)]))
-                .explanation(banner_text(&phase).unwrap_or_default())
                 .buttons([
-                    button("update-later", u::LATER, PushStyle::Standard, cx).on_click(
+                    button("update-ok", u::DISMISS, PushStyle::Default, cx).on_click(
                         move |_, window, cx| {
-                            u1.update(cx, |up, cx| up.postpone(cx));
+                            u1.update(cx, |up, cx| up.dismiss(cx));
                             window.close_dialog(cx);
                         },
                     ),
-                    button("update-retry", u::RETRY, PushStyle::Default, cx)
-                        .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.start_update(cx))),
                 ]),
+            Phase::Failed { .. } => {
+                SheetLayout::new(fill(o::UPDATE_FAILED_TITLE, &[("version", v)]))
+                    .explanation(banner_text(&phase).unwrap_or_default())
+                    .buttons([
+                        button("update-later", u::LATER, PushStyle::Standard, cx).on_click(
+                            move |_, window, cx| {
+                                u1.update(cx, |up, cx| up.postpone(cx));
+                                window.close_dialog(cx);
+                            },
+                        ),
+                        button("update-retry", u::RETRY, PushStyle::Default, cx)
+                            .on_click(move |_, _, cx| u2.update(cx, |up, cx| up.start_update(cx))),
+                    ])
+            }
             _ => return div().into_any_element(),
         };
         div().w_full().child(layout).into_any_element()
@@ -210,7 +221,12 @@ impl UpdateBanner {
         }
     }
 
-    fn open_sheet(&mut self, updater: Entity<Updater>, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_sheet(
+        &mut self,
+        updater: Entity<Updater>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         self.sheet_open = true;
         let sheet = cx.new(|cx| UpdateSheet::new(updater.clone(), cx));
         let this = cx.entity().downgrade();
@@ -268,7 +284,10 @@ impl Render for UpdateBanner {
                 o::UPDATE_STATUS,
                 &[
                     ("version", &info.version),
-                    ("percent", &((share.unwrap_or(0.) * 100.).round() as u32).to_string()),
+                    (
+                        "percent",
+                        &((share.unwrap_or(0.) * 100.).round() as u32).to_string(),
+                    ),
                 ],
             ),
             Phase::WaitingForSends(_) | Phase::Installing(_) => {
@@ -292,7 +311,11 @@ impl Render for UpdateBanner {
                     .n_subheadline()
                     .n_figures()
                     .text_color(k.secondary)
-                    .child(Sym::Download.icon(SymSize::INLINE_SMALL).text_color(k.secondary))
+                    .child(
+                        Sym::Download
+                            .icon(SymSize::INLINE_SMALL)
+                            .text_color(k.secondary),
+                    )
                     .child(div().min_w(px(0.)).one_line().child(text)),
             )
             .when_some(share, |d, s| d.child(determinate_bar(s, None, cx)))

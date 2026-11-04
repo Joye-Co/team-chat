@@ -115,9 +115,11 @@ impl Render for ConnectionBanner {
             .items_start()
             .gap(px(6.))
             .child(
-                div()
-                    .pt(px(3.))
-                    .child(Sym::Offline.icon(SymSize::INLINE_SMALL).text_color(k.secondary)),
+                div().pt(px(3.)).child(
+                    Sym::Offline
+                        .icon(SymSize::INLINE_SMALL)
+                        .text_color(k.secondary),
+                ),
             )
             .child(
                 div()
